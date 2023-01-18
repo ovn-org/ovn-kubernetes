@@ -2,8 +2,9 @@
 
 ## Introduction
 
-The EgressIP feature enables a cluster administrator to
-assign an egress IP address for traffic leaving the cluster from a namespace or from specific pods in a namespace.
+The Egress IP feature enables a cluster administrator to ensure that the traffic from one or more pods
+in one or more namespaces has a consistent source IP address for services outside the cluster network.  
+East-West traffic (including pod -> node IP) is excluded from Egress IP.  
 
 For more info, consider looking at the following links:
 - [Egress IP CRD](https://github.com/ovn-org/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/crd/egressip/v1/types.go#L47)
@@ -13,45 +14,97 @@ For more info, consider looking at the following links:
 
 ## Example
 
-The yamls below are examples of egressIP resources:
-
-Use 192.168.127.10 or 192.168.127.11 from pods of namespaces that have `env=qa` label.
+An example of EgressIP might look like this:
 
 ```yaml
 apiVersion: k8s.ovn.org/v1
 kind: EgressIP
 metadata:
-    name: egress-project1
+  name: egressip-prod
 spec:
-    egressIPs:
-    - 192.168.127.10
-    - 192.168.127.11
-    namespaceSelector:
-        matchLabels:
-            env: qa
-```
-
-Use 10.0.254.100 as egress IP from pods that are not in the `environment=development` namespaces and have the label `app=web`.
-
-```yaml
-apiVersion: k8s.ovn.org/v1
-kind: EgressIP
-metadata:
-    name: egressip-prod
-spec:
-    egressIPs:
-    - 10.0.254.100
-    namespaceSelector:
-        matchExpressions:
-        - key: environment
-          operator: NotIn
-          values:
+  egressIPs:
+    - 172.18.0.33
+    - 172.18.0.44
+  namespaceSelector:
+    matchExpressions:
+      - key: environment
+        operator: NotIn
+        values:
           - development
-    podSelector:
-        matchLabels:
-            app: web
+  podSelector:
+    matchLabels:
+      app: web
+```
+It specifies to use `172.18.0.33` or `172.18.0.44` egressIP for pods that are labeled with `app: web` that run in a namespace without `environment: development` label.
+Both selectors use the [generic kubernetes label selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors).
+
+## Traffic flows
+Egress IP is implemented by redirecting the POD traffic to an egress node where it is SNATed and sent out.  
+
+Using the example EgressIP and a matching pod with `10.244.1.3` IP, the following logical router policies are configured in `ovn_cluster_router`:
+```shell
+Routing Policies
+  1004 inport == "rtos-ovn-control-plane" && ip4.dst == 172.18.0.4 /* ovn-control-plane */                            reroute  10.244.0.2
+  1004 inport == "rtos-ovn-worker" && ip4.dst == 172.18.0.2 /* ovn-worker */                                          reroute  10.244.1.2
+  1004 inport == "rtos-ovn-worker2" && ip4.dst == 172.18.0.3 /* ovn-worker2 */                                        reroute  10.244.2.2
+
+   102 (ip4.src == $a12749576804119081385 || ip4.src == $a16335301576733828072) && ip4.dst == $a11079093880111560446  allow    pkt_mark=1008
+   102 ip4.src == 10.244.0.0/16 && ip4.dst == 10.244.0.0/16                                                           allow
+   102 ip4.src == 10.244.0.0/16 && ip4.dst == 100.64.0.0/16                                                           allow
+
+   100 ip4.src == 10.244.1.3                                                                                          reroute  100.64.0.3, 100.64.0.4
+```
+- Rules with `1004` priority are responsible for redirecting `pod -> local host IP` traffic.  
+- Rules with `102` priority are added by OVN-Kubernetes when EgressIP feature is enabled, they ensure that east-west traffic is not using egress IPs.
+- The rule with `100` priority is added for the pod matching `egressip-prod` EgressIP, and it redirects the traffic to one of the egress nodes (ECMP is used to balance the traffic between next hops).
+
+Once the redirected traffic reaches one of the egress nodes it gets SNATed in the gateway router:
+```shell
+ovn-nbctl lr-nat-list GR_ovn-worker
+TYPE             GATEWAY_PORT          EXTERNAL_IP        EXTERNAL_PORT    LOGICAL_IP          EXTERNAL_MAC         LOGICAL_PORT
+...
+snat                                   172.18.0.33                         10.244.1.3
+ovn-nbctl lr-nat-list  GR_ovn-worker2
+TYPE             GATEWAY_PORT          EXTERNAL_IP        EXTERNAL_PORT    LOGICAL_IP          EXTERNAL_MAC         LOGICAL_PORT
+...
+snat                                   172.18.0.44                         10.244.1.3
 ```
 
+### Pod to node IP traffic
+When a cluster networked pod matched by an egress IP tries to connect to a non-local node IP it hits the following
+logical router policy in `ovn_cluster_router`:
+```shell
+# $<all_eip_pod_ips> - address-set of all pod IPs matched by any EgressIP
+# $<all_esvc_pod_ips> - address-set of all pod IPs matched by any EgressService
+# $<all_node_ips> - address-set of all node IPs in the cluster
+102 (ip4.src == $<all_eip_pod_ips> || ip4.src == $<all_esvc_pod_ips>) && ip4.dst == $<all_node_ips>  allow    pkt_mark=1008
+```
+In addition to simply allowing the `pod -> node IP` traffic so that EgressIP reroute policies 
+are not matched upon, it is also marked with the 1008 mark.  
+If a pod is hosted on an egressNode the traffic will first get SNATed to the egress IP, and then it will hit 
+following flow on breth0 that will SNAT the traffic to local node IP:
+```shell
+# output truncated, 0x3f0 == 1008
+priority=105,pkt_mark=0x3f0,ip,in_port=2 actions=ct(commit,zone=64000,nat(src=<NodeIP>),exec(load:0x1->NXM_NX_CT_MARK[])),output:1
+``` 
+This is required to make `pod -> node IP` traffic behave the same regardless of where the pod is hosted.  
+Implementation details: https://github.com/ovn-org/ovn-kubernetes/commit/e2c981a42a28e6213d9daf3b4489c18dc2b84b19.
+
+### Dealing with non SNATed traffic
+Egress IP is often configured on a node different from the one hosting the affected pods.  
+Due to the fact that ovn-controllers on different nodes apply the changes independently,
+there is a chance that some pod traffic will reach the egress node before it configures the SNAT rules.
+The following flows are added on breth0 to address this scenario:
+```shell
+# Commit connections from local pods so they are not affected by the drop rule below, this is required for ICNIv2
+priority=109,ip,in_port=2,nw_src=<nodeSubnet> actions=ct(commit,zone=64000,exec(set_field:0x1->ct_mark)),output:1
+
+# Drop non SNATed egress traffic coming from non-local pods
+priority=104,ip,in_port=2,nw_src=<clusterSubnet> actions=drop
+
+# Commit connections coming from IPs not in cluster network
+priority=100,ip,in_port=2 actions=ct(commit,zone=64000,exec(set_field:0x1->ct_mark)),output:1
+```
 ## Egress Nodes
 
 In order to select which node(s) may be used as egress, the following label must be added to the `node` resource:
