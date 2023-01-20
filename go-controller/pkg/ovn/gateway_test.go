@@ -33,9 +33,9 @@ func init() {
 	format.MaxLength = 0
 }
 
-func generateGatewayInitExpectedSB(testData []libovsdbtest.TestData, nodeName string, hasIPv4, hasIPv6 bool) []libovsdbtest.TestData {
+func generateGatewayInitExpectedSB(testData []libovsdbtest.TestData, nodeName string) []libovsdbtest.TestData {
 	gr := types.GWRouterPrefix + nodeName
-	if hasIPv4 {
+	if config.IPv4Mode {
 		testData = append(testData, &sbdb.MACBinding{
 			UUID:        "MAC-binding-UUID",
 			Datapath:    gr + "-UUID",
@@ -44,7 +44,7 @@ func generateGatewayInitExpectedSB(testData []libovsdbtest.TestData, nodeName st
 			MAC:         util.IPAddrToHWAddr(net.ParseIP(types.V4DummyNextHopMasqueradeIP)).String(),
 		})
 	}
-	if hasIPv6 {
+	if config.IPv6Mode {
 		testData = append(testData, &sbdb.MACBinding{
 			UUID:        "MAC-binding-2-UUID",
 			Datapath:    gr + "-UUID",
@@ -138,17 +138,30 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		}
 	}
 
-	nexthops := l3GatewayConfig.NextHops
-	if len(nexthops) == 0 {
-		if hasIPv4 {
-			nexthops = append(nexthops, net.ParseIP(types.V4DummyNextHopMasqueradeIP))
-		}
-		if hasIPv6 {
-			nexthops = append(nexthops, net.ParseIP(types.V6DummyNextHopMasqueradeIP))
-		}
+	if hasIPv4 {
+		staticServiceRouteNamedUUID := "static-service-route-v4-UUID"
+		grStaticRoutes = append(grStaticRoutes, staticServiceRouteNamedUUID)
+
+		testData = append(testData, &nbdb.LogicalRouterStaticRoute{
+			UUID:       staticServiceRouteNamedUUID,
+			IPPrefix:   types.V4MasqueradeSubnet,
+			Nexthop:    types.V4DummyNextHopMasqueradeIP,
+			OutputPort: &externalRouterPort,
+		})
+	}
+	if hasIPv6 {
+		staticServiceRouteNamedUUID := "static-service-route-v6-UUID"
+		grStaticRoutes = append(grStaticRoutes, staticServiceRouteNamedUUID)
+
+		testData = append(testData, &nbdb.LogicalRouterStaticRoute{
+			UUID:       staticServiceRouteNamedUUID,
+			IPPrefix:   types.V6MasqueradeSubnet,
+			Nexthop:    types.V6DummyNextHopMasqueradeIP,
+			OutputPort: &externalRouterPort,
+		})
 	}
 
-	for i, nexthop := range nexthops {
+	for i, nexthop := range l3GatewayConfig.NextHops {
 		var allIPs string
 		if utilnet.IsIPv6(nexthop) {
 			allIPs = "::/0"
@@ -355,6 +368,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
+			gr := types.GWRouterPrefix + nodeName
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					// tests migration from local to shared
@@ -366,6 +384,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
+				},
+				SBData: []libovsdbtest.TestData{
+					datapath,
 				},
 			})
 
@@ -401,6 +422,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
 				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+			testData = []libovsdb.TestData{datapath}
+			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName)
+			gomega.Eventually(fakeOvn.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 		})
 
 		ginkgo.It("creates an IPv4 gateway in OVN without next hops", func() {
@@ -477,7 +502,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			testData = []libovsdb.TestData{datapath}
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName, true, false)
+			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName)
 			gomega.Eventually(fakeOvn.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 		})
 
@@ -495,6 +520,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
+			gr := types.GWRouterPrefix + nodeName
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -504,6 +534,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
+				},
+				SBData: []libovsdbtest.TestData{
+					datapath,
 				},
 			})
 
@@ -551,6 +584,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
 				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+			testData = []libovsdb.TestData{datapath}
+			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName)
+			gomega.Eventually(fakeOvn.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 		})
 
 		ginkgo.It("creates an IPv6 gateway in OVN", func() {
@@ -566,6 +603,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
+			gr := types.GWRouterPrefix + nodeName
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -576,13 +618,17 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+				SBData: []libovsdbtest.TestData{
+					datapath,
+				},
 			})
 
+			config.IPv4Mode = false
+			config.IPv6Mode = true
 			clusterIPSubnets := ovntest.MustParseIPNets("fd01::/48")
 			hostSubnets := ovntest.MustParseIPNets("fd01:0:0:2::/64")
 			joinLRPIPs := ovntest.MustParseIPNets("fd98::3/64")
 			defLRPIPs := ovntest.MustParseIPNets("fd98::1/64")
-			nodeName := "test-node"
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
@@ -610,6 +656,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
 				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+			testData = []libovsdb.TestData{datapath}
+			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName)
+			gomega.Eventually(fakeOvn.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 		})
 
 		ginkgo.It("creates an IPv6 gateway in OVN without next hops", func() {
@@ -680,7 +730,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			testData = []libovsdb.TestData{datapath}
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName, false, true)
+			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName)
 			gomega.Eventually(fakeOvn.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 		})
 
@@ -697,6 +747,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
+			gr := types.GWRouterPrefix + nodeName
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -707,8 +762,13 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+				SBData: []libovsdbtest.TestData{
+					datapath,
+				},
 			})
 
+			config.IPv4Mode = true
+			config.IPv6Mode = true
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
 			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16", "fd98::3/64")
@@ -741,6 +801,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
 				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+			testData = []libovsdb.TestData{datapath}
+			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName)
+			gomega.Eventually(fakeOvn.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 		})
 
 		ginkgo.It("removes leftover SNAT entries during init", func() {
@@ -756,6 +820,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
+			gr := types.GWRouterPrefix + nodeName
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -765,6 +834,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
+				},
+				SBData: []libovsdbtest.TestData{
+					datapath,
 				},
 			})
 
@@ -801,6 +873,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
 				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+			testData = []libovsdb.TestData{datapath}
+			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName)
+			gomega.Eventually(fakeOvn.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 		})
 
 		ginkgo.It("ensures only a single static route per node for ovn_cluster_router", func() {
@@ -847,6 +923,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
+			gr := types.GWRouterPrefix + nodeName
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -860,6 +941,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
+				},
+				SBData: []libovsdbtest.TestData{
+					datapath,
 				},
 			})
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
@@ -937,6 +1021,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Name: types.ClusterLBGroupName,
 				UUID: types.ClusterLBGroupName + "-UUID",
 			}
+			gr := types.GWRouterPrefix + nodeName
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					// tests migration from shared to local
@@ -950,8 +1039,13 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+				SBData: []libovsdbtest.TestData{
+					datapath,
+				},
 			})
 
+			config.IPv4Mode = true
+			config.IPv6Mode = true
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
 			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16", "fd98::3/64")
@@ -985,6 +1079,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
 				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+			testData = []libovsdb.TestData{datapath}
+			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName)
+			gomega.Eventually(fakeOvn.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 		})
 
 		ginkgo.It("ensures a leftover route on ovn_cluster_router to join subnet is removed", func() {
@@ -1010,6 +1108,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
+			gr := types.GWRouterPrefix + nodeName
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -1020,6 +1123,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
+				},
+				SBData: []libovsdbtest.TestData{
+					datapath,
 				},
 			})
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
