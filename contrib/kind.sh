@@ -104,6 +104,7 @@ usage() {
     echo "                 [-cn | --cluster-name |"
     echo "                 [-ehp|--egress-ip-healthcheck-port <num>]"
     echo "                 [-is | --ipsec]"
+    echo "                 [--isolated]"
     echo "                 [-h]]"
     echo ""
     echo "-cf  | --config-file                Name of the KIND J2 configuration file."
@@ -148,7 +149,8 @@ usage() {
     echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane" 
     echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
     echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
-    echo "--delete                      	  Delete current cluster"
+    echo "--isolated                          Deploy with an isolated environment (no default gateway)"
+    echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
     echo ""
 }
@@ -291,6 +293,8 @@ parse_args() {
                                                 fi
                                                 OVN_EGRESSIP_HEALTHCHECK_PORT=$1
                                                 ;;
+            --isolated )                        OVN_ISOLATED=true
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
@@ -352,6 +356,7 @@ print_params() {
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
      echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
      echo "OVN_DEPLOY_PODS = $OVN_DEPLOY_PODS"
+     echo "OVN_ISOLATED = $OVN_ISOLATED"
      echo ""
 }
 
@@ -498,6 +503,11 @@ set_default_params() {
   OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
   OVN_DEPLOY_PODS=${OVN_DEPLOY_PODS:-"ovnkube-master ovnkube-node"}
+  OVN_ISOLATED=${OVN_ISOLATED:-false}
+  OVN_GATEWAY_OPTS=""
+  if [ "$OVN_ISOLATED" == true ]; then
+    OVN_GATEWAY_OPTS="--gateway-interface=eth0"
+  fi
 }
 
 detect_apiserver_url() {
@@ -677,6 +687,7 @@ create_ovn_kube_manifests() {
     --net-cidr="${NET_CIDR}" \
     --svc-cidr="${SVC_CIDR}" \
     --gateway-mode="${OVN_GATEWAY_MODE}" \
+    --gateway-options="${OVN_GATEWAY_OPTS}" \
     --enable-ipsec="${ENABLE_IPSEC}" \
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
     --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
@@ -940,6 +951,32 @@ fixup_kubeconfig_names() {
   sed -i -- "s/current-context: .*/current-context: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
 }
 
+remove_default_route() {
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    docker exec "$n" ip route delete default
+  done
+}
+
+add_dns_hostnames() {
+  dns="$'"
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  # find all IPs and build dns entries
+  for n in $KIND_NODES; do
+	ip=$(docker container inspect -f '{{ .NetworkSettings.Networks.kind.IPAddress }}' $n)
+        dns+="$ip $n \n"
+        ip=$(docker container inspect -f '{{ .NetworkSettings.Networks.kind.GlobalIPv6Address }}' $n)
+	dns+="$ip $n \n"
+  done
+
+  dns+="'"
+
+  # update dns on each node
+  for n in $KIND_NODES; do
+	docker exec $n bash -c "echo  $dns >> /etc/hosts"
+  done
+}
+
 check_dependencies
 # In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info"
 # the original command <parse_args $*> was replaced by <parse_args "$@">
@@ -967,6 +1004,10 @@ if [ "$KIND_CREATE" == true ]; then
       docker_create_second_interface
     fi
     coredns_patch
+    if [ "$OVN_ISOLATED" == true ]; then
+      remove_default_route
+      add_dns_hostnames
+    fi
 fi
 build_ovn_image
 detect_apiserver_url
