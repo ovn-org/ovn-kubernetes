@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
@@ -259,6 +260,7 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 	}
 	logicalSwitch.ExternalIDs[types.NetworkExternalID] = oc.GetNetworkName()
 	logicalSwitch.ExternalIDs[types.TopologyExternalID] = oc.TopologyType()
+	logicalSwitch.ExternalIDs[types.TopologyVersionExternalID] = strconv.Itoa(oc.topologyVersion)
 
 	layer2NetConfInfo := oc.NetConfInfo.(*util.Layer2NetConfInfo)
 
@@ -272,14 +274,9 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 		}
 	}
 
-	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig)
+	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig, &logicalSwitch.ExternalIDs)
 	if err != nil {
 		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
-	}
-
-	err = libovsdbops.UpdateLogicalSwitchSetExternalIDs(oc.nbClient, &logicalSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to update external-ids of logical switch %s, err: %v", switchName, err)
 	}
 
 	if err = oc.lsManager.AddSwitch(switchName, logicalSwitch.UUID, hostSubnets); err != nil {

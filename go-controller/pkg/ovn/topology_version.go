@@ -16,16 +16,11 @@ import (
 )
 
 func (oc *DefaultNetworkController) ovnTopologyCleanup() error {
-	ver, err := oc.determineOVNTopoVersionFromOVN()
-	if err != nil {
-		return err
-	}
-
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
-	if ver <= ovntypes.OvnPortBindingTopoVersion {
-		err = addressset.NonDualStackAddressSetCleanup(oc.nbClient)
+	if oc.topologyVersion <= ovntypes.OvnPortBindingTopoVersion {
+		return addressset.NonDualStackAddressSetCleanup(oc.nbClient)
 	}
-	return err
+	return nil
 }
 
 // reportTopologyVersion saves the topology version to two places:
