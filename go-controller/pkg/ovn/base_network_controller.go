@@ -97,6 +97,10 @@ type BaseNetworkController struct {
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 
+	// topology version of this network. It is first retrieved from network logical entities,
+	// and will eventually updated to latest version once topology upgrade is done.
+	topologyVersion int
+
 	// stopChan per controller
 	stopChan chan struct{}
 }
@@ -158,7 +162,8 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 	logicalRouter := nbdb.LogicalRouter{
 		Name: logicalRouterName,
 		ExternalIDs: map[string]string{
-			"k8s-cluster-router": "yes",
+			"k8s-cluster-router":            "yes",
+			types.TopologyVersionExternalID: strconv.Itoa(bnc.topologyVersion),
 		},
 		Options: map[string]string{
 			"always_learn_from_arp_request": "false",
@@ -175,7 +180,8 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 		}
 	}
 
-	err = libovsdbops.CreateOrUpdateLogicalRouter(bnc.nbClient, &logicalRouter)
+	err = libovsdbops.CreateOrUpdateLogicalRouter(bnc.nbClient, &logicalRouter, &logicalRouter.Options,
+		&logicalRouter.ExternalIDs, &logicalRouter.Copp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create distributed router %s, error: %v",
 			logicalRouterName, err)
@@ -483,21 +489,66 @@ func (bnc *BaseNetworkController) updateL3TopologyVersion() error {
 	clusterRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	logicalRouter := nbdb.LogicalRouter{
 		Name:        clusterRouterName,
-		ExternalIDs: map[string]string{"k8s-ovn-topo-version": currentTopologyVersion},
+		ExternalIDs: map[string]string{types.TopologyVersionExternalID: currentTopologyVersion},
 	}
 	err := libovsdbops.UpdateLogicalRouterSetExternalIDs(bnc.nbClient, &logicalRouter)
 	if err != nil {
 		return fmt.Errorf("failed to generate set topology version, err: %v", err)
 	}
+	bnc.topologyVersion = types.OvnCurrentTopologyVersion
 	klog.Infof("Updated Logical_Router %s topology version to %s", clusterRouterName, currentTopologyVersion)
 	return nil
 }
 
-// determineOVNTopoVersionFromOVN determines what OVN Topology version is being used
-// If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
+func (bnc *BaseNetworkController) updateL2TopologyVersion() error {
+	var switchName string
+
+	currentTopologyVersion := strconv.Itoa(types.OvnCurrentTopologyVersion)
+	topoType := bnc.TopologyType()
+	switch topoType {
+	case types.Layer2Topology:
+		switchName = bnc.GetNetworkScopedName(types.OVNLayer2Switch)
+	default:
+		return fmt.Errorf("topology type %s is not supported", topoType)
+	}
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name:        switchName,
+		ExternalIDs: map[string]string{types.TopologyVersionExternalID: currentTopologyVersion},
+	}
+	err := libovsdbops.UpdateLogicalSwitchSetExternalIDs(bnc.nbClient, &logicalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to generate set topology version, err: %v", err)
+	}
+	bnc.topologyVersion = types.OvnCurrentTopologyVersion
+	klog.Infof("Updated Logical_Switch %s topology version to %s", switchName, currentTopologyVersion)
+	return nil
+}
+
+// determineOVNTopoVersionFromOVN determines what OVN Topology version is being used.
+// If TopologyVersionExternalID key in external_ids column does not exist, it is prior to OVN topology versioning
 // and therefore set version number to OvnCurrentTopologyVersion
-func (bnc *BaseNetworkController) determineOVNTopoVersionFromOVN() (int, error) {
-	clusterRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
+func (bnc *BaseNetworkController) determineOVNTopoVersionFromOVN() error {
+	var topologyVersion int
+	var err error
+
+	if !bnc.IsSecondary() {
+		topologyVersion, err = bnc.getOVNTopoVersionFromLogicalRouter(types.OVNClusterRouter)
+	} else {
+		topoType := bnc.TopologyType()
+		switch topoType {
+		case types.Layer3Topology:
+			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalRouter(bnc.GetNetworkScopedName(types.OVNClusterRouter))
+		case types.Layer2Topology:
+			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalSwitch(bnc.GetNetworkScopedName(types.OVNLayer2Switch))
+		default:
+			return fmt.Errorf("topology type %s not supported", topoType)
+		}
+	}
+	bnc.topologyVersion = topologyVersion
+	return err
+}
+
+func (bnc *BaseNetworkController) getOVNTopoVersionFromLogicalRouter(clusterRouterName string) (int, error) {
 	logicalRouter := &nbdb.LogicalRouter{Name: clusterRouterName}
 	logicalRouter, err := libovsdbops.GetLogicalRouter(bnc.nbClient, logicalRouter)
 	if err != nil && err != libovsdbclient.ErrNotFound {
@@ -507,14 +558,32 @@ func (bnc *BaseNetworkController) determineOVNTopoVersionFromOVN() (int, error) 
 		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
 		return math.MaxInt32, nil
 	}
-	v, exists := logicalRouter.ExternalIDs["k8s-ovn-topo-version"]
+	v, exists := logicalRouter.ExternalIDs[types.TopologyVersionExternalID]
 	if !exists {
 		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
 		return 0, nil
 	}
 	ver, err := strconv.Atoi(v)
 	if err != nil {
-		return 0, fmt.Errorf("invalid OVN topology version string for the cluster, err: %v", err)
+		return 0, fmt.Errorf("invalid OVN topology version string for network %s, err: %v", bnc.GetNetworkName(), err)
+	}
+	return ver, nil
+}
+
+func (bnc *BaseNetworkController) getOVNTopoVersionFromLogicalSwitch(switchName string) (int, error) {
+	logicalSwitch := &nbdb.LogicalSwitch{Name: switchName}
+	logicalSwitch, err := libovsdbops.GetLogicalSwitch(bnc.nbClient, logicalSwitch)
+	if err != nil && err != libovsdbclient.ErrNotFound {
+		return 0, fmt.Errorf("error getting switch %s: %v", switchName, err)
+	}
+	if err == libovsdbclient.ErrNotFound {
+		// no switch exists, DB is empty, nothing to upgrade
+		return math.MaxInt32, nil
+	}
+	v := logicalSwitch.ExternalIDs[types.TopologyVersionExternalID]
+	ver, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid OVN topology version string for network %s, err: %v", bnc.GetNetworkName(), err)
 	}
 	return ver, nil
 }

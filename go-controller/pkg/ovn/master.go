@@ -87,11 +87,12 @@ func (oc *DefaultNetworkController) upgradeToSingleSwitchOVNTopology(existingNod
 }
 
 func (oc *DefaultNetworkController) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
-	ver, err := oc.determineOVNTopoVersionFromOVN()
+	err := oc.determineOVNTopoVersionFromOVN()
 	if err != nil {
 		return err
 	}
 
+	ver := oc.topologyVersion
 	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
 	if ver < types.OvnSingleJoinSwitchTopoVersion {
 		klog.Infof("Upgrading to Single Switch OVN Topology")

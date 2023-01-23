@@ -608,3 +608,25 @@ func (jsIPManager *JoinSwitchIPManager) ReleaseJoinLRPIPs(nodeName string) (err 
 	}
 	return err
 }
+
+// NewL2SwitchManager initializes a new layer2 logical switch manager,
+// only manage subnet for the one specified switch
+func NewL2SwitchManager() *LogicalSwitchManager {
+	return &LogicalSwitchManager{
+		cache:    make(map[string]logicalSwitchInfo),
+		RWMutex:  sync.RWMutex{},
+		ipamFunc: NewL2IPAMAllocator,
+	}
+}
+
+// NewLayer2IPAMAllocator provides an ipam interface which can be used for layer2 switch IPAM
+// allocations for the specified cidr using a contiguous allocation strategy.
+func NewL2IPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
+	subnetRange, err := ipam.NewAllocatorCIDRRange(cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
+		return allocator.NewRoundRobinAllocationMap(max, rangeSpec), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return subnetRange, nil
+}

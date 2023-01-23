@@ -46,6 +46,9 @@ const (
 
 	NodeLocalSwitch = "node_local_switch"
 
+	// types.OVNLayer2Switch is the name of layer2 topology switch
+	OVNLayer2Switch = "ovn_layer2_switch"
+
 	// ACL Priorities
 
 	// Default routed multicast allow acl rule priority
@@ -163,7 +166,10 @@ const (
 	NADExternalID = OvnK8sPrefix + "/" + "nad"
 	// key for topology type external-id, only used for secondary network logical entities
 	TopologyExternalID = OvnK8sPrefix + "/" + "topology"
+	// key for topology version external-id
+	TopologyVersionExternalID = "k8s-ovn-topo-version"
 
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology = "layer3"
+	Layer2Topology = "layer2"
 )

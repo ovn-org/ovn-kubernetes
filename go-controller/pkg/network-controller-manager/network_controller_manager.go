@@ -76,11 +76,14 @@ type networkControllerManager struct {
 func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
 	netConfInfo util.NetConfInfo) (NetworkController, error) {
 	cnci := cm.newCommonNetworkControllerInfo()
-	topotype := netConfInfo.TopologyType()
-	if topotype == ovntypes.Layer3Topology {
+	topoType := netConfInfo.TopologyType()
+	switch topoType {
+	case ovntypes.Layer3Topology:
 		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, netConfInfo), nil
+	case ovntypes.Layer2Topology:
+		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, netConfInfo), nil
 	}
-	return nil, fmt.Errorf("topology type %s not supported", topotype)
+	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
@@ -90,6 +93,8 @@ func (cm *networkControllerManager) newDummyNetworkController(topoType, netName 
 	switch topoType {
 	case ovntypes.Layer3Topology:
 		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, &util.Layer3NetConfInfo{}), nil
+	case ovntypes.Layer2Topology:
+		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, &util.Layer2NetConfInfo{}), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
