@@ -494,7 +494,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 				ipsv4, ipsv6 := as.GetIPs()
 
-				gomega.Expect(ipsv4).To(gomega.Equal([]string{ipAddress1, ipAddress2}))
+				gomega.Expect(ipsv4).To(gomega.ConsistOf([]string{ipAddress1, ipAddress2}))
 				gomega.Expect(ipsv6).To(gomega.BeNil())
 				return nil
 			}
