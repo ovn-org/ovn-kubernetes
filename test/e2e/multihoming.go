@@ -22,38 +22,44 @@ import (
 )
 
 var _ = Describe("Multi Homing", func() {
-	Context("Layer 3 topology", func() {
-		const (
-			podName              = "tinypod"
-			secondaryNetworkCIDR = "10.128.0.0/16"
-			secondaryNetworkName = "tenant-blue"
+	const (
+		podName              = "tinypod"
+		secondaryNetworkCIDR = "10.128.0.0/16"
+		secondaryNetworkName = "tenant-blue"
+	)
+	f := wrappedTestFramework("multi-homing")
+
+	var (
+		attachmentConfig *nadapi.NetworkAttachmentDefinition
+		cs               clientset.Interface
+		nadClient        nadclient.K8sCniCncfIoV1Interface
+		pod              *v1.Pod
+	)
+
+	BeforeEach(func() {
+		cs = f.ClientSet
+
+		var err error
+		nadClient, err = nadclient.NewForConfig(f.ClientConfig())
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	JustBeforeEach(func() {
+		_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+			context.Background(),
+			attachmentConfig,
+			metav1.CreateOptions{},
 		)
-		f := wrappedTestFramework("multi-homing")
+		Expect(err).NotTo(HaveOccurred())
+	})
 
-		var (
-			nadClient nadclient.K8sCniCncfIoV1Interface
-			pod       *v1.Pod
-		)
-
-		var cs clientset.Interface
-
+	Context("Layer 3 - routed - topology", func() {
 		BeforeEach(func() {
-			cs = f.ClientSet
-
-			var err error
-			nadClient, err = nadclient.NewForConfig(f.ClientConfig())
-			Expect(err).NotTo(HaveOccurred())
-
-			_, err = nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
-				context.Background(),
-				generateLayer3SecondaryOvnNetwork(f.Namespace.Name, secondaryNetworkName, netCIDR(secondaryNetworkCIDR, 24)),
-				metav1.CreateOptions{},
-			)
-			Expect(err).NotTo(HaveOccurred())
+			attachmentConfig = generateLayer3SecondaryOvnNetwork(f.Namespace.Name, secondaryNetworkName, netCIDR(secondaryNetworkCIDR, 24))
 		})
 
 		Context("A single pod with an OVN-K secondary network", func() {
-			BeforeEach(func() {
+			JustBeforeEach(func() {
 				var err error
 
 				pod, err = cs.CoreV1().Pods(f.Namespace.Name).Create(
@@ -85,7 +91,7 @@ var _ = Describe("Multi Homing", func() {
 				serverIP  string
 			)
 
-			BeforeEach(func() {
+			JustBeforeEach(func() {
 				var err error
 				serverPod, err = cs.CoreV1().Pods(f.Namespace.Name).Create(
 					context.Background(),
