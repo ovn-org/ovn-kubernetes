@@ -161,8 +161,12 @@ func isSubnetsStringEqual(subnetsString, newSubnetsString string) bool {
 // parseSubnetsString parses comma-seperated subnet string and returns the list of subnets
 func parseSubnetsString(clusterSubnetString string) ([]*net.IPNet, error) {
 	var subnetList []*net.IPNet
-	subnetStringList := strings.Split(clusterSubnetString, ",")
 
+	if strings.TrimSpace(clusterSubnetString) == "" {
+		return subnetList, nil
+	}
+
+	subnetStringList := strings.Split(clusterSubnetString, ",")
 	for _, subnetString := range subnetStringList {
 		subnetString = strings.TrimSpace(subnetString)
 		_, subnet, err := net.ParseCIDR(subnetString)
@@ -172,11 +176,6 @@ func parseSubnetsString(clusterSubnetString string) ([]*net.IPNet, error) {
 
 		subnetList = append(subnetList, subnet)
 	}
-
-	if len(subnetList) == 0 {
-		return nil, fmt.Errorf("failed to parse any subnets from %q", clusterSubnetString)
-	}
-
 	return subnetList, nil
 }
 
@@ -303,6 +302,9 @@ func verifyExcludeIPs(subnetsString string, excludeSubnetsString string) ([]*net
 	clusterSubnets, err := parseSubnetsString(subnetsString)
 	if err != nil {
 		return nil, nil, fmt.Errorf("subnets %s is invalid: %v", subnetsString, err)
+	}
+	if len(clusterSubnets) == 0 {
+		return nil, nil, fmt.Errorf("subnets is not defined")
 	}
 
 	excludeSubnets, err := parseSubnetsString(excludeSubnetsString)
