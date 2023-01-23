@@ -157,6 +157,47 @@ var _ = Describe("Multi Homing", func() {
 			})
 		})
 	})
+
+	Context("Layer 2 - switched - topology", func() {
+		const (
+			secondaryNetworkCIDR = "10.128.1.0/24"
+			secondaryNetworkName = "flat-network-tenant-blue"
+			someExcludedCIDR     = "10.128.1.0/29"
+		)
+
+		BeforeEach(func() {
+
+			attachmentConfig = generateSwitchedSecondaryOvnNetwork(
+				f.Namespace.Name,
+				secondaryNetworkName,
+				secondaryNetworkCIDR,
+				someExcludedCIDR,
+			)
+		})
+
+		Context("A single pod with an OVN-K secondary network", func() {
+			JustBeforeEach(func() {
+				var err error
+
+				pod, err = cs.CoreV1().Pods(f.Namespace.Name).Create(
+					context.Background(),
+					generatePodSpec(f.Namespace.Name, podName, nil, secondaryNetworkName),
+					metav1.CreateOptions{},
+				)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("is able to get to the Running phase", func() {
+				Eventually(func() v1.PodPhase {
+					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
+					if err != nil {
+						return v1.PodFailed
+					}
+					return updatedPod.Status.Phase
+				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+			})
+		})
+	})
 })
 
 func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
@@ -242,4 +283,21 @@ func inRange(cidr string, ip string) error {
 	}
 
 	return fmt.Errorf("ip [%s] is NOT in range %s", ip, cidr)
+}
+
+func generateSwitchedSecondaryOvnNetwork(namespace string, name string, cidr string, excludeCIDRs ...string) *nadapi.NetworkAttachmentDefinition {
+	// TODO: optional `excludeSubnets` parameter
+	nadSpec := fmt.Sprintf(`
+{
+        "cniVersion": "0.3.0",
+        "name": %q,
+        "type": "ovn-k8s-cni-overlay",
+        "topology":"layer2",
+        "subnets": %q,
+        "excludeSubnets": %q,
+        "mtu": 1300,
+        "netAttachDefName": %q
+}
+`, name, cidr, strings.Join(excludeCIDRs, ","), fmt.Sprintf("%s/%s", namespace, name))
+	return generateNetAttachDef(namespace, name, nadSpec)
 }
