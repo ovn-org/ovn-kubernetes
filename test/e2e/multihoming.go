@@ -166,7 +166,6 @@ var _ = Describe("Multi Homing", func() {
 		)
 
 		BeforeEach(func() {
-
 			attachmentConfig = generateSwitchedSecondaryOvnNetwork(
 				f.Namespace.Name,
 				secondaryNetworkName,
@@ -195,6 +194,80 @@ var _ = Describe("Multi Homing", func() {
 					}
 					return updatedPod.Status.Phase
 				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+			})
+		})
+
+		Context("multiple pods", func() {
+			const port = 9000
+
+			var (
+				serverPod *v1.Pod
+				serverIP  string
+			)
+
+			JustBeforeEach(func() {
+				var err error
+				serverPod, err = cs.CoreV1().Pods(f.Namespace.Name).Create(
+					context.Background(),
+					generatePodSpec(f.Namespace.Name, podName, httpServerContainerCmd(port), secondaryNetworkName),
+					metav1.CreateOptions{},
+				)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(serverPod).NotTo(BeNil())
+
+				Eventually(func() v1.PodPhase {
+					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
+					if err != nil {
+						return v1.PodFailed
+					}
+					return updatedPod.Status.Phase
+				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+
+				pod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
+					return status.Name == namespacedName(f.Namespace.Name, secondaryNetworkName)
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(netStatus).To(HaveLen(1))
+				Expect(netStatus[0].IPs).NotTo(BeEmpty())
+
+				serverIP = netStatus[0].IPs[0]
+				Expect(inRange(secondaryNetworkCIDR, serverIP)).To(Succeed())
+			})
+
+			It("can communicate over the secondary network", func() {
+				const clientPodName = "client-pod"
+				clientPod, err := cs.CoreV1().Pods(f.Namespace.Name).Create(
+					context.Background(),
+					generatePodSpec(f.Namespace.Name, clientPodName, nil, secondaryNetworkName),
+					metav1.CreateOptions{},
+				)
+				Expect(err).NotTo(HaveOccurred())
+
+				Eventually(func() error {
+					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if updatedPod.Status.Phase == v1.PodRunning {
+						_, err = framework.RunKubectl(
+							clientPod.GetNamespace(),
+							"exec",
+							clientPodName,
+							"--",
+							"curl",
+							"--connect-timeout",
+							"2",
+							net.JoinHostPort(serverIP, fmt.Sprintf("%d", port)),
+						)
+						return err
+					}
+
+					return fmt.Errorf("pod not running. /me is sad")
+				}, 2*time.Minute, 6*time.Second).Should(Succeed())
 			})
 		})
 	})
