@@ -1727,6 +1727,11 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			if err != nil {
 				return err
 			}
+			if config.Gateway.DisableForwarding {
+				if err := initExternalBridgeDropForwardingRules(exGwBridge.bridgeName); err != nil {
+					return fmt.Errorf("failed to add forwarding block rules for bridge %s: err %v", exGwBridge.bridgeName, err)
+				}
+			}
 		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
 		nodeIPs := gw.nodeIPManager.ListAddresses()
@@ -1819,6 +1824,17 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, nodeName string, ofm *ope
 			if err := initSharedGatewayIPTables(); err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	if config.Gateway.DisableForwarding {
+		for _, subnet := range config.Kubernetes.ServiceCIDRs {
+			if err := initExternalBridgeServiceForwardingRules(subnet); err != nil {
+				return nil, fmt.Errorf("failed to add forwarding rules for bridge %s: err %v", gwBridge.bridgeName, err)
+			}
+		}
+		if err := initExternalBridgeDropForwardingRules(gwBridge.bridgeName); err != nil {
+			return nil, fmt.Errorf("failed to add forwarding rules for bridge %s: err %v", gwBridge.bridgeName, err)
 		}
 	}
 

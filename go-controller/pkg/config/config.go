@@ -392,6 +392,8 @@ type GatewayConfig struct {
 	RouterSubnet string `gcfg:"router-subnet"`
 	// SingeNode indicates the cluster has only one node
 	SingleNode bool `gcfg:"single-node"`
+	// DisableForwarding (enabled by default) controls if forwarding is allowed on OVNK controlled interfaces
+	DisableForwarding bool `gcfg:"disable-forwarding"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -1185,6 +1187,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "disable-snat-multiple-gws",
 		Usage:       "Disable SNAT for egress traffic with multiple gateways.",
 		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
+	},
+	&cli.BoolFlag{
+		Name:        "disable-forwarding",
+		Usage:       "Disable forwarding on OVNK controlled interfaces.",
+		Destination: &cliConfig.Gateway.DisableForwarding,
 	},
 	&cli.StringFlag{
 		Name:        "gateway-v4-join-subnet",
