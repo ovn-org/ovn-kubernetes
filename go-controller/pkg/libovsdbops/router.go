@@ -725,7 +725,7 @@ func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName 
 
 // BFD ops
 
-// CreateOrUpdateLogicalRouter creates or updates the provided BFDs and returns
+// CreateOrUpdateBFDOps creates or updates the provided BFDs and returns
 // the corresponding ops
 func CreateOrUpdateBFDOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, bfds ...*nbdb.BFD) ([]libovsdb.Operation, error) {
 	opModels := make([]operationModel, 0, len(bfds))
@@ -744,7 +744,7 @@ func CreateOrUpdateBFDOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
-// CreateOrUpdateLogicalRouter deletes the provided BFDs
+// DeleteBFDs deletes the provided BFDs
 func DeleteBFDs(nbClient libovsdbclient.Client, bfds ...*nbdb.BFD) error {
 	opModels := make([]operationModel, 0, len(bfds))
 	for i := range bfds {
@@ -854,7 +854,7 @@ func BuildSNAT(
 	return buildNAT(nbdb.NATTypeSNAT, externalIPStr, logicalIPStr, logicalPort, "", externalIDs)
 }
 
-// BuildLogicalRouterSNAT builds a logical router DNAT/SNAT
+// BuildDNATAndSNAT builds a logical router DNAT/SNAT
 func BuildDNATAndSNAT(
 	externalIP *net.IP,
 	logicalIP *net.IPNet,
@@ -1110,35 +1110,4 @@ func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 
 	m := newModelClient(nbClient)
 	return m.DeleteOps(ops, opModels...)
-}
-
-// GATEWAY CHASSIS OPs
-
-// CreateOrUpdateGatewayChassis creates or updates the provided gateway chassis
-// and sets it to the provided logical router port
-func CreateOrUpdateGatewayChassis(nbClient libovsdbclient.Client, port *nbdb.LogicalRouterPort, chassis *nbdb.GatewayChassis, fields ...interface{}) error {
-	if len(fields) == 0 {
-		fields = onModelUpdatesAllNonDefault()
-	}
-	opModels := []operationModel{
-		{
-			Model:          chassis,
-			OnModelUpdates: fields,
-			DoAfter:        func() { port.GatewayChassis = []string{chassis.UUID} },
-			ErrNotFound:    false,
-			BulkOp:         false,
-		},
-		{
-			Model: port,
-			// use update here, as of now we only ever want a single chassis
-			// associated with a port
-			OnModelUpdates: []interface{}{&port.GatewayChassis},
-			ErrNotFound:    true,
-			BulkOp:         false,
-		},
-	}
-
-	modelClient := newModelClient(nbClient)
-	_, err := modelClient.CreateOrUpdate(opModels...)
-	return err
 }
