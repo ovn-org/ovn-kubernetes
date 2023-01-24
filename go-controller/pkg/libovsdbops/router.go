@@ -700,6 +700,7 @@ func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName 
 
 	opModels := make([]operationModel, 0, len(lrsrs)+1)
 	for _, lrsr := range lrsrs {
+		lrsr := lrsr
 		router.StaticRoutes = append(router.StaticRoutes, lrsr.UUID)
 		opModel := operationModel{
 			Model:       lrsr,
