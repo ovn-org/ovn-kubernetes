@@ -9,6 +9,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
 	v1 "k8s.io/api/core/v1"
@@ -23,17 +24,17 @@ import (
 
 var _ = Describe("Multi Homing", func() {
 	const (
-		podName              = "tinypod"
-		secondaryNetworkCIDR = "10.128.0.0/16"
-		secondaryNetworkName = "tenant-blue"
+		podName                    = "tinypod"
+		secondaryNetworkCIDR       = "10.128.0.0/16"
+		secondaryNetworkName       = "tenant-blue"
+		secondaryFlatL2IgnoreCIDR  = "10.128.0.0/29"
+		secondaryFlatL2NetworkCIDR = "10.128.0.0/24"
 	)
 	f := wrappedTestFramework("multi-homing")
 
 	var (
-		attachmentConfig *nadapi.NetworkAttachmentDefinition
-		cs               clientset.Interface
-		nadClient        nadclient.K8sCniCncfIoV1Interface
-		pod              *v1.Pod
+		cs        clientset.Interface
+		nadClient nadclient.K8sCniCncfIoV1Interface
 	)
 
 	BeforeEach(func() {
@@ -44,232 +45,138 @@ var _ = Describe("Multi Homing", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	JustBeforeEach(func() {
-		_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
-			context.Background(),
-			attachmentConfig,
-			metav1.CreateOptions{},
+	Context("A single pod with an OVN-K secondary network", func() {
+		table.DescribeTable("is able to get to the Running phase", func(generatorFn attachmentGeneratorFn, cidr string, excludeCIDRs ...string) {
+			netAttachDef := generatorFn(f.Namespace.Name, secondaryNetworkName, cidr, excludeCIDRs...)
+			By("creating the attachment configuration")
+			_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+				context.Background(),
+				netAttachDef,
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating the pod using a secondary network")
+			pod, err := cs.CoreV1().Pods(f.Namespace.Name).Create(
+				context.Background(),
+				generatePodSpec(f.Namespace.Name, podName, nil, netAttachDef.Name),
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("asserting the pod gets to the `Ready` phase")
+			Eventually(func() v1.PodPhase {
+				updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
+				if err != nil {
+					return v1.PodFailed
+				}
+				return updatedPod.Status.Phase
+			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+		},
+			table.Entry(
+				"when attaching to an L3 - routed - network",
+				generateLayer3SecondaryOvnNetwork,
+				netCIDR(secondaryNetworkCIDR, 24),
+			),
+			table.Entry(
+				"when attaching to an L2 - switched - network featuring `excludeCIDR`s",
+				generateSwitchedSecondaryOvnNetwork,
+				secondaryFlatL2NetworkCIDR,
+				secondaryFlatL2IgnoreCIDR,
+			),
 		)
-		Expect(err).NotTo(HaveOccurred())
 	})
 
-	Context("Layer 3 - routed - topology", func() {
-		BeforeEach(func() {
-			attachmentConfig = generateLayer3SecondaryOvnNetwork(f.Namespace.Name, secondaryNetworkName, netCIDR(secondaryNetworkCIDR, 24))
-		})
+	Context("multiple pods connected to the same OVN-K secondary network", func() {
+		const port = 9000
 
-		Context("A single pod with an OVN-K secondary network", func() {
-			JustBeforeEach(func() {
-				var err error
-
-				pod, err = cs.CoreV1().Pods(f.Namespace.Name).Create(
-					context.Background(),
-					generatePodSpec(f.Namespace.Name, podName, nil, secondaryNetworkName),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
-			})
-
-			It("is able to get to the Running phase", func() {
-				Eventually(func() v1.PodPhase {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return v1.PodFailed
-					}
-					return updatedPod.Status.Phase
-				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
-			})
-		})
-
-		Context("multiple pods", func() {
-			const (
-				port = 9000
+		table.DescribeTable("can communicate over the secondary network", func(generatorFn attachmentGeneratorFn, cidr string, excludeCIDRs ...string) {
+			netAttachDef := generatorFn(f.Namespace.Name, secondaryNetworkName, cidr, excludeCIDRs...)
+			By("creating the attachment configuration")
+			_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+				context.Background(),
+				netAttachDef,
+				metav1.CreateOptions{},
 			)
+			Expect(err).NotTo(HaveOccurred())
 
-			var (
-				serverPod *v1.Pod
-				serverIP  string
+			By("instantiating the server pod")
+			serverPod, err := cs.CoreV1().Pods(f.Namespace.Name).Create(
+				context.Background(),
+				generatePodSpec(f.Namespace.Name, podName, httpServerContainerCmd(port), secondaryNetworkName),
+				metav1.CreateOptions{},
 			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(serverPod).NotTo(BeNil())
 
-			JustBeforeEach(func() {
-				var err error
-				serverPod, err = cs.CoreV1().Pods(f.Namespace.Name).Create(
-					context.Background(),
-					generatePodSpec(f.Namespace.Name, podName, httpServerContainerCmd(port), secondaryNetworkName),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(serverPod).NotTo(BeNil())
+			By("asserting the server pod reaches the `Ready` state")
+			Eventually(func() v1.PodPhase {
+				updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
+				if err != nil {
+					return v1.PodFailed
+				}
+				return updatedPod.Status.Phase
+			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 
-				Eventually(func() v1.PodPhase {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return v1.PodFailed
-					}
-					return updatedPod.Status.Phase
-				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+			By("asserting the server pod has an IP from the configured range")
+			pod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
 
-				pod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
-					return status.Name == namespacedName(f.Namespace.Name, secondaryNetworkName)
-				})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(netStatus).To(HaveLen(1))
-				Expect(netStatus[0].IPs).NotTo(BeEmpty())
-
-				serverIP = netStatus[0].IPs[0]
-				Expect(inRange(secondaryNetworkCIDR, serverIP)).To(Succeed())
+			netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
+				return status.Name == namespacedName(f.Namespace.Name, secondaryNetworkName)
 			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(netStatus).To(HaveLen(1))
+			Expect(netStatus[0].IPs).NotTo(BeEmpty())
 
-			It("can communicate over the secondary network", func() {
-				const clientPodName = "client-pod"
-				clientPod, err := cs.CoreV1().Pods(f.Namespace.Name).Create(
-					context.Background(),
-					generatePodSpec(f.Namespace.Name, clientPodName, nil, secondaryNetworkName),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
+			serverIP := netStatus[0].IPs[0]
+			Expect(inRange(secondaryNetworkCIDR, serverIP)).To(Succeed())
 
-				Eventually(func() error {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return err
-					}
+			By("instantiating the *client* pod")
+			const clientPodName = "client-pod"
+			clientPod, err := cs.CoreV1().Pods(f.Namespace.Name).Create(
+				context.Background(),
+				generatePodSpec(f.Namespace.Name, clientPodName, nil, secondaryNetworkName),
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
 
-					if updatedPod.Status.Phase == v1.PodRunning {
-						_, err = framework.RunKubectl(
-							clientPod.GetNamespace(),
-							"exec",
-							clientPodName,
-							"--",
-							"curl",
-							"--connect-timeout",
-							"2",
-							net.JoinHostPort(serverIP, fmt.Sprintf("%d", port)),
-						)
-						return err
-					}
+			By("asserting the *client* pod can contact the server pod exposed endpoint")
+			Eventually(func() error {
+				updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
 
-					return fmt.Errorf("pod not running. /me is sad")
-				}, 2*time.Minute, 6*time.Second).Should(Succeed())
-			})
-		})
-	})
+				if updatedPod.Status.Phase == v1.PodRunning {
+					_, err = framework.RunKubectl(
+						clientPod.GetNamespace(),
+						"exec",
+						clientPodName,
+						"--",
+						"curl",
+						"--connect-timeout",
+						"2",
+						net.JoinHostPort(serverIP, fmt.Sprintf("%d", port)),
+					)
+					return err
+				}
 
-	Context("Layer 2 - switched - topology", func() {
-		const (
-			secondaryNetworkCIDR = "10.128.1.0/24"
-			secondaryNetworkName = "flat-network-tenant-blue"
-			someExcludedCIDR     = "10.128.1.0/29"
+				return fmt.Errorf("pod not running. /me is sad")
+			}, 2*time.Minute, 6*time.Second).Should(Succeed())
+		},
+			table.Entry(
+				"can communicate over an L2 - switched - secondary network",
+				generateSwitchedSecondaryOvnNetwork,
+				secondaryFlatL2NetworkCIDR,
+				secondaryFlatL2IgnoreCIDR,
+			),
+			table.Entry(
+				"can communicate over an L3 - routed - secondary network",
+				generateLayer3SecondaryOvnNetwork,
+				netCIDR(secondaryNetworkCIDR, 24),
+			),
 		)
-
-		BeforeEach(func() {
-			attachmentConfig = generateSwitchedSecondaryOvnNetwork(
-				f.Namespace.Name,
-				secondaryNetworkName,
-				secondaryNetworkCIDR,
-				someExcludedCIDR,
-			)
-		})
-
-		Context("A single pod with an OVN-K secondary network", func() {
-			JustBeforeEach(func() {
-				var err error
-
-				pod, err = cs.CoreV1().Pods(f.Namespace.Name).Create(
-					context.Background(),
-					generatePodSpec(f.Namespace.Name, podName, nil, secondaryNetworkName),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
-			})
-
-			It("is able to get to the Running phase", func() {
-				Eventually(func() v1.PodPhase {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return v1.PodFailed
-					}
-					return updatedPod.Status.Phase
-				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
-			})
-		})
-
-		Context("multiple pods", func() {
-			const port = 9000
-
-			var (
-				serverPod *v1.Pod
-				serverIP  string
-			)
-
-			JustBeforeEach(func() {
-				var err error
-				serverPod, err = cs.CoreV1().Pods(f.Namespace.Name).Create(
-					context.Background(),
-					generatePodSpec(f.Namespace.Name, podName, httpServerContainerCmd(port), secondaryNetworkName),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(serverPod).NotTo(BeNil())
-
-				Eventually(func() v1.PodPhase {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return v1.PodFailed
-					}
-					return updatedPod.Status.Phase
-				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
-
-				pod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
-					return status.Name == namespacedName(f.Namespace.Name, secondaryNetworkName)
-				})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(netStatus).To(HaveLen(1))
-				Expect(netStatus[0].IPs).NotTo(BeEmpty())
-
-				serverIP = netStatus[0].IPs[0]
-				Expect(inRange(secondaryNetworkCIDR, serverIP)).To(Succeed())
-			})
-
-			It("can communicate over the secondary network", func() {
-				const clientPodName = "client-pod"
-				clientPod, err := cs.CoreV1().Pods(f.Namespace.Name).Create(
-					context.Background(),
-					generatePodSpec(f.Namespace.Name, clientPodName, nil, secondaryNetworkName),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
-
-				Eventually(func() error {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return err
-					}
-
-					if updatedPod.Status.Phase == v1.PodRunning {
-						_, err = framework.RunKubectl(
-							clientPod.GetNamespace(),
-							"exec",
-							clientPodName,
-							"--",
-							"curl",
-							"--connect-timeout",
-							"2",
-							net.JoinHostPort(serverIP, fmt.Sprintf("%d", port)),
-						)
-						return err
-					}
-
-					return fmt.Errorf("pod not running. /me is sad")
-				}, 2*time.Minute, 6*time.Second).Should(Succeed())
-			})
-		})
 	})
 })
 
@@ -277,7 +184,9 @@ func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
 	return fmt.Sprintf("%s/%d", netCIDR, netPrefixLengthPerNode)
 }
 
-func generateLayer3SecondaryOvnNetwork(namespace string, name string, cidr string) *nadapi.NetworkAttachmentDefinition {
+type attachmentGeneratorFn func(namespace string, name string, cidr string, excludeCIDRs ...string) *nadapi.NetworkAttachmentDefinition
+
+func generateLayer3SecondaryOvnNetwork(namespace string, name string, cidr string, excludeCIDRs ...string) *nadapi.NetworkAttachmentDefinition {
 	nadSpec := fmt.Sprintf(`
 {
         "cniVersion": "0.3.0",
@@ -285,10 +194,11 @@ func generateLayer3SecondaryOvnNetwork(namespace string, name string, cidr strin
         "type": "ovn-k8s-cni-overlay",
         "topology":"layer3",
         "subnets": %q,
+        "excludeSubnets": %q,
         "mtu": 1300,
         "netAttachDefName": %q
 }
-`, name, cidr, fmt.Sprintf("%s/%s", namespace, name))
+`, name, cidr, strings.Join(excludeCIDRs, ","), fmt.Sprintf("%s/%s", namespace, name))
 	return generateNetAttachDef(namespace, name, nadSpec)
 }
 
