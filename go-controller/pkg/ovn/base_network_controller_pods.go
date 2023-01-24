@@ -96,6 +96,8 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalP
 		}
 	} else if topoType == ovntypes.Layer2Topology {
 		switchNames = []string{bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)}
+	} else if topoType == ovntypes.LocalnetTopology {
+		switchNames = []string{bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)}
 	} else {
 		return fmt.Errorf("topology type %s not supported", topoType)
 	}
@@ -339,7 +341,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
 		topoType := bnc.TopologyType()
 		switch topoType {
-		case ovntypes.Layer2Topology:
+		case ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
 			// no route needed for directly connected subnets
 			return nil
 		case ovntypes.Layer3Topology:
@@ -447,6 +449,8 @@ func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, 
 			switchName = bnc.GetNetworkScopedName(pod.Spec.NodeName)
 		case ovntypes.Layer2Topology:
 			switchName = bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
+		case ovntypes.LocalnetTopology:
+			switchName = bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
 		default:
 			return "", fmt.Errorf("topology type %s not supported", topoType)
 		}

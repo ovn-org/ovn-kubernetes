@@ -256,7 +256,7 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 	return nil
 }
 
-func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
+func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter, managementPortConfig *managementPortConfig, kubeNodeIP net.IP) error {
 	klog.Info("Initializing Gateway Functionality")
 	var err error
@@ -266,8 +266,8 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	var portClaimWatcher *portClaimWatcher
 
 	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
-		loadBalancerHealthChecker = newLoadBalancerHealthChecker(n.name, n.watchFactory)
-		portClaimWatcher, err = newPortClaimWatcher(n.recorder)
+		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
+		portClaimWatcher, err = newPortClaimWatcher(nc.recorder)
 		if err != nil {
 			return err
 		}
@@ -305,19 +305,19 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, n.Kube, n.watchFactory)
+		gw, err = newLocalGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
+			managementPortConfig, nc.Kube, nc.watchFactory)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")
-		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, n.Kube,
-			managementPortConfig, n.watchFactory)
+		gw, err = newSharedGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, nc.Kube,
+			managementPortConfig, nc.watchFactory)
 	case config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
 		gw = &gateway{
 			initFunc:     func() error { return nil },
 			readyFunc:    func() (bool, error) { return true, nil },
-			watchFactory: n.watchFactory.(*factory.WatchFactory),
+			watchFactory: nc.watchFactory.(*factory.WatchFactory),
 		}
 		chassisID, err = util.GetNodeChassisID()
 		if err != nil {
@@ -344,7 +344,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	}
 
 	initGwFunc := func() error {
-		return gw.Init(n.watchFactory, n.stopChan, n.wg)
+		return gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
 	}
 
 	readyGwFunc := func() (bool, error) {
@@ -357,9 +357,9 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	}
 
 	waiter.AddWait(readyGwFunc, initGwFunc)
-	n.gateway = gw
+	nc.gateway = gw
 
-	return n.validateVTEPInterfaceMTU()
+	return nc.validateVTEPInterfaceMTU()
 }
 
 // interfaceForEXGW takes the interface requested to act as exgw bridge
@@ -380,7 +380,7 @@ func interfaceForEXGW(intfName string) string {
 	return intfName
 }
 
-func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
+func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) error {
 	// A DPU host gateway is complementary to the shared gateway running
 	// on the DPU embedded CPU. it performs some initializations and
 	// watch on services for iptable rule updates and run a loadBalancerHealth checker
@@ -409,7 +409,7 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 		return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwIntf, err)
 	}
 
-	if err := addMasqueradeRoute(gwIntf, n.name, ifAddrs, n.watchFactory); err != nil {
+	if err := addMasqueradeRoute(gwIntf, nc.name, ifAddrs, nc.watchFactory); err != nil {
 		return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 	}
 
@@ -421,7 +421,7 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 	gw := &gateway{
 		initFunc:     func() error { return nil },
 		readyFunc:    func() (bool, error) { return true, nil },
-		watchFactory: n.watchFactory.(*factory.WatchFactory),
+		watchFactory: nc.watchFactory.(*factory.WatchFactory),
 	}
 
 	// TODO(adrianc): revisit if support for nodeIPManager is needed.
@@ -431,8 +431,8 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 			return err
 		}
 		gw.nodePortWatcherIptables = newNodePortWatcherIptables()
-		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(n.name, n.watchFactory)
-		portClaimWatcher, err := newPortClaimWatcher(n.recorder)
+		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
+		portClaimWatcher, err := newPortClaimWatcher(nc.recorder)
 		if err != nil {
 			return err
 		}
@@ -443,8 +443,8 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 		return fmt.Errorf("failed to add MAC bindings for service routing")
 	}
 
-	err = gw.Init(n.watchFactory, n.stopChan, n.wg)
-	n.gateway = gw
+	err = gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
+	nc.gateway = gw
 	return err
 }
 

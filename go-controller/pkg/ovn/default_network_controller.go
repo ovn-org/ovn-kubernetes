@@ -42,9 +42,6 @@ import (
 type DefaultNetworkController struct {
 	BaseNetworkController
 
-	// waitGroup per-Controller
-	wg *sync.WaitGroup
-
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator        *subnetallocator.HostSubnetAllocator
 	hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
@@ -177,8 +174,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			namespacesMutex:             sync.Mutex{},
 			addressSetFactory:           addressSetFactory,
 			stopChan:                    defaultStopChan,
+			wg:                          defaultWg,
 		},
-		wg:                           defaultWg,
 		masterSubnetAllocator:        subnetallocator.NewHostSubnetAllocator(),
 		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
 		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),

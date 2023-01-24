@@ -88,6 +88,37 @@ spec:
     }
 ```
 
+### Switched - localnet - topology
+This topology interconnects the workloads via a cluster-wide logical switch to
+a physical network.
+
+The following net-attach-def configures the attachment to a localnet secondary
+network.
+
+```yaml
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: localnet-network
+  namespace: ns1
+spec:
+  config: |2
+    {
+            "cniVersion": "0.3.1",
+            "name": "localnet-network",
+            "type": "ovn-k8s-cni-overlay",
+            "topology":"localnet",
+            "subnets": "202.10.130.112/28",
+            "vlanID": 33,
+            "mtu": 1500,
+            "netAttachDefName": "ns1/localnet-network"
+    }
+```
+
+Note that in order to connect to the physical network, it is expected that
+ovn-bridge-mappings is configured appropriately on the chassis for this
+localnet network.
+
 ## Pod configuration
 The user must specify the secondary network attachments via the
 `k8s.v1.cni.cncf.io/networks` annotation.

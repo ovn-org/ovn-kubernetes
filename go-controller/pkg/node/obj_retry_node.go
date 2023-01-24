@@ -16,7 +16,7 @@ type nodeEventHandler struct {
 	retry.EventHandler
 
 	objType  reflect.Type
-	ovnNode  *OvnNode
+	nc       *DefaultNodeNetworkController
 	syncFunc func([]interface{}) error
 }
 
@@ -29,7 +29,7 @@ type nodeEventHandler struct {
 // shared informer and a sync function to process all objects of this type at startup.
 // In order to create a retry framework for most resource types, newRetryFrameworkNode is
 // to be preferred, as it calls newRetryFrameworkNodeWithParameters with all optional parameters unset.
-func (n *OvnNode) newRetryFrameworkNodeWithParameters(
+func (nc *DefaultNodeNetworkController) newRetryFrameworkNodeWithParameters(
 	objectType reflect.Type,
 	syncFunc func([]interface{}) error) *retry.RetryFramework {
 
@@ -39,12 +39,12 @@ func (n *OvnNode) newRetryFrameworkNodeWithParameters(
 		ObjType:                objectType,
 		EventHandler: &nodeEventHandler{
 			objType:  objectType,
-			ovnNode:  n,
+			nc:       nc,
 			syncFunc: syncFunc,
 		},
 	}
 
-	r := retry.NewRetryFramework(n.stopChan, n.wg, n.watchFactory.(*factory.WatchFactory), resourceHandler)
+	r := retry.NewRetryFramework(nc.stopChan, nc.wg, nc.watchFactory.(*factory.WatchFactory), resourceHandler)
 
 	return r
 }
@@ -53,8 +53,8 @@ func (n *OvnNode) newRetryFrameworkNodeWithParameters(
 // as defined for that type. This constructor is used for resources (1) that do not need
 // any namespace or label filtering in their shared informer, (2) whose sync function
 // is assigned statically based on the resource type.
-func (n *OvnNode) newRetryFrameworkNode(objectType reflect.Type) *retry.RetryFramework {
-	return n.newRetryFrameworkNodeWithParameters(objectType, nil)
+func (nc *DefaultNodeNetworkController) newRetryFrameworkNode(objectType reflect.Type) *retry.RetryFramework {
+	return nc.newRetryFrameworkNodeWithParameters(objectType, nil)
 }
 
 // hasResourceAnUpdateFunc returns true if the given resource type has a dedicated update function.
@@ -123,10 +123,10 @@ func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}
 	switch h.objType {
 
 	case factory.NamespaceExGwType:
-		obj, err = h.ovnNode.watchFactory.GetNamespace(name)
+		obj, err = h.nc.watchFactory.GetNamespace(name)
 
 	case factory.EndpointSliceForStaleConntrackRemovalType:
-		obj, err = h.ovnNode.watchFactory.GetEndpointSlice(namespace, name)
+		obj, err = h.nc.watchFactory.GetEndpointSlice(namespace, name)
 
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
@@ -160,12 +160,12 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCac
 	switch h.objType {
 	case factory.NamespaceExGwType:
 		newNs := newObj.(*kapi.Namespace)
-		return h.ovnNode.syncConntrackForExternalGateways(newNs)
+		return h.nc.syncConntrackForExternalGateways(newNs)
 
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		oldEndpointSlice := oldObj.(*discovery.EndpointSlice)
 		newEndpointSlice := newObj.(*discovery.EndpointSlice)
-		return h.ovnNode.reconcileConntrackUponEndpointSliceEvents(
+		return h.nc.reconcileConntrackUponEndpointSliceEvents(
 			oldEndpointSlice, newEndpointSlice)
 
 	default:
@@ -185,7 +185,7 @@ func (h *nodeEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		endpointslice := obj.(*discovery.EndpointSlice)
-		return h.ovnNode.reconcileConntrackUponEndpointSliceEvents(endpointslice, nil)
+		return h.nc.reconcileConntrackUponEndpointSliceEvents(endpointslice, nil)
 
 	default:
 		return fmt.Errorf("no delete function for object type %s", h.objType)
