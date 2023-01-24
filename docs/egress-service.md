@@ -5,7 +5,10 @@
 The Egress Service feature enables the egress traffic of pods backing a LoadBalancer service to exit the cluster using its ingress IP.
 This is useful for external systems that communicate with applications running on the Kubernetes cluster through a LoadBalancer service and expect that the source IP of egress traffic originating from the pods backing the service is identical to the destination IP they use to reach them - i.e the LoadBalancer's ingress IP.
 
-This functionality can be toggled by annotating a LoadBalancer service, making the source IP of egress packets originating from all of the non host-networked pods that are endpoints of it to be its ingress IP.
+By introducing a new CRD `EgressService`, users could request that the source IP of egress packets originating from all of the pods that are endpoints of a LoadBalancer service would be its ingress IP.
+The CRD is namespace scoped. The name of the EgressService corresponds to the name of a LoadBalancer Service that should be affected by this functionality. Note the mapping of EgressService to Kubernetes Service is 1to1.
+The feature will be supported by both "Shared" and "Local" gateway modes and the affected traffic will be that which is coming from a pod to a destination outside of the cluster - meaning pod-pod / pod-service / pod-node traffic will not be affected.
+
 Announcing the service externally (for ingress traffic) is handled by a LoadBalancer provider (like MetalLB) and not by OVN-Kubernetes as explained later.
 
 ## Details
@@ -18,15 +21,19 @@ The egress part is handled by OVN-Kubernetes, which chooses a node that acts as 
 When that traffic reaches the node's mgmt port it will use its routing table and iptables before heading out.
 Because of that, it takes care of adding the necessary iptables rules on the selected node to SNAT traffic exiting from these pods to the service's ingress IP.
 
-These goals are achieved by introducing an annotation for users to set on LoadBalancer services: `k8s.ovn.org/egress-service`, which can be either empty (`'{}'`) or contain a `nodeSelector` field: `'{"nodeSelector":{"matchLabels":{"size": "large"}}}'` that allows limiting the nodes that can be selected to handle the service's traffic.
-By specifying the `nodeSelector` field, only a node whose labels match the specified selectors can be selected for handling the service's traffic as explained earlier.
-By not specifying the `nodeSelector` field any node in the cluster can be chosen to manage the service's traffic.
+These goals are achieved by introducing a new resource `EgressService` for users to create alongside LoadBalancer services which can be either empty or contain optional fields:
+- `nodeSelector`: allows limiting the nodes that can be selected to handle the service's traffic.
+When present only a node whose labels match the specified selectors can be selected for handling the service's traffic as explained earlier.
+When the field is not specified any node in the cluster can be chosen to manage the service's traffic.
 In addition, if the service's `ExternalTrafficPolicy` is set to `Local` an additional constraint is added that only a node that has an endpoint can be selected.
 
-When a node is selected to handle the service's traffic both the service is annotated with `k8s.ovn.org/egress-service-host=<node_name>` (which is consumed by `ovnkube-node`) and the node is labeled with `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""`, which can be consumed by a LoadBalancer provider to handle the ingress part.
+- `network`: The network which this service should send egress and corresponding ingress replies to.
+This is typically implemented as VRF mapping, representing a numeric id or string name of a routing table which by omission uses the default host routing.
+
+When a node is selected to handle the service's traffic both the status of the relevant `EgressService` is updated with `host: <node_name>` (which is consumed by `ovnkube-node`) and the node is labeled with `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""`, which can be consumed by a LoadBalancer provider to handle the ingress part.
 
 Similarly to the EgressIP feature, once a node is selected it is checked for readiness (TCP/gRPC) to serve traffic every x seconds.
-If a node fails the health check, its allocated services move to another node by removing the `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""` label from it, removing the logical router policies from the cluster router, resetting the `k8s.ovn.org/egress-service-host=<node_name>` annotation on each of the services and requeuing them - causing a new node to be selected for the service.
+If a node fails the health check, its allocated services move to another node by removing the `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""` label from it, removing the logical router policies from the cluster router, resetting the status of the relevant `EgressServices` and requeuing them - causing a new node to be selected for the services.
 If the node becomes not ready or its labels no longer match the service's selectors the same re-election process happens.
 
 The ingress part is handled by a LoadBalancer provider, such as MetalLB, that needs to select the right node (and only it) for announcing the LoadBalancer service (ingress traffic) according to the `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""` label set by OVN-Kubernetes.
@@ -70,10 +77,10 @@ Notice how the packet exits `ovn-worker`'s eth1 and not breth0, as the packet go
 
 ## Changes in OVN northbound database and iptables
 
-The feature is implemented by reacting to events from `Services`, `EndpointSlices` and `Nodes` changes -
+The feature is implemented by reacting to events from `EgressServices`, `Services`, `EndpointSlices` and `Nodes` changes -
 updating OVN's northbound database `Logical_Router_Policy` objects to steer the traffic to the selected node and creating iptables SNAT rules in its `OVN-KUBE-EGRESS-SVC` chain, which is called by the POSTROUTING chain of its nat table.
 
-We'll see how the related objects are changed once a LoadBalancer is requested to act as an "Egress Service" by annotating it with the `k8s.ovn.org/egress-service` annotation in a Dual-Stack kind cluster.
+We'll see how the related objects are changed once a LoadBalancer is requested to act as an "Egress Service" by creating a corresponding `EgressService` named after it in a Dual-Stack kind cluster.
 
 We start with a clean cluster:
 ```
@@ -88,7 +95,6 @@ ovn-worker2         Ready    worker
 $ kubectl describe svc demo-svc
 Name:                     demo-svc
 Namespace:                default
-Annotations:              <none>
 Type:                     LoadBalancer
 LoadBalancer Ingress:     5.5.5.5, 5555:5555:5555:5555:5555:5555:5555:5555
 Endpoints:                10.244.0.5:8080,10.244.2.7:8080
@@ -120,26 +126,37 @@ Routing Policies
 At this point nothing related to Egress Services is in place. It is worth noting that the "allow" policies (102's) that make sure east-west traffic is not affected for EgressIPs are present here as well - if the EgressIP feature is enabled it takes care of creating them, otherwise the "Egress Service" feature does (sharing the same logic), as we do not want Egress Services to change the behavior of east-west traffic.
 Also, the policies created (seen later) for an Egress Service use a higher priority than the EgressIP ones, which means that if a pod belongs to both an EgressIP and an Egress Service the service's ingress IP will be used for the SNAT.
 
-We now request that our service will act as an "Egress Service" by annotating it, with the constraint that only a node with the `"node-role.kubernetes.io/worker": ""` label can be selected to handle its traffic:
+We now request that our service "demo-svc" will act as an "Egress Service" by creating a corresponding `EgressService`, with the constraint that only a node with the `"node-role.kubernetes.io/worker": ""` label can be selected to handle its traffic:
 ```
-$ kubectl annotate svc demo-svc k8s.ovn.org/egress-service='{"nodeSelector":{"matchLabels":{"node-role.kubernetes.io/worker": ""}}}'
-service/demo-svc annotated
+$ cat egress-service.yaml
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: demo-svc
+  namespace: default
+spec:
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/worker: ""
+
+$ kubectl apply -f egress-service.yaml
+egressservice.k8s.ovn.org/demo-svc created
 ```
 
-Once the service is annotated a node is selected to handle all of its traffic (ingress/egress) as described earlier.
-The service is annotated with its name, logical router policies are created on ovn_cluster_router to steer the endpoints' traffic to its mgmt port, SNAT rules are created in its iptables and it is labeled as the node in charge of the service's traffic:
+Once the `EgressService` is created a node is selected to handle all of its traffic (ingress/egress) as described earlier.
+The `EgressService` status is updated with its name, logical router policies are created on ovn_cluster_router to steer the endpoints' traffic to its mgmt port, SNAT rules are created in its iptables and it is labeled as the node in charge of the service's traffic:
 
-The `k8s.ovn.org/egress-service-host` annotation points to `ovn-worker2`, meaning it was selected to handle the service's traffic:
+The status points to `ovn-worker2`, meaning it was selected to handle the service's traffic:
 ```
-$ kubectl describe svc demo-svc
-Name:                     demo-svc
-Namespace:                default
-Annotations:              k8s.ovn.org/egress-service: {"nodeSelector":{"matchLabels":{"node-role.kubernetes.io/worker": ""}}}
-                          k8s.ovn.org/egress-service-host: ovn-worker2
-Type:                     LoadBalancer
-LoadBalancer Ingress:     5.5.5.5, 5555:5555:5555:5555:5555:5555:5555:5555
-Endpoints:                10.244.0.5:8080,10.244.2.7:8080
-                          fd00:10:244:1::5,fd00:10:244:3::7
+$ kubectl describe egressservice demo-svc
+Name:         demo-svc
+Namespace:    default
+Spec:
+  Node Selector:
+    Match Labels:
+      node-role.kubernetes.io/worker:  ""
+Status:
+  Host:  ovn-worker2
 ```
 
 A logical router policy is created for each endpoint to steer its egress traffic towards `ovn-worker2`'s mgmt port:
@@ -192,17 +209,17 @@ $ docker stop ovn-worker2
 ovn-worker2
 ```
 
-The `k8s.ovn.org/egress-service-host` annotation now points to `ovn-worker`:
+The status now points to `ovn-worker`:
 ```
-$ kubectl describe svc demo-svc
-Name:                     demo-svc
-Namespace:                default
-Annotations:              k8s.ovn.org/egress-service: {"nodeSelector":{"matchLabels":{"node-role.kubernetes.io/worker": ""}}}
-                          k8s.ovn.org/egress-service-host: ovn-worker
-Type:                     LoadBalancer
-LoadBalancer Ingress:     5.5.5.5, 5555:5555:5555:5555:5555:5555:5555:5555
-Endpoints:                10.244.0.5:8080,10.244.2.7:8080
-                          fd00:10:244:1::5,fd00:10:244:3::7
+$ kubectl describe egressservice demo-svc
+Name:         demo-svc
+Namespace:    default
+Spec:
+  Node Selector:
+    Match Labels:
+      node-role.kubernetes.io/worker:  ""
+Status:
+  Host:  ovn-worker
 ```
 
 The reroute destination changed to `ovn-worker`'s mgmt port (10.244.1.2 -> 10.244.0.2, fd00:10:244:2::2 -> fd00:10:244:1::2):
@@ -245,20 +262,10 @@ NAME         STATUS   ROLES
 ovn-worker   Ready    worker
 ```
 
-Finally, removing the annotation from the service resets the cluster to the point we started from:
+Finally, deleting the `EgressService` resource resets the cluster to the point we started from:
 ```
-$ kubectl annotate svc demo-svc k8s.ovn.org/egress-service-
-service/demo-svc annotated
-```
-
-```
-$ kubectl describe svc demo-svc
-Name:                     demo-svc
-Namespace:                default
-Annotations:              <none>
-Type:                     LoadBalancer
-LoadBalancer Ingress:     5.5.5.5, 5555:5555:5555:5555:5555:5555:5555:5555
-Endpoints:                10.244.0.5:8080,10.244.2.7:8080
+$ kubectl delete egressservice demo-svc
+egressservice.k8s.ovn.org "demo-svc" deleted
 ```
 
 ```
@@ -300,6 +307,25 @@ $ ip6tables-save | grep EGRESS
 $ kubectl get nodes -l egress-service.k8s.ovn.org/default-demo-svc=""
 No resources found
 ```
+
+### Network
+In addition, an `EgressService` supports a `network` field.
+When it is specified the relevant `ovnkube-node` takes care of creating additional ip rules on its host.
+Assuming an `EgressService` has `Network: blue`, a ClusterIP of 10.96.135.5 and its endpoints are 10.244.0.3 and 10.244.1.6, the following ip rules will be created on the host:
+
+```none
+$ ip rule list
+5000:	from 10.96.135.5 lookup blue
+5000:	from 10.244.0.3 lookup blue
+5000:	from 10.244.1.6 lookup blue
+```
+
+This makes the egress traffic of endpoints of an EgressService to be routed via the "blue" routing table.
+An ip rule is also created for the ClusterIP of the service which is needed in order for the return traffic (reply to an external client calling the service) to use the correct table - this is because the packet flow of contacting a LoadBalancer service goes:
+`lb ip -> node -> enter ovn with ClusterIP -> exit ovn with ClusterIP -> exit node with lb ip`
+
+If the routing table does not exist on the host these rules will not be created and an error will be logged.
+
 ## Usage Example
 
 While the user does not need to know all of the details of how "Egress Services" work, they need to know that in order for a service to work properly the access to it from outside the cluster (ingress traffic) has to go only through the node labeled with the `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""` label - i.e the node designated by OVN-Kubernetes to handle all of the service's traffic.
@@ -322,9 +348,7 @@ spec:
   autoAssign: false
 ```
 
-2. Create the LoadBalancer service. We create it with 2 annotations:
-- `metallb.universe.tf/address-pool` - to explicitly request the IP to be from the `example-pool`.
-- `k8s.ovn.org/egress-service` - to request that all of the endpoints of the service exit the cluster with the service's ingress IP. We also provide a `nodeSelector` so that the traffic exits from a node that matches these selectors.
+2. Create the LoadBalancer service and the corresponding EgressService. We create the service with the `metallb.universe.tf/address-pool` annotation to explicitly request its IP to be from the `example-pool` and the EgressService with a `nodeSelector` so that the traffic exits from a node that matches these selectors.
 ```yaml
 apiVersion: v1
 kind: Service
@@ -333,7 +357,6 @@ metadata:
   namespace: some-namespace
   annotations:
     metallb.universe.tf/address-pool: example-pool
-    k8s.ovn.org/egress-service: '{"nodeSelector":{"matchLabels":{"node-role.kubernetes.io/worker": ""}}}'
 spec:
   selector:
     app: example
@@ -343,6 +366,16 @@ spec:
       port: 8080
       targetPort: 8080
   type: LoadBalancer
+---
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: example-service
+  namespace: some-namespace
+spec:
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/worker: ""
 ```
 
 3. Advertise the service from the node in charge of the service's traffic. So far the service is "broken" - it is not reachable from outside the cluster and if the pods try to send traffic outside it would probably not come back as it is SNATed to an IP which is unknown.
