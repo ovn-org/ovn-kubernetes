@@ -50,6 +50,16 @@ jobs:
     name: Build-master
     runs-on: ubuntu-latest
     steps:
+    # Select which dockerfile to use.
+    - name: Use upstream OVN main branch for user triggered jobs
+      if: github.event_name != 'schedule'
+      run: |
+        echo "OVN_DOCKERFILE=Dockerfile.fedora.dev" >> $GITHUB_ENV
+
+    - name: Use Fedora OVN rpms for scheduled jobs
+      if: github.event_name == 'schedule'
+      run: |
+        echo "OVN_DOCKERFILE=Dockerfile.fedora" >> $GITHUB_ENV
     # Create a cache for the built master image
     - name: Restore master image cache
       id: image_cache_master
@@ -108,7 +118,7 @@ jobs:
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-f:dev -f ${OVN_DOCKERFILE} .
         popd
 
     - name: Cache master image
@@ -137,6 +147,16 @@ jobs:
     name: Build-PR
     runs-on: ubuntu-latest
     steps:
+    # Select which dockerfile to use.
+    - name: Use upstream OVN main branch for user triggered jobs
+      if: github.event_name != 'schedule'
+      run: |
+        echo "OVN_DOCKERFILE=Dockerfile.fedora.dev" >> $GITHUB_ENV
+
+    - name: Use Fedora OVN rpms for scheduled jobs
+      if: github.event_name == 'schedule'
+      run: |
+        echo "OVN_DOCKERFILE=Dockerfile.fedora" >> $GITHUB_ENV
     # Create a cache for the build PR image
     - name: Restore PR image cache
       id: image_cache_pr
@@ -188,7 +208,7 @@ jobs:
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:pr -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-f:pr -f ${OVN_DOCKERFILE} .
           mkdir _output
           docker save ovn-daemonset-f:pr > _output/${CI_IMAGE_PR_TAR}
         popd
@@ -234,7 +254,6 @@ jobs:
 
   ovn-upgrade-e2e:
     name: Upgrade OVN from Master to PR branch based image
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs:
@@ -348,7 +367,6 @@ jobs:
 
   e2e:
     name: e2e
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
     timeout-minutes: 220
@@ -395,7 +413,6 @@ jobs:
       ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' }}"
       OVN_SEPARATE_CLUSTER_MANAGER: "${{ matrix.separate-cluster-manager == 'true' }}"
     steps:
-
     - name: Free up disk space
       run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
 
@@ -467,7 +484,6 @@ jobs:
 
   e2e-dual-conversion:
     name: e2e-dual-conversion
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -543,73 +559,3 @@ jobs:
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
-
-  e2e-periodic:
-    name: e2e-periodic
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ["shard-conformance"]
-        ha: ["HA"]
-        gateway-mode: ["local"]
-        ipfamily: ["ipv4", "ipv6", "dualstack"]
-    needs: [ build-pr ]
-    env:
-      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}"
-      OVN_HA: "${{ matrix.ha == 'HA' }}"
-      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
-      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
-      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' }}"
-      OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
-    steps:
-
-      - name: Free up disk space
-        run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
-
-      - name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: ${{ env.GO_VERSION }}
-        id: go
-
-      - name: Check out code into the Go module directory
-        uses: actions/checkout@v3
-
-      - name: Set up environment
-        run: |
-          export GOPATH=$(go env GOPATH)
-          echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-          echo "$GOPATH/bin" >> $GITHUB_PATH
-      - name: Disable ufw
-        # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
-        # Not needed for KIND deployments, so just disable all the time.
-        run: |
-          sudo ufw disable
-      - uses: actions/download-artifact@v3
-        with:
-          name: test-image-pr
-      - name: Load docker image
-        run: |
-          docker load --input ${CI_IMAGE_PR_TAR}
-      - name: kind setup
-        run: |
-          export OVN_IMAGE="ovn-daemonset-f:pr"
-          make -C test install-kind
-      - name: Run Tests
-        run: |
-          make -C test ${{ matrix.target }}
-      - name: Export logs
-        if: always()
-        run: |
-          mkdir -p /tmp/kind/logs
-          kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
-          path: /tmp/kind/logs
-
