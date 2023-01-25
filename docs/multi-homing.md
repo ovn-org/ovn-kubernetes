@@ -54,6 +54,13 @@ spec:
     }
 ```
 
+**NOTE**
+- the `netAttachDefName` parameter **must** be in <namespace>/<net-attach-def name> format
+- the `subnets` attribute is a comma separated list of subnets.
+- the `subnets` attribute indicates both the subnet across the cluster, and per node.
+  The example above means you have a /16 subnet for the network, but each **node** has
+  a /24 subnet.
+
 ### Switched - layer 2 - topology
 This topology interconnects the workloads via a cluster-wide logical switch.
 
@@ -103,4 +110,8 @@ spec:
     imagePullPolicy: IfNotPresent
     name: agnhost-container
 ```
-
+## Limitations
+OVN-K currently does **not** support:
+- the same attachment configured multiple times in the same pod - i.e.
+  `k8s.v1.cni.cncf.io/networks: l3-network,l3-network` is invalid.
+- updates to the network selection elements lists - i.e. `k8s.v1.cni.cncf.io/networks` annotation
