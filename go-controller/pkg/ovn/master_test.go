@@ -1077,6 +1077,53 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
+	ginkgo.It("clears stale ovn_cluster_router routes in local gw", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			clusterSubnets := startFakeController(oc, wg)
+
+			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
+			// add stale route
+			badRoute := &nbdb.LogicalRouterStaticRoute{
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+				IPPrefix: subnet.String(),
+				Nexthop:  "10.244.0.6",
+			}
+			ginkgo.By("Creating stale route")
+			p := func(item *nbdb.LogicalRouterStaticRoute) bool { return false }
+			err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient,
+				types.OVNClusterRouter, badRoute, p)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ginkgo.By("Syncing node with OVNK")
+			node, err := oc.kube.GetNode(testNode.Name)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = oc.syncNodeManagementPort(node, []*net.IPNet{subnet})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ginkgo.By("Stale route should have been removed")
+
+			skipSnat := false
+			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
+				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
+				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
+				skipSnat, node1.NodeMgmtPortIP, "1400")
+			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+			"--init-gateways",
+			"--gateway-local",
+			"--nodeport",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
 	ginkgo.It("sets up a shared gateway", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)

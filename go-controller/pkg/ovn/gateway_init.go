@@ -227,9 +227,10 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 			Nexthop:  drLRPIfAddr.IP.String(),
 		}
 		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.IPPrefix == lrsr.IPPrefix && util.SliceHasStringItem(updatedLogicalRouter.StaticRoutes, item.UUID)
+			return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(item.Policy, lrsr.Policy) &&
+				util.SliceHasStringItem(updatedLogicalRouter.StaticRoutes, item.UUID)
 		}
-		err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, gatewayRouter, &lrsr, p,
+		err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, gatewayRouter, &lrsr, p,
 			&lrsr.Nexthop)
 		if err != nil {
 			return fmt.Errorf("failed to add a static route %+v in GR %s with distributed router as the nexthop, err: %v", lrsr, gatewayRouter, err)
@@ -285,10 +286,11 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 			OutputPort: &externalRouterPort,
 		}
 		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.OutputPort != nil && *item.OutputPort == *lrsr.OutputPort && item.IPPrefix == lrsr.IPPrefix
+			return item.OutputPort != nil && *item.OutputPort == *lrsr.OutputPort && item.IPPrefix == lrsr.IPPrefix &&
+				libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
 		}
-		err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, gatewayRouter, &lrsr, p,
-			&lrsr.Nexthop)
+		err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, gatewayRouter, &lrsr,
+			p, &lrsr.Nexthop)
 		if err != nil {
 			return fmt.Errorf("error creating static route %+v in GR %s: %v", lrsr, gatewayRouter, err)
 		}
@@ -305,12 +307,13 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 			Nexthop:  gwLRPIP.String(),
 		}
 		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.Nexthop == lrsr.Nexthop && item.IPPrefix == lrsr.IPPrefix
+			return item.IPPrefix == lrsr.IPPrefix &&
+				libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
 		}
-		err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter,
-			&lrsr, p)
+		err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient,
+			types.OVNClusterRouter, &lrsr, p, &lrsr.Nexthop)
 		if err != nil {
-			return fmt.Errorf("error creating static route %+v in GR %s: %v", lrsr, gatewayRouter, err)
+			return fmt.Errorf("error creating static route %+v in %s: %v", lrsr, types.OVNClusterRouter, err)
 		}
 	}
 
@@ -329,25 +332,31 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 			IPPrefix: hostSubnet.String(),
 			Nexthop:  gwLRPIP[0].String(),
 		}
-		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.Nexthop == lrsr.Nexthop && item.IPPrefix == lrsr.IPPrefix && item.Policy != nil && *item.Policy == *lrsr.Policy
-		}
+
 		if config.Gateway.Mode != config.GatewayModeLocal {
+			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
+			}
 			// If migrating from local to shared gateway, let's remove the static routes towards
 			// management port interface for the hostSubnet prefix before adding the routes
 			// towards join switch.
 			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 			oc.staticRouteCleanup([]net.IP{mgmtIfAddr.IP})
 
-			err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter,
-				&lrsr, p)
+			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, types.OVNClusterRouter,
+				&lrsr, p, &lrsr.Nexthop)
 			if err != nil {
 				return fmt.Errorf("error creating static route %+v in GR %s: %v", lrsr, types.OVNClusterRouter, err)
 			}
 		} else if config.Gateway.Mode == config.GatewayModeLocal {
 			// If migrating from shared to local gateway, let's remove the static routes towards
-			// join switch for the hostSubnet prefix before adding the routes
-			// towards management port which is done in syncNodeManagementPort.
+			// join switch for the hostSubnet prefix
+			// Note syncManagementPort happens before gateway sync so only remove things pointing to join subnet
+
+			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return item.IPPrefix == lrsr.IPPrefix && item.Policy != nil && *item.Policy == *lrsr.Policy &&
+					config.ContainsJoinIP(net.ParseIP(item.Nexthop))
+			}
 			err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
 			if err != nil {
 				return fmt.Errorf("error deleting static route %+v in GR %s: %v", lrsr, types.OVNClusterRouter, err)
