@@ -73,7 +73,7 @@ func extractPodBandwidth(podAnnotations map[string]string, dir direction) (int64
 }
 
 func (pr *PodRequest) String() string {
-	return fmt.Sprintf("[%s/%s %s]", pr.PodNamespace, pr.PodName, pr.SandboxID)
+	return fmt.Sprintf("[%s/%s %s network %s NAD %s]", pr.PodNamespace, pr.PodName, pr.SandboxID, pr.netName, pr.nadName)
 }
 
 // checkOrUpdatePodUID validates the given pod UID against the request's existing
@@ -179,8 +179,18 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 			if err != nil {
 				klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s NAD %s: %v", pr.PodNamespace,
 					pr.PodName, pr.nadName, err)
+			}
+
+			// check if this cmdDel is meant for the current sandbox, if not, directly return
+			if dpuCD.SandboxId != pr.SandboxID {
+				klog.Infof("The cmdDel request for sandbox %s is not meant for the currently configured "+
+					"pod %s/%s on NAD %s with sandbox %s. Ignoring this request.",
+					pr.SandboxID, namespace, podName, pr.nadName, dpuCD.SandboxId)
 				return response, nil
 			}
+
+			// Delete the DPU connection-details annotation
+			_ = pr.updatePodDPUConnDetailsWithRetry(&kube.Kube{KClient: clientset.kclient}, clientset.podLister, nil)
 			netdevName = dpuCD.VfNetdevName
 		} else {
 			// Find the hostInterface name
