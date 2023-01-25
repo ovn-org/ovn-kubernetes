@@ -12,6 +12,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	podnetworkinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/informers/externalversions"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -108,11 +109,18 @@ func runHybridOverlay(ctx *cli.Context) error {
 	defer close(stopChan)
 	f := informers.NewSharedInformerFactory(clientset, informer.DefaultResyncInterval)
 
+	podnetworkClientset, err := util.NewPodNetworkClientset(&config.Kubernetes)
+	if err != nil {
+		return err
+	}
+	podNetworkFactory := podnetworkinformerfactory.NewSharedInformerFactory(podnetworkClientset, informer.DefaultResyncInterval)
+
 	n, err := controller.NewNode(
 		&kube.Kube{KClient: clientset},
 		nodeName,
 		f.Core().V1().Nodes().Informer(),
 		f.Core().V1().Pods().Informer(),
+		podNetworkFactory.K8s().V1().PodNetworks().Informer(),
 		informer.NewDefaultEventHandler,
 	)
 	if err != nil {

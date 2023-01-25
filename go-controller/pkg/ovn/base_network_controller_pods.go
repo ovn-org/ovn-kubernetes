@@ -2,31 +2,35 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/pkg/errors"
 	"net"
+	"reflect"
+	"strconv"
 	"time"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	podnetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
+
 	kapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
-
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
-func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
-	annotations *util.PodAnnotation, nadName string) (expectedLogicalPortName string, err error) {
+func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod, podNetwork *util.SinglePodNetwork,
+	nadName string) (expectedLogicalPortName string, err error) {
 	switchName, err := bnc.getExpectedSwitchName(pod)
 	if err != nil {
 		return "", err
@@ -54,19 +58,19 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 				"condition. Pod: %s/%s, node: %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
 		}
 	}
-	if err := bnc.waitForNodeLogicalSwitchInCache(switchName); err != nil {
+	if err = bnc.waitForNodeLogicalSwitchInCache(switchName); err != nil {
 		return expectedLogicalPortName, fmt.Errorf("failed to wait for switch %s to be added to cache. IP allocation may fail!",
 			switchName)
 	}
-	if err = bnc.lsManager.AllocateIPs(switchName, annotations.IPs); err != nil {
+	if err = bnc.lsManager.AllocateIPs(switchName, podNetwork.IPs); err != nil {
 		if err == ipallocator.ErrAllocated {
 			// already allocated: log an error but not stop syncPod from continuing
 			klog.Errorf("Already allocated IPs: %s for pod: %s on switchName: %s",
-				util.JoinIPNetIPs(annotations.IPs, " "), expectedLogicalPortName,
+				util.JoinIPNetIPs(podNetwork.IPs, " "), expectedLogicalPortName,
 				switchName)
 		} else {
 			return expectedLogicalPortName, fmt.Errorf("couldn't allocate IPs: %s for pod: %s on switch: %s"+
-				" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), expectedLogicalPortName,
+				" error: %v", util.JoinIPNetIPs(podNetwork.IPs, " "), expectedLogicalPortName,
 				switchName, err)
 		}
 	}
@@ -155,9 +159,14 @@ func (bnc *BaseNetworkController) lookupPortUUIDAndSwitchName(logicalPort string
 	return lsp.UUID, nodeSwitches[0].Name, nil
 }
 
+// deletePodLogicalPort does all or a subset of the following cleanups:
+// deletes pod lsp, releases pod ip from bnc.lsManager, deletes pod ips from the namespace-owned
+// address set, and removes port from the multicast allow policy.
+// podNetwork is only used when portInfo == nil.
+// Returned *lpInfo != nil only if no other pods are using given pod's IPs.
 func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *lpInfo,
-	nadName string) (*lpInfo, error) {
-	var portUUID, switchName, logicalPort string
+	nadName string, podNetworks *podnetworkapi.PodNetwork) (*lpInfo, error) {
+	var portUUID, switchName string
 	var podIfAddrs []*net.IPNet
 
 	expectedSwitchName, err := bnc.getExpectedSwitchName(pod)
@@ -166,18 +175,13 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 	}
 
 	podDesc := fmt.Sprintf("pod %s/%s/%s", nadName, pod.Namespace, pod.Name)
-	logicalPort = bnc.GetLogicalPortName(pod, nadName)
+	logicalPort := bnc.GetLogicalPortName(pod, nadName)
 	if portInfo == nil {
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
 		// is not re-added into the cache. Delete logical switch port anyway.
-		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+		podNetwork, err := util.ParsePodNetwork(podNetworks, nadName)
 		if err != nil {
-			if util.IsAnnotationNotSetError(err) {
-				// if the annotation doesn’t exist, that’s not an error. It means logical port does not need to be deleted.
-				klog.V(5).Infof("No annotations on %s, no need to delete its logical port: %s", podDesc, logicalPort)
-				return nil, nil
-			}
-			return nil, fmt.Errorf("unable to unmarshal pod annotations for %s: %w", podDesc, err)
+			return nil, fmt.Errorf("failed to parse podNetwork %s/%s: %v", podNetworks.Namespace, podNetworks.Name, err)
 		}
 
 		// Since portInfo is not available, use ovn to locate the logical switch (named after the node name) for the logical port.
@@ -191,7 +195,7 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 			portUUID = ""
 			switchName = expectedSwitchName
 		}
-		podIfAddrs = annotation.IPs
+		podIfAddrs = podNetwork.IPs
 
 		klog.Warningf("No cached port info for deleting %s. Using logical switch %s port uuid %s and addrs %v",
 			podDesc, switchName, portUUID, podIfAddrs)
@@ -222,7 +226,7 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 					continue
 				}
 				// check if the pod addresses match in the OVN annotation
-				pAddrs, err := util.GetPodIPsOfNetwork(p, bnc.NetInfo)
+				pAddrs, err := bnc.watchFactory.GetPodIPsOfNetwork(p, bnc.NetInfo)
 				if err != nil {
 					continue
 				}
@@ -331,18 +335,18 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitchInCache(switchName str
 }
 
 func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nadapi.NetworkSelectionElement,
-	podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error {
+	podNetwork *util.SinglePodNetwork, nodeSubnets []*net.IPNet) error {
 	if bnc.IsSecondary() {
 		// for secondary network, see if its network-attachment's annotation has default-route key.
 		// If present, then we need to add default route for it
-		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
+		podNetwork.Gateways = append(podNetwork.Gateways, network.GatewayRequest...)
 		topoType := bnc.TopologyType()
 		switch topoType {
 		case ovntypes.Layer2Topology:
 			// no route needed for directly connected subnets
 			return nil
 		case ovntypes.Layer3Topology:
-			for _, podIfAddr := range podAnnotation.IPs {
+			for _, podIfAddr := range podNetwork.IPs {
 				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
 				nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
 				if err != nil {
@@ -352,7 +356,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 				layer3NetConfInfo := bnc.NetConfInfo.(*util.Layer3NetConfInfo)
 				for _, clusterSubnet := range layer3NetConfInfo.ClusterSubnets {
 					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-						podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+						podNetwork.Routes = append(podNetwork.Routes, util.PodRoute{
 							Dest:    clusterSubnet.CIDR,
 							NextHop: gatewayIPnet.IP,
 						})
@@ -363,7 +367,6 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 		}
 		return fmt.Errorf("topology type %s not supported", topoType)
 	}
-
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
@@ -384,7 +387,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 		}
 	}
 
-	for _, podIfAddr := range podAnnotation.IPs {
+	for _, podIfAddr := range podNetwork.IPs {
 		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
 		nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
 		if err != nil {
@@ -401,7 +404,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 		if otherDefaultRoute {
 			for _, clusterSubnet := range config.Default.ClusterSubnets {
 				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+					podNetwork.Routes = append(podNetwork.Routes, util.PodRoute{
 						Dest:    clusterSubnet.CIDR,
 						NextHop: gatewayIPnet.IP,
 					})
@@ -409,7 +412,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 			}
 			for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
 				if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
-					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+					podNetwork.Routes = append(podNetwork.Routes, util.PodRoute{
 						Dest:    serviceSubnet,
 						NextHop: gatewayIPnet.IP,
 					})
@@ -420,7 +423,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 		}
 
 		if gatewayIP != nil {
-			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIP)
+			podNetwork.Gateways = append(podNetwork.Gateways, gatewayIP)
 		}
 	}
 	return nil
@@ -453,10 +456,11 @@ func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, 
 	return switchName, nil
 }
 
+// addLogicalPortToNetwork allocates pod IP with bnc.lsManager, creates PodNetwork in the apiserver, and
+// returns db ops to set up lsp. If PodNetwork wasn't updated, then IP will be released.
 func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName string,
 	network *nadapi.NetworkSelectionElement) (ops []ovsdb.Operation,
-	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool, err error) {
-	var ls *nbdb.LogicalSwitch
+	lsp *nbdb.LogicalSwitchPort, podNetwork *util.SinglePodNetwork, newlyCreatedPort bool, err error) {
 
 	podDesc := fmt.Sprintf("%s/%s/%s", nadName, pod.Namespace, pod.Name)
 	switchName, err := bnc.getExpectedSwitchName(pod)
@@ -473,10 +477,11 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		if util.PodTerminating(pod) {
 			podState = "terminating"
 		}
-		return nil, nil, nil, false, fmt.Errorf("[%s/%s] Non-existent node: %s in API for pod with %s state",
-			pod.Namespace, pod.Name, pod.Spec.NodeName, podState)
+		return nil, nil, nil, false, fmt.Errorf("[%s] Non-existent node: %s in API for pod with %s state",
+			podDesc, pod.Spec.NodeName, podState)
 	}
 
+	var ls *nbdb.LogicalSwitch
 	ls, err = bnc.waitForNodeLogicalSwitch(switchName)
 	if err != nil {
 		return nil, nil, nil, false, err
@@ -488,20 +493,17 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
 	var addresses []string
-	var releaseIPs bool
-	lspExist := false
-	needsIP := true
 
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
-	// UUID and and the port cache, address sets, and port groups
+	// UUID and the port cache, address sets, and port groups
 	// will still have the old UUID.
 	lsp = &nbdb.LogicalSwitchPort{Name: portName}
 	existingLSP, err := libovsdbops.GetLogicalSwitchPort(bnc.nbClient, lsp)
 	if err != nil && err != libovsdbclient.ErrNotFound {
 		return nil, nil, nil, false, fmt.Errorf("unable to get the lsp %s from the nbdb: %s", portName, err)
 	}
-	lspExist = err != libovsdbclient.ErrNotFound
+	lspExist := err != libovsdbclient.ErrNotFound
 
 	// Sanity check. If port exists, it should be in the logical switch obtained from the pod spec.
 	if lspExist {
@@ -545,30 +547,19 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	// rescheduled.
 	lsp.Options["requested-chassis"] = pod.Spec.NodeName
 
-	podAnnotation, err = util.UnmarshalPodAnnotation(pod.Annotations, nadName)
-
-	// the IPs we allocate in this function need to be released back to the
-	// IPAM pool if there is some error in any step of addLogicalPort past
-	// the point the IPs were assigned via the IPAM manager.
-	// this needs to be done only when releaseIPs is set to true (the case where
-	// we truly have assigned podIPs in this call) AND when there is no error in
-	// the rest of the functionality of addLogicalPort. It is important to use a
-	// named return variable for defer to work correctly.
-
-	defer func() {
-		if releaseIPs && err != nil {
-			if relErr := bnc.lsManager.ReleaseIPs(switchName, podIfAddrs); relErr != nil {
-				klog.Errorf("Error when releasing IPs %s for switch: %s, err: %q",
-					util.JoinIPNetIPs(podIfAddrs, " "), switchName, relErr)
-			} else {
-				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), switchName)
-			}
-		}
-	}()
-
+	// try to get allocated ips from PodNetwork object.
+	// It is the highest priority source of truth, since ovn db may be deleted e.g. between restarts.
+	podNetworks, err := bnc.watchFactory.GetPodNetwork(pod, true)
+	// just log the error, since podNetwork will be overwritten in the end
+	if err != nil {
+		klog.Infof("Failed getting podNetwork for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+	}
+	podNetwork, err = util.ParsePodNetwork(podNetworks, nadName)
+	needsIP := true
 	if err == nil {
-		podMac = podAnnotation.MAC
-		podIfAddrs = podAnnotation.IPs
+		// PodNetwork object exists
+		podMac = podNetwork.MAC
+		podIfAddrs = podNetwork.IPs
 
 		// If the pod already has annotations use the existing static
 		// IP/MAC from the annotation.
@@ -583,6 +574,28 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		}
 	}
 
+	// assigned ips for given pod may be stored in a PodNetwork object, or
+	// in the lsp (if lsp IP is set, but PodNetwork is not that is probably a bug,
+	// but we still account for that). The newly allocated (not present in any
+	// of the mentioned objects before) IPs in this function need to be released back to the
+	// IPAM pool if there is some error in any step of addLogicalPort past
+	// the point the IPs were assigned via the IPAM manager, and before allocated IPs
+	// are saved in PodNetwork object. For that purpose releaseIPs variable is used.
+	// It is set to true when we truly have assigned podIPs in this call AND
+	// before PodNetwork was successfully updated.
+	// It is important to use a named return variable for defer to work correctly.
+	var releaseIPs bool
+	defer func() {
+		if releaseIPs && err != nil {
+			if relErr := bnc.lsManager.ReleaseIPs(switchName, podIfAddrs); relErr != nil {
+				klog.Errorf("Error when releasing IPs %s for switch: %s, err: %q",
+					util.JoinIPNetIPs(podIfAddrs, " "), switchName, relErr)
+			} else {
+				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), switchName)
+			}
+		}
+	}()
+
 	if needsIP {
 		if existingLSP != nil {
 			// try to get the MAC and IPs from existing OVN port first
@@ -592,27 +605,30 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 					podDesc, switchName, err)
 			}
 		}
-		needsNewAllocation := false
 
-		// ensure we have reserved the IPs found in OVN
-		if len(podIfAddrs) == 0 {
-			needsNewAllocation = true
-		} else if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-			klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s, for pod %s on switch: %s"+
-				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, podDesc, switchName, err)
-
-			needsNewAllocation = true
+		needsNewIPAllocation := true
+		if len(podIfAddrs) > 0 {
+			// ensure we have reserved the IPs found in OVN
+			if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err == nil || err == ipallocator.ErrAllocated {
+				needsNewIPAllocation = false
+			} else {
+				klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s, for pod %s on switch: %s"+
+					" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, podDesc, switchName, err)
+			}
 		}
-		if needsNewAllocation {
+
+		if needsNewIPAllocation {
 			// Previous attempts to use already configured IPs failed, need to assign new
 			podMac, podIfAddrs, err = bnc.assignPodAddresses(switchName)
 			if err != nil {
 				return nil, nil, nil, false, fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					podDesc, switchName, err)
 			}
+			// only release ip that was allocated from scratch in case of failure
+			releaseIPs = true
+
 		}
 
-		releaseIPs = true
 		// handle error cases separately first to ensure binding to err, otherwise the
 		// defer will fail
 		if network != nil && network.MacRequest != "" {
@@ -623,7 +639,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 					network.MacRequest, podDesc, err)
 			}
 		}
-		podAnnotation = &util.PodAnnotation{
+		podNetwork = &util.SinglePodNetwork{
 			IPs: podIfAddrs,
 			MAC: podMac,
 		}
@@ -632,20 +648,21 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 			return nil, nil, nil, false, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
 				podDesc, switchName)
 		}
-		err = bnc.addRoutesGatewayIP(pod, network, podAnnotation, nodeSubnets)
+		err = bnc.addRoutesGatewayIP(pod, network, podNetwork, nodeSubnets)
 		if err != nil {
 			return nil, nil, nil, false, err
 		}
 
-		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s",
-			podIfAddrs, podMac, podAnnotation.Gateways)
+		klog.V(5).Infof("PodNetwork values: ip=%v ; mac=%s ; gw=%s",
+			podIfAddrs, podMac, podNetwork.Gateways)
 		annoStart := time.Now()
-		err = bnc.updatePodAnnotationWithRetry(pod, podAnnotation, nadName)
-		podAnnoTime := time.Since(annoStart)
-		klog.Infof("[%s] addLogicalPort annotation time took %v", podDesc, podAnnoTime)
+		err = bnc.updatePodNetworkAndAnnotationWithRetry(pod, podNetwork, nadName)
 		if err != nil {
 			return nil, nil, nil, false, err
 		}
+		podAnnoTime := time.Since(annoStart)
+		klog.Infof("[%s] addLogicalPort annotation time took %v", podDesc, podAnnoTime)
+		// no need to release ip once it is saved in a PodNetwork object
 		releaseIPs = false
 	}
 
@@ -675,22 +692,59 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 			fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
 	}
 
-	return ops, lsp, podAnnotation, needsIP && !lspExist, nil
+	return ops, lsp, podNetwork, needsIP && !lspExist, nil
 }
 
-func (bnc *BaseNetworkController) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation, nadName string) error {
+// updatePodNetworkAndAnnotationWithRetry will update podNetwork and set the next OvnPodNetworkVersionAnnotation
+// to trigger pod update event in case PodNetwork.Spec.Networks[netName] changed.
+func (bnc *BaseNetworkController) updatePodNetworkAndAnnotationWithRetry(origPod *kapi.Pod,
+	singleNetwork *util.SinglePodNetwork, netName string) error {
 	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
+		podNetwork, err := util.BuildPodNetwork(origPod, singleNetwork, netName)
+		if err != nil {
+			// bad singleNetwork format
+			return fmt.Errorf("failed to build podNetwork based on %+v: %v", singleNetwork, err)
+		}
+		existingPodNetwork, err := bnc.kube.GetPodNetwork(podNetwork)
+		if err != nil && apierrors.IsNotFound(err) {
+			// PodNetwork doesn't exist, create
+			_, err := bnc.kube.CreatePodNetwork(podNetwork)
+			if err != nil {
+				return fmt.Errorf("failed to create pod network %+v: %v", podNetwork, err)
+			}
+		}
+		// PodNetwork already exists, check if update needed
+		if reflect.DeepEqual(existingPodNetwork.Spec.Networks[netName], podNetwork.Spec.Networks[netName]) {
+			// existing object has the same spec, no need to update PodNetwork and pod annotation
+			return nil
+		}
+		existingPodNetwork.Spec.Networks[netName] = podNetwork.Spec.Networks[netName]
+		_, err = bnc.kube.UpdatePodNetwork(existingPodNetwork)
+
+		if err != nil {
+			return fmt.Errorf("failed to update pod network %v: %v", existingPodNetwork, err)
+		}
+		// Update pod annotation to trigger update event
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := bnc.watchFactory.GetPod(origPod.Namespace, origPod.Name)
 		if err != nil {
 			return err
 		}
-
 		cpod := pod.DeepCopy()
-		cpod.Annotations, err = util.MarshalPodAnnotation(cpod.Annotations, podInfo, nadName)
-		if err != nil {
-			return err
+		// set ot update podVersion to signal that related PodNetwork object was updated
+		nextPodNetVersion := 1
+		if cpod.Annotations[util.OvnPodNetworkVersionAnnotation] != "" {
+			previousVer, err := strconv.Atoi(cpod.Annotations[util.OvnPodNetworkVersionAnnotation])
+			if err != nil {
+				return fmt.Errorf("unable to increment existing %s annotation for pod %s/%s: %v",
+					cpod.Annotations[util.OvnPodNetworkVersionAnnotation], origPod.Namespace, origPod.Name, err)
+			}
+			nextPodNetVersion = previousVer + 1
 		}
+		if cpod.Annotations == nil {
+			cpod.Annotations = make(map[string]string)
+		}
+		cpod.Annotations[util.OvnPodNetworkVersionAnnotation] = strconv.Itoa(nextPodNetVersion)
 		return bnc.kube.UpdatePod(cpod)
 	})
 	if resultErr != nil {

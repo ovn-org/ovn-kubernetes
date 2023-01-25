@@ -11,11 +11,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	utilnet "k8s.io/utils/net"
 )
@@ -136,36 +133,21 @@ func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory
 	return nil
 }
 
-// addPeerPods will get all currently assigned ips for given pods, and add them to the address set.
+// addPeerPodIPs will get all currently assigned ips for given pods, and add them to the address set.
 // If pod ips change, this function should be called again.
 // must be called with network policy read lock
-func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
+func (gp *gressPolicy) addPeerPodIPs(ips []net.IP) error {
 	if gp.peerAddressSet == nil {
 		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod(s): for gressPolicy: %s",
 			gp.policyName)
 	}
-
-	podIPFactor := 1
-	if config.IPv4Mode && config.IPv6Mode {
-		podIPFactor = 2
-	}
-	ips := make([]net.IP, 0, len(pods)*podIPFactor)
-	for _, pod := range pods {
-		podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
-		if err != nil {
-			return err
-		}
-		ips = append(ips, podIPs...)
-	}
-
 	return gp.peerAddressSet.AddIPs(ips)
 }
 
 // must be called with network policy read lock
-func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
-	ips, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
-	if err != nil {
-		return err
+func (gp *gressPolicy) deletePeerPodIPs(ips []net.IP) error {
+	if gp.peerAddressSet == nil {
+		return nil
 	}
 	return gp.peerAddressSet.DeleteIPs(ips)
 }

@@ -50,17 +50,6 @@ type eventHandler struct {
 // UpdateFilterFunction returns true if the update is interesting
 type UpdateFilterFunction func(old, new interface{}) bool
 
-// ReceiveAllUpdates always returns true
-// meaning that all updates will be enqueued
-func ReceiveAllUpdates(old, new interface{}) bool {
-	return true
-}
-
-// DiscardAllUpdates always returns false, discarding updates
-func DiscardAllUpdates(old, new interface{}) bool {
-	return false
-}
-
 // EventHandlerCreateFunction is function that creates new event handlers
 type EventHandlerCreateFunction func(
 	name string,
@@ -112,7 +101,7 @@ func NewDefaultEventHandler(
 			if oldObj.GetResourceVersion() == newObj.GetResourceVersion() {
 				return
 			}
-			// check the update aginst the predicate functions
+			// check the update against the predicate functions
 			if e.updateFilter(old, new) {
 				// enqueue if it matches
 				e.enqueue(newObj)

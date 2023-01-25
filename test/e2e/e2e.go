@@ -37,14 +37,13 @@ import (
 )
 
 const (
-	vxlanPort            = "4789" // IANA assigned VXLAN UDP port - rfc7348
-	podNetworkAnnotation = "k8s.ovn.org/pod-networks"
-	retryInterval        = 1 * time.Second  // polling interval timer
-	retryTimeout         = 40 * time.Second // polling timeout
-	rolloutTimeout       = 10 * time.Minute
-	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
-	iperf3Image          = "quay.io/sronanrh/iperf"
-	ovnNs                = "ovn-kubernetes" //OVN kubernetes namespace
+	vxlanPort      = "4789"           // IANA assigned VXLAN UDP port - rfc7348
+	retryInterval  = 1 * time.Second  // polling interval timer
+	retryTimeout   = 40 * time.Second // polling timeout
+	rolloutTimeout = 10 * time.Minute
+	agnhostImage   = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
+	iperf3Image    = "quay.io/sronanrh/iperf"
+	ovnNs          = "ovn-kubernetes" //OVN kubernetes namespace
 )
 
 type podCondition = func(pod *v1.Pod) (bool, error)
@@ -83,33 +82,19 @@ func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host
 	podClient := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
 	_, err := podClient.Create(context.Background(), pod, metav1.CreateOptions{})
 	if err != nil {
-		errChan <- err
-		return
-	}
-
-	// Wait for pod network setup to be almost ready
-	err = wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
-		pod, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
-		if err != nil {
-			return false, nil
-		}
-		_, ok := pod.Annotations[podNetworkAnnotation]
-		return ok, nil
-	})
-	if err != nil {
-		errChan <- err
+		errChan <- fmt.Errorf("failed to create client pod %s: %v", podName, err)
 		return
 	}
 
 	err = e2epod.WaitForPodNotPending(f.ClientSet, f.Namespace.Name, podName)
 	if err != nil {
-		errChan <- err
+		errChan <- fmt.Errorf("failed to wait for pod %s not pending: %v", podName, err)
 		return
 	}
 
 	podGet, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
 	if err != nil {
-		errChan <- err
+		errChan <- fmt.Errorf("failed to get pod %s: %v", podName, err)
 		return
 	}
 
@@ -168,23 +153,10 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 		},
 	}
 	podClient := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
+
 	_, err := podClient.Create(context.Background(), pod, metav1.CreateOptions{})
 	if err != nil {
 		return err
-	}
-
-	// Wait for pod network setup to be almost ready
-	err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-		pod, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
-		if err != nil {
-			return false, nil
-		}
-		_, ok := pod.Annotations[podNetworkAnnotation]
-		return ok, nil
-	})
-	// Fail the test if no pod annotation is retrieved
-	if err != nil {
-		framework.Failf("Error trying to get the pod annotation")
 	}
 
 	err = e2epod.WaitForPodSuccessInNamespace(f.ClientSet, podName, f.Namespace.Name)
@@ -199,59 +171,6 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 	}
 
 	return err
-}
-
-// Place the workload on the specified node and return pod gw route
-func getPodGWRoute(f *framework.Framework, nodeName string, podName string) net.IP {
-	command := []string{"bash", "-c", "sleep 20000"}
-	contName := fmt.Sprintf("%s-container", podName)
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: podName,
-		},
-		Spec: v1.PodSpec{
-			Containers: []v1.Container{
-				{
-					Name:    contName,
-					Image:   agnhostImage,
-					Command: command,
-				},
-			},
-			NodeName:      nodeName,
-			RestartPolicy: v1.RestartPolicyNever,
-		},
-	}
-	podClient := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
-	_, err := podClient.Create(context.Background(), pod, metav1.CreateOptions{})
-	if err != nil {
-		framework.Failf("Error trying to create pod")
-	}
-
-	// Wait for pod network setup to be almost ready
-	wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
-		podGet, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
-		if err != nil {
-			return false, nil
-		}
-		if podGet.Annotations != nil && podGet.Annotations[podNetworkAnnotation] != "" {
-			return true, nil
-		}
-		return false, nil
-	})
-	if err != nil {
-		framework.Failf("Error trying to get the pod annotations")
-	}
-
-	podGet, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
-	if err != nil {
-		framework.Failf("Error trying to get the pod object")
-	}
-	annotation, err := unmarshalPodAnnotation(podGet.Annotations)
-	if err != nil {
-		framework.Failf("Error trying to unmarshal pod annotations")
-	}
-
-	return annotation.Gateways[0]
 }
 
 // Create a pod on the specified node using the agnostic host image

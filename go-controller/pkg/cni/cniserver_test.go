@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	utiltesting "k8s.io/client-go/util/testing"
 
+	podnetworkfakeclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -77,9 +78,11 @@ func TestCNIServer(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 	socketPath := filepath.Join(tmpDir, serverSocketName)
 	fakeClient := fake.NewSimpleClientset()
+	fakePodnetClient := podnetworkfakeclientset.NewSimpleClientset()
 
 	fakeClientset := &util.OVNClientset{
-		KubeClient: fakeClient,
+		KubeClient:       fakeClient,
+		PodNetworkClient: fakePodnetClient,
 	}
 	wf, err := factory.NewNodeWatchFactory(fakeClientset, nodeName)
 	if err != nil {
@@ -89,7 +92,7 @@ func TestCNIServer(t *testing.T) {
 		t.Fatalf("failed to start watch factory: %v", err)
 	}
 
-	s, err := NewCNIServer(false, wf, fakeClient)
+	s, err := NewCNIServer(false, wf, fakeClient, nil)
 	if err != nil {
 		t.Fatalf("error creating CNI server: %v", err)
 	}

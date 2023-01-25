@@ -10,6 +10,9 @@ import (
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	podnetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
+	podnetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned"
+
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -33,6 +36,10 @@ type InterfaceOVN interface {
 	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
+	CreatePodNetwork(podNetwork *podnetworkapi.PodNetwork) (*podnetworkapi.PodNetwork, error)
+	UpdatePodNetwork(podNetwork *podnetworkapi.PodNetwork) (*podnetworkapi.PodNetwork, error)
+	DeletePodNetwork(podNetwork *podnetworkapi.PodNetwork) error
+	GetPodNetwork(podNetwork *podnetworkapi.PodNetwork) (*podnetworkapi.PodNetwork, error)
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -68,6 +75,7 @@ type KubeOVN struct {
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
+	PodNetworkClient     podnetworkclientset.Interface
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -351,4 +359,20 @@ func (k *KubeOVN) UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetwo
 
 func (k *KubeOVN) DeleteCloudPrivateIPConfig(name string) error {
 	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Delete(context.TODO(), name, metav1.DeleteOptions{})
+}
+
+func (k *KubeOVN) CreatePodNetwork(podNetwork *podnetworkapi.PodNetwork) (*podnetworkapi.PodNetwork, error) {
+	return k.PodNetworkClient.K8sV1().PodNetworks(podNetwork.Namespace).Create(context.TODO(), podNetwork, metav1.CreateOptions{})
+}
+
+func (k *KubeOVN) UpdatePodNetwork(podNetwork *podnetworkapi.PodNetwork) (*podnetworkapi.PodNetwork, error) {
+	return k.PodNetworkClient.K8sV1().PodNetworks(podNetwork.Namespace).Update(context.TODO(), podNetwork, metav1.UpdateOptions{})
+}
+
+func (k *KubeOVN) DeletePodNetwork(podNetwork *podnetworkapi.PodNetwork) error {
+	return k.PodNetworkClient.K8sV1().PodNetworks(podNetwork.Namespace).Delete(context.TODO(), podNetwork.Name, metav1.DeleteOptions{})
+}
+
+func (k *KubeOVN) GetPodNetwork(podNetwork *podnetworkapi.PodNetwork) (*podnetworkapi.PodNetwork, error) {
+	return k.PodNetworkClient.K8sV1().PodNetworks(podNetwork.Namespace).Get(context.TODO(), podNetwork.Name, metav1.GetOptions{})
 }

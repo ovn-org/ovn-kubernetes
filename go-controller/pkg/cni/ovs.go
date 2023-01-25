@@ -248,7 +248,16 @@ func checkCancelSandbox(mac string, getter PodInfoGetter, namespace, name, nadNa
 		return fmt.Errorf("canceled old pod sandbox")
 	}
 
-	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	podNetworks, err := getter.getPodNetwork(pod)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("podNetwork deleted")
+		}
+		klog.Warningf("[%s/%s] failed to get podNetwork while waiting for OVS port binding: %v", namespace, name, err)
+		return nil
+	}
+
+	podNetwork, err := util.ParsePodNetwork(podNetworks, nadName)
 	if err != nil {
 		return fmt.Errorf("pod OVN annotations deleted or invalid")
 	}
@@ -256,7 +265,7 @@ func checkCancelSandbox(mac string, getter PodInfoGetter, namespace, name, nadNa
 	// Pod OVN annotation changed and this sandbox should
 	// be canceled so the new pod sandbox can run with the
 	// updated MAC/IP
-	if mac != ovnAnnot.MAC.String() {
+	if mac != podNetwork.MAC.String() {
 		return fmt.Errorf("pod OVN annotations changed")
 	}
 

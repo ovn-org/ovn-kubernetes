@@ -35,6 +35,8 @@ import (
 	ocpconfigapi "github.com/openshift/api/config/v1"
 	ocpcloudnetworkclientsetfake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
 
+	podnetworkfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned/fake"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -274,6 +276,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressIPFakeClient = &egressipfake.Clientset{}
 		cloudNetworkFakeClient = &ocpcloudnetworkclientsetfake.Clientset{}
 		egressQoSFakeClient = &egressqosfake.Clientset{}
+		podNetworkFakeClient := &podnetworkfake.Clientset{}
 
 		ovnClientset = &util.OVNClientset{
 			KubeClient:           fakeClient,
@@ -281,6 +284,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			EgressFirewallClient: egressFirewallFakeClient,
 			CloudNetworkClient:   cloudNetworkFakeClient,
 			EgressQoSClient:      egressQoSFakeClient,
+			PodNetworkClient:     podNetworkFakeClient,
 		}
 
 		pods = make([]*v1.Pod, 0)

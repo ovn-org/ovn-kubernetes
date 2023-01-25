@@ -27,6 +27,17 @@ func TestEventHandler(t *testing.T) {
 	RunSpecs(t, "Event Handler Suite")
 }
 
+// ReceiveAllUpdates always returns true
+// meaning that all updates will be enqueued
+func ReceiveAllUpdates(old, new interface{}) bool {
+	return true
+}
+
+// DiscardAllUpdates always returns false, discarding updates
+func DiscardAllUpdates(old, new interface{}) bool {
+	return false
+}
+
 func newPod(name, namespace string) *kapi.Pod {
 	return &kapi.Pod{
 		Status: kapi.PodStatus{

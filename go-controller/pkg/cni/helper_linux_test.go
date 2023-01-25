@@ -195,7 +195,7 @@ func TestSetupNetwork(t *testing.T) {
 			desc:    "test code path when AddrAdd returns error",
 			inpLink: mockLink,
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
+				SinglePodNetwork: util.SinglePodNetwork{
 					IPs: ovntest.MustParseIPNets("192.168.0.5/24"),
 					MAC: ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 				},
@@ -214,7 +214,7 @@ func TestSetupNetwork(t *testing.T) {
 			desc:    "test code path when AddRoute for gateway returns error",
 			inpLink: mockLink,
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
+				SinglePodNetwork: util.SinglePodNetwork{
 					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
 					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 					Gateways: ovntest.MustParseIPs("192.168.0.1"),
@@ -236,7 +236,7 @@ func TestSetupNetwork(t *testing.T) {
 			desc:    "test code path when AddRoute for pod returns error",
 			inpLink: mockLink,
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
+				SinglePodNetwork: util.SinglePodNetwork{
 					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
 					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 					Gateways: ovntest.MustParseIPs("192.168.0.1"),
@@ -265,7 +265,7 @@ func TestSetupNetwork(t *testing.T) {
 			desc:    "test success path",
 			inpLink: mockLink,
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
+				SinglePodNetwork: util.SinglePodNetwork{
 					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
 					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 					Gateways: ovntest.MustParseIPs("192.168.0.1"),
@@ -293,7 +293,7 @@ func TestSetupNetwork(t *testing.T) {
 			desc:    "test container link already set up",
 			inpLink: mockLink,
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
+				SinglePodNetwork: util.SinglePodNetwork{
 					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
 					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 					Gateways: ovntest.MustParseIPs("192.168.0.1"),
@@ -371,8 +371,8 @@ func TestSetupInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
 			},
 			errExp: true,
 			nsMockHelper: []ovntest.TestifyMockHelper{
@@ -387,7 +387,7 @@ func TestSetupInterface(t *testing.T) {
 			inpContID:    "test",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
+				SinglePodNetwork: util.SinglePodNetwork{},
 				MTU:           1500,
 			},
 			errExp: true,
@@ -469,9 +469,9 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -486,9 +486,9 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -510,9 +510,9 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
@@ -536,9 +536,9 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
@@ -563,9 +563,9 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
@@ -591,9 +591,9 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errMatch:    fmt.Errorf("failed to rename"),
@@ -622,9 +622,9 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
@@ -658,9 +658,9 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errMatch:    fmt.Errorf("failed to set MTU on"),
@@ -700,10 +700,10 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				IsDPUHostMode: true,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				IsDPUHostMode:    true,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             false,
@@ -727,10 +727,10 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				IsDPUHostMode: true,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				IsDPUHostMode:    true,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -750,10 +750,10 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				IsDPUHostMode: true,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				IsDPUHostMode:    true,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -774,10 +774,10 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				IsDPUHostMode: true,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				IsDPUHostMode:    true,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -799,10 +799,10 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				IsDPUHostMode: true,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				IsDPUHostMode:    true,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -825,10 +825,10 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				IsDPUHostMode: true,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				IsDPUHostMode:    true,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -852,10 +852,10 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				IsDPUHostMode: true,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				IsDPUHostMode:    true,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -880,10 +880,10 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				IsDPUHostMode: true,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				IsDPUHostMode:    true,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -909,10 +909,10 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				IsDPUHostMode: true,
-				VfNetdevName:  "en01",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				IsDPUHostMode:    true,
+				VfNetdevName:     "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -939,7 +939,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
+				SinglePodNetwork: util.SinglePodNetwork{
 					IPs: ovntest.MustParseIPNets("192.168.0.5/24"),
 				},
 				MTU:           1500,
@@ -975,7 +975,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
+				SinglePodNetwork: util.SinglePodNetwork{
 					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
 					Gateways: ovntest.MustParseIPs("192.168.0.1"),
 				},
@@ -1014,7 +1014,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
+				SinglePodNetwork: util.SinglePodNetwork{
 					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
 					Gateways: ovntest.MustParseIPs("192.168.0.1"),
 					Routes: []util.PodRoute{

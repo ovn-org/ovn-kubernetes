@@ -20,6 +20,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	podnetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned"
+	podnetworklisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/listers/podnetwork/v1"
 )
 
 // *** The Server is PRIVATE API between OVN components and may be
@@ -48,7 +51,8 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
+func NewCNIServer(useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface,
+	podNetworkClient podnetworkclientset.Interface) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
@@ -66,8 +70,10 @@ func NewCNIServer(useOVSExternalIDs bool, factory factory.NodeWatchFactory, kcli
 		},
 		useOVSExternalIDs: ovnPortBinding,
 		clientSet: &ClientSet{
-			podLister: corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
-			kclient:   kclient,
+			podLister:    corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
+			kclient:      kclient,
+			podNetLister: podnetworklisters.NewPodNetworkLister(factory.PodNetworkInformer().GetIndexer()),
+			podNetClient: podNetworkClient,
 		},
 		kubeAuth: &KubeAPIAuth{
 			Kubeconfig:       config.Kubernetes.Kubeconfig,

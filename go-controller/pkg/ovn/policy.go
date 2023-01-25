@@ -1396,17 +1396,22 @@ func (oc *DefaultNetworkController) handlePeerPodSelectorAddUpdate(np *networkPo
 	if np.deleted {
 		return nil
 	}
-	pods := make([]*kapi.Pod, 0, len(objs))
+	ips := []net.IP{}
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
 		if pod.Spec.NodeName == "" {
 			// update event will be received for this pod later, no ips should be assigned yet
 			continue
 		}
-		pods = append(pods, pod)
+
+		podIPs, err := oc.watchFactory.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+		if err != nil {
+			return fmt.Errorf("failed to get pod's %s/%s IPs: %v", pod.Namespace, pod.Name, err)
+		}
+		ips = append(ips, podIPs...)
 	}
-	// gressPolicy.addPeerPods must be called with networkPolicy RLock.
-	return gp.addPeerPods(pods...)
+	// gressPolicy.addPeerPodIPs must be called with networkPolicy RLock.
+	return gp.addPeerPodIPs(ips)
 }
 
 // handlePeerPodSelectorDelete removes the IP address of a pod that no longer
@@ -1423,8 +1428,12 @@ func (oc *DefaultNetworkController) handlePeerPodSelectorDelete(np *networkPolic
 		klog.Infof("Pod %s/%s not scheduled on any node, skipping it", pod.Namespace, pod.Name)
 		return nil
 	}
-	// gressPolicy.deletePeerPod must be called with networkPolicy RLock.
-	if err := gp.deletePeerPod(pod); err != nil {
+	podIPs, err := oc.watchFactory.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+	if err != nil {
+		return fmt.Errorf("failed to get pod's %s/%s IPs: %v", pod.Namespace, pod.Name, err)
+	}
+	// gressPolicy.deletePeerPodIPs must be called with networkPolicy RLock.
+	if err := gp.deletePeerPodIPs(podIPs); err != nil {
 		return err
 	}
 	return nil
@@ -1543,12 +1552,19 @@ func (oc *DefaultNetworkController) handlePeerNamespaceAndPodDel(np *networkPoli
 	if err != nil {
 		return fmt.Errorf("failed to get namespace %s pods: %v", namespace.Namespace, err)
 	}
+	// call functions from handlePeerPodSelectorDelete
+	ips := []net.IP{}
 	for _, pod := range pods {
-		// call functions from handlePeerPodSelectorDelete
-		// gressPolicy.deletePeerPod must be called with networkPolicy RLock.
-		if err = gp.deletePeerPod(pod); err != nil {
-			errs = append(errs, err)
+		podIPs, err := oc.watchFactory.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to get pod's %s/%s IPs: %v", pod.Namespace, pod.Name, err))
+		} else {
+			ips = append(ips, podIPs...)
 		}
+	}
+	// gressPolicy.deletePeerPodIPs must be called with networkPolicy RLock.
+	if err = gp.deletePeerPodIPs(ips); err != nil {
+		errs = append(errs, err)
 	}
 	return kerrorsutil.NewAggregate(errs)
 }

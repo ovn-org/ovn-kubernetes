@@ -155,7 +155,7 @@ func (oc *DefaultNetworkController) getRoutingPodGWs(nsInfo *namespaceInfo) map[
 }
 
 // addPodToNamespace returns pod's routing gateway info and the ops needed
-// to add pod's IP to the namespace's address set.
+// to add pod's IP to the namespace's address set. Doesn't apply any changes
 func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
@@ -312,7 +312,7 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 					if !util.PodWantsNetwork(pod) {
 						continue
 					}
-					podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
+					podIPs, err := oc.watchFactory.GetPodIPsOfNetwork(pod, oc.NetInfo)
 					if err != nil {
 						errors = append(errors, fmt.Errorf("unable to get pod %q IPs for SNAT rule removal err (%v)", logicalPort, err))
 					}
@@ -352,14 +352,19 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 				errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 			}
 			for _, pod := range existingPods {
-				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
+				podNetworks, err := oc.watchFactory.GetPodNetwork(pod, false)
 				if err != nil {
 					errors = append(errors, err)
 				} else {
-					if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
+					podNetwork, err := util.ParsePodNetwork(podNetworks, types.DefaultNetworkName)
+					if err != nil {
 						errors = append(errors, err)
-					} else if err = addOrUpdatePodSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podAnnotation.IPs); err != nil {
-						errors = append(errors, err)
+					} else {
+						if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
+							errors = append(errors, err)
+						} else if err = addOrUpdatePodSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podNetwork.IPs); err != nil {
+							errors = append(errors, err)
+						}
 					}
 				}
 			}
@@ -534,7 +539,7 @@ func (oc *DefaultNetworkController) createNamespaceAddrSetAllPods(ns string) (ad
 		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
 			if util.PodWantsNetwork(pod) && !util.PodCompleted(pod) && util.PodScheduled(pod) {
-				podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
+				podIPs, err := oc.watchFactory.GetPodIPsOfNetwork(pod, oc.NetInfo)
 				if err != nil {
 					klog.Warningf(err.Error())
 					continue

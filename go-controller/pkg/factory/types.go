@@ -1,6 +1,11 @@
 package factory
 
 import (
+	"net"
+
+	podnetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -46,9 +51,13 @@ type NodeWatchFactory interface {
 
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
+	PodNetworkInformer() cache.SharedIndexInformer
 
 	GetPods(namespace string) ([]*kapi.Pod, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
+	GetPodIPsOfNetwork(pod *kapi.Pod, nInfo util.NetInfo) ([]net.IP, error)
+	GetPodNetwork(pod *kapi.Pod, ignoreNotFound bool) (*podnetworkapi.PodNetwork, error)
+
 	GetNamespaces() ([]*kapi.Namespace, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetNodes() ([]*kapi.Node, error)

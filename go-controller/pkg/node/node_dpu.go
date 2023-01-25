@@ -17,6 +17,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	podnetworklisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/listers/podnetwork/v1"
 )
 
 // watchPodsDPU watch updates for pod dpu annotations
@@ -25,7 +27,8 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
 
-	clientSet := cni.NewClientSet(n.client, corev1listers.NewPodLister(n.watchFactory.LocalPodInformer().GetIndexer()))
+	clientSet := cni.NewClientSet(n.client, corev1listers.NewPodLister(n.watchFactory.LocalPodInformer().GetIndexer()),
+		n.podnetClient, podnetworklisters.NewPodNetworkLister(n.watchFactory.PodNetworkInformer().GetIndexer()))
 
 	// Support default network for now
 	nadName := types.DefaultNetworkName
@@ -49,8 +52,14 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 					retryPods.Store(pod.UID, true)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, nil, isOvnUpEnabled, string(pod.UID),
-					"", nadName, netName, config.Default.MTU)
+				podNetworks, err := n.watchFactory.GetPodNetwork(pod, false)
+				if err != nil {
+					klog.Infof("Failed to get podNetwork for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+					retryPods.Store(pod.UID, true)
+					return
+				}
+				podInterfaceInfo, err := cni.PodNetworkAndAnnotation2PodInfo(pod.Annotations, podNetworks,
+					isOvnUpEnabled, string(pod.UID), "", nadName, netName, config.Default.MTU)
 				if err != nil {
 					retryPods.Store(pod.UID, true)
 					return
@@ -86,8 +95,13 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 					klog.Infof("Failed to get rep name, %s. retrying", err)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, nil, isOvnUpEnabled, string(pod.UID),
-					"", nadName, netName, config.Default.MTU)
+				podNetworks, err := n.watchFactory.GetPodNetwork(pod, false)
+				if err != nil {
+					klog.Infof("Failed to get podNetwork for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+					return
+				}
+				podInterfaceInfo, err := cni.PodNetworkAndAnnotation2PodInfo(pod.Annotations, podNetworks,
+					isOvnUpEnabled, string(pod.UID), "", nadName, netName, config.Default.MTU)
 				if err != nil {
 					return
 				}

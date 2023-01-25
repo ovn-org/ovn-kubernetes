@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"time"
 
+	podnetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -136,7 +137,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 			pod.Namespace, pod.Name, nadName, time.Since(start), libovsdbExecuteTime)
 	}()
 
-	ops, lsp, podAnnotation, newlyCreated, err := bsnc.addLogicalPortToNetwork(pod, nadName, network)
+	ops, lsp, podNetwork, newlyCreated, err := bsnc.addLogicalPortToNetwork(pod, nadName, network)
 	if err != nil {
 		return err
 	}
@@ -161,7 +162,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		return fmt.Errorf("UUID is empty from LSP: %+v", *lsp)
 	}
 
-	_ = bsnc.logicalPortCache.add(pod, switchName, nadName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
+	_ = bsnc.logicalPortCache.add(pod, switchName, nadName, lsp.UUID, podNetwork.MAC, podNetwork.IPs)
 
 	if newlyCreated {
 		metrics.RecordPodCreated(pod, bsnc.NetInfo)
@@ -174,6 +175,8 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *kapi.Pod, portInfoMap map[string]*lpInfo) error {
 	var nadName string
 	var portInfo *lpInfo
+	var podNetworks *podnetworkapi.PodNetwork
+	var err error
 
 	podDesc := pod.Namespace + "/" + pod.Name
 	klog.Infof("Deleting pod: %s for network %s", podDesc, bsnc.GetNetworkName())
@@ -194,13 +197,13 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		// restarts and logicalPortCache is not filled in. In this case, we'd still need to delete resources (IPs,
 		// logical switch port) created for this Pod.
 
-		// get all nadNames from pod annotation, and see if any NAD is of this network
-		podNetworks, err := util.UnmarshalPodAnnotationAllNetworks(pod.Annotations)
+		// get all nadNames from PodNetwork, and see if any NAD is of this network
+		podNetworks, err = bsnc.watchFactory.GetPodNetwork(pod, true)
 		if err != nil {
 			return err
 		}
 
-		for nadName = range podNetworks {
+		for nadName = range podNetworks.Spec.Networks {
 			if bsnc.HasNAD(nadName) {
 				break
 			}
@@ -212,7 +215,7 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 	bsnc.logicalPortCache.remove(pod, nadName)
 
 	// TBD namespaceInfo needed when multi-network policy support is added
-	pInfo, err := bsnc.deletePodLogicalPort(pod, portInfo, nadName)
+	pInfo, err := bsnc.deletePodLogicalPort(pod, portInfo, nadName, podNetworks)
 	if err != nil {
 		return err
 	}
@@ -249,14 +252,17 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 			continue
 		}
 		nadName := util.GetNADName(network.Namespace, network.Name)
-		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+		podNetwork, err := bsnc.watchFactory.GetPodNetwork(pod, false)
 		if err != nil {
-			if !util.IsAnnotationNotSetError(err) {
-				klog.Errorf("Failed to get pod annotation of pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
-			}
+			// PodNetwork not found, nothing to clean up
 			continue
 		}
-		expectedLogicalPortName, err := bsnc.allocatePodIPs(pod, annotations, nadName)
+		singleNetwork, err := util.ParsePodNetwork(podNetwork, nadName)
+		if err != nil {
+			klog.Errorf("Failed to parse pod %s/%s network for NAD %s", pod.Namespace, pod.Name, nadName)
+			continue
+		}
+		expectedLogicalPortName, err := bsnc.allocatePodIPs(pod, singleNetwork, nadName)
 		if err != nil {
 			return err
 		}

@@ -28,6 +28,7 @@ import (
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
+	podnetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
@@ -43,6 +44,7 @@ type OVNClientset struct {
 	CloudNetworkClient    ocpcloudnetworkclientset.Interface
 	EgressQoSClient       egressqosclientset.Interface
 	NetworkAttchDefClient networkattchmentdefclientset.Interface
+	PodNetworkClient      podnetworkclientset.Interface
 }
 
 func adjustCommit() string {
@@ -149,6 +151,10 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	podnetworkClientset, err := podnetworkclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 
 	return &OVNClientset{
 		KubeClient:            kclientset,
@@ -157,7 +163,20 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		CloudNetworkClient:    cloudNetworkClientset,
 		EgressQoSClient:       egressqosClientset,
 		NetworkAttchDefClient: networkAttchmntDefClientset,
+		PodNetworkClient:      podnetworkClientset,
 	}, nil
+}
+
+func NewPodNetworkClientset(conf *config.KubernetesConfig) (*podnetworkclientset.Clientset, error) {
+	kconfig, err := newKubernetesRestConfig(conf)
+	if err != nil {
+		return nil, err
+	}
+	podnetworkClientset, err := podnetworkclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+	return podnetworkClientset, nil
 }
 
 // IsClusterIPSet checks if the service is an headless service or not

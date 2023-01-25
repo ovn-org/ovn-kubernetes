@@ -10,6 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
+	podnetworkfakeclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned/fake"
+	podnetworkinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/informers/externalversions"
 	factorymocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -145,18 +147,22 @@ var _ = Describe("Node DPU tests", func() {
 			vfRep = "pf0vf9"
 			vfLink = &linkMock.Link{}
 			ifInfo = &cni.PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-				Ingress:       -1,
-				Egress:        -1,
-				IsDPUHostMode: true,
-				NetName:       types.DefaultNetworkName,
-				NADName:       types.DefaultNetworkName,
-				PodUID:        "a-pod",
+				SinglePodNetwork: util.SinglePodNetwork{},
+				MTU:              1500,
+				Ingress:          -1,
+				Egress:           -1,
+				IsDPUHostMode:    true,
+				NetName:          types.DefaultNetworkName,
+				NADName:          types.DefaultNetworkName,
+				PodUID:           "a-pod",
 			}
 
 			fakeClient := newFakeKubeClientWithPod(&pod)
-			clientset = cni.NewClientSet(fakeClient, &podLister)
+			fakePodnetClient := podnetworkfakeclientset.NewSimpleClientset()
+			podNetworkFactory := podnetworkinformerfactory.NewSharedInformerFactory(fakePodnetClient, 0)
+			podNetLister := podNetworkFactory.K8s().V1().PodNetworks().Lister()
+			clientset = cni.NewClientSet(fakeClient, &podLister, fakePodnetClient, podNetLister)
+
 			// set pod annotations
 			podAnnot := map[string]string{
 				util.DPUConnectionDetailsAnnot: `{"pfId":"0","vfId":"9","sandboxId":"a8d09931"}`,

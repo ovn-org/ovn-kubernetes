@@ -2,6 +2,7 @@ package factory
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -29,9 +30,16 @@ import (
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
+
+	podnetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
+	podnetworkscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned/scheme"
+	podnetworkinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/informers/externalversions"
+	podnetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/listers/podnetwork/v1"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -54,12 +62,13 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory         informerfactory.SharedInformerFactory
-	eipFactory       egressipinformerfactory.SharedInformerFactory
-	efFactory        egressfirewallinformerfactory.SharedInformerFactory
-	cpipcFactory     ocpcloudnetworkinformerfactory.SharedInformerFactory
-	egressQoSFactory egressqosinformerfactory.SharedInformerFactory
-	informers        map[reflect.Type]*informer
+	iFactory          informerfactory.SharedInformerFactory
+	eipFactory        egressipinformerfactory.SharedInformerFactory
+	efFactory         egressfirewallinformerfactory.SharedInformerFactory
+	cpipcFactory      ocpcloudnetworkinformerfactory.SharedInformerFactory
+	egressQoSFactory  egressqosinformerfactory.SharedInformerFactory
+	podNetworkFactory podnetworkinformerfactory.SharedInformerFactory
+	informers         map[reflect.Type]*informer
 
 	stopChan chan struct{}
 }
@@ -109,6 +118,7 @@ type serviceForFakeNodePortWatcher struct{} // only for unit tests
 var (
 	// Resource types used in ovnk master
 	PodType                               reflect.Type = reflect.TypeOf(&kapi.Pod{})
+	PodNetworkType                        reflect.Type = reflect.TypeOf(&podnetworkapi.PodNetwork{})
 	ServiceType                           reflect.Type = reflect.TypeOf(&kapi.Service{})
 	EndpointSliceType                     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
 	PolicyType                            reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
@@ -145,13 +155,14 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:         informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:       egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efFactory:        egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
-		cpipcFactory:     ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
-		egressQoSFactory: egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
-		informers:        make(map[reflect.Type]*informer),
-		stopChan:         make(chan struct{}),
+		iFactory:          informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:        egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efFactory:         egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
+		cpipcFactory:      ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
+		egressQoSFactory:  egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
+		podNetworkFactory: podnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.PodNetworkClient, resyncInterval),
+		informers:         make(map[reflect.Type]*informer),
+		stopChan:          make(chan struct{}),
 	}
 
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
@@ -161,6 +172,9 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	if err := egressqosapi.AddToScheme(egressqosscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := podnetworkapi.AddToScheme(podnetworkscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -192,6 +206,10 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
 		defaultNumEventQueues)
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[PodNetworkType], err = newInformer(PodNetworkType, wf.podNetworkFactory.K8s().V1().PodNetworks().Informer())
 	if err != nil {
 		return nil, err
 	}
@@ -253,6 +271,14 @@ func (wf *WatchFactory) Start() error {
 			return fmt.Errorf("error in syncing cache for %v informer", oType)
 		}
 	}
+	if wf.podNetworkFactory != nil {
+		wf.podNetworkFactory.Start(wf.stopChan)
+		for oType, synced := range wf.podNetworkFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
 	if config.OVNKubernetesFeature.EnableEgressIP && wf.eipFactory != nil {
 		wf.eipFactory.Start(wf.stopChan)
 		for oType, synced := range wf.eipFactory.WaitForCacheSync(wf.stopChan) {
@@ -293,11 +319,14 @@ func (wf *WatchFactory) Start() error {
 // informers to save memory + bandwidth. It is to be used by the node-only process.
 func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:  informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		informers: make(map[reflect.Type]*informer),
-		stopChan:  make(chan struct{}),
+		iFactory:          informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		podNetworkFactory: podnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.PodNetworkClient, resyncInterval),
+		informers:         make(map[reflect.Type]*informer),
+		stopChan:          make(chan struct{}),
 	}
-
+	if err := podnetworkapi.AddToScheme(podnetworkscheme.Scheme); err != nil {
+		return nil, err
+	}
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
 	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
@@ -308,7 +337,6 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			noAlternateProxySelector())
 	})
-
 	// For Pods, only select pods scheduled to this node
 	wf.iFactory.InformerFor(&kapi.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredPodInformer(
@@ -345,6 +373,10 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	}
 	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
 		defaultNumEventQueues)
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[PodNetworkType], err = newInformer(PodNetworkType, wf.podNetworkFactory.K8s().V1().PodNetworks().Informer())
 	if err != nil {
 		return nil, err
 	}
@@ -600,6 +632,16 @@ func (wf *WatchFactory) RemovePodHandler(handler *Handler) {
 	wf.removeHandler(PodType, handler)
 }
 
+// AddPodNetworkHandler adds a handler function that will be executed on Pod object changes
+func (wf *WatchFactory) AddPodNetworkHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(PodNetworkType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
+}
+
+// RemovePodNetworkHandler removes a Pod object event handler function
+func (wf *WatchFactory) RemovePodNetworkHandler(handler *Handler) {
+	wf.removeHandler(PodNetworkType, handler)
+}
+
 // AddServiceHandler adds a handler function that will be executed on Service object changes
 func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 	return wf.addHandler(ServiceType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
@@ -728,6 +770,34 @@ func (wf *WatchFactory) GetPods(namespace string) ([]*kapi.Pod, error) {
 	return podLister.Pods(namespace).List(labels.Everything())
 }
 
+// GetAllPodNetworks returns all PodNetworks in the cluster
+func (wf *WatchFactory) GetAllPodNetworks() ([]*podnetworkapi.PodNetwork, error) {
+	podNetLister := wf.informers[PodNetworkType].lister.(podnetworklister.PodNetworkLister)
+	return podNetLister.List(labels.Everything())
+}
+
+// GetPodNetwork returns PodNetwork for a given pod
+func (wf *WatchFactory) GetPodNetwork(pod *kapi.Pod, ignoreNotFound bool) (*podnetworkapi.PodNetwork, error) {
+	podNetLister := wf.informers[PodNetworkType].lister.(podnetworklister.PodNetworkLister)
+	podNetwork, err := podNetLister.PodNetworks(pod.Namespace).Get(util.GetPodNetworkName(pod))
+	if err != nil && ignoreNotFound && apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	return podNetwork, err
+}
+
+func (wf *WatchFactory) GetPodIPsOfNetwork(pod *kapi.Pod, nInfo util.NetInfo) ([]net.IP, error) {
+	// ignore error, since util.GetPodIPsOfNetwork allows to pass nil podNetwork to get ips only from pod object
+	podNetworks, _ := wf.GetPodNetwork(pod, true)
+	return util.GetPodIPsOfNetwork(podNetworks, pod, nInfo)
+}
+
+func (wf *WatchFactory) GetPodCIDRsWithFullMask(pod *kapi.Pod) ([]*net.IPNet, error) {
+	// ignore error, since util.GetPodIPsOfNetwork allows to pass nil podNetwork to get ips only from pod object
+	podNetworks, _ := wf.GetPodNetwork(pod, true)
+	return util.GetPodCIDRsWithFullMask(podNetworks, pod)
+}
+
 // GetPodsBySelector returns all the pods in a given namespace by the label selector
 func (wf *WatchFactory) GetPodsBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*kapi.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
@@ -840,6 +910,10 @@ func (wf *WatchFactory) LocalPodInformer() cache.SharedIndexInformer {
 
 func (wf *WatchFactory) PodInformer() cache.SharedIndexInformer {
 	return wf.informers[PodType].inf
+}
+
+func (wf *WatchFactory) PodNetworkInformer() cache.SharedIndexInformer {
+	return wf.informers[PodNetworkType].inf
 }
 
 func (wf *WatchFactory) PodCoreInformer() v1coreinformers.PodInformer {

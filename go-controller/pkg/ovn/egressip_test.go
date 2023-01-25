@@ -3,13 +3,15 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
+	"github.com/urfave/cli/v2"
 	"net"
 	"time"
 
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	podnetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -17,9 +19,8 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/urfave/cli/v2"
+
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1975,9 +1976,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP.String()))
 
 				podUpdate := newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-				podUpdate.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV6IP, v6GatewayIP, podV6IP, v6GatewayIP),
-				}
 				i, n, _ := net.ParseCIDR(podV6IP + "/23")
 				n.IP = i
 				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
@@ -3779,8 +3777,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				oldEgressPodIP := "10.128.0.50"
 				egressPod1 := newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
-				oldAnnotation := map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["10.128.0.50/24"],"mac_address":"0a:58:0a:80:00:05","gateway_ips":["10.128.0.1"],"routes":[{"dest":"10.128.0.0/24","nextHop":"10.128.0.1"}],"ip_address":"10.128.0.50/24","gateway_ip":"10.128.0.1"}}`}
-				egressPod1.Annotations = oldAnnotation
+				ovnNet := &podnetworkapi.OVNNetwork{
+					IPs:      []string{"10.128.0.50/24"},
+					MAC:      "0a:58:0a:80:00:05",
+					Gateways: []string{"10.128.0.1"},
+					Routes: []podnetworkapi.PodRoute{{
+						Dest:    "10.128.0.0/24",
+						NextHop: "10.128.0.1",
+					}},
+				}
+				podNetwork := util.CreatePodNetworkFromOvnNet(egressPod1, ovnNet, types.DefaultNetworkName)
 				egressNamespace := newNamespace(namespace)
 
 				node1 := v1.Node{
@@ -3871,6 +3877,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 					&v1.PodList{
 						Items: []v1.Pod{*egressPod1},
+					},
+					&podnetworkapi.PodNetworkList{
+						Items: []podnetworkapi.PodNetwork{*podNetwork},
 					},
 				)
 
@@ -3968,7 +3977,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 					Options: map[string]string{
 						"requested-chassis": egressPod1.Spec.NodeName,
-						"iface-id-ver":      egressPod1.Name,
+						"iface-id-ver":      string(egressPod1.UID),
 					},
 					PortSecurity: []string{podAddr},
 				}
@@ -3983,20 +3992,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				// delete the pod and simulate a cleanup failure:
 				// 1) create a situation where pod is gone from kapi but egressIP setup wasn't cleanedup due to deletion error
-				//    - we remove annotation from pod to mimic this situation
+				//    - we delete PodNetwork to mimic this situation
 				// 2) leaves us with a stale podAssignment cache
 				// 3) check to make sure the logicalPortCache is used always even if podAssignment already has the podKey
 				ginkgo.By("delete the egress IP pod and force the deletion to fail")
-				egressPod1.Annotations = map[string]string{}
-				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod1.Namespace).Update(context.TODO(), egressPod1, metav1.UpdateOptions{})
+				err = fakeOvn.controller.kube.DeletePodNetwork(podNetwork)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// Wait for the cleared annotations to show up client-side
-				gomega.Eventually(func() int {
-					egressPod1, _ = fakeOvn.watcher.GetPod(egressPod1.Namespace, egressPod1.Name)
-					return len(egressPod1.Annotations)
-				}, 5).Should(gomega.Equal(0))
-
-				// Delete the pod to trigger the cleanup failure
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod1.Namespace).Delete(context.TODO(),
 					egressPod1.Name, metav1.DeleteOptions{})
 				// internally we have an error:
@@ -4014,11 +4015,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						EgressIP: "192.168.126.101",
 					}: "",
 				}))
+
 				// recreate pod with same name immediately;
 				ginkgo.By("should add egress IP setup for the NEW pod which exists in logicalPortCache")
-				newEgressPodIP := "10.128.0.60"
+				// this ip wil be automatically assigned, we can't set it
+				// the main point for it to be different form oldEgressPodIP
+				newEgressPodIP := "10.128.0.3"
 				egressPod1 = newPodWithLabels(namespace, podName, node1Name, newEgressPodIP, egressPodLabel)
-				egressPod1.Annotations = map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["10.128.0.60/24"],"mac_address":"0a:58:0a:80:00:06","gateway_ips":["10.128.0.1"],"routes":[{"dest":"10.128.0.0/24","nextHop":"10.128.0.1"}],"ip_address":"10.128.0.60/24","gateway_ip":"10.128.0.1"}}`}
+				// newPodWithLabels sets pod.UID to pod.Name, but we need new object to have different UID with the same name
+				egressPod1.UID += "-new-UUID"
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod1.Namespace).Create(context.TODO(), egressPod1, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -4055,22 +4060,24 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				podAddr = fmt.Sprintf("%s %s", newEgressPodPortInfo.mac.String(), newEgressPodIP)
 				podLSP.PortSecurity = []string{podAddr}
 				podLSP.Addresses = []string{podAddr}
+				podLSP.Options["iface-id-ver"] = string(egressPod1.UID)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod[1:]))
 
 				ginkgo.By("trigger a forced retry and ensure deletion of oldPod and creation of newPod are successful")
-				// let us add back the annotation to the oldPod which is being retried to make deletion a success
+				// check retry object is present
 				podKey, err := retry.GetResourceKey(egressPod1)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				retry.CheckRetryObjectEventually(podKey, true, fakeOvn.controller.retryEgressIPPods)
-				retryOldObj := retry.GetOldObjFromRetryObj(podKey, fakeOvn.controller.retryEgressIPPods)
-				//fakeOvn.controller.retryEgressIPPods.retryEntries.LoadOrStore(podKey, &RetryObjEntry{backoffSec: 1})
-				pod, _ := retryOldObj.(*kapi.Pod)
-				pod.Annotations = oldAnnotation
+				// add back deleted podNetwork for the oldPod which is being retried to make deletion a success
+				_, err = fakeOvn.controller.kube.CreatePodNetwork(podNetwork)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// request immediate retry
+				retry.SetRetryObjWithNoBackoff(podKey, fakeOvn.controller.retryEgressIPPods)
 				fakeOvn.controller.retryEgressIPPods.RequestRetryObjs()
 				// there should also be no entry for this pod in the retry cache
 				gomega.Eventually(func() bool {
 					return retry.CheckRetryObj(podKey, fakeOvn.controller.retryEgressIPPods)
-				}, retry.RetryObjInterval+time.Second).Should(gomega.BeFalse())
+				}, time.Second).Should(gomega.BeFalse())
 
 				// ensure that egressIP setup is being done with the new pod's information from logicalPortCache
 				podReRoutePolicy.Match = fmt.Sprintf("ip4.src == %s", newEgressPodIP)
@@ -4266,7 +4273,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				ePod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod1.Namespace).Get(context.TODO(), egressPod1.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				egressPodIP, err := util.GetPodIPsOfNetwork(ePod, &util.DefaultNetInfo{})
+				egressPodIP, err := fakeOvn.controller.watchFactory.GetPodIPsOfNetwork(ePod, &util.DefaultNetInfo{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				egressNetPodIP, _, err := net.ParseCIDR(egressPodPortInfo.ips[0].String())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

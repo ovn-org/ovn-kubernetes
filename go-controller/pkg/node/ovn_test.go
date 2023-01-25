@@ -6,6 +6,7 @@ import (
 
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	podnetworkfakeclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -34,6 +35,7 @@ func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
 	return &FakeOVNNode{
 		fakeExec: fexec,
 		recorder: record.NewFakeRecorder(1),
+		wg:       &sync.WaitGroup{},
 	}
 }
 
@@ -46,7 +48,8 @@ func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
 	Expect(err).NotTo(HaveOccurred())
 
 	o.fakeClient = &util.OVNClientset{
-		KubeClient: fake.NewSimpleClientset(v1Objects...),
+		KubeClient:       fake.NewSimpleClientset(v1Objects...),
+		PodNetworkClient: podnetworkfakeclientset.NewSimpleClientset(),
 	}
 	o.init() // initializes the node
 }
@@ -70,6 +73,6 @@ func (o *FakeOVNNode) init() {
 	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeName)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.stopChan, o.wg, o.recorder)
+	o.node = NewNode(o.fakeClient.KubeClient, o.fakeClient.PodNetworkClient, o.watcher, fakeNodeName, o.stopChan, o.wg, o.recorder)
 	o.node.Start(context.TODO())
 }

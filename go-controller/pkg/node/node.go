@@ -23,6 +23,7 @@ import (
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	podnetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -39,6 +40,7 @@ import (
 type OvnNode struct {
 	name         string
 	client       clientset.Interface
+	podnetClient podnetworkclientset.Interface
 	Kube         kube.Interface
 	watchFactory factory.NodeWatchFactory
 	stopChan     chan struct{}
@@ -53,11 +55,12 @@ type OvnNode struct {
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string,
-	stopChan chan struct{}, wg *sync.WaitGroup, eventRecorder record.EventRecorder) *OvnNode {
+func NewNode(kubeClient clientset.Interface, podnetClient podnetworkclientset.Interface, wf factory.NodeWatchFactory,
+	name string, stopChan chan struct{}, wg *sync.WaitGroup, eventRecorder record.EventRecorder) *OvnNode {
 	n := &OvnNode{
 		name:         name,
 		client:       kubeClient,
+		podnetClient: podnetClient,
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
 		stopChan:     stopChan,
@@ -459,11 +462,7 @@ func (n *OvnNode) Start(ctx context.Context) error {
 
 	// Create CNI Server
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
-		kclient, ok := n.Kube.(*kube.Kube)
-		if !ok {
-			return fmt.Errorf("cannot get kubeclient for starting CNI server")
-		}
-		cniServer, err = cni.NewCNIServer(isOvnUpEnabled, n.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer(isOvnUpEnabled, n.watchFactory, n.client, n.podnetClient)
 		if err != nil {
 			return err
 		}
@@ -585,6 +584,7 @@ func (n *OvnNode) Start(ctx context.Context) error {
 			n.name,
 			n.watchFactory.NodeInformer(),
 			n.watchFactory.LocalPodInformer(),
+			n.watchFactory.PodNetworkInformer(),
 			informer.NewDefaultEventHandler,
 		)
 		if err != nil {
@@ -816,7 +816,7 @@ func (n *OvnNode) syncConntrackForExternalGateways(newNs *kapi.Namespace) error 
 	var errors []error
 	for _, pod := range pods {
 		pod := pod
-		podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+		podIPs, err := n.watchFactory.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
 		if err != nil {
 			errors = append(errors, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
 		}

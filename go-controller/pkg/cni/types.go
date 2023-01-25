@@ -14,6 +14,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	podnetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
+	podnetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned"
+	podnetworklisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/listers/podnetwork/v1"
+
 	kapi "k8s.io/api/core/v1"
 )
 
@@ -40,7 +44,7 @@ type KubeAPIAuth struct {
 
 // PodInterfaceInfo consists of interface info result from cni server if cni client configure's interface
 type PodInterfaceInfo struct {
-	util.PodAnnotation
+	util.SinglePodNetwork
 
 	MTU                  int    `json:"mtu"`
 	RoutableMTU          int    `json:"routable-mtu"`
@@ -163,18 +167,24 @@ type podRequestFunc func(request *PodRequest, clientset *ClientSet, useOVSExtern
 
 type PodInfoGetter interface {
 	getPod(namespace, name string) (*kapi.Pod, error)
+	getPodNetwork(pod *kapi.Pod) (*podnetworkapi.PodNetwork, error)
 }
 
 type ClientSet struct {
 	PodInfoGetter
-	kclient   kubernetes.Interface
-	podLister corev1listers.PodLister
+	kclient      kubernetes.Interface
+	podLister    corev1listers.PodLister
+	podNetLister podnetworklisters.PodNetworkLister
+	podNetClient podnetworkclientset.Interface
 }
 
-func NewClientSet(kclient kubernetes.Interface, podLister corev1listers.PodLister) *ClientSet {
+func NewClientSet(kclient kubernetes.Interface, podLister corev1listers.PodLister,
+	podNetClient podnetworkclientset.Interface, podNetLister podnetworklisters.PodNetworkLister) *ClientSet {
 	return &ClientSet{
-		kclient:   kclient,
-		podLister: podLister,
+		kclient:      kclient,
+		podLister:    podLister,
+		podNetLister: podNetLister,
+		podNetClient: podNetClient,
 	}
 }
 

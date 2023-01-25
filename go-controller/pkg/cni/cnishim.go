@@ -29,6 +29,8 @@ import (
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	podnetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
+	podnetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -161,18 +163,29 @@ func shimClientsetFromConfig(auth *KubeAPIAuth) (*shimClientset, error) {
 		return nil, err
 	}
 
+	podnetClient, err := util.NewPodNetworkClientset(kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+
 	return &shimClientset{
-		kclient: kclient,
+		kclient:      kclient,
+		podnetClient: podnetClient,
 	}, nil
 }
 
 type shimClientset struct {
 	PodInfoGetter
-	kclient kubernetes.Interface
+	kclient      kubernetes.Interface
+	podnetClient *podnetworkclientset.Clientset
 }
 
 func (c *shimClientset) getPod(namespace, name string) (*kapi.Pod, error) {
 	return c.kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+}
+
+func (c *shimClientset) getPodNetwork(pod *kapi.Pod) (*podnetworkapi.PodNetwork, error) {
+	return c.podnetClient.K8sV1().PodNetworks(pod.Namespace).Get(context.TODO(), util.GetPodNetworkName(pod), metav1.GetOptions{})
 }
 
 // CmdAdd is the callback for 'add' cni calls from skel

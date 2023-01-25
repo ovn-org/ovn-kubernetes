@@ -3,6 +3,7 @@ package controller
 import (
 	"crypto/sha256"
 	"fmt"
+
 	"net"
 	"os"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	podnetworklisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/listers/podnetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -54,7 +56,8 @@ type NodeController struct {
 	// channel to indicate we need to update flows immediately
 	flowChan chan struct{}
 
-	nodeLister listers.NodeLister
+	nodeLister       listers.NodeLister
+	podNetworkLister podnetworklisters.PodNetworkLister
 }
 
 // newNodeController returns a node handler that listens for node events
@@ -66,15 +69,17 @@ func newNodeController(
 	_ kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
+	podNetworkLister podnetworklisters.PodNetworkLister,
 ) (nodeController, error) {
 
 	node := &NodeController{
-		nodeName:   nodeName,
-		vxlanPort:  uint16(config.HybridOverlay.VXLANPort),
-		flowCache:  make(map[string]*flowCacheEntry),
-		flowMutex:  sync.Mutex{},
-		flowChan:   make(chan struct{}, 1),
-		nodeLister: nodeLister,
+		nodeName:         nodeName,
+		vxlanPort:        uint16(config.HybridOverlay.VXLANPort),
+		flowCache:        make(map[string]*flowCacheEntry),
+		flowMutex:        sync.Mutex{},
+		flowChan:         make(chan struct{}, 1),
+		nodeLister:       nodeLister,
+		podNetworkLister: podNetworkLister,
 	}
 	return node, nil
 }
@@ -98,9 +103,9 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 		klog.Infof("Cleaning up hybrid overlay pod %s/%s because it has completed", pod.Namespace, pod.Name)
 		return n.DeletePod(pod)
 	}
-	podIPs, podMAC, err := getPodDetails(pod)
+	podIPs, podMAC, err := getPodAddresses(pod, n.podNetworkLister)
 	if err != nil {
-		klog.Warningf("Cleaning up hybrid overlay pod %s/%s because it has no OVN annotation %v", pod.Namespace, pod.Name, err)
+		klog.Warningf("Cleaning up hybrid overlay pod %s/%s because getting pod ips failed: %v", pod.Namespace, pod.Name, err)
 		return n.DeletePod(pod)
 	}
 
@@ -147,7 +152,7 @@ func (n *NodeController) DeletePod(pod *kapi.Pod) error {
 	if !util.PodWantsNetwork(pod) {
 		return nil
 	}
-	podIPs, _, err := getPodDetails(pod)
+	podIPs, _, err := getPodAddresses(pod, n.podNetworkLister)
 	if err != nil {
 		return fmt.Errorf("error getting pod details: %v", err)
 	}

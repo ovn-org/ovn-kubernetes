@@ -34,6 +34,7 @@ import (
 
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	podnetworkfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned/fake"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -202,8 +203,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
+		podNetworkFakeClient := &podnetworkfake.Clientset{}
 		fakeClient := &util.OVNClientset{
-			KubeClient: kubeFakeClient,
+			KubeClient:       kubeFakeClient,
+			PodNetworkClient: podNetworkFakeClient,
 		}
 
 		stop := make(chan struct{})
@@ -218,7 +221,12 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.KubeOVN{kube.Kube{kubeFakeClient}, egressIPFakeClient, egressFirewallFakeClient, nil}
+		k := &kube.KubeOVN{
+			kube.Kube{kubeFakeClient},
+			egressIPFakeClient,
+			egressFirewallFakeClient,
+			nil,
+			nil}
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
@@ -510,8 +518,10 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
+		podNetworkFakeClient := &podnetworkfake.Clientset{}
 		fakeClient := &util.OVNClientset{
-			KubeClient: kubeFakeClient,
+			KubeClient:       kubeFakeClient,
+			PodNetworkClient: podNetworkFakeClient,
 		}
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
@@ -642,8 +652,11 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
+		podNetworkFakeClient := &podnetworkfake.Clientset{}
+
 		fakeClient := &util.OVNClientset{
-			KubeClient: kubeFakeClient,
+			KubeClient:       kubeFakeClient,
+			PodNetworkClient: podNetworkFakeClient,
 		}
 
 		stop := make(chan struct{})
@@ -918,8 +931,10 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		)
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
+		podNetworkFakeClient := &podnetworkfake.Clientset{}
 		fakeClient := &util.OVNClientset{
-			KubeClient: kubeFakeClient,
+			KubeClient:       kubeFakeClient,
+			PodNetworkClient: podNetworkFakeClient,
 		}
 
 		stop := make(chan struct{})
@@ -934,7 +949,12 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.KubeOVN{kube.Kube{kubeFakeClient}, egressIPFakeClient, egressFirewallFakeClient, nil}
+		k := &kube.KubeOVN{
+			kube.Kube{kubeFakeClient},
+			egressIPFakeClient,
+			egressFirewallFakeClient,
+			nil,
+			nil}
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 

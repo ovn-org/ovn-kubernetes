@@ -14,8 +14,10 @@ import (
 	"strconv"
 	"strings"
 
-	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	podnetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -237,7 +239,7 @@ func isRoutingViaHost(coreclient *corev1client.CoreV1Client, restconfig *rest.Co
 }
 
 // getPodMAC returns the pod's MAC address.
-func getPodMAC(client *corev1client.CoreV1Client, pod *kapi.Pod) (podMAC string, err error) {
+func getPodMAC(client *corev1client.CoreV1Client, podNetworkClient *podnetworkclientset.Clientset, pod *kapi.Pod) (podMAC string, err error) {
 	if pod.Spec.HostNetwork {
 		node, err := client.Nodes().Get(context.TODO(), pod.Spec.NodeName, metav1.GetOptions{})
 		if err != nil {
@@ -252,12 +254,16 @@ func getPodMAC(client *corev1client.CoreV1Client, pod *kapi.Pod) (podMAC string,
 			podMAC = nodeMAC.String()
 		}
 	} else {
-		podAnnotation, err := util.UnmarshalPodAnnotation(pod.ObjectMeta.Annotations, types.DefaultNetworkName)
+		podNetworks, err := podNetworkClient.K8sV1().PodNetworks(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
 		if err != nil {
 			return "", err
 		}
-		if podAnnotation != nil {
-			podMAC = podAnnotation.MAC.String()
+		podNetwork, err := util.ParsePodNetwork(podNetworks, types.DefaultNetworkName)
+		if err != nil {
+			return "", err
+		}
+		if podNetwork != nil {
+			podMAC = podNetwork.MAC.String()
 		}
 	}
 
@@ -424,7 +430,8 @@ func extractSubsetInfo(subsets []kapi.EndpointSubset, svcInfo *SvcInfo) error {
 }
 
 // getPodInfo returns a pointer to a fully populated PodInfo struct, or error on failure.
-func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, podName string, ovnNamespace string, namespace string, cmd string) (podInfo *PodInfo, err error) {
+func getPodInfo(coreclient *corev1client.CoreV1Client, podnetworkClient *podnetworkclientset.Clientset,
+	restconfig *rest.Config, podName string, ovnNamespace string, namespace string, cmd string) (podInfo *PodInfo, err error) {
 	// Create a PodInfo object with the base information already added, such as
 	// IP, PodName, ContainerName, NodeName, HostNetwork, Namespace, PrimaryInterfaceName
 	pod, err := coreclient.Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
@@ -455,7 +462,7 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	}
 
 	// Get the pod's MAC address.
-	podInfo.MAC, err = getPodMAC(coreclient, pod)
+	podInfo.MAC, err = getPodMAC(coreclient, podnetworkClient, pod)
 	if err != nil {
 		klog.V(1).Infof("Problem obtaining Ethernet address of Pod %s in namespace %s\n", podName, namespace)
 		return nil, err
@@ -1082,6 +1089,10 @@ func main() {
 	if err != nil {
 		klog.Exitf(" Unexpected error: %v", err)
 	}
+	podnetworkClient, err := podnetworkclientset.NewForConfig(restconfig)
+	if err != nil {
+		klog.Exitf(" Unexpected error: %v", err)
+	}
 
 	// Get the namespace that OVN pods reside in.
 	ovnNamespace, err := getOvnNamespace(coreclient, *cfgNamespace)
@@ -1112,7 +1123,7 @@ func main() {
 	klog.V(5).Infof("The sbcmd is %s", sbcmd)
 
 	// Get info needed for the src Pod
-	srcPodInfo, err := getPodInfo(coreclient, restconfig, *srcPodName, ovnNamespace, *srcNamespace, sbcmd)
+	srcPodInfo, err := getPodInfo(coreclient, podnetworkClient, restconfig, *srcPodName, ovnNamespace, *srcNamespace, sbcmd)
 	if err != nil {
 		klog.Exitf("Failed to get information from pod %s: %v", *srcPodName, err)
 	}
@@ -1150,7 +1161,7 @@ func main() {
 	}
 
 	// Now get info needed for the dst Pod
-	dstPodInfo, err := getPodInfo(coreclient, restconfig, *dstPodName, ovnNamespace, *dstNamespace, sbcmd)
+	dstPodInfo, err := getPodInfo(coreclient, podnetworkClient, restconfig, *dstPodName, ovnNamespace, *dstNamespace, sbcmd)
 	if err != nil {
 		klog.Exitf("Failed to get information from pod %s: %v", *dstPodName, err)
 	}

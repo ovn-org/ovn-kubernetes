@@ -1258,7 +1258,7 @@ func (oc *DefaultNetworkController) deletePodEgressIPAssignments(name string, st
 		podStatus.standbyEgressIPNames.Delete(name)
 		return nil
 	}
-	podIPs, err := util.GetPodCIDRsWithFullMask(pod)
+	podIPs, err := oc.watchFactory.GetPodCIDRsWithFullMask(pod)
 	if err != nil {
 		return err
 	}
@@ -2240,7 +2240,7 @@ func (e *egressIPController) addExternalGWPodSNAT(podNamespace, podName string, 
 			if err != nil {
 				return err
 			}
-			podIPs, err := util.GetPodCIDRsWithFullMask(pod)
+			podIPs, err := e.watchFactory.GetPodCIDRsWithFullMask(pod)
 			if err != nil {
 				return err
 			}

@@ -11,6 +11,7 @@ import (
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -23,6 +24,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 
+	podnetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
+	podnetworkfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned/fake"
+	podnetworkinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/informers/externalversions"
 	"github.com/vishvananda/netlink"
 
 	. "github.com/onsi/ginkgo"
@@ -148,19 +152,12 @@ func addSyncFlows(fexec *ovntest.FakeExec) {
 	})
 }
 
-func createPod(namespace, name, node, podIP, podMAC string) *v1.Pod {
-	annotations := map[string]string{}
-	if podIP != "" || podMAC != "" {
-		ipn := ovntest.MustParseIPNet(podIP)
-		gatewayIP := util.NextIP(ipn.IP)
-		annotations[util.OvnPodAnnotationName] = fmt.Sprintf(`{"default": {"ip_address":"` + podIP + `", "mac_address":"` + podMAC + `", "gateway_ip": "` + gatewayIP.String() + `"}}`)
-	}
-
-	return &v1.Pod{
+func createPod(namespace, name, node, podCIDR, podMAC string) (*v1.Pod, *podnetworkapi.PodNetwork) {
+	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   namespace,
-			Name:        name,
-			Annotations: annotations,
+			Namespace: namespace,
+			Name:      name,
+			UID:       apitypes.UID(name),
 		},
 		Spec: v1.PodSpec{
 			NodeName: node,
@@ -169,6 +166,14 @@ func createPod(namespace, name, node, podIP, podMAC string) *v1.Pod {
 			Phase: v1.PodRunning,
 		},
 	}
+	ipNet := ovntest.MustParseIPNet(podCIDR)
+	gatewayIP := util.NextIP(ipNet.IP)
+	podNetwork := util.CreatePodNetworkFromOvnNet(pod, &podnetworkapi.OVNNetwork{
+		IPs:      []string{podCIDR},
+		MAC:      podMAC,
+		Gateways: []string{gatewayIP.String()},
+	}, types.DefaultNetworkName)
+	return pod, podNetwork
 }
 
 func appRun(app *cli.App) {
@@ -313,17 +318,19 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 					*createNode(node1Name, "linux", thisNodeIP, nil),
 				},
 			})
+			podNetworkClient := podnetworkfake.NewSimpleClientset()
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
-
+			podNetworkFactory := podnetworkinformerfactory.NewSharedInformerFactory(podNetworkClient, informer.DefaultResyncInterval)
 			n, err := NewNode(
 				&kube.Kube{KClient: fakeClient},
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
+				podNetworkFactory.K8s().V1().PodNetworks().Informer(),
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -355,16 +362,19 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 					*createNode(node1Name, "linux", node1IP, annotations),
 				},
 			})
+			podNetworkClient := podnetworkfake.NewSimpleClientset()
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+			podNetworkFactory := podnetworkinformerfactory.NewSharedInformerFactory(podNetworkClient, informer.DefaultResyncInterval)
 
 			n, err := NewNode(
 				&kube.Kube{KClient: fakeClient},
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
+				podNetworkFactory.K8s().V1().PodNetworks().Informer(),
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -393,17 +403,20 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{*node},
 			})
+			podNetworkClient := podnetworkfake.NewSimpleClientset()
 
 			addNodeSetupCmds(fexec, thisNode)
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+			podNetworkFactory := podnetworkinformerfactory.NewSharedInformerFactory(podNetworkClient, informer.DefaultResyncInterval)
 
 			n, err := NewNode(
 				&kube.Kube{KClient: fakeClient},
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
+				podNetworkFactory.K8s().V1().PodNetworks().Informer(),
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -446,10 +459,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
 			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
 			node := createNode(thisNode, "linux", thisNodeIP, annotations)
-			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{*node},
 			})
+			podNetworkClient := podnetworkfake.NewSimpleClientset()
 
 			// Node setup from initial node sync
 			addNodeSetupCmds(fexec, thisNode)
@@ -457,12 +470,14 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+			podNetworkFactory := podnetworkinformerfactory.NewSharedInformerFactory(podNetworkClient, informer.DefaultResyncInterval)
 
 			n, err := NewNode(
 				&kube.Kube{KClient: fakeClient},
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
+				podNetworkFactory.K8s().V1().PodNetworks().Informer(),
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -497,6 +512,11 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				return compareFlowCache(linuxNode.flowCache, initialFlowCache)
 			}, 2).Should(BeNil())
 
+			testPod, podNetwork := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
+			// add pod network as if it was created by pod handler
+			// that it the only way to make sure requested IP and MAC are set
+			err = podNetworkFactory.K8s().V1().PodNetworks().Informer().GetIndexer().Add(podNetwork)
+			Expect(err).NotTo(HaveOccurred())
 			_, err = fakeClient.CoreV1().Pods(testPod.Namespace).Create(context.TODO(), testPod, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			// flowSync after add pods
@@ -536,6 +556,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 					*node,
 				},
 			})
+			podNetworkClient := podnetworkfake.NewSimpleClientset()
 
 			// Node setup from initial node sync
 			addNodeSetupCmds(fexec, thisNode)
@@ -543,12 +564,14 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+			podNetworkFactory := podnetworkinformerfactory.NewSharedInformerFactory(podNetworkClient, informer.DefaultResyncInterval)
 
 			n, err := NewNode(
 				&kube.Kube{KClient: fakeClient},
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
+				podNetworkFactory.K8s().V1().PodNetworks().Informer(),
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -633,6 +656,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 					*node,
 				},
 			})
+			podNetworkClient := podnetworkfake.NewSimpleClientset()
 
 			// Node setup from initial node sync
 			addNodeSetupCmds(fexec, thisNode)
@@ -640,12 +664,14 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+			podNetworkFactory := podnetworkinformerfactory.NewSharedInformerFactory(podNetworkClient, informer.DefaultResyncInterval)
 
 			n, err := NewNode(
 				&kube.Kube{KClient: fakeClient},
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
+				podNetworkFactory.K8s().V1().PodNetworks().Informer(),
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -706,7 +732,11 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			}, 2).Should(BeNil())
 
 			// setup local pod
-			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
+			testPod, podNetwork := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
+			// add pod network as if it was created by pod handler
+			// that it the only way to make sure requested IP and MAC are set
+			err = podNetworkFactory.K8s().V1().PodNetworks().Informer().GetIndexer().Add(podNetwork)
+			Expect(err).NotTo(HaveOccurred())
 			_, err = fakeClient.CoreV1().Pods(testPod.Namespace).Create(context.TODO(), testPod, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			addSyncFlows(fexec)
@@ -770,6 +800,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 					*node,
 				},
 			})
+			podNetworkClient := podnetworkfake.NewSimpleClientset()
 
 			// Node setup from initial node sync
 			addNodeSetupCmds(fexec, thisNode)
@@ -777,12 +808,14 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+			podNetworkFactory := podnetworkinformerfactory.NewSharedInformerFactory(podNetworkClient, informer.DefaultResyncInterval)
 
 			n, err := NewNode(
 				&kube.Kube{KClient: fakeClient},
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
+				podNetworkFactory.K8s().V1().PodNetworks().Informer(),
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -841,7 +874,11 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			}, 2).Should(BeNil())
 
 			// setup local pod
-			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
+			testPod, podNetwork := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
+			// add pod network as if it was created by pod handler
+			// that it the only way to make sure requested IP and MAC are set
+			err = podNetworkFactory.K8s().V1().PodNetworks().Informer().GetIndexer().Add(podNetwork)
+			Expect(err).NotTo(HaveOccurred())
 			_, err = fakeClient.CoreV1().Pods(testPod.Namespace).Create(context.TODO(), testPod, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			addSyncFlows(fexec)

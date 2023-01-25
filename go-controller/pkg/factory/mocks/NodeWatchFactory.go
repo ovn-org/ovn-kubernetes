@@ -12,6 +12,12 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	net "net"
+
+	podnetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
+
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	v1 "k8s.io/api/discovery/v1"
 )
 
@@ -296,6 +302,52 @@ func (_m *NodeWatchFactory) GetPod(namespace string, name string) (*corev1.Pod, 
 	return r0, r1
 }
 
+// GetPodIPsOfNetwork provides a mock function with given fields: pod, nInfo
+func (_m *NodeWatchFactory) GetPodIPsOfNetwork(pod *corev1.Pod, nInfo util.NetInfo) ([]net.IP, error) {
+	ret := _m.Called(pod, nInfo)
+
+	var r0 []net.IP
+	if rf, ok := ret.Get(0).(func(*corev1.Pod, util.NetInfo) []net.IP); ok {
+		r0 = rf(pod, nInfo)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]net.IP)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(*corev1.Pod, util.NetInfo) error); ok {
+		r1 = rf(pod, nInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetPodNetwork provides a mock function with given fields: pod, ignoreNotFound
+func (_m *NodeWatchFactory) GetPodNetwork(pod *corev1.Pod, ignoreNotFound bool) (*podnetworkv1.PodNetwork, error) {
+	ret := _m.Called(pod, ignoreNotFound)
+
+	var r0 *podnetworkv1.PodNetwork
+	if rf, ok := ret.Get(0).(func(*corev1.Pod, bool) *podnetworkv1.PodNetwork); ok {
+		r0 = rf(pod, ignoreNotFound)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*podnetworkv1.PodNetwork)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(*corev1.Pod, bool) error); ok {
+		r1 = rf(pod, ignoreNotFound)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetPods provides a mock function with given fields: namespace
 func (_m *NodeWatchFactory) GetPods(namespace string) ([]*corev1.Pod, error) {
 	ret := _m.Called(namespace)
@@ -383,6 +435,22 @@ func (_m *NodeWatchFactory) LocalPodInformer() cache.SharedIndexInformer {
 
 // NodeInformer provides a mock function with given fields:
 func (_m *NodeWatchFactory) NodeInformer() cache.SharedIndexInformer {
+	ret := _m.Called()
+
+	var r0 cache.SharedIndexInformer
+	if rf, ok := ret.Get(0).(func() cache.SharedIndexInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(cache.SharedIndexInformer)
+		}
+	}
+
+	return r0
+}
+
+// PodNetworkInformer provides a mock function with given fields:
+func (_m *NodeWatchFactory) PodNetworkInformer() cache.SharedIndexInformer {
 	ret := _m.Called()
 
 	var r0 cache.SharedIndexInformer

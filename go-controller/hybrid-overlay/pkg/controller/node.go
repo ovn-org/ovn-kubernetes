@@ -9,12 +9,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	podnetworklisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/listers/podnetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kapi "k8s.io/api/core/v1"
 
+	kapi "k8s.io/api/core/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -37,6 +38,7 @@ type Node struct {
 	controller       nodeController
 	nodeEventHandler informer.EventHandler
 	podEventHandler  informer.EventHandler
+	podNetworkLister podnetworklisters.PodNetworkLister
 	sync.Mutex
 }
 
@@ -64,12 +66,12 @@ func nodeChanged(old, new interface{}) bool {
 }
 
 // podChanged returns true if any relevant pod attributes changed
-func podChanged(old, new interface{}) bool {
+func (n *Node) podChanged(old, new interface{}) bool {
 	oldPod := old.(*kapi.Pod)
 	newPod := new.(*kapi.Pod)
 
-	oldIPs, oldMAC, _ := getPodDetails(oldPod)
-	newIPs, newMAC, _ := getPodDetails(newPod)
+	oldIPs, oldMAC, _ := getPodAddresses(oldPod, n.podNetworkLister)
+	newIPs, newMAC, _ := getPodAddresses(newPod, n.podNetworkLister)
 
 	if len(oldIPs) != len(newIPs) || !reflect.DeepEqual(oldMAC, newMAC) {
 		return true
@@ -88,16 +90,21 @@ func NewNode(
 	nodeName string,
 	nodeInformer cache.SharedIndexInformer,
 	podInformer cache.SharedIndexInformer,
+	podNetInformer cache.SharedIndexInformer,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 ) (*Node, error) {
 
 	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
+	podNetworkLister := podnetworklisters.NewPodNetworkLister(podNetInformer.GetIndexer())
 
-	controller, err := newNodeController(kube, nodeName, nodeLister)
+	controller, err := newNodeController(kube, nodeName, nodeLister, podNetworkLister)
 	if err != nil {
 		return nil, err
 	}
-	n := &Node{controller: controller}
+	n := &Node{
+		controller:       controller,
+		podNetworkLister: podNetworkLister,
+	}
 	n.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,
 		func(obj interface{}) error {
 			node, ok := obj.(*kapi.Node)
@@ -136,7 +143,7 @@ func NewNode(
 			}
 			return n.controller.DeletePod(pod)
 		},
-		podChanged,
+		n.podChanged,
 	)
 	return n, nil
 }
@@ -237,10 +244,16 @@ func getNodeDetails(node *kapi.Node) (*net.IPNet, net.IP, net.HardwareAddr, erro
 	return cidr, ip, drMAC, nil
 }
 
-func getPodDetails(pod *kapi.Pod) ([]*net.IPNet, net.HardwareAddr, error) {
-	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
+// getPodAddresses retrieves pod IPs and MAC from ovntypes.DefaultNetworkName network in PodNetwork object.
+// Returns error if this is not possible.
+func getPodAddresses(pod *kapi.Pod, podNetLister podnetworklisters.PodNetworkLister) ([]*net.IPNet, net.HardwareAddr, error) {
+	podNetworks, err := podNetLister.PodNetworks(pod.Namespace).Get(util.GetPodNetworkName(pod))
 	if err != nil {
 		return nil, nil, err
 	}
-	return podInfo.IPs, podInfo.MAC, nil
+	defaultNetwork, err := util.ParsePodNetwork(podNetworks, ovntypes.DefaultNetworkName)
+	if err != nil {
+		return nil, nil, err
+	}
+	return defaultNetwork.IPs, defaultNetwork.MAC, nil
 }

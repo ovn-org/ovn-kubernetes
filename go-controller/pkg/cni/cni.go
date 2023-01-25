@@ -142,16 +142,16 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, useOVS
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
-	podUID, annotations, podNADAnnotation, err := GetPodAnnotations(pr.ctx, clientset, namespace, podName,
+	podUID, annotations, podNetworks, err := GetPodNetworkInfo(pr.ctx, clientset, namespace, podName,
 		pr.nadName, annotCondFn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
+		return nil, fmt.Errorf("failed to get pod network info: %v", err)
 	}
 	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
 		return nil, err
 	}
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, podNADAnnotation, useOVSExternalIDs, pr.PodUID, vfNetdevName,
-		pr.nadName, pr.netName, pr.CNIConf.MTU)
+	podInterfaceInfo, err := PodNetworkAndAnnotation2PodInfo(annotations, podNetworks, useOVSExternalIDs, pr.PodUID,
+		vfNetdevName, pr.nadName, pr.netName, pr.CNIConf.MTU)
 	if err != nil {
 		return nil, err
 	}

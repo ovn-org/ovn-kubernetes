@@ -156,11 +156,13 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
-	if !util.PodWantsNetwork(pod) {
-		if err := oc.deletePodExternalGW(pod); err != nil {
-			return fmt.Errorf("unable to delete external gateway routes for pod %s: %w",
-				getPodNamespacedName(pod), err)
-		}
+	// external GW needs to be cleaned up for any pod
+	if err := oc.deletePodExternalGW(pod); err != nil {
+		return fmt.Errorf("unable to delete external gateway routes for pod %s: %w",
+			getPodNamespacedName(pod), err)
+	}
+	if !util.PodWantsNetwork(pod) || pod.Spec.HostNetwork || !util.PodScheduled(pod) {
+		// no additional cleanup is required
 		return nil
 	}
 	if err := oc.deleteLogicalPort(pod, portInfo); err != nil {

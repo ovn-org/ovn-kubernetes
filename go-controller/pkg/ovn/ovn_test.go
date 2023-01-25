@@ -12,6 +12,8 @@ import (
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+	podnetwork "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1"
+	podnetworkfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -71,6 +73,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	egressIPObjects := []runtime.Object{}
 	egressFirewallObjects := []runtime.Object{}
 	egressQoSObjects := []runtime.Object{}
+	podNetworkObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
@@ -79,6 +82,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			egressFirewallObjects = append(egressFirewallObjects, object)
 		} else if _, isEgressQoSObject := object.(*egressqos.EgressQoSList); isEgressQoSObject {
 			egressQoSObjects = append(egressQoSObjects, object)
+		} else if _, isPodNetwork := object.(*podnetwork.PodNetworkList); isPodNetwork {
+			podNetworkObjects = append(podNetworkObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
@@ -88,6 +93,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
 		EgressQoSClient:      egressqosfake.NewSimpleClientset(egressQoSObjects...),
+		PodNetworkClient:     podnetworkfake.NewSimpleClientset(podNetworkObjects...),
 	}
 	o.init()
 }
@@ -159,6 +165,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
+			PodNetworkClient:     ovnClient.PodNetworkClient,
 		},
 		wf,
 		recorder,
