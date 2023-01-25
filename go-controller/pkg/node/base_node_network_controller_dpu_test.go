@@ -32,25 +32,12 @@ func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string)
 	if ip != "" {
 		ipAddrExtID = fmt.Sprintf("external_ids:ip_addresses=%s ", ip)
 	}
-	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s other_config:transient=true "+
-		"-- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s %sexternal_ids:sandbox=%s external_ids:vf-netdev-name=%s "+
+	return fmt.Sprintf("ovs-vsctl --timeout=30 --may-exist add-port br-int %s other_config:transient=true "+
+		"-- set interface %s external_ids:attached_mac=%s external_ids:iface-id=%s external_ids:iface-id-ver=%s "+
+		"%sexternal_ids:sandbox=%s external_ids:vf-netdev-name=%s "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
 		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ipAddrExtID, sandboxID, hostIfaceName, hostIfaceName, hostIfaceName)
-}
-
-func genOVSAddPortCmdWithNetdev(hostIfaceName, netdev, ifaceID, mac, ip, sandboxID, podUID string) string {
-	ipAddrExtID := ""
-	if ip != "" {
-		ipAddrExtID = fmt.Sprintf("external_ids:ip_addresses=%s ", ip)
-	}
-	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s other_config:transient=true "+
-		"-- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s %sexternal_ids:sandbox=%s external_ids:vf-netdev-name=%s "+
-		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
-		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
-		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ipAddrExtID, sandboxID, netdev, hostIfaceName, hostIfaceName)
 }
 
 func genOVSDelPortCmd(portName string) string {
@@ -190,13 +177,15 @@ var _ = Describe("Node DPU tests", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
 			// set ovs CMD output
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSFindCmd("30", "Interface", "_uuid",
+				Cmd: genOVSFindCmd("30", "Interface", "name",
 					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 			})
+			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
 			})
+			// Mock netlink/ovs calls for cleanup
 			checkOVSPortPodInfo(execMock, vfRep, false, "15", "", "")
 
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
@@ -212,9 +201,10 @@ var _ = Describe("Node DPU tests", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
 			// set ovs CMD output
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSFindCmd("30", "Interface", "_uuid",
+				Cmd: genOVSFindCmd("30", "Interface", "name",
 					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 			})
+			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
@@ -240,9 +230,10 @@ var _ = Describe("Node DPU tests", func() {
 				sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
 				// set ovs CMD output so cni.ConfigureOVS passes without error
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genOVSFindCmd("30", "Interface", "_uuid",
+					Cmd: genOVSFindCmd("30", "Interface", "name",
 						"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 				})
+				checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				})
