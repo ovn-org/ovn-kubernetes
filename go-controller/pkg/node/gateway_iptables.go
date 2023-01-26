@@ -63,7 +63,8 @@ type iptRule struct {
 }
 
 func addIptRules(rules []iptRule) error {
-	var addErrors, err error
+	addErrors := errors.New("")
+	var err error
 	var ipt util.IPTablesHelper
 	for _, r := range rules {
 		klog.V(5).Infof("Adding rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ",
@@ -86,11 +87,15 @@ func addIptRules(rules []iptRule) error {
 				r.table, r.chain, strings.Join(r.args, " "), err)
 		}
 	}
+	if addErrors.Error() == "" {
+		addErrors = nil
+	}
 	return addErrors
 }
 
 func delIptRules(rules []iptRule) error {
-	var delErrors, err error
+	delErrors := errors.New("")
+	var err error
 	var ipt util.IPTablesHelper
 	for _, r := range rules {
 		klog.V(5).Infof("Deleting rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ",
@@ -107,6 +112,9 @@ func delIptRules(rules []iptRule) error {
 					r.table, r.chain, strings.Join(r.args, " "), err)
 			}
 		}
+	}
+	if delErrors.Error() == "" {
+		delErrors = nil
 	}
 	return delErrors
 }
