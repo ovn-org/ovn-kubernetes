@@ -4,15 +4,15 @@ A K8s pod with more than one network interface is said to be multi-homed. The
 has put forward a [standard](https://github.com/k8snetworkplumbingwg/multi-net-spec)
 describing how to specify the configurations for additional network interfaces.
 
-There are several delegating plugins or meta-plugins (Multus, Genie) implementing this standard.
+There are several delegating plugins or meta-plugins (Multus, Genie)
+implementing this standard.
 
 After a pod is scheduled on a particular Kubernetes node, kubelet will invoke
 the delegating plugin to prepare the pod for networking. This meta-plugin will
 then invoke the CNI responsible for setting up the pod's default cluster
 network, and afterwards it iterates the list of additional attachments on the
-pod (yes, these plugins **must** be able to access the Kubernetes API...),
-invoking the corresponding delegate CNI implementing the logic to attach the pod
-to that particular network.
+pod, invoking the corresponding delegate CNI implementing the logic to attach
+the pod to that particular network.
 
 ## Configuring secondary networks
 To allow pods to have multiple network interfaces, the user must provide the
@@ -40,7 +40,7 @@ apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
   name: l3-network
-  namespace: left-one
+  namespace: ns1
 spec:
   config: |2
     {
@@ -50,13 +50,15 @@ spec:
             "topology":"layer3",
             "subnets": "10.128.0.0/16/24",
             "mtu": 1300,
-            "netAttachDefName": "left-one/l3-network"
+            "netAttachDefName": "ns1/l3-network"
     }
 ```
 
 **NOTE**
-- the `netAttachDefName` parameter **must** be in <namespace>/<net-attach-def name> format
-- the `subnets` attribute is a comma separated list of subnets.
+- the `netAttachDefName` parameter **must** match <namespace>/<net-attach-def name>
+  of the surrounding object.
+- the `subnets` attribute is a comma separated list of subnets. When multiple subnets
+  are provided, the user will get an IP from each subnet.
 - the `subnets` attribute indicates both the subnet across the cluster, and per node.
   The example above means you have a /16 subnet for the network, but each **node** has
   a /24 subnet.
@@ -71,18 +73,18 @@ network.
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
-  name: not-so-fast-network
-  namespace: left-one
+  name: l2-network
+  namespace: ns1
 spec:
   config: |2
     {
             "cniVersion": "0.3.1",
-            "name": "not-so-fast-network",
+            "name": "l2-network",
             "type": "ovn-k8s-cni-overlay",
             "topology":"layer2",
-            "subnets": "10.128.0.0/24",
+            "subnets": "10.100.200.0/24",
             "mtu": 1300,
-            "netAttachDefName": "left-one/not-so-fast-network"
+            "netAttachDefName": "ns1/l2-network"
     }
 ```
 
@@ -99,9 +101,9 @@ apiVersion: v1
 kind: Pod
 metadata:
   annotations:
-    k8s.v1.cni.cncf.io/networks: l3-network,not-so-fast-network
+    k8s.v1.cni.cncf.io/networks: l3-network,l2-network
   name: tinypod
-  namespace: left-one
+  namespace: ns1
 spec:
   containers:
   - args:
