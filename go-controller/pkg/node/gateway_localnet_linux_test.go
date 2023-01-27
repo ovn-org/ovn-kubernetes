@@ -289,7 +289,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fakeRules := getExternalIPTRules(service.Spec.Ports[0], externalIP, service.Spec.ClusterIP, false, false)
-				Expect(addIptRules(fakeRules)).To(Succeed())
+				Expect(insertIptRules(fakeRules)).To(Succeed())
 				fakeRules = getExternalIPTRules(
 					v1.ServicePort{
 						Port:     27000,
@@ -301,7 +301,7 @@ var _ = Describe("Node Operations", func() {
 					false,
 					false,
 				)
-				Expect(addIptRules(fakeRules)).To(Succeed())
+				Expect(insertIptRules(fakeRules)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
