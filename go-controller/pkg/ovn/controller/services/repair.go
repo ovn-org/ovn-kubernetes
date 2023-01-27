@@ -1,9 +1,7 @@
 package services
 
 import (
-	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -16,10 +14,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
@@ -42,9 +38,6 @@ type repair struct {
 	// list with every service that should be in the informer queue before we start the ServiceController
 	// workers.
 	unsyncedServices sets.String
-
-	// Really a boolean, but an int32 for atomicity purposes
-	semLegacyLBsDeleted uint32
 
 	nbClient libovsdbclient.Client
 }
@@ -147,48 +140,4 @@ func (r *repair) serviceSynced(key string) {
 		return
 	}
 	delete(r.unsyncedServices, key)
-	if len(r.unsyncedServices) == 0 {
-		go r.runAfterSync() // run in a goroutine so we don't block the ServiceController
-	}
-}
-
-// runAfterSync is called sometime after every existing service is successfully synced at least once
-// It deletes all legacy load balancers.
-func (r *repair) runAfterSync() {
-	_ = utilwait.ExponentialBackoff(retry.DefaultBackoff, func() (bool, error) {
-		klog.Infof("Running Service post-sync cleanup")
-		err := r.deleteLegacyLBs()
-		if err != nil {
-			klog.Warningf("Failed to delete legacy LBs: %v", err)
-			return false, nil
-		}
-		return true, nil
-	})
-}
-
-func (r *repair) deleteLegacyLBs() error {
-	// Find all load-balancers associated with Services
-	legacyLBs, err := findLegacyLBs(r.nbClient)
-	if err != nil {
-		klog.Errorf("Failed to list existing load balancers: %v", err)
-		return err
-	}
-
-	klog.V(2).Infof("Deleting %d legacy LBs", len(legacyLBs))
-	toDelete := make([]string, 0, len(legacyLBs))
-	for _, lb := range legacyLBs {
-		toDelete = append(toDelete, lb.UUID)
-	}
-	if err := ovnlb.DeleteLBs(r.nbClient, toDelete); err != nil {
-		return fmt.Errorf("failed to delete LBs: %w", err)
-	}
-	atomic.StoreUint32(&r.semLegacyLBsDeleted, 1)
-	return nil
-}
-
-// legacyLBsDeleted returns true if we've run the post-sync repair
-// and there are no more legacy LBs, so we can stop searching
-// for them in the services handler.
-func (r *repair) legacyLBsDeleted() bool {
-	return atomic.LoadUint32(&r.semLegacyLBsDeleted) > 0
 }

@@ -328,14 +328,6 @@ func (c *Controller) syncService(key string) error {
 		c.alreadyAppliedLock.Unlock()
 	}
 
-	if !c.repair.legacyLBsDeleted() {
-		if err := deleteServiceFromLegacyLBs(c.nbClient, service); err != nil {
-			klog.Warningf("Failed to delete legacy vips for service %s: %v", key)
-			// Continue anyways, because once all services are synced, we'll delete
-			// the legacy load balancers
-		}
-	}
-
 	c.repair.serviceSynced(key)
 	return nil
 }
