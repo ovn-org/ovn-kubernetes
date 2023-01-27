@@ -136,6 +136,74 @@ var _ = ginkgo.Describe("Egress Services", func() {
 		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalIPv6),
 	)
 
+	ginkgotable.DescribeTable("Should validate the egress SVC SNAT functionality against host-networked pods",
+		func(protocol v1.IPFamily) {
+			ginkgo.By("Creating the backend pods")
+			podsCreateSync := errgroup.Group{}
+			podsToNodeMapping := make(map[string]v1.Node, 3)
+			for i, name := range pods {
+				name := name
+				i := i
+				podsCreateSync.Go(func() error {
+					p, err := createGenericPodWithLabel(f, name, nodes[i].Name, f.Namespace.Name, command, podsLabels)
+					framework.Logf("%s podIPs are: %v", p.Name, p.Status.PodIPs)
+					return err
+				})
+				podsToNodeMapping[name] = nodes[i]
+			}
+
+			err := podsCreateSync.Wait()
+			framework.ExpectNoError(err, "failed to create backend pods")
+
+			ginkgo.By("Creating an egress service without node selectors")
+			_ = createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
+				map[string]string{"k8s.ovn.org/egress-service": "{}"}, podsLabels, podHTTPPort)
+
+			ginkgo.By("Getting the IPs of the node in charge of the service")
+			egressHost, _, _ := getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
+			framework.Logf("Egress node is %s", egressHost.Name)
+
+			var dstNode v1.Node
+			hostNetPod := "host-net-pod"
+			for i := range nodes {
+				if nodes[i].Name != egressHost.Name { // note that we deliberately pick a non-egress-host as dst node
+					dstNode = nodes[i]
+					break
+				}
+			}
+			ginkgo.By("Creating host-networked pod, on non-egress node to act as \"another node\"")
+			_, err = createPod(f, hostNetPod, dstNode.Name, f.Namespace.Name, []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", podHTTPPort)}, map[string]string{}, func(p *v1.Pod) {
+				p.Spec.HostNetwork = true
+			})
+			framework.ExpectNoError(err)
+			framework.Logf("Created pod %s on node %s", hostNetPod, dstNode.Name)
+
+			v4, v6 := getNodeAddresses(&dstNode)
+			dstIP := v4
+			if protocol == v1.IPv6Protocol {
+				dstIP = v6
+			}
+			ginkgo.By("Verifying traffic from all the 3 backend pods should exit with their node's IP when going towards other nodes in cluster")
+			for _, pod := range pods { // loop through all the pods, ensure the curl to other node is always going via nodeIP of the node where the pod lives
+				srcNode := podsToNodeMapping[pod]
+				if srcNode.Name == dstNode.Name {
+					framework.Logf("Skipping check for pod %s because its on the destination node; srcIP will be podIP", pod)
+					continue // traffic flow is pod -> mp0 -> local host: This won't have nodeIP as SNAT
+				}
+				v4, v6 = getNodeAddresses(&srcNode)
+				expectedsrcIP := v4
+				if protocol == v1.IPv6Protocol {
+					expectedsrcIP = v6
+				}
+				gomega.Consistently(func() error {
+					return curlAgnHostClientIPFromPod(f.Namespace.Name, pod, expectedsrcIP, dstIP, podHTTPPort)
+				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach other node with node's ip")
+			}
+		},
+		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol),
+		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol),
+	)
+
 	ginkgotable.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip with selectors",
 		func(protocol v1.IPFamily, dstIP *string) {
 			ginkgo.By("Creating the backend pods")
