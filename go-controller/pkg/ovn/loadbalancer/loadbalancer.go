@@ -39,18 +39,13 @@ import (
 //
 // It is assumed that names are meaningful and somewhat stable, to minimize churn. This
 // function doesn't work with Load_Balancers without a name.
-func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB) error {
+func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existingCacheLBs []LB, LBs []LB) error {
 	externalIDs := util.ExternalIDsForObject(service)
-	lbCache, err := GetLBCache(nbClient)
-	if err != nil {
-		return fmt.Errorf("failed initialize LBcache: %w", err)
-	}
-
-	existing := lbCache.Find(externalIDs)
-	existingByName := make(map[string]*CachedLB, len(existing))
+	existingByName := make(map[string]*LB, len(existingCacheLBs))
 	toDelete := sets.NewString()
 
-	for _, lb := range existing {
+	for i := range existingCacheLBs {
+		lb := &existingCacheLBs[i]
 		existingByName[lb.Name] = lb
 		toDelete.Insert(lb.UUID)
 	}
@@ -77,9 +72,9 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 			blb.UUID = existingLB.UUID
 			existinglbs = append(existinglbs, blb)
 			toDelete.Delete(existingLB.UUID)
-			existingRouters = existingLB.Routers
-			existingSwitches = existingLB.Switches
-			existingGroups = existingLB.Groups
+			existingRouters = sets.NewString(existingLB.Routers...)
+			existingSwitches = sets.NewString(existingLB.Switches...)
+			existingGroups = sets.NewString(existingLB.Groups...)
 		} else {
 			newlbs = append(newlbs, blb)
 		}
@@ -96,12 +91,14 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 
 	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, existinglbs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create ops for ensuring update of service %s/%s load balancers: %w",
+			service.Namespace, service.Name, err)
 	}
 
 	ops, err = libovsdbops.CreateLoadBalancersOps(nbClient, ops, newlbs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create ops for ensuring creation of service %s/%s load balancers: %w",
+			service.Namespace, service.Name, err)
 	}
 
 	// cache switches for this round of ops
@@ -118,13 +115,15 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 	for k, v := range addLBsToSwitch {
 		ops, err = libovsdbops.AddLoadBalancersToLogicalSwitchOps(nbClient, ops, getSwitch(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for adding load balancers to switch %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 	for k, v := range removeLBsFromSwitch {
 		ops, err = libovsdbops.RemoveLoadBalancersFromLogicalSwitchOps(nbClient, ops, getSwitch(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for removing load balancers from switch %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 
@@ -142,13 +141,15 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 	for k, v := range addLBsToRouter {
 		ops, err = libovsdbops.AddLoadBalancersToLogicalRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for adding load balancers to router %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 	for k, v := range removesLBsFromRouter {
 		ops, err = libovsdbops.RemoveLoadBalancersFromLogicalRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for removing load balancers from router %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 
@@ -166,13 +167,15 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 	for k, v := range addLBsToGroups {
 		ops, err = libovsdbops.AddLoadBalancersToGroupOps(nbClient, ops, getGroup(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for adding load balancers to group %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 	for k, v := range removeLBsFromGroups {
 		ops, err = libovsdbops.RemoveLoadBalancersFromGroupOps(nbClient, ops, getGroup(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for removing load balancers from group %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 
@@ -182,7 +185,8 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 	}
 	ops, err = libovsdbops.DeleteLoadBalancersOps(nbClient, ops, deleteLBs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create ops for removing %d load balancers for service %s/%s: %w",
+			len(deleteLBs), service.Namespace, service.Name, err)
 	}
 
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(nbClient, "service",
@@ -194,15 +198,16 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 
 	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(nbClient, lbs, ops)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to ensure load balancers for service %s/%s: %w", service.Namespace, service.Name, err)
 	}
 	txOkCallBack()
 
+	// Store UUID of newly created load balancers for future calls.
+	// This is accomplished by the caching of LBs by the caller of this function.
 	for _, lb := range lbs {
 		wantedByName[lb.Name].UUID = lb.UUID
 	}
 
-	lbCache.update(LBs, toDelete.UnsortedList())
 	klog.V(5).Infof("Deleted %d stale LBs for %#v", len(toDelete), externalIDs)
 
 	return nil

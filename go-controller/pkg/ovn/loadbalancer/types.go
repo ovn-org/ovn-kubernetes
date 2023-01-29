@@ -39,7 +39,7 @@ type LBRule struct {
 	Targets []Addr
 }
 
-// JoinJostsPort takes a list of IPs and a port and converts it to a list of Addrs
+// JoinHostsPort takes a list of IPs and a port and converts it to a list of Addrs
 func JoinHostsPort(ips []string, port int32) []Addr {
 	out := make([]Addr, 0, len(ips))
 	for _, ip := range ips {
