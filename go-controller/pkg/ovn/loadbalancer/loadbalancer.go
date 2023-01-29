@@ -9,7 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -299,51 +298,15 @@ func DeleteLBs(nbClient libovsdbclient.Client, uuids []string) error {
 		return nil
 	}
 
-	cache, err := GetLBCache(nbClient)
-	if err != nil {
-		return err
-	}
-
 	lbs := make([]*nbdb.LoadBalancer, 0, len(uuids))
 	for _, uuid := range uuids {
 		lbs = append(lbs, &nbdb.LoadBalancer{UUID: uuid})
 	}
 
-	err = libovsdbops.DeleteLoadBalancers(nbClient, lbs)
+	err := libovsdbops.DeleteLoadBalancers(nbClient, lbs)
 	if err != nil {
 		return err
 	}
-
-	cache.update(nil, uuids)
-	return nil
-}
-
-type DeleteVIPEntry struct {
-	LBUUID string
-	VIPs   []string // ip:string (or v6 equivalent)
-}
-
-// DeleteLoadBalancerVIPs removes VIPs from load-balancers in a single shot.
-func DeleteLoadBalancerVIPs(nbClient libovsdbclient.Client, toRemove []DeleteVIPEntry) error {
-	lbCache, err := GetLBCache(nbClient)
-	if err != nil {
-		return err
-	}
-
-	var ops []libovsdb.Operation
-	for _, entry := range toRemove {
-		ops, err = libovsdbops.RemoveLoadBalancerVipsOps(nbClient, ops, &nbdb.LoadBalancer{UUID: entry.LBUUID}, entry.VIPs...)
-		if err != nil {
-			return err
-		}
-	}
-
-	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("failed to remove vips from load_balancer: %w", err)
-	}
-
-	lbCache.removeVips(toRemove)
 
 	return nil
 }

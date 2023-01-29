@@ -12,7 +12,6 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/pkg/errors"
 
@@ -444,7 +443,6 @@ func TestSyncServices(t *testing.T) {
 				globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
 			}
 
-			ovnlb.TestOnlySetCache(nil)
 			controller, err := newControllerWithDBSetup(libovsdbtest.TestSetup{NBData: tt.initialDb})
 			if err != nil {
 				t.Fatalf("Error creating controller: %v", err)
