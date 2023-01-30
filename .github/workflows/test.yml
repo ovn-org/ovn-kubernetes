@@ -517,6 +517,7 @@ jobs:
     - name: Run Single-Stack Tests
       run: |
         make -C test shard-test WHAT="Networking Granular Checks"
+        sleep 30
 
     - name: Convert IPv4 cluster to Dual Stack
       run: |
@@ -526,6 +527,7 @@ jobs:
       run: |
         KIND_IPV4_SUPPORT="true"
         KIND_IPV6_SUPPORT="true"
+        sleep 30
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
 
     - name: Run Dual-Stack Control-Plane Tests
