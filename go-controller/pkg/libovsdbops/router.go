@@ -797,8 +797,9 @@ func RemoveLoadBalancersFromLogicalRouterOps(nbClient libovsdbclient.Client, ops
 		Model:            router,
 		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.LoadBalancer},
-		ErrNotFound:      true,
-		BulkOp:           false,
+		// if we want to delete loadbalancer from the router that doesn't exist, that is noop
+		ErrNotFound: false,
+		BulkOp:      false,
 	}
 
 	modelClient := newModelClient(nbClient)
