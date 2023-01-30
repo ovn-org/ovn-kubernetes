@@ -162,8 +162,9 @@ func RemoveLoadBalancersFromLogicalSwitchOps(nbClient libovsdbclient.Client, ops
 		Model:            sw,
 		ModelPredicate:   func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelMutations: []interface{}{&sw.LoadBalancer},
-		ErrNotFound:      true,
-		BulkOp:           false,
+		// if we want to delete loadbalancer from the switch that doesn't exist, that is noop
+		ErrNotFound: false,
+		BulkOp:      false,
 	}
 
 	modelClient := newModelClient(nbClient)
