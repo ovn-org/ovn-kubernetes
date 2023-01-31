@@ -62,7 +62,7 @@ func deleteLocalNodeAccessBridge() error {
 func addGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) error {
 	rules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
 
-	if err := addIptRules(rules); err != nil {
+	if err := insertIptRules(rules); err != nil {
 		return fmt.Errorf("failed to add iptables rules for service %s/%s: %v",
 			service.Namespace, service.Name, err)
 	}
@@ -128,7 +128,7 @@ func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) error {
 
 	// Add rules for endpoints without one.
 	addRules := egressSVCIPTRulesForEndpoints(svc, v4ToAdd, v6ToAdd)
-	if err := addIptRules(addRules); err != nil {
+	if err := appendIptRules(addRules); err != nil {
 		return fmt.Errorf("failed to add iptables rules for service %s/%s during update: %v",
 			svc.Namespace, svc.Name, err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -285,11 +286,23 @@ func (c *Controller) syncService(key string) error {
 	}
 	allOps = append(allOps, createOps...)
 
+	createOps, err = c.addPodIPsToAddressSetOps(createIPAddressNetSlice(v4ToAdd, v6ToAdd))
+	if err != nil {
+		return err
+	}
+	allOps = append(allOps, createOps...)
+
 	deleteOps, err := c.deleteLogicalRouterPoliciesOps(key, v4ToRemove, v6ToRemove)
 	if err != nil {
 		return err
 	}
 	allOps = append(allOps, deleteOps...)
+
+	createOps, err = c.deletePodIPsFromAddressSetOps(createIPAddressNetSlice(v4ToRemove, v6ToRemove))
+	if err != nil {
+		return err
+	}
+	allOps = append(allOps, createOps...)
 
 	if _, err := libovsdbops.TransactAndCheck(c.nbClient, allOps); err != nil {
 		return fmt.Errorf("failed to update router policies for %s, err: %v", key, err)
@@ -425,6 +438,43 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.String, sets.Str
 	}
 
 	return v4Endpoints, v6Endpoints, nodes.UnsortedList(), nil
+}
+
+func createIPAddressNetSlice(v4ips, v6ips []string) []net.IP {
+	ipAddrs := make([]net.IP, 0)
+	for _, ip := range v4ips {
+		ipNet := net.ParseIP(ip)
+		ipAddrs = append(ipAddrs, ipNet)
+	}
+	for _, ip := range v6ips {
+		ipNet := net.ParseIP(ip)
+		ipAddrs = append(ipAddrs, ipNet)
+	}
+	return ipAddrs
+}
+
+func (c *Controller) addPodIPsToAddressSetOps(addrSetIPs []net.IP) ([]libovsdb.Operation, error) {
+	var ops []libovsdb.Operation
+	as, err := c.addressSetFactory.GetAddressSet(ovntypes.EgressServiceServedPods)
+	if err != nil {
+		return nil, fmt.Errorf("cannot ensure that addressSet for cluster %s exists %v", ovntypes.EgressServiceServedPods, err)
+	}
+	if ops, err = as.AddIPsReturnOps(addrSetIPs); err != nil {
+		return nil, fmt.Errorf("cannot add egressPodIPs %v from the address set %v: err: %v", addrSetIPs, ovntypes.EgressServiceServedPods, err)
+	}
+	return ops, nil
+}
+
+func (c *Controller) deletePodIPsFromAddressSetOps(addrSetIPs []net.IP) ([]libovsdb.Operation, error) {
+	var ops []libovsdb.Operation
+	as, err := c.addressSetFactory.GetAddressSet(ovntypes.EgressServiceServedPods)
+	if err != nil {
+		return nil, fmt.Errorf("cannot ensure that addressSet for cluster %s exists %v", ovntypes.EgressServiceServedPods, err)
+	}
+	if ops, err = as.DeleteIPsReturnOps(addrSetIPs); err != nil {
+		return nil, fmt.Errorf("cannot delete egressPodIPs %v from the address set %v: err: %v", addrSetIPs, ovntypes.EgressServiceServedPods, err)
+	}
+	return ops, nil
 }
 
 // Returns the libovsdb operations to create the logical router policies for the service,

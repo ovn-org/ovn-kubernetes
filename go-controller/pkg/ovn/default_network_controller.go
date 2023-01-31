@@ -161,7 +161,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient)
 	}
 	svcController, svcFactory := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
-	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, svcFactory, defaultStopChan)
+	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory, defaultStopChan)
 	var hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
 	if config.HybridOverlay.Enabled {
 		hybridOverlaySubnetAllocator = subnetallocator.NewHostSubnetAllocator()
