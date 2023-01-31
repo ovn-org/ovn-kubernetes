@@ -354,10 +354,9 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	return bnc.lsManager.AddSwitch(logicalSwitch.Name, logicalSwitch.UUID, hostSubnets)
 }
 
-// UpdateNodeHostSubnetAnnotationWithRetry update node's hostSubnet annotation (possibly for multiple networks) and the
-// other given node annotations
-func (cnci *CommonNetworkControllerInfo) UpdateNodeHostSubnetAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet,
-	otherUpdatedNodeAnnotation map[string]string) error {
+// UpdateNodeAnnotationWithRetry update node's annotation with the given node annotations.
+func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName string,
+	nodeAnnotations map[string]string) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
 	// retry mechanism.
@@ -369,14 +368,7 @@ func (cnci *CommonNetworkControllerInfo) UpdateNodeHostSubnetAnnotationWithRetry
 		}
 
 		cnode := node.DeepCopy()
-		for netName, hostSubnets := range hostSubnetsMap {
-			cnode.Annotations, err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, netName)
-			if err != nil {
-				return fmt.Errorf("failed to update node %q annotation subnet %s",
-					node.Name, util.JoinIPNets(hostSubnets, ","))
-			}
-		}
-		for k, v := range otherUpdatedNodeAnnotation {
+		for k, v := range nodeAnnotations {
 			cnode.Annotations[k] = v
 		}
 		return cnci.kube.UpdateNode(cnode)

@@ -285,25 +285,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 	var ops []ovsdb.Operation
 	var err error
 
-	// remove hostsubnet annotation for this network
-	klog.Infof("Remove node-subnets annotation for network %s on all nodes", netName)
-	existingNodes, err := oc.watchFactory.GetNodes()
-	if err != nil {
-		klog.Errorf("Error in initializing/fetching subnets: %v", err)
-		return nil
-	}
-	for _, node := range existingNodes {
-		if util.NoHostSubnet(node) {
-			klog.V(5).Infof("Node %s is not managed by OVN", node.Name)
-			continue
-		}
-		hostSubnetsMap := map[string][]*net.IPNet{netName: nil}
-		err = oc.UpdateNodeHostSubnetAnnotationWithRetry(node.Name, hostSubnetsMap, nil)
-		if err != nil {
-			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
-				node.Name, netName)
-		}
-	}
+	// Note : Cluster manager removes the subnet annotation for the node.
 
 	klog.Infof("Delete OVN logical entities for %s network controller of network %s", types.Layer3Topology, netName)
 	// first delete node logical switches
@@ -419,17 +401,12 @@ func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, 
 }
 
 func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
+	// Node subnet for the secondary layer3 network is allocated by cluster manager.
+	// Make sure that the node is allocated with the subnet before proceeding
+	// to create OVN Northbound resources.
 	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
-	if err != nil && !util.IsAnnotationNotSetError(err) {
-		// Log the error and try to allocate new subnets
-		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
-		return nil, err
-	}
-
-	hostSubnetsMap := map[string][]*net.IPNet{oc.GetNetworkName(): hostSubnets}
-	err = oc.UpdateNodeHostSubnetAnnotationWithRetry(node.Name, hostSubnetsMap, nil)
-	if err != nil {
-		return nil, err
+	if err != nil || len(hostSubnets) < 1 {
+		return nil, fmt.Errorf("subnet annotation in the node %q for the layer3 secondary network %s is missing : %w", node.Name, oc.GetNetworkName(), err)
 	}
 
 	err = oc.createNodeLogicalSwitch(node.Name, hostSubnets, "")

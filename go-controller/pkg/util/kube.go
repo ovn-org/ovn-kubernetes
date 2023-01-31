@@ -57,7 +57,8 @@ type OVNNodeClientset struct {
 }
 
 type OVNClusterManagerClientset struct {
-	KubeClient kubernetes.Interface
+	KubeClient            kubernetes.Interface
+	NetworkAttchDefClient networkattchmentdefclientset.Interface
 }
 
 func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
@@ -72,7 +73,8 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 
 func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset {
 	return &OVNClusterManagerClientset{
-		KubeClient: cs.KubeClient,
+		KubeClient:            cs.KubeClient,
+		NetworkAttchDefClient: cs.NetworkAttchDefClient,
 	}
 }
 

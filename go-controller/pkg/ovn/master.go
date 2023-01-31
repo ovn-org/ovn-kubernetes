@@ -407,9 +407,7 @@ func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, erro
 			node.Name, gwLRPIPs)
 	}
 
-	// Pass empty hostSubnetsMap to UpdateNodeHostSubnetAnnotationWithRetry().
-	hostSubnetsMap := map[string][]*net.IPNet{}
-	err = oc.UpdateNodeHostSubnetAnnotationWithRetry(node.Name, hostSubnetsMap, updatedNodeAnnotation)
+	err = oc.UpdateNodeAnnotationWithRetry(node.Name, updatedNodeAnnotation)
 	if err != nil {
 		return nil, err
 	}

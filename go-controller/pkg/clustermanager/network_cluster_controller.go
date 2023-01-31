@@ -306,6 +306,38 @@ func (ncc *networkClusterController) updateNodeSubnetAnnotationWithRetry(nodeNam
 	return nil
 }
 
+// Cleanup cleans up the subnet annotations from the node for the secondary networks
+func (ncc *networkClusterController) Cleanup(netName string) error {
+	if !ncc.IsSecondary() {
+		return fmt.Errorf("default network can't be cleaned up")
+	}
+	// remove hostsubnet annotation for this network
+	klog.Infof("Remove node-subnets annotation for network %s on all nodes", ncc.networkName)
+	existingNodes, err := ncc.watchFactory.GetNodes()
+	if err != nil {
+		return fmt.Errorf("error in retrieving the nodes: %v", err)
+	}
+
+	for _, node := range existingNodes {
+		if util.NoHostSubnet(node) {
+			// Secondary network subnet is not allocated for a nohost subnet node
+			klog.V(5).Infof("Node %s is not managed by OVN", node.Name)
+			continue
+		}
+
+		hostSubnetsMap := map[string][]*net.IPNet{ncc.networkName: nil}
+		err = ncc.updateNodeSubnetAnnotationWithRetry(node.Name, hostSubnetsMap)
+		if err != nil {
+			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
+				node.Name, ncc.networkName)
+		}
+
+		ncc.clusterSubnetAllocator.ReleaseAllNodeSubnets(node.Name)
+	}
+
+	return nil
+}
+
 // networkClusterControllerEventHandler object handles the events
 // from retry framework.
 type networkClusterControllerEventHandler struct {

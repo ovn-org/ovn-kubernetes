@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -66,14 +67,14 @@ type networkControllerManager struct {
 	// used for leader election
 	identity string
 
-	defaultNetworkController BaseNetworkController
+	defaultNetworkController nad.BaseNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
-	nadController *netAttachDefinitionController
+	nadController *nad.NetAttachDefinitionController
 }
 
 func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
-	netConfInfo util.NetConfInfo) (NetworkController, error) {
+	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
 	cnci := cm.newCommonNetworkControllerInfo()
 	topoType := netConfInfo.TopologyType()
 	switch topoType {
@@ -88,7 +89,7 @@ func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
 }
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
-func (cm *networkControllerManager) newDummyNetworkController(topoType, netName string) (NetworkController, error) {
+func (cm *networkControllerManager) newDummyNetworkController(topoType, netName string) (nad.NetworkController, error) {
 	cnci := cm.newCommonNetworkControllerInfo()
 	netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
@@ -126,7 +127,7 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*
 	return nodeSwitches, clusterRouters, nil
 }
 
-func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []NetworkController) error {
+func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
 	existingNetworksMap := map[string]struct{}{}
 	for _, oc := range allControllers {
 		existingNetworksMap[oc.GetNetworkName()] = struct{}{}
@@ -138,7 +139,7 @@ func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []Netw
 		return err
 	}
 
-	staleNetworkControllers := map[string]NetworkController{}
+	staleNetworkControllers := map[string]nad.NetworkController{}
 	for _, ls := range switches {
 		netName := ls.ExternalIDs[ovntypes.NetworkExternalID]
 		if _, ok := existingNetworksMap[netName]; ok {
@@ -296,8 +297,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 	}
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		klog.Infof("Multiple network supported, creating %s", controllerName)
-		cm.nadController = newNetAttachDefinitionController(cm, ovnClient.NetworkAttchDefClient, cm.recorder)
+		cm.nadController = nad.NewNetAttachDefinitionController("network-controller-manager", cm, ovnClient.NetworkAttchDefClient, cm.recorder)
 	}
 	return cm
 }

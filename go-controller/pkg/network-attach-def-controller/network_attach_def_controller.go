@@ -1,7 +1,8 @@
-package networkControllerManager
+package networkAttachDefController
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -35,12 +36,13 @@ const (
 	// 5ms, 10ms, 20ms, 40ms, 80ms, 160ms, 320ms, 640ms, 1.3s, 2.6s, 5.1s, 10.2s, 20.4s, 41s, 82s
 	// maxRetries = 15
 
-	controllerName  = "net-attach-def-controller"
 	avoidResync     = 0
 	numberOfWorkers = 2
 	qps             = 15
 	maxRetries      = 10
 )
+
+var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
 
 type BaseNetworkController interface {
 	Start(ctx context.Context) error
@@ -76,7 +78,8 @@ type nadNetConfInfo struct {
 	netName string
 }
 
-type netAttachDefinitionController struct {
+type NetAttachDefinitionController struct {
+	name               string
 	recorder           record.EventRecorder
 	ncm                NetworkControllerManager
 	nadFactory         networkattachmentdefinitioninformerfactory.SharedInformerFactory
@@ -88,13 +91,13 @@ type netAttachDefinitionController struct {
 	// key is nadName, value is nadNetConfInfo
 	perNADNetConfInfo *syncmap.SyncMap[*nadNetConfInfo]
 	// controller for all networks, key is netName of net-attach-def, value is networkNADInfo
-	// this map is updated either at the very beginning of ovnkube-master when initializing the default controller
-	// or when net-attach-def is added/deleted. All these are serialized by syncmap lock
+	// this map is updated either at the very beginning of network controller manager when initializing the
+	// default controller or when net-attach-def is added/deleted. All these are serialized by syncmap lock
 	perNetworkNADInfo *syncmap.SyncMap[*networkNADInfo]
 }
 
-func newNetAttachDefinitionController(ncm NetworkControllerManager, networkAttchDefClient networkattchmentdefclientset.Interface,
-	recorder record.EventRecorder) *netAttachDefinitionController {
+func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager, networkAttchDefClient networkattchmentdefclientset.Interface,
+	recorder record.EventRecorder) *NetAttachDefinitionController {
 	nadFactory := netattachdefinformers.NewSharedInformerFactoryWithOptions(
 		networkAttchDefClient,
 		avoidResync,
@@ -104,7 +107,8 @@ func newNetAttachDefinitionController(ncm NetworkControllerManager, networkAttch
 		workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 1000*time.Second),
 		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(qps), qps*5)})
 
-	nadController := &netAttachDefinitionController{
+	nadController := &NetAttachDefinitionController{
+		name:               name,
 		recorder:           recorder,
 		ncm:                ncm,
 		nadFactory:         nadFactory,
@@ -124,16 +128,16 @@ func newNetAttachDefinitionController(ncm NetworkControllerManager, networkAttch
 	return nadController
 }
 
-func (nadController *netAttachDefinitionController) Run(stopChan <-chan struct{}) error {
+func (nadController *NetAttachDefinitionController) Run(stopChan <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 	defer func() {
-		klog.Infof("Shutting down controller %s", controllerName)
+		klog.Infof("Shutting down controller %s", nadController.name)
 		nadController.queue.ShutDown()
 	}()
 
 	nadController.nadFactory.Start(stopChan)
-	klog.Infof("Starting controller %s", controllerName)
-	if !cache.WaitForNamedCacheSync(controllerName, stopChan, nadController.netAttachDefSynced) {
+	klog.Infof("Starting controller %s", nadController.name)
+	if !cache.WaitForNamedCacheSync(nadController.name, stopChan, nadController.netAttachDefSynced) {
 		return fmt.Errorf("error syncing cache")
 	}
 
@@ -142,7 +146,7 @@ func (nadController *netAttachDefinitionController) Run(stopChan <-chan struct{}
 		return fmt.Errorf("failed to sync all existing NAD entries: %v", err)
 	}
 
-	klog.Info("Starting workers for controller %s", controllerName)
+	klog.Info("Starting workers for controller %s", nadController.name)
 	wg := &sync.WaitGroup{}
 	for i := 0; i < numberOfWorkers; i++ {
 		wg.Add(1)
@@ -158,11 +162,11 @@ func (nadController *netAttachDefinitionController) Run(stopChan <-chan struct{}
 	return nil
 }
 
-func (nadController *netAttachDefinitionController) SyncNetworkControllers() (err error) {
+func (nadController *NetAttachDefinitionController) SyncNetworkControllers() (err error) {
 	startTime := time.Now()
-	klog.V(4).Infof("Starting repairing loop for %s", controllerName)
+	klog.V(4).Infof("Starting repairing loop for %s", nadController.name)
 	defer func() {
-		klog.V(4).Infof("Finished repairing loop for %s: %v err: %v", controllerName,
+		klog.V(4).Infof("Finished repairing loop for %s: %v err: %v", nadController.name,
 			time.Since(startTime), err)
 	}()
 
@@ -177,7 +181,8 @@ func (nadController *netAttachDefinitionController) SyncNetworkControllers() (er
 	// we wouldn't otherwise know about yet
 	for _, nad := range existingNADs {
 		err = nadController.AddNetAttachDef(nadController.ncm, nad, false)
-		if err != nil {
+		// Ignore the error if there is no network controller to manager a topology
+		if err != nil && !errors.Is(err, ErrNetworkControllerTopologyNotManaged) {
 			return err
 		}
 	}
@@ -185,12 +190,12 @@ func (nadController *netAttachDefinitionController) SyncNetworkControllers() (er
 	return nadController.ncm.CleanupDeletedNetworks(nadController.GetAllNetworkControllers())
 }
 
-func (nadController *netAttachDefinitionController) worker() {
+func (nadController *NetAttachDefinitionController) worker() {
 	for nadController.processNextWorkItem() {
 	}
 }
 
-func (nadController *netAttachDefinitionController) processNextWorkItem() bool {
+func (nadController *NetAttachDefinitionController) processNextWorkItem() bool {
 	key, quit := nadController.queue.Get()
 	if quit {
 		return false
@@ -202,15 +207,15 @@ func (nadController *netAttachDefinitionController) processNextWorkItem() bool {
 	return true
 }
 
-func (nadController *netAttachDefinitionController) sync(key string) error {
+func (nadController *NetAttachDefinitionController) sync(key string) error {
 	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
 	}
-	klog.V(5).Infof("Sync net-attach-def %s/%s", namespace, name)
+	klog.V(5).Infof("%s: Sync net-attach-def %s/%s", nadController.name, namespace, name)
 	defer func() {
-		klog.V(4).Infof("Finished syncing net-attach-def %s/%s : %v", namespace, name, time.Since(startTime))
+		klog.V(4).Infof("%s: Finished syncing net-attach-def %s/%s: %v", nadController.name, namespace, name, time.Since(startTime))
 	}()
 
 	nad, err := nadController.netAttachDefLister.NetworkAttachmentDefinitions(namespace).Get(name)
@@ -225,11 +230,17 @@ func (nadController *netAttachDefinitionController) sync(key string) error {
 	}
 }
 
-func (nadController *netAttachDefinitionController) handleErr(err error, key interface{}) {
+func (nadController *NetAttachDefinitionController) handleErr(err error, key interface{}) {
 	ns, name, keyErr := cache.SplitMetaNamespaceKey(key.(string))
 	if keyErr != nil {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
 	}
+
+	if errors.Is(err, ErrNetworkControllerTopologyNotManaged) {
+		klog.V(2).Infof("%s: Dropping net-attach-def %q out of the queue. No network controller to manage it.", nadController.name, key)
+		err = nil
+	}
+
 	if err == nil {
 		nadController.queue.Forget(key)
 		return
@@ -241,36 +252,36 @@ func (nadController *netAttachDefinitionController) handleErr(err error, key int
 		return
 	}
 
-	klog.Warningf("Dropping net-attach-def %q out of the queue: %v", key, err)
+	klog.Warningf("%s: Dropping net-attach-def %q out of the queue: %v", nadController.name, key, err)
 	nadController.queue.Forget(key)
 	utilruntime.HandleError(err)
 }
 
-func (nadController *netAttachDefinitionController) queueNetworkAttachDefinition(obj interface{}) {
+func (nadController *NetAttachDefinitionController) queueNetworkAttachDefinition(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for net-attach-def %+v: %v", obj, err))
+		utilruntime.HandleError(fmt.Errorf("%s: couldn't get key for net-attach-def %+v: %v", nadController.name, obj, err))
 		return
 	}
 	nadController.queue.Add(key)
 }
 
-func (nadController *netAttachDefinitionController) onNetworkAttachDefinitionAdd(obj interface{}) {
+func (nadController *NetAttachDefinitionController) onNetworkAttachDefinitionAdd(obj interface{}) {
 	nad := obj.(*nettypes.NetworkAttachmentDefinition)
 	if nad == nil {
-		utilruntime.HandleError(fmt.Errorf("invalid net-attach-def provided to onNetworkAttachDefinitionAdd()"))
+		utilruntime.HandleError(fmt.Errorf("%s: invalid net-attach-def provided to onNetworkAttachDefinitionAdd()", nadController.name))
 		return
 	}
 
-	klog.V(4).Infof("Adding net-attach-def %s/%s", nad.Namespace, nad.Name)
+	klog.V(4).Infof("%s: Adding net-attach-def %s/%s", nadController.name, nad.Namespace, nad.Name)
 	nadController.queueNetworkAttachDefinition(obj)
 }
 
-func (nadController *netAttachDefinitionController) onNetworkAttachDefinitionUpdate(oldObj, newObj interface{}) {
+func (nadController *NetAttachDefinitionController) onNetworkAttachDefinitionUpdate(oldObj, newObj interface{}) {
 	oldNAD := oldObj.(*nettypes.NetworkAttachmentDefinition)
 	newNAD := newObj.(*nettypes.NetworkAttachmentDefinition)
 	if oldNAD == nil || newNAD == nil {
-		utilruntime.HandleError(fmt.Errorf("invalid net-attach-def provided to onNetworkAttachDefinitionUpdate()"))
+		utilruntime.HandleError(fmt.Errorf("%s: invalid net-attach-def provided to onNetworkAttachDefinitionUpdate()", nadController.name))
 		return
 	}
 
@@ -280,7 +291,7 @@ func (nadController *netAttachDefinitionController) onNetworkAttachDefinitionUpd
 		return
 	}
 
-	err := fmt.Sprintf("Updating net-attach-def %s/%s is not supported", newNAD.Namespace, newNAD.Name)
+	err := fmt.Sprintf("%s: Updating net-attach-def %s/%s is not supported", nadController.name, newNAD.Namespace, newNAD.Name)
 	nadRef := kapi.ObjectReference{
 		Kind:      "NetworkAttachmentDefinition",
 		Namespace: newNAD.Namespace,
@@ -290,21 +301,21 @@ func (nadController *netAttachDefinitionController) onNetworkAttachDefinitionUpd
 	klog.Warningf(err)
 }
 
-func (nadController *netAttachDefinitionController) onNetworkAttachDefinitionDelete(obj interface{}) {
+func (nadController *NetAttachDefinitionController) onNetworkAttachDefinitionDelete(obj interface{}) {
 	nad := obj.(*nettypes.NetworkAttachmentDefinition)
 	if nad == nil {
 		utilruntime.HandleError(fmt.Errorf("invalid net-attach-def provided to onNetworkAttachDefinitionDelete()"))
 		return
 	}
 
-	klog.V(4).Infof("Deleting net-attach-def %s/%s", nad.Namespace, nad.Name)
+	klog.V(4).Infof("%s: Deleting net-attach-def %s/%s", nadController.name, nad.Namespace, nad.Name)
 	nadController.queueNetworkAttachDefinition(obj)
 }
 
 // GetAllNetworkControllers returns a snapshot of all managed NAD associated network controllers.
 // Caller needs to note that there are no guarantees the return results reflect the real time
 // condition. There maybe more controllers being added, and returned controllers may be deleted
-func (nadController *netAttachDefinitionController) GetAllNetworkControllers() []NetworkController {
+func (nadController *NetAttachDefinitionController) GetAllNetworkControllers() []NetworkController {
 	allNetworkNames := nadController.perNetworkNADInfo.GetKeys()
 	allNetworkControllers := make([]NetworkController, 0, len(allNetworkNames))
 	for _, netName := range allNetworkNames {
@@ -321,7 +332,7 @@ func (nadController *netAttachDefinitionController) GetAllNetworkControllers() [
 // AddNetAttachDef adds the given nad to the associated controller. It creates the controller if this
 // is the first NAD of the network.
 // Non-retriable errors (configuration error etc.) are just logged, and the function immediately returns nil.
-func (nadController *netAttachDefinitionController) AddNetAttachDef(ncm NetworkControllerManager,
+func (nadController *NetAttachDefinitionController) AddNetAttachDef(ncm NetworkControllerManager,
 	netattachdef *nettypes.NetworkAttachmentDefinition, doStart bool) error {
 	var netConfInfo util.NetConfInfo
 	var nInfo util.NetInfo
@@ -329,7 +340,7 @@ func (nadController *netAttachDefinitionController) AddNetAttachDef(ncm NetworkC
 	var netName string
 
 	netAttachDefName := util.GetNADName(netattachdef.Namespace, netattachdef.Name)
-	klog.Infof("Add net-attach-def %s", netAttachDefName)
+	klog.Infof("%s: Add net-attach-def %s", nadController.name, netAttachDefName)
 
 	nInfo, netConfInfo, invalidNADErr = util.ParseNADInfo(netattachdef)
 	if invalidNADErr == nil {
@@ -348,29 +359,29 @@ func (nadController *netAttachDefinitionController) AddNetAttachDef(ncm NetworkC
 			// first time to process this nad
 			if invalidNADErr != nil {
 				// invalid nad, nothing to do
-				klog.Warningf("net-attach-def %s is first seen and is invalid: %v", nadName, invalidNADErr)
+				klog.Warningf("%s: net-attach-def %s is first seen and is invalid: %v", nadController.name, nadName, invalidNADErr)
 				nadController.perNADNetConfInfo.Delete(nadName)
 				return nil
 			}
-			klog.V(5).Infof("net-attach-def %s network %s first seen", nadName, netName)
+			klog.V(5).Infof("%s: net-attach-def %s network %s first seen", nadController.name, nadName, netName)
 			err = nadController.addNADToController(ncm, nadName, nInfo, netConfInfo, doStart)
 			if err != nil {
-				klog.Errorf("Failed to add net-attach-def %s to network %s: %v", nadName, netName, err)
+				klog.Errorf("%s: Failed to add net-attach-def %s to network %s: %v", nadController.name, nadName, netName, err)
 				nadController.perNADNetConfInfo.Delete(nadName)
 				return err
 			}
 		} else {
-			klog.V(5).Infof("net-attach-def %s network %s already exists", nadName, netName)
+			klog.V(5).Infof("%s: net-attach-def %s network %s already exists", nadController.name, nadName, netName)
 			nadUpdated := false
 			if invalidNADErr != nil {
 				nadUpdated = true
 			} else if nadNci.netName != netName {
 				// netconf network name changed
-				klog.V(5).Infof("net-attach-def %s network name %s has changed", netName, nadNci.netName)
+				klog.V(5).Infof("%s: net-attach-def %s network name %s has changed", nadController.name, netName, nadNci.netName)
 				nadUpdated = true
 			} else if !nadNci.CompareNetConf(netConfInfo) {
 				// netconf spec changed
-				klog.V(5).Infof("net-attach-def %s spec has changed", nadName)
+				klog.V(5).Infof("%s: net-attach-def %s spec has changed", nadController.name, nadName)
 				nadUpdated = true
 			}
 
@@ -381,30 +392,30 @@ func (nadController *netAttachDefinitionController) AddNetAttachDef(ncm NetworkC
 				}
 				err = nadController.addNADToController(ncm, nadName, nInfo, netConfInfo, doStart)
 				if err != nil {
-					klog.Errorf("Failed to add net-attach-def %s to network %s: %v", nadName, netName, err)
+					klog.Errorf("%s: Failed to add net-attach-def %s to network %s: %v", nadController.name, nadName, netName, err)
 					return err
 				}
 				return nil
 			}
 			if nadUpdated {
-				klog.V(5).Infof("net-attach-def %s network %s updated", nadName, netName)
+				klog.V(5).Infof("%s: net-attach-def %s network %s updated", nadController.name, nadName, netName)
 				// delete the NAD from the old network first
 				err := nadController.deleteNADFromController(nadNci.netName, nadName)
 				if err != nil {
-					klog.Errorf("Failed to delete net-attach-def %s from network %s: %v", nadName, nadNci.netName, err)
+					klog.Errorf("%s: Failed to delete net-attach-def %s from network %s: %v", nadController.name, nadName, nadNci.netName, err)
 					return err
 				}
 				nadController.perNADNetConfInfo.Delete(nadName)
 			}
 			if invalidNADErr != nil {
-				klog.Warningf("net-attach-def %s is invalid: %v", nadName, invalidNADErr)
+				klog.Warningf("%s: net-attach-def %s is invalid: %v", nadController.name, nadName, invalidNADErr)
 				return nil
 			}
-			klog.V(5).Infof("Add updated net-attach-def %s to network %s", nadName, netName)
+			klog.V(5).Infof("%s: Add updated net-attach-def %s to network %s", nadController.name, nadName, netName)
 			nadController.perNADNetConfInfo.LoadOrStore(nadName, &nadNetConfInfo{NetConfInfo: netConfInfo, netName: netName})
 			err = nadController.addNADToController(ncm, nadName, nInfo, netConfInfo, doStart)
 			if err != nil {
-				klog.Errorf("Failed to add net-attach-def %s to network %s: %v", nadName, netName, err)
+				klog.Errorf("%s: Failed to add net-attach-def %s to network %s: %v", nadController.name, nadName, netName, err)
 				nadController.perNADNetConfInfo.Delete(nadName)
 				return err
 			}
@@ -416,17 +427,17 @@ func (nadController *netAttachDefinitionController) AddNetAttachDef(ncm NetworkC
 
 // DeleteNetAttachDef deletes the given NAD from the associated controller. It delete the controller if this
 // is the last NAD of the network
-func (nadController *netAttachDefinitionController) DeleteNetAttachDef(netAttachDefName string) error {
-	klog.Infof("Delete net-attach-def %s", netAttachDefName)
+func (nadController *NetAttachDefinitionController) DeleteNetAttachDef(netAttachDefName string) error {
+	klog.Infof("%s: Delete net-attach-def %s", nadController.name, netAttachDefName)
 	return nadController.perNADNetConfInfo.DoWithLock(netAttachDefName, func(nadName string) error {
 		existingNadNetConfInfo, found := nadController.perNADNetConfInfo.Load(nadName)
 		if !found {
-			klog.V(5).Infof("net-attach-def %s not found for removal", nadName)
+			klog.V(5).Infof("%s: net-attach-def %s not found for removal", nadController.name, nadName)
 			return nil
 		}
 		err := nadController.deleteNADFromController(existingNadNetConfInfo.netName, nadName)
 		if err != nil {
-			klog.Errorf("Failed to delete net-attach-def %s from network %s: %v", nadName, existingNadNetConfInfo.netName, err)
+			klog.Errorf("%s: Failed to delete net-attach-def %s from network %s: %v", nadController.name, nadName, existingNadNetConfInfo.netName, err)
 			return err
 		}
 		nadController.perNADNetConfInfo.Delete(nadName)
@@ -434,13 +445,13 @@ func (nadController *netAttachDefinitionController) DeleteNetAttachDef(netAttach
 	})
 }
 
-func (nadController *netAttachDefinitionController) addNADToController(ncm NetworkControllerManager, nadName string,
+func (nadController *NetAttachDefinitionController) addNADToController(ncm NetworkControllerManager, nadName string,
 	nInfo util.NetInfo, netConfInfo util.NetConfInfo, doStart bool) (err error) {
 	var oc NetworkController
 	var nadExists, isStarted bool
 
 	netName := nInfo.GetNetworkName()
-	klog.V(5).Infof("Add net-attach-def %s to network %s", nadName, netName)
+	klog.V(5).Infof("%s: Add net-attach-def %s to network %s", nadController.name, nadName, netName)
 	return nadController.perNetworkNADInfo.DoWithLock(netName, func(networkName string) error {
 		nni, loaded := nadController.perNetworkNADInfo.LoadOrStore(networkName, &networkNADInfo{
 			nadNames:  map[string]struct{}{},
@@ -454,14 +465,15 @@ func (nadController *netAttachDefinitionController) addNADToController(ncm Netwo
 				}
 			}()
 			// first NAD for this network, create controller
-			klog.V(5).Infof("First net-attach-def %s of network %s added, create network controller", nadName, networkName)
+			klog.V(5).Infof("%s: First net-attach-def %s of network %s added, create network controller", nadController.name, nadName, networkName)
 			oc, err = ncm.NewNetworkController(nInfo, netConfInfo)
 			if err != nil {
-				return fmt.Errorf("failed to create network controller for network %s: %v", networkName, err)
+				klog.Errorf("%s: Failed to create network controller for network %s: %v", nadController.name, networkName, err)
+				return err
 			}
 			nni.nc = oc
 		} else {
-			klog.V(5).Infof("net-attach-def %s added to existing network %s", nadName, networkName)
+			klog.V(5).Infof("%s: net-attach-def %s added to existing network %s", nadController.name, nadName, networkName)
 			// controller of this network already exists
 			oc = nni.nc
 			isStarted = nni.isStarted
@@ -470,10 +482,10 @@ func (nadController *netAttachDefinitionController) addNADToController(ncm Netwo
 			if !oc.CompareNetConf(netConfInfo) {
 				if nadExists {
 					// this should not happen, continue to start the existing controller if requested
-					return fmt.Errorf("net-attach-def %s netconf spec changed, should not happen", networkName)
+					return fmt.Errorf("%s: net-attach-def %s netconf spec changed, should not happen", nadController.name, networkName)
 				} else {
-					return fmt.Errorf("NAD %s does not share the same CNI config with network %s",
-						nadName, networkName)
+					return fmt.Errorf("%s: NAD %s does not share the same CNI config with network %s",
+						nadController.name, nadName, networkName)
 				}
 			}
 		}
@@ -492,35 +504,35 @@ func (nadController *netAttachDefinitionController) addNADToController(ncm Netwo
 			return nil
 		}
 
-		klog.V(5).Infof("Start network controller for network %s", networkName)
+		klog.V(5).Infof("%s: Start network controller for network %s", nadController.name, networkName)
 		// start the controller if requested
 		err = oc.Start(context.TODO())
 		if err == nil {
 			nni.isStarted = true
 			return nil
 		}
-		return fmt.Errorf("network controller for network %s failed to be started: %v", networkName, err)
+		return fmt.Errorf("%s: network controller for network %s failed to be started: %v", nadController.name, networkName, err)
 	})
 }
 
-func (nadController *netAttachDefinitionController) deleteNADFromController(netName, nadName string) error {
-	klog.V(5).Infof("Delete net-attach-def %s from network %s", nadName, netName)
+func (nadController *NetAttachDefinitionController) deleteNADFromController(netName, nadName string) error {
+	klog.V(5).Infof("%s: Delete net-attach-def %s from network %s", nadController.name, nadName, netName)
 	return nadController.perNetworkNADInfo.DoWithLock(netName, func(networkName string) error {
 		nni, found := nadController.perNetworkNADInfo.Load(networkName)
 		if !found {
-			klog.V(5).Infof("Network controller for network %s not found", networkName)
+			klog.V(5).Infof("%s: Network controller for network %s not found", nadController.name, networkName)
 			return nil
 		}
 		_, nadExists := nni.nadNames[nadName]
 		if !nadExists {
-			klog.V(5).Infof("Unable to remove NAD %s, does not exist on network %s", nadName, networkName)
+			klog.V(5).Infof("%s: Unable to remove NAD %s, does not exist on network %s", nadController.name, nadName, networkName)
 			return nil
 		}
 
 		oc := nni.nc
 		delete(nni.nadNames, nadName)
 		if len(nni.nadNames) == 0 {
-			klog.V(5).Infof("The last NAD: %s of network %s has been deleted, stopping network controller", nadName, networkName)
+			klog.V(5).Infof("%s: The last NAD: %s of network %s has been deleted, stopping network controller", nadController.name, nadName, networkName)
 			oc.Stop()
 			err := oc.Cleanup(oc.GetNetworkName())
 			// set isStarted to false even stop failed, as the operation could be half-done.
@@ -528,12 +540,12 @@ func (nadController *netAttachDefinitionController) deleteNADFromController(netN
 			nni.isStarted = false
 			if err != nil {
 				nni.nadNames[nadName] = struct{}{}
-				return fmt.Errorf("failed to stop network controller for network %s: %v", networkName, err)
+				return fmt.Errorf("%s: failed to stop network controller for network %s: %v", nadController.name, networkName, err)
 			}
 			nadController.perNetworkNADInfo.Delete(networkName)
 		}
 		nni.nc.DeleteNAD(nadName)
-		klog.V(5).Infof("Delete NAD %s from controller of network %s", nadName, networkName)
+		klog.V(5).Infof("%s: Delete NAD %s from controller of network %s", nadController.name, nadName, networkName)
 		return nil
 	})
 }

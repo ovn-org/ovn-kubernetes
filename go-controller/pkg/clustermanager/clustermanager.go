@@ -19,12 +19,14 @@ import (
 )
 
 // ClusterManager structure is the object which manages the cluster nodes.
-// It creates a default network controller for the default network.
+// It creates a default network controller for the default network and a
+// secondary network cluster controller manager to manage the multi networks.
 type ClusterManager struct {
 	client                      clientset.Interface
 	defaultNetClusterController *networkClusterController
 	wf                          *factory.WatchFactory
 	wg                          *sync.WaitGroup
+	secondaryNetClusterManager  *secondaryNetworkClusterManager
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
@@ -60,6 +62,9 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		isActive:                    false,
 	}
 
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		cm.secondaryNetClusterManager = newSecondaryNetworkClusterManager(ovnClient, wf, recorder)
+	}
 	return cm
 }
 
@@ -97,7 +102,7 @@ func (cm *ClusterManager) Start(ctx context.Context, cancel context.CancelFunc) 
 			OnStartedLeading: func(ctx context.Context) {
 				klog.Infof("Won leader election; in active mode")
 				// run only on the active master node
-				if err := cm.run(ctx); err != nil {
+				if err := cm.run(ctx, cancel); err != nil {
 					klog.Error(err)
 					cancel()
 				}
@@ -148,7 +153,7 @@ func (cm *ClusterManager) Stop() {
 
 // run starts managing the cluster operations
 // It starts the default network cluster controller
-func (cm *ClusterManager) run(ctx context.Context) error {
+func (cm *ClusterManager) run(ctx context.Context, cancel context.CancelFunc) error {
 	cm.Lock()
 	defer cm.Unlock()
 	if cm.isActive {
@@ -174,6 +179,12 @@ func (cm *ClusterManager) run(ctx context.Context) error {
 		return err
 	}
 
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		if err := cm.secondaryNetClusterManager.Start(cancel); err != nil {
+			return err
+		}
+	}
+
 	cm.isActive = true
 	return nil
 }
@@ -191,6 +202,10 @@ func (cm *ClusterManager) halt() error {
 	klog.Info("Halting the cluster manager operations")
 	metrics.UnregisterClusterManagerFunctional()
 	cm.defaultNetClusterController.Stop()
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		cm.secondaryNetClusterManager.Stop()
+	}
+
 	cm.isActive = false
 	return nil
 }
