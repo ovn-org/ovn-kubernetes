@@ -552,7 +552,6 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 	opModels := []operationModel{
 		{
 			Model:          lrsr,
-			ModelPredicate: p,
 			OnModelUpdates: fields,
 			DoAfter:        func() { router.StaticRoutes = []string{lrsr.UUID} },
 			ErrNotFound:    false,
@@ -567,22 +566,96 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 		},
 	}
 
+	if p != nil {
+		opModels[0].ModelPredicate = p
+	}
+
 	m := newModelClient(nbClient)
 	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
-// CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps looks up a logical
+// PolicyEqualPredicate determines if two static routes have the same routing policy (dst-ip or src-ip)
+// If policy is nil, OVN considers that as dst-ip
+func PolicyEqualPredicate(p1, p2 *nbdb.LogicalRouterStaticRoutePolicy) bool {
+	if p1 == nil {
+		return p2 == nil || (p2 != nil && *p2 == nbdb.LogicalRouterStaticRoutePolicyDstIP)
+	}
+
+	if p2 == nil {
+		return *p1 == nbdb.LogicalRouterStaticRoutePolicyDstIP
+	}
+
+	return *p1 == *p2
+}
+
+// CreateOrReplaceLogicalRouterStaticRouteWithPredicate looks up a logical
 // router static route from the cache based on a given predicate. If it does not
 // exist, it creates the provided logical router static route. If it does, it
 // updates it. The logical router static route is added to the provided logical
-// router
-func CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client, routerName string,
+// router.
+// If more than one route matches the predicate on the router, the additional routes are removed.
+func CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient libovsdbclient.Client, routerName string,
 	lrsr *nbdb.LogicalRouterStaticRoute, p logicalRouterStaticRoutePredicate, fields ...interface{}) error {
-	ops, err := CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient, nil, routerName, lrsr, p, fields...)
+
+	lr := &nbdb.LogicalRouter{Name: routerName}
+	router, err := GetLogicalRouter(nbClient, lr)
+	if err != nil {
+		return err
+	}
+	newPredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		for _, routeUUID := range router.StaticRoutes {
+			if routeUUID == item.UUID && p(item) {
+				return true
+			}
+		}
+		return false
+	}
+	routes, err := FindLogicalRouterStaticRoutesWithPredicate(nbClient, newPredicate)
 	if err != nil {
 		return err
 	}
 
+	var ops []libovsdb.Operation
+	m := newModelClient(nbClient)
+
+	if len(routes) > 0 {
+		lrsr.UUID = routes[0].UUID
+	}
+
+	if len(routes) > 1 {
+		// should only be a single route remove all except the first
+		routes = routes[1:]
+		opModels := make([]operationModel, 0, len(routes)+1)
+		router.StaticRoutes = []string{}
+		for _, route := range routes {
+			route := route
+			router.StaticRoutes = append(router.StaticRoutes, route.UUID)
+			opModel := operationModel{
+				Model:       route,
+				ErrNotFound: false,
+				BulkOp:      false,
+			}
+			opModels = append(opModels, opModel)
+		}
+		opModel := operationModel{
+			Model:            router,
+			ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
+			OnModelMutations: []interface{}{&router.StaticRoutes},
+			ErrNotFound:      true,
+			BulkOp:           false,
+		}
+		opModels = append(opModels, opModel)
+
+		ops, err = m.DeleteOps(nil, opModels...)
+		if err != nil {
+			return err
+		}
+	}
+
+	ops, err = CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient, ops, routerName, lrsr, nil, fields...)
+	if err != nil {
+		return err
+	}
 	_, err = TransactAndCheck(nbClient, ops)
 	return err
 }
@@ -617,7 +690,7 @@ func DeleteLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client
 	return m.Delete(opModels...)
 }
 
-// DeleteLogicalRouterPolicies deletes the logical router static routes and
+// DeleteLogicalRouterStaticRoutes deletes the logical router static routes and
 // removes them from the provided logical router
 func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName string, lrsrs ...*nbdb.LogicalRouterStaticRoute) error {
 	router := &nbdb.LogicalRouter{
@@ -627,6 +700,7 @@ func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName 
 
 	opModels := make([]operationModel, 0, len(lrsrs)+1)
 	for _, lrsr := range lrsrs {
+		lrsr := lrsr
 		router.StaticRoutes = append(router.StaticRoutes, lrsr.UUID)
 		opModel := operationModel{
 			Model:       lrsr,
@@ -651,7 +725,7 @@ func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName 
 
 // BFD ops
 
-// CreateOrUpdateLogicalRouter creates or updates the provided BFDs and returns
+// CreateOrUpdateBFDOps creates or updates the provided BFDs and returns
 // the corresponding ops
 func CreateOrUpdateBFDOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, bfds ...*nbdb.BFD) ([]libovsdb.Operation, error) {
 	opModels := make([]operationModel, 0, len(bfds))
@@ -670,7 +744,7 @@ func CreateOrUpdateBFDOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
-// CreateOrUpdateLogicalRouter deletes the provided BFDs
+// DeleteBFDs deletes the provided BFDs
 func DeleteBFDs(nbClient libovsdbclient.Client, bfds ...*nbdb.BFD) error {
 	opModels := make([]operationModel, 0, len(bfds))
 	for i := range bfds {
@@ -723,8 +797,9 @@ func RemoveLoadBalancersFromLogicalRouterOps(nbClient libovsdbclient.Client, ops
 		Model:            router,
 		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.LoadBalancer},
-		ErrNotFound:      true,
-		BulkOp:           false,
+		// if we want to delete loadbalancer from the router that doesn't exist, that is noop
+		ErrNotFound: false,
+		BulkOp:      false,
 	}
 
 	modelClient := newModelClient(nbClient)
@@ -780,7 +855,7 @@ func BuildSNAT(
 	return buildNAT(nbdb.NATTypeSNAT, externalIPStr, logicalIPStr, logicalPort, "", externalIDs)
 }
 
-// BuildLogicalRouterSNAT builds a logical router DNAT/SNAT
+// BuildDNATAndSNAT builds a logical router DNAT/SNAT
 func BuildDNATAndSNAT(
 	externalIP *net.IP,
 	logicalIP *net.IPNet,
@@ -1036,35 +1111,4 @@ func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 
 	m := newModelClient(nbClient)
 	return m.DeleteOps(ops, opModels...)
-}
-
-// GATEWAY CHASSIS OPs
-
-// CreateOrUpdateGatewayChassis creates or updates the provided gateway chassis
-// and sets it to the provided logical router port
-func CreateOrUpdateGatewayChassis(nbClient libovsdbclient.Client, port *nbdb.LogicalRouterPort, chassis *nbdb.GatewayChassis, fields ...interface{}) error {
-	if len(fields) == 0 {
-		fields = onModelUpdatesAllNonDefault()
-	}
-	opModels := []operationModel{
-		{
-			Model:          chassis,
-			OnModelUpdates: fields,
-			DoAfter:        func() { port.GatewayChassis = []string{chassis.UUID} },
-			ErrNotFound:    false,
-			BulkOp:         false,
-		},
-		{
-			Model: port,
-			// use update here, as of now we only ever want a single chassis
-			// associated with a port
-			OnModelUpdates: []interface{}{&port.GatewayChassis},
-			ErrNotFound:    true,
-			BulkOp:         false,
-		},
-	}
-
-	modelClient := newModelClient(nbClient)
-	_, err := modelClient.CreateOrUpdate(opModels...)
-	return err
 }

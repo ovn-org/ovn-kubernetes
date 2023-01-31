@@ -46,6 +46,9 @@ const (
 
 	NodeLocalSwitch = "node_local_switch"
 
+	// types.OVNLayer2Switch is the name of layer2 topology switch
+	OVNLayer2Switch = "ovn_layer2_switch"
+
 	// ACL Priorities
 
 	// Default routed multicast allow acl rule priority
@@ -117,6 +120,9 @@ const (
 	// OVN-K8S Address Sets Names
 	HybridRoutePolicyPrefix = "hybrid-route-pods-"
 	EgressQoSRulePrefix     = "egress-qos-pods-"
+	ClusterNodeIP           = "cluster-node-ips"
+	EgressIPServedPods      = "egressip-served-pods"
+	EgressServiceServedPods = "egresssvc-served-pods"
 
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
@@ -163,7 +169,10 @@ const (
 	NADExternalID = OvnK8sPrefix + "/" + "nad"
 	// key for topology type external-id, only used for secondary network logical entities
 	TopologyExternalID = OvnK8sPrefix + "/" + "topology"
+	// key for topology version external-id
+	TopologyVersionExternalID = "k8s-ovn-topo-version"
 
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology = "layer3"
+	Layer2Topology = "layer2"
 )

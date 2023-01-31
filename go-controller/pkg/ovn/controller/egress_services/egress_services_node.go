@@ -173,6 +173,10 @@ func (c *Controller) syncNode(key string) error {
 		klog.V(4).Infof("Finished syncing Egress Service node %s: %v", nodeName, time.Since(startTime))
 	}()
 
+	if err := c.deleteLegacyDefaultNoRerouteNodePolicies(c.nbClient, nodeName); err != nil {
+		return err
+	}
+
 	n, err := c.nodeLister.Get(nodeName)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
@@ -196,12 +200,12 @@ func (c *Controller) syncNode(key string) error {
 			state.healthClient.Disconnect()
 		}
 
-		return c.deleteNoRerouteNodePolicies(c.nbClient, key)
+		return c.deleteNoRerouteNodePolicies(c.addressSetFactory, nodeName, state.v4InternalNodeIP, state.v6InternalNodeIP)
 	}
 
 	// We create the per-node reroute policies as long as it has a resource (n != nil at this point),
 	// regardless if it was allocated services or not.
-	if err := c.createNoRerouteNodePolicies(c.nbClient, n); err != nil {
+	if err := c.createNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, n); err != nil {
 		return err
 	}
 
@@ -308,8 +312,11 @@ func (c *Controller) nodeStateFor(name string) (*nodeState, error) {
 		v6IP = ip
 	}
 
-	return &nodeState{name: name, mgmtIPs: mgmtIPs, v4MgmtIP: v4IP, v6MgmtIP: v6IP, healthClient: healthcheck.NewEgressIPHealthClient(name),
-		allocations: map[string]*svcState{}, labels: node.Labels, reachable: true, draining: false}, nil
+	v4NodeAddr, v6NodeAddr := util.GetNodeInternalAddrs(node)
+
+	return &nodeState{name: name, mgmtIPs: mgmtIPs, v4MgmtIP: v4IP, v6MgmtIP: v6IP, v4InternalNodeIP: v4NodeAddr, v6InternalNodeIP: v6NodeAddr,
+		healthClient: healthcheck.NewEgressIPHealthClient(name), allocations: map[string]*svcState{}, labels: node.Labels,
+		reachable: true, draining: false}, nil
 }
 
 // Returns the names of all of the nodes in the nodes cache that match the given selector

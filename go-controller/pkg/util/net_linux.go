@@ -483,7 +483,7 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 
 	var ips []*net.IPNet
 	for _, addr := range addrs {
-		if addr.IP.IsLinkLocalUnicast() || isAddressReservedForInternalUse(addr.IP) {
+		if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) {
 			continue
 		}
 		// Ignore addresses marked as secondary or deprecated since they may
@@ -498,7 +498,7 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 	return ips, nil
 }
 
-func isAddressReservedForInternalUse(addr net.IP) bool {
+func IsAddressReservedForInternalUse(addr net.IP) bool {
 	var subnetStr string
 	if addr.To4() != nil {
 		subnetStr = types.V4MasqueradeSubnet

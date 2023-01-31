@@ -287,3 +287,10 @@ func MatchAllIPStringFamily(isIPv6 bool, ipStrings []string) ([]string, error) {
 	}
 	return nil, NoIPError
 }
+
+// ContainsCIDR returns true if ipnet1 contains ipnet2
+func ContainsCIDR(ipnet1, ipnet2 *net.IPNet) bool {
+	mask1, _ := ipnet1.Mask.Size()
+	mask2, _ := ipnet2.Mask.Size()
+	return mask1 <= mask2 && ipnet1.Contains(ipnet2.IP)
+}

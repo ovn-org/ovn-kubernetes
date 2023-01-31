@@ -71,6 +71,13 @@ fi
 # time.
 SKIPPED_TESTS+="${SKIPPED_TESTS:+|}disabling egress nodes impeding Legacy health check"
 
+if [ "$ENABLE_MULTI_NET" != "true" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+    SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="Multi Homing"
+fi
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock

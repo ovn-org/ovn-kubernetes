@@ -61,8 +61,9 @@ func GetGatewayPhysicalIPs(nbClient libovsdbclient.Client, gatewayRouter string)
 	return nil, fmt.Errorf("no physical IPs found for gateway %s", gatewayRouter)
 }
 
-// CreateDummyGWMacBinding creates a mac binding for a fake next hop when a node has no default gateway
-func CreateDummyGWMacBinding(sbClient libovsdbclient.Client, nodeName string) error {
+// CreateDummyGWMacBindings creates mac bindings (ipv4 and ipv6) for a fake next hops
+// used by host->service traffic
+func CreateDummyGWMacBindings(sbClient libovsdbclient.Client, nodeName string) error {
 	for _, nextHop := range node.DummyNextHopIPs() {
 		dummyNextHopMAC := util.IPAddrToHWAddr(nextHop)
 		nodeGWRouter := util.GetGatewayRouterFromNode(nodeName)

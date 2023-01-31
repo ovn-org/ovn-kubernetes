@@ -17,6 +17,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
+	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
 
 	"github.com/containernetworking/plugins/pkg/ip"
@@ -428,6 +429,13 @@ func (n *OvnNode) Start(ctx context.Context) error {
 
 		err = setupOVNNode(node)
 		if err != nil {
+			return err
+		}
+
+		// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
+		// Must happen before calling any OVS exec from pkg/cni to prevent races.
+		// Not required in DPUHost mode as OVS is not present there.
+		if err := cni.SetExec(kexec.New()); err != nil {
 			return err
 		}
 	}
