@@ -355,6 +355,11 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": expectedOVNClusterRouter.UUID, "name": types.OVNClusterRouter},
 			}
+			gr := types.GWRouterPrefix + node1.Name
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
@@ -368,6 +373,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
+					datapath,
 				},
 			}
 			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
@@ -438,7 +444,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseStateWithHybridNode := append([]libovsdbtest.TestData{hybridSubnetStaticRoute1, hybridSubnetLRP2, hybridSubnetLRP1, hybridLogicalSwitchPort, hybridLogicalRouterStaticRoute}, expectedDatabaseState...)
 
 			expectedMACBinding := &sbdb.MACBinding{
-				UUID:        "MAC-binding-UUID",
+				UUID:        "MAC-binding-HO-UUID",
 				Datapath:    clusterRouterDatapath.UUID,
 				IP:          nodeHOIP,
 				LogicalPort: "rtos-node1",
@@ -446,10 +452,12 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			expectedSBDatabaseState := []libovsdbtest.TestData{
+				datapath,
 				expectedMACBinding,
 				clusterRouterDatapath,
 			}
 
+			expectedSBDatabaseState = generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseStateWithHybridNode))
 			gomega.Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 
@@ -624,6 +632,11 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": expectedOVNClusterRouter.UUID, "name": types.OVNClusterRouter},
 			}
+			gr := types.GWRouterPrefix + node1.Name
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 
 			expectedDatabaseState := []libovsdbtest.TestData{ovnClusterRouterLRP}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
@@ -658,7 +671,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseStateWithHybridNode := append([]libovsdbtest.TestData{hybridSubnetStaticRoute1, hybridSubnetLRP2, hybridSubnetLRP1, hybridLogicalSwitchPort, hybridLogicalRouterStaticRoute}, expectedDatabaseState...)
 
 			expectedMACBinding := &sbdb.MACBinding{
-				UUID:        "MAC-binding-UUID",
+				UUID:        "MAC-binding-HO-UUID",
 				Datapath:    clusterRouterDatapath.UUID,
 				IP:          nodeHOIP,
 				LogicalPort: "rtos-node1",
@@ -666,6 +679,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			expectedSBDatabaseState := []libovsdbtest.TestData{
+				datapath,
 				clusterRouterDatapath,
 				expectedMACBinding,
 			}
@@ -702,6 +716,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
 
 			gomega.Consistently(libovsdbOvnNBClient, 2).Should(libovsdbtest.HaveData(expectedDatabaseStateWithHybridNode))
+			expectedSBDatabaseState = generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
 			gomega.Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 
 			return nil
@@ -820,6 +835,11 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": expectedOVNClusterRouter.UUID, "name": types.OVNClusterRouter},
 			}
+			gr := types.GWRouterPrefix + node1.Name
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
@@ -833,6 +853,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
+					datapath,
 				},
 			}
 			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
@@ -895,7 +916,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseStateWithHybridNode := append([]libovsdbtest.TestData{hybridSubnetStaticRoute1, hybridSubnetLRP2, hybridSubnetLRP1, hybridLogicalSwitchPort, hybridLogicalRouterStaticRoute}, expectedDatabaseState...)
 
 			expectedMACBinding := &sbdb.MACBinding{
-				UUID:        "MAC-binding-UUID",
+				UUID:        "MAC-binding-HO-UUID",
 				Datapath:    clusterRouterDatapath.UUID,
 				IP:          nodeHOIP,
 				LogicalPort: "rtos-node1",
@@ -903,10 +924,12 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			expectedSBDatabaseState := []libovsdbtest.TestData{
+				datapath,
 				expectedMACBinding,
 				clusterRouterDatapath,
 			}
 
+			expectedSBDatabaseState = generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseStateWithHybridNode))
 			gomega.Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 
@@ -1081,6 +1104,11 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": expectedOVNClusterRouter.UUID, "name": types.OVNClusterRouter},
 			}
+			gr := types.GWRouterPrefix + node1.Name
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
@@ -1094,6 +1122,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
+					datapath,
 				},
 			}
 			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
@@ -1157,7 +1186,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseStateWithHybridNode := append([]libovsdbtest.TestData{hybridSubnetStaticRoute1, hybridSubnetLRP2, hybridSubnetLRP1, hybridLogicalSwitchPort, hybridLogicalRouterStaticRoute}, expectedDatabaseState...)
 
 			expectedMACBinding := &sbdb.MACBinding{
-				UUID:        "MAC-binding-UUID",
+				UUID:        "MAC-binding-HO-UUID",
 				Datapath:    clusterRouterDatapath.UUID,
 				IP:          nodeHOIP,
 				LogicalPort: "rtos-node1",
@@ -1165,10 +1194,12 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			expectedSBDatabaseState := []libovsdbtest.TestData{
+				datapath,
 				expectedMACBinding,
 				clusterRouterDatapath,
 			}
 
+			expectedSBDatabaseState = generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseStateWithHybridNode))
 			gomega.Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 

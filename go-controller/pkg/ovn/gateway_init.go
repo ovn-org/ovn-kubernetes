@@ -264,10 +264,30 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 	externalRouterPort := types.GWRouterToExtSwitchPrefix + gatewayRouter
 
 	nextHops := l3GatewayConfig.NextHops
-	if len(l3GatewayConfig.NextHops) == 0 {
-		nextHops = node.DummyNextHopIPs()
-		if err := gateway.CreateDummyGWMacBinding(oc.sbClient, nodeName); err != nil {
-			return err
+
+	if err := gateway.CreateDummyGWMacBindings(oc.sbClient, nodeName); err != nil {
+		return err
+	}
+
+	for _, nextHop := range node.DummyNextHopIPs() {
+		// Add return service route for OVN back to host
+		prefix := types.V4MasqueradeSubnet
+		if utilnet.IsIPv6(nextHop) {
+			prefix = types.V6MasqueradeSubnet
+		}
+		lrsr := nbdb.LogicalRouterStaticRoute{
+			IPPrefix:   prefix,
+			Nexthop:    nextHop.String(),
+			OutputPort: &externalRouterPort,
+		}
+		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.OutputPort != nil && *item.OutputPort == *lrsr.OutputPort && item.IPPrefix == lrsr.IPPrefix &&
+				libovsdbops.PolicyEqualPredicate(item.Policy, lrsr.Policy)
+		}
+		err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, gatewayRouter, &lrsr, p,
+			&lrsr.Nexthop)
+		if err != nil {
+			return fmt.Errorf("error creating service static route %+v in GR %s: %v", lrsr, gatewayRouter, err)
 		}
 	}
 
