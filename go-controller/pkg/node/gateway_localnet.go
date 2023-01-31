@@ -56,7 +56,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	if config.IPv6Mode {
 		generateBlockMCSRules(&rules, iptables.ProtocolIPv6)
 	}
-	if err := addIptRules(rules); err != nil {
+	if err := insertIptRules(rules); err != nil {
 		return nil, fmt.Errorf("failed to setup MCS-blocking rules: %w", err)
 	}
 	// END OCP HACK
