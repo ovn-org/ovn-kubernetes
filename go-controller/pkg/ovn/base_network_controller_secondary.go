@@ -124,7 +124,9 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		return nil
 	}
 
-	if bsnc.lsManager.IsNonHostSubnetSwitch(switchName) {
+	if bsnc.doesNetworkRequireIPAM() && bsnc.lsManager.IsNonHostSubnetSwitch(switchName) {
+		klog.V(5).Infof(
+			"Pod %s/%s requires IPAM but does not have an assigned IP address", pod.Namespace, pod.Name)
 		return nil
 	}
 
@@ -223,6 +225,10 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			continue
 		}
 
+		if len(pInfo.ips) == 0 {
+			continue
+		}
+
 		// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
 		// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
 		// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
@@ -261,12 +267,16 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 				}
 				continue
 			}
-			expectedLogicalPortName, err := bsnc.allocatePodIPs(pod, annotations, nadName)
-			if err != nil {
-				return err
-			}
-			if expectedLogicalPortName != "" {
-				expectedLogicalPorts[expectedLogicalPortName] = true
+			if bsnc.doesNetworkRequireIPAM() {
+				expectedLogicalPortName, err := bsnc.allocatePodIPs(pod, annotations, nadName)
+				if err != nil {
+					return err
+				}
+				if expectedLogicalPortName != "" {
+					expectedLogicalPorts[expectedLogicalPortName] = true
+				}
+			} else {
+				expectedLogicalPorts[bsnc.GetLogicalPortName(pod, nadName)] = true
 			}
 		}
 	}

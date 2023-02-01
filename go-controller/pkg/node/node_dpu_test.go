@@ -28,21 +28,29 @@ func genOVSFindCmd(table, column, condition string) string {
 }
 
 func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string) string {
+	ipAddrExtID := ""
+	if ip != "" {
+		ipAddrExtID = fmt.Sprintf("external_ids:ip_addresses=%s ", ip)
+	}
 	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s other_config:transient=true "+
 		"-- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s "+
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s %sexternal_ids:sandbox=%s "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
-		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID, hostIfaceName, hostIfaceName)
+		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ipAddrExtID, sandboxID, hostIfaceName, hostIfaceName)
 }
 
 func genOVSAddPortCmdWithNetdev(hostIfaceName, netdev, ifaceID, mac, ip, sandboxID, podUID string) string {
+	ipAddrExtID := ""
+	if ip != "" {
+		ipAddrExtID = fmt.Sprintf("external_ids:ip_addresses=%s ", ip)
+	}
 	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s other_config:transient=true "+
 		"-- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s external_ids:vf-netdev-name=%s "+
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s %sexternal_ids:sandbox=%s external_ids:vf-netdev-name=%s "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
-		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID, netdev, hostIfaceName, hostIfaceName)
+		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ipAddrExtID, sandboxID, netdev, hostIfaceName, hostIfaceName)
 }
 
 func genOVSDelPortCmd(portName string) string {

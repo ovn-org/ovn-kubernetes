@@ -705,3 +705,7 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr 
 	klog.V(5).Infof("Posting %s event for Node %s: %v", kapi.EventTypeWarning, node.Name, nodeErr)
 	bnc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
 }
+
+func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
+	return !(bnc.TopologyType() == types.Layer2Topology && len(bnc.Subnets()) == 0)
+}

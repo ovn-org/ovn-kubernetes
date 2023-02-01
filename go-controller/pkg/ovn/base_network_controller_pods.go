@@ -48,7 +48,7 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 			klog.Infof("Ignoring IP allocation for terminating pod: %s/%s, on deleted "+
 				"node: %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
 			return expectedLogicalPortName, nil
-		} else {
+		} else if bnc.doesNetworkRequireIPAM() {
 			// unknown condition how we are getting a non-terminating pod without a node here
 			klog.Errorf("Pod IP allocation found for a non-existent node in API with unknown "+
 				"condition. Pod: %s/%s, node: %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
@@ -469,7 +469,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
 	// We cannot wire a pod that has no node/switch, so retry again later
 	if _, err := bnc.watchFactory.GetNode(pod.Spec.NodeName); kerrors.IsNotFound(err) &&
-		bnc.lsManager.GetSwitchSubnets(switchName) == nil {
+		bnc.lsManager.GetSwitchSubnets(switchName) == nil && bnc.doesNetworkRequireIPAM() {
 		podState := "unknown"
 		if util.PodTerminating(pod) {
 			podState = "terminating"
@@ -575,12 +575,16 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		// IP/MAC from the annotation.
 		lsp.DynamicAddresses = nil
 
-		// ensure we have reserved the IPs in the annotation
-		if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-			return nil, nil, nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
-				podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
-		} else {
-			needsIP = false
+		if bnc.doesNetworkRequireIPAM() {
+			// ensure we have reserved the IPs in the annotation
+			if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+				return nil, nil, nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
+					podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
+			} else {
+				needsIP = false
+			}
+		} else if len(podIfAddrs) > 0 {
+			return nil, nil, nil, false, fmt.Errorf("IPAMless network with IPs present in the annotations; rejecting to handle this request")
 		}
 	}
 
@@ -593,23 +597,31 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 					podDesc, switchName, err)
 			}
 		}
-		needsNewAllocation := false
+		needsNewMacOrIPAllocation := false
 
 		// ensure we have reserved the IPs found in OVN
 		if len(podIfAddrs) == 0 {
-			needsNewAllocation = true
-		} else if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-			klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s, for pod %s on switch: %s"+
-				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, podDesc, switchName, err)
+			needsNewMacOrIPAllocation = true
+		} else if bnc.doesNetworkRequireIPAM() {
+			if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+				klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s, for pod %s on switch: %s"+
+					" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, podDesc, switchName, err)
 
-			needsNewAllocation = true
+				needsNewMacOrIPAllocation = true
+			}
 		}
-		if needsNewAllocation {
+		if needsNewMacOrIPAllocation {
 			// Previous attempts to use already configured IPs failed, need to assign new
-			podMac, podIfAddrs, err = bnc.assignPodAddresses(switchName)
+			generatedPodMac, generatedPodIfAddrs, err := bnc.assignPodAddresses(switchName)
 			if err != nil {
 				return nil, nil, nil, false, fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					podDesc, switchName, err)
+			}
+			if podMac == nil {
+				podMac = generatedPodMac
+			}
+			if len(generatedPodIfAddrs) > 0 {
+				podIfAddrs = generatedPodIfAddrs
 			}
 		}
 
@@ -629,7 +641,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 			MAC: podMac,
 		}
 		var nodeSubnets []*net.IPNet
-		if nodeSubnets = bnc.lsManager.GetSwitchSubnets(switchName); nodeSubnets == nil {
+		if nodeSubnets = bnc.lsManager.GetSwitchSubnets(switchName); nodeSubnets == nil && bnc.doesNetworkRequireIPAM() {
 			return nil, nil, nil, false, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
 				podDesc, switchName)
 		}
@@ -708,6 +720,15 @@ func (bnc *BaseNetworkController) assignPodAddresses(switchName string) (net.Har
 		podCIDRs []*net.IPNet
 		err      error
 	)
+
+	if !bnc.doesNetworkRequireIPAM() {
+		klog.V(5).Infof("layer2 topology without subnet; will only generate the MAC address for the pod NIC")
+		mac, err := logicalswitchmanager.GenerateRandMAC()
+		if err != nil {
+			return nil, nil, err
+		}
+		return mac, nil, nil
+	}
 	podCIDRs, err = bnc.lsManager.AllocateNextIPs(switchName)
 	if err != nil {
 		return nil, nil, err

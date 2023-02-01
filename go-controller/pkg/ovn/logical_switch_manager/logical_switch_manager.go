@@ -3,6 +3,7 @@ package logicalswitchmanager
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"reflect"
 	"sync"
@@ -345,6 +346,7 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(switchName string, hy
 
 // Mark the IPs in ipnets slice as available for allocation
 // by releasing them from the IPAM pool of allocated IPs.
+// If there aren't IPs to release the method does not return an error.
 func (manager *LogicalSwitchManager) ReleaseIPs(switchName string, ipnets []*net.IPNet) error {
 	manager.RLock()
 	defer manager.RUnlock()
@@ -356,9 +358,7 @@ func (manager *LogicalSwitchManager) ReleaseIPs(switchName string, ipnets []*net
 	if !ok {
 		return fmt.Errorf("unable to release ips for switch %s: %w", switchName, SwitchNotFound)
 	}
-	if len(lsi.ipams) == 0 {
-		return fmt.Errorf("failed to release IPs for switch %s because there is no IPAM instance", switchName)
-	}
+
 	for _, ipnet := range ipnets {
 		for _, ipam := range lsi.ipams {
 			cidr := ipam.CIDR()
@@ -629,4 +629,18 @@ func NewL2IPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
 		return nil, err
 	}
 	return subnetRange, nil
+}
+
+// GenerateRandMAC generates a random unicast and locally administered MAC address.
+// LOOTED FROM https://github.com/cilium/cilium/blob/v1.12.6/pkg/mac/mac.go#L106
+func GenerateRandMAC() (net.HardwareAddr, error) {
+	buf := make([]byte, 6)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, fmt.Errorf("unable to retrieve 6 rnd bytes: %s", err)
+	}
+
+	// Set locally administered addresses bit and reset multicast bit
+	buf[0] = (buf[0] | 0x02) & 0xfe
+
+	return buf, nil
 }
