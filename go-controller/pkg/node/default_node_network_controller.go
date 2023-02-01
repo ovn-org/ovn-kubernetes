@@ -56,6 +56,13 @@ type BaseNodeNetworkController struct {
 	util.NetInfo
 	util.NetConfInfo
 
+	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
+	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*util.DPUConnectionDetails). Key of nadToDPUCDMap
+	// is nadName; value is DPU_ConnectionDetails when VF representor is successfully configured for that
+	// given NAD. DPU mode only
+	// Note that we assume that Pod's Network Attachment Selection Annotation will not change over time.
+	podNADToDPUCDMap sync.Map
+
 	// stopChan and WaitGroup per controller
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
