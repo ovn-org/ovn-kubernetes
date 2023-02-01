@@ -13,6 +13,7 @@ import (
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/pkg/errors"
 
 	v1 "k8s.io/api/core/v1"
@@ -557,8 +558,8 @@ func tcpGatewayRouterExternalIDs() map[string]string {
 
 func serviceExternalIDs(namespacedServiceName string) map[string]string {
 	return map[string]string{
-		"k8s.ovn.org/kind":  "Service",
-		"k8s.ovn.org/owner": namespacedServiceName,
+		types.LoadBalancerKindExternalID:  "Service",
+		types.LoadBalancerOwnerExternalID: namespacedServiceName,
 	}
 }
 

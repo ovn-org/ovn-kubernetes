@@ -434,7 +434,7 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 	}
 
 	return map[string]string{
-		types.OvnK8sPrefix + "/owner": nsn.String(),
-		types.OvnK8sPrefix + "/kind":  gk.String(),
+		types.LoadBalancerOwnerExternalID: nsn.String(),
+		types.LoadBalancerKindExternalID:  gk.String(),
 	}
 }

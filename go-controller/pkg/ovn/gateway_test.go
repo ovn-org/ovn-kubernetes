@@ -1186,8 +1186,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 						Protocol: &nbdb.LoadBalancerProtocolTCP,
 						ExternalIDs: map[string]string{
-							"k8s.ovn.org/kind":  "Service",
-							"k8s.ovn.org/owner": "default/kubernetes",
+							types.LoadBalancerKindExternalID:  "Service",
+							types.LoadBalancerOwnerExternalID: "default/kubernetes",
 						},
 						Vips: map[string]string{
 							"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
@@ -1254,8 +1254,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "default/kubernetes",
+						types.LoadBalancerKindExternalID:  "Service",
+						types.LoadBalancerOwnerExternalID: "default/kubernetes",
 					},
 					Vips: map[string]string{
 						"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
@@ -1306,8 +1306,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 						Protocol: &nbdb.LoadBalancerProtocolTCP,
 						ExternalIDs: map[string]string{
-							"k8s.ovn.org/kind":  "Service",
-							"k8s.ovn.org/owner": "default/kubernetes",
+							types.LoadBalancerKindExternalID:  "Service",
+							types.LoadBalancerOwnerExternalID: "default/kubernetes",
 						},
 						Vips: map[string]string{
 							"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
@@ -1388,8 +1388,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "default/kubernetes",
+						types.LoadBalancerKindExternalID:  "Service",
+						types.LoadBalancerOwnerExternalID: "default/kubernetes",
 					},
 					Vips: map[string]string{
 						"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",

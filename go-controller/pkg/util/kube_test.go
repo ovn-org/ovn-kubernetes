@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -691,8 +692,8 @@ func TestExternalIDsForObject(t *testing.T) {
 			},
 		}),
 		map[string]string{
-			"k8s.ovn.org/kind":  "Service",
-			"k8s.ovn.org/owner": "ns/svc-ab23",
+			types.LoadBalancerKindExternalID:  "Service",
+			types.LoadBalancerOwnerExternalID: "ns/svc-ab23",
 		})
 
 	assert.Equal(t,
@@ -705,7 +706,7 @@ func TestExternalIDsForObject(t *testing.T) {
 			},
 		}),
 		map[string]string{
-			"k8s.ovn.org/kind":  "Service",
-			"k8s.ovn.org/owner": "ns/svc-ab23",
+			types.LoadBalancerKindExternalID:  "Service",
+			types.LoadBalancerOwnerExternalID: "ns/svc-ab23",
 		})
 }

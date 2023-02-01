@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -18,8 +19,8 @@ func TestEnsureLBs(t *testing.T) {
 	name := "foo"
 	namespace := "testns"
 	defaultExternalIDs := map[string]string{
-		"k8s.ovn.org/kind":  "Service",
-		"k8s.ovn.org/owner": fmt.Sprintf("%s/%s", namespace, name),
+		types.LoadBalancerKindExternalID:  "Service",
+		types.LoadBalancerOwnerExternalID: fmt.Sprintf("%s/%s", namespace, name),
 	}
 
 	defaultService := &v1.Service{

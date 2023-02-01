@@ -8,8 +8,8 @@ import (
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
@@ -89,7 +89,7 @@ func (r *repair) runBeforeSync() {
 	staleLBs := []string{}
 	for _, lb := range existingLBs {
 		// Extract namespace + name, look to see if it exists
-		owner := lb.ExternalIDs["k8s.ovn.org/owner"]
+		owner := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
 		namespace, name, err := cache.SplitMetaNamespaceKey(owner)
 		if err != nil || namespace == "" {
 			klog.Warningf("Service LB %#v has unreadable owner, deleting", lb)
@@ -138,7 +138,7 @@ func getLBs(nbClient libovsdbclient.Client) ([]*ovnlb.LB, error) {
 	for _, lb := range lbs {
 
 		// Skip load balancers unrelated to service
-		if lb.ExternalIDs["k8s.ovn.org/kind"] != "Service" {
+		if lb.ExternalIDs[types.LoadBalancerKindExternalID] != "Service" {
 			continue
 		}
 

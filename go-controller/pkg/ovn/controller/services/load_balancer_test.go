@@ -7,6 +7,7 @@ import (
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/assert"
 
@@ -754,8 +755,8 @@ func Test_buildClusterLBs(t *testing.T) {
 	}
 
 	defaultExternalIDs := map[string]string{
-		"k8s.ovn.org/kind":  "Service",
-		"k8s.ovn.org/owner": fmt.Sprintf("%s/%s", namespace, name),
+		types.LoadBalancerKindExternalID:  "Service",
+		types.LoadBalancerOwnerExternalID: fmt.Sprintf("%s/%s", namespace, name),
 	}
 
 	defaultRouters := []string{}
@@ -979,8 +980,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 	}
 
 	defaultExternalIDs := map[string]string{
-		"k8s.ovn.org/kind":  "Service",
-		"k8s.ovn.org/owner": fmt.Sprintf("%s/%s", namespace, name),
+		types.LoadBalancerKindExternalID:  "Service",
+		types.LoadBalancerOwnerExternalID: fmt.Sprintf("%s/%s", namespace, name),
 	}
 
 	//defaultRouters := []string{"gr-node-a", "gr-node-b"}

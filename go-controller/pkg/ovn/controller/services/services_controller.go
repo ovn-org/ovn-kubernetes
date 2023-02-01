@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"golang.org/x/time/rate"
 
@@ -252,7 +253,7 @@ func (c *Controller) initTopLevelCache() error {
 	c.alreadyApplied = make(map[string][]ovnlb.LB, len(services))
 
 	for _, lb := range lbs {
-		service := lb.ExternalIDs["k8s.ovn.org/owner"]
+		service := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
 		c.alreadyApplied[service] = append(c.alreadyApplied[service], *lb)
 	}
 
@@ -278,12 +279,12 @@ func _getLBsCommon(nbClient libovsdbclient.Client, withServiceOwner bool) (sets.
 	for _, lb := range lbs {
 
 		// Skip load balancers unrelated to service, or w/out an owner (aka namespace+name)
-		if lb.ExternalIDs["k8s.ovn.org/kind"] != "Service" {
+		if lb.ExternalIDs[types.LoadBalancerKindExternalID] != "Service" {
 			continue
 		}
 
 		if withServiceOwner {
-			service, ok := lb.ExternalIDs["k8s.ovn.org/owner"]
+			service, ok := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
 			if !ok {
 				continue
 			}
