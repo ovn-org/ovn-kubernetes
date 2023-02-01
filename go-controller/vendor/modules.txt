@@ -177,6 +177,9 @@ github.com/json-iterator/go
 github.com/juju/errors
 # github.com/juju/testing v0.0.0-20200706033705-4c23f9c453cd
 ## explicit; go 1.14
+# github.com/k8snetworkplumbingwg/govdpa v0.1.4
+## explicit; go 1.17
+github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa
 # github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.3.0
 ## explicit; go 1.17
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io

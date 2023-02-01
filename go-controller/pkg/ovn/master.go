@@ -87,11 +87,12 @@ func (oc *DefaultNetworkController) upgradeToSingleSwitchOVNTopology(existingNod
 }
 
 func (oc *DefaultNetworkController) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
-	ver, err := oc.determineOVNTopoVersionFromOVN()
+	err := oc.determineOVNTopoVersionFromOVN()
 	if err != nil {
 		return err
 	}
 
+	ver := oc.topologyVersion
 	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
 	if ver < types.OvnSingleJoinSwitchTopoVersion {
 		klog.Infof("Upgrading to Single Switch OVN Topology")
@@ -244,7 +245,6 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		if !utilnet.IsIPv6CIDR(hostSubnet) {
 			v4Subnet = hostSubnet
 		}
-
 		if config.Gateway.Mode == config.GatewayModeLocal {
 			lrsr := nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
@@ -252,10 +252,10 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 				Nexthop:  mgmtIfAddr.IP.String(),
 			}
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-				return item.IPPrefix == lrsr.IPPrefix && item.Nexthop == lrsr.Nexthop && item.Policy != nil && *item.Policy == *lrsr.Policy
+				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
 			}
-			err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter,
-				&lrsr, p)
+			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, types.OVNClusterRouter,
+				&lrsr, p, &lrsr.Nexthop)
 			if err != nil {
 				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, types.OVNClusterRouter, err)
 			}

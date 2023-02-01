@@ -41,9 +41,7 @@ func ResetRunner() {
 
 func ovsExec(args ...string) (string, error) {
 	if runner == nil {
-		if err := SetExec(kexec.New()); err != nil {
-			return "", err
-		}
+		return "", fmt.Errorf("OVS exec runner not initialized")
 	}
 
 	args = append([]string{"--timeout=30"}, args...)
@@ -123,9 +121,7 @@ func ovsClear(table, record string, columns ...string) error {
 
 func ofctlExec(args ...string) (string, error) {
 	if runner == nil {
-		if err := SetExec(kexec.New()); err != nil {
-			return "", err
-		}
+		return "", fmt.Errorf("OVS exec runner not initialized")
 	}
 
 	args = append([]string{"--timeout=10", "--no-stats", "--strict"}, args...)

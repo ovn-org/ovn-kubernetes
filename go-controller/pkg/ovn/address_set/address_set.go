@@ -43,6 +43,8 @@ type AddressSetFactory interface {
 	// factory's backing store. SHOULD NOT BE CALLED for any address set
 	// for which an AddressSet object has been created.
 	DestroyAddressSetInBackingStore(name string) error
+	// GetAddressSet returns the address-set that matches the given searchName
+	GetAddressSet(name string) (AddressSet, error)
 }
 
 // AddressSet is an interface for address set objects
@@ -133,6 +135,39 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) (AddressSet, erro
 	}
 
 	return &ovnAddressSets{nbClient: asf.nbClient, name: name, ipv4: v4set, ipv6: v6set}, nil
+}
+
+// GetAddressSet returns the address-set that matches the given searchName
+func (asf *ovnAddressSetFactory) GetAddressSet(searchName string) (AddressSet, error) {
+	var (
+		v4set, v6set *ovnAddressSet
+	)
+	p := func(addrSet *nbdb.AddressSet) bool {
+		findName, exists := addrSet.ExternalIDs["name"]
+		return exists && strings.Contains(findName, searchName)
+	}
+	addrSetList, err := libovsdbops.FindAddressSetsWithPredicate(asf.nbClient, p)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching address sets: %+v", err)
+	}
+	getOVNAddressSet := func(addrSet *nbdb.AddressSet) *ovnAddressSet {
+		return &ovnAddressSet{
+			nbClient: asf.nbClient,
+			name:     addrSet.ExternalIDs["name"],
+			hashName: hashedAddressSet(addrSet.ExternalIDs["name"]),
+			uuid:     addrSet.UUID,
+		}
+	}
+	for i := range addrSetList {
+		addrSet := addrSetList[i]
+		if strings.Contains(addrSet.ExternalIDs["name"], ipv4AddressSetSuffix) {
+			v4set = getOVNAddressSet(addrSet)
+		}
+		if strings.Contains(addrSet.ExternalIDs["name"], ipv6AddressSetSuffix) {
+			v6set = getOVNAddressSet(addrSet)
+		}
+	}
+	return &ovnAddressSets{nbClient: asf.nbClient, name: searchName, ipv4: v4set, ipv6: v6set}, nil
 }
 
 // forEachAddressSet executes a do function on each address set found to have ExternalIDs["name"].

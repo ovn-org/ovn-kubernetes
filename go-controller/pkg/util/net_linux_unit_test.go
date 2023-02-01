@@ -1308,7 +1308,7 @@ func TestIsAddressReservedForInternalUse(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res := isAddressReservedForInternalUse(tc.input)
+			res := IsAddressReservedForInternalUse(tc.input)
 			t.Log(res)
 			assert.Equal(t, res, tc.outExp)
 		})

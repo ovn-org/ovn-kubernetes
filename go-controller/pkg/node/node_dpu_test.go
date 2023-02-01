@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
@@ -33,6 +34,15 @@ func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string)
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
 		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID, hostIfaceName, hostIfaceName)
+}
+
+func genOVSAddPortCmdWithNetdev(hostIfaceName, netdev, ifaceID, mac, ip, sandboxID, podUID string) string {
+	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s other_config:transient=true "+
+		"-- set interface %s external_ids:attached_mac=%s "+
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s external_ids:vf-netdev-name=%s "+
+		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
+		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
+		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID, netdev, hostIfaceName, hostIfaceName)
 }
 
 func genOVSDelPortCmd(portName string) string {
@@ -168,6 +178,36 @@ var _ = Describe("Node DPU tests", func() {
 			})
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+				Err: fmt.Errorf("failed to run ovs command"),
+			})
+			// Mock netlink/ovs calls for cleanup
+			netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
+			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSDelPortCmd("pf0vf9"),
+			})
+
+			fakeClient := newFakeKubeClientWithPod(&pod)
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+
+			// call addRepPort()
+			err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to run ovs command"))
+			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+		})
+
+		It("Fails if configure OVS fails (with netdev external-ids)", func() {
+			// set vfRep netdev name
+			ifInfo.VfNetdevName = "netdev-vf9"
+
+			// set ovs CMD output
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSFindCmd("Interface", "_uuid",
+					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSAddPortCmdWithNetdev(vfRep, ifInfo.VfNetdevName, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
 			})
 			// Mock netlink/ovs calls for cleanup

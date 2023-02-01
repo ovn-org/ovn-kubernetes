@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -219,7 +220,11 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
-
+			gr := ovntypes.GWRouterPrefix + node1.Name
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 			fakeOvn.startWithDBSetup(
 				libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
@@ -229,6 +234,9 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 						expectedClusterRouterPortGroup,
 						expectedClusterPortGroup,
 						expectedClusterLBGroup,
+					},
+					SBData: []libovsdbtest.TestData{
+						datapath,
 					},
 				},
 				&v1.NamespaceList{

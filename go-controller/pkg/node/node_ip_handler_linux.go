@@ -98,15 +98,9 @@ func (c *addressManager) ListAddresses() []net.IP {
 	return out
 }
 
-func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
-	if !c.useNetlink {
-		// For testcases just return; we don't want to talk to
-		// netlink since that pollutes the testcases with the local
-		// CI machine configuration.
-		return
-	}
+type subscribeFn func() (bool, chan netlink.AddrUpdate, error)
 
-	var addrChan chan netlink.AddrUpdate
+func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 	addrSubscribeOptions := netlink.AddrSubscribeOptions{
 		ErrorCallback: func(err error) {
 			klog.Errorf("Failed during AddrSubscribe callback: %v", err)
@@ -114,16 +108,22 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 		},
 	}
 
-	subScribeFcn := func() (bool, error) {
-		addrChan = make(chan netlink.AddrUpdate)
+	subscribe := func() (bool, chan netlink.AddrUpdate, error) {
+		addrChan := make(chan netlink.AddrUpdate)
 		if err := netlink.AddrSubscribeWithOptions(addrChan, stopChan, addrSubscribeOptions); err != nil {
-			return false, err
+			return false, nil, err
 		}
 		// sync the manager with current addresses on the node
 		c.sync()
-		return true, nil
+		return true, addrChan, nil
 	}
 
+	c.runInternal(stopChan, doneWg, subscribe)
+}
+
+// runInternal can be used by testcases to provide a fake subscription function
+// rather than using netlink
+func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGroup, subscribe subscribeFn) {
 	doneWg.Add(1)
 	go func() {
 		defer doneWg.Done()
@@ -131,7 +131,7 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 		addressSyncTimer := time.NewTicker(30 * time.Second)
 		defer addressSyncTimer.Stop()
 
-		subscribed, err := subScribeFcn()
+		subscribed, addrChan, err := subscribe()
 		if err != nil {
 			klog.Error("Error during netlink subscribe for IP Manager: %v", err)
 		}
@@ -141,7 +141,7 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 			case a, ok := <-addrChan:
 				addressSyncTimer.Reset(30 * time.Second)
 				if !ok {
-					if subscribed, err = subScribeFcn(); err != nil {
+					if subscribed, addrChan, err = subscribe(); err != nil {
 						klog.Error("Error during netlink re-subscribe due to channel closing for IP Manager: %v", err)
 					}
 					continue
@@ -168,7 +168,7 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 					klog.V(5).Info("Node IP manager calling sync() explicitly")
 					c.sync()
 				} else {
-					if subscribed, err = subScribeFcn(); err != nil {
+					if subscribed, addrChan, err = subscribe(); err != nil {
 						klog.Error("Error during netlink re-subscribe for IP Manager: %v", err)
 					}
 				}
@@ -212,7 +212,7 @@ func (c *addressManager) doesNodeHostAddressesMatch() bool {
 }
 
 // detects if the IP is valid for a node
-// excludes things like local IPs, mgmt port ip
+// excludes things like local IPs, mgmt port ip, special masquerade IP
 func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 	if addr == nil {
 		return false
@@ -232,6 +232,10 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 		if c.mgmtPortConfig.ipv6 != nil && c.mgmtPortConfig.ipv6.ifAddr.IP.Equal(addr) {
 			return false
 		}
+	}
+
+	if util.IsAddressReservedForInternalUse(addr) {
+		return false
 	}
 
 	return true

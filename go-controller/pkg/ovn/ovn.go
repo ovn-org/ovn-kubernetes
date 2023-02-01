@@ -14,6 +14,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
@@ -433,19 +434,21 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 	return nil
 }
 
-func newEgressServiceController(client clientset.Interface, nbClient libovsdbclient.Client,
+func newEgressServiceController(client clientset.Interface, nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 	svcFactory informers.SharedInformerFactory, stopCh <-chan struct{}) *egresssvc.Controller {
 
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
-	initClusterEgressPolicies := func(libovsdbclient.Client) error { return nil }
-	createNodeNoReroutePolicies := func(libovsdbclient.Client, *kapi.Node) error { return nil }
-	deleteNodeNoReroutePolicies := func(libovsdbclient.Client, string) error { return nil }
+	initClusterEgressPolicies := func(libovsdbclient.Client, addressset.AddressSetFactory) error { return nil }
+	createNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, *kapi.Node) error { return nil }
+	deleteNodeNoReroutePolicies := func(addressset.AddressSetFactory, string, net.IP, net.IP) error { return nil }
+	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string) error { return nil }
 
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies
 		createNodeNoReroutePolicies = CreateDefaultNoRerouteNodePolicies
 		deleteNodeNoReroutePolicies = DeleteDefaultNoRerouteNodePolicies
+		deleteLegacyDefaultNoRerouteNodePolicies = DeleteLegacyDefaultNoRerouteNodePolicies
 	}
 
 	// TODO: currently an ugly hack to pass the (copied) isReachable func to the egress service controller
@@ -467,8 +470,9 @@ func newEgressServiceController(client clientset.Interface, nbClient libovsdbcli
 		return isReachableViaGRPC(mgmtIPs, healthClient, hcPort, timeout)
 	}
 
-	return egresssvc.NewController(client, nbClient,
-		initClusterEgressPolicies, createNodeNoReroutePolicies, deleteNodeNoReroutePolicies, isReachable,
+	return egresssvc.NewController(client, nbClient, addressSetFactory,
+		initClusterEgressPolicies, createNodeNoReroutePolicies,
+		deleteNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies, isReachable,
 		stopCh, svcFactory.Core().V1().Services(),
 		svcFactory.Discovery().V1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes())

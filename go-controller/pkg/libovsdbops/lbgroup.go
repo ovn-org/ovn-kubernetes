@@ -60,8 +60,9 @@ func RemoveLoadBalancersFromGroupOps(nbClient libovsdbclient.Client, ops []libov
 		Model:            group,
 		ModelPredicate:   func(item *nbdb.LoadBalancerGroup) bool { return item.Name == group.Name },
 		OnModelMutations: []interface{}{&group.LoadBalancer},
-		ErrNotFound:      true,
-		BulkOp:           false,
+		// if we want to delete loadbalancer from the port group that doesn't exist, that is noop
+		ErrNotFound: false,
+		BulkOp:      false,
 	}
 
 	m := newModelClient(nbClient)

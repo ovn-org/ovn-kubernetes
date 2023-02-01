@@ -3,6 +3,7 @@ package util
 import (
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -135,18 +136,17 @@ func (defaultNetConfInfo *DefaultNetConfInfo) MTU() int {
 	return config.Default.MTU
 }
 
-// Layer3NetConfInfo is structure which holds specific secondary layer3 network information
-type Layer3NetConfInfo struct {
-	subnets        string
-	mtu            int
-	ClusterSubnets []config.CIDRNetworkEntry
-}
-
-func compareSubnetsString(subnetsString, newSubnetsString string) bool {
+func isSubnetsStringEqual(subnetsString, newSubnetsString string) bool {
 	subnetsStringList := strings.Split(subnetsString, ",")
 	newSubnetsStringList := strings.Split(newSubnetsString, ",")
 	if len(subnetsStringList) != len(newSubnetsStringList) {
 		return false
+	}
+	for index := range subnetsStringList {
+		subnetsStringList[index] = strings.TrimSpace(subnetsStringList[index])
+	}
+	for index := range newSubnetsStringList {
+		newSubnetsStringList[index] = strings.TrimSpace(newSubnetsStringList[index])
 	}
 	sort.Strings(subnetsStringList)
 	sort.Strings(newSubnetsStringList)
@@ -156,6 +156,34 @@ func compareSubnetsString(subnetsString, newSubnetsString string) bool {
 		}
 	}
 	return true
+}
+
+// parseSubnetsString parses comma-seperated subnet string and returns the list of subnets
+func parseSubnetsString(clusterSubnetString string) ([]*net.IPNet, error) {
+	var subnetList []*net.IPNet
+
+	if strings.TrimSpace(clusterSubnetString) == "" {
+		return subnetList, nil
+	}
+
+	subnetStringList := strings.Split(clusterSubnetString, ",")
+	for _, subnetString := range subnetStringList {
+		subnetString = strings.TrimSpace(subnetString)
+		_, subnet, err := net.ParseCIDR(subnetString)
+		if err != nil {
+			return nil, err
+		}
+
+		subnetList = append(subnetList, subnet)
+	}
+	return subnetList, nil
+}
+
+// Layer3NetConfInfo is structure which holds specific secondary layer3 network information
+type Layer3NetConfInfo struct {
+	subnets        string
+	mtu            int
+	ClusterSubnets []config.CIDRNetworkEntry
 }
 
 // CompareNetConf compares the layer3NetConfInfo with the given newNetConfInfo and returns true
@@ -171,14 +199,14 @@ func (layer3NetConfInfo *Layer3NetConfInfo) CompareNetConf(newNetConfInfo NetCon
 		return false
 	}
 
-	if compareSubnetsString(layer3NetConfInfo.subnets, newLayer3NetConfInfo.subnets) {
+	if !isSubnetsStringEqual(layer3NetConfInfo.subnets, newLayer3NetConfInfo.subnets) {
 		err = fmt.Errorf("new %s netconf subnets %v has changed, expect %v",
 			types.Layer3Topology, newLayer3NetConfInfo.subnets, layer3NetConfInfo.subnets)
 		errs = append(errs, err)
 	}
 
 	if layer3NetConfInfo.mtu != newLayer3NetConfInfo.mtu {
-		err = fmt.Errorf("new %s netconf MTU %v has changed, expect %v",
+		err = fmt.Errorf("new %s netconf mtu %v has changed, expect %v",
 			types.Layer3Topology, newLayer3NetConfInfo.mtu, layer3NetConfInfo.mtu)
 		errs = append(errs, err)
 	}
@@ -213,6 +241,102 @@ func (layer3NetConfInfo *Layer3NetConfInfo) MTU() int {
 	return layer3NetConfInfo.mtu
 }
 
+// Layer2NetConfInfo is structure which holds specific secondary layer2 network information
+type Layer2NetConfInfo struct {
+	subnets        string
+	mtu            int
+	excludeSubnets string
+
+	ClusterSubnets []*net.IPNet
+	ExcludeSubnets []*net.IPNet
+}
+
+func (layer2NetConfInfo *Layer2NetConfInfo) CompareNetConf(newNetConfInfo NetConfInfo) bool {
+	var errs []error
+	var err error
+	newLayer2NetConfInfo, ok := newNetConfInfo.(*Layer2NetConfInfo)
+	if !ok {
+		klog.V(5).Infof("New netconf topology type is different, expect %s",
+			layer2NetConfInfo.TopologyType())
+		return false
+	}
+	if !isSubnetsStringEqual(layer2NetConfInfo.subnets, newLayer2NetConfInfo.subnets) {
+		err = fmt.Errorf("new %s netconf subnets %v has changed, expect %v",
+			types.Layer2Topology, newLayer2NetConfInfo.subnets, layer2NetConfInfo.subnets)
+		errs = append(errs, err)
+	}
+	if layer2NetConfInfo.mtu != newLayer2NetConfInfo.mtu {
+		err = fmt.Errorf("new %s netconf mtu %v has changed, expect %v",
+			types.Layer2Topology, newLayer2NetConfInfo.mtu, layer2NetConfInfo.mtu)
+		errs = append(errs, err)
+	}
+	if !isSubnetsStringEqual(layer2NetConfInfo.excludeSubnets, newLayer2NetConfInfo.excludeSubnets) {
+		err = fmt.Errorf("new %s netconf excludeSubnets %v has changed, expect %v",
+			types.Layer2Topology, newLayer2NetConfInfo.excludeSubnets, layer2NetConfInfo.excludeSubnets)
+		errs = append(errs, err)
+	}
+	if len(errs) != 0 {
+		err = kerrors.NewAggregate(errs)
+		klog.V(5).Infof(err.Error())
+		return false
+	}
+	return true
+}
+
+func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (*Layer2NetConfInfo, error) {
+	clusterSubnets, excludeSubnets, err := verifyExcludeIPs(netconf.Subnets, netconf.ExcludeSubnets)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
+	}
+
+	return &Layer2NetConfInfo{
+		subnets:        netconf.Subnets,
+		mtu:            netconf.MTU,
+		excludeSubnets: netconf.ExcludeSubnets,
+		ClusterSubnets: clusterSubnets,
+		ExcludeSubnets: excludeSubnets,
+	}, nil
+}
+
+func verifyExcludeIPs(subnetsString string, excludeSubnetsString string) ([]*net.IPNet, []*net.IPNet, error) {
+	clusterSubnets, err := parseSubnetsString(subnetsString)
+	if err != nil {
+		return nil, nil, fmt.Errorf("subnets %s is invalid: %v", subnetsString, err)
+	}
+	if len(clusterSubnets) == 0 {
+		return nil, nil, fmt.Errorf("subnets is not defined")
+	}
+
+	excludeSubnets, err := parseSubnetsString(excludeSubnetsString)
+	if err != nil {
+		return nil, nil, fmt.Errorf("excludeSubnets %s is invalid: %v", excludeSubnetsString, err)
+	}
+
+	for _, excludeSubnet := range excludeSubnets {
+		found := false
+		for _, subnet := range clusterSubnets {
+			if ContainsCIDR(subnet, excludeSubnet) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, nil, fmt.Errorf("the provided network subnets %v does not contain exluded subnets %v",
+				clusterSubnets, excludeSubnet)
+		}
+	}
+
+	return clusterSubnets, excludeSubnets, nil
+}
+
+func (layer2NetConfInfo *Layer2NetConfInfo) TopologyType() string {
+	return types.Layer2Topology
+}
+
+func (layer2NetConfInfo *Layer2NetConfInfo) MTU() int {
+	return layer2NetConfInfo.mtu
+}
+
 // GetNADName returns key of NetAttachDefInfo.NetAttachDefs map, also used as Pod annotation key
 func GetNADName(namespace, name string) string {
 	return fmt.Sprintf("%s/%s", namespace, name)
@@ -233,12 +357,15 @@ func newNetConfInfo(netconf *ovncnitypes.NetConf) (NetConfInfo, error) {
 	if netconf.Name == types.DefaultNetworkName {
 		return &DefaultNetConfInfo{}, nil
 	}
-
-	if netconf.Topology == types.Layer3Topology {
+	switch netconf.Topology {
+	case types.Layer3Topology:
 		return newLayer3NetConfInfo(netconf)
+	case types.Layer2Topology:
+		return newLayer2NetConfInfo(netconf)
+	default:
+		// other topology NAD can be supported later
+		return nil, fmt.Errorf("topology %s not supported", netconf.Topology)
 	}
-	// other topology NAD can be supported later
-	return nil, fmt.Errorf("topology %s not supported", netconf.Topology)
 }
 
 // ParseNADInfo parses config in NAD spec and return a NetAttachDefInfo object for secondary networks

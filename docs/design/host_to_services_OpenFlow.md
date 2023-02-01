@@ -3,15 +3,52 @@
 
 ## Background
 
-In order to allow host to Kubernetes service access packets originating from the host must go into OVN in order to hit load balancers and be routed to the appropriate destination. Typically when accessing a services backed by an OVN networked pod, a single interface can be used (ovn-k8s-mp0) in order to get into the local worker switch, hit the load balancer, and reach the pod endpoint. However, when a service is backed by host networked pods, the behavior becomes more complex. For example, if the host access a service, where the backing endpoint is the host itself, then the packet must hairpin back to the host after being load balanced. Due to Reverse Path Filtering (RPF) in Linux, the packet cannot return to ovn-k8s-mp0, and thus we use the Distributed Gateway Port (DGP) via ovn-k8s-gw0 to get the packet back to the host.
+In order to allow host to Kubernetes service access packets originating from the host must go into OVN in order to hit
+load balancers and be routed to the appropriate destination. Typically when accessing a services backed by an OVN
+networked pod, a single interface can be used (ovn-k8s-mp0) in order to get into the local worker switch, hit the load
+balancer, and reach the pod endpoint. However, when a service is backed by host networked pods, the behavior becomes
+more complex. For example, if the host access a service, where the backing endpoint is the host itself, then the packet
+must hairpin back to the host after being load balanced. There are additional complexities to consider, such as when an
+host network endpoint is using a secondary IP on a NIC. To be able to solve all of the potential use cases for service
+traffic, OpenFlow is leveraged with OVN-Kubernetse programmed flows in order to steer service traffic.
 
 ## Introduction
 
-The DGP solution functionally works, but adds complexity to the OVN-Kubernetes network architecture and creates an additional path into the host which is undesirable for Smart NIC deployments. A new implementation, leverages OpenFlow on the shared gateway bridge to handle all host to service traffic, and eliminates the need for DGP. This feature is only supported with shared gateway mode.
+OpenFlow on the OVS gateway bridge to handle all host to service traffic and this methodology is used for both gateway
+modes (local and shared). However, the paths that local and shared take may be slightly different as local gateway mode
+requires that all service traffic uses host's routing stack as a next hop before leaving the node.
 
-Accessing services from the host via the shared gateway bridge means that traffic from the host enters the shared gateway bridge and is then forwarded into the Gateway Router (GR). The complexity with this solution revolves around the fact that the host and the GR both share the same node IP address. Due to this fact, the host and OVN can never know the other is using the same IP address and thus requires masquerading done inside of the shared gateway bridge. Additionally, we want to avoid the shared gateway having to act like a router and managing control plane functions like ARP. This would add a bunch of overhead to managing the shared gateway bridge and greatly increase the cost of this implementation. 
+Accessing services from the host via the shared gateway bridge means that traffic from the host enters the shared 
+gateway bridge and is then forwarded into the Gateway Router (GR). The complexity with this solution revolves around 
+the fact that the host and the GR both share the same node IP address. Due to this fact, the host and OVN can never know
+the other is using the same IP address and thus requires masquerading done inside of the shared gateway bridge. 
+Additionally, we want to avoid the shared gateway having to act like a router and managing control plane functions like
+ARP. This would add a bunch of overhead to managing the shared gateway bridge and greatly increase the cost of this implementation. 
 
-In order to avoid ARP, both the OVN GR and the host think that the service CIDR is an externally routed network. This means that the host uses its default route when it wants to talk to the service CIDR, and routes the packet towards its default gateway on the shared gateway bridge. By doing this the destination MAC address will be the default gateway MAC and can be manipulated to act as masquerade MAC to the host. As the host goes to send traffic to the default gateway destined to the service CIDR, OpenFlow rules in br-ex hijack the packet, modify it, and redirect it to OVN GR. Similarly the reply packets from OVN GR are modified and masqueraded, before being sent back to the host.
+In order to avoid ARP, both the OVN GR and the host think that the service CIDR is an externally routed network. In other
+words this both OVN and the host think that to reach the service CIDR they need to route their packet to some next hop
+external to the node. In the past OVN-Kubernetes has leveraged the default gateway as that next hop, routing all service traffic
+towards that default gateway. However, this behavior relied on the default gateway existing and being able to ARP for its
+MAC address. In the current implementation this dependency on the gateway has been removed, and a secondary network is
+configured on OVN and the host with a fake next hop in that secondary network. The default secondary networks for IPv4 and IPv6
+are:
+ - `169.254.169.0/29`
+ - `fd69::/125`
+
+OVN is assigned 169.254.169.1 and fd69::1, while the Host uses 169.254.169.2 and fd69::2. The next hop address used is
+169.254.169.4 and fd69::4.
+
+This subnet is only used for services communication, and service access from the host will be routed via:
+```text
+10.96.0.0/16 via 169.254.169.4 dev breth0 mtu 1400
+```
+
+By doing this the destination MAC address will be the next hop MAC and can be manipulated to act as masquerade MAC to the host. 
+As the host goes to send traffic to the next hop, OpenFlow rules in br-ex hijack the packet, modify it, and redirect it 
+to the OVN GR. Similarly the reply packets from OVN GR are modified and masqueraded, before being sent back to the host.
+
+Since the next hop is not a real address it cannot perform ARP response, so static ARP entries are added to the host
+and OVN GR.
 
 For Host to pod access (and vice versa) the management port (ovn-k8s-mp0) is still used.
 
@@ -28,9 +65,10 @@ The following sections go over each potential traffic path originating from Host
 For all of the following use cases, follow this topology:
 
 ```text
-          host (ovn-worker, 172.18.0.3) 
+          host (ovn-worker, 172.18.0.3, 169.254.169.2) 
            |
-eth0----|breth0| ------ 172.18.0.3 OVN GR 100.64.0.4 --- join switch --- ovn_cluster_router --- 10.244.1.3 pod
+eth0----|breth0| ------ 172.18.0.3   OVN GR 100.64.0.4 --- join switch --- ovn_cluster_router --- 10.244.1.3 pod
+                        169.254.169.1
 
 ```
 
@@ -58,29 +96,71 @@ Another worker node exists, ovn-worker2 at 172.18.0.4.
   - fd69::3: local ETP masquerade address (not used for shared GW, kept for parity)
   - fd69::4: dummy next-hop masquerade address
 
-### Nodes without a default GW
-For scenarios where the nodes do not have a known next-hop (microshift, for instance), we rely on a dummy next-hop
-masquerade IP address.
-
-We need to provision this (fake) neighbor in OVN, enabling ARP / ND replies for this fake masquerade IP address.
-
-OVN is also provisioned with a static route specifying this dummy next-hop masquerade IP as its default route.
-
-Finally, to enable the hairpin scenario, we need to provision a route specifying traffic originating from the host
-must be routed to the OVN masquerade address (i.e. `169.254.169.1`).
-This route looks like: `169.254.169.1/32 dev breth0 mtu 1400 src <node IP address>`
-
-### Node masquerade IPs / routes
-In order to enable the host to services, we set the host masquerade IP (169.254.169.2) on the br-ext bridge.
-As a result, a subnet route - `169.254.169.0/29 dev breth0 proto kernel scope link src 169.254.169.2` is also
-provisioned by the kernel.
-
-The masquerade subnet netmask consists of 29 bits - to accomodate 4 (four) IPs - other than the `.0` address.
+### Configuration Details
+#### Host
+As previously mentioned the host is configured with the `169.254.169.2` and `fd69::2` addresses. These are configured
+on the shared gateway bridge interface (typically br-ex or breth0) in the kernel. Additionally a route for service traffic
+is added as well as a static ARP/IPv6 neighbor entry.
 
 The services will now be reached from the nodes via this dummy next hop masquerade IP (i.e. `169.254.169.4`).
 
-The SNAT / unSNAT priority=500 openflow flows will be kept to enable use cases where packets are sent from the node
-having a different source IP address.
+Additionally, to enable the hairpin scenario, we need to provision a route specifying traffic originating from the host
+(acting as an host networked endpoint reply) must be routed to the OVN masquerade address (i.e. `169.254.169.1`) using
+the source IP address of the real host IP.
+This route looks like: `169.254.169.1/32 dev breth0 mtu 1400 src <node IP address>`
+
+#### OVN
+In OVN we do not explicitly configure the `169.254.169.1` and `fd69::1` addresses on the GR interface. OVN is only able
+to have a single primary IP on the interface. Instead, we simply add a MAC Binding (ARP entry equivalent) for the next
+hop address, as well as a route for the secondary subnets to the next hop. This is all that is required in order to allow
+OVN to route the packet towards the fake next hop.
+
+The SBDB MAC binding will look like this (one per node):
+```text
+_uuid               : f244faba-19ad-4b08-bffe-d0b52b270410
+datapath            : 7cc30875-0c68-4ecc-8193-a9fe3abb6cd5
+ip                  : "169.254.169.4"
+logical_port        : rtoe-GR_ovn-worker
+mac                 : "0a:58:a9:fe:a9:04"
+timestamp           : 0
+```
+
+Each OVN GR will then have a route table that looks like this:
+```text
+[root@ovn-control-plane ~]# ovn-nbctl lr-route-list GR_ovn-worker
+IPv4 Routes
+Route Table <main>:
+         169.254.169.0/29             169.254.169.4 dst-ip rtoe-GR_ovn-worker
+            10.244.0.0/16                100.64.0.1 dst-ip
+                0.0.0.0/0                172.18.0.1 dst-ip rtoe-GR_ovn-worker
+
+```
+
+Notice 169.254.169.0 route via 169.254.169.4 works, even though OVN does not have an IP on that subnet:
+```text
+[root@ovn-control-plane ~]# ovn-nbctl show GR_ovn-worker
+router 7c1323d5-f388-449f-94cb-51216194c606 (GR_ovn-worker)
+    port rtoj-GR_ovn-worker
+        mac: "0a:58:64:40:00:03"
+        networks: ["100.64.0.3/16"]
+    port rtoe-GR_ovn-worker
+        mac: "02:42:ac:12:00:02"
+        networks: ["172.18.0.2/16"]
+    nat 98e32e9b-e8f1-413c-881d-cfdfd5a02d43
+        external ip: "172.18.0.3"
+        logical ip: "10.244.0.0/16"
+        type: "snat"
+
+```
+
+This works because the output port `rtoe_GR_ovn-worker` is configured on the route. OVN will simply lookup the MAC binding
+for 169.254.169.4, and then forward it out the rtoe_GR_ovn-worker interface, while SNAT'ing the source IP of the packet to
+its primary address of 1721.8.0.3.
+
+#### OVS
+The gateway bridge flows are managed by OVN-Kubernetes. Priority 500 flows are added which are specifically there to handle
+service traffic for this design. These flows handle masquerading between the host and OVN, while flows in later tables
+take care of rewriting MAC addresses.
 
 ### OpenFlow Flows
 
@@ -117,7 +197,7 @@ CT Entry:
 tcp      6 114 TIME_WAIT src=172.18.0.3 dst=10.96.146.87 sport=47108 dport=80 src=10.96.146.87 dst=172.18.0.3 sport=80 dport=47108 [ASSURED] mark=0 secctx=system_u:object_r:unlabeled_t:s0 use=1
 
 ```
-2. The host routes this packet towards the default gateway 172.18.0.1's MAC address via shared gateway bridge breth0.
+2. The host routes this packet towards the next hop's (169.254.169.4) MAC address via shared gateway bridge breth0.
 3. Flows in breth0 hijack the packet, SNAT to the host's masquerade IP (169.254.169.2) and send it to OF table 2:
 ```text
 cookie=0xdeff105, duration=1136.261s, table=0, n_packets=12, n_bytes=884, priority=500,ip,in_port=LOCAL,nw_dst=10.96.0.0/16 actions=ct(commit,table=2,zone=64001,nat(src=169.254.169.2))
@@ -143,7 +223,9 @@ tcp      6 114 TIME_WAIT src=169.254.169.2 dst=10.244.1.3 sport=47108 dport=80 s
 
 #### Reply
 
-The reply packet simply uses same reverse path and packets are unNAT'ed on their way back towards breth0 and eventually the LOCAL host port. The OVN GR will think it is routing towards the default gateway and set the dest MAC to be the MAC of 172.18.0.1 In OpenFlow, the return packet will hit this first flow in the shared gateway bridge:
+The reply packet simply uses same reverse path and packets are unNAT'ed on their way back towards breth0 and eventually 
+the LOCAL host port. The OVN GR will think it is routing towards the next hop and set the dest MAC to be the MAC of
+169.254.169.4. In OpenFlow, the return packet will hit this first flow in the shared gateway bridge:
 ```text
 cookie=0xdeff105, duration=1136.261s, table=0, n_packets=11, n_bytes=1670, priority=500,ip,in_port="patch-breth0_ov",nw_src=10.96.0.0/16,nw_dst=169.254.169.2 actions=ct(table=3,zone=64001,nat)
 ```
@@ -151,7 +233,8 @@ This flow will unDNAT the packet, and send to table 3:
 ```text
 cookie=0xdeff105, duration=1.486s, table=3, n_packets=11, n_bytes=1670, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst:02:42:ac:12:00:03,LOCAL
 ```
-This flow will move the dest MAC (default gw MAC) to be the source, and set the new dest MAC to be the MAC of the host. This ensures the Linux host thinks it is still talking to the default gateway. The packet is then delivered to the host.
+This flow will move the dest MAC (next hop MAC) to be the source, and set the new dest MAC to be the MAC of the host.
+This ensures the Linux host thinks it is still talking to the external next hop. The packet is then delivered to the host.
 
 
 ### Host -> Service -> Host Endpoint on Different Node
@@ -175,9 +258,10 @@ tcp      6 116 TIME_WAIT src=169.254.169.2 dst=10.96.146.87 sport=55978 dport=80
 ```text
 tcp      6 116 TIME_WAIT src=172.18.0.3 dst=172.18.0.4 sport=55978 dport=80 src=172.18.0.4 dst=172.18.0.3 sport=80 dport=55978 [ASSURED] mark=0 secctx=system_u:object_r:unlabeled_t:s0 zone=64000 use=1
 ```
-7. As this packet comes back into breth0 it is treated like any other normal packet going from OVN to the external network. The packet is Conntracked in zone 64000 and sent out of the eth0 interface:
+7. As this packet comes back into breth0 it is treated like any other normal packet going from OVN to the external network.
+The packet is Conntracked in zone 64000, marked with 1, and sent out of the eth0 interface:
 ```text
-cookie=0xdeff105, duration=2182.669s, table=0, n_packets=393581, n_bytes=592594193, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000)
+cookie=0xdeff105, duration=15820.270s, table=0, n_packets=0, n_bytes=0, priority=100,ip,in_port="patch-breth0_ov" actions=ct(commit,zone=64000,exec(load:0x1->NXM_NX_CT_MARK[])),output:eth0
 ```
 CT Entry:
 ```text
@@ -186,11 +270,23 @@ tcp      6 116 TIME_WAIT src=172.18.0.3 dst=172.18.0.4 sport=55978 dport=80 src=
 
 #### Reply
 
-When the reply packet comes back into ovn-worker via the eth0 interface, the packet will be forwarded back into OVN GR (due to a CT match in zone 64000). OVN GR will then handle unSNAT, unDNAT and send the packet back towards breth0 where the packet will be handled the same way as it was in the previous example.
+When the reply packet comes back into ovn-worker via the eth0 interface, the packet will be forwarded back into OVN GR 
+due to a CT match in zone 64000 with a marking of 1:
+```text
+cookie=0xdeff105, duration=15820.270s, table=0, n_packets=5442, n_bytes=4579489, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000)
+cookie=0xdeff105, duration=15820.270s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+est+trk,ct_mark=0x1,ip actions=output:"patch-breth0_ov"
+cookie=0xdeff105, duration=15820.270s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+rel+trk,ct_mark=0x1,ip actions=output:"patch-breth0_ov"
+```
+
+OVN GR will then handle unSNAT, unDNAT and send the packet back towards breth0 where
+the packet will be handled the same way as it was in the previous example.
 
 ### Host -> Service -> Host Endpoint on Same Node
 
-This is the most complicated use case. Unlike the previous examples, multiple sessions have to be established and masqueraded between the host and OVN in order to trick the host into thinking it has two external connections that are not the same. This avoids issues with RPF as well as short-circuiting where the host would skip sending traffic back to OVN because it knows the traffic destination is local to itself. In this example a host network pod is used as the backend endpoint on ovn-worker:
+This is the most complicated use case. Unlike the previous examples, multiple sessions have to be established and masqueraded
+between the host and OVN in order to trick the host into thinking it has two external connections that are not the same.
+This avoids issues with RPF as well as short-circuiting where the host would skip sending traffic back to OVN because it
+knows the traffic destination is local to itself. In this example a host network pod is used as the backend endpoint on ovn-worker:
 ```text
 [trozet@trozet contrib]$ kubectl get ep web-service
 NAME          ENDPOINTS                       AGE

@@ -94,6 +94,8 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalP
 			}
 			switchNames = append(switchNames, switchName)
 		}
+	} else if topoType == ovntypes.Layer2Topology {
+		switchNames = []string{bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)}
 	} else {
 		return fmt.Errorf("topology type %s not supported", topoType)
 	}
@@ -333,31 +335,35 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 	podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet, routingExternalGWs *gatewayInfo, routingPodGWs map[string]gatewayInfo,
 	hybridOverlayExternalGW net.IP) error {
 	if bnc.IsSecondary() {
-		topoType := bnc.TopologyType()
-		if topoType != ovntypes.Layer3Topology {
-			return fmt.Errorf("topology type %s not supported", topoType)
-		}
-		// secondary layer3 network, see if its network-attachment's annotation has default-route key.
+		// for secondary network, see if its network-attachment's annotation has default-route key.
 		// If present, then we need to add default route for it
 		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
-		for _, podIfAddr := range podAnnotation.IPs {
-			isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
-			nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
-			if err != nil {
-				return err
-			}
-			gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
-			layer3NetConfInfo := bnc.NetConfInfo.(*util.Layer3NetConfInfo)
-			for _, clusterSubnet := range layer3NetConfInfo.ClusterSubnets {
-				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
-						Dest:    clusterSubnet.CIDR,
-						NextHop: gatewayIPnet.IP,
-					})
+		topoType := bnc.TopologyType()
+		switch topoType {
+		case ovntypes.Layer2Topology:
+			// no route needed for directly connected subnets
+			return nil
+		case ovntypes.Layer3Topology:
+			for _, podIfAddr := range podAnnotation.IPs {
+				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+				nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
+				if err != nil {
+					return err
+				}
+				gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
+				layer3NetConfInfo := bnc.NetConfInfo.(*util.Layer3NetConfInfo)
+				for _, clusterSubnet := range layer3NetConfInfo.ClusterSubnets {
+					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+						podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+							Dest:    clusterSubnet.CIDR,
+							NextHop: gatewayIPnet.IP,
+						})
+					}
 				}
 			}
+			return nil
 		}
-		return nil
+		return fmt.Errorf("topology type %s not supported", topoType)
 	}
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
@@ -456,6 +462,8 @@ func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, 
 		switch topoType {
 		case ovntypes.Layer3Topology:
 			switchName = bnc.GetNetworkScopedName(pod.Spec.NodeName)
+		case ovntypes.Layer2Topology:
+			switchName = bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
 		default:
 			return "", fmt.Errorf("topology type %s not supported", topoType)
 		}
