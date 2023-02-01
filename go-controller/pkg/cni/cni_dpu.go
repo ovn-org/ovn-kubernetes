@@ -10,7 +10,8 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-// updatePodDPUConnDetailsWithRetry update the pod annotation with the given connection details
+// updatePodDPUConnDetailsWithRetry update the pod annotation with the given connection details for the NAD in
+// the PodRequest. If the dpuConnDetails argument is nil, delete the NAD's DPU connection details annotation instead.
 func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podLister corev1listers.PodLister, dpuConnDetails *util.DPUConnectionDetails) error {
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
@@ -22,13 +23,16 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podL
 		cpod := pod.DeepCopy()
 		cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, dpuConnDetails, pr.nadName)
 		if err != nil {
+			if util.IsAnnotationAlreadySetError(err) {
+				return nil
+			}
 			return err
 		}
 		return kube.UpdatePod(cpod)
 	})
 	if resultErr != nil {
-		return fmt.Errorf("failed to update %s annotation on pod %s/%s for NAD %s: %v",
-			util.DPUConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, pr.nadName, resultErr)
+		return fmt.Errorf("failed to update %s annotation dpuConnDetails %+v on pod %s/%s for NAD %s: %v",
+			util.DPUConnectionDetailsAnnot, dpuConnDetails, pr.PodNamespace, pr.PodName, pr.nadName, resultErr)
 	}
 	return nil
 }

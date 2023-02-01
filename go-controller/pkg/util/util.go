@@ -155,6 +155,25 @@ func IsAnnotationNotSetError(err error) bool {
 	return ok
 }
 
+type annotationAlreadySetError struct {
+	msg string
+}
+
+func (aase annotationAlreadySetError) Error() string {
+	return aase.msg
+}
+
+// newAnnotationAlreadySetError returns an error for an annotation that is not set
+func newAnnotationAlreadySetError(format string, args ...interface{}) error {
+	return annotationAlreadySetError{msg: fmt.Sprintf(format, args...)}
+}
+
+// IsAnnotationAlreadySetError returns true if the error indicates that an annotation is already set
+func IsAnnotationAlreadySetError(err error) bool {
+	_, ok := err.(annotationAlreadySetError)
+	return ok
+}
+
 // HashforOVN hashes the provided input to make it a valid addressSet or portGroup name.
 func HashForOVN(s string) string {
 	h := fnv.New64a()
