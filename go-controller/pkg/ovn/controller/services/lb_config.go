@@ -308,11 +308,11 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				routerV4targetips = util.UpdateIPsSlice(routerV4targetips, node.nodeIPs, []string{types.V4HostMasqueradeIP})
 				routerV6targetips = util.UpdateIPsSlice(routerV6targetips, node.nodeIPs, []string{types.V6HostMasqueradeIP})
 
-				routerV4targets := JoinHostsPort(routerV4targetips, config.eps.Port)
-				routerV6targets := JoinHostsPort(routerV6targetips, config.eps.Port)
+				routerV4targets := joinHostsPort(routerV4targetips, config.eps.Port)
+				routerV6targets := joinHostsPort(routerV6targetips, config.eps.Port)
 
-				switchV4Targets := JoinHostsPort(config.eps.V4IPs, config.eps.Port)
-				switchV6Targets := JoinHostsPort(config.eps.V6IPs, config.eps.Port)
+				switchV4Targets := joinHostsPort(config.eps.V4IPs, config.eps.Port)
+				switchV6Targets := joinHostsPort(config.eps.V6IPs, config.eps.Port)
 
 				// Substitute the special vip "node" for the node's physical ips
 				// This is used for nodeport
@@ -336,10 +336,10 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 					if config.externalTrafficLocal && config.hasNodePort {
 						// add special masqueradeIP as a vip if its nodePort svc with ETP=local
 						mvip := types.V4HostETPLocalMasqueradeIP
-						targetsETP := JoinHostsPort(switchV4targetips, config.eps.Port)
+						targetsETP := joinHostsPort(switchV4targetips, config.eps.Port)
 						if isv6 {
 							mvip = types.V6HostETPLocalMasqueradeIP
-							targetsETP = JoinHostsPort(switchV6targetips, config.eps.Port)
+							targetsETP = joinHostsPort(switchV6targetips, config.eps.Port)
 						}
 						switchRules = append(switchRules, LBRule{
 							Source:  Addr{IP: mvip, Port: config.inport},
@@ -347,9 +347,9 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 						})
 					}
 					if config.internalTrafficLocal && util.IsClusterIP(vip) { // ITP only applicable to CIP
-						targetsITP := JoinHostsPort(switchV4targetips, config.eps.Port)
+						targetsITP := joinHostsPort(switchV4targetips, config.eps.Port)
 						if isv6 {
-							targetsITP = JoinHostsPort(switchV6targetips, config.eps.Port)
+							targetsITP = joinHostsPort(switchV6targetips, config.eps.Port)
 						}
 						switchRules = append(switchRules, LBRule{
 							Source:  Addr{IP: vip, Port: config.inport},
@@ -523,4 +523,13 @@ func canMergeLB(a, b LB) bool {
 	// While rules are actually a set, we generate all our lbConfigs from a single source
 	// so the ordering will be the same. Thus, we can cheat and just reflect.DeepEqual
 	return reflect.DeepEqual(a.Rules, b.Rules)
+}
+
+// joinHostsPort takes a list of IPs and a port and converts it to a list of Addrs
+func joinHostsPort(ips []string, port int32) []Addr {
+	out := make([]Addr, 0, len(ips))
+	for _, ip := range ips {
+		out = append(out, Addr{IP: ip, Port: port})
+	}
+	return out
 }

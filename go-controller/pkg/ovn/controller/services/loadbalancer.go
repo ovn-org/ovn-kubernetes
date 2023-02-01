@@ -18,6 +18,51 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// LB is a desired or existing load_balancer configuration in OVN.
+type LB struct {
+	Name        string
+	UUID        string
+	Protocol    string // one of TCP, UDP, SCTP
+	ExternalIDs map[string]string
+	Opts        LBOpts
+
+	Rules []LBRule
+
+	// the names of logical switches, routers and LB groups that this LB should be attached to
+	Switches []string
+	Routers  []string
+	Groups   []string
+}
+
+type LBOpts struct {
+	// if true, then enable unidling. Otherwise, generate reject
+	Unidling bool
+
+	// If greater than 0, then enable per-client-IP affinity.
+	AffinityTimeOut int32
+
+	// If true, then disable SNAT entirely
+	SkipSNAT bool
+}
+
+type Addr struct {
+	IP   string
+	Port int32
+}
+
+type LBRule struct {
+	Source  Addr
+	Targets []Addr
+}
+
+func (a *Addr) String() string {
+	return util.JoinHostPortInt32(a.IP, a.Port)
+}
+
+func (a *Addr) Equals(b *Addr) bool {
+	return a.Port == b.Port && a.IP == b.IP
+}
+
 // EnsureLBs provides a generic load-balancer reconciliation engine.
 //
 // It assures that, for a given set of ExternalIDs, only the configured
