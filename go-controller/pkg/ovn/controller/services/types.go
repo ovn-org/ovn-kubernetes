@@ -1,4 +1,4 @@
-package loadbalancer
+package services
 
 import "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 

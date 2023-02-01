@@ -1,4 +1,4 @@
-package loadbalancer
+package services
 
 import (
 	"fmt"
@@ -309,4 +309,113 @@ func DeleteLBs(nbClient libovsdbclient.Client, uuids []string) error {
 	}
 
 	return nil
+}
+
+// getLBs returns a slice of load balancers found in OVN.
+func getLBs(nbClient libovsdbclient.Client) ([]*LB, error) {
+	_, out, err := _getLBsCommon(nbClient, false)
+	return out, err
+}
+
+// getServiceLBs returns a set of services as well as a slice of load balancers found in OVN.
+func getServiceLBs(nbClient libovsdbclient.Client) (sets.String, []*LB, error) {
+	return _getLBsCommon(nbClient, true)
+}
+
+func _getLBsCommon(nbClient libovsdbclient.Client, withServiceOwner bool) (sets.String, []*LB, error) {
+	lbs, err := libovsdbops.ListLoadBalancers(nbClient)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not list load_balancer: %w", err)
+	}
+
+	services := sets.NewString()
+	outMap := make(map[string]*LB, len(lbs))
+	for _, lb := range lbs {
+
+		// Skip load balancers unrelated to service, or w/out an owner (aka namespace+name)
+		if lb.ExternalIDs[types.LoadBalancerKindExternalID] != "Service" {
+			continue
+		}
+
+		if withServiceOwner {
+			service, ok := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
+			if !ok {
+				continue
+			}
+			services.Insert(service)
+		}
+
+		// Note: no need to fill in Opts and Rules: syncServices populates them later.
+		// Switches, Routers and Groups for each load balancer will get filled in below.
+		res := LB{
+			UUID:        lb.UUID,
+			Name:        lb.Name,
+			ExternalIDs: lb.ExternalIDs,
+			Opts:        LBOpts{},
+			Rules:       []LBRule{},
+			Switches:    []string{},
+			Routers:     []string{},
+			Groups:      []string{},
+		}
+		if lb.Protocol != nil {
+			res.Protocol = *lb.Protocol
+		}
+
+		outMap[lb.UUID] = &res
+	}
+
+	// Switches
+	ps := func(item *nbdb.LogicalSwitch) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, ps)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not list logical switches: %w", err)
+	}
+	for _, ls := range switches {
+		for _, lbuuid := range ls.LoadBalancer {
+			if ovnLb, ok := outMap[lbuuid]; ok {
+				outMap[lbuuid].Switches = append(ovnLb.Switches, ls.Name)
+			}
+		}
+	}
+
+	// Routers
+	pr := func(item *nbdb.LogicalRouter) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, pr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not list logical routers: %w", err)
+	}
+	for _, router := range routers {
+		for _, lbuuid := range router.LoadBalancer {
+			if ovnLb, ok := outMap[lbuuid]; ok {
+				outMap[lbuuid].Routers = append(ovnLb.Routers, router.Name)
+			}
+		}
+	}
+
+	// Groups
+	pg := func(item *nbdb.LoadBalancerGroup) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	groups, err := libovsdbops.FindLoadBalancerGroupsWithPredicate(nbClient, pg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not list load balancer groups: %w", err)
+	}
+	for _, group := range groups {
+		for _, lbuuid := range group.LoadBalancer {
+			if ovnLb, ok := outMap[lbuuid]; ok {
+				outMap[lbuuid].Groups = append(ovnLb.Groups, group.Name)
+			}
+		}
+	}
+
+	out := make([]*LB, 0, len(outMap))
+	for _, value := range outMap {
+		out = append(out, value)
+	}
+
+	return services, out, nil
 }

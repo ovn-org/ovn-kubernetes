@@ -8,10 +8,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"golang.org/x/time/rate"
@@ -22,7 +19,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	coreinformers "k8s.io/client-go/informers/core/v1"
@@ -65,7 +61,7 @@ func NewController(client clientset.Interface,
 		nbClient:         nbClient,
 		queue:            workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
 		workerLoopPeriod: time.Second,
-		alreadyApplied:   map[string][]ovnlb.LB{},
+		alreadyApplied:   map[string][]LB{},
 	}
 
 	// services
@@ -144,7 +140,7 @@ type Controller struct {
 
 	// alreadyApplied is a map of service key -> already applied configuration, so we can short-circuit
 	// if a service's config hasn't changed
-	alreadyApplied     map[string][]ovnlb.LB
+	alreadyApplied     map[string][]LB
 	alreadyAppliedLock sync.Mutex
 
 	// 'true' if Load_Balancer_Group is supported.
@@ -237,7 +233,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 }
 
 // initTopLevelCache will take load balancer data currently applied in OVN and populate the cache.
-// An important caveat here is that no effort is made towards populating some details of ovnlb.LB here.
+// An important caveat here is that no effort is made towards populating some details of LB here.
 // That is because such work will be performed in syncService, so all that is needed here is the ability
 // to distinguish what is present in ovn database and this 'dirty' initial value.
 func (c *Controller) initTopLevelCache() error {
@@ -250,7 +246,7 @@ func (c *Controller) initTopLevelCache() error {
 		return fmt.Errorf("failed to load balancers: %w", err)
 	}
 
-	c.alreadyApplied = make(map[string][]ovnlb.LB, len(services))
+	c.alreadyApplied = make(map[string][]LB, len(services))
 
 	for _, lb := range lbs {
 		service := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
@@ -261,109 +257,6 @@ func (c *Controller) initTopLevelCache() error {
 		len(lbs), len(c.alreadyApplied))
 
 	return nil
-}
-
-// getServiceLBs returns a set of services as well as a slice of load balancers found in OVN.
-func getServiceLBs(nbClient libovsdbclient.Client) (sets.String, []*ovnlb.LB, error) {
-	return _getLBsCommon(nbClient, true)
-}
-
-func _getLBsCommon(nbClient libovsdbclient.Client, withServiceOwner bool) (sets.String, []*ovnlb.LB, error) {
-	lbs, err := libovsdbops.ListLoadBalancers(nbClient)
-	if err != nil {
-		return nil, nil, fmt.Errorf("could not list load_balancer: %w", err)
-	}
-
-	services := sets.NewString()
-	outMap := make(map[string]*ovnlb.LB, len(lbs))
-	for _, lb := range lbs {
-
-		// Skip load balancers unrelated to service, or w/out an owner (aka namespace+name)
-		if lb.ExternalIDs[types.LoadBalancerKindExternalID] != "Service" {
-			continue
-		}
-
-		if withServiceOwner {
-			service, ok := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
-			if !ok {
-				continue
-			}
-			services.Insert(service)
-		}
-
-		// Note: no need to fill in Opts and Rules: syncServices populates them later.
-		// Switches, Routers and Groups for each load balancer will get filled in below.
-		res := ovnlb.LB{
-			UUID:        lb.UUID,
-			Name:        lb.Name,
-			ExternalIDs: lb.ExternalIDs,
-			Opts:        ovnlb.LBOpts{},
-			Rules:       []ovnlb.LBRule{},
-			Switches:    []string{},
-			Routers:     []string{},
-			Groups:      []string{},
-		}
-		if lb.Protocol != nil {
-			res.Protocol = *lb.Protocol
-		}
-
-		outMap[lb.UUID] = &res
-	}
-
-	// Switches
-	ps := func(item *nbdb.LogicalSwitch) bool {
-		return len(item.LoadBalancer) > 0
-	}
-	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, ps)
-	if err != nil {
-		return nil, nil, fmt.Errorf("could not list logical switches: %w", err)
-	}
-	for _, ls := range switches {
-		for _, lbuuid := range ls.LoadBalancer {
-			if ovnLb, ok := outMap[lbuuid]; ok {
-				outMap[lbuuid].Switches = append(ovnLb.Switches, ls.Name)
-			}
-		}
-	}
-
-	// Routers
-	pr := func(item *nbdb.LogicalRouter) bool {
-		return len(item.LoadBalancer) > 0
-	}
-	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, pr)
-	if err != nil {
-		return nil, nil, fmt.Errorf("could not list logical routers: %w", err)
-	}
-	for _, router := range routers {
-		for _, lbuuid := range router.LoadBalancer {
-			if ovnLb, ok := outMap[lbuuid]; ok {
-				outMap[lbuuid].Routers = append(ovnLb.Routers, router.Name)
-			}
-		}
-	}
-
-	// Groups
-	pg := func(item *nbdb.LoadBalancerGroup) bool {
-		return len(item.LoadBalancer) > 0
-	}
-	groups, err := libovsdbops.FindLoadBalancerGroupsWithPredicate(nbClient, pg)
-	if err != nil {
-		return nil, nil, fmt.Errorf("could not list load balancer groups: %w", err)
-	}
-	for _, group := range groups {
-		for _, lbuuid := range group.LoadBalancer {
-			if ovnLb, ok := outMap[lbuuid]; ok {
-				outMap[lbuuid].Groups = append(ovnLb.Groups, group.Name)
-			}
-		}
-	}
-
-	out := make([]*ovnlb.LB, 0, len(outMap))
-	for _, value := range outMap {
-		out = append(out, value)
-	}
-
-	return services, out, nil
 }
 
 // syncService ensures a given Service is correctly reflected in OVN. It does this by
@@ -407,9 +300,9 @@ func (c *Controller) syncService(key string) error {
 
 		c.alreadyAppliedLock.Lock()
 		alreadyAppliedLbs, alreadyAppliedKeyExists := c.alreadyApplied[key]
-		var existingLBs []ovnlb.LB
+		var existingLBs []LB
 		if alreadyAppliedKeyExists {
-			existingLBs = make([]ovnlb.LB, len(alreadyAppliedLbs))
+			existingLBs = make([]LB, len(alreadyAppliedLbs))
 			copy(existingLBs, alreadyAppliedLbs)
 		}
 		c.alreadyAppliedLock.Unlock()
@@ -421,7 +314,7 @@ func (c *Controller) syncService(key string) error {
 			// worker will be operating at a given service. That is why it is safe to have changes to this cache
 			// from multiple workers, because the `key` is always uniquely hashed to the same worker thread.
 
-			if err := ovnlb.EnsureLBs(c.nbClient, service, existingLBs, nil); err != nil {
+			if err := EnsureLBs(c.nbClient, service, existingLBs, nil); err != nil {
 				return fmt.Errorf("failed to delete load balancers for service %s/%s: %w",
 					namespace, name, err)
 			}
@@ -470,14 +363,14 @@ func (c *Controller) syncService(key string) error {
 	// Short-circuit if nothing has changed
 	c.alreadyAppliedLock.Lock()
 	alreadyAppliedLbs, alreadyAppliedKeyExists := c.alreadyApplied[key]
-	var existingLBs []ovnlb.LB
+	var existingLBs []LB
 	if alreadyAppliedKeyExists {
-		existingLBs = make([]ovnlb.LB, len(alreadyAppliedLbs))
+		existingLBs = make([]LB, len(alreadyAppliedLbs))
 		copy(existingLBs, alreadyAppliedLbs)
 	}
 	c.alreadyAppliedLock.Unlock()
 
-	if alreadyAppliedKeyExists && ovnlb.LoadBalancersEqualNoUUID(existingLBs, lbs) {
+	if alreadyAppliedKeyExists && LoadBalancersEqualNoUUID(existingLBs, lbs) {
 		klog.V(3).Infof("Skipping no-op change for service %s", key)
 	} else {
 		klog.V(5).Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
@@ -485,7 +378,7 @@ func (c *Controller) syncService(key string) error {
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.
 		// If so, this will fail and we will resync.
-		if err := ovnlb.EnsureLBs(c.nbClient, service, existingLBs, lbs); err != nil {
+		if err := EnsureLBs(c.nbClient, service, existingLBs, lbs); err != nil {
 			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
 		}
 

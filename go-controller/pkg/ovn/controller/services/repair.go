@@ -8,7 +8,6 @@ import (
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -104,7 +103,7 @@ func (r *repair) runBeforeSync() {
 	}
 
 	// Delete those stale load balancers
-	if err := ovnlb.DeleteLBs(r.nbClient, staleLBs); err != nil {
+	if err := DeleteLBs(r.nbClient, staleLBs); err != nil {
 		klog.Errorf("Failed to delete stale LBs: %v", err)
 	}
 	klog.V(2).Infof("Deleted %d stale service LBs", len(staleLBs))
@@ -126,38 +125,6 @@ func (r *repair) runBeforeSync() {
 			klog.Errorf("Failed to purge existing reject rules: %v", err)
 		}
 	}
-}
-
-func getLBs(nbClient libovsdbclient.Client) ([]*ovnlb.LB, error) {
-	lbs, err := libovsdbops.ListLoadBalancers(nbClient)
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]*ovnlb.LB, 0, len(lbs))
-	for _, lb := range lbs {
-
-		// Skip load balancers unrelated to service
-		if lb.ExternalIDs[types.LoadBalancerKindExternalID] != "Service" {
-			continue
-		}
-
-		// Note: not filling in anything else other than uuid, name, proto and externalids
-		// because there is not a need at this time.
-		res := ovnlb.LB{
-			UUID:        lb.UUID,
-			Name:        lb.Name,
-			ExternalIDs: lb.ExternalIDs,
-		}
-
-		if lb.Protocol != nil {
-			res.Protocol = *lb.Protocol
-		}
-
-		out = append(out, &res)
-	}
-
-	return out, nil
 }
 
 // serviceSynced is called by a ServiceController worker when it has successfully

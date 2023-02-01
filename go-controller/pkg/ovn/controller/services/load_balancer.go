@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -149,7 +148,7 @@ func makeLBName(service *v1.Service, proto v1.Protocol, scope string) string {
 // It takes a list of (proto:[vips]:port -> [endpoints]) configs and re-aggregates
 // them to a list of (proto:[vip:port -> [endpoint:port]])
 // This load balancer is attached to all node switches. In shared-GW mode, it is also on all routers
-func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeInfo, useLBGroup bool) []ovnlb.LB {
+func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeInfo, useLBGroup bool) []LB {
 	var nodeSwitches []string
 	var nodeRouters []string
 	var groups []string
@@ -175,13 +174,13 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 
 	cbp := configsByProto(configs)
 
-	out := []ovnlb.LB{}
+	out := []LB{}
 	for _, proto := range protos {
 		cfgs, ok := cbp[proto]
 		if !ok {
 			continue
 		}
-		lb := ovnlb.LB{
+		lb := LB{
 			Name:        makeLBName(service, proto, "cluster"),
 			Protocol:    string(proto),
 			ExternalIDs: util.ExternalIDsForObject(service),
@@ -198,23 +197,23 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 					service.Namespace, service.Name)
 			}
 
-			v4targets := make([]ovnlb.Addr, 0, len(config.eps.V4IPs))
+			v4targets := make([]Addr, 0, len(config.eps.V4IPs))
 			for _, tgt := range config.eps.V4IPs {
-				v4targets = append(v4targets, ovnlb.Addr{
+				v4targets = append(v4targets, Addr{
 					IP:   tgt,
 					Port: config.eps.Port,
 				})
 			}
 
-			v6targets := make([]ovnlb.Addr, 0, len(config.eps.V6IPs))
+			v6targets := make([]Addr, 0, len(config.eps.V6IPs))
 			for _, tgt := range config.eps.V6IPs {
-				v6targets = append(v6targets, ovnlb.Addr{
+				v6targets = append(v6targets, Addr{
 					IP:   tgt,
 					Port: config.eps.Port,
 				})
 			}
 
-			rules := make([]ovnlb.LBRule, 0, len(config.vips))
+			rules := make([]LBRule, 0, len(config.vips))
 			for _, vip := range config.vips {
 				if vip == placeholderNodeIPs {
 					klog.Errorf("BUG: service %s/%s has a \"node\" vip for a cluster-wide lbConfig",
@@ -226,8 +225,8 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 					targets = v6targets
 				}
 
-				rules = append(rules, ovnlb.LBRule{
-					Source: ovnlb.Addr{
+				rules = append(rules, LBRule{
+					Source: Addr{
 						IP:   vip,
 						Port: config.inport,
 					},
@@ -259,11 +258,11 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 // - SkipSNAT enabled
 // - NP LB on the switch will have masqueradeIP as the vip to handle etp=local for LGW case.
 // This results in the creation of an additional load balancer on the GatewayRouters and NodeSwitches.
-func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) []ovnlb.LB {
+func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) []LB {
 	cbp := configsByProto(configs)
 	eids := util.ExternalIDsForObject(service)
 
-	out := make([]ovnlb.LB, 0, len(nodes)*len(configs))
+	out := make([]LB, 0, len(nodes)*len(configs))
 
 	// output is one LB per node per protocol
 	// with one rule per vip
@@ -277,9 +276,9 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 			// attach to router & switch,
 			// rules may or may not be different
 			// localRouterRules are rules with no snat
-			routerRules := make([]ovnlb.LBRule, 0, len(configs))
-			noSNATRouterRules := make([]ovnlb.LBRule, 0)
-			switchRules := make([]ovnlb.LBRule, 0, len(configs))
+			routerRules := make([]LBRule, 0, len(configs))
+			noSNATRouterRules := make([]LBRule, 0)
+			switchRules := make([]LBRule, 0, len(configs))
 
 			for _, config := range configs {
 				vips := config.vips
@@ -309,11 +308,11 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				routerV4targetips = util.UpdateIPsSlice(routerV4targetips, node.nodeIPs, []string{types.V4HostMasqueradeIP})
 				routerV6targetips = util.UpdateIPsSlice(routerV6targetips, node.nodeIPs, []string{types.V6HostMasqueradeIP})
 
-				routerV4targets := ovnlb.JoinHostsPort(routerV4targetips, config.eps.Port)
-				routerV6targets := ovnlb.JoinHostsPort(routerV6targetips, config.eps.Port)
+				routerV4targets := JoinHostsPort(routerV4targetips, config.eps.Port)
+				routerV6targets := JoinHostsPort(routerV6targetips, config.eps.Port)
 
-				switchV4Targets := ovnlb.JoinHostsPort(config.eps.V4IPs, config.eps.Port)
-				switchV6Targets := ovnlb.JoinHostsPort(config.eps.V6IPs, config.eps.Port)
+				switchV4Targets := JoinHostsPort(config.eps.V4IPs, config.eps.Port)
+				switchV6Targets := JoinHostsPort(config.eps.V6IPs, config.eps.Port)
 
 				// Substitute the special vip "node" for the node's physical ips
 				// This is used for nodeport
@@ -337,28 +336,28 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 					if config.externalTrafficLocal && config.hasNodePort {
 						// add special masqueradeIP as a vip if its nodePort svc with ETP=local
 						mvip := types.V4HostETPLocalMasqueradeIP
-						targetsETP := ovnlb.JoinHostsPort(switchV4targetips, config.eps.Port)
+						targetsETP := JoinHostsPort(switchV4targetips, config.eps.Port)
 						if isv6 {
 							mvip = types.V6HostETPLocalMasqueradeIP
-							targetsETP = ovnlb.JoinHostsPort(switchV6targetips, config.eps.Port)
+							targetsETP = JoinHostsPort(switchV6targetips, config.eps.Port)
 						}
-						switchRules = append(switchRules, ovnlb.LBRule{
-							Source:  ovnlb.Addr{IP: mvip, Port: config.inport},
+						switchRules = append(switchRules, LBRule{
+							Source:  Addr{IP: mvip, Port: config.inport},
 							Targets: targetsETP,
 						})
 					}
 					if config.internalTrafficLocal && util.IsClusterIP(vip) { // ITP only applicable to CIP
-						targetsITP := ovnlb.JoinHostsPort(switchV4targetips, config.eps.Port)
+						targetsITP := JoinHostsPort(switchV4targetips, config.eps.Port)
 						if isv6 {
-							targetsITP = ovnlb.JoinHostsPort(switchV6targetips, config.eps.Port)
+							targetsITP = JoinHostsPort(switchV6targetips, config.eps.Port)
 						}
-						switchRules = append(switchRules, ovnlb.LBRule{
-							Source:  ovnlb.Addr{IP: vip, Port: config.inport},
+						switchRules = append(switchRules, LBRule{
+							Source:  Addr{IP: vip, Port: config.inport},
 							Targets: targetsITP,
 						})
 					} else {
-						switchRules = append(switchRules, ovnlb.LBRule{
-							Source:  ovnlb.Addr{IP: vip, Port: config.inport},
+						switchRules = append(switchRules, LBRule{
+							Source:  Addr{IP: vip, Port: config.inport},
 							Targets: targets,
 						})
 					}
@@ -369,8 +368,8 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 					if isv6 {
 						targets = routerV6targets
 					}
-					rule := ovnlb.LBRule{
-						Source:  ovnlb.Addr{IP: vip, Port: config.inport},
+					rule := LBRule{
+						Source:  Addr{IP: vip, Port: config.inport},
 						Targets: targets,
 					}
 
@@ -387,7 +386,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 
 			// If switch and router rules are identical, coalesce
 			if reflect.DeepEqual(switchRules, routerRules) && len(switchRules) > 0 && node.gatewayRouterName != "" {
-				out = append(out, ovnlb.LB{
+				out = append(out, LB{
 					Name:        makeLBName(service, proto, "node_router+switch_"+node.name),
 					Protocol:    string(proto),
 					ExternalIDs: eids,
@@ -398,7 +397,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				})
 			} else {
 				if len(routerRules) > 0 && node.gatewayRouterName != "" {
-					out = append(out, ovnlb.LB{
+					out = append(out, LB{
 						Name:        makeLBName(service, proto, "node_router_"+node.name),
 						Protocol:    string(proto),
 						ExternalIDs: eids,
@@ -408,7 +407,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 					})
 				}
 				if len(noSNATRouterRules) > 0 && node.gatewayRouterName != "" {
-					lb := ovnlb.LB{
+					lb := LB{
 						Name:        makeLBName(service, proto, "node_local_router_"+node.name),
 						Protocol:    string(proto),
 						ExternalIDs: eids,
@@ -421,7 +420,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				}
 
 				if len(switchRules) > 0 {
-					out = append(out, ovnlb.LB{
+					out = append(out, LB{
 						Name:        makeLBName(service, proto, "node_switch_"+node.name),
 						Protocol:    string(proto),
 						ExternalIDs: eids,
@@ -466,9 +465,9 @@ func getSessionAffinityTimeOut(service *v1.Service) int32 {
 }
 
 // lbOpts generates the OVN load balancer options from the kubernetes Service.
-func lbOpts(service *v1.Service) ovnlb.LBOpts {
+func lbOpts(service *v1.Service) LBOpts {
 	affinity := service.Spec.SessionAffinity == v1.ServiceAffinityClientIP
-	lbOptions := ovnlb.LBOpts{
+	lbOptions := LBOpts{
 		Unidling: svcNeedsIdling(service.GetAnnotations()),
 		SkipSNAT: false, // never service-wide, ExternalTrafficPolicy-specific
 	}
@@ -482,11 +481,11 @@ func lbOpts(service *v1.Service) ovnlb.LBOpts {
 //
 // an LB can be merged if the protocol, rules, and options are the same,
 // and only the switches and routers are different.
-func mergeLBs(lbs []ovnlb.LB) []ovnlb.LB {
+func mergeLBs(lbs []LB) []LB {
 	if len(lbs) == 1 {
 		return lbs
 	}
-	out := make([]ovnlb.LB, 0, len(lbs))
+	out := make([]LB, 0, len(lbs))
 
 outer:
 	for _, lb := range lbs {
@@ -512,7 +511,7 @@ outer:
 // canMergeLB returns true if two LBs are mergeable.
 // We know that the ExternalIDs will be the same, so we don't need to compare them.
 // All that matters is the protocol and rules are the same.
-func canMergeLB(a, b ovnlb.LB) bool {
+func canMergeLB(a, b LB) bool {
 	if a.Protocol != b.Protocol {
 		return false
 	}
