@@ -253,10 +253,11 @@ func buildLB(lb *LB) *nbdb.LoadBalancer {
 	}
 
 	options := map[string]string{
-		"reject":          reject,
-		"event":           event,
-		"skip_snat":       skipSNAT,
-		"hairpin_snat_ip": fmt.Sprintf("%s %s", types.V4OVNServiceHairpinMasqueradeIP, types.V6OVNServiceHairpinMasqueradeIP),
+		"reject":             reject,
+		"event":              event,
+		"skip_snat":          skipSNAT,
+		"neighbor_responder": "none",
+		"hairpin_snat_ip":    fmt.Sprintf("%s %s", types.V4OVNServiceHairpinMasqueradeIP, types.V6OVNServiceHairpinMasqueradeIP),
 	}
 
 	// Session affinity
