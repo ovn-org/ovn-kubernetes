@@ -133,6 +133,8 @@ var _ = Describe("Multi Homing", func() {
 			port              = 9000
 			workerOneNodeName = "ovn-worker"
 			workerTwoNodeName = "ovn-worker2"
+			clientIP          = "192.168.200.10/24"
+			staticServerIP    = "192.168.200.20/24"
 		)
 
 		table.DescribeTable(
@@ -204,12 +206,12 @@ var _ = Describe("Multi Homing", func() {
 
 				if netConfig.cidr == "" {
 					By("configuring static IP addresses in the pods")
-					const (
-						clientIP       = "192.168.200.10/24"
-						staticServerIP = "192.168.200.20/24"
-					)
-					Expect(configurePodStaticIP(f.Namespace.Name, clientPodName, clientIP)).To(Succeed())
-					Expect(configurePodStaticIP(f.Namespace.Name, serverPod.GetName(), staticServerIP)).To(Succeed())
+					if !areStaticIPsConfiguredViaCNI(clientPodConfig) {
+						Expect(configurePodStaticIP(clientPodConfig.namespace, clientPodName, clientIP)).To(Succeed())
+					}
+					if !areStaticIPsConfiguredViaCNI(serverPodConfig) {
+						Expect(configurePodStaticIP(serverPodConfig.namespace, serverPod.GetName(), staticServerIP)).To(Succeed())
+					}
 					serverIP = strings.ReplaceAll(staticServerIP, "/24", "")
 				}
 
@@ -297,6 +299,28 @@ var _ = Describe("Multi Homing", func() {
 					name:         podName,
 					containerCmd: httpServerContainerCmd(port),
 					isPrivileged: true,
+				},
+			),
+			table.Entry(
+				"can communicate over an L2 secondary network without IPAM, with static IPs configured via network selection elements",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "layer2",
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{
+						Name:      secondaryNetworkName,
+						IPRequest: []string{clientIP},
+					}},
+					name: clientPodName,
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{
+						Name:      secondaryNetworkName,
+						IPRequest: []string{staticServerIP},
+					}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
 				},
 			),
 		)
@@ -533,4 +557,13 @@ func configurePodStaticIP(podNamespace string, podName string, staticIP string) 
 		"net1",
 	)
 	return err
+}
+
+func areStaticIPsConfiguredViaCNI(podConfig podConfiguration) bool {
+	for _, attachment := range podConfig.attachments {
+		if len(attachment.IPRequest) > 0 {
+			return true
+		}
+	}
+	return false
 }
