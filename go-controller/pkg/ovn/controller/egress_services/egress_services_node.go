@@ -205,12 +205,13 @@ func (c *Controller) syncNode(key string) error {
 			return nil
 		}
 
-		return c.deleteNoRerouteNodePolicies(c.addressSetFactory, nodeName, state.v4InternalNodeIP, state.v6InternalNodeIP)
+		return c.deleteNoRerouteNodePolicies(c.addressSetFactory, nodeName, state.v4InternalNodeIP,
+			state.v6InternalNodeIP, c.controllerName)
 	}
 
 	// We create the per-node reroute policies as long as it has a resource (n != nil at this point),
 	// regardless if it was allocated services or not.
-	if err := c.createNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, n); err != nil {
+	if err := c.createNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, n, c.controllerName); err != nil {
 		return err
 	}
 

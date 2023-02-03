@@ -12,7 +12,6 @@ import (
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	kapi "k8s.io/api/core/v1"
@@ -233,11 +232,12 @@ func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfire
 	// EgressFirewall needs to make sure that the address_set for the namespace exists independently of the namespace object
 	// so that OVN doesn't get unresolved references to the address_set.
 	// TODO: This should go away once we do something like refcounting for address_sets.
-	_, err := oc.addressSetFactory.EnsureAddressSet(egressFirewall.Namespace)
+	asIndex := getNamespaceAddrSetDbIDs(egressFirewall.Namespace, oc.controllerName)
+	as, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
 	if err != nil {
-		return fmt.Errorf("cannot Ensure that addressSet for namespace %s exists %v", egressFirewall.Namespace, err)
+		return fmt.Errorf("cannot ensure addressSet for namespace %s: %v", egressFirewall.Namespace, err)
 	}
-	ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames(egressFirewall.Namespace)
+	ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
 	aclLoggingLevels := oc.GetNamespaceACLLogging(ef.namespace)
 	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority, aclLoggingLevels); err != nil {
 		return err

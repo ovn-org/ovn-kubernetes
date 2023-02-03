@@ -27,6 +27,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
+					controllerName:              netInfo.GetNetworkName() + "-network-controller",
 					NetConfInfo:                 netconfInfo,
 					NetInfo:                     netInfo,
 					lsManager:                   lsm.NewL2SwitchManager(),

@@ -37,6 +37,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const DefaultNetworkControllerName = "default-network-controller"
+
 // DefaultNetworkController structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints) for default l3 network
 type DefaultNetworkController struct {
@@ -158,7 +160,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient)
 	}
 	svcController, svcFactory := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
-	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory, defaultStopChan)
+	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory,
+		defaultStopChan, DefaultNetworkControllerName)
 	var hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
 	if config.HybridOverlay.Enabled {
 		hybridOverlaySubnetAllocator = subnetallocator.NewHostSubnetAllocator()
@@ -166,6 +169,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
+			controllerName:              DefaultNetworkControllerName,
 			NetConfInfo:                 &util.DefaultNetConfInfo{},
 			NetInfo:                     &util.DefaultNetInfo{},
 			lsManager:                   lsm.NewLogicalSwitchManager(),
@@ -425,7 +429,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
 		var err error
-		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
+		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan)
 		if err != nil {
 			return err
 		}

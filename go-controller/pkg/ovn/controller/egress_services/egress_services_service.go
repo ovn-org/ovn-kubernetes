@@ -27,6 +27,15 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+const EgressServiceServedPodsAddrSetName = "egresssvc-served-pods"
+
+func GetEgressServiceAddrSetDbIDs(controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressService, controller, map[libovsdbops.ExternalIDKey]string{
+		// egressService has 1 cluster-wide address set
+		libovsdbops.ObjectNameKey: EgressServiceServedPodsAddrSetName,
+	})
+}
+
 func (c *Controller) onServiceAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
@@ -455,24 +464,26 @@ func createIPAddressNetSlice(v4ips, v6ips []string) []net.IP {
 
 func (c *Controller) addPodIPsToAddressSetOps(addrSetIPs []net.IP) ([]libovsdb.Operation, error) {
 	var ops []libovsdb.Operation
-	as, err := c.addressSetFactory.GetAddressSet(ovntypes.EgressServiceServedPods)
+	dbIDs := GetEgressServiceAddrSetDbIDs(c.controllerName)
+	as, err := c.addressSetFactory.GetAddressSet(dbIDs)
 	if err != nil {
-		return nil, fmt.Errorf("cannot ensure that addressSet for cluster %s exists %v", ovntypes.EgressServiceServedPods, err)
+		return nil, fmt.Errorf("cannot ensure that addressSet %s exists %v", EgressServiceServedPodsAddrSetName, err)
 	}
 	if ops, err = as.AddIPsReturnOps(addrSetIPs); err != nil {
-		return nil, fmt.Errorf("cannot add egressPodIPs %v from the address set %v: err: %v", addrSetIPs, ovntypes.EgressServiceServedPods, err)
+		return nil, fmt.Errorf("cannot add egressPodIPs %v from the address set %v: err: %v", addrSetIPs, EgressServiceServedPodsAddrSetName, err)
 	}
 	return ops, nil
 }
 
 func (c *Controller) deletePodIPsFromAddressSetOps(addrSetIPs []net.IP) ([]libovsdb.Operation, error) {
 	var ops []libovsdb.Operation
-	as, err := c.addressSetFactory.GetAddressSet(ovntypes.EgressServiceServedPods)
+	dbIDs := GetEgressServiceAddrSetDbIDs(c.controllerName)
+	as, err := c.addressSetFactory.GetAddressSet(dbIDs)
 	if err != nil {
-		return nil, fmt.Errorf("cannot ensure that addressSet for cluster %s exists %v", ovntypes.EgressServiceServedPods, err)
+		return nil, fmt.Errorf("cannot ensure that addressSet %s exists %v", EgressServiceServedPodsAddrSetName, err)
 	}
 	if ops, err = as.DeleteIPsReturnOps(addrSetIPs); err != nil {
-		return nil, fmt.Errorf("cannot delete egressPodIPs %v from the address set %v: err: %v", addrSetIPs, ovntypes.EgressServiceServedPods, err)
+		return nil, fmt.Errorf("cannot delete egressPodIPs %v from the address set %v: err: %v", addrSetIPs, EgressServiceServedPodsAddrSetName, err)
 	}
 	return ops, nil
 }

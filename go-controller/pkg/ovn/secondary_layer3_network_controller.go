@@ -201,10 +201,12 @@ type SecondaryLayer3NetworkController struct {
 func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
 	netconfInfo util.NetConfInfo) *SecondaryLayer3NetworkController {
 	stopChan := make(chan struct{})
+	// controllerName must be unique to identify db object owned by given controller
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 			BaseNetworkController: BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
+				controllerName:              netInfo.GetNetworkName() + "-network-controller",
 				NetConfInfo:                 netconfInfo,
 				NetInfo:                     netInfo,
 				lsManager:                   lsm.NewLogicalSwitchManager(),
