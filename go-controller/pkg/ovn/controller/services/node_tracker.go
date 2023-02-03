@@ -42,6 +42,8 @@ type nodeInfo struct {
 	gatewayRouterName string
 	// The name of the node's switch - never empty
 	switchName string
+	// The chassisID of the node (ovs.external-ids:system-id)
+	chassisID string
 }
 
 // returns a list of all ip blocks "assigned" to this node
@@ -96,7 +98,8 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, erro
 			// updateNode needs to be called only when hostSubnet annotation has changed or
 			// if L3Gateway annotation's ip addresses have changed or the name of the node (very rare)
 			// has changed. No need to trigger update for any other field change.
-			if util.NodeSubnetAnnotationChanged(oldObj, newObj) || util.NodeL3GatewayAnnotationChanged(oldObj, newObj) || oldObj.Name != newObj.Name {
+			if util.NodeSubnetAnnotationChanged(oldObj, newObj) || util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
+				util.NodeChassisIDAnnotationChanged(oldObj, newObj) || oldObj.Name != newObj.Name {
 				nt.updateNode(newObj)
 			}
 		},
@@ -126,13 +129,14 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, erro
 
 // updateNodeInfo updates the node info cache, and syncs all services
 // if it changed.
-func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, nodeIPs []string, podSubnets []*net.IPNet) {
+func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisID string, nodeIPs []string, podSubnets []*net.IPNet) {
 	ni := nodeInfo{
 		name:              nodeName,
 		nodeIPs:           nodeIPs,
 		podSubnets:        make([]net.IPNet, 0, len(podSubnets)),
 		gatewayRouterName: routerName,
 		switchName:        switchName,
+		chassisID:         chassisID,
 	}
 	for i := range podSubnets {
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
@@ -187,6 +191,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 	switchName := node.Name
 	grName := ""
 	ips := []string{}
+	chassisID := ""
 
 	// if the node has a gateway config, it will soon have a gateway router
 	// so, set the router name
@@ -200,12 +205,14 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 				ips = append(ips, ip.IP.String())
 			}
 		}
+		chassisID = gwConf.ChassisID
 	}
 
 	nt.updateNodeInfo(
 		node.Name,
 		switchName,
 		grName,
+		chassisID,
 		ips,
 		hsn,
 	)
