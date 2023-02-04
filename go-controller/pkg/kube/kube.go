@@ -39,6 +39,7 @@ type InterfaceOVN interface {
 // kubernetes resources
 type Interface interface {
 	SetAnnotationsOnPod(namespace, podName string, annotations map[string]interface{}) error
+	SetAnnotationsOnService(namespace, serviceName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error
 	SetTaintOnNode(nodeName string, taint *kapi.Taint) error
@@ -146,6 +147,33 @@ func (k *Kube) SetAnnotationsOnNamespace(namespaceName string, annotations map[s
 	_, err = k.KClient.CoreV1().Namespaces().Patch(context.TODO(), namespaceName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
 		klog.Errorf("Error in setting annotation on namespace %s: %v", namespaceName, err)
+	}
+	return err
+}
+
+// SetAnnotationsOnService takes a service namespace and name and a map of key/value string pairs to set as annotations
+func (k *Kube) SetAnnotationsOnService(namespace, name string, annotations map[string]interface{}) error {
+	var err error
+	var patchData []byte
+	patch := struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}{
+		Metadata: map[string]interface{}{
+			"annotations": annotations,
+		},
+	}
+
+	serviceDesc := namespace + "/" + name
+	klog.Infof("Setting annotations %v on service %s", annotations, serviceDesc)
+	patchData, err = json.Marshal(&patch)
+	if err != nil {
+		klog.Errorf("Error in setting annotations on service %s: %v", serviceDesc, err)
+		return err
+	}
+
+	_, err = k.KClient.CoreV1().Services(namespace).Patch(context.TODO(), name, types.MergePatchType, patchData, metav1.PatchOptions{})
+	if err != nil {
+		klog.Errorf("Error in setting annotation on service %s: %v", serviceDesc, err)
 	}
 	return err
 }

@@ -35,8 +35,11 @@ type LB struct {
 }
 
 type LBOpts struct {
-	// if true, then enable unidling. Otherwise, generate reject
-	Unidling bool
+	// if the service should send back tcp REJECT in case of no endpoints
+	Reject bool
+
+	// if the service should raise empty_lb events
+	EmptyLBEvents bool
 
 	// If greater than 0, then enable per-client-IP affinity.
 	AffinityTimeOut int32
@@ -288,22 +291,24 @@ func mapLBDifferenceByKey(keyMap map[string][]*nbdb.LoadBalancer, keyIn sets.Str
 }
 
 func buildLB(lb *LB) *nbdb.LoadBalancer {
-	reject := "true"
-	event := "false"
-
-	if lb.Opts.Unidling {
-		reject = "false"
-		event = "true"
-	}
-
 	skipSNAT := "false"
 	if lb.Opts.SkipSNAT {
 		skipSNAT = "true"
 	}
 
+	reject := "false"
+	if lb.Opts.Reject {
+		reject = "true"
+	}
+
+	emptyLb := "false"
+	if lb.Opts.EmptyLBEvents {
+		emptyLb = "true"
+	}
+
 	options := map[string]string{
 		"reject":             reject,
-		"event":              event,
+		"event":              emptyLb,
 		"skip_snat":          skipSNAT,
 		"neighbor_responder": "none",
 		"hairpin_snat_ip":    fmt.Sprintf("%s %s", types.V4OVNServiceHairpinMasqueradeIP, types.V6OVNServiceHairpinMasqueradeIP),

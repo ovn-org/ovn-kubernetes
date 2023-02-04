@@ -164,9 +164,10 @@ var _ = ginkgo.Describe("Unidling", func() {
 			})
 			framework.ExpectNoError(err)
 
+			// Service starts a grace period in which it doesn't reject connections.
 			gomega.Eventually(func() serviceStatus {
 				return checkService(clientPod, cmd)
-			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is rejecting")
 
 			gomega.Eventually(func() bool {
 				return hittingGeneratesNewEvents(service, cs, clientPod, cmd)
