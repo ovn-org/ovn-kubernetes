@@ -635,8 +635,8 @@ github.com/openshift/api v0.0.0-20221004161420-ef2c62cf20d0/go.mod h1:JRz+ZvTqu9
 github.com/openshift/client-go v0.0.0-20220915152853-9dfefb19db2e h1:ab+BJg7h50pi2/rbMkDSXfYx8w80HLmr7NBs8H1hEvU=
 github.com/openshift/client-go v0.0.0-20220915152853-9dfefb19db2e/go.mod h1:e+TTiBDGWB3O3p3iAzl054x3cZDWhrZ5+jxJRCdEFkA=
 github.com/opentracing/opentracing-go v1.1.0/go.mod h1:UkNAQd3GIcIGf0SeVgPpRdFStlNbqXla1AfSYxPUl2o=
-github.com/ovn-org/libovsdb v0.6.1-0.20221101143603-8f21d188c3a5 h1:Cw0JXIHSGp8etz5/P7zNQ0tCMmTljBGBr8Rn2P1PuzQ=
-github.com/ovn-org/libovsdb v0.6.1-0.20221101143603-8f21d188c3a5/go.mod h1:S/+Hux9//oB7yLaPsUKnXTzZc6S1C4a9HP0UifXfKz0=
+github.com/ovn-org/libovsdb v0.6.1-0.20230203213244-a6a173993830 h1:eV+OMJFLtayfrYTCEBIsxvuMV0HK6KPWCqIUdaxoIwQ=
+github.com/ovn-org/libovsdb v0.6.1-0.20230203213244-a6a173993830/go.mod h1:S/+Hux9//oB7yLaPsUKnXTzZc6S1C4a9HP0UifXfKz0=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=
 github.com/pelletier/go-toml v1.8.1/go.mod h1:T2/BmBdy8dvIRq1a/8aqjN41wvWlN4lrapLU/GW4pbc=
@@ -1069,8 +1069,6 @@ golang.org/x/sys v0.0.0-20220412211240-33da011f77ad/go.mod h1:oPkhp1MJrh7nUepCBc
 golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
-golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab h1:2QkjZIsXupsJbJIdSjjUOgWK3aEtzyuh2mPt3l/CkeU=
-golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.2.0 h1:ljd4t30dBnAvMZaQCevtY0xLLD0A+bRZXbgLMLU1F/A=
 golang.org/x/sys v0.2.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=

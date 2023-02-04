@@ -315,18 +315,3 @@ func (m Mapper) equalIndexes(one, other *Info, indexes ...string) (bool, error) 
 	}
 	return false, nil
 }
-
-// NewMonitorRequest returns a monitor request for the provided tableName
-// If fields is provided, the request will be constrained to the provided columns
-// If no fields are provided, all columns will be used
-func (m *Mapper) NewMonitorRequest(data *Info, fields []string) (*ovsdb.MonitorRequest, error) {
-	var columns []string
-	if len(fields) > 0 {
-		columns = append(columns, fields...)
-	} else {
-		for c := range data.Metadata.TableSchema.Columns {
-			columns = append(columns, c)
-		}
-	}
-	return &ovsdb.MonitorRequest{Columns: columns, Select: ovsdb.NewDefaultMonitorSelect()}, nil
-}
