@@ -79,6 +79,11 @@ var _ = Describe("Multi Homing", func() {
 				netCIDR(secondaryNetworkCIDR, 24),
 			),
 			table.Entry(
+				"when attaching to an L2 - switched - network",
+				generateSwitchedSecondaryOvnNetwork,
+				secondaryFlatL2NetworkCIDR,
+			),
+			table.Entry(
 				"when attaching to an L2 - switched - network featuring `excludeCIDR`s",
 				generateSwitchedSecondaryOvnNetwork,
 				secondaryFlatL2NetworkCIDR,
@@ -167,6 +172,11 @@ var _ = Describe("Multi Homing", func() {
 		},
 			table.Entry(
 				"can communicate over an L2 - switched - secondary network",
+				generateSwitchedSecondaryOvnNetwork,
+				secondaryFlatL2NetworkCIDR,
+			),
+			table.Entry(
+				"can communicate over an L2 - switched - secondary network with excludeCIDRs",
 				generateSwitchedSecondaryOvnNetwork,
 				secondaryFlatL2NetworkCIDR,
 				secondaryFlatL2IgnoreCIDR,
@@ -269,7 +279,6 @@ func inRange(cidr string, ip string) error {
 }
 
 func generateSwitchedSecondaryOvnNetwork(namespace string, name string, cidr string, excludeCIDRs ...string) *nadapi.NetworkAttachmentDefinition {
-	// TODO: optional `excludeSubnets` parameter
 	nadSpec := fmt.Sprintf(`
 {
         "cniVersion": "0.3.0",
