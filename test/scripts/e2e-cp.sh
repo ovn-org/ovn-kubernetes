@@ -78,6 +78,15 @@ if [ "$ENABLE_MULTI_NET" != "true" ]; then
   SKIPPED_TESTS+="Multi Homing"
 fi
 
+# Only run Node IP address migration tests if they are explicitly requested
+IP_MIGRATION_TESTS="Node IP address migration"
+if [ "${WHAT}" != "${IP_MIGRATION_TESTS}" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="Node IP address migration"
+fi
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock

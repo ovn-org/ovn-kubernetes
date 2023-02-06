@@ -56,6 +56,12 @@ All local tests are run by `make control-plane`. The local tests are controlled 
 and the actual tests are defined in the directory
 [ovn-kubernetes/test/e2e/](https://github.com/ovn-org/ovn-kubernetes/tree/master/test/e2e).
 
+#### Node IP migration tests
+
+The node IP migration tests are part of the control-plane tests but due to their impact they cannot be run concurrently
+with other tests and they are disabled when running `make control-plane`.
+Instead, they must explicitly be requested with `make -C test control-plane WHAT="Node IP address migration"`.
+
 ### Github CI integration through Github Actions Matrix
 
 Each of these shards and control-plane tests can then be run in a [Github Actions matrix](https://docs.github.com/en/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix) of:

@@ -815,6 +815,22 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 	case factory.EgressNodeType:
 		oldNode := oldObj.(*kapi.Node)
 		newNode := newObj.(*kapi.Node)
+
+		// Check if the node's internal addresses changed. If so,
+		// delete and readd the node for egress to update LR policies.
+		// We are only interested in the IPs here, not the subnet information.
+		oldV4Addr, oldV6Addr := util.GetNodeInternalAddrs(oldNode)
+		newV4Addr, newV6Addr := util.GetNodeInternalAddrs(newNode)
+		if !oldV4Addr.Equal(newV4Addr) || !oldV6Addr.Equal(newV6Addr) {
+			klog.Infof("Egress IP detected IP address change. Recreating node %s for Egress IP.", newNode.Name)
+			if err := h.oc.deleteNodeForEgress(oldNode); err != nil {
+				klog.Error(err)
+			}
+			if err := h.oc.setupNodeForEgress(newNode); err != nil {
+				klog.Error(err)
+			}
+		}
+
 		// Initialize the allocator on every update,
 		// ovnkube-node/cloud-network-config-controller will make sure to
 		// annotate the node with the egressIPConfig, but that might have
