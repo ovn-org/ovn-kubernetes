@@ -33,6 +33,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -224,40 +225,45 @@ func (oc *DefaultNetworkController) WatchNamespaces() error {
 	return err
 }
 
-// syncNodeGateway ensures a node's gateway router is configured
-func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
-	if err != nil {
-		return err
+func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
+	hostSubnets []*net.IPNet, hostAddrs sets.String) error {
+	var err error
+	var gwLRPIPs, clusterSubnets []*net.IPNet
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
-	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+	gwLRPIPs, err = oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
+	if err != nil {
+		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
+	}
+
+	drLRPIPs, _ := oc.joinSwIPManager.EnsureJoinLRPIPs(ovntypes.OVNClusterRouter)
+
+	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
+
+	err = oc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs,
+		enableGatewayMTU)
+	if err != nil {
+		return fmt.Errorf("failed to init shared interface gateway: %v", err)
+	}
+
+	for _, subnet := range hostSubnets {
+		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
+		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
 		if err != nil {
 			return err
 		}
-	}
-
-	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := oc.gatewayCleanup(node.Name); err != nil {
-			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
-		}
-		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs.List())
+		if err != nil && err != util.NoIPError {
 			return err
 		}
-	} else if hostSubnets != nil {
-		var hostAddrs sets.String
-		if config.Gateway.Mode == config.GatewayModeShared {
-			hostAddrs, err = util.ParseNodeHostAddresses(node)
-			if err != nil && !util.IsAnnotationNotSetError(err) {
-				return fmt.Errorf("failed to get host addresses for node: %s: %v", node.Name, err)
-			}
-		}
-		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
-			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
+		if err := oc.addPolicyBasedRoutes(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
+			return err
 		}
 	}
-	return nil
+
+	return err
 }
 
 // aclLoggingUpdateNsInfo parses the provided annotation values and sets nsInfo.aclLogging.Deny and

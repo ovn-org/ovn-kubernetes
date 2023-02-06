@@ -24,8 +24,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	controllerManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -247,7 +247,8 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		metrics.RegisterMasterBase()
 
 		masterEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
-		cm := controllerManager.NewNetworkControllerManager(ovnClientset, master, masterWatchFactory,
+
+		cm := ovn.NewMaster(ovnClientset, master, masterWatchFactory,
 			libovsdbOvnNBClient, libovsdbOvnSBClient, masterEventRecorder, wg)
 		err = cm.Start(ctx.Context, cancel)
 		defer cm.Stop()

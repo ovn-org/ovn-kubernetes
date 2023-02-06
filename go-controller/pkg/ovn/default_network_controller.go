@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -345,6 +346,219 @@ func (oc *DefaultNetworkController) Init() error {
 	if err := oc.SetupMaster(nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
+	}
+
+	return nil
+}
+
+func (oc *DefaultNetworkController) createACLLoggingMeter() error {
+	band := &nbdb.MeterBand{
+		Action: ovntypes.MeterAction,
+		Rate:   config.Logging.ACLLoggingRateLimit,
+	}
+	ops, err := libovsdbops.CreateMeterBandOps(oc.nbClient, nil, band)
+	if err != nil {
+		return fmt.Errorf("can't create meter band %v: %v", band, err)
+	}
+
+	meterFairness := true
+	meter := &nbdb.Meter{
+		Name: ovntypes.OvnACLLoggingMeter,
+		Fair: &meterFairness,
+		Unit: ovntypes.PacketsPerSecond,
+	}
+	ops, err = libovsdbops.CreateOrUpdateMeterOps(oc.nbClient, ops, meter, []*nbdb.MeterBand{band},
+		&meter.Bands, &meter.Fair, &meter.Unit)
+	if err != nil {
+		return fmt.Errorf("can't create meter %v: %v", meter, err)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("can't transact ACL logging meter: %v", err)
+	}
+
+	return nil
+}
+
+func (oc *DefaultNetworkController) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
+	err := oc.determineOVNTopoVersionFromOVN()
+	if err != nil {
+		return err
+	}
+
+	ver := oc.topologyVersion
+	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
+	if ver < ovntypes.OvnSingleJoinSwitchTopoVersion {
+		klog.Infof("Upgrading to Single Switch OVN Topology")
+		err = oc.upgradeToSingleSwitchOVNTopology(existingNodes)
+	}
+	if err == nil && ver < ovntypes.OvnNamespacedDenyPGTopoVersion {
+		klog.Infof("Upgrading to Namespace Deny PortGroup OVN Topology")
+		err = oc.upgradeToNamespacedDenyPGOVNTopology(existingNodes)
+	}
+	// If version is less than Host -> Service with OpenFlow, we need to remove and cleanup DGP
+	if err == nil && ((ver < ovntypes.OvnHostToSvcOFTopoVersion && config.Gateway.Mode == config.GatewayModeShared) ||
+		(ver < ovntypes.OvnRoutingViaHostTopoVersion)) {
+		err = oc.cleanupDGP(existingNodes)
+	}
+	return err
+}
+
+// cleanup obsolete *gressDefaultDeny port groups
+func (oc *DefaultNetworkController) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
+	err := libovsdbops.DeletePortGroups(oc.nbClient, "ingressDefaultDeny", "egressDefaultDeny")
+	if err != nil {
+		klog.Errorf("%v", err)
+	}
+	return nil
+}
+
+// delete obsoleted logical OVN entities that are specific for Multiple join switches OVN topology. Also cleanup
+// OVN entities for deleted nodes (similar to syncNodes() but for obsoleted Multiple join switches OVN topology)
+func (oc *DefaultNetworkController) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
+	existingNodes := make(map[string]bool)
+	for _, node := range existingNodeList.Items {
+		existingNodes[node.Name] = true
+
+		// delete the obsoleted node-join-subnets annotation
+		err := oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{"k8s.ovn.org/node-join-subnets": nil})
+		if err != nil {
+			klog.Errorf("Failed to remove node-join-subnets annotation for node %s", node.Name)
+		}
+	}
+
+	p := func(item *nbdb.LogicalSwitch) bool {
+		return strings.HasPrefix(item.Name, ovntypes.JoinSwitchPrefix)
+	}
+	legacyJoinSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
+	if err != nil {
+		klog.Errorf("Failed to remove any legacy per node join switches")
+	}
+
+	for _, legacyJoinSwitch := range legacyJoinSwitches {
+		// if the node was deleted when ovn-master was down, delete its per-node switch
+		nodeName := strings.TrimPrefix(legacyJoinSwitch.Name, ovntypes.JoinSwitchPrefix)
+		upgradeOnly := true
+		if _, ok := existingNodes[nodeName]; !ok {
+			_ = oc.deleteNodeLogicalNetwork(nodeName)
+			upgradeOnly = false
+		}
+
+		// for all nodes include the ones that were deleted, delete its gateway entities.
+		// See comments above the multiJoinSwitchGatewayCleanup() function for details.
+		err := oc.multiJoinSwitchGatewayCleanup(nodeName, upgradeOnly)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetupMaster creates the central router and load-balancers for the network
+func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) error {
+	// Create default Control Plane Protection (COPP) entry for routers
+	logicalRouter, err := oc.createOvnClusterRouter()
+	if err != nil {
+		return err
+	}
+	oc.defaultCOPPUUID = *(logicalRouter.Copp)
+
+	// Create a cluster-wide port group that all logical switch ports are part of
+	pg := libovsdbops.BuildPortGroup(ovntypes.ClusterPortGroupName, ovntypes.ClusterPortGroupName, nil, nil)
+	err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
+	if err != nil {
+		klog.Errorf("Failed to create cluster port group: %v", err)
+		return err
+	}
+
+	// Create a cluster-wide port group with all node-to-cluster router
+	// logical switch ports.  Currently the only user is multicast but it might
+	// be used for other features in the future.
+	pg = libovsdbops.BuildPortGroup(ovntypes.ClusterRtrPortGroupName, ovntypes.ClusterRtrPortGroupName, nil, nil)
+	err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
+	if err != nil {
+		klog.Errorf("Failed to create cluster port group: %v", err)
+		return err
+	}
+
+	// If supported, enable IGMP relay on the router to forward multicast
+	// traffic between nodes.
+	if oc.multicastSupport {
+		// Drop IP multicast globally. Multicast is allowed only if explicitly
+		// enabled in a namespace.
+		if err := oc.createDefaultDenyMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
+			return err
+		}
+
+		// Allow IP multicast from node switch to cluster router and from
+		// cluster router to node switch.
+		if err := oc.createDefaultAllowMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
+			return err
+		}
+	}
+
+	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: ovntypes.OVNJoinSwitch,
+	}
+	// nothing is updated here, so no reason to pass fields
+	err = libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
+	}
+
+	// Initialize the OVNJoinSwitch switch IP manager
+	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
+	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, logicalSwitch.UUID, existingNodeNames)
+	if err != nil {
+		return err
+	}
+
+	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
+	// allocate the first IPs in the join switch subnets
+	gwLRPIfAddrs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(ovntypes.OVNClusterRouter)
+	if err != nil {
+		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", ovntypes.OVNClusterRouter, err)
+	}
+
+	// Connect the distributed router to OVNJoinSwitch.
+	drSwitchPort := ovntypes.JoinSwitchToGWRouterPrefix + ovntypes.OVNClusterRouter
+	drRouterPort := ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.OVNClusterRouter
+
+	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIfAddrs[0].IP)
+	gwLRPNetworks := []string{}
+	for _, gwLRPIfAddr := range gwLRPIfAddrs {
+		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
+	}
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name:     drRouterPort,
+		MAC:      gwLRPMAC.String(),
+		Networks: gwLRPNetworks,
+	}
+
+	err = libovsdbops.CreateOrUpdateLogicalRouterPort(oc.nbClient, logicalRouter,
+		&logicalRouterPort, nil, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
+	if err != nil {
+		return fmt.Errorf("failed to add logical router port %+v on router %s: %v", logicalRouterPort, logicalRouter.Name, err)
+	}
+
+	// Create OVNJoinSwitch that will be used to connect gateway routers to the
+	// distributed router and connect it to said dsitributed router.
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name: drSwitchPort,
+		Type: "router",
+		Options: map[string]string{
+			"router-port": drRouterPort,
+		},
+		Addresses: []string{"router"},
+	}
+	sw := nbdb.LogicalSwitch{Name: ovntypes.OVNJoinSwitch}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
+	if err != nil {
+		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, ovntypes.OVNJoinSwitch, err)
 	}
 
 	return nil
