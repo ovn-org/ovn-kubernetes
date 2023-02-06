@@ -376,9 +376,10 @@ func (bnc *BaseNetworkController) allocateNodeSubnets(node *kapi.Node,
 	return hostSubnets, nil
 }
 
-// UpdateNodeAnnotationWithRetry update node's hostSubnet annotation (possibly for multiple networks) and the
-// other given node annotations
-func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet,
+// UpdateNodeHostSubnetAnnotationWithRetry update node's hostSubnet annotation (possibly for multiple networks) and the
+// other given node annotations.
+// May be used concurrently, since it retries update on version conflict.
+func (cnci *CommonNetworkControllerInfo) UpdateNodeHostSubnetAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet,
 	otherUpdatedNodeAnnotation map[string]string) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
@@ -401,7 +402,7 @@ func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName 
 		for k, v := range otherUpdatedNodeAnnotation {
 			cnode.Annotations[k] = v
 		}
-		return cnci.kube.PatchNode(node, cnode)
+		return cnci.kube.UpdateNode(cnode)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation", nodeName)

@@ -44,6 +44,7 @@ type Interface interface {
 	SetTaintOnNode(nodeName string, taint *kapi.Taint) error
 	RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error
 	PatchNode(old, new *kapi.Node) error
+	UpdateNode(node *kapi.Node) error
 	UpdateNodeStatus(node *kapi.Node) error
 	UpdatePod(pod *kapi.Pod) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
@@ -237,6 +238,12 @@ func (k *Kube) PatchNode(old, new *kapi.Node) error {
 	}
 
 	return nil
+}
+
+// UpdateNode updates node with provided node data
+func (k *Kube) UpdateNode(node *kapi.Node) error {
+	_, err := k.KClient.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+	return err
 }
 
 // UpdateNodeStatus takes the node object and sets the provided update status
