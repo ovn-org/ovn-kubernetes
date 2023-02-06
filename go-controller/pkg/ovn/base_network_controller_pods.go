@@ -31,7 +31,7 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 	if err != nil {
 		return "", err
 	}
-	if !util.PodScheduled(pod) || !util.PodWantsNetwork(pod) || util.PodCompleted(pod) {
+	if !util.PodScheduled(pod) || util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) {
 		return "", nil
 	}
 	// skip nodes that are not running ovnk (inferred from host subnets)
@@ -218,7 +218,7 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 			}
 			// iterate through all pods, ignore pods on other switches
 			for _, p := range pods {
-				if util.PodCompleted(p) || !util.PodWantsNetwork(p) || !util.PodScheduled(p) || expectedSwitchName != switchName {
+				if util.PodCompleted(p) || util.PodWantsHostNetwork(p) || !util.PodScheduled(p) || expectedSwitchName != switchName {
 					continue
 				}
 				// check if the pod addresses match in the OVN annotation
@@ -367,7 +367,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
-	networks, err := util.GetK8sPodAllNetworks(pod)
+	networks, err := util.GetK8sPodAllNetworkSelections(pod)
 	if err != nil {
 		return fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
 			pod.Namespace, pod.Name, err)
@@ -434,7 +434,7 @@ func (bnc *BaseNetworkController) podExpectedInLogicalCache(pod *kapi.Pod) bool 
 	if err != nil {
 		return false
 	}
-	return util.PodWantsNetwork(pod) && !bnc.lsManager.IsNonHostSubnetSwitch(switchName) && !util.PodCompleted(pod)
+	return !util.PodWantsHostNetwork(pod) && !bnc.lsManager.IsNonHostSubnetSwitch(switchName) && !util.PodCompleted(pod)
 }
 
 func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, error) {

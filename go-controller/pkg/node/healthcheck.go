@@ -322,7 +322,7 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 	}
 	expectedIfaceIdsWithoutPrefix := make(map[string]bool)
 	for _, pod := range pods {
-		if pod.Spec.NodeName == nodeName && util.PodWantsNetwork(pod) {
+		if pod.Spec.NodeName == nodeName && !util.PodWantsHostNetwork(pod) {
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
 			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
 			// share the same process)

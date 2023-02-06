@@ -267,10 +267,10 @@ func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 		kapi.NodeInternalIP, kapi.NodeExternalIP)
 }
 
-// PodWantsNetwork returns if the given pod is hostNetworked or not to determine if networking
+// PodWantsHostNetwork returns if the given pod is hostNetworked or not to determine if networking
 // needs to be setup
-func PodWantsNetwork(pod *kapi.Pod) bool {
-	return !pod.Spec.HostNetwork
+func PodWantsHostNetwork(pod *kapi.Pod) bool {
+	return pod.Spec.HostNetwork
 }
 
 // PodCompleted checks if the pod is marked as completed (in a terminal state)

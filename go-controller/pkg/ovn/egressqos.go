@@ -142,7 +142,7 @@ func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.
 	podsIps := []net.IP{}
 	for _, pod := range pods {
 		// we don't handle HostNetworked or completed pods
-		if util.PodWantsNetwork(pod) && !util.PodCompleted(pod) {
+		if !util.PodWantsHostNetwork(pod) && !util.PodCompleted(pod) {
 			podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
 			if err != nil {
 				return nil, nil, err
@@ -711,7 +711,7 @@ func (oc *DefaultNetworkController) syncEgressQoSPod(key string) error {
 
 	klog.V(5).Infof("Pod %s retrieved from lister: %v", pod.Name, pod)
 
-	if !util.PodWantsNetwork(pod) { // we don't handle HostNetworked pods
+	if util.PodWantsHostNetwork(pod) { // we don't handle HostNetworked pods
 		return nil
 	}
 
