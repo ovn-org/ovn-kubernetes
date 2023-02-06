@@ -54,6 +54,8 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *sbdb.ChassisPrivate:
 		return t.UUID
+	case *sbdb.IGMPGroup:
+		return t.UUID
 	case *sbdb.MACBinding:
 		return t.UUID
 	case *sbdb.SBGlobal:
@@ -106,6 +108,8 @@ func setUUID(model model.Model, uuid string) {
 	case *sbdb.Chassis:
 		t.UUID = uuid
 	case *sbdb.ChassisPrivate:
+		t.UUID = uuid
+	case *sbdb.IGMPGroup:
 		t.UUID = uuid
 	case *sbdb.MACBinding:
 		t.UUID = uuid
@@ -212,6 +216,10 @@ func copyIndexes(model model.Model) model.Model {
 			UUID: t.UUID,
 			Name: t.Name,
 		}
+	case *sbdb.IGMPGroup:
+		return &sbdb.IGMPGroup{
+			UUID: t.UUID,
+		}
 	case *sbdb.MACBinding:
 		return &sbdb.MACBinding{
 			UUID:        t.UUID,
@@ -273,6 +281,8 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*sbdb.Chassis{}
 	case *sbdb.ChassisPrivate:
 		return &[]*sbdb.ChassisPrivate{}
+	case *sbdb.IGMPGroup:
+		return &[]*sbdb.IGMPGroup{}
 	case *sbdb.MACBinding:
 		return &[]*sbdb.MACBinding{}
 	case *nbdb.QoS:

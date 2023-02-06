@@ -61,19 +61,31 @@ func newMonitorCookie(dbName string) MonitorCookie {
 type TableMonitor struct {
 	// Table is the table to be monitored
 	Table string
-	// Condition is the condition under which the table should be monitored
-	Condition model.Condition
+	// Conditions are the conditions under which the table should be monitored
+	Conditions []ovsdb.Condition
 	// Fields are the fields in the model to monitor
 	// If none are supplied, all fields will be used
 	Fields []string
 }
 
-func fieldsAsStrings(dbModel model.DatabaseModel, m model.Model, fields []interface{}) ([]string, error) {
-	var columns []string
-
-	if len(fields) == 0 {
-		return columns, nil
+func newTableMonitor(o *ovsdbClient, m model.Model, conditions []model.Condition, fields []interface{}) (*TableMonitor, error) {
+	dbModel := o.primaryDB().model
+	tableName := dbModel.FindTable(reflect.TypeOf(m))
+	if tableName == "" {
+		return nil, fmt.Errorf("object of type %s is not part of the ClientDBModel", reflect.TypeOf(m))
 	}
+
+	var columns []string
+	var ovsdbConds []ovsdb.Condition
+
+	if len(fields) == 0 && len(conditions) == 0 {
+		return &TableMonitor{
+			Table:      tableName,
+			Conditions: ovsdbConds,
+			Fields:     columns,
+		}, nil
+	}
+
 	data, err := dbModel.NewModelInfo(m)
 	if err != nil {
 		return nil, fmt.Errorf("unable to obtain info from model %v: %v", m, err)
@@ -85,46 +97,40 @@ func fieldsAsStrings(dbModel model.DatabaseModel, m model.Model, fields []interf
 		}
 		columns = append(columns, column)
 	}
-	return columns, nil
+	db := o.databases[o.primaryDBName]
+	mmapper := db.model.Mapper
+	for _, modelCond := range conditions {
+		ovsdbCond, err := mmapper.NewCondition(data, modelCond.Field, modelCond.Function, modelCond.Value)
+		if err != nil {
+			return nil, fmt.Errorf("unable to convert condition %v: %v", modelCond, err)
+		}
+		ovsdbConds = append(ovsdbConds, *ovsdbCond)
+	}
+	return &TableMonitor{
+		Table:      tableName,
+		Conditions: ovsdbConds,
+		Fields:     columns,
+	}, nil
 }
 
 func WithTable(m model.Model, fields ...interface{}) MonitorOption {
 	return func(o *ovsdbClient, monitor *Monitor) error {
-		dbModel := o.primaryDB().model
-		tableName := dbModel.FindTable(reflect.TypeOf(m))
-		if tableName == "" {
-			return fmt.Errorf("object of type %s is not part of the ClientDBModel", reflect.TypeOf(m))
-		}
-		fieldsStr, err := fieldsAsStrings(dbModel, m, fields)
+		tableMonitor, err := newTableMonitor(o, m, []model.Condition{}, fields)
 		if err != nil {
 			return err
 		}
-		tableMonitor := TableMonitor{
-			Table:  tableName,
-			Fields: fieldsStr,
-		}
-		monitor.Tables = append(monitor.Tables, tableMonitor)
+		monitor.Tables = append(monitor.Tables, *tableMonitor)
 		return nil
 	}
 }
 
-func WithConditionalTable(m model.Model, condition model.Condition, fields ...interface{}) MonitorOption {
+func WithConditionalTable(m model.Model, conditions []model.Condition, fields ...interface{}) MonitorOption {
 	return func(o *ovsdbClient, monitor *Monitor) error {
-		dbModel := o.primaryDB().model
-		tableName := dbModel.FindTable(reflect.TypeOf(m))
-		if tableName == "" {
-			return fmt.Errorf("object of type %s is not part of the ClientDBModel", reflect.TypeOf(m))
-		}
-		fieldsStr, err := fieldsAsStrings(dbModel, m, fields)
+		tableMonitor, err := newTableMonitor(o, m, conditions, fields)
 		if err != nil {
 			return err
 		}
-		tableMonitor := TableMonitor{
-			Table:     tableName,
-			Condition: condition,
-			Fields:    fieldsStr,
-		}
-		monitor.Tables = append(monitor.Tables, tableMonitor)
+		monitor.Tables = append(monitor.Tables, *tableMonitor)
 		return nil
 	}
 }

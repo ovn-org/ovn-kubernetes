@@ -1,4 +1,4 @@
-package server
+package database
 
 import (
 	"reflect"

@@ -36,6 +36,7 @@ func DeleteChassis(sbClient libovsdbclient.Client, chassis ...*sbdb.Chassis) err
 		chassisPrivate := sbdb.ChassisPrivate{
 			Name: chassis[i].Name,
 		}
+		chassisUUID := ""
 		opModel := []operationModel{
 			{
 				Model:          chassis[i],
@@ -45,6 +46,7 @@ func DeleteChassis(sbClient libovsdbclient.Client, chassis ...*sbdb.Chassis) err
 				DoAfter: func() {
 					if len(foundChassis) > 0 {
 						chassisPrivate.Name = foundChassis[0].Name
+						chassisUUID = foundChassis[0].UUID
 					}
 				},
 			},
@@ -52,6 +54,16 @@ func DeleteChassis(sbClient libovsdbclient.Client, chassis ...*sbdb.Chassis) err
 				Model:       &chassisPrivate,
 				ErrNotFound: false,
 				BulkOp:      false,
+			},
+			// IGMPGroup has a weak link to chassis, deleting multiple chassis may result in IGMP_Groups
+			// with identical values on columns "address", "datapath", and "chassis", when "chassis" goes empty
+			{
+				Model: &sbdb.IGMPGroup{},
+				ModelPredicate: func(group *sbdb.IGMPGroup) bool {
+					return group.Chassis != nil && chassisUUID != "" && *group.Chassis == chassisUUID
+				},
+				ErrNotFound: false,
+				BulkOp:      true,
 			},
 		}
 		opModels = append(opModels, opModel...)
@@ -69,6 +81,7 @@ type chassisPredicate func(*sbdb.Chassis) bool
 func DeleteChassisWithPredicate(sbClient libovsdbclient.Client, p chassisPredicate) error {
 	foundChassis := []*sbdb.Chassis{}
 	foundChassisNames := sets.NewString()
+	foundChassisUUIDS := sets.NewString()
 	opModels := []operationModel{
 		{
 			Model:          &sbdb.Chassis{},
@@ -79,12 +92,21 @@ func DeleteChassisWithPredicate(sbClient libovsdbclient.Client, p chassisPredica
 			DoAfter: func() {
 				for _, chassis := range foundChassis {
 					foundChassisNames.Insert(chassis.Name)
+					foundChassisUUIDS.Insert(chassis.UUID)
 				}
 			},
 		},
 		{
 			Model:          &sbdb.ChassisPrivate{},
 			ModelPredicate: func(item *sbdb.ChassisPrivate) bool { return foundChassisNames.Has(item.Name) },
+			ErrNotFound:    false,
+			BulkOp:         true,
+		},
+		// IGMPGroup has a weak link to chassis, deleting multiple chassis may result in IGMP_Groups
+		// with identical values on columns "address", "datapath", and "chassis", when "chassis" goes empty
+		{
+			Model:          &sbdb.IGMPGroup{},
+			ModelPredicate: func(group *sbdb.IGMPGroup) bool { return group.Chassis != nil && foundChassisUUIDS.Has(*group.Chassis) },
 			ErrNotFound:    false,
 			BulkOp:         true,
 		},
