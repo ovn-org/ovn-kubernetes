@@ -198,6 +198,11 @@ func (c *Controller) syncNode(key string) error {
 			}
 			delete(c.nodes, nodeName)
 			state.healthClient.Disconnect()
+		} else {
+			// we don't have a node at this point (node deleted?) and we don't have its cache
+			// entry (state==nil) as well. Maybe state was deleted when node became nodeReady or unreachable
+			// nothing to sync here
+			return nil
 		}
 
 		return c.deleteNoRerouteNodePolicies(c.addressSetFactory, nodeName, state.v4InternalNodeIP, state.v6InternalNodeIP)

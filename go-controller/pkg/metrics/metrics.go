@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/http/pprof"
 	"regexp"
@@ -405,6 +406,51 @@ func getTLSServer(addr, certFile, privKeyFile string, handler http.Handler) *htt
 	return server
 }
 
+// stringFlagSetterFunc is a func used for setting string type flag.
+type stringFlagSetterFunc func(string) (string, error)
+
+// klogSetter is a setter to set klog level.
+func klogSetter(val string) (string, error) {
+	var level klog.Level
+	if err := level.Set(val); err != nil {
+		return "", fmt.Errorf("failed set klog.logging.verbosity %s: %v", val, err)
+	}
+	return fmt.Sprintf("successfully set klog.logging.verbosity to %s", val), nil
+}
+
+// stringFlagPutHandler wraps an http Handler to set string type flag.
+func stringFlagPutHandler(setter stringFlagSetterFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == "PUT":
+			body, err := ioutil.ReadAll(req.Body)
+			if err != nil {
+				writePlainText(http.StatusBadRequest, "error reading request body: "+err.Error(), w)
+				return
+			}
+			defer req.Body.Close()
+			response, err := setter(string(body))
+			if err != nil {
+				writePlainText(http.StatusBadRequest, err.Error(), w)
+				return
+			}
+			writePlainText(http.StatusOK, response, w)
+			return
+		default:
+			writePlainText(http.StatusNotAcceptable, "unsupported http method", w)
+			return
+		}
+	})
+}
+
+// writePlainText renders a simple string response.
+func writePlainText(statusCode int, text string, w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(statusCode)
+	fmt.Fprintln(w, text)
+}
+
 // StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected
 // It puts the endpoint behind TLS if certFile and keyFile are defined.
 func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, keyFile string,
@@ -418,6 +464,9 @@ func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, k
 		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+		// Allow changes to log level at runtime
+		mux.HandleFunc("/debug/flags/v", stringFlagPutHandler(klogSetter))
 	}
 	wg.Add(1)
 
