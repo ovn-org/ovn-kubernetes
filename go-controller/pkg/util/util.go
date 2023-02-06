@@ -349,3 +349,8 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 
 	return nil
 }
+
+// hash the provided input to make it a valid portGroup name.
+func HashedPortGroup(s string) string {
+	return HashForOVN(s)
+}

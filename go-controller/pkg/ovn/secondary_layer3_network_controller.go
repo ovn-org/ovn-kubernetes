@@ -14,8 +14,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	bnc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/base_network_controller"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	ovnutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -27,7 +29,7 @@ import (
 )
 
 type secondaryLayer3NetworkControllerEventHandler struct {
-	baseHandler  baseNetworkControllerEventHandler
+	baseHandler  bnc.BaseNetworkControllerEventHandler
 	watchFactory *factory.WatchFactory
 	objType      reflect.Type
 	oc           *SecondaryLayer3NetworkController
@@ -39,7 +41,7 @@ type secondaryLayer3NetworkControllerEventHandler struct {
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
 // function or with a delete on the old obj followed by an add on the new obj).
 func (h *secondaryLayer3NetworkControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
-	return h.baseHandler.areResourcesEqual(h.objType, obj1, obj2)
+	return h.baseHandler.AreResourcesEqual(h.objType, obj1, obj2)
 }
 
 // GetInternalCacheEntry returns the internal cache entry for this object, given an object and its type.
@@ -51,7 +53,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) GetInternalCacheEntry(obj
 // GetResourceFromInformerCache returns the latest state of the object, given an object key and its type.
 // from the informers cache.
 func (h *secondaryLayer3NetworkControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
-	return h.baseHandler.getResourceFromInformerCache(h.objType, h.watchFactory, key)
+	return h.baseHandler.GetResourceFromInformerCache(h.objType, h.watchFactory, key)
 }
 
 // RecordAddEvent records the add event on this given object.
@@ -77,7 +79,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) RecordErrorEvent(obj inte
 // IsResourceScheduled returns true if the given object has been scheduled.
 // Only applied to pods for now. Returns true for all other types.
 func (h *secondaryLayer3NetworkControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
-	return h.baseHandler.isResourceScheduled(h.objType, obj)
+	return h.baseHandler.IsResourceScheduled(h.objType, obj)
 }
 
 // AddResource adds the specified object to the cluster according to its type and returns the error,
@@ -90,13 +92,13 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
-		var nodeParams *nodeSyncs
+		var nodeParams *bnc.NodeSyncs
 		if fromRetryLoop {
 			_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
 			_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
-			nodeParams = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync}
+			nodeParams = &bnc.NodeSyncs{SyncNode: nodeSync, SyncClusterRouterPort: clusterRtrSync}
 		} else {
-			nodeParams = &nodeSyncs{syncNode: true, syncClusterRouterPort: true}
+			nodeParams = &bnc.NodeSyncs{SyncNode: true, SyncClusterRouterPort: true}
 		}
 
 		if err := h.oc.addUpdateNodeEvent(node, nodeParams); err != nil {
@@ -129,9 +131,9 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		// determine what actually changed in this update
 		_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
 		_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-		clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+		clusterRtrSync := failed || ovnutil.NodeChassisChanged(oldNode, newNode) || ovnutil.NodeSubnetChanged(oldNode, newNode)
 
-		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync})
+		return h.oc.addUpdateNodeEvent(newNode, &bnc.NodeSyncs{SyncNode: nodeSync, SyncClusterRouterPort: clusterRtrSync})
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 	}
@@ -163,7 +165,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 	} else {
 		switch h.objType {
 		case factory.PodType:
-			syncFunc = h.oc.syncPodsForSecondaryNetwork
+			syncFunc = h.oc.SyncPodsForSecondaryNetwork
 
 		case factory.NodeType:
 			syncFunc = h.oc.syncNodes
@@ -181,13 +183,13 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 // IsObjectInTerminalState returns true if the given object is a in terminal state.
 // This is used now for pods that are either in a PodSucceeded or in a PodFailed state.
 func (h *secondaryLayer3NetworkControllerEventHandler) IsObjectInTerminalState(obj interface{}) bool {
-	return h.baseHandler.isObjectInTerminalState(h.objType, obj)
+	return h.baseHandler.IsObjectInTerminalState(h.objType, obj)
 }
 
 // SecondaryLayer3NetworkController is created for logical network infrastructure and policy
 // for a secondary l3 network
 type SecondaryLayer3NetworkController struct {
-	BaseSecondaryNetworkController
+	bnc.BaseSecondaryNetworkController
 
 	// waitGroup per-Controller
 	wg *sync.WaitGroup
@@ -201,21 +203,21 @@ type SecondaryLayer3NetworkController struct {
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
-func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
+func NewSecondaryLayer3NetworkController(cnci *bnc.CommonNetworkControllerInfo, netInfo util.NetInfo,
 	netconfInfo util.NetConfInfo) *SecondaryLayer3NetworkController {
 	stopChan := make(chan struct{})
 	oc := &SecondaryLayer3NetworkController{
-		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
-			BaseNetworkController: BaseNetworkController{
+		BaseSecondaryNetworkController: bnc.BaseSecondaryNetworkController{
+			BaseNetworkController: bnc.BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
 				NetConfInfo:                 netconfInfo,
 				NetInfo:                     netInfo,
-				lsManager:                   lsm.NewLogicalSwitchManager(),
-				logicalPortCache:            newPortCache(stopChan),
-				namespaces:                  make(map[string]*namespaceInfo),
-				namespacesMutex:             sync.Mutex{},
-				addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient),
-				stopChan:                    stopChan,
+				LsManager:                   lsm.NewLogicalSwitchManager(),
+				LogicalPortCache:            ovnutil.NewPortCache(stopChan),
+				Namespaces:                  make(map[string]*bnc.NamespaceInfo),
+				NamespacesMutex:             sync.Mutex{},
+				AddressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.NbClient),
+				StopChan:                    stopChan,
 			},
 		},
 		wg:                          &sync.WaitGroup{},
@@ -225,37 +227,37 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 	}
 
 	// disable multicast support for secondary networks
-	oc.multicastSupport = false
+	oc.MulticastSupport = false
 
 	oc.initRetryFramework()
 	return oc
 }
 
 func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
-	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
+	oc.RetryPods = oc.newRetryFramework(factory.PodType)
+	oc.RetryNodes = oc.newRetryFramework(factory.NodeType)
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource type;
 func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 	objectType reflect.Type) *retry.RetryFramework {
 	eventHandler := &secondaryLayer3NetworkControllerEventHandler{
-		baseHandler:  baseNetworkControllerEventHandler{},
+		baseHandler:  bnc.BaseNetworkControllerEventHandler{},
 		objType:      objectType,
-		watchFactory: oc.watchFactory,
+		watchFactory: oc.WatchFactory,
 		oc:           oc,
 		syncFunc:     nil,
 	}
 	resourceHandler := &retry.ResourceHandler{
-		HasUpdateFunc:          hasResourceAnUpdateFunc(objectType),
-		NeedsUpdateDuringRetry: needsUpdateDuringRetry(objectType),
+		HasUpdateFunc:          bnc.HasResourceAnUpdateFunc(objectType),
+		NeedsUpdateDuringRetry: bnc.NeedsUpdateDuringRetry(objectType),
 		ObjType:                objectType,
 		EventHandler:           eventHandler,
 	}
 	return retry.NewRetryFramework(
-		oc.stopChan,
+		oc.StopChan,
 		oc.wg,
-		oc.watchFactory,
+		oc.WatchFactory,
 		resourceHandler,
 	)
 }
@@ -273,15 +275,15 @@ func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller, and delete all logical entities for this network if requested
 func (oc *SecondaryLayer3NetworkController) Stop() {
 	klog.Infof("Stop secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
-	close(oc.stopChan)
+	close(oc.StopChan)
 	oc.wg.Wait()
 
-	if oc.podHandler != nil {
-		oc.watchFactory.RemovePodHandler(oc.podHandler)
+	if oc.PodHandler != nil {
+		oc.WatchFactory.RemovePodHandler(oc.PodHandler)
 	}
 
-	if oc.nodeHandler != nil {
-		oc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
+	if oc.NodeHandler != nil {
+		oc.WatchFactory.RemoveNodeHandler(oc.NodeHandler)
 	}
 }
 
@@ -294,13 +296,13 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 
 	// remove hostsubnet annotation for this network
 	klog.Infof("Remove node-subnets annotation for network %s on all nodes", netName)
-	existingNodes, err := oc.watchFactory.GetNodes()
+	existingNodes, err := oc.WatchFactory.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in initializing/fetching subnets: %v", err)
 		return nil
 	}
 	for _, node := range existingNodes {
-		if noHostSubnet(node) {
+		if ovnutil.NoHostSubnet(node) {
 			klog.V(5).Infof("Node %s is not managed by OVN", node.Name)
 			continue
 		}
@@ -314,7 +316,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 
 	klog.Infof("Delete OVN logical entities for %s network controller of network %s", types.Layer3Topology, netName)
 	// first delete node logical switches
-	ops, err = libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, ops,
+	ops, err = libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.NbClient, ops,
 		func(item *nbdb.LogicalSwitch) bool {
 			return item.ExternalIDs[types.NetworkExternalID] == netName
 		})
@@ -323,7 +325,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 	}
 
 	// now delete cluster router
-	ops, err = libovsdbops.DeleteLogicalRoutersWithPredicateOps(oc.nbClient, ops,
+	ops, err = libovsdbops.DeleteLogicalRoutersWithPredicateOps(oc.NbClient, ops,
 		func(item *nbdb.LogicalRouter) bool {
 			return item.ExternalIDs[types.NetworkExternalID] == netName
 		})
@@ -331,7 +333,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 		return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
 	}
 
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	_, err = libovsdbops.TransactAndCheck(oc.NbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to deleting routers/switches of network %s: %v", netName, err)
 	}
@@ -353,7 +355,7 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	// controller is fully running and resource handlers have synced, update Topology version in OVN
-	if err := oc.updateL3TopologyVersion(); err != nil {
+	if err := oc.UpdateL3TopologyVersion(); err != nil {
 		return fmt.Errorf("failed to update topology version for network %s: %v", oc.GetNetworkName(), err)
 	}
 
@@ -363,12 +365,12 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
 func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
-	if oc.nodeHandler != nil {
+	if oc.NodeHandler != nil {
 		return nil
 	}
-	handler, err := oc.retryNodes.WatchResource()
+	handler, err := oc.RetryNodes.WatchResource()
 	if err == nil {
-		oc.nodeHandler = handler
+		oc.NodeHandler = handler
 	}
 	return err
 }
@@ -381,17 +383,17 @@ func (oc *SecondaryLayer3NetworkController) Init() error {
 		return err
 	}
 
-	_, err := oc.createOvnClusterRouter()
+	_, err := oc.CreateOvnClusterRouter()
 	return err
 }
 
-func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *bnc.NodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
 
-	if noHostSubnet := noHostSubnet(node); noHostSubnet {
-		err := oc.lsManager.AddNoHostSubnetSwitch(oc.GetNetworkScopedName(node.Name))
+	if noHostSubnet := ovnutil.NoHostSubnet(node); noHostSubnet {
+		err := oc.LsManager.AddNoHostSubnetSwitch(oc.GetNetworkScopedName(node.Name))
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for switch %s: %w", oc.GetNetworkScopedName(node.Name), err)
 		}
@@ -399,19 +401,19 @@ func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, 
 	}
 
 	klog.Infof("Adding or Updating Node %q for network %s", node.Name, oc.GetNetworkName())
-	if nSyncs.syncNode {
+	if nSyncs.SyncNode {
 		if hostSubnets, err = oc.addNode(node); err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
 			err = fmt.Errorf("nodeAdd: error adding node %q for network %s: %w", node.Name, oc.GetNetworkName(), err)
-			oc.recordNodeErrorEvent(node, err)
+			oc.RecordNodeErrorEvent(node, err)
 			return err
 		}
 		oc.addNodeFailed.Delete(node.Name)
 	}
 
-	if nSyncs.syncClusterRouterPort {
-		if err = oc.syncNodeClusterRouterPort(node, hostSubnets); err != nil {
+	if nSyncs.SyncClusterRouterPort {
+		if err = oc.SyncNodeClusterRouterPort(node, hostSubnets); err != nil {
 			errs = append(errs, err)
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
 		} else {
@@ -420,20 +422,20 @@ func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, 
 	}
 
 	// ensure pods that already exist on this node have their logical ports created
-	if nSyncs.syncNode { // do this only if it is a new node add
-		errors := oc.addAllPodsOnNode(node.Name)
+	if nSyncs.SyncNode { // do this only if it is a new node add
+		errors := oc.AddAllPodsOnNode(node.Name)
 		errs = append(errs, errors...)
 	}
 
 	err = kerrors.NewAggregate(errs)
 	if err != nil {
-		oc.recordNodeErrorEvent(node, err)
+		oc.RecordNodeErrorEvent(node, err)
 	}
 	return err
 }
 
 func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	hostSubnets, err := oc.allocateNodeSubnets(node, oc.masterSubnetAllocator)
+	hostSubnets, err := oc.AllocateNodeSubnets(node, oc.masterSubnetAllocator)
 	if err != nil {
 		return nil, err
 	}
@@ -444,7 +446,7 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPN
 		return nil, err
 	}
 
-	err = oc.createNodeLogicalSwitch(node.Name, hostSubnets, "")
+	err = oc.CreateNodeLogicalSwitch(node.Name, hostSubnets, "")
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +461,7 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 		return err
 	}
 
-	oc.lsManager.DeleteSwitch(oc.GetNetworkScopedName(node.Name))
+	oc.LsManager.DeleteSwitch(oc.GetNetworkScopedName(node.Name))
 	oc.addNodeFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
 	return nil
@@ -468,7 +470,7 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 func (oc *SecondaryLayer3NetworkController) deleteNode(nodeName string) error {
 	oc.masterSubnetAllocator.ReleaseAllNodeSubnets(nodeName)
 
-	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
+	if err := oc.DeleteNodeLogicalNetwork(nodeName); err != nil {
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
 	}
 
@@ -486,13 +488,13 @@ func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error
 		if !ok {
 			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
-		_ = oc.updateNodesManageHostSubnets(node, oc.masterSubnetAllocator, foundNodes)
+		_ = oc.UpdateNodesManageHostSubnets(node, oc.masterSubnetAllocator, foundNodes)
 	}
 
 	p := func(item *nbdb.LogicalSwitch) bool {
 		return len(item.OtherConfig) > 0 && item.ExternalIDs[types.NetworkExternalID] == oc.GetNetworkName()
 	}
-	nodeSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
+	nodeSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.NbClient, p)
 	if err != nil {
 		return fmt.Errorf("failed to get node logical switches which have other-config set for network %s: %v", oc.GetNetworkName(), err)
 	}

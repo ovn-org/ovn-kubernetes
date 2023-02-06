@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"golang.org/x/time/rate"
 	"sync"
 	"time"
 
@@ -24,7 +25,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"golang.org/x/time/rate"
 )
 
 const (

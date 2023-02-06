@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	bnc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/base_network_controller"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -173,7 +174,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 }
 
 // newBaseNetworkController creates and returns the base controller
-func (cm *networkControllerManager) newCommonNetworkControllerInfo() *CommonNetworkControllerInfo {
-	return NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
+func (cm *networkControllerManager) newCommonNetworkControllerInfo() *bnc.CommonNetworkControllerInfo {
+	return bnc.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport)
 }

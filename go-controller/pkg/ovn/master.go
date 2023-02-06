@@ -19,6 +19,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	bnc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/base_network_controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/default_network_controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -45,7 +47,7 @@ type ovnkubeMaster struct {
 	// used for leader election
 	identity string
 
-	defaultNetworkController *DefaultNetworkController
+	defaultNetworkController *default_network_controller.DefaultNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
 	nadController *NetAttachDefinitionController
@@ -74,9 +76,9 @@ func NewMaster(ovnClient *util.OVNClientset, identity string, wf *factory.WatchF
 		wg:           wg,
 		identity:     identity,
 	}
-	cnci := NewCommonNetworkControllerInfo(master.client, master.kube, master.watchFactory, master.recorder, master.nbClient,
+	cnci := bnc.NewCommonNetworkControllerInfo(master.client, master.kube, master.watchFactory, master.recorder, master.nbClient,
 		master.sbClient, master.podRecorder, master.SCTPSupport, master.multicastSupport)
-	master.defaultNetworkController = NewDefaultNetworkController(cnci)
+	master.defaultNetworkController = default_network_controller.NewDefaultNetworkController(cnci)
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		cm := NewNetworkControllerManager(ovnClient, identity, wf,

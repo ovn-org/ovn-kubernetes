@@ -13,7 +13,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	bnc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/base_network_controller"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	ovnutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -23,7 +25,7 @@ import (
 )
 
 type secondaryLayer2NetworkControllerEventHandler struct {
-	baseHandler  baseNetworkControllerEventHandler
+	baseHandler  bnc.BaseNetworkControllerEventHandler
 	watchFactory *factory.WatchFactory
 	objType      reflect.Type
 	oc           *SecondaryLayer2NetworkController
@@ -35,7 +37,7 @@ type secondaryLayer2NetworkControllerEventHandler struct {
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
 // function or with a delete on the old obj followed by an add on the new obj).
 func (h *secondaryLayer2NetworkControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
-	return h.baseHandler.areResourcesEqual(h.objType, obj1, obj2)
+	return h.baseHandler.AreResourcesEqual(h.objType, obj1, obj2)
 }
 
 // GetInternalCacheEntry returns the internal cache entry for this object, given an object and its type.
@@ -47,7 +49,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) GetInternalCacheEntry(obj
 // GetResourceFromInformerCache returns the latest state of the object, given an object key and its type.
 // from the informers cache.
 func (h *secondaryLayer2NetworkControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
-	return h.baseHandler.getResourceFromInformerCache(h.objType, h.watchFactory, key)
+	return h.baseHandler.GetResourceFromInformerCache(h.objType, h.watchFactory, key)
 }
 
 // RecordAddEvent records the add event on this given object.
@@ -73,7 +75,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) RecordErrorEvent(obj inte
 // IsResourceScheduled returns true if the given object has been scheduled.
 // Only applied to pods for now. Returns true for all other types.
 func (h *secondaryLayer2NetworkControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
-	return h.baseHandler.isResourceScheduled(h.objType, obj)
+	return h.baseHandler.IsResourceScheduled(h.objType, obj)
 }
 
 // AddResource adds the specified object to the cluster according to its type and returns the error,
@@ -107,7 +109,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []interface
 	} else {
 		switch h.objType {
 		case factory.PodType:
-			syncFunc = h.oc.syncPodsForSecondaryNetwork
+			syncFunc = h.oc.SyncPodsForSecondaryNetwork
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
@@ -122,71 +124,71 @@ func (h *secondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []interface
 // IsObjectInTerminalState returns true if the given object is a in terminal state.
 // This is used now for pods that are either in a PodSucceeded or in a PodFailed state.
 func (h *secondaryLayer2NetworkControllerEventHandler) IsObjectInTerminalState(obj interface{}) bool {
-	return h.baseHandler.isObjectInTerminalState(h.objType, obj)
+	return h.baseHandler.IsObjectInTerminalState(h.objType, obj)
 }
 
 // SecondaryLayer2NetworkController is created for logical network infrastructure and policy
 // for a secondary layer2 network
 type SecondaryLayer2NetworkController struct {
-	BaseSecondaryNetworkController
+	bnc.BaseSecondaryNetworkController
 
 	// waitGroup per-Controller
 	wg *sync.WaitGroup
 }
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
-func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
+func NewSecondaryLayer2NetworkController(cnci *bnc.CommonNetworkControllerInfo, netInfo util.NetInfo,
 	netconfInfo util.NetConfInfo) *SecondaryLayer2NetworkController {
 	stopChan := make(chan struct{})
 
 	oc := &SecondaryLayer2NetworkController{
-		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
-			BaseNetworkController: BaseNetworkController{
+		BaseSecondaryNetworkController: bnc.BaseSecondaryNetworkController{
+			BaseNetworkController: bnc.BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
 				NetConfInfo:                 netconfInfo,
 				NetInfo:                     netInfo,
-				lsManager:                   lsm.NewL2SwitchManager(),
-				logicalPortCache:            newPortCache(stopChan),
-				namespaces:                  make(map[string]*namespaceInfo),
-				namespacesMutex:             sync.Mutex{},
-				addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient),
-				stopChan:                    stopChan,
+				LsManager:                   lsm.NewL2SwitchManager(),
+				LogicalPortCache:            ovnutil.NewPortCache(stopChan),
+				Namespaces:                  make(map[string]*bnc.NamespaceInfo),
+				NamespacesMutex:             sync.Mutex{},
+				AddressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.NbClient),
+				StopChan:                    stopChan,
 			},
 		},
 		wg: &sync.WaitGroup{},
 	}
 
 	// disable multicast support for secondary networks
-	oc.multicastSupport = false
+	oc.MulticastSupport = false
 
 	oc.initRetryFramework()
 	return oc
 }
 
 func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
-	oc.retryPods = oc.newRetryFramework(factory.PodType)
+	oc.RetryPods = oc.newRetryFramework(factory.PodType)
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource type;
 func (oc *SecondaryLayer2NetworkController) newRetryFramework(
 	objectType reflect.Type) *retry.RetryFramework {
 	eventHandler := &secondaryLayer2NetworkControllerEventHandler{
-		baseHandler:  baseNetworkControllerEventHandler{},
+		baseHandler:  bnc.BaseNetworkControllerEventHandler{},
 		objType:      objectType,
-		watchFactory: oc.watchFactory,
+		watchFactory: oc.WatchFactory,
 		oc:           oc,
 		syncFunc:     nil,
 	}
 	resourceHandler := &retry.ResourceHandler{
-		HasUpdateFunc:          hasResourceAnUpdateFunc(objectType),
-		NeedsUpdateDuringRetry: needsUpdateDuringRetry(objectType),
+		HasUpdateFunc:          bnc.HasResourceAnUpdateFunc(objectType),
+		NeedsUpdateDuringRetry: bnc.NeedsUpdateDuringRetry(objectType),
 		ObjType:                objectType,
 		EventHandler:           eventHandler,
 	}
 	return retry.NewRetryFramework(
-		oc.stopChan,
+		oc.StopChan,
 		oc.wg,
-		oc.watchFactory,
+		oc.WatchFactory,
 		resourceHandler,
 	)
 }
@@ -204,11 +206,11 @@ func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller, and delete all logical entities for this network if requested
 func (oc *SecondaryLayer2NetworkController) Stop() {
 	klog.Infof("Stop secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
-	close(oc.stopChan)
+	close(oc.StopChan)
 	oc.wg.Wait()
 
-	if oc.podHandler != nil {
-		oc.watchFactory.RemovePodHandler(oc.podHandler)
+	if oc.PodHandler != nil {
+		oc.WatchFactory.RemovePodHandler(oc.PodHandler)
 	}
 }
 
@@ -218,7 +220,7 @@ func (oc *SecondaryLayer2NetworkController) Cleanup(netName string) error {
 	klog.Infof("Delete OVN logical entities for %s network controller of network %s", types.Layer2Topology, netName)
 
 	// delete layer 2 logical switches
-	ops, err := libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, nil,
+	ops, err := libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.NbClient, nil,
 		func(item *nbdb.LogicalSwitch) bool {
 			return item.ExternalIDs[types.NetworkExternalID] == netName
 		})
@@ -226,7 +228,7 @@ func (oc *SecondaryLayer2NetworkController) Cleanup(netName string) error {
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
 	}
 
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	_, err = libovsdbops.TransactAndCheck(oc.NbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to deleting switches of network %s: %v", netName, err)
 	}
@@ -245,7 +247,7 @@ func (oc *SecondaryLayer2NetworkController) Run() error {
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	// controller is fully running and resource handlers have synced, update Topology version in OVN
-	if err := oc.updateL2TopologyVersion(); err != nil {
+	if err := oc.UpdateL2TopologyVersion(); err != nil {
 		return fmt.Errorf("failed to update topology version for network %s: %v", oc.GetNetworkName(), err)
 	}
 
@@ -260,7 +262,7 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 	}
 	logicalSwitch.ExternalIDs[types.NetworkExternalID] = oc.GetNetworkName()
 	logicalSwitch.ExternalIDs[types.TopologyExternalID] = oc.TopologyType()
-	logicalSwitch.ExternalIDs[types.TopologyVersionExternalID] = strconv.Itoa(oc.topologyVersion)
+	logicalSwitch.ExternalIDs[types.TopologyVersionExternalID] = strconv.Itoa(oc.TopologyVersion)
 
 	layer2NetConfInfo := oc.NetConfInfo.(*util.Layer2NetConfInfo)
 
@@ -274,12 +276,12 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 		}
 	}
 
-	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig, &logicalSwitch.ExternalIDs)
+	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.NbClient, &logicalSwitch, &logicalSwitch.OtherConfig, &logicalSwitch.ExternalIDs)
 	if err != nil {
 		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
 	}
 
-	if err = oc.lsManager.AddSwitch(switchName, logicalSwitch.UUID, hostSubnets); err != nil {
+	if err = oc.LsManager.AddSwitch(switchName, logicalSwitch.UUID, hostSubnets); err != nil {
 		return err
 	}
 
@@ -292,7 +294,7 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 			} else {
 				ipMask = net.CIDRMask(128, 128)
 			}
-			_ = oc.lsManager.AllocateIPs(switchName, []*net.IPNet{{IP: excludeIP, Mask: ipMask}})
+			_ = oc.LsManager.AllocateIPs(switchName, []*net.IPNet{{IP: excludeIP, Mask: ipMask}})
 		}
 	}
 
