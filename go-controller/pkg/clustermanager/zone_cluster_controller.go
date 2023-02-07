@@ -42,6 +42,10 @@ type zoneClusterController struct {
 	// node gateway router port IP generators (connecting to the join switch)
 	nodeGWRouterLRPIPv4Generator *ipGenerator
 	nodeGWRouterLRPIPv6Generator *ipGenerator
+
+	// Transit switch IP generator. This is required if EnableInterconnect feature is enabled.
+	transitSwitchIPv4Generator *ipGenerator
+	transitSwitchIPv6Generator *ipGenerator
 }
 
 func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) (*zoneClusterController, error) {
@@ -80,6 +84,24 @@ func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *fa
 		}
 	}
 
+	var transitSwitchIPv4Generator, transitSwitchIPv6Generator *ipGenerator
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if config.IPv4Mode {
+			transitSwitchIPv4Generator, err = newIPGenerator(config.ClusterManager.V4TransitSwitchSubnet)
+			if err != nil {
+				return nil, fmt.Errorf("error creating IP Generator for v4 transit switch subnet %s: %w", config.ClusterManager.V4TransitSwitchSubnet, err)
+			}
+		}
+
+		if config.IPv6Mode {
+			transitSwitchIPv6Generator, err = newIPGenerator(config.ClusterManager.V6TransitSwitchSubnet)
+			if err != nil {
+				return nil, fmt.Errorf("error creating IP Generator for v6 transit switch subnet %s: %w", config.ClusterManager.V4TransitSwitchSubnet, err)
+			}
+		}
+	}
+
 	zcc := &zoneClusterController{
 		kube:                         kube,
 		watchFactory:                 wf,
@@ -88,6 +110,8 @@ func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *fa
 		nodeIDAllocator:              nodeIDAllocator,
 		nodeGWRouterLRPIPv4Generator: nodeGWRouterLRPIPv4Generator,
 		nodeGWRouterLRPIPv6Generator: nodeGWRouterLRPIPv6Generator,
+		transitSwitchIPv4Generator:   transitSwitchIPv4Generator,
+		transitSwitchIPv6Generator:   transitSwitchIPv6Generator,
 	}
 
 	zcc.initRetryFramework()
@@ -162,6 +186,31 @@ func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) er
 		return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IPs, err : %v",
 			node.Name, err)
 	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		v4Addr = nil
+		v6Addr = nil
+		if config.IPv4Mode {
+			v4Addr, err = zcc.transitSwitchIPv4Generator.GenerateIP(allocatedNodeID)
+			if err != nil {
+				return fmt.Errorf("failed to generate transit switch port IPv4 address for node %s : err - %w", node.Name, err)
+			}
+		}
+
+		if config.IPv6Mode {
+			v6Addr, err = zcc.transitSwitchIPv6Generator.GenerateIP(allocatedNodeID)
+			if err != nil {
+				return fmt.Errorf("failed to generate transit switch port IPv6 address for node %s : err - %w", node.Name, err)
+			}
+		}
+
+		nodeAnnotations, err = util.CreateNodeTransitSwitchPortAddrAnnotation(nodeAnnotations, v4Addr, v6Addr)
+		if err != nil {
+			return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IPs, err : %w",
+				node.Name, err)
+		}
+	}
+	// TODO (numans)  If EnableInterconnect is false, clear the NodeTransitSwitchPortAddrAnnotation if set.
 
 	return zcc.kube.SetAnnotationsOnNode(node.Name, nodeAnnotations)
 }
@@ -344,6 +393,9 @@ func (h *zoneClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interfa
 			return false, nil
 		}
 		if util.NodeGatewayRouterLRPAddrAnnotationChanged(node1, node2) {
+			return false, nil
+		}
+		if util.NodeTransitSwitchPortAddrAnnotationChanged(node1, node2) {
 			return false, nil
 		}
 		return true, nil

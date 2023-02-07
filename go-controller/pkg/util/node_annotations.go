@@ -81,6 +81,10 @@ const (
 	// ovnkube-node gets the node's zone from the OVN Southbound database.
 	ovnNodeZoneName = "k8s.ovn.org/zone-name"
 
+	// ovnTransitSwitchPortAddr is the annotation to store the node Transit switch port ips.
+	// It is set by cluster manager.
+	ovnTransitSwitchPortAddr = "k8s.ovn.org/node-transit-switch-port-ifaddr"
+
 	// ovnNodeID is the id (of type integer) of a node. It is set by cluster-manager.
 	ovnNodeID = "k8s.ovn.org/node-id"
 
@@ -358,8 +362,10 @@ func SetNodePrimaryIfAddrs(nodeAnnotator kube.Annotator, ifAddrs []*net.IPNet) (
 	return nodeAnnotator.Set(ovnNodeIfAddr, primaryIfAddrAnnotation)
 }
 
-// CreateNodeGatewayRouterLRPAddrAnnotation sets the IPv4 / IPv6 values of the node's Gatewary Router LRP to join switch.
-func CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotation map[string]interface{}, nodeIPNetv4,
+// createPrimaryIfAddrAnnotation marshals the IPv4 / IPv6 values in the
+// primaryIfAddrAnnotation format and stores it in the nodeAnnotation
+// map with the provided 'annotationName' as key
+func createPrimaryIfAddrAnnotation(annotationName string, nodeAnnotation map[string]interface{}, nodeIPNetv4,
 	nodeIPNetv6 *net.IPNet) (map[string]interface{}, error) {
 	if nodeAnnotation == nil {
 		nodeAnnotation = make(map[string]interface{})
@@ -375,12 +381,28 @@ func CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotation map[string]interfac
 	if err != nil {
 		return nil, err
 	}
-	nodeAnnotation[ovnNodeGRLRPAddr] = string(bytes)
+	nodeAnnotation[annotationName] = string(bytes)
 	return nodeAnnotation, nil
+}
+
+// CreateNodeGatewayRouterLRPAddrAnnotation sets the IPv4 / IPv6 values of the node's Gatewary Router LRP to join switch.
+func CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotation map[string]interface{}, nodeIPNetv4,
+	nodeIPNetv6 *net.IPNet) (map[string]interface{}, error) {
+	return createPrimaryIfAddrAnnotation(ovnNodeGRLRPAddr, nodeAnnotation, nodeIPNetv4, nodeIPNetv6)
 }
 
 func NodeGatewayRouterLRPAddrAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[ovnNodeGRLRPAddr] != newNode.Annotations[ovnNodeGRLRPAddr]
+}
+
+// CreateNodeTransitSwitchPortAddrAnnotation creates the node annotation for the node's Transit switch port addresses.
+func CreateNodeTransitSwitchPortAddrAnnotation(nodeAnnotation map[string]interface{}, nodeIPNetv4,
+	nodeIPNetv6 *net.IPNet) (map[string]interface{}, error) {
+	return createPrimaryIfAddrAnnotation(ovnTransitSwitchPortAddr, nodeAnnotation, nodeIPNetv4, nodeIPNetv6)
+}
+
+func NodeTransitSwitchPortAddrAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	return oldNode.Annotations[ovnTransitSwitchPortAddr] != newNode.Annotations[ovnTransitSwitchPortAddr]
 }
 
 const UnlimitedNodeCapacity = math.MaxInt32
@@ -469,38 +491,51 @@ func ParseNodeGatewayRouterLRPAddr(node *kapi.Node) (net.IP, error) {
 	return ip, nil
 }
 
-// ParseNodeGatewayRouterLRPAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
-// stored in the 'ovnNodeGRLRPAddr' annotation
-func ParseNodeGatewayRouterLRPAddrs(node *kapi.Node) ([]*net.IPNet, error) {
-	nodeIfAddrAnnotation, ok := node.Annotations[ovnNodeGRLRPAddr]
+// parsePrimaryIfAddrAnnotation unmarshals the IPv4 / IPv6 values in the
+// primaryIfAddrAnnotation format from the nodeAnnotation map with the
+// provided 'annotationName' as key and returns the addresses.
+func parsePrimaryIfAddrAnnotation(node *kapi.Node, annotationName string) ([]*net.IPNet, error) {
+	nodeIfAddrAnnotation, ok := node.Annotations[annotationName]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeGRLRPAddr, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", annotationName, node.Name)
 	}
 	nodeIfAddr := primaryIfAddrAnnotation{}
 	if err := json.Unmarshal([]byte(nodeIfAddrAnnotation), &nodeIfAddr); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", ovnNodeGRLRPAddr, node.Name, err)
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %w", annotationName, node.Name, err)
 	}
 	if nodeIfAddr.IPv4 == "" && nodeIfAddr.IPv6 == "" {
 		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
 	}
-	var gwLRPAddrs []*net.IPNet
+	var ipAddrs []*net.IPNet
 	if nodeIfAddr.IPv4 != "" {
 		ip, ipNet, err := net.ParseCIDR(nodeIfAddr.IPv4)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse IPv4 address %s from annotation: %s for node %q, err: %v", nodeIfAddr.IPv4, ovnNodeGRLRPAddr, node.Name, err)
+			return nil, fmt.Errorf("failed to parse IPv4 address %s from annotation: %s for node %q, err: %w", nodeIfAddr.IPv4, annotationName, node.Name, err)
 		}
-		gwLRPAddrs = append(gwLRPAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
+		ipAddrs = append(ipAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
 	}
 
 	if nodeIfAddr.IPv6 != "" {
 		ip, ipNet, err := net.ParseCIDR(nodeIfAddr.IPv6)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse IPv6 address %s from annotation: %s for node %q, err: %v", nodeIfAddr.IPv6, ovnNodeGRLRPAddr, node.Name, err)
+			return nil, fmt.Errorf("failed to parse IPv6 address %s from annotation: %s for node %q, err: %w", nodeIfAddr.IPv6, annotationName, node.Name, err)
 		}
-		gwLRPAddrs = append(gwLRPAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
+		ipAddrs = append(ipAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
 	}
 
-	return gwLRPAddrs, nil
+	return ipAddrs, nil
+}
+
+// ParseNodeGatewayRouterLRPAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
+// stored in the 'ovnNodeGRLRPAddr' annotation
+func ParseNodeGatewayRouterLRPAddrs(node *kapi.Node) ([]*net.IPNet, error) {
+	return parsePrimaryIfAddrAnnotation(node, ovnNodeGRLRPAddr)
+}
+
+// ParseNodeTransitSwitchPortAddrs returns the IPv4 and/or IPv6 addresses for the node's transit switch port
+// stored in the 'ovnTransitSwitchPortAddr' annotation
+func ParseNodeTransitSwitchPortAddrs(node *kapi.Node) ([]*net.IPNet, error) {
+	return parsePrimaryIfAddrAnnotation(node, ovnTransitSwitchPortAddr)
 }
 
 // ParseCloudEgressIPConfig returns the cloud's information concerning the node's primary network interface
