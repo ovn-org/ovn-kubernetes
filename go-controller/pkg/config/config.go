@@ -166,6 +166,11 @@ var (
 	OvnKubeNode = OvnKubeNodeConfig{
 		Mode: types.NodeModeFull,
 	}
+
+	ClusterManager = ClusterManagerConfig{
+		V4TransitSwitchSubnet: "168.254.0.0/16",
+		V6TransitSwitchSubnet: "fd97::/64",
+	}
 )
 
 const (
@@ -348,6 +353,7 @@ type OVNKubernetesFeatureConfig struct {
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
+	EnableInterconnect              bool `gcfg:"enable-interconnect"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -445,6 +451,14 @@ type OvnKubeNodeConfig struct {
 	DisableOVNIfaceIdVer   bool `gcfg:"disable-ovn-iface-id-ver"`
 }
 
+// ClusterManagerConfig holds configuration for ovnkube-cluster-manager
+type ClusterManagerConfig struct {
+	// V4TransitSwitchSubnet to be used in the cluster for interconnecting multiple zones
+	V4TransitSwitchSubnet string `gcfg:"v4-transit-switch-subnet"`
+	// V6TransitSwitchSubnet to be used in the cluster for interconnecting multiple zones
+	V6TransitSwitchSubnet string `gcfg:"v6-transit-switch-subnet"`
+}
+
 // OvnDBScheme describes the OVN database connection transport method
 type OvnDBScheme string
 
@@ -474,6 +488,7 @@ type config struct {
 	ClusterMgrHA         HAConfig
 	HybridOverlay        HybridOverlayConfig
 	OvnKubeNode          OvnKubeNodeConfig
+	ClusterManager       ClusterManagerConfig
 }
 
 var (
@@ -492,6 +507,8 @@ var (
 	savedClusterMgrHA         HAConfig
 	savedHybridOverlay        HybridOverlayConfig
 	savedOvnKubeNode          OvnKubeNodeConfig
+	savedClusterManager       ClusterManagerConfig
+
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -518,6 +535,7 @@ func init() {
 	savedMasterHA = MasterHA
 	savedHybridOverlay = HybridOverlay
 	savedOvnKubeNode = OvnKubeNode
+	savedClusterManager = ClusterManager
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Printf("Version: %s\n", Version)
 		fmt.Printf("Git commit: %s\n", Commit)
@@ -547,6 +565,7 @@ func PrepareTestConfig() error {
 	MasterHA = savedMasterHA
 	HybridOverlay = savedHybridOverlay
 	OvnKubeNode = savedOvnKubeNode
+	ClusterManager = savedClusterManager
 
 	if err := completeConfig(); err != nil {
 		return err
@@ -920,6 +939,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use stateless network policy feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableStatelessNetPol,
 		Value:       OVNKubernetesFeature.EnableStatelessNetPol,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-interconnect",
+		Usage:       "Configure to enable interconnecting multiple zones.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableInterconnect,
+		Value:       OVNKubernetesFeature.EnableInterconnect,
 	},
 }
 
@@ -1339,6 +1364,22 @@ var OvnKubeNodeFlags = []cli.Flag{
 	},
 }
 
+// ClusterManagerFlags captures ovnkube-cluster-manager specific configurations
+var ClusterManagerFlags = []cli.Flag{
+	&cli.StringFlag{
+		Name:        "cluster-manager-v4-transit-switch-subnet",
+		Usage:       "The v4 transit switch subnet used for assigning transit switch IPv4 addresses for interconnect",
+		Destination: &cliConfig.ClusterManager.V4TransitSwitchSubnet,
+		Value:       ClusterManager.V4TransitSwitchSubnet,
+	},
+	&cli.StringFlag{
+		Name:        "cluster-manager-v6-transit-switch-subnet",
+		Usage:       "The v6 transit switch subnet used for assigning transit switch IPv6 addresses for interconnect",
+		Destination: &cliConfig.ClusterManager.V6TransitSwitchSubnet,
+		Value:       ClusterManager.V6TransitSwitchSubnet,
+	},
+}
+
 // Flags are general command-line flags. Apps should add these flags to their
 // own urfave/cli flags and call InitConfig() early in the application.
 var Flags []cli.Flag
@@ -1360,6 +1401,7 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, MonitoringFlags...)
 	flags = append(flags, IPFIXFlags...)
 	flags = append(flags, OvnKubeNodeFlags...)
+	flags = append(flags, ClusterManagerFlags...)
 	flags = append(flags, customFlags...)
 	return flags
 }
@@ -1790,6 +1832,37 @@ func completeHybridOverlayConfig(allSubnets *configSubnets) error {
 	return nil
 }
 
+func buildClusterManagerConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&ClusterManager, &file.ClusterManager, &savedClusterManager); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&ClusterManager, &cli.ClusterManager, &savedClusterManager); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// completeClusterManagerConfig completes the ClusterManager config by parsing raw values
+// into their final form.
+func completeClusterManagerConfig() error {
+	// Validate v4 and v6 transit switch subnets
+	v4IP, _, err := net.ParseCIDR(ClusterManager.V4TransitSwitchSubnet)
+	if err != nil || utilnet.IsIPv6(v4IP) {
+		return fmt.Errorf("invalid transit switch v4 subnet specified, subnet: %s: error: %v", ClusterManager.V4TransitSwitchSubnet, err)
+	}
+
+	v6IP, _, err := net.ParseCIDR(ClusterManager.V6TransitSwitchSubnet)
+	if err != nil || !utilnet.IsIPv6(v6IP) {
+		return fmt.Errorf("invalid transit switch v4 join subnet specified, subnet: %s: error: %v", ClusterManager.V6TransitSwitchSubnet, err)
+	}
+
+	return nil
+}
+
 func buildDefaultConfig(cli, file *config) error {
 	if err := overrideFields(&Default, &file.Default, &savedDefault); err != nil {
 		return err
@@ -1884,6 +1957,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		MasterHA:             savedMasterHA,
 		HybridOverlay:        savedHybridOverlay,
 		OvnKubeNode:          savedOvnKubeNode,
+		ClusterManager:       savedClusterManager,
 	}
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
@@ -2001,6 +2075,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildClusterManagerConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	tmpAuth, err := buildOvnAuth(exec, true, &cliConfig.OvnNorth, &cfg.OvnNorth, defaults.OvnNorthAddress)
 	if err != nil {
 		return "", err
@@ -2028,6 +2106,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
 	klog.V(5).Infof("Ovnkube Node config: %+v", OvnKubeNode)
+	klog.V(5).Infof("Ovnkube Cluster Manager config: %+v", ClusterManager)
 
 	return retConfigFile, nil
 }
@@ -2048,6 +2127,10 @@ func completeConfig() error {
 		return err
 	}
 	if err := completeHybridOverlayConfig(allSubnets); err != nil {
+		return err
+	}
+
+	if err := completeClusterManagerConfig(); err != nil {
 		return err
 	}
 

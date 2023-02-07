@@ -29,6 +29,9 @@ const (
 
 	// ovnNodeGRLRPAddrAnnotaton is the node annotation name used to store the node gateway router port ips.
 	ovnNodeGRLRPAddrAnnotaton = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
+
+	// ovnTransitSwitchPortAddrAnnotation is the node annotation name to store the transit switch port ips.
+	ovnTransitSwitchPortAddrAnnotation = "k8s.ovn.org/node-transit-switch-port-ifaddr"
 )
 
 var _ = ginkgo.Describe("Cluster Manager", func() {
@@ -1150,4 +1153,269 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})
+
+	ginkgo.Context("Transit switch port IP allocations", func() {
+		ginkgo.It("Interconnect enabled", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer clusterManager.Stop()
+
+				// Check that cluster manager has allocated id transit switch port ips for each node
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						_, ok := updatedNode.Annotations[ovnTransitSwitchPortAddrAnnotation]
+						if !ok {
+							return fmt.Errorf("expected node annotation for node %s to have transit switch port ips allocated", n.Name)
+						}
+
+						transitSwitchIps, err := util.ParseNodeTransitSwitchPortAddrs(updatedNode)
+						if err != nil {
+							return fmt.Errorf("error parsing transit switch ip annotations for the node %s", n.Name)
+						}
+
+						if len(transitSwitchIps) < 1 {
+							return fmt.Errorf("transit switch ips for node %s not allocated", n.Name)
+						}
+
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+				"--enable-interconnect",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("Interconnect enabled - clear the transit switch port ips and check", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer clusterManager.Stop()
+
+				// Check that cluster manager has allocated id transit switch port ips for each node
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						_, ok := updatedNode.Annotations[ovnTransitSwitchPortAddrAnnotation]
+						if !ok {
+							return fmt.Errorf("expected node annotation for node %s to have transit switch port ips allocated", n.Name)
+						}
+
+						transitSwitchIps, err := util.ParseNodeTransitSwitchPortAddrs(updatedNode)
+						if err != nil {
+							return fmt.Errorf("error parsing transit switch ip annotations for the node %s", n.Name)
+						}
+
+						if len(transitSwitchIps) < 1 {
+							return fmt.Errorf("transit switch ips for node %s not allocated", n.Name)
+						}
+
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				// Clear the transit switch port ip annotation from node 1.
+				node1, _ := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+				nodeAnnotations := node1.Annotations
+				nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient}, "node1")
+				for k, v := range nodeAnnotations {
+					nodeAnnotator.Set(k, v)
+				}
+				node1TransitSwitchIps := node1.Annotations[ovnTransitSwitchPortAddrAnnotation]
+				nodeAnnotator.Delete(ovnTransitSwitchPortAddrAnnotation)
+				err = nodeAnnotator.Run()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(func() error {
+					updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					updatedNode1TransitSwitchIps, ok := updatedNode.Annotations[ovnTransitSwitchPortAddrAnnotation]
+					if !ok {
+						return fmt.Errorf("expected node annotation for node node1 to have transit switch port ips allocated")
+					}
+
+					transitSwitchIps, err := util.ParseNodeTransitSwitchPortAddrs(updatedNode)
+					if err != nil {
+						return fmt.Errorf("error parsing transit switch ip annotations for the node node1")
+					}
+
+					if len(transitSwitchIps) < 1 {
+						return fmt.Errorf("transit switch ips for node node1 not allocated")
+					}
+					gomega.Expect(node1TransitSwitchIps).To(gomega.Equal(updatedNode1TransitSwitchIps))
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+				"--enable-interconnect",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("Interconnect disabled", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer clusterManager.Stop()
+
+				// Check that cluster manager has allocated id transit switch port ips for each node
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						_, ok := updatedNode.Annotations[ovnTransitSwitchPortAddrAnnotation]
+						if ok {
+							return fmt.Errorf("not expected node annotation for node %s to have transit switch port ips allocated", n.Name)
+						}
+
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
+
 })
