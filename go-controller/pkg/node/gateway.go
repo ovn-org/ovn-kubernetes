@@ -386,7 +386,6 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses() ([]*net.IPNet, error)
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
 	res := bridgeConfiguration{}
 	gwIntf := intfName
-	bridgeCreated := false
 
 	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
 		// This is an OVS bridge's internal port
@@ -406,7 +405,6 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		res.bridgeName = bridgeName
 		res.uplinkName = intfName
 		gwIntf = bridgeName
-		bridgeCreated = true
 	} else {
 		// gateway interface is an OVS bridge
 		uplinkName, err := getIntfName(intfName)
@@ -430,8 +428,12 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		}
 	}
 
-	res.interfaceID, res.macAddress, err = bridgedGatewayNodeSetup(nodeName, res.bridgeName, gwIntf,
-		physicalNetworkName, bridgeCreated)
+	res.macAddress, err = util.GetOVSPortMACAddress(gwIntf)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get MAC address for ovs port %s", gwIntf)
+	}
+
+	res.interfaceID, err = bridgedGatewayNodeSetup(nodeName, res.bridgeName, physicalNetworkName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
