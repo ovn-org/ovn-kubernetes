@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -145,10 +146,19 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		return nil
 	}
 
-	_, network, err := util.PodWantsMultiNetwork(pod, oc.NetInfo)
+	_, networkMap, err := util.GetPodNADToNetworkMapping(pod, oc.NetInfo)
 	if err != nil {
 		// multus won't add this Pod if this fails, should never happen
 		return fmt.Errorf("error getting default-network's network-attachment for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+	}
+	// for default network, networkMap either is empty or contains only one network selection element
+	if len(networkMap) > 1 {
+		return fmt.Errorf("more than one NAD requested on default network for pod %s/%s", pod.Namespace, pod.Name)
+	}
+
+	var network *nadapi.NetworkSelectionElement
+	for _, network = range networkMap {
+		break
 	}
 
 	var libovsdbExecuteTime time.Duration

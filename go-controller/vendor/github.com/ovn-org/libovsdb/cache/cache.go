@@ -57,14 +57,14 @@ type ErrIndexExists struct {
 	Value    interface{}
 	Index    string
 	New      string
-	Existing string
+	Existing []string
 }
 
 func (e *ErrIndexExists) Error() string {
 	return fmt.Sprintf("cannot insert %s in the %s table. item %s has identical indexes. index: %s, value: %v", e.New, e.Table, e.Existing, e.Index, e.Value)
 }
 
-func NewIndexExistsError(table string, value interface{}, index string, new, existing string) *ErrIndexExists {
+func NewIndexExistsError(table string, value interface{}, index string, new string, existing []string) *ErrIndexExists {
 	return &ErrIndexExists{
 		table, value, index, new, existing,
 	}
@@ -167,6 +167,13 @@ func (r *RowCache) Row(uuid string) model.Model {
 	return r.rowByUUID(uuid)
 }
 
+func (r *RowCache) HasRow(uuid string) bool {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	_, found := r.cache[uuid]
+	return found
+}
+
 // rowsByModels searches the cache to find all rows matching any of the provided
 // models, either by UUID or indexes. An error is returned if the model schema
 // has no UUID field, or if the provided models are not all the same type.
@@ -264,7 +271,7 @@ func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
 	if err != nil {
 		return err
 	}
-	newIndexes := r.newIndexes()
+	addIndexes := r.newIndexes()
 	for _, indexSpec := range r.indexSpecs {
 		index := indexSpec.index
 		val, err := valueFromIndex(info, indexSpec.columns)
@@ -272,25 +279,29 @@ func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
 			return err
 		}
 
+		uuidset := newUUIDSet(uuid)
+
 		vals := r.indexes[index]
-		if existing, ok := vals[val]; ok && !existing.empty() && checkIndexes && indexSpec.isSchemaIndex() {
-			return NewIndexExistsError(r.name, val, string(index), uuid, existing.getAny())
+		existing := vals[val]
+		if checkIndexes && indexSpec.isSchemaIndex() && !existing.empty() && !existing.equals(uuidset) {
+			return NewIndexExistsError(r.name, val, string(index), uuid, existing.list())
 		}
 
-		uuidset := newUUIDSet(uuid)
-		if indexSpec.isSchemaIndex() {
-			newIndexes[index][val] = uuidset
-		} else {
-			newIndexes[index][val] = addUUIDSet(r.indexes[index][val], uuidset)
-		}
+		addIndexes[index][val] = uuidset
 	}
 
 	// write indexes
-	for k1, v1 := range newIndexes {
-		for k2, v2 := range v1 {
-			r.indexes[k1][k2] = v2
+	for _, indexSpec := range r.indexSpecs {
+		index := indexSpec.index
+		for k, v := range addIndexes[index] {
+			if indexSpec.isSchemaIndex() {
+				r.indexes[index][k] = v
+			} else {
+				r.indexes[index][k] = addUUIDSet(r.indexes[index][k], v)
+			}
 		}
 	}
+
 	r.cache[uuid] = model.Clone(m)
 	return nil
 }
@@ -311,7 +322,9 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) (model.
 	if err != nil {
 		return nil, err
 	}
-	newIndexes := r.newIndexes()
+
+	addIndexes := r.newIndexes()
+	removeIndexes := r.newIndexes()
 	var errs []error
 	for _, indexSpec := range r.indexSpecs {
 		index := indexSpec.index
@@ -331,44 +344,51 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) (model.
 		}
 		// old and new values are NOT the same
 
+		uuidset := newUUIDSet(uuid)
+
 		// check that there are no conflicts
 		vals := r.indexes[index]
-		if existing, ok := vals[newVal]; ok && indexSpec.isSchemaIndex() && checkIndexes && !existing.empty() && !existing.has(uuid) {
+		existing := vals[newVal]
+		if checkIndexes && indexSpec.isSchemaIndex() && !existing.empty() && !existing.equals(uuidset) {
 			errs = append(errs, NewIndexExistsError(
 				r.name,
 				newVal,
 				string(index),
 				uuid,
-				existing.getAny(),
+				existing.list(),
 			))
 		}
 
-		uuidset := newUUIDSet(uuid)
-		if indexSpec.isSchemaIndex() {
-			newIndexes[index][newVal] = uuidset
-			newIndexes[index][oldVal] = nil
-		} else {
-			newIndexes[index][newVal] = addUUIDSet(r.indexes[index][newVal], uuidset)
-			newIndexes[index][oldVal] = substractUUIDSet(r.indexes[index][oldVal], uuidset)
-		}
+		addIndexes[index][newVal] = uuidset
+		removeIndexes[index][oldVal] = uuidset
 	}
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("%+v", errs)
 	}
+
 	// write indexes
-	for k1, v1 := range newIndexes {
-		for k2, v2 := range v1 {
-			if len(v2) == 0 {
-				delete(r.indexes[k1], k2)
+	for _, indexSpec := range r.indexSpecs {
+		index := indexSpec.index
+		for k, v := range addIndexes[index] {
+			if indexSpec.isSchemaIndex() {
+				r.indexes[index][k] = v
 			} else {
-				r.indexes[k1][k2] = v2
+				r.indexes[index][k] = addUUIDSet(r.indexes[index][k], v)
+			}
+		}
+		for k, v := range removeIndexes[index] {
+			if indexSpec.isSchemaIndex() || substractUUIDSet(r.indexes[index][k], v).empty() {
+				delete(r.indexes[index], k)
 			}
 		}
 	}
+
 	r.cache[uuid] = model.Clone(m)
 	return oldRow, nil
 }
 
+// IndexExists checks if any of the schema indexes of the provided model is
+// already in the cache under a different UUID.
 func (r *RowCache) IndexExists(row model.Model) error {
 	info, err := r.dbModel.NewModelInfo(row)
 	if err != nil {
@@ -391,13 +411,14 @@ func (r *RowCache) IndexExists(row model.Model) error {
 			continue
 		}
 		vals := r.indexes[index]
-		if existing := vals[val]; !existing.empty() && !existing.has(uuid) {
+		existing := vals[val]
+		if !existing.empty() && !existing.equals(newUUIDSet(uuid)) {
 			return NewIndexExistsError(
 				r.name,
 				val,
 				string(index),
 				uuid,
-				existing.getAny(),
+				existing.list(),
 			)
 		}
 	}
@@ -416,24 +437,31 @@ func (r *RowCache) Delete(uuid string) error {
 	if err != nil {
 		return err
 	}
+
+	removeIndexes := r.newIndexes()
 	for _, indexSpec := range r.indexSpecs {
 		index := indexSpec.index
 		oldVal, err := valueFromIndex(oldInfo, indexSpec.columns)
 		if err != nil {
 			return err
 		}
-		// only remove the index if it is pointing to this uuid
-		// otherwise we can cause a consistency issue if we've processed
-		// updates out of order
-		vals := r.indexes[index]
-		existing, ok := vals[oldVal]
-		if ok {
-			existing.remove(uuid)
-			if len(existing) == 0 {
-				delete(vals, oldVal)
+
+		removeIndexes[index][oldVal] = newUUIDSet(uuid)
+	}
+
+	// write indexes
+	for _, indexSpec := range r.indexSpecs {
+		index := indexSpec.index
+		for k, v := range removeIndexes[index] {
+			// only remove the index if it is pointing to this uuid
+			// otherwise we can cause a consistency issue if we've processed
+			// updates out of order
+			if substractUUIDSet(r.indexes[index][k], v).empty() {
+				delete(r.indexes[index], k)
 			}
 		}
 	}
+
 	delete(r.cache, uuid)
 	return nil
 }
@@ -473,6 +501,7 @@ func (r *RowCache) RowsShallow() map[string]model.Model {
 // quick as possible, via indexes, a reduced list of candidate models that might
 // match all conditions, which should be better than just evaluating all
 // conditions against all rows of a table.
+//
 //nolint:gocyclo // warns overall function is complex but ignores inner functions
 func (r *RowCache) uuidsByConditionsAsIndexes(conditions []ovsdb.Condition, nativeValues []interface{}) (uuidset, error) {
 	type indexableCondition struct {
@@ -1432,6 +1461,15 @@ func valueFromIndex(info *mapper.Info, columnKeys []model.ColumnKey) (interface{
 			val, err := valueFromColumnKey(info, columnKey)
 			if err != nil {
 				return "", err
+			}
+			// if object is nil dont try to encode it
+			value := reflect.ValueOf(val)
+			if value.Kind() == reflect.Invalid {
+				continue
+			}
+			// if object is a nil pointer dont try to encode it
+			if value.Kind() == reflect.Pointer && value.IsNil() {
+				continue
 			}
 			err = enc.Encode(val)
 			if err != nil {

@@ -92,7 +92,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			}
 		}
 
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
 
 		if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
 			return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
@@ -113,6 +113,9 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
+			// update gateway IPs for service openflows programmed by nodePortWatcher interface
+			npw, _ := gw.nodePortWatcher.(*nodePortWatcher)
+			npw.updateGatewayIPs(gw.nodeIPManager)
 			gw.openflowManager.requestFlowSync()
 		}
 
@@ -123,7 +126,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 					return err
 				}
 			}
-			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge.patchPort, gwBridge.bridgeName, gwBridge.uplinkName, nodeName, gwBridge.ips, gw.openflowManager, gw.nodeIPManager, watchFactory)
+			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, nodeName, gw.openflowManager, gw.nodeIPManager, watchFactory)
 			if err != nil {
 				return err
 			}

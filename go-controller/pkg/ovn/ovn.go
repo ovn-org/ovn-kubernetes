@@ -84,7 +84,7 @@ func (oc *DefaultNetworkController) syncPeriodic() {
 func (oc *DefaultNetworkController) getPortInfo(pod *kapi.Pod) *lpInfo {
 	var portInfo *lpInfo
 	key := util.GetLogicalPortName(pod.Namespace, pod.Name)
-	if !util.PodWantsNetwork(pod) {
+	if util.PodWantsHostNetwork(pod) {
 		// create dummy logicalPortInfo for host-networked pods
 		mac, _ := net.ParseMAC("00:00:00:00:00:00")
 		portInfo = &lpInfo{
@@ -138,7 +138,7 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 		}
 	}
 
-	if util.PodWantsNetwork(pod) && addPort {
+	if !util.PodWantsHostNetwork(pod) && addPort {
 		if err := oc.addLogicalPort(pod); err != nil {
 			return fmt.Errorf("addLogicalPort failed for %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
@@ -157,7 +157,7 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
-	if !util.PodWantsNetwork(pod) {
+	if util.PodWantsHostNetwork(pod) {
 		if err := oc.deletePodExternalGW(pod); err != nil {
 			return fmt.Errorf("unable to delete external gateway routes for pod %s: %w",
 				getPodNamespacedName(pod), err)
