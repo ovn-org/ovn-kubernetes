@@ -418,7 +418,9 @@ func (cm *networkControllerManager) Stop() {
 	// then stops each network controller associated with net-attach-def; it is ok
 	// to call GetAllControllers here as net-attach-def controller has been stopped,
 	// and no more change of network controllers
-	for _, oc := range cm.nadController.GetAllNetworkControllers() {
-		oc.Stop()
+	if cm.nadController != nil {
+		for _, oc := range cm.nadController.GetAllNetworkControllers() {
+			oc.Stop()
+		}
 	}
 }
