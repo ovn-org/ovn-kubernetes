@@ -258,6 +258,71 @@ var _ = Describe("Multi Homing", func() {
 			),
 		)
 	})
+
+	Context("A pod with multiple attachments to the same OVN-K networks", func() {
+		var pod *v1.Pod
+
+		BeforeEach(func() {
+			netAttachDefs := []networkAttachmentConfig{
+				newAttachmentConfigWithOverriddenName(secondaryNetworkName, f.Namespace.Name, secondaryNetworkName, "layer2", secondaryFlatL2NetworkCIDR),
+				newAttachmentConfigWithOverriddenName(secondaryNetworkName+"-alias", f.Namespace.Name, secondaryNetworkName, "layer2", secondaryFlatL2NetworkCIDR),
+			}
+			for i := range netAttachDefs {
+				netConfig := netAttachDefs[i]
+				By("creating the attachment configuration")
+				_, err := nadClient.NetworkAttachmentDefinitions(netConfig.namespace).Create(
+					context.Background(),
+					generateNAD(netConfig),
+					metav1.CreateOptions{},
+				)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			podConfig := podConfiguration{
+				attachments: []nadapi.NetworkSelectionElement{
+					{Name: secondaryNetworkName},
+					{Name: secondaryNetworkName + "-alias"},
+				},
+				name:      podName,
+				namespace: f.Namespace.Name,
+			}
+			By("creating the pod using a secondary network")
+			var err error
+			pod, err = cs.CoreV1().Pods(podConfig.namespace).Create(
+				context.Background(),
+				generatePodSpec(podConfig),
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("asserting the pod gets to the `Ready` phase")
+			Eventually(func() v1.PodPhase {
+				updatedPod, err := cs.CoreV1().Pods(podConfig.namespace).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
+				if err != nil {
+					return v1.PodFailed
+				}
+				return updatedPod.Status.Phase
+			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+		})
+
+		It("features two different IPs from the same subnet", func() {
+			var err error
+			pod, err = cs.CoreV1().Pods(pod.GetNamespace()).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
+				return !status.Default
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(netStatus).To(HaveLen(2))
+
+			Expect(netStatus[0].IPs).To(HaveLen(1))
+			Expect(netStatus[1].IPs).To(HaveLen(1))
+			Expect(netStatus[0].IPs[0]).NotTo(Equal(netStatus[1].IPs[0]))
+			Expect(inRange(secondaryFlatL2NetworkCIDR, netStatus[0].IPs[0]))
+			Expect(inRange(secondaryFlatL2NetworkCIDR, netStatus[1].IPs[0]))
+		})
+	})
 })
 
 func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
@@ -270,6 +335,14 @@ type networkAttachmentConfig struct {
 	namespace    string
 	name         string
 	topology     string
+	networkName  string
+}
+
+func (nac networkAttachmentConfig) attachmentName() string {
+	if nac.networkName != "" {
+		return nac.networkName
+	}
+	return nac.name
 }
 
 func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
@@ -286,7 +359,7 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
         "netAttachDefName": %q
 }
 `,
-		config.name,
+		config.attachmentName(),
 		config.topology,
 		config.cidr,
 		strings.Join(config.excludeCIDRs, ","),
@@ -386,4 +459,14 @@ func connectToServer(clientPodNs string, clientPodName, serverIP string, port in
 		net.JoinHostPort(serverIP, fmt.Sprintf("%d", port)),
 	)
 	return err
+}
+
+func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topology, cidr string) networkAttachmentConfig {
+	return networkAttachmentConfig{
+		cidr:        cidr,
+		name:        name,
+		namespace:   namespace,
+		networkName: networkName,
+		topology:    topology,
+	}
 }
