@@ -742,13 +742,13 @@ func Test_buildClusterLBs(t *testing.T) {
 	defaultNodes := []nodeInfo{
 		{
 			name:              "node-a",
-			nodeIPs:           []string{"10.0.0.1"},
+			nodeIPs:           []net.IP{net.ParseIP("10.0.0.1")},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
 		},
 		{
 			name:              "node-b",
-			nodeIPs:           []string{"10.0.0.2"},
+			nodeIPs:           []net.IP{net.ParseIP("10.0.0.2")},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
 		},
@@ -970,14 +970,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 	defaultNodes := []nodeInfo{
 		{
 			name:              "node-a",
-			nodeIPs:           []string{"10.0.0.1"},
+			nodeIPs:           []net.IP{net.ParseIP("10.0.0.1")},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
 			name:              "node-b",
-			nodeIPs:           []string{"10.0.0.2"},
+			nodeIPs:           []net.IP{net.ParseIP("10.0.0.2")},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},

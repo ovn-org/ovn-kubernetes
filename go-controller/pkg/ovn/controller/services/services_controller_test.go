@@ -607,7 +607,7 @@ func endpoint(ip string, port int32) string {
 func nodeConfig(nodeName string, nodeIP string) *nodeInfo {
 	return &nodeInfo{
 		name:              nodeName,
-		nodeIPs:           []string{nodeIP},
+		nodeIPs:           []net.IP{net.ParseIP(nodeIP)},
 		gatewayRouterName: nodeGWRouterName(nodeName),
 		switchName:        nodeSwitchName(nodeName),
 	}

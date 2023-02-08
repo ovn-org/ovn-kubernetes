@@ -307,8 +307,8 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 
 				// any targets local to the node need to have a special
 				// harpin IP added, but only for the router LB
-				routerV4targetips = util.UpdateIPsSlice(routerV4targetips, node.nodeIPs, []string{types.V4HostMasqueradeIP})
-				routerV6targetips = util.UpdateIPsSlice(routerV6targetips, node.nodeIPs, []string{types.V6HostMasqueradeIP})
+				routerV4targetips = util.UpdateIPsSlice(routerV4targetips, node.nodeIPsStr(), []string{types.V4HostMasqueradeIP})
+				routerV6targetips = util.UpdateIPsSlice(routerV6targetips, node.nodeIPsStr(), []string{types.V6HostMasqueradeIP})
 
 				routerV4targets := joinHostsPort(routerV4targetips, config.eps.Port)
 				routerV6targets := joinHostsPort(routerV6targetips, config.eps.Port)
@@ -321,7 +321,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				vips = make([]string, 0, len(vips))
 				for _, vip := range config.vips {
 					if vip == placeholderNodeIPs {
-						vips = append(vips, node.nodeIPs...)
+						vips = append(vips, node.nodeIPsStr()...)
 					} else {
 						vips = append(vips, vip)
 					}
