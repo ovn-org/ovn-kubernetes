@@ -360,6 +360,7 @@ func (g *gateway) GetGatewayBridgeIface() string {
 }
 
 type bridgeConfiguration struct {
+	sync.Mutex
 	bridgeName  string
 	uplinkName  string
 	ips         []*net.IPNet
@@ -369,6 +370,17 @@ type bridgeConfiguration struct {
 	ofPortPatch string
 	ofPortPhys  string
 	ofPortHost  string
+}
+
+// updateInterfaceIPAddresses sets and returns the bridge's current ips
+func (b *bridgeConfiguration) updateInterfaceIPAddresses() ([]*net.IPNet, error) {
+	b.Lock()
+	defer b.Unlock()
+	ifAddrs, err := getNetworkInterfaceIPAddresses(b.bridgeName)
+	if err == nil {
+		b.ips = ifAddrs
+	}
+	return ifAddrs, err
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {

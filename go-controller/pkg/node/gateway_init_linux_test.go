@@ -131,6 +131,14 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 			Output: "7",
 		})
+		if setNodeIP {
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-encap-ip=192.168.1.10",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-appctl --timeout=5 -t ovn-controller exit --restart",
+			})
+		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
 			Output: "0",
@@ -491,6 +499,12 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get interface " + hostRep + " ofport",
 			Output: "9",
 		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-encap-ip=192.168.1.101",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-appctl --timeout=5 -t ovn-controller exit --restart",
+		})
 		// cleanup flows
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-ofctl -O OpenFlow13 --bundle replace-flows " + brphys + " -",
@@ -826,6 +840,12 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 			Output: "7",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-encap-ip=192.168.1.10",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-appctl --timeout=5 -t ovn-controller exit --restart",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",

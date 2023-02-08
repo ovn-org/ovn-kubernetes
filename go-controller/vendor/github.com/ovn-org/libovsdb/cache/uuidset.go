@@ -24,6 +24,18 @@ func (s uuidset) has(uuid string) bool {
 	return ok
 }
 
+func (s uuidset) equals(o uuidset) bool {
+	if len(s) != len(o) {
+		return false
+	}
+	for uuid := range s {
+		if !o.has(uuid) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s uuidset) getAny() string {
 	for k := range s {
 		return k

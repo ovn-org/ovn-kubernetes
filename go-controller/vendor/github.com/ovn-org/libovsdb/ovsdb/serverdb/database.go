@@ -30,6 +30,14 @@ type Database struct {
 	Sid       *string       `ovsdb:"sid"`
 }
 
+func (a *Database) GetUUID() string {
+	return a.UUID
+}
+
+func (a *Database) GetCid() *string {
+	return a.Cid
+}
+
 func copyDatabaseCid(a *string) *string {
 	if a == nil {
 		return nil
@@ -46,6 +54,14 @@ func equalDatabaseCid(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *Database) GetConnected() bool {
+	return a.Connected
+}
+
+func (a *Database) GetIndex() *int {
+	return a.Index
 }
 
 func copyDatabaseIndex(a *int) *int {
@@ -66,6 +82,22 @@ func equalDatabaseIndex(a, b *int) bool {
 	return *a == *b
 }
 
+func (a *Database) GetLeader() bool {
+	return a.Leader
+}
+
+func (a *Database) GetModel() DatabaseModel {
+	return a.Model
+}
+
+func (a *Database) GetName() string {
+	return a.Name
+}
+
+func (a *Database) GetSchema() *string {
+	return a.Schema
+}
+
 func copyDatabaseSchema(a *string) *string {
 	if a == nil {
 		return nil
@@ -82,6 +114,10 @@ func equalDatabaseSchema(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *Database) GetSid() *string {
+	return a.Sid
 }
 
 func copyDatabaseSid(a *string) *string {

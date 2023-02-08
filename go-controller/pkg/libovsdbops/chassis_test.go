@@ -10,6 +10,9 @@ import (
 
 func TestDeleteChassis(t *testing.T) {
 	uuid := "b9998337-2498-4d1e-86e6-fc0417abb2f0"
+	uuid2 := "b9998337-2498-4d1e-86e6-fc0417abb2f1"
+	uuid3 := "b9998337-2498-4d1e-86e6-fc0417abb2f2"
+	fakeDatapathUUID := "datapath-uuid"
 	tests := []struct {
 		desc             string
 		chassis          *sbdb.Chassis
@@ -32,6 +35,38 @@ func TestDeleteChassis(t *testing.T) {
 			},
 		},
 		{
+			desc:    "delete chassis and igmp group by chassis UUID",
+			chassis: &sbdb.Chassis{UUID: uuid},
+			initialDB: []libovsdbtest.TestData{
+				&sbdb.Chassis{UUID: uuid},
+				&sbdb.IGMPGroup{Address: "1.1.1.1", Chassis: &uuid, Datapath: &fakeDatapathUUID},
+				&sbdb.IGMPGroup{Address: "1.1.1.2", Chassis: &uuid, Datapath: &fakeDatapathUUID},
+
+				&sbdb.Chassis{UUID: uuid2},
+				&sbdb.IGMPGroup{Chassis: &uuid2, Datapath: &fakeDatapathUUID},
+			},
+			expectedDB: []libovsdbtest.TestData{
+				&sbdb.Chassis{UUID: uuid2},
+				&sbdb.IGMPGroup{Chassis: &uuid2, Datapath: &fakeDatapathUUID},
+			},
+		},
+		{
+			desc:    "delete chassis and igmp group by chassis Name",
+			chassis: &sbdb.Chassis{Name: "test"},
+			initialDB: []libovsdbtest.TestData{
+				&sbdb.Chassis{UUID: uuid, Name: "test"},
+				&sbdb.IGMPGroup{Address: "1.1.1.1", Chassis: &uuid, Datapath: &fakeDatapathUUID},
+				&sbdb.IGMPGroup{Address: "1.1.1.2", Chassis: &uuid, Datapath: &fakeDatapathUUID},
+
+				&sbdb.Chassis{UUID: uuid2, Name: "test2"},
+				&sbdb.IGMPGroup{Chassis: &uuid2, Datapath: &fakeDatapathUUID},
+			},
+			expectedDB: []libovsdbtest.TestData{
+				&sbdb.Chassis{UUID: uuid2, Name: "test2"},
+				&sbdb.IGMPGroup{Chassis: &uuid2, Datapath: &fakeDatapathUUID},
+			},
+		},
+		{
 			desc:    "delete chassis and chassis private by UUID",
 			chassis: &sbdb.Chassis{UUID: uuid},
 			initialDB: []libovsdbtest.TestData{
@@ -41,16 +76,18 @@ func TestDeleteChassis(t *testing.T) {
 			expectedDB: []libovsdbtest.TestData{},
 		},
 		{
-			desc:    "delete chassis when chassis private does not exist",
+			desc:    "delete chassis when chassis private and igmp group do not exist",
 			chassis: &sbdb.Chassis{Name: "test"},
 			initialDB: []libovsdbtest.TestData{
 				&sbdb.Chassis{Name: "test"},
-				&sbdb.Chassis{Name: "test2"},
+				&sbdb.Chassis{UUID: uuid2, Name: "test2"},
 				&sbdb.ChassisPrivate{Name: "test2"},
+				&sbdb.IGMPGroup{Chassis: &uuid2, Datapath: &fakeDatapathUUID},
 			},
 			expectedDB: []libovsdbtest.TestData{
-				&sbdb.Chassis{Name: "test2"},
+				&sbdb.Chassis{UUID: uuid2, Name: "test2"},
 				&sbdb.ChassisPrivate{Name: "test2"},
+				&sbdb.IGMPGroup{Chassis: &uuid2, Datapath: &fakeDatapathUUID},
 			},
 		},
 		{
@@ -80,6 +117,23 @@ func TestDeleteChassis(t *testing.T) {
 			expectedDB: []libovsdbtest.TestData{
 				&sbdb.Chassis{Name: "test3", Hostname: "testNode3"},
 				&sbdb.ChassisPrivate{Name: "test3"},
+			},
+		},
+		{
+			desc:             "delete chassis and igmp group by predicate",
+			chassisPredicate: func(c *sbdb.Chassis) bool { return c.Hostname == "testNode" },
+			initialDB: []libovsdbtest.TestData{
+				&sbdb.Chassis{UUID: uuid, Hostname: "testNode"},
+				&sbdb.IGMPGroup{Address: "1.1.1.1", Chassis: &uuid, Datapath: &fakeDatapathUUID},
+				&sbdb.IGMPGroup{Address: "1.1.1.2", Chassis: &uuid, Datapath: &fakeDatapathUUID},
+				&sbdb.Chassis{UUID: uuid2, Hostname: "testNode"},
+				&sbdb.IGMPGroup{Chassis: &uuid2, Datapath: &fakeDatapathUUID},
+				&sbdb.Chassis{UUID: uuid3, Hostname: "testNode3"},
+				&sbdb.IGMPGroup{Chassis: &uuid3, Datapath: &fakeDatapathUUID},
+			},
+			expectedDB: []libovsdbtest.TestData{
+				&sbdb.Chassis{UUID: uuid3, Hostname: "testNode3"},
+				&sbdb.IGMPGroup{Chassis: &uuid3, Datapath: &fakeDatapathUUID},
 			},
 		},
 		{

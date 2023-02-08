@@ -225,7 +225,7 @@ func (oc *DefaultNetworkController) addGWRoutesForNamespace(namespace string, eg
 		return fmt.Errorf("failed to get all the pods (%v)", err)
 	}
 	for _, pod := range existingPods {
-		if util.PodCompleted(pod) || !util.PodWantsNetwork(pod) {
+		if util.PodCompleted(pod) || util.PodWantsHostNetwork(pod) {
 			continue
 		}
 		podIPs := make([]*net.IPNet, 0)
@@ -1046,7 +1046,7 @@ func (oc *DefaultNetworkController) buildClusterECMPCacheFromNamespaces(clusterR
 		for _, gwIP := range gwIPs.UnsortedList() {
 			for _, nsPod := range nsPods {
 				// ignore completed pods, host networked pods, pods not scheduled
-				if !util.PodWantsNetwork(nsPod) || util.PodCompleted(nsPod) || !util.PodScheduled(nsPod) {
+				if util.PodWantsHostNetwork(nsPod) || util.PodCompleted(nsPod) || !util.PodScheduled(nsPod) {
 					continue
 				}
 				for _, podIP := range nsPod.Status.PodIPs {
@@ -1104,7 +1104,7 @@ func (oc *DefaultNetworkController) buildClusterECMPCacheFromPods(clusterRouteCa
 		for _, gwIP := range gwIPs.UnsortedList() {
 			for _, nsPod := range nsPods {
 				// ignore completed pods, host networked pods, pods not scheduled
-				if !util.PodWantsNetwork(nsPod) || util.PodCompleted(nsPod) || !util.PodScheduled(nsPod) {
+				if util.PodWantsHostNetwork(nsPod) || util.PodCompleted(nsPod) || !util.PodScheduled(nsPod) {
 					continue
 				}
 				for _, podIP := range nsPod.Status.PodIPs {

@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -98,6 +99,28 @@ func newAgnhostPod(namespace, name string, command ...string) *v1.Pod {
 			Namespace: namespace,
 		},
 		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:    name,
+					Image:   agnhostImage,
+					Command: command,
+				},
+			},
+			RestartPolicy: v1.RestartPolicyNever,
+		},
+	}
+}
+
+// newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
+// that behave the same, no matter the underlying OS.
+func newAgnhostPodOnNode(name, nodeName string, labels map[string]string, command ...string) *v1.Pod {
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: labels,
+		},
+		Spec: v1.PodSpec{
+			NodeName: nodeName,
 			Containers: []v1.Container{
 				{
 					Name:    name,
@@ -694,13 +717,32 @@ func waitForRollout(c clientset.Interface, ns string, resource string, allowedNo
 }
 
 func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error {
+	targetIP := dstPodIP
+	if utilnet.IsIPv6String(dstPodIP) {
+		targetIP = fmt.Sprintf("[%s]", dstPodIP)
+	}
 	stdout, stderr, err := fr.ExecShellInPodWithFullOutput(
 		srcPodName,
-		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:8000 | head -n1", dstPodIP))
+		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:8000 | head -n1", targetIP))
 	if err == nil && stdout == "HTTP/1.1 200 OK" {
 		return nil
 	}
 	return fmt.Errorf("http request failed; stdout: %s, err: %v", stdout+stderr, err)
+}
+
+// pokeAllPodIPs will either poke the single dstPod's PodIP or all IPs in the pod's PodIPs list. The returned error
+// will be an aggregate of the errors encountered poking all destination IPs.
+func pokeAllPodIPs(fr *framework.Framework, srcPodName string, dstPod *v1.Pod) error {
+	var errors []error
+	if len(dstPod.Status.PodIPs) > 0 {
+		for _, podIP := range dstPod.Status.PodIPs {
+			if err := pokePod(fr, srcPodName, podIP.IP); err != nil {
+				errors = append(errors, err)
+			}
+		}
+		return utilerrors.NewAggregate(errors)
+	}
+	return pokePod(fr, srcPodName, dstPod.Status.PodIP)
 }
 
 func pokeExternalHostFromPod(fr *framework.Framework, namespace string, srcPodName, dstIp string, dstPort int) error {
