@@ -202,7 +202,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 	}
 
 	for _, entry := range clusterIPSubnet {
-		drLRPIfAddr, err := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(entry), drLRPIfAddrs)
+		drLRPIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(entry), drLRPIfAddrs)
 		if err != nil {
 			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
 				"router as the nexthop: %v",

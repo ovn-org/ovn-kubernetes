@@ -356,12 +356,12 @@ func DeleteLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, ro
 	return err
 }
 
-// CreateOrAddNextHopsToLogicalRouterPolicyWithPredicate looks up a logical
+// CreateOrAddNextHopsToLogicalRouterPolicyWithPredicateOps looks up a logical
 // router policy from the cache based on a given predicate. If it doesn't find
 // any, it creates the provided logical router policy. If it does, adds any
 // missing Nexthops to the existing logical router policy. The logical router
-// policy is added to the provided logical router.
-func CreateOrAddNextHopsToLogicalRouterPolicyWithPredicate(nbClient libovsdbclient.Client, routerName string, lrp *nbdb.LogicalRouterPolicy, p logicalRouterPolicyPredicate) error {
+// policy is added to the provided logical router. Returns the corresponding ops
+func CreateOrAddNextHopsToLogicalRouterPolicyWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, routerName string, lrp *nbdb.LogicalRouterPolicy, p logicalRouterPolicyPredicate) ([]libovsdb.Operation, error) {
 	router := &nbdb.LogicalRouter{
 		Name: routerName,
 	}
@@ -385,8 +385,7 @@ func CreateOrAddNextHopsToLogicalRouterPolicyWithPredicate(nbClient libovsdbclie
 	}
 
 	m := newModelClient(nbClient)
-	_, err := m.CreateOrUpdate(opModels...)
-	return err
+	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
 func deleteNextHopsFromLogicalRouterPolicyOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, routerName string, lrps []*nbdb.LogicalRouterPolicy, nextHops ...string) ([]libovsdb.Operation, error) {
@@ -472,7 +471,7 @@ func DeleteNextHopFromLogicalRouterPoliciesWithPredicateOps(nbClient libovsdbcli
 		return nil, err
 	}
 
-	return deleteNextHopsFromLogicalRouterPolicyOps(nbClient, nil, routerName, lrps, nextHop)
+	return deleteNextHopsFromLogicalRouterPolicyOps(nbClient, ops, routerName, lrps, nextHop)
 }
 
 // DeleteNextHopFromLogicalRouterPoliciesWithPredicate looks up a logical router

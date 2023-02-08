@@ -102,7 +102,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		} else {
 			hasIPv4 = true
 		}
-		nexthop, _ := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(subnet), defLRPIPs)
+		nexthop, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(subnet), defLRPIPs)
 		grStaticRouteNamedUUID := fmt.Sprintf("static-subnet-route-%v-UUID", i)
 		grStaticRoutes = append(grStaticRoutes, grStaticRouteNamedUUID)
 		testData = append(testData, &nbdb.LogicalRouterStaticRoute{
@@ -114,7 +114,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 	}
 	if config.Gateway.Mode == config.GatewayModeShared {
 		for i, hostSubnet := range hostSubnets {
-			joinLRPIP, _ := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(hostSubnet), joinLRPIPs)
+			joinLRPIP, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(hostSubnet), joinLRPIPs)
 			ocrStaticRouteNamedUUID := fmt.Sprintf("subnet-static-route-ovn-cluster-router-%v-UUID", i)
 			expectedOVNClusterRouter.StaticRoutes = append(expectedOVNClusterRouter.StaticRoutes, ocrStaticRouteNamedUUID)
 			testData = append(testData, &nbdb.LogicalRouterStaticRoute{
@@ -200,7 +200,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		for i, subnet := range clusterIPSubnets {
 			natUUID := fmt.Sprintf("nat-%d-UUID", i)
 			natUUIDs = append(natUUIDs, natUUID)
-			physicalIP, _ := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(subnet), l3GatewayConfig.IPAddresses)
+			physicalIP, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(subnet), l3GatewayConfig.IPAddresses)
 			testData = append(testData, &nbdb.NAT{
 				UUID:       natUUID,
 				ExternalIP: physicalIP.IP.String(),
