@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/client-go/kubernetes"
 	"net"
 	"net/http"
 	"os"
@@ -20,7 +19,6 @@ import (
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	cni020 "github.com/containernetworking/cni/pkg/types/020"
 	"k8s.io/client-go/kubernetes/fake"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 	utiltesting "k8s.io/client-go/util/testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -49,7 +47,7 @@ func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) 
 
 var expectedResult cnitypes.Result
 
-func serverHandleCNI(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error) {
+func serverHandleCNI(request *PodRequest, clientset *ClientSet, useOVSExternalIDs bool, kubeAuth *KubeAPIAuth) ([]byte, error) {
 	if request.Command == CNIAdd {
 		return json.Marshal(&expectedResult)
 	} else if request.Command == CNIDel || request.Command == CNIUpdate || request.Command == CNICheck {
@@ -80,7 +78,9 @@ func TestCNIServer(t *testing.T) {
 	socketPath := filepath.Join(tmpDir, serverSocketName)
 	fakeClient := fake.NewSimpleClientset()
 
-	fakeClientset := &util.OVNClientset{KubeClient: fakeClient}
+	fakeClientset := &util.OVNNodeClientset{
+		KubeClient: fakeClient,
+	}
 	wf, err := factory.NewNodeWatchFactory(fakeClientset, nodeName)
 	if err != nil {
 		t.Fatalf("failed to create watch factory: %v", err)
@@ -89,11 +89,13 @@ func TestCNIServer(t *testing.T) {
 		t.Fatalf("failed to start watch factory: %v", err)
 	}
 
-	s, err := NewCNIServer(tmpDir, false, wf, fakeClient)
+	s, err := NewCNIServer(false, wf, fakeClient)
 	if err != nil {
 		t.Fatalf("error creating CNI server: %v", err)
 	}
-	if err := s.Start(serverHandleCNI); err != nil {
+	// override request handler
+	s.handlePodRequestFunc = serverHandleCNI
+	if err := s.Start(tmpDir); err != nil {
 		t.Fatalf("error starting CNI server: %v", err)
 	}
 

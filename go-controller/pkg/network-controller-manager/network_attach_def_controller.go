@@ -17,6 +17,7 @@ import (
 	"k8s.io/klog/v2"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	netattachdefinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
 	networkattachmentdefinitioninformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
 	networkattachmentdefinitionlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
@@ -92,10 +93,10 @@ type netAttachDefinitionController struct {
 	perNetworkNADInfo *syncmap.SyncMap[*networkNADInfo]
 }
 
-func newNetAttachDefinitionController(ncm NetworkControllerManager, ovnClientset *util.OVNClientset,
+func newNetAttachDefinitionController(ncm NetworkControllerManager, networkAttchDefClient networkattchmentdefclientset.Interface,
 	recorder record.EventRecorder) *netAttachDefinitionController {
 	nadFactory := netattachdefinformers.NewSharedInformerFactoryWithOptions(
-		ovnClientset.NetworkAttchDefClient,
+		networkAttchDefClient,
 		avoidResync,
 	)
 	netAttachDefInformer := nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions()

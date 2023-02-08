@@ -42,7 +42,7 @@ import (
 // CommonNetworkControllerInfo structure is place holder for all fields shared among controllers.
 type CommonNetworkControllerInfo struct {
 	client       clientset.Interface
-	kube         kube.Interface
+	kube         *kube.KubeOVN
 	watchFactory *factory.WatchFactory
 	podRecorder  *metrics.PodRecorder
 
@@ -112,7 +112,7 @@ type BaseSecondaryNetworkController struct {
 }
 
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
-func NewCommonNetworkControllerInfo(client clientset.Interface, kube kube.Interface, wf *factory.WatchFactory,
+func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
 	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport bool) *CommonNetworkControllerInfo {
 	return &CommonNetworkControllerInfo{
@@ -376,9 +376,10 @@ func (bnc *BaseNetworkController) allocateNodeSubnets(node *kapi.Node,
 	return hostSubnets, nil
 }
 
-// UpdateNodeAnnotationWithRetry update node's hostSubnet annotation (possibly for multiple networks) and the
-// other given node annotations
-func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet,
+// UpdateNodeHostSubnetAnnotationWithRetry update node's hostSubnet annotation (possibly for multiple networks) and the
+// other given node annotations.
+// May be used concurrently, since it retries update on version conflict.
+func (cnci *CommonNetworkControllerInfo) UpdateNodeHostSubnetAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet,
 	otherUpdatedNodeAnnotation map[string]string) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
@@ -401,7 +402,7 @@ func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName 
 		for k, v := range otherUpdatedNodeAnnotation {
 			cnode.Annotations[k] = v
 		}
-		return cnci.kube.PatchNode(node, cnode)
+		return cnci.kube.UpdateNode(cnode)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation", nodeName)

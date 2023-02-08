@@ -229,7 +229,7 @@ func (c *handlerCalls) getDeleted() int {
 
 var _ = Describe("Watch Factory Operations", func() {
 	var (
-		ovnClientset                        *util.OVNClientset
+		ovnClientset                        *util.OVNMasterClientset
 		fakeClient                          *fake.Clientset
 		egressIPFakeClient                  *egressipfake.Clientset
 		egressFirewallFakeClient            *egressfirewallfake.Clientset
@@ -275,7 +275,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		cloudNetworkFakeClient = &ocpcloudnetworkclientsetfake.Clientset{}
 		egressQoSFakeClient = &egressqosfake.Clientset{}
 
-		ovnClientset = &util.OVNClientset{
+		ovnClientset = &util.OVNMasterClientset{
 			KubeClient:           fakeClient,
 			EgressIPClient:       egressIPFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
@@ -381,7 +381,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	Context("when a processExisting is given", func() {
 		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector, priority int) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
+				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
 			} else {
 				wf, err = NewMasterWatchFactory(ovnClientset)
 			}
@@ -403,7 +403,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		testExistingFilteredHandler := func(objType reflect.Type, realObj reflect.Type, namespace string, sel labels.Selector, priority int) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
+				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
 			} else {
 				wf, err = NewMasterWatchFactory(ovnClientset)
 			}
@@ -535,7 +535,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	Context("when existing items are known to the informer", func() {
 		testExisting := func(objType reflect.Type) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
+				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
 			} else {
 				wf, err = NewMasterWatchFactory(ovnClientset)
 			}
@@ -1450,7 +1450,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to endpointslices add/update/delete events", func() {
-		wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
+		wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())

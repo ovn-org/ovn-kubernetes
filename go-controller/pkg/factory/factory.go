@@ -137,7 +137,7 @@ var (
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
-func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, error) {
+func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
@@ -291,7 +291,7 @@ func (wf *WatchFactory) Start() error {
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
 // informers to save memory + bandwidth. It is to be used by the node-only process.
-func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
+func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
 		iFactory:  informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
 		informers: make(map[reflect.Type]*informer),
