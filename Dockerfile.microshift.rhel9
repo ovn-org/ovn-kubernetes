@@ -1,0 +1,30 @@
+#
+# This is the MicroShift ovn overlay network image.
+# it provides an overlay network using ovs/ovn/ovn-kube
+#
+# The standard name for this image is ovn-kubernetes-singlenode
+#
+# ovn-kubernetes-singlenode is a simplified version of
+# ovn-kubernetes image built for MicroShift product.
+# Some rpm packages and ovn-kubernetes binaries are removed
+# from this image, for example:
+#
+# openvswitch-devel, openvswitch-ipsec, libpcap, iproute etc
+# ovn-kube-util, hybrid-overlay-node.exe, ovndbchecker and ovnkube-trace
+
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.19-openshift-4.13 AS builder
+
+WORKDIR /go/src/github.com/openshift/ovn-kubernetes
+COPY . .
+
+# build the binaries
+RUN cd go-controller; CGO_ENABLED=0 make
+
+FROM registry.ci.openshift.org/ocp/4.13:ovn-kubernetes-base-rhel-9
+
+USER root
+
+ENV PYTHONDONTWRITEBYTECODE yes
+
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/
