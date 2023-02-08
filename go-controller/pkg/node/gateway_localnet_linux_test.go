@@ -68,8 +68,8 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset,
 	k := &kube.Kube{KClient: fakeClient.KubeClient}
 	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
 	localHostNetEp := "192.168.18.15/32"
-	ip, _, _ := net.ParseCIDR(localHostNetEp)
-	n.nodeIPManager.addAddr(ip)
+	ip, ipnet, _ := net.ParseCIDR(localHostNetEp)
+	n.nodeIPManager.addAddr(net.IPNet{IP: ip, Mask: ipnet.Mask})
 
 	// set up a controller to handle events on services to mock the nodeportwatcher bits
 	// in gateway.go and trigger code in gateway_shared_intf.go
@@ -100,8 +100,8 @@ func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNNodeC
 	k := &kube.Kube{KClient: fakeClient.KubeClient}
 	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
 	localHostNetEp := "192.168.18.15/32"
-	ip, _, _ := net.ParseCIDR(localHostNetEp)
-	n.nodeIPManager.addAddr(ip)
+	ip, ipnet, _ := net.ParseCIDR(localHostNetEp)
+	n.nodeIPManager.addAddr(net.IPNet{IP: ip, Mask: ipnet.Mask})
 
 	nodePortWatcherRetry := n.newRetryFrameworkForTests(factory.ServiceForFakeNodePortWatcherType, stopChan, wg)
 	if _, err := nodePortWatcherRetry.WatchResource(); err != nil {
