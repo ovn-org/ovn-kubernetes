@@ -117,8 +117,11 @@ var _ = Describe("Multi Homing", func() {
 
 	Context("multiple pods connected to the same OVN-K secondary network", func() {
 		const (
-			clientPodName = "client-pod"
-			port          = 9000
+			clientPodName     = "client-pod"
+			nodeHostnameKey   = "kubernetes.io/hostname"
+			port              = 9000
+			workerOneNodeName = "ovn-worker"
+			workerTwoNodeName = "ovn-worker2"
 		)
 
 		table.DescribeTable(
@@ -200,20 +203,22 @@ var _ = Describe("Multi Homing", func() {
 				}, 2*time.Minute, 6*time.Second).Should(Succeed())
 			},
 			table.Entry(
-				"can communicate over an L2 - switched - secondary network",
+				"can communicate over an L2 secondary network when the pods are scheduled in different nodes",
 				networkAttachmentConfig{
 					name:     secondaryNetworkName,
 					topology: "layer2",
 					cidr:     secondaryNetworkCIDR,
 				},
 				podConfiguration{
-					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
-					name:        clientPodName,
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         clientPodName,
+					nodeSelector: map[string]string{nodeHostnameKey: workerOneNodeName},
 				},
 				podConfiguration{
 					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
 					name:         podName,
 					containerCmd: httpServerContainerCmd(port),
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
 			table.Entry(
@@ -305,11 +310,13 @@ type podConfiguration struct {
 	containerCmd []string
 	name         string
 	namespace    string
+	nodeSelector map[string]string
 }
 
 func generatePodSpec(config podConfiguration) *v1.Pod {
 	podSpec := e2epod.NewAgnhostPod(config.namespace, config.name, nil, nil, nil, config.containerCmd...)
 	podSpec.Annotations = networkSelectionElements(config.attachments...)
+	podSpec.Spec.NodeSelector = config.nodeSelector
 	return podSpec
 }
 
