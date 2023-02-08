@@ -1,4 +1,4 @@
-package ovn
+package secondary_network_controllers
 
 import (
 	"context"

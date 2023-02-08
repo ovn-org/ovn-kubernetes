@@ -21,6 +21,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	bnc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/base_network_controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/default_network_controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/nad_controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -50,7 +51,7 @@ type ovnkubeMaster struct {
 	defaultNetworkController *default_network_controller.DefaultNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
-	nadController *NetAttachDefinitionController
+	nadController *nad_controller.NetAttachDefinitionController
 }
 
 // NewMaster creates a new OVN controller manager to manage all the controller for all networks
@@ -81,10 +82,10 @@ func NewMaster(ovnClient *util.OVNClientset, identity string, wf *factory.WatchF
 	master.defaultNetworkController = default_network_controller.NewDefaultNetworkController(cnci)
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm := NewNetworkControllerManager(ovnClient, identity, wf,
+		cm := nad_controller.NewNetworkControllerManager(ovnClient, identity, wf,
 			libovsdbOvnNBClient, libovsdbOvnSBClient, recorder, wg)
-		klog.Infof("Multiple network supported, creating %s", ControllerName)
-		master.nadController = NewNetAttachDefinitionController(cm, ovnClient.NetworkAttchDefClient, recorder)
+		klog.Infof("Multiple network supported, creating %s", nad_controller.ControllerName)
+		master.nadController = nad_controller.NewNetAttachDefinitionController(cm, ovnClient.NetworkAttchDefClient, recorder)
 	}
 	return master
 }

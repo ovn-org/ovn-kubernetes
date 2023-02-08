@@ -1,4 +1,4 @@
-package ovn
+package nad_controller
 
 import (
 	"fmt"
@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	bnc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/base_network_controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/secondary_network_controllers"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -49,9 +50,9 @@ func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
 	topoType := netConfInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return NewSecondaryLayer3NetworkController(cnci, nInfo, netConfInfo), nil
+		return secondary_network_controllers.NewSecondaryLayer3NetworkController(cnci, nInfo, netConfInfo), nil
 	case ovntypes.Layer2Topology:
-		return NewSecondaryLayer2NetworkController(cnci, nInfo, netConfInfo), nil
+		return secondary_network_controllers.NewSecondaryLayer2NetworkController(cnci, nInfo, netConfInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -62,9 +63,9 @@ func (cm *networkControllerManager) newDummyNetworkController(topoType, netName 
 	netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return NewSecondaryLayer3NetworkController(cnci, netInfo, &util.Layer3NetConfInfo{}), nil
+		return secondary_network_controllers.NewSecondaryLayer3NetworkController(cnci, netInfo, &util.Layer3NetConfInfo{}), nil
 	case ovntypes.Layer2Topology:
-		return NewSecondaryLayer2NetworkController(cnci, netInfo, &util.Layer2NetConfInfo{}), nil
+		return secondary_network_controllers.NewSecondaryLayer2NetworkController(cnci, netInfo, &util.Layer2NetConfInfo{}), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
