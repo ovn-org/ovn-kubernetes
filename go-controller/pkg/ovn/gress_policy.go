@@ -17,6 +17,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -165,7 +166,10 @@ func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
 	ips, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
 	if err != nil {
-		return err
+		// if pod ips can't be fetched on delete, we don't expect that information about ips will ever be updated,
+		// therefore just log the error and return.
+		klog.Infof("Failed to get pod IPs %s/%s to delete from network policy peers: %w", pod.Namespace, pod.Name, err)
+		return nil
 	}
 	return gp.peerAddressSet.DeleteIPs(ips)
 }
