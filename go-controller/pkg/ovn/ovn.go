@@ -224,42 +224,6 @@ func (oc *DefaultNetworkController) WatchNamespaces() error {
 	return err
 }
 
-// syncNodeGateway ensures a node's gateway router is configured
-func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
-	if err != nil {
-		return err
-	}
-
-	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
-		if err != nil {
-			return err
-		}
-	}
-
-	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := oc.gatewayCleanup(node.Name); err != nil {
-			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
-		}
-		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {
-			return err
-		}
-	} else if hostSubnets != nil {
-		var hostAddrs sets.String
-		if config.Gateway.Mode == config.GatewayModeShared {
-			hostAddrs, err = util.ParseNodeHostAddresses(node)
-			if err != nil && !util.IsAnnotationNotSetError(err) {
-				return fmt.Errorf("failed to get host addresses for node: %s: %v", node.Name, err)
-			}
-		}
-		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
-			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
-		}
-	}
-	return nil
-}
-
 // aclLoggingUpdateNsInfo parses the provided annotation values and sets nsInfo.aclLogging.Deny and
 // nsInfo.aclLogging.Allow. If errors are encountered parsing the annotation, disable logging completely. If either
 // value contains invalid input, disable logging for the respective key. This is needed to ensure idempotency.
