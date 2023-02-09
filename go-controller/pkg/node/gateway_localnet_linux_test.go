@@ -546,8 +546,10 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
+				epReady := true
 				ep1 := discovery.Endpoint{
-					Addresses: []string{"10.244.0.3"},
+					Addresses:  []string{"10.244.0.3"},
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -865,18 +867,22 @@ var _ = Describe("Node Operations", func() {
 					},
 					true, false,
 				)
+				epReady := true
 				ep1 := discovery.Endpoint{
-					Addresses: []string{"10.244.0.3"},
-					NodeName:  &fakeNodeName,
+					Addresses:  []string{"10.244.0.3"},
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
+					NodeName:   &fakeNodeName,
 				}
 				otherNodeName := "node2"
 				nonLocalEndpoint := discovery.Endpoint{
-					Addresses: []string{"10.244.1.3"}, // is not picked since its not local to the node
-					NodeName:  &otherNodeName,
+					Addresses:  []string{"10.244.1.3"}, // is not picked since its not local to the node
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
+					NodeName:   &otherNodeName,
 				}
 				ep2 := discovery.Endpoint{
-					Addresses: []string{"10.244.0.4"},
-					NodeName:  &fakeNodeName,
+					Addresses:  []string{"10.244.0.4"},
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
+					NodeName:   &fakeNodeName,
 				}
 				epPortName := "http"
 				epPortValue := int32(8080)
@@ -1926,8 +1932,10 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
+				epReady := true
 				ep1 := discovery.Endpoint{
-					Addresses: []string{"10.244.0.3"},
+					Addresses:  []string{"10.244.0.3"},
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2064,9 +2072,10 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
-
+				epReady := true
 				ep1 := discovery.Endpoint{
-					Addresses: []string{"10.244.0.3"},
+					Addresses:  []string{"10.244.0.3"},
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2210,9 +2219,10 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
-
+				epReady := true
 				ep1 := discovery.Endpoint{
-					Addresses: []string{"192.168.18.15"}, // host-networked endpoint local to this node
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
+					Addresses:  []string{"192.168.18.15"}, // host-networked endpoint local to this node
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2354,8 +2364,10 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, true,
 				)
+				epReady := true
 				ep1 := discovery.Endpoint{
-					Addresses: []string{"10.244.0.3"},
+					Addresses:  []string{"10.244.0.3"},
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2500,8 +2512,10 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, true,
 				)
+				epReady := true
 				ep1 := discovery.Endpoint{
-					Addresses: []string{"192.168.18.15"}, // host-networked endpoint local to this node
+					Addresses:  []string{"192.168.18.15"}, // host-networked endpoint local to this node
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2663,9 +2677,10 @@ var _ = Describe("Node Operations", func() {
 				)
 				service.Annotations[util.EgressSVCHostAnnotation] = "mynode"
 				service.Annotations[util.EgressSVCAnnotation] = "{}"
-
+				epReady := true
 				ep1 := discovery.Endpoint{
-					Addresses: []string{"10.128.0.3"},
+					Addresses:  []string{"10.128.0.3"},
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
 				}
 				epPort := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2674,7 +2689,8 @@ var _ = Describe("Node Operations", func() {
 
 				// host-networked endpoint, should not have an SNAT rule created
 				ep2 := discovery.Endpoint{
-					Addresses: []string{"192.168.18.15"},
+					Addresses:  []string{"192.168.18.15"},
+					Conditions: discovery.EndpointConditions{Ready: &epReady},
 				}
 				// endpointSlice.Endpoints is ovn-networked so this will
 				// come under !hasLocalHostNetEp case

@@ -212,8 +212,12 @@ func isHostEndpoint(endpointIP string) bool {
 // discovery.EndpointSlice reports in the same slice all endpoints along with their status.
 // isEndpointReady takes an endpoint from an endpoint slice and returns true if the endpoint is
 // to be considered ready.
+// Note: API definition for nil Ready assume in the most cases Endpoint will be ready
+// https://github.com/kubernetes/api/blob/0478a3e95231398d8b380dc2a1905972be8ae1d5/discovery/v1/types.go#L131
+// However its not guaranteed either so this API just look for Ready state is true and
+// when its nil "known state" we don't assume its ready.
 func isEndpointReady(endpoint discovery.Endpoint) bool {
-	return endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready
+	return endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready
 }
 
 // checkForStaleOVSInternalPorts checks for OVS internal ports without any ofport assigned,
