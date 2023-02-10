@@ -30,11 +30,6 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-# install selinux-policy first to avoid a race
-RUN yum install -y  \
-	selinux-policy && \
-	yum clean all
-
 # more-pkgs file is updated in Dockerfile.base
 # more-pkgs file contains the following ovs/ovn packages to be installed in this Dockerfile
 # - openvswitch-devel
