@@ -18,7 +18,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -413,15 +412,9 @@ func (cnci *CommonNetworkControllerInfo) UpdateNodeHostSubnetAnnotationWithRetry
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
 func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) error {
 	switchName := bnc.GetNetworkScopedName(nodeName)
-	// Remove switch to lb associations from the LBCache before removing the switch
-	lbCache, err := ovnlb.GetLBCache(bnc.nbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get load_balancer cache for node %s: %v", nodeName, err)
-	}
-	lbCache.RemoveSwitch(switchName)
 
 	// Remove the logical switch associated with the node
-	err = libovsdbops.DeleteLogicalSwitch(bnc.nbClient, switchName)
+	err := libovsdbops.DeleteLogicalSwitch(bnc.nbClient, switchName)
 	if err != nil {
 		return fmt.Errorf("failed to delete logical switch %s: %v", switchName, err)
 	}

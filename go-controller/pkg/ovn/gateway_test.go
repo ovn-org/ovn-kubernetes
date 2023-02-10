@@ -14,7 +14,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -334,8 +333,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
-		// Create new LBCache
-		ovnlb.TestOnlySetCache(nil)
 
 		fakeOvn = NewFakeOVN()
 	})
@@ -1189,8 +1186,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 						Protocol: &nbdb.LoadBalancerProtocolTCP,
 						ExternalIDs: map[string]string{
-							"k8s.ovn.org/kind":  "Service",
-							"k8s.ovn.org/owner": "default/kubernetes",
+							types.LoadBalancerKindExternalID:  "Service",
+							types.LoadBalancerOwnerExternalID: "default/kubernetes",
 						},
 						Vips: map[string]string{
 							"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
@@ -1257,8 +1254,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "default/kubernetes",
+						types.LoadBalancerKindExternalID:  "Service",
+						types.LoadBalancerOwnerExternalID: "default/kubernetes",
 					},
 					Vips: map[string]string{
 						"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
@@ -1309,8 +1306,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 						Protocol: &nbdb.LoadBalancerProtocolTCP,
 						ExternalIDs: map[string]string{
-							"k8s.ovn.org/kind":  "Service",
-							"k8s.ovn.org/owner": "default/kubernetes",
+							types.LoadBalancerKindExternalID:  "Service",
+							types.LoadBalancerOwnerExternalID: "default/kubernetes",
 						},
 						Vips: map[string]string{
 							"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
@@ -1391,8 +1388,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "default/kubernetes",
+						types.LoadBalancerKindExternalID:  "Service",
+						types.LoadBalancerOwnerExternalID: "default/kubernetes",
 					},
 					Vips: map[string]string{
 						"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",

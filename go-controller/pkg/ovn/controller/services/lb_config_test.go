@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/assert"
 
@@ -754,8 +754,8 @@ func Test_buildClusterLBs(t *testing.T) {
 	}
 
 	defaultExternalIDs := map[string]string{
-		"k8s.ovn.org/kind":  "Service",
-		"k8s.ovn.org/owner": fmt.Sprintf("%s/%s", namespace, name),
+		types.LoadBalancerKindExternalID:  "Service",
+		types.LoadBalancerOwnerExternalID: fmt.Sprintf("%s/%s", namespace, name),
 	}
 
 	defaultRouters := []string{}
@@ -767,7 +767,7 @@ func Test_buildClusterLBs(t *testing.T) {
 		service   *v1.Service
 		configs   []lbConfig
 		nodeInfos []nodeInfo
-		expected  []ovnlb.LB
+		expected  []LB
 	}{
 		{
 			name:    "two tcp services, single stack",
@@ -793,19 +793,19 @@ func Test_buildClusterLBs(t *testing.T) {
 				},
 			},
 			nodeInfos: defaultNodes,
-			expected: []ovnlb.LB{
+			expected: []LB{
 				{
 					Name:        fmt.Sprintf("Service_%s/%s_TCP_cluster", namespace, name),
 					Protocol:    "TCP",
 					ExternalIDs: defaultExternalIDs,
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"192.168.0.1", 8080}, {"192.168.0.2", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"192.168.0.1", 8080}, {"192.168.0.2", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 443},
-							Targets: []ovnlb.Addr{{"192.168.0.1", 8043}},
+							Source:  Addr{"1.2.3.4", 443},
+							Targets: []Addr{{"192.168.0.1", 8043}},
 						},
 					},
 
@@ -839,15 +839,15 @@ func Test_buildClusterLBs(t *testing.T) {
 				},
 			},
 			nodeInfos: defaultNodes,
-			expected: []ovnlb.LB{
+			expected: []LB{
 				{
 					Name:        fmt.Sprintf("Service_%s/%s_TCP_cluster", namespace, name),
 					Protocol:    "TCP",
 					ExternalIDs: defaultExternalIDs,
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"192.168.0.1", 8080}, {"192.168.0.2", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"192.168.0.1", 8080}, {"192.168.0.2", 8080}},
 						},
 					},
 
@@ -859,10 +859,10 @@ func Test_buildClusterLBs(t *testing.T) {
 					Name:        fmt.Sprintf("Service_%s/%s_UDP_cluster", namespace, name),
 					Protocol:    "UDP",
 					ExternalIDs: defaultExternalIDs,
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 443},
-							Targets: []ovnlb.Addr{{"192.168.0.1", 8043}},
+							Source:  Addr{"1.2.3.4", 443},
+							Targets: []Addr{{"192.168.0.1", 8043}},
 						},
 					},
 
@@ -898,27 +898,27 @@ func Test_buildClusterLBs(t *testing.T) {
 				},
 			},
 			nodeInfos: defaultNodes,
-			expected: []ovnlb.LB{
+			expected: []LB{
 				{
 					Name:        fmt.Sprintf("Service_%s/%s_TCP_cluster", namespace, name),
 					Protocol:    "TCP",
 					ExternalIDs: defaultExternalIDs,
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"192.168.0.1", 8080}, {"192.168.0.2", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"192.168.0.1", 8080}, {"192.168.0.2", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"fe80::1", 80},
-							Targets: []ovnlb.Addr{{"fe90::1", 8080}, {"fe91::1", 8080}},
+							Source:  Addr{"fe80::1", 80},
+							Targets: []Addr{{"fe90::1", 8080}, {"fe91::1", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 443},
-							Targets: []ovnlb.Addr{{"192.168.0.1", 8043}},
+							Source:  Addr{"1.2.3.4", 443},
+							Targets: []Addr{{"192.168.0.1", 8043}},
 						},
 						{
-							Source:  ovnlb.Addr{"fe80::1", 443},
-							Targets: []ovnlb.Addr{{"fe90::1", 8043}},
+							Source:  Addr{"fe80::1", 443},
+							Targets: []Addr{{"fe90::1", 8043}},
 						},
 					},
 
@@ -979,8 +979,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 	}
 
 	defaultExternalIDs := map[string]string{
-		"k8s.ovn.org/kind":  "Service",
-		"k8s.ovn.org/owner": fmt.Sprintf("%s/%s", namespace, name),
+		types.LoadBalancerKindExternalID:  "Service",
+		types.LoadBalancerOwnerExternalID: fmt.Sprintf("%s/%s", namespace, name),
 	}
 
 	//defaultRouters := []string{"gr-node-a", "gr-node-b"}
@@ -990,8 +990,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 		name           string
 		service        *v1.Service
 		configs        []lbConfig
-		expectedShared []ovnlb.LB
-		expectedLocal  []ovnlb.LB
+		expectedShared []LB
+		expectedLocal  []LB
 	}{
 		{
 			name:    "host-network pod",
@@ -1007,16 +1007,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 			},
-			expectedShared: []ovnlb.LB{
+			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 					},
 				},
@@ -1026,10 +1026,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-a", "switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
 				},
@@ -1049,17 +1049,17 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 			},
-			expectedShared: []ovnlb.LB{
+			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+							Source:  Addr{"10.0.0.1", 80},
+							Targets: []Addr{{"10.128.0.2", 8080}},
 						},
 					},
 				},
@@ -1069,25 +1069,25 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"10.0.0.2", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+							Source:  Addr{"10.0.0.2", 80},
+							Targets: []Addr{{"10.128.0.2", 8080}},
 						},
 					},
 				},
 			},
-			expectedLocal: []ovnlb.LB{
+			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+							Source:  Addr{"10.0.0.1", 80},
+							Targets: []Addr{{"10.128.0.2", 8080}},
 						},
 					},
 				},
@@ -1097,10 +1097,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"10.0.0.2", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+							Source:  Addr{"10.0.0.2", 80},
+							Targets: []Addr{{"10.128.0.2", 8080}},
 						},
 					},
 				},
@@ -1129,20 +1129,20 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 			},
-			expectedShared: []ovnlb.LB{
+			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{"10.0.0.1", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 					},
 				},
@@ -1151,14 +1151,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"10.0.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
 				},
@@ -1168,32 +1168,32 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.2", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"10.0.0.2", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
 				},
 			},
-			expectedLocal: []ovnlb.LB{
+			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{"10.0.0.1", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 					},
 				},
@@ -1202,14 +1202,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"10.0.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
 				},
@@ -1219,14 +1219,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.2", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"10.0.0.2", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
 				},
@@ -1258,7 +1258,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 			},
-			expectedShared: []ovnlb.LB{
+			expectedShared: []LB{
 				// node-a has endpoints: 3 load balancers
 				// router clusterip
 				// router nodeport
@@ -1268,10 +1268,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 					},
 				},
@@ -1279,12 +1279,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
-					Opts:        ovnlb.LBOpts{SkipSNAT: true},
+					Opts:        LBOpts{SkipSNAT: true},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{"10.0.0.1", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 					},
 				},
@@ -1293,18 +1293,18 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"169.254.169.3", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"169.254.169.3", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"10.0.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
 				},
@@ -1318,14 +1318,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.2", 80},
-							Targets: []ovnlb.Addr{},
+							Source:  Addr{"10.0.0.2", 80},
+							Targets: []Addr{},
 						},
 					},
 				},
@@ -1334,18 +1334,18 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 						{
-							Source:  ovnlb.Addr{"169.254.169.3", 80},
-							Targets: []ovnlb.Addr{},
+							Source:  Addr{"169.254.169.3", 80},
+							Targets: []Addr{},
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.2", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{"10.0.0.2", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
 				},
@@ -1375,20 +1375,20 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 			},
-			expectedShared: []ovnlb.LB{
+			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a_merged",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a", "gr-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}},
 						},
 					},
 				},
@@ -1397,14 +1397,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}}, // filters out the ep present only on node-a
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.128.0.1", 8080}}, // filters out the ep present only on node-a
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 				},
@@ -1413,32 +1413,32 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.1.1", 8080}}, // filters out the ep present only on node-b
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.128.1.1", 8080}}, // filters out the ep present only on node-b
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 				},
 			},
-			expectedLocal: []ovnlb.LB{
+			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a_merged",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a", "gr-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}},
 						},
 					},
 				},
@@ -1447,14 +1447,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}}, // filters out the ep present only on node-a
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.128.0.1", 8080}}, // filters out the ep present only on node-a
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 				},
@@ -1463,14 +1463,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.1.1", 8080}}, // filters out the ep present only on node-b
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.128.1.1", 8080}}, // filters out the ep present only on node-b
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 				},
@@ -1500,20 +1500,20 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 			},
-			expectedShared: []ovnlb.LB{
+			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}},
 						},
 					},
 				},
@@ -1522,14 +1522,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // filters out the ep present only on node-a
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}}, // filters out the ep present only on node-a
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 				},
@@ -1538,14 +1538,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}},
 						},
 					},
 				},
@@ -1554,32 +1554,32 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.2", 8080}}, // filters out the ep present only on node-b
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.2", 8080}}, // filters out the ep present only on node-b
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 				},
 			},
-			expectedLocal: []ovnlb.LB{
+			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}},
 						},
 					},
 				},
@@ -1588,14 +1588,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // filters out the ep present only on node-a
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}}, // filters out the ep present only on node-a
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 				},
@@ -1604,14 +1604,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}},
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}},
 						},
 					},
 				},
@@ -1620,14 +1620,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.2", 8080}}, // filters out the ep present only on node-b
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.2", 8080}}, // filters out the ep present only on node-b
 						},
 						{
-							Source:  ovnlb.Addr{"1.2.3.4", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{"1.2.3.4", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 				},
@@ -1662,16 +1662,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 			},
-			expectedShared: []ovnlb.LB{
+			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
 						},
 					},
 				},
@@ -1679,12 +1679,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
-					Opts:        ovnlb.LBOpts{SkipSNAT: true},
+					Opts:        LBOpts{SkipSNAT: true},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 34345},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
+							Source:  Addr{"10.0.0.1", 34345},
+							Targets: []Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
 						},
 					},
 				},
@@ -1693,18 +1693,18 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // filter out eps only on node-a for clusterIP
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}}, // filter out eps only on node-a for clusterIP
 						},
 						{
-							Source:  ovnlb.Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},   // filter out eps only on node-a for nodePorts
+							Source:  Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []Addr{{"10.0.0.1", 8080}},   // filter out eps only on node-a for nodePorts
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 34345},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+							Source:  Addr{"10.0.0.1", 34345},
+							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
 				},
@@ -1713,14 +1713,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.2", 34345},
-							Targets: []ovnlb.Addr{}, // filter out eps only on node-b for nodePort on GR when ETP=local
+							Source:  Addr{"10.0.0.2", 34345},
+							Targets: []Addr{}, // filter out eps only on node-b for nodePort on GR when ETP=local
 						},
 					},
 				},
@@ -1729,32 +1729,32 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{}, // filter out eps only on node-b for clusterIP
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{}, // filter out eps only on node-b for clusterIP
 						},
 						{
-							Source:  ovnlb.Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
-							Targets: []ovnlb.Addr{},                     // filter out eps only on node-b for nodePorts
+							Source:  Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []Addr{},                     // filter out eps only on node-b for nodePorts
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.2", 34345},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+							Source:  Addr{"10.0.0.2", 34345},
+							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
 				},
 			},
-			expectedLocal: []ovnlb.LB{
+			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"169.254.169.2", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
 						},
 					},
 				},
@@ -1762,12 +1762,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
-					Opts:        ovnlb.LBOpts{SkipSNAT: true},
+					Opts:        LBOpts{SkipSNAT: true},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 34345},
-							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
+							Source:  Addr{"10.0.0.1", 34345},
+							Targets: []Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
 						},
 					},
 				},
@@ -1776,18 +1776,18 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // filter out eps only on node-a for clusterIP
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}}, // filter out eps only on node-a for clusterIP
 						},
 						{
-							Source:  ovnlb.Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},   // filter out eps only on node-a for nodePorts
+							Source:  Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []Addr{{"10.0.0.1", 8080}},   // filter out eps only on node-a for nodePorts
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 34345},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+							Source:  Addr{"10.0.0.1", 34345},
+							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
 				},
@@ -1796,14 +1796,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{{"10.0.0.1", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.2", 34345},
-							Targets: []ovnlb.Addr{}, // filter out eps only on node-b for nodePort on GR when ETP=local
+							Source:  Addr{"10.0.0.2", 34345},
+							Targets: []Addr{}, // filter out eps only on node-b for nodePort on GR when ETP=local
 						},
 					},
 				},
@@ -1812,18 +1812,18 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.0.1", 80},
-							Targets: []ovnlb.Addr{}, // filter out eps only on node-b for clusterIP
+							Source:  Addr{"192.168.0.1", 80},
+							Targets: []Addr{}, // filter out eps only on node-b for clusterIP
 						},
 						{
-							Source:  ovnlb.Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
-							Targets: []ovnlb.Addr{},                     // filter out eps only on node-b for nodePorts
+							Source:  Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []Addr{},                     // filter out eps only on node-b for nodePorts
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.2", 34345},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+							Source:  Addr{"10.0.0.2", 34345},
+							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
 				},

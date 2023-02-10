@@ -171,6 +171,10 @@ const (
 	TopologyExternalID = OvnK8sPrefix + "/" + "topology"
 	// key for topology version external-id
 	TopologyVersionExternalID = "k8s-ovn-topo-version"
+	// key for load_balancer kind external-id
+	LoadBalancerKindExternalID = OvnK8sPrefix + "/" + "kind"
+	// key for load_balancer service external-id
+	LoadBalancerOwnerExternalID = OvnK8sPrefix + "/" + "owner"
 
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology = "layer3"

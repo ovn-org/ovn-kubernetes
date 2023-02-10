@@ -9,7 +9,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"golang.org/x/time/rate"
 
@@ -61,7 +61,7 @@ func NewController(client clientset.Interface,
 		nbClient:         nbClient,
 		queue:            workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
 		workerLoopPeriod: time.Second,
-		alreadyApplied:   map[string][]ovnlb.LB{},
+		alreadyApplied:   map[string][]LB{},
 	}
 
 	// services
@@ -140,7 +140,7 @@ type Controller struct {
 
 	// alreadyApplied is a map of service key -> already applied configuration, so we can short-circuit
 	// if a service's config hasn't changed
-	alreadyApplied     map[string][]ovnlb.LB
+	alreadyApplied     map[string][]LB
 	alreadyAppliedLock sync.Mutex
 
 	// 'true' if Load_Balancer_Group is supported.
@@ -170,6 +170,11 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		// and handles removal of stale data on upgrades
 		c.repair.runBeforeSync()
 	}
+
+	if err := c.initTopLevelCache(); err != nil {
+		return fmt.Errorf("error initializing alreadyApplied cache: %w", err)
+	}
+
 	// Start the workers after the repair loop to avoid races
 	klog.Info("Starting workers")
 	for i := 0; i < workers; i++ {
@@ -227,6 +232,33 @@ func (c *Controller) handleErr(err error, key interface{}) {
 	utilruntime.HandleError(err)
 }
 
+// initTopLevelCache will take load balancer data currently applied in OVN and populate the cache.
+// An important caveat here is that no effort is made towards populating some details of LB here.
+// That is because such work will be performed in syncService, so all that is needed here is the ability
+// to distinguish what is present in ovn database and this 'dirty' initial value.
+func (c *Controller) initTopLevelCache() error {
+	c.alreadyAppliedLock.Lock()
+	defer c.alreadyAppliedLock.Unlock()
+
+	// first, list all load balancers and their respective services
+	services, lbs, err := getServiceLBs(c.nbClient)
+	if err != nil {
+		return fmt.Errorf("failed to load balancers: %w", err)
+	}
+
+	c.alreadyApplied = make(map[string][]LB, len(services))
+
+	for _, lb := range lbs {
+		service := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
+		c.alreadyApplied[service] = append(c.alreadyApplied[service], *lb)
+	}
+
+	klog.Infof("Controller cache of %d load balancers initialized for %d services",
+		len(lbs), len(c.alreadyApplied))
+
+	return nil
+}
+
 // syncService ensures a given Service is correctly reflected in OVN. It does this by
 // 1. Generating a high-level desired configuration
 // 2. Converting the high-level configuration in to a list of exact OVN Load_Balancer objects
@@ -266,9 +298,30 @@ func (c *Controller) syncService(key string) error {
 			},
 		}
 
-		if err := ovnlb.EnsureLBs(c.nbClient, service, nil); err != nil {
-			return fmt.Errorf("failed to delete load balancers for service %s/%s: %w",
-				namespace, name, err)
+		c.alreadyAppliedLock.Lock()
+		alreadyAppliedLbs, alreadyAppliedKeyExists := c.alreadyApplied[key]
+		var existingLBs []LB
+		if alreadyAppliedKeyExists {
+			existingLBs = make([]LB, len(alreadyAppliedLbs))
+			copy(existingLBs, alreadyAppliedLbs)
+		}
+		c.alreadyAppliedLock.Unlock()
+
+		if alreadyAppliedKeyExists {
+			//
+			// The controller's alreadyApplied functions as the cache for the service controller to map into OVN
+			// load balancers. While EnsureLBs may be concurrently called by this controller's workers, only a single
+			// worker will be operating at a given service. That is why it is safe to have changes to this cache
+			// from multiple workers, because the `key` is always uniquely hashed to the same worker thread.
+
+			if err := EnsureLBs(c.nbClient, service, existingLBs, nil); err != nil {
+				return fmt.Errorf("failed to delete load balancers for service %s/%s: %w",
+					namespace, name, err)
+			}
+
+			c.alreadyAppliedLock.Lock()
+			delete(c.alreadyApplied, key)
+			c.alreadyAppliedLock.Unlock()
 		}
 
 		c.repair.serviceSynced(key)
@@ -309,9 +362,15 @@ func (c *Controller) syncService(key string) error {
 
 	// Short-circuit if nothing has changed
 	c.alreadyAppliedLock.Lock()
-	existingLBs, ok := c.alreadyApplied[key]
+	alreadyAppliedLbs, alreadyAppliedKeyExists := c.alreadyApplied[key]
+	var existingLBs []LB
+	if alreadyAppliedKeyExists {
+		existingLBs = make([]LB, len(alreadyAppliedLbs))
+		copy(existingLBs, alreadyAppliedLbs)
+	}
 	c.alreadyAppliedLock.Unlock()
-	if ok && ovnlb.LoadBalancersEqualNoUUID(existingLBs, lbs) {
+
+	if alreadyAppliedKeyExists && LoadBalancersEqualNoUUID(existingLBs, lbs) {
 		klog.V(3).Infof("Skipping no-op change for service %s", key)
 	} else {
 		klog.V(5).Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
@@ -319,21 +378,13 @@ func (c *Controller) syncService(key string) error {
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.
 		// If so, this will fail and we will resync.
-		if err := ovnlb.EnsureLBs(c.nbClient, service, lbs); err != nil {
+		if err := EnsureLBs(c.nbClient, service, existingLBs, lbs); err != nil {
 			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
 		}
 
 		c.alreadyAppliedLock.Lock()
 		c.alreadyApplied[key] = lbs
 		c.alreadyAppliedLock.Unlock()
-	}
-
-	if !c.repair.legacyLBsDeleted() {
-		if err := deleteServiceFromLegacyLBs(c.nbClient, service); err != nil {
-			klog.Warningf("Failed to delete legacy vips for service %s: %v", key)
-			// Continue anyways, because once all services are synced, we'll delete
-			// the legacy load balancers
-		}
 	}
 
 	c.repair.serviceSynced(key)

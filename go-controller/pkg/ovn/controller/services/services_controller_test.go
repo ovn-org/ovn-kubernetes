@@ -12,8 +12,8 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/pkg/errors"
 
 	v1 "k8s.io/api/core/v1"
@@ -61,6 +61,7 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 	)
 	controller.servicesSynced = alwaysReady
 	controller.endpointSlicesSynced = alwaysReady
+	controller.initTopLevelCache()
 	return &serviceController{
 		controller,
 		informerFactory.Core().V1().Services().Informer().GetStore(),
@@ -239,78 +240,6 @@ func TestSyncServices(t *testing.T) {
 				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 				nodeLogicalRouter("node-c"),
-			},
-		},
-		{
-			name: "remove service from legacy load balancers",
-			slice: &discovery.EndpointSlice{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      serviceName + "ab23",
-					Namespace: ns,
-					Labels:    map[string]string{discovery.LabelServiceName: serviceName},
-				},
-				Ports:       []discovery.EndpointPort{},
-				AddressType: discovery.AddressTypeIPv4,
-				Endpoints:   []discovery.Endpoint{},
-			},
-			service: &v1.Service{
-				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-				Spec: v1.ServiceSpec{
-					Type:       v1.ServiceTypeClusterIP,
-					ClusterIP:  "192.168.1.1",
-					ClusterIPs: []string{"192.168.1.1"},
-					Selector:   map[string]string{"foo": "bar"},
-					Ports: []v1.ServicePort{{
-						Port:       80,
-						Protocol:   v1.ProtocolTCP,
-						TargetPort: intstr.FromInt(3456),
-					}},
-				},
-			},
-			initialDb: []libovsdbtest.TestData{
-				&nbdb.LoadBalancer{
-					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Options:  servicesOptions(),
-					Protocol: &nbdb.LoadBalancerProtocolTCP,
-					Vips: map[string]string{
-						"192.168.0.1:6443": "",
-					},
-					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
-				},
-				&nbdb.LoadBalancer{
-					UUID:     "TCP_lb_gateway_router",
-					Protocol: &nbdb.LoadBalancerProtocolTCP,
-					Vips: map[string]string{
-						"192.168.1.1:80": "",
-					},
-					ExternalIDs: tcpGatewayRouterExternalIDs(),
-				},
-				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-			},
-			expectedDb: []libovsdbtest.TestData{
-				&nbdb.LoadBalancer{
-					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Options:  servicesOptions(),
-					Protocol: &nbdb.LoadBalancerProtocolTCP,
-					Vips: map[string]string{
-						"192.168.1.1:80": "",
-					},
-					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
-				},
-				&nbdb.LoadBalancer{
-					UUID:        "TCP_lb_gateway_router",
-					Protocol:    &nbdb.LoadBalancerProtocolTCP,
-					ExternalIDs: tcpGatewayRouterExternalIDs(),
-				},
-				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 		},
 		{
@@ -515,7 +444,6 @@ func TestSyncServices(t *testing.T) {
 				globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
 			}
 
-			ovnlb.TestOnlySetCache(nil)
 			controller, err := newControllerWithDBSetup(libovsdbtest.TestSetup{NBData: tt.initialDb})
 			if err != nil {
 				t.Fatalf("Error creating controller: %v", err)
@@ -529,7 +457,7 @@ func TestSyncServices(t *testing.T) {
 
 			err = controller.syncService(ns + "/" + serviceName)
 			if err != nil {
-				t.Errorf("syncServices error: %v", err)
+				t.Fatalf("syncServices error: %v", err)
 			}
 
 			g.Expect(controller.nbClient).To(libovsdbtest.HaveData(tt.expectedDb))
@@ -630,8 +558,8 @@ func tcpGatewayRouterExternalIDs() map[string]string {
 
 func serviceExternalIDs(namespacedServiceName string) map[string]string {
 	return map[string]string{
-		"k8s.ovn.org/kind":  "Service",
-		"k8s.ovn.org/owner": namespacedServiceName,
+		types.LoadBalancerKindExternalID:  "Service",
+		types.LoadBalancerOwnerExternalID: namespacedServiceName,
 	}
 }
 
