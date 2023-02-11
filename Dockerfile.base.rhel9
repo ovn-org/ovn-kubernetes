@@ -9,7 +9,7 @@ FROM registry.ci.openshift.org/ocp/builder:rhel-9-base-openshift-4.13
 
 # install selinux-policy first to avoid a race
 RUN yum install -y  \
-	selinux-policy && \
+	selinux-policy procps-ng && \
 	yum clean all
 
 ARG ovsver=3.0.0-28.el9fdp
@@ -36,15 +36,6 @@ COPY .git/refs/heads/ /root/.git/refs/heads/
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
 COPY dist/images/ovnkube.sh /root/
-
-# iptables wrappers
-COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
-COPY ./dist/images/iptables-scripts/iptables-save /usr/sbin/
-COPY ./dist/images/iptables-scripts/iptables-restore /usr/sbin/
-COPY ./dist/images/iptables-scripts/ip6tables /usr/sbin/
-COPY ./dist/images/iptables-scripts/ip6tables-save /usr/sbin/
-COPY ./dist/images/iptables-scripts/ip6tables-restore /usr/sbin/
-COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
 
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
