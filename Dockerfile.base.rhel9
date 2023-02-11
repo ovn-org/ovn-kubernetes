@@ -9,7 +9,7 @@ FROM registry.ci.openshift.org/ocp/builder:rhel-9-base-openshift-4.13
 
 # install selinux-policy first to avoid a race
 RUN yum install -y  \
-	selinux-policy && \
+	selinux-policy procps-ng && \
 	yum clean all
 
 ARG ovsver=3.0.0-28.el9fdp
