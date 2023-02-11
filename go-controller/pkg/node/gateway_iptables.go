@@ -355,6 +355,10 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svc
 func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	protocol := getIPTablesProtocol(cidr.IP.String())
+	masqueradeIP := types.V4OVNMasqueradeIP
+	if protocol == iptables.ProtocolIPv6 {
+		masqueradeIP = types.V6OVNMasqueradeIP
+	}
 	return []iptRule{
 		{
 			table: "filter",
@@ -390,6 +394,15 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			chain: "POSTROUTING",
 			args: []string{
 				"-s", cidr.String(),
+				"-j", "MASQUERADE",
+			},
+			protocol: protocol,
+		},
+		{
+			table: "nat",
+			chain: "POSTROUTING",
+			args: []string{
+				"-s", masqueradeIP,
 				"-j", "MASQUERADE",
 			},
 			protocol: protocol,
