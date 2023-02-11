@@ -21,7 +21,6 @@ RUN cd go-controller; CGO_ENABLED=0 make windows
 # - creating directories required by ovn-kubernetes
 # - git commit number
 # - ovnkube.sh script
-# - iptables wrappers
 FROM registry.ci.openshift.org/ocp/4.13:ovn-kubernetes-base-rhel-9
 
 USER root
@@ -37,7 +36,7 @@ RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
 	containernetworking-plugins \
-	tcpdump iputils \
+	tcpdump iputils iptables \
 	libreswan \
 	ethtool conntrack-tools \
 	openshift-clients \
