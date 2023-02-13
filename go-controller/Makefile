@@ -5,6 +5,8 @@ BINDIR ?= ${PREFIX}/bin
 CNIBINDIR ?= ${DESTDIR}/opt/cni/bin
 GCFLAGS ?=
 export GCFLAGS
+LDFLAGS ?=
+export LDFLAGS
 PKGS ?=
 GOPATH ?= $(shell go env GOPATH)
 TEST_REPORT_DIR?=$(CURDIR)/_artifacts
@@ -36,6 +38,8 @@ export NOROOT
 #   make all GCFLAGS=all="-N -l"
 #       (disables compiler optimization and inlining to aid source debugging tools
 #        like delve)
+#   make all LDFLAGS="-w -s"
+#       (disables symbol table and DWARF generation when building ovnk binaries)
 
 all build:
 	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovndbchecker cmd/ovnkube-trace
