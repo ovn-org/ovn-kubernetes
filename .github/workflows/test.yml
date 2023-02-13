@@ -522,6 +522,7 @@ jobs:
 
     - name: Run Dual-Stack Tests
       run: |
+        DUALSTACK_CONVERSION="true"
         KIND_IPV4_SUPPORT="true"
         KIND_IPV6_SUPPORT="true"
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"

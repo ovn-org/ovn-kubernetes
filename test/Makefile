@@ -5,6 +5,7 @@ JOB_NAME?="$@"
 # IPv6 only network, set appropriately to skip related tests.
 KIND_IPV4_SUPPORT?=false
 KIND_IPV6_SUPPORT?=false
+DUALSTACK_CONVERSION?=false
 
 .PHONY: install-kind
 install-kind:
@@ -22,6 +23,7 @@ shard-%:
 	E2E_REPORT_PREFIX=$(JOB_NAME)_ \
 	KIND_IPV4_SUPPORT=$(KIND_IPV4_SUPPORT) \
 	KIND_IPV6_SUPPORT=$(KIND_IPV6_SUPPORT) \
+	DUALSTACK_CONVERSION=$(DUALSTACK_CONVERSION) \
 	./scripts/e2e-kind.sh $@ $(WHAT)
 
 .PHONY: control-plane
