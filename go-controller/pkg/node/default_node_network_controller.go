@@ -14,6 +14,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -734,7 +735,15 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 		// nothing to do upon an add event
 		return nil
 	}
-
+	namespacedName, err := serviceNamespacedNameFromEndpointSlice(oldEndpointSlice)
+	if err != nil {
+		return fmt.Errorf("cannot reconcile conntrack: %v", err)
+	}
+	svc, err := nc.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
+	if err != nil && !kerrors.IsNotFound(err) {
+		return fmt.Errorf("error while retrieving service for endpointslice %s/%s when reconciling conntrack: %v",
+			newEndpointSlice.Namespace, newEndpointSlice.Name, err)
+	}
 	for _, oldPort := range oldEndpointSlice.Ports {
 		if *oldPort.Protocol != kapi.ProtocolUDP { // flush conntrack only for UDP
 			continue
@@ -744,7 +753,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 				oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
 				// upon an update event, remove conntrack entries for IP addresses that are no longer
 				// in the endpointslice, skip otherwise
-				if newEndpointSlice != nil && doesEPSliceContainReadyEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol) {
+				if newEndpointSlice != nil && doesEndpointSliceContainValidEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
 					continue
 				}
 				// upon update and delete events, flush conntrack only for UDP
@@ -900,13 +909,14 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 	return nil
 }
 
-// doesEPSliceContainEndpoint checks whether the endpointslice
-// contains a specific endpoint with IP/Port/Protocol and this endpoint is ready
-func doesEPSliceContainReadyEndpoint(epSlice *discovery.EndpointSlice,
-	epIP string, epPort int32, protocol kapi.Protocol) bool {
+// doesEndpointSliceContainValidEndpoint returns true if the endpointslice
+// contains an endpoint with the given IP/Port/Protocol and this endpoint is considered valid
+func doesEndpointSliceContainValidEndpoint(epSlice *discovery.EndpointSlice,
+	epIP string, epPort int32, protocol kapi.Protocol, service *kapi.Service) bool {
+	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
 	for _, port := range epSlice.Ports {
 		for _, endpoint := range epSlice.Endpoints {
-			if !isEndpointReady(endpoint) {
+			if !util.IsEndpointValid(endpoint, includeTerminating) {
 				continue
 			}
 			for _, ip := range endpoint.Addresses {
