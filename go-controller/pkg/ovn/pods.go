@@ -43,29 +43,24 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 			expectedLogicalPorts[expectedLogicalPortName] = true
 		}
 
-		// OCP HACK
-		// Do not try to remove hybrid overlay subnet route on pods using ICNIv1
 		// delete the outdated hybrid overlay subnet route if it exists
-		if annotations != nil && !hasHybridAnnotation(pod.ObjectMeta) {
-			// END OCP HACK
-			newRoutes := []util.PodRoute{}
-			switchName := pod.Spec.NodeName
-			for _, subnet := range oc.lsManager.GetSwitchSubnets(switchName) {
-				hybridOverlayIFAddr := util.GetNodeHybridOverlayIfAddr(subnet).IP
-				for _, route := range annotations.Routes {
-					if !route.NextHop.Equal(hybridOverlayIFAddr) {
-						newRoutes = append(newRoutes, route)
-					}
+		newRoutes := []util.PodRoute{}
+		switchName := pod.Spec.NodeName
+		for _, subnet := range oc.lsManager.GetSwitchSubnets(switchName) {
+			hybridOverlayIFAddr := util.GetNodeHybridOverlayIfAddr(subnet).IP
+			for _, route := range annotations.Routes {
+				if !route.NextHop.Equal(hybridOverlayIFAddr) {
+					newRoutes = append(newRoutes, route)
 				}
 			}
-			// checking the length because cannot compare the slices directly and if routes are removed
-			// the length will be different
-			if len(annotations.Routes) != len(newRoutes) {
-				annotations.Routes = newRoutes
-				err = oc.updatePodAnnotationWithRetry(pod, annotations, ovntypes.DefaultNetworkName)
-				if err != nil {
-					return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
-				}
+		}
+		// checking the length because cannot compare the slices directly and if routes are removed
+		// the length will be different
+		if len(annotations.Routes) != len(newRoutes) {
+			annotations.Routes = newRoutes
+			err = oc.updatePodAnnotationWithRetry(pod, annotations, ovntypes.DefaultNetworkName)
+			if err != nil {
+				return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 			}
 		}
 	}

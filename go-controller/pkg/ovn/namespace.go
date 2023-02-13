@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -43,9 +42,6 @@ type namespaceInfo struct {
 	// You must hold the namespaceInfo's mutex to add/delete dependent policies.
 	// Namespace can take oc.networkPolicies key Lock while holding nsInfo lock, the opposite should never happen.
 	relatedNetworkPolicies map[string]bool
-
-	hybridOverlayExternalGW net.IP
-	hybridOverlayVTEP       net.IP
 
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
@@ -160,21 +156,21 @@ func (oc *DefaultNetworkController) getRoutingPodGWs(nsInfo *namespaceInfo) map[
 
 // addPodToNamespace returns pod's routing gateway info and the ops needed
 // to add pod's IP to the namespace's address set.
-func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]gatewayInfo, net.IP, []ovsdb.Operation, error) {
+func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
+		return nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
 
 	defer nsUnlock()
 
 	if ops, err = nsInfo.addressSet.AddIPsReturnOps(createIPAddressSlice(ips)); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, ops, nil
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
 }
 
 func createIPAddressSlice(ips []*net.IPNet) []net.IP {
@@ -230,7 +226,6 @@ func (oc *DefaultNetworkController) multicastDeleteNamespace(ns *kapi.Namespace,
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *DefaultNetworkController) AddNamespace(ns *kapi.Namespace) error {
-	var errors []error
 	klog.Infof("[%s] adding namespace", ns.Name)
 	// Keep track of how long syncs take.
 	start := time.Now()
@@ -238,33 +233,12 @@ func (oc *DefaultNetworkController) AddNamespace(ns *kapi.Namespace) error {
 		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
 	}()
 
-	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns.Name, false, ns)
+	_, nsUnlock, err := oc.ensureNamespaceLocked(ns.Name, false, ns)
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
 	defer nsUnlock()
-
-	// OCP HACK -- hybrid overlay
-	annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			errors = append(errors, fmt.Errorf("could not parse hybrid overlay external gw annotation"))
-		} else {
-			nsInfo.hybridOverlayExternalGW = parsedAnnotation
-		}
-	}
-	annotation = ns.Annotations[hotypes.HybridOverlayVTEP]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			errors = append(errors, fmt.Errorf("could not parse hybrid overlay VTEP annotation"))
-		} else {
-			nsInfo.hybridOverlayVTEP = parsedAnnotation
-		}
-	}
-	// END OCP HACK
-	return kerrors.NewAggregate(errors)
+	return nil
 }
 
 // configureNamespace ensures internal structures are updated based on namespace
@@ -419,30 +393,6 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 		}
 	}
 
-	// OCP HACK -- hybrid overlay
-	annotation := newer.Annotations[hotypes.HybridOverlayExternalGw]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			errors = append(errors, fmt.Errorf("could not parse hybrid overlay external gw annotation"))
-		} else {
-			nsInfo.hybridOverlayExternalGW = parsedAnnotation
-		}
-	} else {
-		nsInfo.hybridOverlayExternalGW = nil
-	}
-	annotation = newer.Annotations[hotypes.HybridOverlayVTEP]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			errors = append(errors, fmt.Errorf("could not parse hybrid overlay VTEP annotation"))
-		} else {
-			nsInfo.hybridOverlayVTEP = parsedAnnotation
-		}
-	} else {
-		nsInfo.hybridOverlayVTEP = nil
-	}
-	// END OCP HACK
 	if err := oc.multicastUpdateNamespace(newer, nsInfo); err != nil {
 		errors = append(errors, err)
 	}
