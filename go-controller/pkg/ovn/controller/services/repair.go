@@ -5,7 +5,6 @@ import (
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -59,16 +58,6 @@ func (r *repair) runBeforeSync() {
 	defer func() {
 		klog.V(4).Infof("Finished repairing loop for services: %v", time.Since(startTime))
 	}()
-
-	// Ensure unidling is enabled
-	nbGlobal := nbdb.NBGlobal{
-		Options: map[string]string{"controller_event": "true"},
-	}
-	if globalconfig.Kubernetes.OVNEmptyLbEvents {
-		if err := libovsdbops.UpdateNBGlobalSetOptions(r.nbClient, &nbGlobal); err != nil {
-			klog.Errorf("Unable to enable controller events, unidling not possible: %v", err)
-		}
-	}
 
 	// Build a list of every service existing
 	// After every service has been synced, then we'll execute runAfterSync

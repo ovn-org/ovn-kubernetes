@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -761,6 +762,7 @@ func Test_buildClusterLBs(t *testing.T) {
 	defaultRouters := []string{}
 	defaultSwitches := []string{}
 	defaultGroups := []string{"clusterLBGroup"}
+	defaultOpts := LBOpts{Reject: true}
 
 	tc := []struct {
 		name      string
@@ -812,6 +814,7 @@ func Test_buildClusterLBs(t *testing.T) {
 					Routers:  defaultRouters,
 					Switches: defaultSwitches,
 					Groups:   defaultGroups,
+					Opts:     defaultOpts,
 				},
 			},
 		},
@@ -854,6 +857,7 @@ func Test_buildClusterLBs(t *testing.T) {
 					Switches: defaultSwitches,
 					Routers:  defaultRouters,
 					Groups:   defaultGroups,
+					Opts:     defaultOpts,
 				},
 				{
 					Name:        fmt.Sprintf("Service_%s/%s_UDP_cluster", namespace, name),
@@ -869,6 +873,7 @@ func Test_buildClusterLBs(t *testing.T) {
 					Switches: defaultSwitches,
 					Routers:  defaultRouters,
 					Groups:   defaultGroups,
+					Opts:     defaultOpts,
 				},
 			},
 		},
@@ -925,6 +930,7 @@ func Test_buildClusterLBs(t *testing.T) {
 					Routers:  defaultRouters,
 					Switches: defaultSwitches,
 					Groups:   defaultGroups,
+					Opts:     defaultOpts,
 				},
 			},
 		},
@@ -982,6 +988,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 		types.LoadBalancerKindExternalID:  "Service",
 		types.LoadBalancerOwnerExternalID: fmt.Sprintf("%s/%s", namespace, name),
 	}
+	defaultOpts := LBOpts{Reject: true}
 
 	//defaultRouters := []string{"gr-node-a", "gr-node-b"}
 	//defaultSwitches := []string{"switch-node-a", "switch-node-b"}
@@ -1019,6 +1026,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a_merged",
@@ -1032,6 +1040,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 		},
@@ -1062,6 +1071,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.128.0.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
@@ -1075,6 +1085,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.128.0.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 			expectedLocal: []LB{
@@ -1090,6 +1101,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.128.0.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
@@ -1103,6 +1115,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.128.0.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 		},
@@ -1145,6 +1158,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
@@ -1161,6 +1175,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
@@ -1178,6 +1193,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 			expectedLocal: []LB{
@@ -1196,6 +1212,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
@@ -1212,6 +1229,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
@@ -1229,6 +1247,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 		},
@@ -1274,12 +1293,13 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"169.254.169.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
-					Opts:        LBOpts{SkipSNAT: true},
+					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
@@ -1307,6 +1327,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 
 				// node-b has no service, 3 lbs
@@ -1328,6 +1349,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
@@ -1348,6 +1370,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 		},
@@ -1391,6 +1414,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
@@ -1407,6 +1431,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
@@ -1423,6 +1448,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 			expectedLocal: []LB{
@@ -1441,6 +1467,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
@@ -1457,6 +1484,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
@@ -1473,6 +1501,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 		},
@@ -1516,6 +1545,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
@@ -1532,6 +1562,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-b",
@@ -1548,6 +1579,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
@@ -1564,6 +1596,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 			expectedLocal: []LB{
@@ -1582,6 +1615,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
@@ -1598,6 +1632,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-b",
@@ -1614,6 +1649,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
@@ -1630,6 +1666,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 		},
@@ -1674,12 +1711,13 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"169.254.169.2", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
-					Opts:        LBOpts{SkipSNAT: true},
+					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
@@ -1707,6 +1745,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-b",
@@ -1723,6 +1762,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{}, // filter out eps only on node-b for nodePort on GR when ETP=local
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
@@ -1743,6 +1783,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 			expectedLocal: []LB{
@@ -1757,12 +1798,13 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"169.254.169.2", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
-					Opts:        LBOpts{SkipSNAT: true},
+					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
@@ -1790,6 +1832,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-b",
@@ -1806,6 +1849,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{}, // filter out eps only on node-b for nodePort on GR when ETP=local
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
@@ -1826,6 +1870,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 		},
@@ -1846,6 +1891,78 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				assert.Equal(t, tt.expectedLocal, actual, "local gateway mode not as expected")
 			}
 
+		})
+	}
+}
+
+func Test_idledServices(t *testing.T) {
+	serviceName := "foo"
+	ns := "testns"
+	tenSecondsAgo := time.Now().Add(-10 * time.Second).Format(time.RFC3339)
+	oneHourAgo := time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
+
+	globalconfig.Kubernetes.OVNEmptyLbEvents = true
+	defer func() {
+		globalconfig.Kubernetes.OVNEmptyLbEvents = false
+	}()
+
+	tc := []struct {
+		name     string
+		service  *v1.Service
+		expected LBOpts
+	}{
+		{
+			name: "active service",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns, Annotations: map[string]string{}},
+			},
+			expected: LBOpts{
+				Reject:        true,
+				EmptyLBEvents: false,
+			},
+		},
+		{
+			name: "idled service",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns, Annotations: map[string]string{
+					"k8s.ovn.org/idled-at": "2023-01-01T13:14:15Z",
+				}},
+			},
+			expected: LBOpts{
+				Reject:        false,
+				EmptyLBEvents: true,
+			},
+		},
+		{
+			name: "recently unidled service",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns, Annotations: map[string]string{
+					"k8s.ovn.org/unidled-at": tenSecondsAgo,
+				}},
+			},
+			expected: LBOpts{
+				Reject:        false,
+				EmptyLBEvents: false,
+			},
+		},
+		{
+			name: "long time unidled service",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns, Annotations: map[string]string{
+					"k8s.ovn.org/unidled-at": oneHourAgo,
+				}},
+			},
+			expected: LBOpts{
+				Reject:        true,
+				EmptyLBEvents: false,
+			},
+		},
+	}
+
+	for i, tt := range tc {
+		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
+			actualLbOpts := lbOpts(tt.service)
+			assert.Equal(t, tt.expected, actualLbOpts)
 		})
 	}
 }

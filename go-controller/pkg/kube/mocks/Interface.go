@@ -241,6 +241,20 @@ func (_m *Interface) SetAnnotationsOnPod(namespace string, podName string, annot
 	return r0
 }
 
+// SetAnnotationsOnService provides a mock function with given fields: namespace, serviceName, annotations
+func (_m *Interface) SetAnnotationsOnService(namespace string, serviceName string, annotations map[string]interface{}) error {
+	ret := _m.Called(namespace, serviceName, annotations)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, map[string]interface{}) error); ok {
+		r0 = rf(namespace, serviceName, annotations)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // SetTaintOnNode provides a mock function with given fields: nodeName, taint
 func (_m *Interface) SetTaintOnNode(nodeName string, taint *corev1.Taint) error {
 	ret := _m.Called(nodeName, taint)

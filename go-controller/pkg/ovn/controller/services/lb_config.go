@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -468,9 +470,23 @@ func getSessionAffinityTimeOut(service *v1.Service) int32 {
 func lbOpts(service *v1.Service) LBOpts {
 	affinity := service.Spec.SessionAffinity == v1.ServiceAffinityClientIP
 	lbOptions := LBOpts{
-		Unidling: svcNeedsIdling(service.GetAnnotations()),
 		SkipSNAT: false, // never service-wide, ExternalTrafficPolicy-specific
 	}
+
+	lbOptions.Reject = true
+	lbOptions.EmptyLBEvents = false
+
+	if config.Kubernetes.OVNEmptyLbEvents {
+		if unidling.HasIdleAt(service) {
+			lbOptions.Reject = false
+			lbOptions.EmptyLBEvents = true
+		}
+
+		if unidling.IsOnGracePeriod(service) {
+			lbOptions.Reject = false
+		}
+	}
+
 	if affinity {
 		lbOptions.AffinityTimeOut = getSessionAffinityTimeOut(service)
 	}
