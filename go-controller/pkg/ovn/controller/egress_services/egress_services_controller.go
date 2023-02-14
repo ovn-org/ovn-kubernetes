@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nodereachability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -48,7 +49,6 @@ type Controller struct {
 	createNoRerouteNodePolicies              func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, node *corev1.Node) error
 	deleteNoRerouteNodePolicies              func(addressSetFactory addressset.AddressSetFactory, nodeName string, v4NodeAddr, v6NodeAddr net.IP) error
 	deleteLegacyDefaultNoRerouteNodePolicies func(libovsdbclient.Client, string) error
-	IsReachable                              func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool // TODO: make a universal cache instead
 
 	services map[string]*svcState  // svc key -> state
 	nodes    map[string]*nodeState // node name -> state
@@ -103,7 +103,6 @@ func NewController(
 	createNoRerouteNodePolicies func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, node *corev1.Node) error,
 	deleteNoRerouteNodePolicies func(addressSetFactory addressset.AddressSetFactory, nodeName string, v4NodeAddr, v6NodeAddr net.IP) error,
 	deleteLegacyDefaultNoRerouteNodePolicies func(libovsdbclient.Client, string) error,
-	isReachable func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool,
 	stopCh <-chan struct{},
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
@@ -117,7 +116,6 @@ func NewController(
 		createNoRerouteNodePolicies:              createNoRerouteNodePolicies,
 		deleteNoRerouteNodePolicies:              deleteNoRerouteNodePolicies,
 		deleteLegacyDefaultNoRerouteNodePolicies: deleteLegacyDefaultNoRerouteNodePolicies,
-		IsReachable:                              isReachable,
 		stopCh:                                   stopCh,
 		services:                                 map[string]*svcState{},
 		nodes:                                    map[string]*nodeState{},
@@ -214,7 +212,7 @@ func (c *Controller) Run(threadiness int) {
 		}()
 	}
 
-	go c.checkNodesReachability()
+	go nodereachability.CheckNodesReachability(c.stopCh, c.CheckNodesReachabilityIterate)
 
 	// wait until we're told to stop
 	<-c.stopCh
@@ -224,6 +222,39 @@ func (c *Controller) Run(threadiness int) {
 	c.nodesQueue.ShutDown()
 
 	wg.Wait()
+}
+
+func (c *Controller) CheckNodesReachabilityIterate() {
+	c.Lock()
+	defer c.Unlock()
+
+	nodesToFree := []*nodeState{}
+	for _, node := range c.nodes {
+		wasReachable := node.reachable
+		isReachable := nodereachability.IsReachable(node.name, node.mgmtIPs, node.healthClient)
+		node.reachable = isReachable
+		if wasReachable && !isReachable {
+			// The node is not reachable, we need to drain it and reassign its allocations
+			c.nodesQueue.Add(node.name)
+			continue
+		}
+
+		startedDrain := node.draining
+		fullyDrained := len(node.allocations) == 0
+		if startedDrain && fullyDrained && isReachable {
+			// We make the node usable for new allocations only when
+			// it has finished draining and is reachable again.
+			// As long it is in the cache and in draining state it can't
+			// be chosen for new allocations.
+			nodesToFree = append(nodesToFree, node)
+		}
+	}
+
+	for _, node := range nodesToFree {
+		delete(c.nodes, node.name)
+		node.healthClient.Disconnect()
+		c.nodesQueue.Add(node.name) // Since it is available we queue it as it might match unallocated services
+	}
 }
 
 // This takes care of syncing stale data which we might have in OVN if

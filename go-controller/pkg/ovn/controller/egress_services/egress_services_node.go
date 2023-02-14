@@ -25,61 +25,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// TODO: https://github.com/ovn-org/ovn-kubernetes/pull/3135#discussion_r960042582
-// Currently we are creating another goroutine that pretty much does what EgressIP
-// does to monitor nodes' reachability.
-// Ideally we should move the healthchecking logic from these controllers and make
-// a universal cache that both of them can query to obtain the "health" status of the nodes.
-
-// Similarly to the EgressIP controller, we loop over all of the nodes that have
-// allocations and check if they are still usable.
-func (c *Controller) checkNodesReachability() {
-	timer := time.NewTicker(5 * time.Second)
-	defer timer.Stop()
-	for {
-		select {
-		case <-timer.C:
-			c.CheckNodesReachabilityIterate()
-		case <-c.stopCh:
-			klog.V(5).Infof("Stop channel got triggered: will stop CheckNodesReachability")
-			return
-		}
-	}
-}
-
-func (c *Controller) CheckNodesReachabilityIterate() {
-	c.Lock()
-	defer c.Unlock()
-
-	nodesToFree := []*nodeState{}
-	for _, node := range c.nodes {
-		wasReachable := node.reachable
-		isReachable := c.IsReachable(node.name, node.mgmtIPs, node.healthClient)
-		node.reachable = isReachable
-		if wasReachable && !isReachable {
-			// The node is not reachable, we need to drain it and reassign its allocations
-			c.nodesQueue.Add(node.name)
-			continue
-		}
-
-		startedDrain := node.draining
-		fullyDrained := len(node.allocations) == 0
-		if startedDrain && fullyDrained && isReachable {
-			// We make the node usable for new allocations only when
-			// it has finished draining and is reachable again.
-			// As long it is in the cache and in draining state it can't
-			// be chosen for new allocations.
-			nodesToFree = append(nodesToFree, node)
-		}
-	}
-
-	for _, node := range nodesToFree {
-		delete(c.nodes, node.name)
-		node.healthClient.Disconnect()
-		c.nodesQueue.Add(node.name) // Since it is available we queue it as it might match unallocated services
-	}
-}
-
 func (c *Controller) onNodeAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {

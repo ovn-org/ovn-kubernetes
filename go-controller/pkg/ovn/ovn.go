@@ -17,7 +17,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -451,28 +450,9 @@ func newEgressServiceController(client clientset.Interface, nbClient libovsdbcli
 		deleteLegacyDefaultNoRerouteNodePolicies = DeleteLegacyDefaultNoRerouteNodePolicies
 	}
 
-	// TODO: currently an ugly hack to pass the (copied) isReachable func to the egress service controller
-	// without touching the egressIP controller code too much before the Controller object is created.
-	// This will be removed once we consolidate all of the healthchecks to a different place and have
-	// the controllers query a universal cache instead of creating multiple goroutines that do the same thing.
-	timeout := config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout
-	hcPort := config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort
-	isReachable := func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool {
-		// Check if we need to do node reachability check
-		if timeout == 0 {
-			return true
-		}
-
-		if hcPort == 0 {
-			return isReachableLegacy(nodeName, mgmtIPs, timeout)
-		}
-
-		return isReachableViaGRPC(mgmtIPs, healthClient, hcPort, timeout)
-	}
-
 	return egresssvc.NewController(client, nbClient, addressSetFactory,
 		initClusterEgressPolicies, createNodeNoReroutePolicies,
-		deleteNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies, isReachable,
+		deleteNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
 		stopCh, svcFactory.Core().V1().Services(),
 		svcFactory.Discovery().V1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes())

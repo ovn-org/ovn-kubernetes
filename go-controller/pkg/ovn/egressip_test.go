@@ -176,7 +176,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		},
 	}
 
-	dialer = fakeEgressIPDialer{}
 	hccAllocator = &fakeEgressIPHealthClientAllocator{}
 
 	getEgressIPAllocatorSizeSafely := func() int {
@@ -4760,7 +4759,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(cachedEgressNode2.egressIPConfig.V4.Net).To(gomega.Equal(ip2V4Sub))
 
 				// Explicitly call check reachibility so we need not to wait for slow periodic timer
-				checkEgressNodesReachabilityIterate(fakeOvn.controller)
+				fakeOvn.controller.checkEgressNodesReachabilityIterate()
 				gomega.Expect(cachedEgressNode1.isReachable).To(gomega.BeTrue())
 				gomega.Expect(cachedEgressNode2.isReachable).To(gomega.BeTrue())
 
@@ -4816,7 +4815,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						desc: "node1 and node2 connected and both counters bump",
 						tcPrepareFunc: func(hcc1, hcc2 *fakeEgressIPHealthClient) {
 							// Perform an additional iteration, to make probe counters to bump on second call
-							checkEgressNodesReachabilityIterate(fakeOvn.controller)
+							fakeOvn.controller.checkEgressNodesReachabilityIterate()
 						},
 					},
 				}
@@ -4862,7 +4861,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					}
 
 					// Perform connect or probing, depending on the state of the connections
-					checkEgressNodesReachabilityIterate(fakeOvn.controller)
+					fakeOvn.controller.checkEgressNodesReachabilityIterate()
 
 					ttIterCheck(hcc1, prevNode1IsConnected, prevNode1Probes, tt.node1FailProbes, tt.desc)
 					ttIterCheck(hcc2, prevNode2IsConnected, prevNode2Probes, tt.node2FailProbes, tt.desc)
@@ -4880,7 +4879,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
 
 				// Explicitly call check reachibility so we need not to wait for slow periodic timer
-				checkEgressNodesReachabilityIterate(fakeOvn.controller)
+				fakeOvn.controller.checkEgressNodesReachabilityIterate()
 
 				gomega.Expect(hcc1.IsConnected()).To(gomega.BeTrue())
 				gomega.Expect(hcc2.IsConnected()).To(gomega.BeFalse())
@@ -7746,7 +7745,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				hcClient := fakeOvn.controller.eIPC.allocator.cache[node.Name].healthClient.(*fakeEgressIPHealthClient)
 				hcClient.FakeProbeFailure = true
 				// explicitly call check reachability, periodic checker is not active
-				checkEgressNodesReachabilityIterate(fakeOvn.controller)
+				fakeOvn.controller.checkEgressNodesReachabilityIterate()
 				gomega.Eventually(getEgressIPStatusLen(eIP1.Name)).Should(gomega.Equal(0))
 
 				hcClient.FakeProbeFailure = false
@@ -7759,7 +7758,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				// egress IP should get assigned on the next checkEgressNodesReachabilityIterate call
 				// explicitly call check reachability, periodic checker is not active
-				checkEgressNodesReachabilityIterate(fakeOvn.controller)
+				fakeOvn.controller.checkEgressNodesReachabilityIterate()
 				gomega.Eventually(getEgressIPStatusLen(eIP1.Name)).Should(gomega.Equal(1))
 
 				return nil
