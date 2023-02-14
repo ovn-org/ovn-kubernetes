@@ -1915,15 +1915,10 @@ func addMasqueradeRoute(netIfaceName, nodeName string, ifAddrs []*net.IPNet, wat
 		return fmt.Errorf("unable to find shared gw bridge interface: %s", netIfaceName)
 	}
 
-	mtu := config.Default.MTU
-	if config.Default.RoutableMTU != 0 {
-		mtu = config.Default.RoutableMTU
-	}
-
 	if ipv4 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv4)
-		err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet}, mtu, ipv4)
+		err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet}, 0, ipv4)
 		if err != nil {
 			return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
 		}
@@ -1932,7 +1927,7 @@ func addMasqueradeRoute(netIfaceName, nodeName string, ifAddrs []*net.IPNet, wat
 	if ipv6 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/128", types.V6OVNMasqueradeIP))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv6)
-		err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet}, mtu, ipv6)
+		err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet}, 0, ipv6)
 		if err != nil {
 			return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
 		}
