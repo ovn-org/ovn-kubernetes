@@ -283,3 +283,6 @@ for n in $NODES; do
     docker exec $n curl --connect-timeout 5 $ip
   done
 done
+
+# Give some time for everything to settle
+sleep 60
