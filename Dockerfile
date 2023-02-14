@@ -38,7 +38,7 @@ RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
 	containernetworking-plugins \
-	tcpdump iputils iptables \
+	tcpdump iputils \
 	libreswan \
 	ethtool conntrack-tools \
 	" && \

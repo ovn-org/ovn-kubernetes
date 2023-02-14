@@ -36,7 +36,7 @@ RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
 	containernetworking-plugins \
-	tcpdump iputils iptables \
+	tcpdump iputils \
 	libreswan \
 	ethtool conntrack-tools \
 	openshift-clients \
