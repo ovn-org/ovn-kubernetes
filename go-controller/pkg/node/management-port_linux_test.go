@@ -210,7 +210,19 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 set interface " + mgtPort + " " + fmt.Sprintf("mac=%s", strings.ReplaceAll(mgtPortMAC, ":", "\\:")),
 	})
-
+	for _, cfg := range configs {
+		if cfg.family == netlink.FAMILY_V4 {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
+				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+			})
+		} else {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv6.conf.ovn-k8s-mp0.forwarding=1",
+				Output: "net.ipv6.conf.ovn-k8s-mp0.forwarding = 1",
+			})
+		}
+	}
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " ofport",
 		Output: "1",
@@ -362,6 +374,21 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		mgtPort    string = types.K8sMgmtIntfName
 		mtu        int    = 1400
 	)
+
+	for _, cfg := range configs {
+		if cfg.family == netlink.FAMILY_V4 {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
+				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+			})
+		}
+		if cfg.family == netlink.FAMILY_V6 {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv6.conf.ovn-k8s-mp0.forwarding=1",
+				Output: "net.ipv6.conf.ovn-k8s-mp0.forwarding = 1",
+			})
+		}
+	}
 
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
