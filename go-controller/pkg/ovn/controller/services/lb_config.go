@@ -333,8 +333,8 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 					if len(switchV6targetDNSips) == 0 {
 						switchV6targetDNSips = config.eps.V6IPs
 					}
-					switchV4Targets = ovnlb.JoinHostsPort(switchV4targetDNSips, config.eps.Port)
-					switchV6Targets = ovnlb.JoinHostsPort(switchV6targetDNSips, config.eps.Port)
+					switchV4Targets = joinHostsPort(switchV4targetDNSips, config.eps.Port)
+					switchV6Targets = joinHostsPort(switchV6targetDNSips, config.eps.Port)
 				}
 				// OCP HACK end
 

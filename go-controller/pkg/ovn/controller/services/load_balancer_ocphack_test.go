@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
@@ -60,11 +59,13 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 	//defaultRouters := []string{"gr-node-a", "gr-node-b"}
 	//defaultSwitches := []string{"switch-node-a", "switch-node-b"}
 
+	defaultOpts := LBOpts{Reject: true}
+
 	tc := []struct {
 		name     string
 		service  *v1.Service
 		configs  []lbConfig
-		expected []ovnlb.LB
+		expected []LB
 	}{
 		{
 			name:    "clusterIP service, standard pods",
@@ -80,42 +81,45 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 					},
 				},
 			},
-			expected: []ovnlb.LB{
+			expected: []LB{
 				{
 					Name:        "Service_openshift-dns/dns-default_TCP_node_router_node-a_merged",
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a", "gr-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.1.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}, {"10.128.1.2", 8080}},
+							Source:  Addr{"192.168.1.1", 80},
+							Targets: []Addr{{"10.128.0.2", 8080}, {"10.128.1.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_openshift-dns/dns-default_TCP_node_switch_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.1.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+							Source:  Addr{"192.168.1.1", 80},
+							Targets: []Addr{{"10.128.0.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 				{
 					Name:        "Service_openshift-dns/dns-default_TCP_node_switch_node-b",
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
-					Rules: []ovnlb.LBRule{
+					Rules: []LBRule{
 						{
-							Source:  ovnlb.Addr{"192.168.1.1", 80},
-							Targets: []ovnlb.Addr{{"10.128.1.2", 8080}},
+							Source:  Addr{"192.168.1.1", 80},
+							Targets: []Addr{{"10.128.1.2", 8080}},
 						},
 					},
+					Opts: defaultOpts,
 				},
 			},
 		},
