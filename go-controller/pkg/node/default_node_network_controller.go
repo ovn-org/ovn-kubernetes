@@ -90,6 +90,9 @@ type DefaultNodeNetworkController struct {
 
 	gateway Gateway
 
+	// Node healthcheck server for cloud load balancers
+	healthzServer *proxierHealthUpdater
+
 	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
 	retryNamespaces *retry.RetryFramework
 	// retry framework for endpoint slices, used for the removal of stale conntrack entries for services
@@ -114,6 +117,10 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) *De
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg)
+
+	if len(config.Kubernetes.HealthzBindAddress) != 0 {
+		nc.healthzServer = newNodeProxyHealthzServer(nc.name, config.Kubernetes.HealthzBindAddress, nc.recorder)
+	}
 
 	nc.initRetryFrameworkForNode()
 	return nc
@@ -660,6 +667,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to watch endpointSlices: %w", err)
 		}
+	}
+
+	if nc.healthzServer != nil {
+		nc.healthzServer.Start(nc.stopChan, nc.wg)
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
