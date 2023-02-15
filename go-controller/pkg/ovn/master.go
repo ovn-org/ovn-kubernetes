@@ -745,15 +745,22 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 		errs = append(errs, err)
 	}
 
+	annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
 	if config.HybridOverlay.Enabled {
-		annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
 		if err := oc.handleHybridOverlayPort(node, annotator); err != nil {
 			errs = append(errs, fmt.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err))
 		}
-		if err := annotator.Run(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to set hybrid overlay annotations for node %s: %v", node.Name, err))
+	} else {
+		// the node needs to cleanup Hybrid overlay annotations if it has them and hybrid overlay is not enabled
+		if _, exist := node.Annotations[hotypes.HybridOverlayDRMAC]; exist {
+			annotator.Delete(hotypes.HybridOverlayDRMAC)
 		}
-
+		if _, exist := node.Annotations[hotypes.HybridOverlayDRIP]; exist {
+			annotator.Delete(hotypes.HybridOverlayDRIP)
+		}
+	}
+	if err := annotator.Run(); err != nil {
+		errs = append(errs, fmt.Errorf("failed to set hybrid overlay annotations for node %s: %v", node.Name, err))
 	}
 
 	oc.clearInitialNodeNetworkUnavailableCondition(node)
