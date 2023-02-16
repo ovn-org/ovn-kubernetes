@@ -272,7 +272,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 			return err
 		}
 	} else if hostSubnets != nil {
-		var hostAddrs sets.String
+		var hostAddrs sets.Set[string]
 		if config.Gateway.Mode == config.GatewayModeShared {
 			hostAddrs, err = util.ParseNodeHostAddresses(node)
 			if err != nil && !util.IsAnnotationNotSetError(err) {

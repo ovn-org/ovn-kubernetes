@@ -892,7 +892,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		expectedNBDatabaseState        []libovsdbtest.TestData
 		expectedSBDatabaseState        []libovsdbtest.TestData
 		l3GatewayConfig                *util.L3GatewayConfig
-		nodeHostAddrs                  sets.String
+		nodeHostAddrs                  sets.Set[string]
 	)
 
 	const (
@@ -985,7 +985,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		nodeHostAddrs = sets.NewString(node1.NodeIP)
+		nodeHostAddrs = sets.New[string](node1.NodeIP)
 		err = util.SetNodeHostAddresses(nodeAnnotator, nodeHostAddrs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = nodeAnnotator.Run()

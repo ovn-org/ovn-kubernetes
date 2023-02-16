@@ -90,7 +90,7 @@ func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) error {
 	key := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 	cachedEps := npw.egressServiceInfo[key]
 	if cachedEps == nil {
-		cachedEps = &serviceEps{sets.NewString(), sets.NewString()}
+		cachedEps = &serviceEps{sets.New[string](), sets.New[string]()}
 		npw.egressServiceInfo[key] = cachedEps
 	}
 
@@ -100,8 +100,8 @@ func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) error {
 			svc.Namespace, svc.Name, err)
 	}
 
-	v4Eps := sets.NewString() // All current v4 eps
-	v6Eps := sets.NewString() // All current v6 eps
+	v4Eps := sets.New[string]() // All current v4 eps
+	v6Eps := sets.New[string]() // All current v6 eps
 	for _, epSlice := range epSlices {
 		if epSlice.AddressType == v1.AddressTypeFQDN {
 			continue

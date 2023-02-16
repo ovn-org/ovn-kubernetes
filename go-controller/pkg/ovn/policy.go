@@ -62,8 +62,8 @@ type defaultDenyPortGroups struct {
 	// store policies that are using every port in the map
 	// these maps should be atomically updated with db operations
 	// if adding a port to db for a policy fails, map shouldn't be changed
-	ingressPortToPolicies map[string]sets.String
-	egressPortToPolicies  map[string]sets.String
+	ingressPortToPolicies map[string]sets.Set[string]
+	egressPortToPolicies  map[string]sets.Set[string]
 	// policies is a map of policies that use this port group
 	// policy keys must be unique, and it can be retrieved with (np *networkPolicy) getKey()
 	policies map[string]bool
@@ -83,7 +83,7 @@ func (sharedPGs *defaultDenyPortGroups) addPortsForPolicy(np *networkPolicy,
 			// need to add it to the port group.
 			if sharedPGs.ingressPortToPolicies[portName].Len() == 0 {
 				ingressDenyPorts = append(ingressDenyPorts, portUUID)
-				sharedPGs.ingressPortToPolicies[portName] = sets.String{}
+				sharedPGs.ingressPortToPolicies[portName] = sets.Set[string]{}
 			}
 			// increment the reference count.
 			sharedPGs.ingressPortToPolicies[portName].Insert(np.getKey())
@@ -94,7 +94,7 @@ func (sharedPGs *defaultDenyPortGroups) addPortsForPolicy(np *networkPolicy,
 			if sharedPGs.egressPortToPolicies[portName].Len() == 0 {
 				// again, reference count is 0, so add to port
 				egressDenyPorts = append(egressDenyPorts, portUUID)
-				sharedPGs.egressPortToPolicies[portName] = sets.String{}
+				sharedPGs.egressPortToPolicies[portName] = sets.Set[string]{}
 			}
 			// bump reference count
 			sharedPGs.egressPortToPolicies[portName].Insert(np.getKey())
@@ -471,8 +471,8 @@ func buildDenyACLs(namespace, pg string, aclLogging *ACLLoggingLevels, aclT aclT
 func (oc *DefaultNetworkController) addPolicyToDefaultPortGroups(np *networkPolicy, aclLogging *ACLLoggingLevels) error {
 	return oc.sharedNetpolPortGroups.DoWithLock(np.namespace, func(pgKey string) error {
 		sharedPGs, loaded := oc.sharedNetpolPortGroups.LoadOrStore(pgKey, &defaultDenyPortGroups{
-			ingressPortToPolicies: map[string]sets.String{},
-			egressPortToPolicies:  map[string]sets.String{},
+			ingressPortToPolicies: map[string]sets.Set[string]{},
+			egressPortToPolicies:  map[string]sets.Set[string]{},
 			policies:              map[string]bool{},
 		})
 		if !loaded {

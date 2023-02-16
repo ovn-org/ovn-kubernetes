@@ -98,7 +98,7 @@ func (oc *DefaultNetworkController) delPbrAndNatRules(nodeName string, lrpTypes 
 }
 
 func (oc *DefaultNetworkController) staticRouteCleanup(nextHops []net.IP) {
-	ips := sets.String{}
+	ips := sets.Set[string]{}
 	for _, nextHop := range nextHops {
 		ips.Insert(nextHop.String())
 	}
@@ -158,7 +158,7 @@ func (oc *DefaultNetworkController) multiJoinSwitchGatewayCleanup(nodeName strin
 	}
 
 	var nextHops []net.IP
-	nextHopsStr := sets.String{}
+	nextHopsStr := sets.Set[string]{}
 	for _, gwIPAddr := range gwIPAddrs {
 		nextHops = append(nextHops, gwIPAddr.IP)
 		nextHopsStr.Insert(gwIPAddr.IP.String())
@@ -231,7 +231,7 @@ func (oc *DefaultNetworkController) removeLRPolicies(nodeName string, priorities
 		priorities = []string{types.NodeSubnetPolicyPriority}
 	}
 
-	intPriorities := sets.Int{}
+	intPriorities := sets.Set[int]{}
 	for _, priority := range priorities {
 		intPriority, _ := strconv.Atoi(priority)
 		intPriorities.Insert(intPriority)

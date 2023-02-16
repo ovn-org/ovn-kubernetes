@@ -30,7 +30,7 @@ import (
 )
 
 type gatewayInfo struct {
-	gws        sets.String
+	gws        sets.Set[string]
 	bfdEnabled bool
 }
 
@@ -385,7 +385,7 @@ func (oc *DefaultNetworkController) deletePodGWRoutesForNamespace(pod *kapi.Pod,
 	// check if any gateways were stored for this pod
 	foundGws, ok := nsInfo.routingExternalPodGWs[podGWKey]
 	delete(nsInfo.routingExternalPodGWs, podGWKey)
-	existingGWs := sets.NewString()
+	existingGWs := sets.New[string]()
 	for _, gwInfo := range nsInfo.routingExternalPodGWs {
 		existingGWs.Insert(gwInfo.gws.UnsortedList()...)
 	}
@@ -409,7 +409,7 @@ func (oc *DefaultNetworkController) deletePodGWRoutesForNamespace(pod *kapi.Pod,
 		return fmt.Errorf("failed to delete GW routes for pod %s: %w", pod.Name, err)
 	}
 	// remove the exgw podIP from the namespace's k8s.ovn.org/external-gw-pod-ips list
-	if err := util.UpdateExternalGatewayPodIPsAnnotation(oc.kube, namespace, existingGWs.List()); err != nil {
+	if err := util.UpdateExternalGatewayPodIPsAnnotation(oc.kube, namespace, existingGWs.UnsortedList()); err != nil {
 		klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", util.ExternalGatewayPodIPsAnnotation, existingGWs, namespace, err)
 	}
 	return nil
@@ -418,7 +418,7 @@ func (oc *DefaultNetworkController) deletePodGWRoutesForNamespace(pod *kapi.Pod,
 // deleteGwRoutesForNamespace handles deleting routes to gateways for a pod on a specific GR.
 // If a set of gateways is given, only routes for that gateway are deleted. If no gateways
 // are given, all routes for the namespace are deleted.
-func (oc *DefaultNetworkController) deleteGWRoutesForNamespace(namespace string, matchGWs sets.String) error {
+func (oc *DefaultNetworkController) deleteGWRoutesForNamespace(namespace string, matchGWs sets.Set[string]) error {
 	deleteAll := (matchGWs == nil || matchGWs.Len() == 0)
 	for _, routeInfo := range oc.getRouteInfosForNamespace(namespace) {
 		routeInfo.Lock()
@@ -1007,8 +1007,8 @@ func (oc *DefaultNetworkController) cleanExGwECMPRoutes() {
 	}
 }
 
-func getExGwPodIPs(gatewayPod *kapi.Pod) (sets.String, error) {
-	foundGws := sets.NewString()
+func getExGwPodIPs(gatewayPod *kapi.Pod) (sets.Set[string], error) {
+	foundGws := sets.New[string]()
 	if gatewayPod.Annotations[util.RoutingNetworkAnnotation] != "" {
 		var multusNetworks []nettypes.NetworkStatus
 		err := json.Unmarshal([]byte(gatewayPod.ObjectMeta.Annotations[nettypes.NetworkStatusAnnot]), &multusNetworks)

@@ -327,8 +327,8 @@ func (c *Controller) nodeStateFor(name string) (*nodeState, error) {
 
 // Returns the names of all of the nodes in the nodes cache that match the given selector
 // and a slice of their states which can be sorted later.
-func (c *Controller) cachedNodesFor(selector labels.Selector) (sets.String, []*nodeState) {
-	names := sets.NewString()
+func (c *Controller) cachedNodesFor(selector labels.Selector) (sets.Set[string], []*nodeState) {
+	names := sets.New[string]()
 	states := []*nodeState{}
 	for _, n := range c.nodes {
 		if selector.Matches(labels.Set(n.labels)) {
@@ -401,7 +401,7 @@ func (c *Controller) selectNodeFor(selector labels.Selector) (*nodeState, error)
 		return nil, err
 	}
 
-	allReadyNodes := sets.NewString()
+	allReadyNodes := sets.New[string]()
 	for _, n := range nodes {
 		if nodeIsReady(n) {
 			allReadyNodes.Insert(n.Name)

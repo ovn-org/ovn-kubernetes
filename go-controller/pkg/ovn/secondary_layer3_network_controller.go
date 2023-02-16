@@ -443,7 +443,7 @@ func (oc *SecondaryLayer3NetworkController) deleteNode(nodeName string) error {
 // Note that this list will include the 'join' cluster switch, which we
 // do not want to delete.
 func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error {
-	foundNodes := sets.NewString()
+	foundNodes := sets.New[string]()
 	for _, tmp := range nodes {
 		node, ok := tmp.(*kapi.Node)
 		if !ok {

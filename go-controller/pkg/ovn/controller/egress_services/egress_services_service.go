@@ -254,7 +254,7 @@ func (c *Controller) syncService(key string) error {
 
 		// We found a node - update the caches with the new objects.
 		delete(c.unallocatedServices, key)
-		newState := &svcState{node: node.name, selector: selector, v4Endpoints: sets.NewString(), v6Endpoints: sets.NewString(), stale: false}
+		newState := &svcState{node: node.name, selector: selector, v4Endpoints: sets.New[string](), v6Endpoints: sets.New[string](), stale: false}
 		c.services[key] = newState
 		node.allocations[key] = newState
 		c.nodes[node.name] = node
@@ -409,7 +409,7 @@ func (c *Controller) patchServiceAnnotations(namespace, name string, annotations
 }
 
 // Returns all of the non-host endpoints for the given service grouped by IPv4/IPv6.
-func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.String, sets.String, []string, error) {
+func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.Set[string], sets.Set[string], []string, error) {
 	// Get the endpoint slices associated to the Service
 	esLabelSelector := labels.Set(map[string]string{
 		discovery.LabelServiceName: svc.Name,
@@ -420,9 +420,9 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.String, sets.Str
 		return nil, nil, nil, err
 	}
 
-	v4Endpoints := sets.NewString()
-	v6Endpoints := sets.NewString()
-	nodes := sets.NewString()
+	v4Endpoints := sets.New[string]()
+	v6Endpoints := sets.New[string]()
+	nodes := sets.New[string]()
 	for _, eps := range endpointSlices {
 		if eps.AddressType == discovery.AddressTypeFQDN {
 			continue

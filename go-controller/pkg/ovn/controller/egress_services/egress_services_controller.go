@@ -85,8 +85,8 @@ type Controller struct {
 type svcState struct {
 	node        string
 	selector    labels.Selector
-	v4Endpoints sets.String
-	v6Endpoints sets.String
+	v4Endpoints sets.Set[string]
+	v6Endpoints sets.Set[string]
 	stale       bool
 }
 
@@ -247,8 +247,8 @@ func (c *Controller) repair() error {
 	defer c.Unlock()
 
 	// all the current valid egress services keys to their endpoints from the listers.
-	svcKeyToAllV4Endpoints := map[string]sets.String{}
-	svcKeyToAllV6Endpoints := map[string]sets.String{}
+	svcKeyToAllV4Endpoints := map[string]sets.Set[string]{}
+	svcKeyToAllV6Endpoints := map[string]sets.Set[string]{}
 
 	// all known existing egress services to their endpoints from OVN.
 	svcKeyToConfiguredV4Endpoints := map[string][]string{}
@@ -327,7 +327,7 @@ func (c *Controller) repair() error {
 			svcKeyToAllV6Endpoints[key] = v6
 			svcKeyToConfiguredV4Endpoints[key] = []string{}
 			svcKeyToConfiguredV6Endpoints[key] = []string{}
-			svcState := &svcState{node: svcHost, selector: selector, v4Endpoints: sets.NewString(), v6Endpoints: sets.NewString(), stale: false}
+			svcState := &svcState{node: svcHost, selector: selector, v4Endpoints: sets.New[string](), v6Endpoints: sets.New[string](), stale: false}
 			nodeState.allocations[key] = svcState
 			c.nodes[svcHost] = nodeState
 			c.services[key] = svcState

@@ -89,7 +89,7 @@ func (a *Addr) Equals(b *Addr) bool {
 func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existingCacheLBs []LB, LBs []LB) error {
 	externalIDs := util.ExternalIDsForObject(service)
 	existingByName := make(map[string]*LB, len(existingCacheLBs))
-	toDelete := sets.NewString()
+	toDelete := sets.New[string]()
 
 	for i := range existingCacheLBs {
 		lb := &existingCacheLBs[i]
@@ -112,22 +112,22 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existing
 		blb := buildLB(&lb)
 		lbs = append(lbs, blb)
 		existingLB := existingByName[lb.Name]
-		existingRouters := sets.String{}
-		existingSwitches := sets.String{}
-		existingGroups := sets.String{}
+		existingRouters := sets.Set[string]{}
+		existingSwitches := sets.Set[string]{}
+		existingGroups := sets.Set[string]{}
 		if existingLB != nil {
 			blb.UUID = existingLB.UUID
 			existinglbs = append(existinglbs, blb)
 			toDelete.Delete(existingLB.UUID)
-			existingRouters = sets.NewString(existingLB.Routers...)
-			existingSwitches = sets.NewString(existingLB.Switches...)
-			existingGroups = sets.NewString(existingLB.Groups...)
+			existingRouters = sets.New[string](existingLB.Routers...)
+			existingSwitches = sets.New[string](existingLB.Switches...)
+			existingGroups = sets.New[string](existingLB.Groups...)
 		} else {
 			newlbs = append(newlbs, blb)
 		}
-		wantRouters := sets.NewString(lb.Routers...)
-		wantSwitches := sets.NewString(lb.Switches...)
-		wantGroups := sets.NewString(lb.Groups...)
+		wantRouters := sets.New(lb.Routers...)
+		wantSwitches := sets.New(lb.Switches...)
+		wantGroups := sets.New(lb.Groups...)
 		mapLBDifferenceByKey(addLBsToSwitch, wantSwitches, existingSwitches, blb)
 		mapLBDifferenceByKey(removeLBsFromSwitch, existingSwitches, wantSwitches, blb)
 		mapLBDifferenceByKey(addLBsToRouter, wantRouters, existingRouters, blb)
@@ -279,7 +279,7 @@ func LoadBalancersEqualNoUUID(lbs1, lbs2 []LB) bool {
 	return reflect.DeepEqual(new1, new2)
 }
 
-func mapLBDifferenceByKey(keyMap map[string][]*nbdb.LoadBalancer, keyIn sets.String, keyNotIn sets.String, lb *nbdb.LoadBalancer) {
+func mapLBDifferenceByKey(keyMap map[string][]*nbdb.LoadBalancer, keyIn sets.Set[string], keyNotIn sets.Set[string], lb *nbdb.LoadBalancer) {
 	for _, k := range keyIn.Difference(keyNotIn).UnsortedList() {
 		l := keyMap[k]
 		if l == nil {
@@ -368,17 +368,17 @@ func getLBs(nbClient libovsdbclient.Client) ([]*LB, error) {
 }
 
 // getServiceLBs returns a set of services as well as a slice of load balancers found in OVN.
-func getServiceLBs(nbClient libovsdbclient.Client) (sets.String, []*LB, error) {
+func getServiceLBs(nbClient libovsdbclient.Client) (sets.Set[string], []*LB, error) {
 	return _getLBsCommon(nbClient, true)
 }
 
-func _getLBsCommon(nbClient libovsdbclient.Client, withServiceOwner bool) (sets.String, []*LB, error) {
+func _getLBsCommon(nbClient libovsdbclient.Client, withServiceOwner bool) (sets.Set[string], []*LB, error) {
 	lbs, err := libovsdbops.ListLoadBalancers(nbClient)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not list load_balancer: %w", err)
 	}
 
-	services := sets.NewString()
+	services := sets.New[string]()
 	outMap := make(map[string]*LB, len(lbs))
 	for _, lb := range lbs {
 
