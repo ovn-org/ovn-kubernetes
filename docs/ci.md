@@ -109,7 +109,7 @@ Determine which version of Kubernetes is currently used in CI (See
 and set the environmental variable `K8S_VERSION` to the same value. Also make sure to export a GOPATH which points to your go directory with `export GOPATH=(...)`.
 
 ```
-K8S_VERSION=v1.24.0
+K8S_VERSION=v1.26.0
 git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
 pushd $GOPATH/src/k8s.io/kubernetes/
 make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
