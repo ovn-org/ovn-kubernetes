@@ -382,6 +382,7 @@ func RegisterMasterFunctional() {
 	prometheus.MustRegister(metricEgressFirewallRuleCount)
 	prometheus.MustRegister(metricEgressFirewallCount)
 	prometheus.MustRegister(metricEgressRoutingViaHost)
+	prometheus.MustRegister(MetricResourceRetryFailuresCount)
 }
 
 // RunTimestamp adds a goroutine that registers and updates timestamp metrics.

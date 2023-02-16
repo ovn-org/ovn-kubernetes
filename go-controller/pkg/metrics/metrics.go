@@ -71,6 +71,15 @@ type stopwatchStatistics struct {
 	longTermAvg    string
 }
 
+// MetricResourceRetryFailuresCount is the number of times retrying to reconcile a Kubernetes
+// resource reached the maximum retry limit and will not be retried. This metric doesn't
+// need Subsystem string since it is applicable for both master and node.
+var MetricResourceRetryFailuresCount = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Name:      "resource_retry_failures_total",
+	Help:      "The total number of times processing a Kubernetes resource reached the maximum retry limit and was no longer processed",
+})
+
 // OVN/OVS components, namely ovn-northd, ovn-controller, and ovs-vswitchd provide various
 // metrics through the 'coverage/show' command. The following data structure holds all the
 // metrics we are interested in that output for a given component. We generalize capturing

@@ -14,6 +14,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 )
 
@@ -231,6 +232,7 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 			klog.Warningf("Dropping retry entry for %s %s: exceeded number of failed attempts",
 				r.ResourceHandler.ObjType, objKey)
 			r.DeleteRetryObj(key)
+			metrics.MetricResourceRetryFailuresCount.Inc()
 			return
 		}
 		forceRetry := false
