@@ -54,7 +54,7 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 				"condition. Pod: %s/%s, node: %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
 		}
 	}
-	if err := bnc.waitForNodeLogicalSwitchInCache(switchName); err != nil {
+	if err := bnc.waitForNodeLogicalSwitchSubnetsInCache(switchName); err != nil {
 		return expectedLogicalPortName, fmt.Errorf("failed to wait for switch %s to be added to cache. IP allocation may fail!",
 			switchName)
 	}
@@ -316,10 +316,11 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitch(switchName string) (*
 	return ls, nil
 }
 
-func (bnc *BaseNetworkController) waitForNodeLogicalSwitchInCache(switchName string) error {
-	// Wait for the node logical switch to be created by the ClusterController.
+func (bnc *BaseNetworkController) waitForNodeLogicalSwitchSubnetsInCache(switchName string) error {
+	// Wait for the node logical switch with IPAM to be created by the ClusterController
 	// The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch.
+	// This function is only invoked when IPAM is required.
 	var subnets []*net.IPNet
 	if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
 		subnets = bnc.lsManager.GetSwitchSubnets(switchName)
