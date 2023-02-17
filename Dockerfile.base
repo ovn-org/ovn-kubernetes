@@ -8,18 +8,18 @@
 FROM registry.ci.openshift.org/ocp/4.13:base
 
 # install selinux-policy first to avoid a race
-RUN yum install -y  \
+RUN dnf install -y --nodocs \
 	selinux-policy && \
-	yum clean all
+	dnf clean all
 
 ARG ovsver=2.17.0-62.el8fdp
 ARG ovnver=22.12.0-18.el8fdp
 
 RUN INSTALL_PKGS="iptables" && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.17 = $ovsver" "python3-openvswitch2.17 = $ovsver" && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn22.12 = $ovnver" "ovn22.12-central = $ovnver" "ovn22.12-host = $ovnver" && \
-	yum clean all && rm -rf /var/cache/*
+	dnf install -y --nodocs $INSTALL_PKGS && \
+	dnf install -y --nodocs "openvswitch2.17 = $ovsver" "python3-openvswitch2.17 = $ovsver" && \
+	dnf install -y --nodocs "ovn22.12 = $ovnver" "ovn22.12-central = $ovnver" "ovn22.12-host = $ovnver" && \
+	dnf clean all && rm -rf /var/cache/*
 
 RUN sed 's/%/"/g' <<<"%openvswitch2.17-devel = $ovsver% %openvswitch2.17-ipsec = $ovsver% %ovn22.12-vtep = $ovnver%" > /more-pkgs
 
