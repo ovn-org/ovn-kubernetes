@@ -242,6 +242,7 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 			return fmt.Errorf("unable to find gateway IP for subnet: %v, found IPs: %v", subnet, gwIPs)
 		}
 
+		// Remove MTU from service route once https://bugzilla.redhat.com/show_bug.cgi?id=2169839 is fixed.
 		mtu := config.Default.MTU
 		if config.Default.RoutableMTU != 0 {
 			mtu = config.Default.RoutableMTU
