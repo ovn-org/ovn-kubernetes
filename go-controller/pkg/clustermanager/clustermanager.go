@@ -34,7 +34,7 @@ type ClusterManager struct {
 
 // NewClusterManager creates a new cluster manager to manage the cluster nodes.
 func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
-	identity string, wg *sync.WaitGroup, recorder record.EventRecorder) *ClusterManager {
+	identity string, wg *sync.WaitGroup, recorder record.EventRecorder) (*ClusterManager, error) {
 	defaultNetClusterController := newNetworkClusterController(ovntypes.DefaultNetworkName, config.Default.ClusterSubnets,
 		ovnClient, wf, config.HybridOverlay.Enabled, &util.DefaultNetInfo{}, &util.DefaultNetConfInfo{})
 	cm := &ClusterManager{
@@ -45,11 +45,14 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		recorder:                    recorder,
 		identity:                    identity,
 	}
-
+	var err error
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.secondaryNetClusterManager = newSecondaryNetworkClusterManager(ovnClient, wf, recorder)
+		cm.secondaryNetClusterManager, err = newSecondaryNetworkClusterManager(ovnClient, wf, recorder)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return cm
+	return cm, nil
 }
 
 // Start the cluster manager.

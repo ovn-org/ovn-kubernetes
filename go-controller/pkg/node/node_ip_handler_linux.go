@@ -135,11 +135,14 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	// address but only later update kubelet configuration and restart kubelet (which in turn will update the reported
 	// IP address inside the node's status field).
 	nodeInformer := c.watchFactory.NodeInformer()
-	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
 			c.handleNodeChanges(new)
 		},
 	})
+	if err != nil {
+		klog.Fatalf("Could not add node event handler while starting address manager %v", err)
+	}
 
 	doneWg.Add(1)
 	go func() {

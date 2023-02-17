@@ -23,15 +23,19 @@ type secondaryNetworkClusterManager struct {
 }
 
 func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset,
-	wf *factory.WatchFactory, recorder record.EventRecorder) *secondaryNetworkClusterManager {
+	wf *factory.WatchFactory, recorder record.EventRecorder) (*secondaryNetworkClusterManager, error) {
 	klog.Infof("Creating secondary network cluster manager")
 	sncm := &secondaryNetworkClusterManager{
 		ovnClient:    ovnClient,
 		watchFactory: wf,
 	}
-	sncm.nadController = nad.NewNetAttachDefinitionController(
+	var err error
+	sncm.nadController, err = nad.NewNetAttachDefinitionController(
 		"cluster-manager", sncm, ovnClient.NetworkAttchDefClient, recorder)
-	return sncm
+	if err != nil {
+		return nil, err
+	}
+	return sncm, nil
 }
 
 // Start the secondary layer3 controller, handles all events and creates all

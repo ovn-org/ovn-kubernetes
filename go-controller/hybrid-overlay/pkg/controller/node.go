@@ -98,7 +98,7 @@ func NewNode(
 		return nil, err
 	}
 	n := &Node{controller: controller}
-	n.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,
+	n.nodeEventHandler, err = eventHandlerCreateFunction("node", nodeInformer,
 		func(obj interface{}) error {
 			node, ok := obj.(*kapi.Node)
 			if !ok {
@@ -115,7 +115,10 @@ func NewNode(
 		},
 		nodeChanged,
 	)
-	n.podEventHandler = eventHandlerCreateFunction("pod", podInformer,
+	if err != nil {
+		return nil, err
+	}
+	n.podEventHandler, err = eventHandlerCreateFunction("pod", podInformer,
 		func(obj interface{}) error {
 			pod, ok := obj.(*kapi.Pod)
 			if !ok {
@@ -138,7 +141,11 @@ func NewNode(
 		},
 		podChanged,
 	)
+	if err != nil {
+		return nil, err
+	}
 	return n, nil
+
 }
 
 // Run starts the controller and does not return until all operations have

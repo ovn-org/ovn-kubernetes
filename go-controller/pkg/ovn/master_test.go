@@ -985,7 +985,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		nodeHostAddrs = sets.New[string](node1.NodeIP)
+		nodeHostAddrs = sets.New(node1.NodeIP)
 		err = util.SetNodeHostAddresses(nodeAnnotator, nodeHostAddrs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = nodeAnnotator.Run()
@@ -1000,7 +1000,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		recorder = record.NewFakeRecorder(10)
-		oc = NewOvnController(fakeClient, f, stopChan, nil, nbClient, sbClient, recorder, wg)
+		oc, _ = NewOvnController(fakeClient, f, stopChan, nil, nbClient, sbClient, recorder, wg)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		oc.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 		gomega.Expect(oc).NotTo(gomega.BeNil())
 		oc.defaultCOPPUUID, err = EnsureDefaultCOPP(nbClient)
@@ -1519,6 +1520,7 @@ func newNodeSNAT(uuid, logicalIP, externalIP string) *nbdb.NAT {
 }
 
 func TestController_syncNodes(t *testing.T) {
+	gomega.RegisterFailHandler(ginkgo.Fail)
 	tests := []struct {
 		name         string
 		initialSBDB  []libovsdbtest.TestData
@@ -1577,7 +1579,7 @@ func TestController_syncNodes(t *testing.T) {
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
 
-			controller := NewOvnController(
+			controller, err := NewOvnController(
 				fakeClient,
 				f,
 				stopChan,
@@ -1586,6 +1588,7 @@ func TestController_syncNodes(t *testing.T) {
 				sbClient,
 				record.NewFakeRecorder(0),
 				wg)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {
 				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
@@ -1609,6 +1612,7 @@ func TestController_syncNodes(t *testing.T) {
 }
 
 func TestController_deleteStaleNodeChassis(t *testing.T) {
+	gomega.RegisterFailHandler(ginkgo.Fail)
 	tests := []struct {
 		name         string
 		node         v1.Node
@@ -1645,7 +1649,6 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				close(stopChan)
 				wg.Wait()
 			}()
-
 			kubeFakeClient := fake.NewSimpleClientset()
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
@@ -1669,7 +1672,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
 
-			controller := NewOvnController(
+			controller, err := NewOvnController(
 				fakeClient,
 				f,
 				stopChan,
@@ -1678,6 +1681,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				sbClient,
 				record.NewFakeRecorder(0),
 				wg)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {
 				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)

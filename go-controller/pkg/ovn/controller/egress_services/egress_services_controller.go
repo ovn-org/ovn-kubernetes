@@ -117,7 +117,7 @@ func NewController(
 	stopCh <-chan struct{},
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
-	nodeInformer coreinformers.NodeInformer) *Controller {
+	nodeInformer coreinformers.NodeInformer) (*Controller, error) {
 	klog.Info("Setting up event handlers for Egress Services")
 	c := &Controller{
 		controllerName:                           controllerName,
@@ -141,19 +141,25 @@ func NewController(
 		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 		"egressservices",
 	)
-	serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	_, err := serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onServiceAdd,
 		UpdateFunc: c.onServiceUpdate,
 		DeleteFunc: c.onServiceDelete,
 	}))
+	if err != nil {
+		return nil, err
+	}
 
 	c.endpointSliceLister = endpointSliceInformer.Lister()
 	c.endpointSlicesSynced = endpointSliceInformer.Informer().HasSynced
-	endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	_, err = endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onEndpointSliceAdd,
 		UpdateFunc: c.onEndpointSliceUpdate,
 		DeleteFunc: c.onEndpointSliceDelete,
 	}))
+	if err != nil {
+		return nil, err
+	}
 
 	c.nodeLister = nodeInformer.Lister()
 	c.nodesSynced = nodeInformer.Informer().HasSynced
@@ -161,13 +167,16 @@ func NewController(
 		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 		"egressservicenodes",
 	)
-	nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	_, err = nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onNodeAdd,
 		UpdateFunc: c.onNodeUpdate,
 		DeleteFunc: c.onNodeDelete,
 	}))
+	if err != nil {
+		return nil, err
+	}
 
-	return c
+	return c, nil
 }
 
 func (c *Controller) Run(threadiness int) {

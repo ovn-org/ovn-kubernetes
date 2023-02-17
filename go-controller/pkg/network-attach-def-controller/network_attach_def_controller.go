@@ -99,7 +99,7 @@ type NetAttachDefinitionController struct {
 }
 
 func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager, networkAttchDefClient nadclientset.Interface,
-	recorder record.EventRecorder) *NetAttachDefinitionController {
+	recorder record.EventRecorder) (*NetAttachDefinitionController, error) {
 	nadFactory := nadinformers.NewSharedInformerFactoryWithOptions(
 		networkAttchDefClient,
 		avoidResync,
@@ -122,13 +122,17 @@ func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager,
 		perNADNetConfInfo:  syncmap.NewSyncMap[*nadNetConfInfo](),
 		perNetworkNADInfo:  syncmap.NewSyncMap[*networkNADInfo](),
 	}
-	netAttachDefInformer.Informer().AddEventHandler(
+	_, err := netAttachDefInformer.Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc:    nadController.onNetworkAttachDefinitionAdd,
 			UpdateFunc: nadController.onNetworkAttachDefinitionUpdate,
 			DeleteFunc: nadController.onNetworkAttachDefinitionDelete,
 		})
-	return nadController
+	if err != nil {
+		return nil, err
+	}
+	return nadController, nil
+
 }
 
 func (nadController *NetAttachDefinitionController) Start() error {
@@ -484,7 +488,6 @@ func (nadController *NetAttachDefinitionController) addNADToController(ncm Netwo
 			klog.V(5).Infof("%s: First net-attach-def %s of network %s added, create network controller", nadController.name, nadName, networkName)
 			oc, err = ncm.NewNetworkController(nInfo, netConfInfo)
 			if err != nil {
-				klog.Errorf("%s: Failed to create network controller for network %s: %v", nadController.name, networkName, err)
 				return err
 			}
 			nni.nc = oc

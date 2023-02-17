@@ -540,8 +540,12 @@ func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (
 			h.OnAdd(item)
 		}
 	}
-	i.inf.AddEventHandler(i.newFederatedHandler())
+	_, err = i.inf.AddEventHandler(i.newFederatedHandler())
+	if err != nil {
+		return nil, err
+	}
 	return i, nil
+
 }
 
 func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
@@ -575,6 +579,11 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		addsWg.Wait()
 	}
 
-	i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues))
+	_, err = i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues))
+	if err != nil {
+		return nil, err
+	}
+
 	return i, nil
+
 }

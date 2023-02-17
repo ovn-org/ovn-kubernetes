@@ -428,8 +428,11 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			defer clusterManagerWatchFactory.Shutdown()
 		}
 
-		cm := clustermanager.NewClusterManager(ovnClientset.GetClusterManagerClientset(), clusterManagerWatchFactory,
+		cm, err := clustermanager.NewClusterManager(ovnClientset.GetClusterManagerClientset(), clusterManagerWatchFactory,
 			runMode.identity, wg, eventRecorder)
+		if err != nil {
+			return fmt.Errorf("failed to create new cluster manager: %w", err)
+		}
 		err = cm.Start(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to start cluster manager: %w", err)
@@ -451,8 +454,11 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
 		}
 
-		cm := controllerManager.NewNetworkControllerManager(ovnClientset, runMode.identity,
+		cm, err := controllerManager.NewNetworkControllerManager(ovnClientset, runMode.identity,
 			masterWatchFactory, libovsdbOvnNBClient, libovsdbOvnSBClient, eventRecorder, wg)
+		if err != nil {
+			return err
+		}
 		err = cm.Start(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to start network controller manager: %w", err)
@@ -482,7 +488,10 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		}
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
-		ncm := controllerManager.NewNodeNetworkControllerManager(ovnClientset, nodeWatchFactory, runMode.identity, eventRecorder)
+		ncm, err := controllerManager.NewNodeNetworkControllerManager(ovnClientset, nodeWatchFactory, runMode.identity, eventRecorder)
+		if err != nil {
+			return fmt.Errorf("failed to create ovnkube node network controller manager: %w", err)
+		}
 		err = ncm.Start(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to start node network manager: %w", err)

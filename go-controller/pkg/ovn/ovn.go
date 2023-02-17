@@ -400,7 +400,7 @@ func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, recorder record.EventRecorder) (*svccontroller.Controller, informers.SharedInformerFactory) {
+func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, recorder record.EventRecorder) (*svccontroller.Controller, informers.SharedInformerFactory, error) {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
@@ -421,7 +421,7 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 			options.LabelSelector = labelSelector.String()
 		}))
 
-	controller := svccontroller.NewController(
+	controller, err := svccontroller.NewController(
 		client,
 		nbClient,
 		svcFactory.Core().V1().Services(),
@@ -429,8 +429,10 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 		svcFactory.Core().V1().Nodes(),
 		recorder,
 	)
-
-	return controller, svcFactory
+	if err != nil {
+		return nil, nil, err
+	}
+	return controller, svcFactory, nil
 }
 
 func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
@@ -450,7 +452,7 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 }
 
 func newEgressServiceController(client clientset.Interface, nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	svcFactory informers.SharedInformerFactory, stopCh <-chan struct{}, controllerName string) *egresssvc.Controller {
+	svcFactory informers.SharedInformerFactory, stopCh <-chan struct{}, controllerName string) (*egresssvc.Controller, error) {
 
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
