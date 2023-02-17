@@ -110,6 +110,7 @@ type NetConfInfo interface {
 	CompareNetConf(NetConfInfo) bool
 	TopologyType() string
 	MTU() int
+	Subnets() []string
 }
 
 // DefaultNetConfInfo is structure which holds specific default network information
@@ -134,6 +135,11 @@ func (defaultNetConfInfo *DefaultNetConfInfo) TopologyType() string {
 // MTU returns the defaultNetConfInfo's MTU value
 func (defaultNetConfInfo *DefaultNetConfInfo) MTU() int {
 	return config.Default.MTU
+}
+
+// Subnets returns the defaultNetConfInfo's Subnets value
+func (defaultNetConfInfo *DefaultNetConfInfo) Subnets() []string {
+	return []string{config.Default.RawClusterSubnets}
 }
 
 func isSubnetsStringEqual(subnetsString, newSubnetsString string) bool {
@@ -241,6 +247,10 @@ func (layer3NetConfInfo *Layer3NetConfInfo) MTU() int {
 	return layer3NetConfInfo.mtu
 }
 
+func (layer3NetConfInfo *Layer3NetConfInfo) Subnets() []string {
+	return strings.Split(layer3NetConfInfo.subnets, ",")
+}
+
 // Layer2NetConfInfo is structure which holds specific secondary layer2 network information
 type Layer2NetConfInfo struct {
 	subnets        string
@@ -303,9 +313,6 @@ func verifyExcludeIPs(subnetsString string, excludeSubnetsString string) ([]*net
 	if err != nil {
 		return nil, nil, fmt.Errorf("subnets %s is invalid: %v", subnetsString, err)
 	}
-	if len(clusterSubnets) == 0 {
-		return nil, nil, fmt.Errorf("subnets is not defined")
-	}
 
 	excludeSubnets, err := parseSubnetsString(excludeSubnetsString)
 	if err != nil {
@@ -335,6 +342,14 @@ func (layer2NetConfInfo *Layer2NetConfInfo) TopologyType() string {
 
 func (layer2NetConfInfo *Layer2NetConfInfo) MTU() int {
 	return layer2NetConfInfo.mtu
+}
+
+func (layer2NetConfInfo *Layer2NetConfInfo) Subnets() []string {
+	subnets := strings.Split(layer2NetConfInfo.subnets, ",")
+	if len(subnets) == 1 && strings.TrimSpace(subnets[0]) == "" {
+		return nil
+	}
+	return subnets
 }
 
 // GetNADName returns key of NetAttachDefInfo.NetAttachDefs map, also used as Pod annotation key

@@ -143,11 +143,6 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 			errMatch:    fmt.Errorf("failed to parse pod MAC"),
 		},
 		{
-			desc:        "verify error thrown when neither ip_addresses nor ip_address is set",
-			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"0a:58:fd:98:00:01"}}`},
-			errMatch:    fmt.Errorf("bad annotation data (neither ip_address nor ip_addresses is set)"),
-		},
-		{
 			desc:        "test path when ip_addresses is empty and ip_address is set",
 			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"0a:58:fd:98:00:01", "ip_address":"192.168.0.11/24"}}`},
 		},
@@ -198,6 +193,10 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 		{
 			desc:        "verify successful unmarshal of pod annotation",
 			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.0.1"],"routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
+		},
+		{
+			desc:        "verify successful unmarshal of pod annotation when *only* the MAC address is present",
+			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"mac_address":"0a:58:fd:98:00:01"}}`},
 		},
 	}
 	for i, tc := range tests {

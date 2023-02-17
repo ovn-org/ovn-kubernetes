@@ -112,6 +112,17 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
+			table.Entry(
+				"when attaching to an L2 - switched - network without IPAM",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "layer2",
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        podName,
+				},
+			),
 		)
 	})
 
@@ -166,10 +177,13 @@ var _ = Describe("Multi Homing", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(netStatus).To(HaveLen(1))
 
-				By("asserting the server pod has an IP from the configured range")
-				Expect(netStatus[0].IPs).NotTo(BeEmpty())
-				serverIP := netStatus[0].IPs[0]
-				Expect(inRange(secondaryNetworkCIDR, serverIP)).To(Succeed())
+				serverIP := ""
+				if netConfig.cidr != "" {
+					By("asserting the server pod has an IP from the configured range")
+					Expect(netStatus[0].IPs).NotTo(BeEmpty())
+					serverIP = netStatus[0].IPs[0]
+					Expect(inRange(secondaryNetworkCIDR, serverIP)).To(Succeed())
+				}
 
 				By("instantiating the *client* pod")
 				clientPod, err := cs.CoreV1().Pods(clientPodConfig.namespace).Create(
@@ -187,6 +201,17 @@ var _ = Describe("Multi Homing", func() {
 					}
 					return updatedPod.Status.Phase
 				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+
+				if netConfig.cidr == "" {
+					By("configuring static IP addresses in the pods")
+					const (
+						clientIP       = "192.168.200.10/24"
+						staticServerIP = "192.168.200.20/24"
+					)
+					Expect(configurePodStaticIP(f.Namespace.Name, clientPodName, clientIP)).To(Succeed())
+					Expect(configurePodStaticIP(f.Namespace.Name, serverPod.GetName(), staticServerIP)).To(Succeed())
+					serverIP = strings.ReplaceAll(staticServerIP, "/24", "")
+				}
 
 				By("asserting the *client* pod can contact the server pod exposed endpoint")
 				Eventually(func() error {
@@ -254,6 +279,24 @@ var _ = Describe("Multi Homing", func() {
 					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
 					name:         podName,
 					containerCmd: httpServerContainerCmd(port),
+				},
+			),
+			table.Entry(
+				"can communicate over an L2 - switched - secondary network without IPAM",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "layer2",
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         clientPodName,
+					isPrivileged: true,
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					isPrivileged: true,
 				},
 			),
 		)
@@ -384,12 +427,17 @@ type podConfiguration struct {
 	name         string
 	namespace    string
 	nodeSelector map[string]string
+	isPrivileged bool
 }
 
 func generatePodSpec(config podConfiguration) *v1.Pod {
 	podSpec := e2epod.NewAgnhostPod(config.namespace, config.name, nil, nil, nil, config.containerCmd...)
 	podSpec.Annotations = networkSelectionElements(config.attachments...)
 	podSpec.Spec.NodeSelector = config.nodeSelector
+	if config.isPrivileged {
+		privileged := true
+		podSpec.Spec.Containers[0].SecurityContext.Privileged = &privileged
+	}
 	return podSpec
 }
 
@@ -469,4 +517,20 @@ func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topolog
 		networkName: networkName,
 		topology:    topology,
 	}
+}
+
+func configurePodStaticIP(podNamespace string, podName string, staticIP string) error {
+	_, err := framework.RunKubectl(
+		podNamespace,
+		"exec",
+		podName,
+		"--",
+		"ip",
+		"addr",
+		"add",
+		staticIP,
+		"dev",
+		"net1",
+	)
+	return err
 }
