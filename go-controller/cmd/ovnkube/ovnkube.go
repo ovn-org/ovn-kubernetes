@@ -285,6 +285,7 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		start := time.Now()
 		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, wg, nodeEventRecorder)
 		if err := n.Start(ctx.Context); err != nil {
+			klog.Errorf("Failed to start ovnkube node: %v", err)
 			return err
 		}
 		end := time.Since(start)
