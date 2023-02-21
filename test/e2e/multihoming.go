@@ -545,16 +545,8 @@ func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topolog
 
 func configurePodStaticIP(podNamespace string, podName string, staticIP string) error {
 	_, err := framework.RunKubectl(
-		podNamespace,
-		"exec",
-		podName,
-		"--",
-		"ip",
-		"addr",
-		"add",
-		staticIP,
-		"dev",
-		"net1",
+		podNamespace, "exec", podName, "--",
+		"ip", "addr", "add", staticIP, "dev", "net1",
 	)
 	return err
 }
