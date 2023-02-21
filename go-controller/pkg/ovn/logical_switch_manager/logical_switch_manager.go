@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -19,8 +20,11 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-// SwitchNotFound is used to inform the logical switch was not found in the cache
-var SwitchNotFound = errors.New("switch not found")
+var (
+	ErrMacAllocated = errors.New("provided MAC is already allocated")
+	// SwitchNotFound is used to inform the logical switch was not found in the cache
+	SwitchNotFound = errors.New("switch not found")
+)
 
 // logicalSwitchInfo contains information corresponding to the switch. It holds the
 // subnet allocations (v4 and v6) as well as the IPAM allocator instances for each
@@ -31,6 +35,8 @@ type logicalSwitchInfo struct {
 	noHostSubnet bool
 	// the uuid of the logicalSwitch described by this struct
 	uuid string
+	// the MACs assigned on this logical switch
+	macReservations map[string]struct{}
 }
 
 type ipamFactoryFunc func(*net.IPNet) (ipam.Interface, error)
@@ -116,11 +122,50 @@ func (manager *LogicalSwitchManager) AddSwitch(switchName, uuid string, hostSubn
 		}
 		ipams = append(ipams, ipam)
 	}
+
 	manager.cache[switchName] = logicalSwitchInfo{
 		hostSubnets:  hostSubnets,
 		ipams:        ipams,
 		noHostSubnet: len(hostSubnets) == 0,
 		uuid:         uuid,
+	}
+
+	return nil
+}
+
+func (manager *LogicalSwitchManager) AddIPAMLessSwitch(switchName, uuid string, macAddresses map[string]struct{}) error {
+	extractMapKeys := func(aMap map[string]struct{}) []string {
+		keys := make([]string, len(aMap))
+
+		i := 0
+		for k := range aMap {
+			keys[i] = k
+			i++
+		}
+		return keys
+	}
+	newMacReservations := extractMapKeys(macAddresses)
+	manager.Lock()
+	defer manager.Unlock()
+
+	if lsi, ok := manager.cache[switchName]; ok && !reflect.DeepEqual(lsi.macReservations, macAddresses) {
+		klog.Warningf(
+			"Logical switch %s already in cache with mac reservations %s; replacing with %s",
+			switchName,
+			strings.Join(extractMapKeys(lsi.macReservations), ";"),
+			strings.Join(newMacReservations, ";"),
+		)
+	}
+
+	if macAddresses == nil {
+		macAddresses = make(map[string]struct{}, 0)
+	}
+	manager.cache[switchName] = logicalSwitchInfo{
+		hostSubnets:     nil,
+		ipams:           nil,
+		noHostSubnet:    true,
+		uuid:            uuid,
+		macReservations: macAddresses,
 	}
 
 	return nil
@@ -235,6 +280,23 @@ func (manager *LogicalSwitchManager) AllocateIPs(switchName string, ipnets []*ne
 			}
 		}
 	}
+	return nil
+}
+
+func (manager *LogicalSwitchManager) AllocateMAC(switchName string, mac net.HardwareAddr) error {
+	manager.Lock()
+	defer manager.Unlock()
+	lsi, ok := manager.cache[switchName]
+	macKey := string(mac)
+	if !ok {
+		return fmt.Errorf("unable to allocate MAC: %s for switch %s: %w", macKey, switchName, SwitchNotFound)
+	}
+
+	if _, isMacAlreadyAllocated := lsi.macReservations[macKey]; isMacAlreadyAllocated {
+		return ErrMacAllocated
+	}
+
+	lsi.macReservations[macKey] = struct{}{}
 	return nil
 }
 

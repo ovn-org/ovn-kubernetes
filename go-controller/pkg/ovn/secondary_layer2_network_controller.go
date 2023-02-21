@@ -264,23 +264,37 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 
 	layer2NetConfInfo := oc.NetConfInfo.(*util.Layer2NetConfInfo)
 
-	hostSubnets := make([]*net.IPNet, 0, len(layer2NetConfInfo.ClusterSubnets))
-	for _, subnet := range layer2NetConfInfo.ClusterSubnets {
-		hostSubnets = append(hostSubnets, subnet)
-		if utilnet.IsIPv6CIDR(subnet) {
-			logicalSwitch.OtherConfig = map[string]string{"ipv6_prefix": subnet.IP.String()}
-		} else {
-			logicalSwitch.OtherConfig = map[string]string{"subnet": subnet.String()}
-		}
-	}
-
 	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig, &logicalSwitch.ExternalIDs)
 	if err != nil {
 		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
 	}
 
-	if err = oc.lsManager.AddSwitch(switchName, logicalSwitch.UUID, hostSubnets); err != nil {
-		return err
+	if oc.doesNetworkRequireIPAM() {
+		hostSubnets := make([]*net.IPNet, 0, len(layer2NetConfInfo.ClusterSubnets))
+		for _, subnet := range layer2NetConfInfo.ClusterSubnets {
+			hostSubnets = append(hostSubnets, subnet)
+			if utilnet.IsIPv6CIDR(subnet) {
+				logicalSwitch.OtherConfig = map[string]string{"ipv6_prefix": subnet.IP.String()}
+			} else {
+				logicalSwitch.OtherConfig = map[string]string{"subnet": subnet.String()}
+			}
+		}
+
+		if err = oc.lsManager.AddSwitch(switchName, logicalSwitch.UUID, hostSubnets); err != nil {
+			return err
+		}
+	} else {
+		lsps, err := libovsdbops.FindLogicalSwitchPortsWithPredicate(oc.nbClient, func(port *nbdb.LogicalSwitchPort) bool {
+			portExternalID, hasNetworkExtID := port.ExternalIDs[types.NetworkExternalID]
+			return hasNetworkExtID && portExternalID == oc.NetInfo.GetNetworkName()
+		})
+		if err != nil {
+			return fmt.Errorf("failed to list the logical switch ports of switch %s: %v", switchName, err)
+		}
+
+		if err = oc.lsManager.AddIPAMLessSwitch(switchName, logicalSwitch.UUID, logicalSwitchPortMacAddresses(lsps)); err != nil {
+			return err
+		}
 	}
 
 	// FIXME: allocate IP ranges when https://github.com/ovn-org/ovn-kubernetes/issues/3369 is fixed
@@ -297,4 +311,17 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 	}
 
 	return nil
+}
+
+func logicalSwitchPortMacAddresses(lsps []*nbdb.LogicalSwitchPort) map[string]struct{} {
+	macAddresses := map[string]struct{}{}
+	for _, lsp := range lsps {
+		addrs := lsp.Addresses
+		_, err := net.ParseMAC(addrs[0])
+		if err != nil {
+			// TODO
+		}
+		macAddresses[addrs[0]] = struct{}{}
+	}
+	return macAddresses
 }

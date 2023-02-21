@@ -394,4 +394,29 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 
 	})
 
+	ginkgo.Context("when allocating MAC addresses", func() {
+		ginkgo.It("we can randomly generate random mac addresses", func() {
+			generatedMAC, err := GenerateRandMAC()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(GenerateRandMAC()).NotTo(gomega.Equal(generatedMAC))
+		})
+		ginkgo.It("an error is thrown when we attempt to allocate the same MAC twice", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				testNode := testNodeSubnetData{
+					switchName: "testNode1",
+					subnets:    []string{},
+				}
+				err = lsManager.AddIPAMLessSwitch(testNode.switchName, "", map[string]struct{}{})
+				mac, err := GenerateRandMAC()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Expect(lsManager.AllocateMAC(testNode.switchName, mac)).To(gomega.Succeed())
+				gomega.Expect(lsManager.AllocateMAC(testNode.switchName, mac)).To(gomega.MatchError(ErrMacAllocated))
+				return nil
+			}
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+	})
 })

@@ -586,6 +586,10 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		} else if len(podIfAddrs) > 0 {
 			return nil, nil, nil, false, fmt.Errorf("IPAMless network with IPs present in the annotations; rejecting to handle this request")
 		}
+
+		if err = bnc.lsManager.AllocateMAC(switchName, podMac); err != nil && err != logicalswitchmanager.ErrMacAllocated {
+			return nil, nil, nil, false, fmt.Errorf("unable to ensure MAC address for already annotated pod: %s: %v", podDesc, err)
+		}
 	}
 
 	if needsIP {
@@ -619,6 +623,12 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 			}
 			if podMac == nil {
 				podMac = generatedPodMac
+				if !bnc.doesNetworkRequireIPAM() {
+					if err := bnc.lsManager.AllocateMAC(switchName, podMac); err != nil {
+						klog.Errorf("error allocating MAC addresses %s on switch %s: %v", podMac.String(), switchName, err)
+						return nil, nil, nil, false, err
+					}
+				}
 			}
 			if len(generatedPodIfAddrs) > 0 {
 				podIfAddrs = generatedPodIfAddrs
@@ -634,6 +644,10 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 			if err != nil {
 				return nil, nil, nil, false, fmt.Errorf("failed to parse mac %s requested in annotation for pod %s: Error %v",
 					network.MacRequest, podDesc, err)
+			}
+			if err := bnc.lsManager.AllocateMAC(switchName, podMac); err != nil {
+				klog.Errorf("error allocating MAC addresses %s on switch %s: %v", podMac.String(), switchName, err)
+				return nil, nil, nil, false, err
 			}
 		}
 		podAnnotation = &util.PodAnnotation{

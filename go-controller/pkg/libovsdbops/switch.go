@@ -266,6 +266,16 @@ func UpdateLogicalSwitchSetOtherConfig(nbClient libovsdbclient.Client, sw *nbdb.
 
 // LOGICAL SWITCH PORT OPs
 
+// FindLogicalSwitchPortsWithPredicate looks up logical switch ports from the
+// cache based on a given predicate
+func FindLogicalSwitchPortsWithPredicate(nbClient libovsdbclient.Client, p logicalSwitchPortPredicate) ([]*nbdb.LogicalSwitchPort, error) {
+	found := []*nbdb.LogicalSwitchPort{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
+}
+
 // GetLogicalSwitchPort looks up a logical switch port from the cache
 func GetLogicalSwitchPort(nbClient libovsdbclient.Client, lsp *nbdb.LogicalSwitchPort) (*nbdb.LogicalSwitchPort, error) {
 	found := []*nbdb.LogicalSwitchPort{}
