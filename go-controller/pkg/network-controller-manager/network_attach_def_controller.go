@@ -39,7 +39,7 @@ const (
 	avoidResync     = 0
 	numberOfWorkers = 2
 	qps             = 15
-	maxRetries      = 10
+	maxRetries      = 100
 )
 
 type BaseNetworkController interface {
@@ -130,7 +130,7 @@ func (nadController *netAttachDefinitionController) Run(stopChan <-chan struct{}
 		klog.Infof("Shutting down controller %s", controllerName)
 		nadController.queue.ShutDown()
 	}()
-
+	klog.Infof("Running with %d maxRetries", maxRetries)
 	nadController.nadFactory.Start(stopChan)
 	klog.Infof("Starting controller %s", controllerName)
 	if !cache.WaitForNamedCacheSync(controllerName, stopChan, nadController.netAttachDefSynced) {

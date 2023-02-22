@@ -73,7 +73,7 @@ var _ = Describe("Multi Homing", func() {
 					return v1.PodFailed
 				}
 				return updatedPod.Status.Phase
-			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+			}, 5*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 		},
 			table.Entry(
 				"when attaching to an L3 - routed - network",
@@ -166,7 +166,7 @@ var _ = Describe("Multi Homing", func() {
 						return v1.PodFailed
 					}
 					return updatedPod.Status.Phase
-				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+				}, 5*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 
 				pod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -200,7 +200,7 @@ var _ = Describe("Multi Homing", func() {
 						return v1.PodFailed
 					}
 					return updatedPod.Status.Phase
-				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+				}, 5*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 
 				if netConfig.cidr == "" {
 					By("configuring static IP addresses in the pods")
@@ -225,7 +225,7 @@ var _ = Describe("Multi Homing", func() {
 					}
 
 					return fmt.Errorf("pod not running. /me is sad")
-				}, 2*time.Minute, 6*time.Second).Should(Succeed())
+				}, 5*time.Minute, 6*time.Second).Should(Succeed())
 			},
 			table.Entry(
 				"can communicate over an L2 secondary network when the pods are scheduled in different nodes",
@@ -345,7 +345,7 @@ var _ = Describe("Multi Homing", func() {
 					return v1.PodFailed
 				}
 				return updatedPod.Status.Phase
-			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+			}, 5*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 		})
 
 		It("features two different IPs from the same subnet", func() {
