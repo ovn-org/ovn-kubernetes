@@ -614,13 +614,6 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
 		}
-		// OCP HACK
-		if config.HybridOverlay.Enabled {
-			if err := h.oc.addPodICNIv1(pod); err != nil {
-				return err
-			}
-		}
-		// END OCP HACK
 		return h.oc.ensurePod(nil, pod, true)
 
 	case factory.PolicyType:
@@ -746,14 +739,6 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
 		}
-		// OCP HACK -- required for hybrid overlay
-		if config.HybridOverlay.Enabled && hasHybridAnnotation(ns.ObjectMeta) {
-			if err := h.oc.addNamespaceICNIv1(ns); err != nil {
-				return fmt.Errorf("unable to handle legacy ICNIv1 check for namespace %q add, error: %v",
-					ns.Name, err)
-			}
-		}
-		// END OCP HACK
 		return h.oc.AddNamespace(ns)
 
 	default:
@@ -772,13 +757,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 	case factory.PodType:
 		oldPod := oldObj.(*kapi.Pod)
 		newPod := newObj.(*kapi.Pod)
-		// OCP HACK
-		if config.HybridOverlay.Enabled {
-			if err := h.oc.addPodICNIv1(newPod); err != nil {
-				return err
-			}
-		}
-		// END OCP HACK
+
 		return h.oc.ensurePod(oldPod, newPod, inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
 
 	case factory.NodeType:
@@ -917,14 +896,6 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
-		// OCP HACK -- required for hybrid overlay
-		if config.HybridOverlay.Enabled && nsHybridAnnotationChanged(oldNs, newNs) {
-			if err := h.oc.addNamespaceICNIv1(newNs); err != nil {
-				return fmt.Errorf("unable to handle legacy ICNIv1 check for namespace %q during update, error: %v",
-					newNs.Name, err)
-			}
-		}
-		// END OCP HACK
 		return h.oc.updateNamespace(oldNs, newNs)
 	}
 	return fmt.Errorf("no update function for object type %s", h.objType)

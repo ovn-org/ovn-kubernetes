@@ -640,7 +640,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 	var hybridOverlayExternalGW net.IP
 	if oc != nil {
 		// Ensure the namespace/nsInfo exists
-		routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, ops, err = oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+		routingExternalGWs, routingPodGWs, ops, err = oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 		if err != nil {
 			return nil, nil, nil, false, routingExternalGWs, routingPodGWs, err
 		}

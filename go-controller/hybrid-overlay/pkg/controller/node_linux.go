@@ -109,21 +109,6 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 		return n.DeletePod(pod)
 	}
 
-	externalGw, ok := pod.Annotations[hotypes.HybridOverlayExternalGw]
-	// validate the external gateway (if any) is a valid IP address
-	if ip := net.ParseIP(externalGw); ok && ip == nil {
-		klog.Warningf("Failed parse a valid external gateway ip address from %v: %v", externalGw, err)
-		return fmt.Errorf("failed to validate a valid external gateway ip address %s: %v", externalGw, err)
-	}
-
-	VTEP, ok := pod.Annotations[hotypes.HybridOverlayVTEP]
-	// validate the VTEP (if any) is a valid IP address
-	VTEPIP := net.ParseIP(VTEP)
-	if ok && VTEPIP == nil {
-		klog.Warningf("Failed parse a valid vtep ip address from %v: %v", VTEP, err)
-		return fmt.Errorf("failed to validate a valid vtep ip address %s: %v", VTEP, err)
-	}
-
 	// It's always safe to ignore the learn flow as we only process and add or update
 	// if the IP/MAC or Annotations have changed
 	ignoreLearn := true
@@ -154,76 +139,6 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 				"actions=set_field:%s->eth_src,set_field:%s->eth_dst,output:ext",
 			cookie, podIP.IP, n.drMAC.String(), podMAC))
 
-		if externalGw == "" || VTEP == "" {
-			klog.Infof("Hybrid Overlay Gateway mode not enabled for pod %s, namespace does not have hybrid"+
-				"annotations, external gw: %s, VTEP: %s", pod.Name, externalGw, VTEP)
-			n.updateFlowCacheEntry(cookie, flows, ignoreLearn)
-			continue
-		}
-
-		portMACRaw := strings.Replace(n.drMAC.String(), ":", "", -1)
-		vtepIPRaw := getIPAsHexString(VTEPIP)
-
-		// update map for tun to pod
-		n.tunMapMutex.Lock()
-		n.tunMap[podIP.IP.String()] = VTEP
-		// iterate and find all pods that belong to this VTEP and create learn actions
-		learnActions := ""
-		for pod, tun := range n.tunMap {
-			if tun == VTEP {
-				if len(learnActions) > 0 {
-					learnActions += ","
-				}
-				learnActions += fmt.Sprintf("learn("+
-					"table=20,cookie=0x%s,priority=50,"+
-					"dl_type=0x0800,nw_src=%s,"+
-					"load:NXM_NX_ARP_SHA[]->NXM_OF_ETH_DST[],"+
-					"load:0x%s->NXM_OF_ETH_SRC[],"+
-					"load:%d->NXM_NX_TUN_ID[0..31],"+
-					"load:0x%s->NXM_NX_TUN_IPV4_DST[],"+
-					"output:NXM_OF_IN_PORT[])",
-					podIPToCookie(net.ParseIP(pod)), pod, portMACRaw, hotypes.HybridOverlayVNI, vtepIPRaw)
-			}
-		}
-
-		// for arp request/response from vxlan, learn and add flow to table 20, for pod-> vxlan traffic
-		// special cookie needed here for tunnel
-		// tunnel cookie flows only contain a single flow ever, but it is updated by multiple pod adds
-		// so need proper locking around tunMap
-		// after learning actions, we need to resubmit the flow to the gw arp response table (2) so that we can respond
-		// back if this was an arp request
-		tunCookie := podIPToCookie(VTEPIP)
-		tunFlow := fmt.Sprintf("table=0,cookie=0x%s,priority=120,in_port=%s,arp,arp_spa=%s,tun_src=%s,"+
-			"actions=%s,resubmit(,2)",
-			tunCookie, extVXLANName, externalGw, VTEP, learnActions)
-		n.updateFlowCacheEntry(tunCookie, []string{tunFlow}, false)
-		n.tunMapMutex.Unlock()
-
-		// add flow to table 0 to match on incoming traffic from pods, send to table 20
-		// bypass regular Hybrid overlay for gateway mode
-		flows = append(flows,
-			fmt.Sprintf("table=0, cookie=0x%s, priority=10000,in_port=ext,ip,nw_src=%s,"+
-				"actions=goto_table:20",
-				cookie, podIP.IP))
-
-		// we need to send an ARP request to get the GW to send us a response
-		// and learn the mac, we will trigger an arp request to the gateway in table 1
-		flows = append(flows,
-			fmt.Sprintf(""+
-				"table=1,cookie=0x%s,priority=10,arp,arp_tpa=%s,"+
-				"actions="+
-				"mod_dl_dst:ff:ff:ff:ff:ff:ff,"+
-				"mod_dl_src:%s,"+
-				"load:0x1->NXM_OF_ARP_OP[],"+
-				"set_field:%s->arp_sha,"+
-				"set_field:%s->arp_spa,"+
-				"set_field:%s->arp_tpa,"+
-				"set_field:00:00:00:00:00:00->arp_tha,"+
-				"load:%d->NXM_NX_TUN_ID[0..31],"+
-				"set_field:%s->tun_dst,"+
-				"output:%s",
-				cookie, podIP.IP, n.drMAC.String(), n.drMAC.String(), n.drIP, externalGw, hotypes.HybridOverlayVNI,
-				VTEP, extVXLANName))
 		n.updateFlowCacheEntry(cookie, flows, ignoreLearn)
 	}
 	n.requestFlowSync()
