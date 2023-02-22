@@ -560,11 +560,13 @@ func (oc *DefaultNetworkController) reconcileCloudPrivateIPConfig(old, new *ocpc
 
 	if old != nil {
 		oldCloudPrivateIPConfig = old
-		// We need to handle two types of deletes, A) object UPDATE where the
+		// We need to handle three types of deletes, A) object UPDATE where the
 		// old egress IP <-> node assignment has been removed. This is indicated
 		// by the old object having a .status.node set and the new object having
 		// .status.node empty and the condition on the new being successful. B)
-		// object DELETE, for which new is nil
+		// object UPDATE where egress IP <-> node assignment has been updated.
+		// This is indicated by .status.node being different on old and new
+		// objects. C) object DELETE, for which new is nil
 		shouldDelete = oldCloudPrivateIPConfig.Status.Node != "" || new == nil
 		// On DELETE we need to delete the .spec.node for the old object
 		nodeToDelete = oldCloudPrivateIPConfig.Spec.Node
@@ -579,7 +581,8 @@ func (oc *DefaultNetworkController) reconcileCloudPrivateIPConfig(old, new *ocpc
 			ocpcloudnetworkapi.CloudPrivateIPConfigConditionType(newCloudPrivateIPConfig.Status.Conditions[0].Type) == ocpcloudnetworkapi.Assigned &&
 			kapi.ConditionStatus(newCloudPrivateIPConfig.Status.Conditions[0].Status) == kapi.ConditionTrue
 		// See above explanation for the delete
-		shouldDelete = shouldDelete && newCloudPrivateIPConfig.Status.Node == "" &&
+		shouldDelete = shouldDelete &&
+			(newCloudPrivateIPConfig.Status.Node == "" || newCloudPrivateIPConfig.Status.Node != oldCloudPrivateIPConfig.Status.Node) &&
 			ocpcloudnetworkapi.CloudPrivateIPConfigConditionType(newCloudPrivateIPConfig.Status.Conditions[0].Type) == ocpcloudnetworkapi.Assigned &&
 			kapi.ConditionStatus(newCloudPrivateIPConfig.Status.Conditions[0].Status) == kapi.ConditionTrue
 		// On UPDATE we need to delete the old .status.node
