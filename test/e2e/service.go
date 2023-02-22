@@ -347,6 +347,27 @@ var _ = ginkgo.Describe("Services", func() {
 								}
 								return nil
 							}, 60*time.Second, 1*time.Second).Should(gomega.Succeed())
+							// Flushing the IP route cache will remove any routes in the cache
+							// that are a result of receiving a "need to frag" packet. Let's
+							// flush this on all 3 nodes else we will run into the
+							// bug: https://issues.redhat.com/browse/OCPBUGS-7609.
+							// TODO: Revisit this once https://bugzilla.redhat.com/show_bug.cgi?id=2169839 is fixed.
+							ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
+								LabelSelector: "name=ovnkube-node",
+							})
+							if err != nil {
+								framework.Failf("could not get ovnkube-node pods: %v", err)
+							}
+							for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
+								framework.Logf("Flushing the ip route cache on %s", ovnKubeNodePod.Name)
+								_, err := framework.RunHostCmdWithRetries(
+									ovnNs,
+									ovnKubeNodePod.Name,
+									"ip route flush cache",
+									framework.Poll,
+									60*time.Second)
+								framework.ExpectNoError(err, "Flushing the ip route cache failed")
+							}
 						}
 					}
 				})

@@ -18,7 +18,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -42,7 +41,7 @@ import (
 // CommonNetworkControllerInfo structure is place holder for all fields shared among controllers.
 type CommonNetworkControllerInfo struct {
 	client       clientset.Interface
-	kube         kube.Interface
+	kube         *kube.KubeOVN
 	watchFactory *factory.WatchFactory
 	podRecorder  *metrics.PodRecorder
 
@@ -112,7 +111,7 @@ type BaseSecondaryNetworkController struct {
 }
 
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
-func NewCommonNetworkControllerInfo(client clientset.Interface, kube kube.Interface, wf *factory.WatchFactory,
+func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
 	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport bool) *CommonNetworkControllerInfo {
 	return &CommonNetworkControllerInfo{
@@ -376,9 +375,10 @@ func (bnc *BaseNetworkController) allocateNodeSubnets(node *kapi.Node,
 	return hostSubnets, nil
 }
 
-// UpdateNodeAnnotationWithRetry update node's hostSubnet annotation (possibly for multiple networks) and the
-// other given node annotations
-func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet,
+// UpdateNodeHostSubnetAnnotationWithRetry update node's hostSubnet annotation (possibly for multiple networks) and the
+// other given node annotations.
+// May be used concurrently, since it retries update on version conflict.
+func (cnci *CommonNetworkControllerInfo) UpdateNodeHostSubnetAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet,
 	otherUpdatedNodeAnnotation map[string]string) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
@@ -401,7 +401,7 @@ func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName 
 		for k, v := range otherUpdatedNodeAnnotation {
 			cnode.Annotations[k] = v
 		}
-		return cnci.kube.PatchNode(node, cnode)
+		return cnci.kube.UpdateNode(cnode)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation", nodeName)
@@ -412,15 +412,9 @@ func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName 
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
 func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) error {
 	switchName := bnc.GetNetworkScopedName(nodeName)
-	// Remove switch to lb associations from the LBCache before removing the switch
-	lbCache, err := ovnlb.GetLBCache(bnc.nbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get load_balancer cache for node %s: %v", nodeName, err)
-	}
-	lbCache.RemoveSwitch(switchName)
 
 	// Remove the logical switch associated with the node
-	err = libovsdbops.DeleteLogicalSwitch(bnc.nbClient, switchName)
+	err := libovsdbops.DeleteLogicalSwitch(bnc.nbClient, switchName)
 	if err != nil {
 		return fmt.Errorf("failed to delete logical switch %s: %v", switchName, err)
 	}
@@ -703,4 +697,8 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr 
 
 	klog.V(5).Infof("Posting %s event for Node %s: %v", kapi.EventTypeWarning, node.Name, nodeErr)
 	bnc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
+}
+
+func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
+	return !(bnc.TopologyType() == types.Layer2Topology && len(bnc.Subnets()) == 0)
 }

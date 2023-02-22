@@ -28,21 +28,29 @@ func genOVSFindCmd(table, column, condition string) string {
 }
 
 func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string) string {
+	ipAddrExtID := ""
+	if ip != "" {
+		ipAddrExtID = fmt.Sprintf("external_ids:ip_addresses=%s ", ip)
+	}
 	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s other_config:transient=true "+
 		"-- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s "+
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s %sexternal_ids:sandbox=%s "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
-		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID, hostIfaceName, hostIfaceName)
+		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ipAddrExtID, sandboxID, hostIfaceName, hostIfaceName)
 }
 
 func genOVSAddPortCmdWithNetdev(hostIfaceName, netdev, ifaceID, mac, ip, sandboxID, podUID string) string {
+	ipAddrExtID := ""
+	if ip != "" {
+		ipAddrExtID = fmt.Sprintf("external_ids:ip_addresses=%s ", ip)
+	}
 	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s other_config:transient=true "+
 		"-- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s external_ids:vf-netdev-name=%s "+
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s %sexternal_ids:sandbox=%s external_ids:vf-netdev-name=%s "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
-		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID, netdev, hostIfaceName, hostIfaceName)
+		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ipAddrExtID, sandboxID, netdev, hostIfaceName, hostIfaceName)
 }
 
 func genOVSDelPortCmd(portName string) string {
@@ -78,6 +86,7 @@ var _ = Describe("Node DPU tests", func() {
 	var node OvnNode
 	var podLister v1mocks.PodLister
 	var podNamespaceLister v1mocks.PodNamespaceLister
+	var clientset *cni.ClientSet
 
 	origSriovnetOps := util.GetSriovnetOps()
 	origNetlinkOps := util.GetNetLinkOps()
@@ -154,6 +163,8 @@ var _ = Describe("Node DPU tests", func() {
 				PodUID:        "a-pod",
 			}
 
+			fakeClient := newFakeKubeClientWithPod(&pod)
+			clientset = cni.NewClientSet(fakeClient, &podLister)
 			// set pod annotations
 			podAnnot := map[string]string{
 				util.DPUConnectionDetailsAnnot: `{"pfId":"0","vfId":"9","sandboxId":"a8d09931"}`,
@@ -163,9 +174,8 @@ var _ = Describe("Node DPU tests", func() {
 
 		It("Fails if dpu.connection-details Pod annotation is not present", func() {
 			pod.Annotations = map[string]string{}
-			fakeClient := newFakeKubeClientWithPod(&pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+			err := node.addRepPort(&pod, vfRep, ifInfo, clientset)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to get dpu annotation"))
 		})
@@ -187,11 +197,10 @@ var _ = Describe("Node DPU tests", func() {
 				Cmd: genOVSDelPortCmd("pf0vf9"),
 			})
 
-			fakeClient := newFakeKubeClientWithPod(&pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
 			// call addRepPort()
-			err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+			err := node.addRepPort(&pod, vfRep, ifInfo, clientset)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to run ovs command"))
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
@@ -216,12 +225,10 @@ var _ = Describe("Node DPU tests", func() {
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSDelPortCmd("pf0vf9"),
 			})
-
-			fakeClient := newFakeKubeClientWithPod(&pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
 			// call addRepPort()
-			err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+			err := node.addRepPort(&pod, vfRep, ifInfo, clientset)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to run ovs command"))
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
@@ -274,10 +281,9 @@ var _ = Describe("Node DPU tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					fakeClient := newFakeKubeClientWithPod(&pod)
 					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
-					err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+					err := node.addRepPort(&pod, vfRep, ifInfo, clientset)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 				})
@@ -291,10 +297,9 @@ var _ = Describe("Node DPU tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					fakeClient := newFakeKubeClientWithPod(&pod)
 					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
-					err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+					err := node.addRepPort(&pod, vfRep, ifInfo, clientset)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 				})
@@ -309,10 +314,9 @@ var _ = Describe("Node DPU tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					fakeClient := newFakeKubeClientWithPod(&pod)
 					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
-					err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+					err := node.addRepPort(&pod, vfRep, ifInfo, clientset)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 				})
@@ -332,10 +336,9 @@ var _ = Describe("Node DPU tests", func() {
 				Expect(err).ToNot(HaveOccurred())
 				kubeMock.On("UpdatePod", cpod).Return(nil)
 
-				fakeClient := newFakeKubeClientWithPod(&pod)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
-				err = node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+				err = node.addRepPort(&pod, vfRep, ifInfo, clientset)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})
@@ -359,10 +362,9 @@ var _ = Describe("Node DPU tests", func() {
 					Cmd: genOVSDelPortCmd("pf0vf9"),
 				})
 
-				fakeClient := newFakeKubeClientWithPod(&pod)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
-				err = node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+				err = node.addRepPort(&pod, vfRep, ifInfo, clientset)
 				Expect(err).To(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})

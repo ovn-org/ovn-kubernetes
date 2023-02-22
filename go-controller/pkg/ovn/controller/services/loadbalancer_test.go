@@ -1,10 +1,11 @@
-package loadbalancer
+package services
 
 import (
 	"fmt"
 	"testing"
 
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -15,17 +16,20 @@ func TestEnsureLBs(t *testing.T) {
 		t.Fatalf("Error creating NB: %v", err)
 	}
 	t.Cleanup(cleanup.Cleanup)
-	lbCache, err := GetLBCache(nbClient)
-	if err != nil {
-		t.Fatalf("Error creating LB Cache: %v", err)
-	}
 	name := "foo"
 	namespace := "testns"
 	defaultExternalIDs := map[string]string{
-		"k8s.ovn.org/kind":  "Service",
-		"k8s.ovn.org/owner": fmt.Sprintf("%s/%s", namespace, name),
+		types.LoadBalancerKindExternalID:  "Service",
+		types.LoadBalancerOwnerExternalID: fmt.Sprintf("%s/%s", namespace, name),
 	}
-	// put stale lb in the cache
+
+	defaultService := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: v1.ServiceSpec{
+			Type: v1.ServiceTypeClusterIP,
+		},
+	}
+
 	staleLBs := []LB{
 		{
 			Name:        "Service_testns/foo_TCP_node_router_node-a",
@@ -42,15 +46,23 @@ func TestEnsureLBs(t *testing.T) {
 			},
 			UUID: "test-UUID",
 		},
-	}
-	lbCache.update(staleLBs, nil)
-
-	defaultService := &v1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: v1.ServiceSpec{
-			Type: v1.ServiceTypeClusterIP,
+		{
+			Name:        "Service_testns/foo_TCP_node_is_gone",
+			ExternalIDs: defaultExternalIDs,
+			Routers:     []string{"gr-node-is-gone", "non-exisitng-router"},
+			Switches:    []string{"non-exisitng-switch"},
+			Groups:      []string{"non-existing-group"},
+			Protocol:    "TCP",
+			Rules: []LBRule{
+				{
+					Source:  Addr{"4.5.6.7", 80},
+					Targets: []Addr{{"169.254.169.2", 8080}},
+				},
+			},
+			UUID: "test-UUID2",
 		},
 	}
+
 	// required lb doesn't have stale router, switch, and port group reference.
 	// "gr-node-a" is listed as applied in the cache, no update operation will be generated for it.
 	LBs := []LB{
@@ -65,10 +77,14 @@ func TestEnsureLBs(t *testing.T) {
 					Targets: []Addr{{"169.254.169.2", 8080}},
 				},
 			},
+			UUID: "", // intentionally left empty to make sure EnsureLBs sets it properly
 		},
 	}
-	err = EnsureLBs(nbClient, defaultService, LBs)
+	err = EnsureLBs(nbClient, defaultService, staleLBs, LBs)
 	if err != nil {
 		t.Fatalf("Error EnsureLBs: %v", err)
+	}
+	if LBs[0].UUID != staleLBs[0].UUID {
+		t.Fatalf("EnsureLBs did not set UUID of cached LB as is should")
 	}
 }

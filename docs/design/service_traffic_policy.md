@@ -241,6 +241,155 @@ NOTE: Host-> svc (NP/EIP/LB) is neither "internal" nor "external" traffic, hence
 
 #### **Local Gateway Mode**
 
+### External Source -> Service -> Host Networked pod (non-hairpin case)
+
+NOTE: Same steps happen for `Host -> Service -> Host Networked Pods (non-hairpin case)`.
+
+The implementation of this case differs for local gateway from that for shared gateway. In local gateway all service traffic is sent straight to host (instead of sending it to OVN) to allow users to apply custom routes according to their use cases.
+
+In local gateway mode, rather than sending the traffic from breth0 into OVN via gateway router, we use flows on breth0 to send it into the host. Similarly rather than sending the DNAT-ed traffic from OVN to wire, we send it to host first.
+
+```text
+          host (ovn-worker2, 172.19.0.3) ---- 172.19.0.3 LOCAL(host) -- iptables -- breth0 -- GR -- breth0 -- host -- breth0 -- eth0 (backend ovn-worker 172.19.0.4)
+           ^
+           ^
+           |
+eth0--->|breth0|
+
+```
+
+SYN flow:
+
+1. Match on the incoming traffic via default flow on `table0`, send it to `table1`:
+
+```
+cookie=0xdeff105, duration=3189.786s, table=0, n_packets=99979, n_bytes=298029215, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000,nat)
+```
+
+2. Send it out to LOCAL ovs port on breth0 and traffic is delivered to the host:
+
+```
+cookie=0xdeff105, duration=3189.787s, table=1, n_packets=108, n_bytes=23004, priority=0 actions=NORMAL
+```
+
+3. In the host, we have an IPtable rule in the PREROUTING chain that DNATs this packet matched on nodePort to its clusterIP:targetPort
+
+```
+[8:480] -A OVN-KUBE-NODEPORT -p tcp -m addrtype --dst-type LOCAL -m tcp --dport 31339 -j DNAT --to-destination 10.96.115.103:80
+```
+
+4. The service route in the host sends this packet back to breth0.
+
+```
+10.96.0.0/16 via 169.254.169.4 dev breth0 mtu 1400 
+```
+
+5. On breth0, we have priority 500 flows meant to handle hairpining, that will SNAT the srcIP to the special `169.254.169.2` masqueradeIP and send it to `table2`
+
+```
+cookie=0xdeff105, duration=3189.786s, table=0, n_packets=11, n_bytes=814, priority=500,ip,in_port=LOCAL,nw_dst=10.96.0.0/16 actions=ct(commit,table=2,zone=64001,nat(src=169.254.169.2))
+```
+
+6. In `table2` we have a flow that forwards this to patch port that takes the traffic in OVN:
+
+```
+cookie=0xdeff105, duration=6.308s, table=2, n_packets=11, n_bytes=814, actions=mod_dl_dst:02:42:ac:12:00:03,output:"patch-breth0_ov"
+```
+
+7. Traffic enters the GR on the worker node and hits the load-balancer where we DNAT it correctly to the local backends.
+
+The GR load-balancer on a node with endpoints for the clusterIP will look like this:
+
+```
+_uuid               : 4e7ff1e3-a211-45d7-8243-54e087ca3965                                                                                                                   
+external_ids        : {"k8s.ovn.org/kind"=Service, "k8s.ovn.org/owner"="default/example-service-hello-world"}                                                                
+health_check        : []                                                                                                                                                     
+ip_port_mappings    : {}                                                                                                                                                     
+name                : "Service_default/example-service-hello-world_TCP_node_router+switch_ovn-control-plane"                                                                 
+options             : {event="false", hairpin_snat_ip="169.254.169.5 fd69::5", reject="true", skip_snat="false"}                                                             
+protocol            : tcp                                                                                                                                                    
+selection_fields    : []                                                                                                                                                     
+vips                : {"10.96.115.103:80"="172.19.0.3:8080", "172.19.0.3:31339"="172.19.0.4:8080"} 
+```
+
+8. Traffic from OVN is sent back to host:
+
+```
+  cookie=0xdeff105, duration=839.789s, table=0, n_packets=6, n_bytes=484, priority=175,tcp,in_port="patch-breth0_ov",nw_src=172.19.0.3 actions=ct(table=4,zone=64001)
+  cookie=0xdeff105, duration=2334.510s, table=4, n_packets=18, n_bytes=1452, ip actions=ct(commit,table=3,zone=64002,nat(src=169.254.169.1))
+  cookie=0xdeff105, duration=1.612s, table=3, n_packets=10, n_bytes=892, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst:02:42:ac:13:00:03,LOCAL
+```
+
+9. The routes in the host send this back to breth0:
+
+```
+169.254.169.1 dev breth0 src 172.19.0.4 mtu 1400 
+```
+
+10. Traffic leaves to primary interface from breth0:
+
+```
+ cookie=0xdeff105, duration=2334.510s, table=0, n_packets=7611, n_bytes=754388, priority=100,ip,in_port=LOCAL actions=ct(commit,zone=64000,exec(load:0x2->NXM_NX_CT_MARK[])),output:eth0
+```
+
+Packet goes to other host via underlay.
+
+SYNACK flow:
+
+1. Match on the incoming traffic via default flow on `table0`, send it to `table1`:
+
+```
+cookie=0xdeff105, duration=3189.786s, table=0, n_packets=99979, n_bytes=298029215, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000,nat)
+```
+
+2. Send it out to LOCAL ovs port on breth0 and traffic is delivered to the host:
+
+```
+ cookie=0xdeff105, duration=2334.510s, table=1, n_packets=9466, n_bytes=4512265, priority=100,ct_state=+est+trk,ct_mark=0x2,ip actions=LOCAL
+```
+
+3. Before coming to host in breth0 using above flow it will get unSNATed back to .1 masqueradeIP in 64000 zone, then unDNATed back to clusterIP using iptables and sent to OVN:
+
+```
+ cookie=0xdeff105, duration=2334.510s, table=0, n_packets=14, n_bytes=1356, priority=500,ip,in_port=LOCAL,nw_dst=169.254.169.1 actions=ct(table=5,zone=64002,nat)
+ cookie=0xdeff105, duration=2334.510s, table=5, n_packets=14, n_bytes=1356, ip actions=ct(commit,table=2,zone=64001,nat)
+ cookie=0xdeff105, duration=0.365s, table=2, n_packets=33, n_bytes=2882, actions=mod_dl_dst:02:42:ac:13:00:03,output:"patch-breth0_ov"
+```
+
+4. From OVN it gets sent back to host and then back from host into breth0 and into the wire:
+
+```
+  cookie=0xdeff105, duration=2334.510s, table=0, n_packets=18, n_bytes=1452, priority=175,ip,in_port="patch-breth0_ov",nw_src=172.19.0.4 actions=ct(table=4,zone=64001,nat)
+  cookie=0xdeff105, duration=2334.510s, table=4, n_packets=18, n_bytes=1452, ip actions=ct(commit,table=3,zone=64002,nat(src=169.254.169.1))
+  cookie=0xdeff105, duration=0.365s, table=3, n_packets=32, n_bytes=2808, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst:02:42:ac:13:00:03,LOCAL
+  cookie=0xdeff105, duration=2334.510s, table=0, n_packets=7611, n_bytes=754388, priority=100,ip,in_port=LOCAL actions=ct(commit,zone=64000,exec(load:0x2->NXM_NX_CT_MARK[])),output:eth0
+```
+
+NOTE: We have added a masquerade rule to iptable rules to SNAT towards the netIP of the interface via which the packet leaves.
+
+```
+[12:720] -A POSTROUTING -s 169.254.169.0/29 -j MASQUERADE
+```
+
+tcpdump:
+```
+SYN:
+13:38:52.988279 eth0  In  ifindex 19 02:42:df:4d:b6:d2 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 > 172.19.0.4.30950: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.988315 breth0 In  ifindex 6 02:42:df:4d:b6:d2 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 > 172.19.0.4.30950: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.988357 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 > 10.96.211.228.80: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.989240 breth0 In  ifindex 6 02:42:ac:13:00:03 ethertype IPv4 (0x0800), length 80: 169.254.169.1.36363 > 172.19.0.3.8080: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.989240 breth0 In  ifindex 6 02:42:ac:13:00:03 ethertype IPv4 (0x0800), length 80: 172.19.0.4.31991 > 172.19.0.3.8080: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+SYNACK:
+13:38:52.989515 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.3.8080 > 172.19.0.4.31991: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989515 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.3.8080 > 169.254.169.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989562 breth0 In  ifindex 6 0a:58:a9:fe:a9:04 ethertype IPv4 (0x0800), length 80: 10.96.211.228.80 > 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989571 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.4.30950 > 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989581 eth0  Out ifindex 19 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.4.30950 > 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+```
+
+
+### External Source -> Service -> OVN pod
+
 The implementation of this case differs for local gateway from that for shared gateway. In local gateway all service traffic is sent straight to host (instead of sending it to OVN) to allow users to apply custom routes according to their use cases.
 
 In local gateway mode, rather than sending the traffic from breth0 into OVN via gateway router, we use flows on breth0 to send it into the host.

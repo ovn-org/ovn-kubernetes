@@ -13,13 +13,15 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	kapi "k8s.io/api/core/v1"
 )
 
-// serverRunDir is the default directory for CNIServer runtime files
-const serverRunDir string = "/var/run/ovn-kubernetes/cni/"
+// ServerRunDir is the default directory for CNIServer runtime files
+const ServerRunDir string = "/var/run/ovn-kubernetes/cni/"
 
 const serverSocketName string = "ovn-cni-server.sock"
-const serverSocketPath string = serverRunDir + "/" + serverSocketName
+const serverSocketPath string = ServerRunDir + "/" + serverSocketName
 
 // KubeAPIAuth contains information necessary to create a Kube API client
 type KubeAPIAuth struct {
@@ -157,16 +159,31 @@ type PodRequest struct {
 	nadName string
 }
 
-type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error)
+type podRequestFunc func(request *PodRequest, clientset *ClientSet, useOVSExternalIDs bool, kubeAuth *KubeAPIAuth) ([]byte, error)
+
+type PodInfoGetter interface {
+	getPod(namespace, name string) (*kapi.Pod, error)
+}
+
+type ClientSet struct {
+	PodInfoGetter
+	kclient   kubernetes.Interface
+	podLister corev1listers.PodLister
+}
+
+func NewClientSet(kclient kubernetes.Interface, podLister corev1listers.PodLister) *ClientSet {
+	return &ClientSet{
+		kclient:   kclient,
+		podLister: podLister,
+	}
+}
 
 // Server object that listens for JSON-marshaled Request objects
 // on a private root-only Unix domain socket.
 type Server struct {
 	http.Server
-	requestFunc       cniRequestFunc
-	rundir            string
-	useOVSExternalIDs int32
-	kclient           kubernetes.Interface
-	podLister         corev1listers.PodLister
-	kubeAuth          *KubeAPIAuth
+	handlePodRequestFunc podRequestFunc
+	useOVSExternalIDs    int32
+	clientSet            *ClientSet
+	kubeAuth             *KubeAPIAuth
 }

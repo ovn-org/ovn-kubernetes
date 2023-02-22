@@ -6,6 +6,7 @@ package cni
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -21,6 +22,8 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
+	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
@@ -132,7 +135,7 @@ func (p *Plugin) postMetrics(startTime time.Time, cmd command, err error) {
 	})
 }
 
-func kubeClientsetFromConfig(auth *KubeAPIAuth) (*kubernetes.Clientset, error) {
+func shimClientsetFromConfig(auth *KubeAPIAuth) (*shimClientset, error) {
 	if auth.Kubeconfig == "" && auth.KubeAPIServer == "" {
 		return nil, nil
 	}
@@ -145,14 +148,31 @@ func kubeClientsetFromConfig(auth *KubeAPIAuth) (*kubernetes.Clientset, error) {
 			return nil, fmt.Errorf("failed to decode Kube API CA data: %v", err)
 		}
 	}
-
-	return util.NewKubernetesClientset(&config.KubernetesConfig{
+	kubeconfig := &config.KubernetesConfig{
 		Kubeconfig: auth.Kubeconfig,
 		APIServer:  auth.KubeAPIServer,
 		Token:      auth.KubeAPIToken,
 		TokenFile:  auth.KubeAPITokenFile,
 		CAData:     caData,
-	})
+	}
+
+	kclient, err := util.NewKubernetesClientset(kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return &shimClientset{
+		kclient: kclient,
+	}, nil
+}
+
+type shimClientset struct {
+	PodInfoGetter
+	kclient kubernetes.Interface
+}
+
+func (c *shimClientset) getPod(namespace, name string) (*kapi.Pod, error) {
+	return c.kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }
 
 // CmdAdd is the callback for 'add' cni calls from skel
@@ -188,7 +208,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	kclient, errK := kubeClientsetFromConfig(response.KubeAuth)
+	clientset, errK := shimClientsetFromConfig(response.KubeAuth)
 	if errK != nil {
 		err = errK
 		return err
@@ -200,7 +220,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		result = response.Result
 	} else {
 		// Use the IPAM details from ovnkube-node to configure the pod interface
-		pr, err := cniRequestToPodRequest(req, nil, kclient)
+		pr, err := cniRequestToPodRequest(req)
 		if err != nil {
 			err = fmt.Errorf("failed to create pod request: %v", err)
 			klog.Error(err.Error())
@@ -208,7 +228,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		}
 		defer pr.cancel()
 
-		result, err = pr.getCNIResult(nil, kclient, response.PodIFInfo)
+		result, err = pr.getCNIResult(clientset, response.PodIFInfo)
 		if err != nil {
 			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
 			klog.Error(err.Error())
@@ -256,7 +276,7 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 
 	// if Result is nil, then ovnkube-node is running in unprivileged mode so unconfigure the Interface from here.
 	if response.Result == nil {
-		pr, err = cniRequestToPodRequest(req, nil, nil)
+		pr, err = cniRequestToPodRequest(req)
 		if err != nil {
 			err = fmt.Errorf("failed to create pod request: %v", err)
 			return err

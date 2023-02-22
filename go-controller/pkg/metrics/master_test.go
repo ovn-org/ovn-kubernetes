@@ -11,8 +11,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	fakeclientgo "k8s.io/client-go/kubernetes/fake"
@@ -37,10 +35,7 @@ func getKubeClient(nodeCount int) *kube.Kube {
 		})
 	}
 	kubeFakeClient := fakeclientgo.NewSimpleClientset(&corev1.NodeList{Items: nodes})
-	fakeClient := &util.OVNClientset{
-		KubeClient: kubeFakeClient,
-	}
-	return &kube.Kube{fakeClient.KubeClient, nil, nil, nil}
+	return &kube.Kube{KClient: kubeFakeClient}
 }
 
 func setHvCfg(nbClient client.Client, hvCfg int, hvCfgTimestamp time.Time) {

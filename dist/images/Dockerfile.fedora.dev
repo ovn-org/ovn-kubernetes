@@ -15,7 +15,7 @@
 # this image in any production environment.
 #
 
-FROM fedora:36 AS ovnbuilder
+FROM fedora:37 AS ovnbuilder
 
 USER root
 
@@ -63,7 +63,7 @@ RUN rm rpm/rpmbuild/RPMS/x86_64/*docker*
 RUN git log -n 1
 
 # Build the final image
-FROM fedora:36
+FROM fedora:37
 
 # Install needed dependencies.
 RUN INSTALL_PKGS=" \

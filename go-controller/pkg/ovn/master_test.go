@@ -878,7 +878,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		dbSetup        libovsdbtest.TestSetup
 		node1          tNode
 		testNode       v1.Node
-		fakeClient     *util.OVNClientset
+		fakeClient     *util.OVNMasterClientset
 		kubeFakeClient *fake.Clientset
 		oc             *DefaultNetworkController
 		nodeAnnotator  kube.Annotator
@@ -970,7 +970,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
 		egressQoSFakeClient := &egressqosfake.Clientset{}
-		fakeClient = &util.OVNClientset{
+		fakeClient = &util.OVNMasterClientset{
 			KubeClient:           kubeFakeClient,
 			EgressIPClient:       egressIPFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
@@ -979,7 +979,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		var err error
 
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, fakeClient.EgressIPClient, fakeClient.EgressFirewallClient, nil}, testNode.Name)
+		nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient}, testNode.Name)
 		l3GatewayConfig = node1.gatewayConfig(config.GatewayModeLocal, uint(vlanID))
 		err = util.SetL3GatewayConfig(nodeAnnotator, l3GatewayConfig)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1566,7 +1566,7 @@ func TestController_syncNodes(t *testing.T) {
 			kubeFakeClient := fake.NewSimpleClientset()
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
-			fakeClient := &util.OVNClientset{
+			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
@@ -1658,7 +1658,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 			kubeFakeClient := fake.NewSimpleClientset()
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
-			fakeClient := &util.OVNClientset{
+			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,

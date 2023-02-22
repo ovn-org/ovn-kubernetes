@@ -44,9 +44,8 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 
 // networkControllerManager structure is the object manages all controllers for all networks
 type networkControllerManager struct {
-	ovnClientset *util.OVNClientset
 	client       clientset.Interface
-	kube         kube.Interface
+	kube         *kube.KubeOVN
 	watchFactory *factory.WatchFactory
 	podRecorder  *metrics.PodRecorder
 	// event recorder used to post events to k8s
@@ -269,10 +268,9 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 	podRecorder := metrics.NewPodRecorder()
 
 	cm := &networkControllerManager{
-		ovnClientset: ovnClient,
-		client:       ovnClient.KubeClient,
-		kube: &kube.Kube{
-			KClient:              ovnClient.KubeClient,
+		client: ovnClient.KubeClient,
+		kube: &kube.KubeOVN{
+			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
@@ -290,7 +288,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		klog.Infof("Multiple network supported, creating %s", controllerName)
-		cm.nadController = newNetAttachDefinitionController(cm, cm.ovnClientset, cm.recorder)
+		cm.nadController = newNetAttachDefinitionController(cm, ovnClient.NetworkAttchDefClient, cm.recorder)
 	}
 	return cm
 }

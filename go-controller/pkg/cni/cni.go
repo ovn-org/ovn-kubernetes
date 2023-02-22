@@ -2,13 +2,10 @@ package cni
 
 import (
 	"fmt"
-	"net"
-
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/client-go/kubernetes"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"net"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
@@ -115,14 +112,14 @@ func (pr *PodRequest) getVFNetdevName() (string, error) {
 	return vfNetdevices[0], nil
 }
 
-func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) (*Response, error) {
+func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, useOVSExternalIDs bool) (*Response, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
 		return nil, fmt.Errorf("required CNI variable missing")
 	}
 
-	kubecli := &kube.Kube{KClient: kclient}
+	kubecli := &kube.Kube{KClient: clientset.kclient}
 	annotCondFn := isOvnReady
 	vfNetdevName := ""
 	if pr.CNIConf.DeviceID != "" {
@@ -135,7 +132,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 			// Add DPU connection-details annotation so ovnkube-node running on DPU
 			// performs the needed network plumbing.
-			if err = pr.addDPUConnectionDetailsAnnot(kubecli, podLister, vfNetdevName); err != nil {
+			if err = pr.addDPUConnectionDetailsAnnot(kubecli, clientset.podLister, vfNetdevName); err != nil {
 				return nil, err
 			}
 			annotCondFn = isDPUReady
@@ -145,7 +142,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
-	podUID, annotations, podNADAnnotation, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName,
+	podUID, annotations, podNADAnnotation, err := GetPodAnnotations(pr.ctx, clientset, namespace, podName,
 		pr.nadName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
@@ -161,7 +158,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 
 	response := &Response{KubeAuth: kubeAuth}
 	if !config.UnprivilegedMode {
-		response.Result, err = pr.getCNIResult(podLister, kclient, podInterfaceInfo)
+		response.Result, err = pr.getCNIResult(clientset, podInterfaceInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -172,7 +169,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	return response, nil
 }
 
-func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernetes.Interface) (*Response, error) {
+func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 	// assume success case, return an empty Result
 	response := &Response{}
 	response.Result = &current.Result{}
@@ -186,7 +183,7 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 	vfNetdevName := ""
 	if pr.CNIConf.DeviceID != "" {
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-			pod, err := getPod(podLister, kclient, pr.PodNamespace, pr.PodName)
+			pod, err := clientset.getPod(pr.PodNamespace, pr.PodName)
 			if err != nil {
 				klog.Warningf("Failed to get pod %s/%s: %v", pr.PodNamespace, pr.PodName, err)
 				return response, nil
@@ -240,19 +237,19 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 	return response, nil
 }
 
-func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) error {
+func (pr *PodRequest) cmdCheck() error {
 	// noop...CMD check is not considered useful, and has a considerable performance impact
 	// to pod bring up times with CRIO. This is due to the fact that CRIO currently calls check
 	// after CNI ADD before it finishes bringing the container up
 	return nil
 }
 
-// HandleCNIRequest is the callback for all the requests
+// HandlePodRequest is the callback for all the requests
 // coming to the cniserver after being processed into PodRequest objects
 // Argument '*PodRequest' encapsulates all the necessary information
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
-func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error) {
+func HandlePodRequest(request *PodRequest, clientset *ClientSet, useOVSExternalIDs bool, kubeAuth *KubeAPIAuth) ([]byte, error) {
 	var result, resultForLogging []byte
 	var response *Response
 	var err, err1 error
@@ -260,11 +257,11 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
 	switch request.Command {
 	case CNIAdd:
-		response, err = request.cmdAdd(kubeAuth, podLister, useOVSExternalIDs, kclient)
+		response, err = request.cmdAdd(kubeAuth, clientset, useOVSExternalIDs)
 	case CNIDel:
-		response, err = request.cmdDel(podLister, kclient)
+		response, err = request.cmdDel(clientset)
 	case CNICheck:
-		err = request.cmdCheck(podLister, useOVSExternalIDs, kclient)
+		err = request.cmdCheck()
 	default:
 	}
 
@@ -289,8 +286,11 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 }
 
 // getCNIResult get result from pod interface info.
-func (pr *PodRequest) getCNIResult(podLister corev1listers.PodLister, kclient kubernetes.Interface, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
-	interfacesArray, err := pr.ConfigureInterface(podLister, kclient, podInterfaceInfo)
+// PodInfoGetter is used to check if sandbox is still valid for the current
+// instance of the pod in the apiserver, see checkCancelSandbox for more info.
+// If kube api is not available from the CNI, pass nil to skip this check.
+func (pr *PodRequest) getCNIResult(getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
+	interfacesArray, err := pr.ConfigureInterface(getter, podInterfaceInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}

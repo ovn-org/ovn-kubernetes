@@ -1,4 +1,4 @@
-package loadbalancer
+package services
 
 import (
 	"fmt"
@@ -9,7 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -18,6 +17,54 @@ import (
 
 	"k8s.io/klog/v2"
 )
+
+// LB is a desired or existing load_balancer configuration in OVN.
+type LB struct {
+	Name        string
+	UUID        string
+	Protocol    string // one of TCP, UDP, SCTP
+	ExternalIDs map[string]string
+	Opts        LBOpts
+
+	Rules []LBRule
+
+	// the names of logical switches, routers and LB groups that this LB should be attached to
+	Switches []string
+	Routers  []string
+	Groups   []string
+}
+
+type LBOpts struct {
+	// if the service should send back tcp REJECT in case of no endpoints
+	Reject bool
+
+	// if the service should raise empty_lb events
+	EmptyLBEvents bool
+
+	// If greater than 0, then enable per-client-IP affinity.
+	AffinityTimeOut int32
+
+	// If true, then disable SNAT entirely
+	SkipSNAT bool
+}
+
+type Addr struct {
+	IP   string
+	Port int32
+}
+
+type LBRule struct {
+	Source  Addr
+	Targets []Addr
+}
+
+func (a *Addr) String() string {
+	return util.JoinHostPortInt32(a.IP, a.Port)
+}
+
+func (a *Addr) Equals(b *Addr) bool {
+	return a.Port == b.Port && a.IP == b.IP
+}
 
 // EnsureLBs provides a generic load-balancer reconciliation engine.
 //
@@ -39,18 +86,13 @@ import (
 //
 // It is assumed that names are meaningful and somewhat stable, to minimize churn. This
 // function doesn't work with Load_Balancers without a name.
-func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB) error {
+func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existingCacheLBs []LB, LBs []LB) error {
 	externalIDs := util.ExternalIDsForObject(service)
-	lbCache, err := GetLBCache(nbClient)
-	if err != nil {
-		return fmt.Errorf("failed initialize LBcache: %w", err)
-	}
-
-	existing := lbCache.Find(externalIDs)
-	existingByName := make(map[string]*CachedLB, len(existing))
+	existingByName := make(map[string]*LB, len(existingCacheLBs))
 	toDelete := sets.NewString()
 
-	for _, lb := range existing {
+	for i := range existingCacheLBs {
+		lb := &existingCacheLBs[i]
 		existingByName[lb.Name] = lb
 		toDelete.Insert(lb.UUID)
 	}
@@ -77,9 +119,9 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 			blb.UUID = existingLB.UUID
 			existinglbs = append(existinglbs, blb)
 			toDelete.Delete(existingLB.UUID)
-			existingRouters = existingLB.Routers
-			existingSwitches = existingLB.Switches
-			existingGroups = existingLB.Groups
+			existingRouters = sets.NewString(existingLB.Routers...)
+			existingSwitches = sets.NewString(existingLB.Switches...)
+			existingGroups = sets.NewString(existingLB.Groups...)
 		} else {
 			newlbs = append(newlbs, blb)
 		}
@@ -96,12 +138,14 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 
 	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, existinglbs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create ops for ensuring update of service %s/%s load balancers: %w",
+			service.Namespace, service.Name, err)
 	}
 
 	ops, err = libovsdbops.CreateLoadBalancersOps(nbClient, ops, newlbs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create ops for ensuring creation of service %s/%s load balancers: %w",
+			service.Namespace, service.Name, err)
 	}
 
 	// cache switches for this round of ops
@@ -118,13 +162,15 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 	for k, v := range addLBsToSwitch {
 		ops, err = libovsdbops.AddLoadBalancersToLogicalSwitchOps(nbClient, ops, getSwitch(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for adding load balancers to switch %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 	for k, v := range removeLBsFromSwitch {
 		ops, err = libovsdbops.RemoveLoadBalancersFromLogicalSwitchOps(nbClient, ops, getSwitch(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for removing load balancers from switch %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 
@@ -142,13 +188,15 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 	for k, v := range addLBsToRouter {
 		ops, err = libovsdbops.AddLoadBalancersToLogicalRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for adding load balancers to router %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 	for k, v := range removesLBsFromRouter {
 		ops, err = libovsdbops.RemoveLoadBalancersFromLogicalRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for removing load balancers from router %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 
@@ -166,13 +214,15 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 	for k, v := range addLBsToGroups {
 		ops, err = libovsdbops.AddLoadBalancersToGroupOps(nbClient, ops, getGroup(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for adding load balancers to group %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 	for k, v := range removeLBsFromGroups {
 		ops, err = libovsdbops.RemoveLoadBalancersFromGroupOps(nbClient, ops, getGroup(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create ops for removing load balancers from group %s for service %s/%s: %w",
+				k, service.Namespace, service.Name, err)
 		}
 	}
 
@@ -182,7 +232,8 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 	}
 	ops, err = libovsdbops.DeleteLoadBalancersOps(nbClient, ops, deleteLBs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create ops for removing %d load balancers for service %s/%s: %w",
+			len(deleteLBs), service.Namespace, service.Name, err)
 	}
 
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(nbClient, "service",
@@ -194,15 +245,16 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 
 	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(nbClient, lbs, ops)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to ensure load balancers for service %s/%s: %w", service.Namespace, service.Name, err)
 	}
 	txOkCallBack()
 
+	// Store UUID of newly created load balancers for future calls.
+	// This is accomplished by the caching of LBs by the caller of this function.
 	for _, lb := range lbs {
 		wantedByName[lb.Name].UUID = lb.UUID
 	}
 
-	lbCache.update(LBs, toDelete.UnsortedList())
 	klog.V(5).Infof("Deleted %d stale LBs for %#v", len(toDelete), externalIDs)
 
 	return nil
@@ -239,22 +291,24 @@ func mapLBDifferenceByKey(keyMap map[string][]*nbdb.LoadBalancer, keyIn sets.Str
 }
 
 func buildLB(lb *LB) *nbdb.LoadBalancer {
-	reject := "true"
-	event := "false"
-
-	if lb.Opts.Unidling {
-		reject = "false"
-		event = "true"
-	}
-
 	skipSNAT := "false"
 	if lb.Opts.SkipSNAT {
 		skipSNAT = "true"
 	}
 
+	reject := "false"
+	if lb.Opts.Reject {
+		reject = "true"
+	}
+
+	emptyLb := "false"
+	if lb.Opts.EmptyLBEvents {
+		emptyLb = "true"
+	}
+
 	options := map[string]string{
 		"reject":             reject,
-		"event":              event,
+		"event":              emptyLb,
 		"skip_snat":          skipSNAT,
 		"neighbor_responder": "none",
 		"hairpin_snat_ip":    fmt.Sprintf("%s %s", types.V4OVNServiceHairpinMasqueradeIP, types.V6OVNServiceHairpinMasqueradeIP),
@@ -294,51 +348,124 @@ func DeleteLBs(nbClient libovsdbclient.Client, uuids []string) error {
 		return nil
 	}
 
-	cache, err := GetLBCache(nbClient)
-	if err != nil {
-		return err
-	}
-
 	lbs := make([]*nbdb.LoadBalancer, 0, len(uuids))
 	for _, uuid := range uuids {
 		lbs = append(lbs, &nbdb.LoadBalancer{UUID: uuid})
 	}
 
-	err = libovsdbops.DeleteLoadBalancers(nbClient, lbs)
+	err := libovsdbops.DeleteLoadBalancers(nbClient, lbs)
 	if err != nil {
 		return err
 	}
 
-	cache.update(nil, uuids)
 	return nil
 }
 
-type DeleteVIPEntry struct {
-	LBUUID string
-	VIPs   []string // ip:string (or v6 equivalent)
+// getLBs returns a slice of load balancers found in OVN.
+func getLBs(nbClient libovsdbclient.Client) ([]*LB, error) {
+	_, out, err := _getLBsCommon(nbClient, false)
+	return out, err
 }
 
-// DeleteLoadBalancerVIPs removes VIPs from load-balancers in a single shot.
-func DeleteLoadBalancerVIPs(nbClient libovsdbclient.Client, toRemove []DeleteVIPEntry) error {
-	lbCache, err := GetLBCache(nbClient)
+// getServiceLBs returns a set of services as well as a slice of load balancers found in OVN.
+func getServiceLBs(nbClient libovsdbclient.Client) (sets.String, []*LB, error) {
+	return _getLBsCommon(nbClient, true)
+}
+
+func _getLBsCommon(nbClient libovsdbclient.Client, withServiceOwner bool) (sets.String, []*LB, error) {
+	lbs, err := libovsdbops.ListLoadBalancers(nbClient)
 	if err != nil {
-		return err
+		return nil, nil, fmt.Errorf("could not list load_balancer: %w", err)
 	}
 
-	var ops []libovsdb.Operation
-	for _, entry := range toRemove {
-		ops, err = libovsdbops.RemoveLoadBalancerVipsOps(nbClient, ops, &nbdb.LoadBalancer{UUID: entry.LBUUID}, entry.VIPs...)
-		if err != nil {
-			return err
+	services := sets.NewString()
+	outMap := make(map[string]*LB, len(lbs))
+	for _, lb := range lbs {
+
+		// Skip load balancers unrelated to service, or w/out an owner (aka namespace+name)
+		if lb.ExternalIDs[types.LoadBalancerKindExternalID] != "Service" {
+			continue
+		}
+
+		if withServiceOwner {
+			service, ok := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
+			if !ok {
+				continue
+			}
+			services.Insert(service)
+		}
+
+		// Note: no need to fill in Opts and Rules: syncServices populates them later.
+		// Switches, Routers and Groups for each load balancer will get filled in below.
+		res := LB{
+			UUID:        lb.UUID,
+			Name:        lb.Name,
+			ExternalIDs: lb.ExternalIDs,
+			Opts:        LBOpts{},
+			Rules:       []LBRule{},
+			Switches:    []string{},
+			Routers:     []string{},
+			Groups:      []string{},
+		}
+		if lb.Protocol != nil {
+			res.Protocol = *lb.Protocol
+		}
+
+		outMap[lb.UUID] = &res
+	}
+
+	// Switches
+	ps := func(item *nbdb.LogicalSwitch) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, ps)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not list logical switches: %w", err)
+	}
+	for _, ls := range switches {
+		for _, lbuuid := range ls.LoadBalancer {
+			if ovnLb, ok := outMap[lbuuid]; ok {
+				outMap[lbuuid].Switches = append(ovnLb.Switches, ls.Name)
+			}
 		}
 	}
 
-	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
+	// Routers
+	pr := func(item *nbdb.LogicalRouter) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, pr)
 	if err != nil {
-		return fmt.Errorf("failed to remove vips from load_balancer: %w", err)
+		return nil, nil, fmt.Errorf("could not list logical routers: %w", err)
+	}
+	for _, router := range routers {
+		for _, lbuuid := range router.LoadBalancer {
+			if ovnLb, ok := outMap[lbuuid]; ok {
+				outMap[lbuuid].Routers = append(ovnLb.Routers, router.Name)
+			}
+		}
 	}
 
-	lbCache.removeVips(toRemove)
+	// Groups
+	pg := func(item *nbdb.LoadBalancerGroup) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	groups, err := libovsdbops.FindLoadBalancerGroupsWithPredicate(nbClient, pg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not list load balancer groups: %w", err)
+	}
+	for _, group := range groups {
+		for _, lbuuid := range group.LoadBalancer {
+			if ovnLb, ok := outMap[lbuuid]; ok {
+				outMap[lbuuid].Groups = append(ovnLb.Groups, group.Name)
+			}
+		}
+	}
 
-	return nil
+	out := make([]*LB, 0, len(outMap))
+	for _, value := range outMap {
+		out = append(out, value)
+	}
+
+	return services, out, nil
 }

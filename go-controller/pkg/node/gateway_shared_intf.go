@@ -1140,7 +1140,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
 				"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
 
-		physicalIP, err := util.MatchIPNetFamily(false, bridgeIPs)
+		physicalIP, err := util.MatchFirstIPNetFamily(false, bridgeIPs)
 		if err != nil {
 			return nil, fmt.Errorf("unable to determine IPv4 physical IP of host: %v", err)
 		}
@@ -1196,7 +1196,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
 				"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
 
-		physicalIP, err := util.MatchIPNetFamily(true, bridgeIPs)
+		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
 		if err != nil {
 			return nil, fmt.Errorf("unable to determine IPv6 physical IP of host: %v", err)
 		}
@@ -1381,7 +1381,7 @@ func commonFlows(bridge *bridgeConfiguration) ([]string, error) {
 			defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost))
 
 	if config.IPv4Mode {
-		physicalIP, err := util.MatchIPNetFamily(false, bridgeIPs)
+		physicalIP, err := util.MatchFirstIPNetFamily(false, bridgeIPs)
 		if err != nil {
 			return nil, fmt.Errorf("unable to determine IPv4 physical IP of host: %v", err)
 		}
@@ -1394,6 +1394,7 @@ func commonFlows(bridge *bridgeConfiguration) ([]string, error) {
 			fmt.Sprintf("cookie=%s, priority=105, in_port=%s, ip, pkt_mark=%s "+
 				"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
 				defaultOpenFlowCookie, ofPortPatch, ovnKubeNodeSNATMark, config.Default.ConntrackZone, physicalIP.IP, ctMarkOVN, ofPortPhys))
+
 		// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 		// so that reverse direction goes back to the pods.
 		dftFlows = append(dftFlows,
@@ -1408,14 +1409,35 @@ func commonFlows(bridge *bridgeConfiguration) ([]string, error) {
 				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
 				defaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, ctMarkHost, ofPortPhys))
 
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			// table 0, any packet coming from OVN send to host in LGW mode, host will take care of sending it outside if needed.
+			// exceptions are traffic for egressIP and egressGW features and ICMP related traffic which will hit the priority 100 flow instead of this.
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, tcp, nw_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					defaultOpenFlowCookie, ofPortPatch, physicalIP.IP, HostMasqCTZone))
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, udp, nw_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					defaultOpenFlowCookie, ofPortPatch, physicalIP.IP, HostMasqCTZone))
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, sctp, nw_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					defaultOpenFlowCookie, ofPortPatch, physicalIP.IP, HostMasqCTZone))
+			// We send BFD traffic coming from OVN to outside directly using a higher priority flow
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=650, table=0, in_port=%s, udp, tp_dst=3784, actions=output:%s",
+					defaultOpenFlowCookie, ofPortPatch, ofPortPhys))
+		}
+
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state and mark of the connection.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ip, "+
-				"actions=ct(commit,zone=%d,nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
+				"actions=ct(zone=%d, nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
 	}
 	if config.IPv6Mode {
-		physicalIP, err := util.MatchIPNetFamily(true, bridgeIPs)
+		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
 		if err != nil {
 			return nil, fmt.Errorf("unable to determine IPv6 physical IP of host: %v", err)
 		}
@@ -1428,6 +1450,7 @@ func commonFlows(bridge *bridgeConfiguration) ([]string, error) {
 			fmt.Sprintf("cookie=%s, priority=105, in_port=%s, ipv6, pkt_mark=%s "+
 				"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
 				defaultOpenFlowCookie, ofPortPatch, ovnKubeNodeSNATMark, config.Default.ConntrackZone, physicalIP.IP, ctMarkOVN, ofPortPhys))
+
 		// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 		// so that reverse direction goes back to the pods.
 		dftFlows = append(dftFlows,
@@ -1442,11 +1465,31 @@ func commonFlows(bridge *bridgeConfiguration) ([]string, error) {
 				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
 				defaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, ctMarkHost, ofPortPhys))
 
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			// table 0, any packet coming from OVN send to host in LGW mode, host will take care of sending it outside if needed.
+			// exceptions are traffic for egressIP and egressGW features and ICMP related traffic which will hit the priority 100 flow instead of this.
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, tcp6, ipv6_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					defaultOpenFlowCookie, ofPortPatch, physicalIP.IP, HostMasqCTZone))
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, udp6, ipv6_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					defaultOpenFlowCookie, ofPortPatch, physicalIP.IP, HostMasqCTZone))
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, sctp6, ipv6_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					defaultOpenFlowCookie, ofPortPatch, physicalIP.IP, HostMasqCTZone))
+			// We send BFD traffic coming from OVN to outside directly using a higher priority flow
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=650, table=0, in_port=%s, udp6, tp_dst=3784, actions=output:%s",
+					defaultOpenFlowCookie, ofPortPatch, ofPortPhys))
+		}
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state and mark of the connection.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ipv6, "+
-				"actions=ct(commit,zone=%d,nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
+				"actions=ct(zone=%d, nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
 	}
 
 	actions := fmt.Sprintf("output:%s", ofPortPatch)
@@ -1886,15 +1929,10 @@ func addMasqueradeRoute(netIfaceName, nodeName string, ifAddrs []*net.IPNet, wat
 		return fmt.Errorf("unable to find shared gw bridge interface: %s", netIfaceName)
 	}
 
-	mtu := config.Default.MTU
-	if config.Default.RoutableMTU != 0 {
-		mtu = config.Default.RoutableMTU
-	}
-
 	if ipv4 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv4)
-		err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet}, mtu, ipv4)
+		err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet}, 0, ipv4)
 		if err != nil {
 			return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
 		}
@@ -1903,7 +1941,7 @@ func addMasqueradeRoute(netIfaceName, nodeName string, ifAddrs []*net.IPNet, wat
 	if ipv6 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/128", types.V6OVNMasqueradeIP))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv6)
-		err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet}, mtu, ipv6)
+		err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet}, 0, ipv6)
 		if err != nil {
 			return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
 		}

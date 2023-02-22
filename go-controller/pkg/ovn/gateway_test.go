@@ -14,7 +14,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -102,7 +101,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		} else {
 			hasIPv4 = true
 		}
-		nexthop, _ := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(subnet), defLRPIPs)
+		nexthop, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(subnet), defLRPIPs)
 		grStaticRouteNamedUUID := fmt.Sprintf("static-subnet-route-%v-UUID", i)
 		grStaticRoutes = append(grStaticRoutes, grStaticRouteNamedUUID)
 		testData = append(testData, &nbdb.LogicalRouterStaticRoute{
@@ -114,7 +113,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 	}
 	if config.Gateway.Mode == config.GatewayModeShared {
 		for i, hostSubnet := range hostSubnets {
-			joinLRPIP, _ := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(hostSubnet), joinLRPIPs)
+			joinLRPIP, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(hostSubnet), joinLRPIPs)
 			ocrStaticRouteNamedUUID := fmt.Sprintf("subnet-static-route-ovn-cluster-router-%v-UUID", i)
 			expectedOVNClusterRouter.StaticRoutes = append(expectedOVNClusterRouter.StaticRoutes, ocrStaticRouteNamedUUID)
 			testData = append(testData, &nbdb.LogicalRouterStaticRoute{
@@ -200,7 +199,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		for i, subnet := range clusterIPSubnets {
 			natUUID := fmt.Sprintf("nat-%d-UUID", i)
 			natUUIDs = append(natUUIDs, natUUID)
-			physicalIP, _ := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(subnet), l3GatewayConfig.IPAddresses)
+			physicalIP, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(subnet), l3GatewayConfig.IPAddresses)
 			testData = append(testData, &nbdb.NAT{
 				UUID:       natUUID,
 				ExternalIP: physicalIP.IP.String(),
@@ -334,8 +333,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
-		// Create new LBCache
-		ovnlb.TestOnlySetCache(nil)
 
 		fakeOvn = NewFakeOVN()
 	})
@@ -1189,8 +1186,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 						Protocol: &nbdb.LoadBalancerProtocolTCP,
 						ExternalIDs: map[string]string{
-							"k8s.ovn.org/kind":  "Service",
-							"k8s.ovn.org/owner": "default/kubernetes",
+							types.LoadBalancerKindExternalID:  "Service",
+							types.LoadBalancerOwnerExternalID: "default/kubernetes",
 						},
 						Vips: map[string]string{
 							"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
@@ -1257,8 +1254,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "default/kubernetes",
+						types.LoadBalancerKindExternalID:  "Service",
+						types.LoadBalancerOwnerExternalID: "default/kubernetes",
 					},
 					Vips: map[string]string{
 						"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
@@ -1309,8 +1306,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 						Protocol: &nbdb.LoadBalancerProtocolTCP,
 						ExternalIDs: map[string]string{
-							"k8s.ovn.org/kind":  "Service",
-							"k8s.ovn.org/owner": "default/kubernetes",
+							types.LoadBalancerKindExternalID:  "Service",
+							types.LoadBalancerOwnerExternalID: "default/kubernetes",
 						},
 						Vips: map[string]string{
 							"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
@@ -1391,8 +1388,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "default/kubernetes",
+						types.LoadBalancerKindExternalID:  "Service",
+						types.LoadBalancerOwnerExternalID: "default/kubernetes",
 					},
 					Vips: map[string]string{
 						"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",

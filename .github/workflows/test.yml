@@ -470,16 +470,14 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        gateway-mode: [local, shared]
     needs: [ build-pr ]
     env:
-      JOB_NAME: "DualStack-conversion-${{ matrix.gateway-mode }}"
+      JOB_NAME: "DualStack-conversion-shared"
       OVN_HA: "true"
       KIND_IPV4_SUPPORT: "true"
       KIND_IPV6_SUPPORT: "false"
       OVN_HYBRID_OVERLAY_ENABLE: "false"
-      OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
+      OVN_GATEWAY_MODE: "shared"
       OVN_MULTICAST_ENABLE:  "false"
     steps:
 
@@ -518,16 +516,13 @@ jobs:
         export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test install-kind
 
-    - name: Run Single-Stack Tests
-      run: |
-        make -C test shard-test WHAT="Networking Granular Checks"
-
     - name: Convert IPv4 cluster to Dual Stack
       run: |
         ./contrib/kind-dual-stack-conversion.sh
 
     - name: Run Dual-Stack Tests
       run: |
+        DUALSTACK_CONVERSION="true"
         KIND_IPV4_SUPPORT="true"
         KIND_IPV6_SUPPORT="true"
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"

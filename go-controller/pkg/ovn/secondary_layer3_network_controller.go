@@ -305,7 +305,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 			continue
 		}
 		hostSubnetsMap := map[string][]*net.IPNet{netName: nil}
-		err = oc.UpdateNodeAnnotationWithRetry(node.Name, hostSubnetsMap, nil)
+		err = oc.UpdateNodeHostSubnetAnnotationWithRetry(node.Name, hostSubnetsMap, nil)
 		if err != nil {
 			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
 				node.Name, netName)
@@ -439,7 +439,7 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPN
 	}
 
 	hostSubnetsMap := map[string][]*net.IPNet{oc.GetNetworkName(): hostSubnets}
-	err = oc.UpdateNodeAnnotationWithRetry(node.Name, hostSubnetsMap, nil)
+	err = oc.UpdateNodeHostSubnetAnnotationWithRetry(node.Name, hostSubnetsMap, nil)
 	if err != nil {
 		return nil, err
 	}

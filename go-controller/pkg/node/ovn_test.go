@@ -22,7 +22,7 @@ type FakeOVNNode struct {
 	watcher    factory.NodeWatchFactory
 	stopChan   chan struct{}
 	recorder   *record.FakeRecorder
-	fakeClient *util.OVNClientset
+	fakeClient *util.OVNNodeClientset
 	fakeExec   *ovntest.FakeExec
 	wg         *sync.WaitGroup
 }
@@ -45,7 +45,7 @@ func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.fakeClient = &util.OVNClientset{
+	o.fakeClient = &util.OVNNodeClientset{
 		KubeClient: fake.NewSimpleClientset(v1Objects...),
 	}
 	o.init() // initializes the node

@@ -20,38 +20,53 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// InterfaceOVN represents the exported methods for dealing with getting/setting
+// kubernetes and OVN resources
+type InterfaceOVN interface {
+	Interface
+	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
+	UpdateEgressIP(eIP *egressipv1.EgressIP) error
+	PatchEgressIP(name string, patchData []byte) error
+	GetEgressIP(name string) (*egressipv1.EgressIP, error)
+	GetEgressIPs() (*egressipv1.EgressIPList, error)
+	GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error)
+	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
+	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
+	DeleteCloudPrivateIPConfig(name string) error
+}
+
 // Interface represents the exported methods for dealing with getting/setting
 // kubernetes resources
 type Interface interface {
 	SetAnnotationsOnPod(namespace, podName string, annotations map[string]interface{}) error
+	SetAnnotationsOnService(namespace, serviceName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error
 	SetTaintOnNode(nodeName string, taint *kapi.Taint) error
 	RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error
 	PatchNode(old, new *kapi.Node) error
-	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
-	UpdateEgressIP(eIP *egressipv1.EgressIP) error
-	PatchEgressIP(name string, patchData []byte) error
+	UpdateNode(node *kapi.Node) error
 	UpdateNodeStatus(node *kapi.Node) error
 	UpdatePod(pod *kapi.Pod) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetNodes() (*kapi.NodeList, error)
-	GetEgressIP(name string) (*egressipv1.EgressIP, error)
-	GetEgressIPs() (*egressipv1.EgressIPList, error)
-	GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error)
 	GetNamespaces(labelSelector metav1.LabelSelector) (*kapi.NamespaceList, error)
 	GetPods(namespace string, labelSelector metav1.LabelSelector) (*kapi.PodList, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetNode(name string) (*kapi.Node, error)
-	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
-	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
-	DeleteCloudPrivateIPConfig(name string) error
 	Events() kv1core.EventInterface
 }
 
-// Kube is the structure object upon which the Interface is implemented
+// Kube works with kube client only
+// Implements Interface
 type Kube struct {
-	KClient              kubernetes.Interface
+	KClient kubernetes.Interface
+}
+
+// KubeOVN works with all kube and ovn resources
+// Implements InterfaceOVN
+type KubeOVN struct {
+	Kube
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
@@ -132,6 +147,33 @@ func (k *Kube) SetAnnotationsOnNamespace(namespaceName string, annotations map[s
 	_, err = k.KClient.CoreV1().Namespaces().Patch(context.TODO(), namespaceName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
 		klog.Errorf("Error in setting annotation on namespace %s: %v", namespaceName, err)
+	}
+	return err
+}
+
+// SetAnnotationsOnService takes a service namespace and name and a map of key/value string pairs to set as annotations
+func (k *Kube) SetAnnotationsOnService(namespace, name string, annotations map[string]interface{}) error {
+	var err error
+	var patchData []byte
+	patch := struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}{
+		Metadata: map[string]interface{}{
+			"annotations": annotations,
+		},
+	}
+
+	serviceDesc := namespace + "/" + name
+	klog.Infof("Setting annotations %v on service %s", annotations, serviceDesc)
+	patchData, err = json.Marshal(&patch)
+	if err != nil {
+		klog.Errorf("Error in setting annotations on service %s: %v", serviceDesc, err)
+		return err
+	}
+
+	_, err = k.KClient.CoreV1().Services(namespace).Patch(context.TODO(), name, types.MergePatchType, patchData, metav1.PatchOptions{})
+	if err != nil {
+		klog.Errorf("Error in setting annotation on service %s: %v", serviceDesc, err)
 	}
 	return err
 }
@@ -226,22 +268,9 @@ func (k *Kube) PatchNode(old, new *kapi.Node) error {
 	return nil
 }
 
-// UpdateEgressFirewall updates the EgressFirewall with the provided EgressFirewall data
-func (k *Kube) UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error {
-	klog.Infof("Updating status on EgressFirewall %s in namespace %s", egressfirewall.Name, egressfirewall.Namespace)
-	_, err := k.EgressFirewallClient.K8sV1().EgressFirewalls(egressfirewall.Namespace).Update(context.TODO(), egressfirewall, metav1.UpdateOptions{})
-	return err
-}
-
-// UpdateEgressIP updates the EgressIP with the provided EgressIP data
-func (k *Kube) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
-	klog.Infof("Updating status on EgressIP %s status %v", eIP.Name, eIP.Status)
-	_, err := k.EIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIP, metav1.UpdateOptions{})
-	return err
-}
-
-func (k *Kube) PatchEgressIP(name string, patchData []byte) error {
-	_, err := k.EIPClient.K8sV1().EgressIPs().Patch(context.TODO(), name, types.JSONPatchType, patchData, metav1.PatchOptions{})
+// UpdateNode updates node with provided node data
+func (k *Kube) UpdateNode(node *kapi.Node) error {
+	_, err := k.KClient.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
 	return err
 }
 
@@ -304,37 +333,57 @@ func (k *Kube) GetNode(name string) (*kapi.Node, error) {
 	return k.KClient.CoreV1().Nodes().Get(context.TODO(), name, metav1.GetOptions{})
 }
 
+// Events returns events to use when creating an EventSinkImpl
+func (k *Kube) Events() kv1core.EventInterface {
+	return k.KClient.CoreV1().Events("")
+}
+
+// UpdateEgressFirewall updates the EgressFirewall with the provided EgressFirewall data
+func (k *KubeOVN) UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error {
+	klog.Infof("Updating status on EgressFirewall %s in namespace %s", egressfirewall.Name, egressfirewall.Namespace)
+	_, err := k.EgressFirewallClient.K8sV1().EgressFirewalls(egressfirewall.Namespace).Update(context.TODO(), egressfirewall, metav1.UpdateOptions{})
+	return err
+}
+
+// UpdateEgressIP updates the EgressIP with the provided EgressIP data
+func (k *KubeOVN) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
+	klog.Infof("Updating status on EgressIP %s status %v", eIP.Name, eIP.Status)
+	_, err := k.EIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIP, metav1.UpdateOptions{})
+	return err
+}
+
+func (k *KubeOVN) PatchEgressIP(name string, patchData []byte) error {
+	_, err := k.EIPClient.K8sV1().EgressIPs().Patch(context.TODO(), name, types.JSONPatchType, patchData, metav1.PatchOptions{})
+	return err
+}
+
 // GetEgressIP returns the EgressIP object from kubernetes
-func (k *Kube) GetEgressIP(name string) (*egressipv1.EgressIP, error) {
+func (k *KubeOVN) GetEgressIP(name string) (*egressipv1.EgressIP, error) {
 	return k.EIPClient.K8sV1().EgressIPs().Get(context.TODO(), name, metav1.GetOptions{})
 }
 
 // GetEgressIPs returns the list of all EgressIP objects from kubernetes
-func (k *Kube) GetEgressIPs() (*egressipv1.EgressIPList, error) {
+func (k *KubeOVN) GetEgressIPs() (*egressipv1.EgressIPList, error) {
 	return k.EIPClient.K8sV1().EgressIPs().List(context.TODO(), metav1.ListOptions{
 		ResourceVersion: "0",
 	})
 }
 
 // GetEgressFirewalls returns the list of all EgressFirewall objects from kubernetes
-func (k *Kube) GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error) {
+func (k *KubeOVN) GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error) {
 	return k.EgressFirewallClient.K8sV1().EgressFirewalls(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{
 		ResourceVersion: "0",
 	})
 }
 
-func (k *Kube) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
+func (k *KubeOVN) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
 	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Create(context.TODO(), cloudPrivateIPConfig, metav1.CreateOptions{})
 }
 
-func (k *Kube) UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
+func (k *KubeOVN) UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
 	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Update(context.TODO(), cloudPrivateIPConfig, metav1.UpdateOptions{})
 }
-func (k *Kube) DeleteCloudPrivateIPConfig(name string) error {
-	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Delete(context.TODO(), name, metav1.DeleteOptions{})
-}
 
-// Events returns events to use when creating an EventSinkImpl
-func (k *Kube) Events() kv1core.EventInterface {
-	return k.KClient.CoreV1().Events("")
+func (k *KubeOVN) DeleteCloudPrivateIPConfig(name string) error {
+	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Delete(context.TODO(), name, metav1.DeleteOptions{})
 }
