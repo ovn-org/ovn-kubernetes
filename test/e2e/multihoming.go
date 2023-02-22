@@ -366,6 +366,77 @@ var _ = Describe("Multi Homing", func() {
 			Expect(inRange(secondaryFlatL2NetworkCIDR, netStatus[1].IPs[0]))
 		})
 	})
+
+	Context("A pod for which a specific MAC address is allocated", func() {
+		const userSpecifiedMAC = "02:03:04:05:06:07"
+
+		BeforeEach(func() {
+			By("creating the attachment configuration")
+			_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+				context.Background(),
+				generateNAD(networkAttachmentConfig{
+					namespace:   f.Namespace.Name,
+					name:        secondaryNetworkName,
+					topology:    "layer2",
+					networkName: secondaryNetworkName,
+				}),
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating the pod using a secondary network")
+			pod, err := cs.CoreV1().Pods(f.Namespace.Name).Create(
+				context.Background(),
+				generatePodSpec(podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{
+						{
+							Name:       secondaryNetworkName,
+							Namespace:  f.Namespace.Name,
+							MacRequest: userSpecifiedMAC,
+						},
+					},
+					name:      podName,
+					namespace: f.Namespace.Name,
+				}),
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() v1.PodPhase {
+				updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
+				if err != nil {
+					return v1.PodFailed
+				}
+				return updatedPod.Status.Phase
+			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+		})
+
+		It("fails when another pod requests the same MAC address", func() {
+			const anotherPodName = "another-pod"
+			anotherPod, err := cs.CoreV1().Pods(f.Namespace.Name).Create(
+				context.Background(),
+				generatePodSpec(podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{
+						{
+							Name:       secondaryNetworkName,
+							Namespace:  f.Namespace.Name,
+							MacRequest: userSpecifiedMAC,
+						},
+					},
+					name:      anotherPodName,
+					namespace: f.Namespace.Name,
+				}),
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Consistently(func() v1.PodPhase {
+				updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), anotherPod.GetName(), metav1.GetOptions{})
+				if err != nil {
+					return v1.PodFailed
+				}
+				return updatedPod.Status.Phase
+			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodPending))
+		})
+	})
 })
 
 func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
