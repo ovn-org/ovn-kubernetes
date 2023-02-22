@@ -826,6 +826,7 @@ destroy_metallb() {
   docker stop lbclient || true # its possible the lbclient doesn't exist which is fine, ignore error
   docker stop frr || true # its possible the lbclient doesn't exist which is fine, ignore error
   docker network rm clientnet || true # its possible the clientnet network doesn't exist which is fine, ignore error
+  sudo rm -rf metallb || true # this repo is removed in install_metallb(), but in case of trouble it may still be around
 }
 
 install_multus() {
