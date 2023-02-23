@@ -351,13 +351,13 @@ type LbEndpoints struct {
 	Port  int32
 }
 
-// GetLbEndpoints return the endpoints that belong to the IPFamily as a slice of IPs
-func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort) LbEndpoints {
+// GetLbEndpoints returns the IPv4 and IPv6 addresses of valid endpoints as slices inside a struct
+func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort, includeTerminating bool) LbEndpoints {
 	v4ips := sets.NewString()
 	v6ips := sets.NewString()
 
 	out := LbEndpoints{}
-	// return an empty object so the caller don't have to check for nil and can use it as an iterator
+	// return an empty object so the caller doesn't have to check for nil and can use it as an iterator
 	if len(slices) == 0 {
 		return out
 	}
@@ -365,17 +365,17 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort)
 	for _, slice := range slices {
 		klog.V(4).Infof("Getting endpoints for slice %s/%s", slice.Namespace, slice.Name)
 
-		// build the list of endpoints in the slice
+		// build the list of valid endpoints in the slice
 		for _, port := range slice.Ports {
-			// If Service port name set it must match the name field in the endpoint
-			// If Service port name is not set we just use the endpoint port
+			// If Service port name is set, it must match the name field in the endpoint
+			// If Service port name is not set, we just use the endpoint port
 			if svcPort.Name != "" && svcPort.Name != *port.Name {
 				klog.V(5).Infof("Slice %s with different Port name, requested: %s received: %s",
 					slice.Name, svcPort.Name, *port.Name)
 				continue
 			}
 
-			// Skip ports that doesn't match the protocol
+			// Skip ports that don't match the protocol
 			if *port.Protocol != svcPort.Protocol {
 				klog.V(5).Infof("Slice %s with different Port protocol, requested: %s received: %s",
 					slice.Name, svcPort.Protocol, *port.Protocol)
@@ -384,13 +384,13 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort)
 
 			out.Port = *port.Port
 			for _, endpoint := range slice.Endpoints {
-				// Skip endpoints that are not ready
-				if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
-					klog.V(4).Infof("Slice endpoints Not Ready")
+				// Skip endpoint if it's not valid
+				if !IsEndpointValid(endpoint, includeTerminating) {
+					klog.V(4).Infof("Slice endpoint not valid")
 					continue
 				}
 				for _, ip := range endpoint.Addresses {
-					klog.V(4).Infof("Adding slice %s endpoints: %v, port: %d", slice.Name, endpoint.Addresses, *port.Port)
+					klog.V(4).Infof("Adding slice %s endpoint: %v, port: %d", slice.Name, endpoint.Addresses, *port.Port)
 					ipStr := utilnet.ParseIPSloppy(ip).String()
 					switch slice.AddressType {
 					case discovery.AddressTypeIPv4:

@@ -530,11 +530,12 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 // and return the matching NetworkSelectionElement if any exists.
 //
 // Return value:
-//    bool: if this Pod is on this Network; true or false
-//    map[string]*nettypes.NetworkSelectionElement: all NetworkSelectionElement that pod is requested
-//        for the specified network, key is NADName. Note multiple NADs of the same network are allowed
-//        on one pod, as long as they are of different NADName.
-//    error:  error in case of failure
+//
+//	bool: if this Pod is on this Network; true or false
+//	map[string]*nettypes.NetworkSelectionElement: all NetworkSelectionElement that pod is requested
+//	    for the specified network, key is NADName. Note multiple NADs of the same network are allowed
+//	    on one pod, as long as they are of different NADName.
+//	error:  error in case of failure
 func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
 	if pod.Spec.HostNetwork {
 		return false, nil, nil
