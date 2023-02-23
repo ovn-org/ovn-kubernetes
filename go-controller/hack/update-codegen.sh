@@ -53,6 +53,7 @@ for crd in ${crds}; do
     --input-base "" \
     --input github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/clientset \
+    --plural-exceptions="EgressQoS:EgressQoSes" \
     "$@"
 
   echo "Generating listers for $crd"
@@ -60,6 +61,7 @@ for crd in ${crds}; do
     --go-header-file hack/boilerplate.go.txt \
     --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/listers \
+    --plural-exceptions="EgressQoS:EgressQoSes" \
     "$@"
 
   echo "Generating informers for $crd"
@@ -69,6 +71,7 @@ for crd in ${crds}; do
     --versioned-clientset-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/clientset/versioned \
     --listers-package  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/listers \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/informers \
+    --plural-exceptions="EgressQoS:EgressQoSes" \
     "$@"
 done
 
