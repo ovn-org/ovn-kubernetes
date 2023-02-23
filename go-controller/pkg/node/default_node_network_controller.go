@@ -768,7 +768,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		if err := nc.watchPodsDPU(); err != nil {
+		if _, err := nc.watchPodsDPU(); err != nil {
 			return err
 		}
 	} else {

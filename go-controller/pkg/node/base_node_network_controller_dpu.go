@@ -16,6 +16,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -98,24 +99,39 @@ func dpuConnectionDetailChanged(oldDPUCD, newDPUCD *util.DPUConnectionDetails) b
 }
 
 // watchPodsDPU watch updates for pod DPU annotations
-func (bnnc *BaseNodeNetworkController) watchPodsDPU() error {
+func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) {
 	clientSet := cni.NewClientSet(bnnc.client, corev1listers.NewPodLister(bnnc.watchFactory.LocalPodInformer().GetIndexer()))
 
-	netName := types.DefaultNetworkName
-	_, err := bnnc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+	netName := bnnc.GetNetworkName()
+	return bnnc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			klog.V(5).Infof("Add for Pod: %s/%s for network %s", pod.Namespace, pod.Name, netName)
 			if util.PodWantsHostNetwork(pod) || pod.Status.Phase == kapi.PodRunning {
 				return
 			}
+
 			// add all the Pod's NADs into Pod's nadToDPUCDMap
 			// For default network, NAD name is DefaultNetworkName.
-			//
-			// Support default network for now
-			nadToDPUCDMap := map[string]*util.DPUConnectionDetails{types.DefaultNetworkName: nil}
-			if len(nadToDPUCDMap) == 0 {
-				return
+			var nadToDPUCDMap map[string]*util.DPUConnectionDetails
+			if bnnc.IsSecondary() {
+				on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bnnc.NetInfo)
+				if err != nil || !on {
+					if err != nil {
+						// configuration error, no need to retry, do not return error
+						klog.Errorf("Error getting network-attachment for pod %s/%s network %s: %v",
+							pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
+					} else {
+						klog.V(5).Infof("Skipping Pod %s/%s as it is not attached to network: %s",
+							pod.Namespace, pod.Name, netName)
+					}
+					return
+				}
+				for nadName := range networkMap {
+					nadToDPUCDMap = map[string]*util.DPUConnectionDetails{nadName: nil}
+				}
+			} else {
+				nadToDPUCDMap = map[string]*util.DPUConnectionDetails{types.DefaultNetworkName: nil}
 			}
 
 			isOvnUpEnabled := atomic.LoadInt32(&bnnc.atomicOvnUpEnabled) > 0
@@ -196,7 +212,6 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() error {
 			}
 		},
 	}, nil)
-	return err
 }
 
 // updatePodDPUConnStatusWithRetry update the pod annotion with the givin connection details
