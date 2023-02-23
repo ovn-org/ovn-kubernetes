@@ -81,6 +81,8 @@ func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
 		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, netConfInfo), nil
 	case ovntypes.Layer2Topology:
 		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, netConfInfo), nil
+	case ovntypes.LocalnetTopology:
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, netConfInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -94,6 +96,8 @@ func (cm *networkControllerManager) newDummyNetworkController(topoType, netName 
 		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, &util.Layer3NetConfInfo{}), nil
 	case ovntypes.Layer2Topology:
 		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, &util.Layer2NetConfInfo{}), nil
+	case ovntypes.LocalnetTopology:
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, &util.LocalnetNetConfInfo{}), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -361,7 +365,7 @@ func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
 	metrics.MonitorIPSec(cm.nbClient)
 }
 
-// newBaseNetworkController creates and returns the base controller
+// newCommonNetworkControllerInfo creates and returns the common networkController info
 func (cm *networkControllerManager) newCommonNetworkControllerInfo() *ovn.CommonNetworkControllerInfo {
 	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport)
@@ -389,13 +393,12 @@ func (cm *networkControllerManager) Run(ctx context.Context) error {
 		return err
 	}
 
-	if cm.defaultNetworkController != nil {
-		err = cm.defaultNetworkController.Start(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to start default network controller: %v", err)
-		}
+	err = cm.defaultNetworkController.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start default network controller: %v", err)
 	}
 
+	// nadController is nil if multi-network is disabled
 	if cm.nadController != nil {
 		klog.Infof("Starts net-attach-def controller")
 		return cm.nadController.Run(cm.stopChan)

@@ -189,9 +189,6 @@ func (h *secondaryLayer3NetworkControllerEventHandler) IsObjectInTerminalState(o
 type SecondaryLayer3NetworkController struct {
 	BaseSecondaryNetworkController
 
-	// waitGroup per-Controller
-	wg *sync.WaitGroup
-
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator *subnetallocator.HostSubnetAllocator
 
@@ -216,9 +213,9 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				namespacesMutex:             sync.Mutex{},
 				addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient),
 				stopChan:                    stopChan,
+				wg:                          &sync.WaitGroup{},
 			},
 		},
-		wg:                          &sync.WaitGroup{},
 		masterSubnetAllocator:       subnetallocator.NewHostSubnetAllocator(),
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},

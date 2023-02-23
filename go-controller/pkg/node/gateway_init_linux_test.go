@@ -667,17 +667,13 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		n := OvnNode{
-			watchFactory: wf,
-			name:         nodeName,
-			stopChan:     stop,
-			wg:           wg,
-		}
+		cnnci := NewCommonNodeNetworkControllerInfo(nil, wf, nil, nodeName, false)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := n.initGatewayDPUHost(net.ParseIP(hostIP))
+			err := nc.initGatewayDPUHost(net.ParseIP(hostIP))
 			Expect(err).NotTo(HaveOccurred())
 
 			link, err := netlink.LinkByName(uplinkName)
