@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -615,17 +616,26 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 			}
 		}
 		if needsNewMacOrIPAllocation {
-			// Previous attempts to use already configured IPs failed, need to assign new
-			generatedPodMac, generatedPodIfAddrs, err := bnc.assignPodAddresses(switchName)
-			if err != nil {
-				return nil, nil, nil, false, fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
-					podDesc, switchName, err)
-			}
-			if podMac == nil {
-				podMac = generatedPodMac
-			}
-			if len(generatedPodIfAddrs) > 0 {
-				podIfAddrs = generatedPodIfAddrs
+			if network != nil && network.IPRequest != nil && !bnc.doesNetworkRequireIPAM() {
+				klog.V(5).Infof("Will use static IP addresses for pod %s on a flatL2 topology without subnet defined", podDesc)
+				podIfAddrs, err = calculateStaticIPs(podDesc, network.IPRequest)
+				if err != nil {
+					return nil, nil, nil, false, err
+				}
+				podMac = util.IPAddrToHWAddr(podIfAddrs[0].IP)
+			} else {
+				// Previous attempts to use already configured IPs failed, need to assign new
+				generatedPodMac, generatedPodIfAddrs, err := bnc.assignPodAddresses(switchName)
+				if err != nil {
+					return nil, nil, nil, false, fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
+						podDesc, switchName, err)
+				}
+				if podMac == nil {
+					podMac = generatedPodMac
+				}
+				if len(generatedPodIfAddrs) > 0 {
+					podIfAddrs = generatedPodIfAddrs
+				}
 			}
 		}
 
@@ -633,11 +643,9 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		// handle error cases separately first to ensure binding to err, otherwise the
 		// defer will fail
 		if network != nil && network.MacRequest != "" {
-			klog.V(5).Infof("Pod %s requested custom MAC: %s", podDesc, network.MacRequest)
-			podMac, err = net.ParseMAC(network.MacRequest)
+			podMac, err = calculateStaticMAC(podDesc, network.MacRequest)
 			if err != nil {
-				return nil, nil, nil, false, fmt.Errorf("failed to parse mac %s requested in annotation for pod %s: Error %v",
-					network.MacRequest, podDesc, err)
+				return nil, nil, nil, false, err
 			}
 		}
 		podAnnotation = &util.PodAnnotation{
@@ -828,4 +836,32 @@ func (bnc *BaseNetworkController) WatchPods() error {
 		bnc.podHandler = handler
 	}
 	return err
+}
+
+func calculateStaticIPs(podDesc string, ips []string) ([]*net.IPNet, error) {
+	var staticIPs []*net.IPNet
+	klog.V(5).Infof("Pod %s requested static IPs: %s", podDesc, strings.Join(ips, ";"))
+	for _, ip := range ips {
+		ipAddr, ipNet, err := net.ParseCIDR(ip)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse IP %s requested in annotation for pod %s: Error %v",
+				ip, podDesc, err)
+		}
+		ipNet.IP = ipAddr
+		staticIPs = append(staticIPs, ipNet)
+	}
+
+	return staticIPs, nil
+}
+
+func calculateStaticMAC(podDesc string, mac string) (net.HardwareAddr, error) {
+	var err error
+	var podMac net.HardwareAddr
+	klog.V(5).Infof("Pod %s requested custom MAC: %s", podDesc, mac)
+	podMac, err = net.ParseMAC(mac)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse mac %s requested in annotation for pod %s: Error %v",
+			mac, podDesc, err)
+	}
+	return podMac, nil
 }
