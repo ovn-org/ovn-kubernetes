@@ -93,7 +93,8 @@ spec:
             "topology":"layer2",
             "subnets": "10.100.200.0/24",
             "mtu": 1300,
-            "netAttachDefName": "ns1/l2-network"
+            "netAttachDefName": "ns1/l2-network",
+            "excludeSubnets": "10.100.200.0/29"
     }
 ```
 
