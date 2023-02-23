@@ -30,6 +30,7 @@ var _ = Describe("Multi Homing", func() {
 		secondaryFlatL2IgnoreCIDR  = "10.128.0.0/29"
 		secondaryFlatL2NetworkCIDR = "10.128.0.0/24"
 		netPrefixLengthPerNode     = 24
+		secondaryIPv6CIDR          = "10:100:200::0/64"
 	)
 	f := wrappedTestFramework("multi-homing")
 
@@ -116,6 +117,18 @@ var _ = Describe("Multi Homing", func() {
 			table.Entry(
 				"when attaching to an L2 - switched - network without IPAM",
 				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "layer2",
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        podName,
+				},
+			),
+			table.Entry(
+				"when attaching to an L2 - switched - network with an IPv6 subnet",
+				networkAttachmentConfig{
+					cidr:     secondaryIPv6CIDR,
 					name:     secondaryNetworkName,
 					topology: "layer2",
 				},
@@ -322,6 +335,25 @@ var _ = Describe("Multi Homing", func() {
 					}},
 					name:         podName,
 					containerCmd: httpServerContainerCmd(port),
+				},
+			),
+			table.Entry(
+				"can communicate over an L2 secondary network with an IPv6 subnet when pods are scheduled in different nodes",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "layer2",
+					cidr:     secondaryIPv6CIDR,
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         clientPodName,
+					nodeSelector: map[string]string{nodeHostnameKey: workerOneNodeName},
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
 		)
