@@ -17,16 +17,14 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	controllerManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovnmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -176,8 +174,9 @@ func setupPIDFile(pidfile string) error {
 
 // ovnkubeRunMode object stores the run mode of the ovnkube
 type ovnkubeRunMode struct {
-	networkControllerManager bool // network controller manager (--init-network-controller-manager or --init-master) is enabled
-	clusterManager           bool // cluster manager (--init-cluster-manager or --init-master) is enabled
+	master                   bool // master (--init-master) is enabled (both network controller manager and cluster manager)
+	networkControllerManager bool // network controller manager (--init-network-controller-manager) is enabled
+	clusterManager           bool // cluster manager (--init-cluster-manager) is enabled
 	node                     bool // node (--init-node) is enabled
 	cleanupNode              bool // cleanup (--cleanup-node) is enabled
 }
@@ -189,20 +188,13 @@ type ovnkubeRunMode struct {
 //   - network controller manager + cluster manager
 //   - network controller manager + node
 func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
-	mode := &ovnkubeRunMode{false, false, false, false}
+	mode := &ovnkubeRunMode{false, false, false, false, false}
 
-	if ctx.String("init-master") != "" {
-		// If init-master is set, then both network controller manager and cluster manager
-		// are enabled
-		mode.networkControllerManager = true
+	if ctx.String("init-master") != "" || (ctx.String("init-cluster-manager") != "" && ctx.String("init-network-controller-manager") != "") {
+		mode.master = true
+	} else if ctx.String("init-cluster-manager") != "" {
 		mode.clusterManager = true
-	}
-
-	if ctx.String("init-cluster-manager") != "" {
-		mode.clusterManager = true
-	}
-
-	if ctx.String("init-network-controller-manager") != "" {
+	} else if ctx.String("init-network-controller-manager") != "" {
 		mode.networkControllerManager = true
 	}
 
@@ -214,19 +206,23 @@ func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
 		mode.cleanupNode = true
 	}
 
-	if mode.cleanupNode && (mode.clusterManager || mode.networkControllerManager || mode.node) {
+	if mode.cleanupNode && (mode.master || mode.clusterManager || mode.networkControllerManager || mode.node) {
 		return nil, fmt.Errorf("cannot run cleanup-node mode along with any other mode")
 	}
 
-	if !mode.clusterManager && !mode.networkControllerManager && !mode.node && !mode.cleanupNode {
+	if !mode.master && !mode.clusterManager && !mode.networkControllerManager && !mode.node && !mode.cleanupNode {
 		return nil, fmt.Errorf("need to specify a mode for ovnkube")
 	}
 
-	if !mode.networkControllerManager && mode.clusterManager && mode.node {
+	if mode.clusterManager && mode.node {
 		return nil, fmt.Errorf("cannot run in both cluster manager and node mode")
 	}
 
 	return mode, nil
+}
+
+func getMasterIdentity(ctx *cli.Context) string {
+	return ctx.String("init-master")
 }
 
 func getNetworkControllerManagerIdentity(ctx *cli.Context) string {
@@ -294,58 +290,32 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	var masterWatchFactory *factory.WatchFactory
 	var masterEventRecorder record.EventRecorder
 
-	if runMode.networkControllerManager {
-		var err error
-		// create factory and start the controllers asked for
-		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+	var ovnManager ovnmanager.OvnManager
+
+	if runMode.master || runMode.clusterManager || runMode.networkControllerManager {
+		managerType := ovnmanager.ManagerTypeMaster
+		identity := getMasterIdentity(ctx)
+		if runMode.clusterManager {
+			managerType = ovnmanager.ManagerTypeClusterManager
+			identity = getClusterManagerIdentity(ctx)
+		} else if runMode.networkControllerManager {
+			managerType = ovnmanager.ManagerTypeNetworkControllerManager
+			identity = getNetworkControllerManagerIdentity(ctx)
+		}
+
+		ovnManager, err = ovnmanager.NewOvnManager(managerType, identity, ovnClientset, wg, util.EventRecorder(ovnClientset.KubeClient))
 		if err != nil {
 			return err
 		}
-		defer masterWatchFactory.Shutdown()
-	}
-
-	if runMode.clusterManager {
-		var clusterManagerWatchFactory *factory.WatchFactory
-		if runMode.networkControllerManager {
-			clusterManagerWatchFactory = masterWatchFactory
-		} else {
-			clusterManagerWatchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset.GetClusterManagerClientset())
-			if err != nil {
-				return err
-			}
-			defer clusterManagerWatchFactory.Shutdown()
-		}
-
-		cm := clustermanager.NewClusterManager(ovnClientset.GetClusterManagerClientset(), clusterManagerWatchFactory,
-			getClusterManagerIdentity(ctx), wg, util.EventRecorder(ovnClientset.KubeClient))
-		err = cm.Start(ctx.Context, cancel)
-		if err != nil {
-			return fmt.Errorf("failed to start cluster manager leader election: %w", err)
-		}
-		defer cm.Stop()
-	}
-
-	if runMode.networkControllerManager {
-		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
-
-		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
-			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
-		}
-
-		if libovsdbOvnSBClient, err = libovsdb.NewSBClient(stopChan); err != nil {
-			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
-		}
-
-		// register prometheus metrics that do not depend on becoming ovnkube-master leader
-		metrics.RegisterMasterBase()
-
-		masterEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
-		cm := controllerManager.NewNetworkControllerManager(ovnClientset, getNetworkControllerManagerIdentity(ctx),
-			masterWatchFactory, libovsdbOvnNBClient, libovsdbOvnSBClient, masterEventRecorder, wg)
-		err = cm.Start(ctx.Context, cancel)
-		defer cm.Stop()
+		err = ovnManager.Start(ctx.Context)
 		if err != nil {
 			return err
+		}
+		defer ovnManager.Stop()
+
+		if runMode.master {
+			masterWatchFactory = ovnManager.GetManagerWatchFactory()
+			masterEventRecorder = ovnManager.GetManagerEventRecorder()
 		}
 	}
 

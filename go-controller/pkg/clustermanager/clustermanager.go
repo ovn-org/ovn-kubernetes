@@ -6,8 +6,6 @@ import (
 	"time"
 
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
@@ -34,16 +32,10 @@ type ClusterManager struct {
 	// used for leader election
 	identity string
 
-	// Indicates if cluster manager is leader and it is active or not.  This variable is protected
-	// by the mutex and is modified by only when started or stopped.
-	// Once 'isActive' is set, starting ClusterManager will be a no-op and once
-	// it is false, stopping ClusterManager will be a no-op.
-	// ClusterManager can be stopped in two different situations:
-	//    - On process termination
-	//    - When leadership is lost
-	// and 'isActive' makes sure that stopping ClusterManager is idempotent.
-	isActive   bool
-	sync.Mutex // This lock syunchornizes starting or stoping ClusterManager from different goroutines
+	// This lock protects accessing the Start and Stop function from different go routines.
+	// Mostly needed for the unit test cases otherwise the test fails with the data race warning.
+	// The warning is seen because 2 go routines call Start() and Stop().
+	sync.Mutex
 }
 
 // NewClusterManager creates a new Cluster Manager for managing the
@@ -59,7 +51,6 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		wf:                          wf,
 		recorder:                    recorder,
 		identity:                    identity,
-		isActive:                    false,
 	}
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
@@ -68,97 +59,11 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 	return cm
 }
 
-// Start waits until this process is the leader before starting the cluster manager functions
-func (cm *ClusterManager) Start(ctx context.Context, cancel context.CancelFunc) error {
-	metrics.RegisterClusterManagerBase()
-
-	// Set up leader election process first.
-	// User lease resource lock as configmap and endpoint lock support is removed from leader election library.
-	// TODO: Remove the leader election from cluster-manager and have one single election
-	// when both cluster manager and network controller manager are running.
-	// See https://issues.redhat.com/browse/OCPBUGS-8080 for details
-	rl, err := resourcelock.New(
-		resourcelock.LeasesResourceLock,
-		config.Kubernetes.OVNConfigNamespace,
-		"ovn-kubernetes-cluster-manager",
-		cm.client.CoreV1(),
-		cm.client.CoordinationV1(),
-		resourcelock.ResourceLockConfig{
-			Identity:      cm.identity,
-			EventRecorder: cm.recorder,
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	lec := leaderelection.LeaderElectionConfig{
-		Lock:            rl,
-		LeaseDuration:   time.Duration(config.ClusterMgrHA.ElectionLeaseDuration) * time.Second,
-		RenewDeadline:   time.Duration(config.ClusterMgrHA.ElectionRenewDeadline) * time.Second,
-		RetryPeriod:     time.Duration(config.ClusterMgrHA.ElectionRetryPeriod) * time.Second,
-		ReleaseOnCancel: true,
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {
-				klog.Infof("Won leader election; in active mode")
-				// run only on the active master node
-				if err := cm.start(ctx); err != nil {
-					klog.Error(err)
-					cancel()
-				}
-			},
-			OnStoppedLeading: func() {
-				klog.Infof("No longer leader; transitioning to standby mode")
-				// This node was leader and it lost the election.
-				// Stop all the cluster manager responsibilities
-				// and become a standby. This doesn't exit the process because
-				//    - network cluster manager may also be running in an another
-				//      leader election session and we don't want to disrupt it.
-				//    - ClusterManager can be started again if it becomes leader
-				//      again.
-				if err := cm.stop(); err != nil {
-					klog.Error(err)
-					cancel()
-				}
-			},
-			OnNewLeader: func(newLeaderName string) {
-				if newLeaderName != cm.identity {
-					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
-				}
-			},
-		},
-	}
-
-	leaderElector, err := leaderelection.NewLeaderElector(lec)
-	if err != nil {
-		return err
-	}
-
-	cm.wg.Add(1)
-	go func() {
-		leaderElector.Run(ctx)
-		cm.wg.Done()
-	}()
-
-	return nil
-}
-
-// Stop the cluster manager if it is active
-func (cm *ClusterManager) Stop() {
-	if err := cm.stop(); err != nil {
-		klog.Error(err)
-	}
-}
-
-// start managing the cluster operations
+// Start starts managing the cluster operations
 // It starts the default network cluster controller
-func (cm *ClusterManager) start(ctx context.Context) error {
+func (cm *ClusterManager) Start(ctx context.Context) error {
 	cm.Lock()
 	defer cm.Unlock()
-	if cm.isActive {
-		// Is already active and nothing to do
-		return nil
-	}
 
 	klog.Info("Starting the cluster manager")
 	metrics.RegisterClusterManagerFunctional()
@@ -184,19 +89,14 @@ func (cm *ClusterManager) start(ctx context.Context) error {
 		}
 	}
 
-	cm.isActive = true
 	return nil
 }
 
-// stop managing the cluster operations by stopping the default
+// Stop stops managing the cluster operations by stopping the default
 // network cluster controller
-func (cm *ClusterManager) stop() error {
+func (cm *ClusterManager) Stop() {
 	cm.Lock()
 	defer cm.Unlock()
-	if !cm.isActive {
-		// Is not active.  Nothing to halt.
-		return nil
-	}
 
 	klog.Info("Stopping the cluster manager")
 	metrics.UnregisterClusterManagerFunctional()
@@ -204,7 +104,4 @@ func (cm *ClusterManager) stop() error {
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		cm.secondaryNetClusterManager.Stop()
 	}
-
-	cm.isActive = false
-	return nil
 }

@@ -90,11 +90,9 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				c, cancel := context.WithCancel(ctx.Context)
-				defer cancel()
 				clusterManager := NewClusterManager(fakeClient, f, "identity", wg, nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-				err = clusterManager.Start(c, cancel)
+				err = clusterManager.Start(ctx.Context)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				defer clusterManager.Stop()
 
@@ -155,11 +153,9 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				c, cancel := context.WithCancel(ctx.Context)
-				defer cancel()
 				clusterManager := NewClusterManager(fakeClient, f, "identity", wg, nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-				err = clusterManager.Start(c, cancel)
+				err = clusterManager.Start(ctx.Context)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				defer clusterManager.Stop()
 
@@ -246,11 +242,9 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				c, cancel := context.WithCancel(ctx.Context)
-				defer cancel()
 				clusterManager := NewClusterManager(fakeClient, f, "identity", wg, nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-				err = clusterManager.Start(c, cancel)
+				err = clusterManager.Start(ctx.Context)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				defer clusterManager.Stop()
 
@@ -317,11 +311,9 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				c, cancel := context.WithCancel(ctx.Context)
-				defer cancel()
 				clusterManager := NewClusterManager(fakeClient, f, "identity", wg, nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-				err = clusterManager.Start(c, cancel)
+				err = clusterManager.Start(ctx.Context)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				defer clusterManager.Stop()
 

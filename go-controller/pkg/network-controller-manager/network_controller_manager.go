@@ -21,30 +21,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 )
 
-type ovnkubeMasterLeaderMetrics struct{}
-
-func (ovnkubeMasterLeaderMetrics) On(string) {
-	metrics.MetricMasterLeader.Set(1)
-}
-
-func (ovnkubeMasterLeaderMetrics) Off(string) {
-	metrics.MetricMasterLeader.Set(0)
-}
-
-type ovnkubeMasterLeaderMetricsProvider struct{}
-
-func (ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
-	return ovnkubeMasterLeaderMetrics{}
-}
-
-// networkControllerManager structure is the object manages all controllers for all networks
-type networkControllerManager struct {
+// NetworkControllerManager structure is the object manages all controllers for all networks
+type NetworkControllerManager struct {
 	client       clientset.Interface
 	kube         *kube.KubeOVN
 	watchFactory *factory.WatchFactory
@@ -71,9 +53,14 @@ type networkControllerManager struct {
 
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
 	nadController *nad.NetAttachDefinitionController
+
+	// This lock protects accessing the Start and Stop function from different go routines.
+	// Mostly needed for the unit test cases otherwise the test fails with the data race warning.
+	// The warning is seen because 2 go routines call Start() and Stop().
+	sync.Mutex
 }
 
-func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
+func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo,
 	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
 	cnci := cm.newCommonNetworkControllerInfo()
 	topoType := netConfInfo.TopologyType()
@@ -89,7 +76,7 @@ func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
 }
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
-func (cm *networkControllerManager) newDummyNetworkController(topoType, netName string) (nad.NetworkController, error) {
+func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName string) (nad.NetworkController, error) {
 	cnci := cm.newCommonNetworkControllerInfo()
 	netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
@@ -127,7 +114,7 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*
 	return nodeSwitches, clusterRouters, nil
 }
 
-func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
+func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
 	existingNetworksMap := map[string]struct{}{}
 	for _, oc := range allControllers {
 		existingNetworksMap[oc.GetNetworkName()] = struct{}{}
@@ -181,97 +168,13 @@ func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	return nil
 }
 
-// Start waits until this process is the leader before starting master functions
-func (cm *networkControllerManager) Start(ctx context.Context, cancel context.CancelFunc) error {
-	// Set up leader election process first
-	rl, err := resourcelock.New(
-		// TODO (rravaiol) (bpickard)
-		// https://github.com/kubernetes/kubernetes/issues/107454
-		// leader election library no longer supports leader-election
-		// locks based solely on `endpoints` or `configmaps` resources.
-		// Slowly migrating to new API across three releases; with k8s 1.24
-		// we're now in the second step ('x+2') bullet from the link above).
-		// This will have to be updated for the next k8s bump: to 1.26.
-		resourcelock.LeasesResourceLock,
-		config.Kubernetes.OVNConfigNamespace,
-		"ovn-kubernetes-master",
-		cm.client.CoreV1(),
-		cm.client.CoordinationV1(),
-		resourcelock.ResourceLockConfig{
-			Identity:      cm.identity,
-			EventRecorder: cm.recorder,
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	lec := leaderelection.LeaderElectionConfig{
-		Lock:            rl,
-		LeaseDuration:   time.Duration(config.MasterHA.ElectionLeaseDuration) * time.Second,
-		RenewDeadline:   time.Duration(config.MasterHA.ElectionRenewDeadline) * time.Second,
-		RetryPeriod:     time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
-		ReleaseOnCancel: true,
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {
-				klog.Infof("Won leader election; in active mode")
-				klog.Infof("Starting cluster master")
-				start := time.Now()
-				defer func() {
-					end := time.Since(start)
-					metrics.MetricMasterReadyDuration.Set(end.Seconds())
-				}()
-
-				if err = cm.start(ctx); err != nil {
-					klog.Error(err)
-					cancel()
-					return
-				}
-			},
-			OnStoppedLeading: func() {
-				//This node was leader and it lost the election.
-				// Whenever the node transitions from leader to follower,
-				// we need to handle the transition properly like clearing
-				// the cache.
-				// Note: If cluster manager LE is also running, it will
-				// exit the cluster manager too.
-				// TODO: Remove the leader election from cluster-manager and have one single election
-				// when both cluster manager and network controller manager are running.
-				// See https://issues.redhat.com/browse/OCPBUGS-8080 for details
-				klog.Infof("No longer leader; exiting")
-				cancel()
-			},
-			OnNewLeader: func(newLeaderName string) {
-				if newLeaderName != cm.identity {
-					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
-				}
-			},
-		},
-	}
-
-	leaderelection.SetProvider(ovnkubeMasterLeaderMetricsProvider{})
-	leaderElector, err := leaderelection.NewLeaderElector(lec)
-	if err != nil {
-		return err
-	}
-
-	cm.wg.Add(1)
-	go func() {
-		leaderElector.Run(ctx)
-		klog.Infof("Stopped leader election")
-		cm.wg.Done()
-	}()
-
-	return nil
-}
-
 // NewNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
 func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, wf *factory.WatchFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder, wg *sync.WaitGroup) *networkControllerManager {
+	recorder record.EventRecorder, wg *sync.WaitGroup) *NetworkControllerManager {
 	podRecorder := metrics.NewPodRecorder()
 
-	cm := &networkControllerManager{
+	cm := &NetworkControllerManager{
 		client: ovnClient.KubeClient,
 		kube: &kube.KubeOVN{
 			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
@@ -296,7 +199,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 	return cm
 }
 
-func (cm *networkControllerManager) configureSCTPSupport() error {
+func (cm *NetworkControllerManager) configureSCTPSupport() error {
 	hasSCTPSupport, err := util.DetectSCTPSupport()
 	if err != nil {
 		return err
@@ -311,7 +214,7 @@ func (cm *networkControllerManager) configureSCTPSupport() error {
 	return nil
 }
 
-func (cm *networkControllerManager) configureMulticastSupport() {
+func (cm *NetworkControllerManager) configureMulticastSupport() {
 	cm.multicastSupport = config.EnableMulticast
 	if cm.multicastSupport {
 		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
@@ -327,7 +230,7 @@ func (cm *networkControllerManager) configureMulticastSupport() {
 // understand it. Logical datapath groups reduce the size of the southbound
 // database in large clusters. ovn-controllers should be upgraded to a version
 // that supports them before the option is turned on by the master.
-func (cm *networkControllerManager) enableOVNLogicalDataPathGroups() error {
+func (cm *NetworkControllerManager) enableOVNLogicalDataPathGroups() error {
 	nbGlobal := nbdb.NBGlobal{
 		Options: map[string]string{"use_logical_dp_groups": "true"},
 	}
@@ -337,7 +240,7 @@ func (cm *networkControllerManager) enableOVNLogicalDataPathGroups() error {
 	return nil
 }
 
-func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
+func (cm *NetworkControllerManager) configureMetrics(stopChan <-chan struct{}) {
 	metrics.RegisterMasterPerformance(cm.nbClient)
 	metrics.RegisterMasterFunctional()
 	metrics.RunTimestamp(stopChan, cm.sbClient, cm.nbClient)
@@ -345,19 +248,22 @@ func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
 }
 
 // newCommonNetworkControllerInfo creates and returns the common networkController info
-func (cm *networkControllerManager) newCommonNetworkControllerInfo() *ovn.CommonNetworkControllerInfo {
+func (cm *NetworkControllerManager) newCommonNetworkControllerInfo() *ovn.CommonNetworkControllerInfo {
 	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport)
 }
 
 // NewDefaultNetworkController creates the controller for default network
-func (cm *networkControllerManager) NewDefaultNetworkController() {
+func (cm *NetworkControllerManager) NewDefaultNetworkController() {
 	defaultController := ovn.NewDefaultNetworkController(cm.newCommonNetworkControllerInfo())
 	cm.defaultNetworkController = defaultController
 }
 
-// start the network controller manager
-func (cm *networkControllerManager) start(ctx context.Context) error {
+// Start the network controller manager
+func (cm *NetworkControllerManager) Start(ctx context.Context) error {
+	cm.Lock()
+	defer cm.Unlock()
+
 	cm.configureMetrics(cm.stopChan)
 
 	err := cm.configureSCTPSupport()
@@ -400,8 +306,11 @@ func (cm *networkControllerManager) start(ctx context.Context) error {
 }
 
 // Stop gracefully stops all managed controllers
-func (cm *networkControllerManager) Stop() {
-	// stop metric recorders
+func (cm *NetworkControllerManager) Stop() {
+	cm.Lock()
+	defer cm.Unlock()
+
+	// stop metrics recorders
 	close(cm.stopChan)
 
 	// stops the default network controller
