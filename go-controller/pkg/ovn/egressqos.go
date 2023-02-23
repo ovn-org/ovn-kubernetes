@@ -35,7 +35,6 @@ const (
 	maxEgressQoSRetries        = 10
 	defaultEgressQoSName       = "default"
 	EgressQoSFlowStartPriority = 1000
-	rulePriorityDelimeter      = "-"
 )
 
 type egressQoS struct {

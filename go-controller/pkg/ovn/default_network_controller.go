@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set_syncer"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
@@ -269,7 +270,15 @@ func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (oc *DefaultNetworkController) Start(ctx context.Context) error {
-	if err := oc.Init(); err != nil {
+	// sync address sets, only required for DefaultNetworkController, since any old objects in the db without
+	// Owner set are owned by the default network controller.
+	syncer := address_set_syncer.NewAddressSetSyncer(oc.nbClient, DefaultNetworkControllerName)
+	err := syncer.SyncAddressSets()
+	if err != nil {
+		return fmt.Errorf("failed to sync address sets on controller init: %v", err)
+	}
+
+	if err = oc.Init(); err != nil {
 		return err
 	}
 
@@ -477,13 +486,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}()
 
 		unidling.NewUnidledAtController(oc.kube, oc.watchFactory.ServiceInformer())
-	}
-
-	// Final step to cleanup after resource handlers have synced
-	err := oc.ovnTopologyCleanup()
-	if err != nil {
-		klog.Errorf("Failed to cleanup OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
-		return err
 	}
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN and the ConfigMap
