@@ -15,16 +15,11 @@ import (
 )
 
 // Start the Server's local HTTP server on a root-owned Unix domain socket.
-// requestFunc will be called to handle pod setup/teardown operations on each
+// handlePodRequestFunc will be called to handle pod setup/teardown operations on each
 // request to the Server's HTTP server, and should return the response bytes,
 // or an error when the operation has completed.
-func (s *Server) Start(requestFunc cniRequestFunc) error {
-	if requestFunc == nil {
-		return fmt.Errorf("no pod request handler")
-	}
-	s.requestFunc = requestFunc
-
-	socketPath := filepath.Join(s.rundir, serverSocketName)
+func (s *Server) Start(rundir string) error {
+	socketPath := filepath.Join(rundir, serverSocketName)
 
 	// For security reasons the socket must be accessible only to root.
 	// Listen() (which creates the socket) cannot set permissions thus the
@@ -37,10 +32,10 @@ func (s *Server) Start(requestFunc cniRequestFunc) error {
 	// error if they are not root-only.
 
 	// Remove and re-create the socket directory with root-only permissions
-	if err := os.RemoveAll(s.rundir); err != nil && !os.IsNotExist(err) {
-		info, err := os.Stat(s.rundir)
+	if err := os.RemoveAll(rundir); err != nil && !os.IsNotExist(err) {
+		info, err := os.Stat(rundir)
 		if err != nil {
-			return fmt.Errorf("failed to stat old pod info socket directory %s: %v", s.rundir, err)
+			return fmt.Errorf("failed to stat old pod info socket directory %s: %v", rundir, err)
 		}
 		// Owner must be root
 		tmp := info.Sys()
@@ -49,12 +44,12 @@ func (s *Server) Start(requestFunc cniRequestFunc) error {
 			return fmt.Errorf("failed to read pod info socket directory stat info: %T", tmp)
 		}
 		if statt.Uid != 0 {
-			return fmt.Errorf("insecure owner of pod info socket directory %s: %v", s.rundir, statt.Uid)
+			return fmt.Errorf("insecure owner of pod info socket directory %s: %v", rundir, statt.Uid)
 		}
 
 		// Check permissions
 		if info.Mode()&0o777 != 0o700 {
-			return fmt.Errorf("insecure permissions on pod info socket directory %s: %v", s.rundir, info.Mode())
+			return fmt.Errorf("insecure permissions on pod info socket directory %s: %v", rundir, info.Mode())
 		}
 
 		// Finally remove the socket file so we can re-create it
@@ -62,8 +57,8 @@ func (s *Server) Start(requestFunc cniRequestFunc) error {
 			return fmt.Errorf("failed to remove old pod info socket %s: %v", socketPath, err)
 		}
 	}
-	if err := os.MkdirAll(s.rundir, 0o700); err != nil {
-		return fmt.Errorf("failed to create pod info socket directory %s: %v", s.rundir, err)
+	if err := os.MkdirAll(rundir, 0o700); err != nil {
+		return fmt.Errorf("failed to create pod info socket directory %s: %v", rundir, err)
 	}
 
 	// On Linux the socket is created with the permissions of the directory

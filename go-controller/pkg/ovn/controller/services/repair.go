@@ -1,25 +1,19 @@
 package services
 
 import (
-	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
@@ -43,9 +37,6 @@ type repair struct {
 	// workers.
 	unsyncedServices sets.String
 
-	// Really a boolean, but an int32 for atomicity purposes
-	semLegacyLBsDeleted uint32
-
 	nbClient libovsdbclient.Client
 }
 
@@ -68,16 +59,6 @@ func (r *repair) runBeforeSync() {
 		klog.V(4).Infof("Finished repairing loop for services: %v", time.Since(startTime))
 	}()
 
-	// Ensure unidling is enabled
-	nbGlobal := nbdb.NBGlobal{
-		Options: map[string]string{"controller_event": "true"},
-	}
-	if globalconfig.Kubernetes.OVNEmptyLbEvents {
-		if err := libovsdbops.UpdateNBGlobalSetOptions(r.nbClient, &nbGlobal); err != nil {
-			klog.Errorf("Unable to enable controller events, unidling not possible: %v", err)
-		}
-	}
-
 	// Build a list of every service existing
 	// After every service has been synced, then we'll execute runAfterSync
 	services, _ := r.serviceLister.List(labels.Everything())
@@ -87,17 +68,16 @@ func (r *repair) runBeforeSync() {
 	}
 
 	// Find all load-balancers associated with Services
-	lbCache, err := ovnlb.GetLBCache(r.nbClient)
+	existingLBs, err := getLBs(r.nbClient)
 	if err != nil {
-		klog.Errorf("Failed to get load_balancer cache: %v", err)
+		klog.Errorf("Unable to get service lbs for repair: %v", err)
 	}
-	existingLBs := lbCache.Find(map[string]string{"k8s.ovn.org/kind": "Service"})
 
 	// Look for any load balancers whose Service no longer exists in the apiserver
 	staleLBs := []string{}
 	for _, lb := range existingLBs {
 		// Extract namespace + name, look to see if it exists
-		owner := lb.ExternalIDs["k8s.ovn.org/owner"]
+		owner := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
 		namespace, name, err := cache.SplitMetaNamespaceKey(owner)
 		if err != nil || namespace == "" {
 			klog.Warningf("Service LB %#v has unreadable owner, deleting", lb)
@@ -112,7 +92,7 @@ func (r *repair) runBeforeSync() {
 	}
 
 	// Delete those stale load balancers
-	if err := ovnlb.DeleteLBs(r.nbClient, staleLBs); err != nil {
+	if err := DeleteLBs(r.nbClient, staleLBs); err != nil {
 		klog.Errorf("Failed to delete stale LBs: %v", err)
 	}
 	klog.V(2).Infof("Deleted %d stale service LBs", len(staleLBs))
@@ -147,48 +127,4 @@ func (r *repair) serviceSynced(key string) {
 		return
 	}
 	delete(r.unsyncedServices, key)
-	if len(r.unsyncedServices) == 0 {
-		go r.runAfterSync() // run in a goroutine so we don't block the ServiceController
-	}
-}
-
-// runAfterSync is called sometime after every existing service is successfully synced at least once
-// It deletes all legacy load balancers.
-func (r *repair) runAfterSync() {
-	_ = utilwait.ExponentialBackoff(retry.DefaultBackoff, func() (bool, error) {
-		klog.Infof("Running Service post-sync cleanup")
-		err := r.deleteLegacyLBs()
-		if err != nil {
-			klog.Warningf("Failed to delete legacy LBs: %v", err)
-			return false, nil
-		}
-		return true, nil
-	})
-}
-
-func (r *repair) deleteLegacyLBs() error {
-	// Find all load-balancers associated with Services
-	legacyLBs, err := findLegacyLBs(r.nbClient)
-	if err != nil {
-		klog.Errorf("Failed to list existing load balancers: %v", err)
-		return err
-	}
-
-	klog.V(2).Infof("Deleting %d legacy LBs", len(legacyLBs))
-	toDelete := make([]string, 0, len(legacyLBs))
-	for _, lb := range legacyLBs {
-		toDelete = append(toDelete, lb.UUID)
-	}
-	if err := ovnlb.DeleteLBs(r.nbClient, toDelete); err != nil {
-		return fmt.Errorf("failed to delete LBs: %w", err)
-	}
-	atomic.StoreUint32(&r.semLegacyLBsDeleted, 1)
-	return nil
-}
-
-// legacyLBsDeleted returns true if we've run the post-sync repair
-// and there are no more legacy LBs, so we can stop searching
-// for them in the services handler.
-func (r *repair) legacyLBsDeleted() bool {
-	return atomic.LoadUint32(&r.semLegacyLBsDeleted) > 0
 }

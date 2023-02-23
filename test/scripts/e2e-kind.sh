@@ -96,6 +96,10 @@ DUALSTACK_ONLY_TESTS="
 \[Feature:.*DualStack.*\]
 "
 
+DUALSTACK_CONVERSION_TESTS="
+should function for service endpoints using hostNetwork
+"
+
 # Github CI doesn´t offer IPv6 connectivity, so always skip IPv6 only tests.
 #  See: https://github.com/ovn-org/ovn-kubernetes/issues/1522
 SKIPPED_TESTS=$SKIPPED_TESTS$IPV6_ONLY_TESTS
@@ -114,6 +118,11 @@ fi
 # If not DualStack, skip DualStack tests
 if [ "$KIND_IPV4_SUPPORT" == false ] || [ "$KIND_IPV6_SUPPORT" == false ]; then
 	SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_ONLY_TESTS
+fi
+
+# If dulastack conversion, skip certain tests due to unknown flakes upstream (FIXME)
+if [ "DUALSTACK_CONVERSION" == true ]; then
+  SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_CONVERSION_TESTS
 fi
 
 SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"

@@ -170,10 +170,9 @@ func UnmarshalPodAnnotation(annotations map[string]string, nadName string) (*Pod
 	}
 
 	if len(a.IPs) == 0 {
-		if a.IP == "" {
-			return nil, fmt.Errorf("bad annotation data (neither ip_address nor ip_addresses is set)")
+		if a.IP != "" {
+			a.IPs = append(a.IPs, a.IP)
 		}
-		a.IPs = append(a.IPs, a.IP)
 	} else if a.IP != "" && a.IP != a.IPs[0] {
 		return nil, fmt.Errorf("bad annotation data (ip_address and ip_addresses conflict)")
 	}

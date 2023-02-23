@@ -63,12 +63,12 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 	return &fNPW
 }
 
-func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fakeMgmtPortConfig *managementPortConfig) error {
+func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset, fakeMgmtPortConfig *managementPortConfig) error {
 	if err := initLocalGatewayIPTables(); err != nil {
 		return err
 	}
 
-	k := &kube.Kube{fakeClient.KubeClient, nil, nil, nil}
+	k := &kube.Kube{fakeClient.KubeClient}
 	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
 	localHostNetEp := "192.168.18.15/32"
 	ip, _, _ := net.ParseCIDR(localHostNetEp)
@@ -95,12 +95,12 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fak
 	return err
 }
 
-func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNClientset, fakeMgmtPortConfig *managementPortConfig, stopChan chan struct{}, wg *sync.WaitGroup) (*retry.RetryFramework, error) {
+func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNNodeClientset, fakeMgmtPortConfig *managementPortConfig, stopChan chan struct{}, wg *sync.WaitGroup) (*retry.RetryFramework, error) {
 	if err := initLocalGatewayIPTables(); err != nil {
 		return nil, err
 	}
 
-	k := &kube.Kube{fakeClient.KubeClient, nil, nil, nil}
+	k := &kube.Kube{fakeClient.KubeClient}
 	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
 	localHostNetEp := "192.168.18.15/32"
 	ip, _, _ := net.ParseCIDR(localHostNetEp)

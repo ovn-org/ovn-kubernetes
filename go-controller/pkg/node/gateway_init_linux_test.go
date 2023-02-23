@@ -32,10 +32,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/vishvananda/netlink"
 
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
-	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -209,13 +205,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		egressQoSFakeClient := &egressqosfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-			EgressQoSClient:      egressQoSFakeClient,
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
 		}
 
 		stop := make(chan struct{})
@@ -230,7 +221,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil}
+		k := &kube.Kube{kubeFakeClient}
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
@@ -536,13 +527,8 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		egressQoSFakeClient := &egressqosfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-			EgressQoSClient:      egressQoSFakeClient,
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
 		}
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
@@ -576,7 +562,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil}
+		k := &kube.Kube{KClient: kubeFakeClient}
 
 		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
 
@@ -673,10 +659,8 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
 		}
 
 		stop := make(chan struct{})
@@ -955,13 +939,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			&service,
 			&endpointSlice,
 		)
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		egressQoSFakeClient := &egressqosfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-			EgressQoSClient:      egressQoSFakeClient,
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
 		}
 
 		stop := make(chan struct{})
@@ -976,8 +955,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil}
-
+		k := &kube.Kube{kubeFakeClient}
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
 		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
@@ -1060,6 +1038,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 				},
 				"POSTROUTING": []string{
 					"-j OVN-KUBE-EGRESS-SVC",
+					"-s 169.254.169.1 -j MASQUERADE",
 					"-s 10.1.1.0/24 -j MASQUERADE",
 				},
 				"OVN-KUBE-SNAT-MGMTPORT": []string{},

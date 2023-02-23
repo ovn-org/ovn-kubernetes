@@ -207,7 +207,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		// namespace annotations to go through external egress router
 		if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
 			return err
-		} else if ops, err = oc.addOrUpdatePodSNATReturnOps(pod.Spec.NodeName, extIPs, podAnnotation.IPs, ops); err != nil {
+		} else if ops, err = addOrUpdatePodSNATOps(oc.nbClient, pod.Spec.NodeName, extIPs, podAnnotation.IPs, ops); err != nil {
 			return err
 		}
 	}

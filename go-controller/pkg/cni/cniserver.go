@@ -48,13 +48,9 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
+func NewCNIServer(useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
-	}
-
-	if len(rundir) == 0 {
-		rundir = serverRunDir
 	}
 	router := mux.NewRouter()
 
@@ -68,16 +64,18 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 		Server: http.Server{
 			Handler: router,
 		},
-		rundir:            rundir,
 		useOVSExternalIDs: ovnPortBinding,
-		podLister:         corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
-		kclient:           kclient,
+		clientSet: &ClientSet{
+			podLister: corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
+			kclient:   kclient,
+		},
 		kubeAuth: &KubeAPIAuth{
 			Kubeconfig:       config.Kubernetes.Kubeconfig,
 			KubeAPIServer:    config.Kubernetes.APIServer,
 			KubeAPIToken:     config.Kubernetes.Token,
 			KubeAPITokenFile: config.Kubernetes.TokenFile,
 		},
+		handlePodRequestFunc: HandlePodRequest,
 	}
 
 	if len(config.Kubernetes.CAData) > 0 {
@@ -124,7 +122,7 @@ func gatherCNIArgs(env map[string]string) (map[string]string, error) {
 	return mapArgs, nil
 }
 
-func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kclient kubernetes.Interface) (*PodRequest, error) {
+func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 	cmd, ok := cr.Env["CNI_COMMAND"]
 	if !ok {
 		return nil, fmt.Errorf("unexpected or missing CNI_COMMAND")
@@ -200,7 +198,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	if err := json.Unmarshal(b, &cr); err != nil {
 		return nil, err
 	}
-	req, err := cniRequestToPodRequest(&cr, s.podLister, s.kclient)
+	req, err := cniRequestToPodRequest(&cr)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +208,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	if atomic.LoadInt32(&s.useOVSExternalIDs) > 0 {
 		useOVSExternalIDs = true
 	}
-	result, err := s.requestFunc(req, s.podLister, useOVSExternalIDs, s.kclient, s.kubeAuth)
+	result, err := s.handlePodRequestFunc(req, s.clientSet, useOVSExternalIDs, s.kubeAuth)
 	if err != nil {
 		// Prefix error with request information for easier debugging
 		return nil, fmt.Errorf("%s %v", req, err)

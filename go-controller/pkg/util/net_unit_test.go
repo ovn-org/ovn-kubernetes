@@ -281,7 +281,7 @@ func TestMatchIPFamily(t *testing.T) {
 	}
 }
 
-func TestMatchIPNetFamily(t *testing.T) {
+func TestMatchFirstIPNetFamily(t *testing.T) {
 	tests := []struct {
 		desc       string
 		inpIsIPv6  bool // true matches with IPv6 and false with IPv4
@@ -321,7 +321,7 @@ func TestMatchIPNetFamily(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, err := MatchIPNetFamily(tc.inpIsIPv6, ovntest.MustParseIPNets(tc.inpSubnets...))
+			res, err := MatchFirstIPNetFamily(tc.inpIsIPv6, ovntest.MustParseIPNets(tc.inpSubnets...))
 			t.Log(res, err)
 			if tc.expected == "" {
 				assert.Error(t, err)

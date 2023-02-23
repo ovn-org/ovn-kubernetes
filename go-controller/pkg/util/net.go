@@ -251,15 +251,27 @@ func MatchFirstIPFamily(isIPv6 bool, ips []net.IP) (net.IP, error) {
 	return nil, fmt.Errorf("no %s IP available", IPFamilyName(isIPv6))
 }
 
-// MatchIPNetFamily loops through the array of *net.IPNet and returns the
+// MatchFirstIPNetFamily loops through the array of ipnets and returns the
 // first entry in the list in the same IP Family, based on input flag isIPv6.
-func MatchIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) (*net.IPNet, error) {
+func MatchFirstIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) (*net.IPNet, error) {
 	for _, ipnet := range ipnets {
 		if utilnet.IsIPv6CIDR(ipnet) == isIPv6 {
 			return ipnet, nil
 		}
 	}
 	return nil, fmt.Errorf("no %s value available", IPFamilyName(isIPv6))
+}
+
+// MatchAllIPNetFamily loops through the array of *net.IPNet and returns a
+// slice of ipnets with the same IP Family, based on input flag isIPv6.
+func MatchAllIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) []*net.IPNet {
+	var ret []*net.IPNet
+	for _, ipnet := range ipnets {
+		if utilnet.IsIPv6CIDR(ipnet) == isIPv6 {
+			ret = append(ret, ipnet)
+		}
+	}
+	return ret
 }
 
 // MatchIPStringFamily loops through the array of string and returns the

@@ -129,9 +129,12 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 }
 
 func setupClusterController(clusterController *DefaultNetworkController, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
-	err := clusterController.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	err = clusterController.masterSubnetAllocator.InitRanges(config.Default.ClusterSubnets)
+	if config.HybridOverlay.ClusterSubnets != nil {
+		err := clusterController.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+
+	err := clusterController.masterSubnetAllocator.InitRanges(config.Default.ClusterSubnets)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	clusterController.SCTPSupport = true
@@ -206,7 +209,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
-			fakeClient := &util.OVNClientset{
+			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
@@ -304,7 +307,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
-			fakeClient := &util.OVNClientset{
+			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
@@ -315,7 +318,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
@@ -580,7 +583,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
-			fakeClient := &util.OVNClientset{
+			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
@@ -591,7 +594,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
@@ -784,7 +787,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
-			fakeClient := &util.OVNClientset{
+			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
@@ -795,7 +798,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
@@ -1053,7 +1056,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
-			fakeClient := &util.OVNClientset{
+			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
@@ -1064,7 +1067,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
@@ -1203,7 +1206,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseStateWithHybridNode))
 			gomega.Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 
-			nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
+			nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
 			util.DeleteNodeHostSubnetAnnotation(nodeAnnotator)
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1233,4 +1236,170 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
+
+	ginkgo.It("cleans up a Linux node that has hybridOverlay annotations when hybrid overlay is disabled", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				nodeHOMAC string = "0a:58:0a:01:01:03"
+				hoSubnet  string = "11.1.0.0/16"
+				nodeHOIP  string = "10.1.1.3"
+			)
+			node1 := tNode{
+				Name:                 "node1",
+				NodeIP:               "1.2.3.4",
+				NodeLRPMAC:           "0a:58:0a:01:01:01",
+				LrpIP:                "100.64.0.2",
+				DrLrpIP:              "100.64.0.1",
+				PhysicalBridgeMAC:    "11:22:33:44:55:66",
+				SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
+				NodeSubnet:           "10.1.1.0/24",
+				GWRouter:             types.GWRouterPrefix + "node1",
+				GatewayRouterIPMask:  "172.16.16.2/24",
+				GatewayRouterIP:      "172.16.16.2",
+				GatewayRouterNextHop: "172.16.16.1",
+				PhysicalBridgeName:   "br-eth0",
+				NodeGWIP:             "10.1.1.1/24",
+				NodeMgmtPortIP:       "10.1.1.2",
+				//NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
+				NodeMgmtPortMAC: "0a:58:64:40:00:03",
+				DnatSnatIP:      "169.254.0.1",
+			}
+			testNode := node1.k8sNode()
+			testNode.Annotations = map[string]string{hotypes.HybridOverlayDRIP: nodeHOIP, hotypes.HybridOverlayDRMAC: nodeHOMAC}
+
+			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{testNode},
+			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+			egressIPFakeClient := &egressipfake.Clientset{}
+			egressQoSFakeClient := &egressqosfake.Clientset{}
+			fakeClient := &util.OVNMasterClientset{
+				KubeClient:           kubeFakeClient,
+				EgressIPClient:       egressIPFakeClient,
+				EgressFirewallClient: egressFirewallFakeClient,
+				EgressQoSClient:      egressQoSFakeClient,
+			}
+
+			vlanID := 1024
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			config.Kubernetes.HostNetworkNamespace = ""
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
+			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
+			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeIP))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = nodeAnnotator.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			f, err = factory.NewMasterWatchFactory(fakeClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = f.Start()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedOVNClusterRouter := newOVNClusterRouter()
+			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
+				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
+				Networks: []string{"100.64.0.1/16"},
+				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
+			}
+			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedClusterRouterPortGroup := newRouterPortGroup()
+			expectedClusterPortGroup := newClusterPortGroup()
+
+			clusterRouterDatapath := &sbdb.DatapathBinding{
+				UUID:        types.OVNClusterRouter + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": expectedOVNClusterRouter.UUID, "name": types.OVNClusterRouter},
+			}
+			gr := types.GWRouterPrefix + node1.Name
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
+
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					newClusterJoinSwitch(),
+					expectedNodeSwitch,
+					ovnClusterRouterLRP,
+					expectedOVNClusterRouter,
+					expectedClusterRouterPortGroup,
+					expectedClusterPortGroup,
+					expectedClusterLBGroup,
+				},
+				SBData: []libovsdbtest.TestData{
+					clusterRouterDatapath,
+					datapath,
+				},
+			}
+			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedDatabaseState := []libovsdbtest.TestData{ovnClusterRouterLRP}
+			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
+
+			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
+				libovsdbOvnNBClient, libovsdbOvnSBClient,
+				record.NewFakeRecorder(10), wg)
+			gomega.Expect(clusterController).NotTo(gomega.BeNil())
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+
+			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
+
+			gomega.Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
+
+			gomega.Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRIP, nodeHOIP))
+
+			//assuming all the pods have finished processing
+			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
+			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
+
+			gomega.Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).ShouldNot(gomega.HaveKey(hotypes.HybridOverlayDRMAC))
+
+			gomega.Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).ShouldNot(gomega.HaveKey(hotypes.HybridOverlayDRIP))
+
+			return nil
+		}
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+			"-gateway-mode=shared",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
 })

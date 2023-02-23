@@ -313,7 +313,7 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 
 	for _, subnet := range hostSubnets {
 		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
-		l3GatewayConfigIP, err := util.MatchIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
 		if err != nil {
 			return err
 		}
@@ -394,7 +394,7 @@ func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, erro
 	}
 
 	hostSubnetsMap := map[string][]*net.IPNet{oc.GetNetworkName(): hostSubnets}
-	err = oc.UpdateNodeAnnotationWithRetry(node.Name, hostSubnetsMap, updatedNodeAnnotation)
+	err = oc.UpdateNodeHostSubnetAnnotationWithRetry(node.Name, hostSubnetsMap, updatedNodeAnnotation)
 	if err != nil {
 		return nil, err
 	}
@@ -745,15 +745,22 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 		errs = append(errs, err)
 	}
 
+	annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
 	if config.HybridOverlay.Enabled {
-		annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
 		if err := oc.handleHybridOverlayPort(node, annotator); err != nil {
 			errs = append(errs, fmt.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err))
 		}
-		if err := annotator.Run(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to set hybrid overlay annotations for node %s: %v", node.Name, err))
+	} else {
+		// the node needs to cleanup Hybrid overlay annotations if it has them and hybrid overlay is not enabled
+		if _, exist := node.Annotations[hotypes.HybridOverlayDRMAC]; exist {
+			annotator.Delete(hotypes.HybridOverlayDRMAC)
 		}
-
+		if _, exist := node.Annotations[hotypes.HybridOverlayDRIP]; exist {
+			annotator.Delete(hotypes.HybridOverlayDRIP)
+		}
+	}
+	if err := annotator.Run(); err != nil {
+		errs = append(errs, fmt.Errorf("failed to set hybrid overlay annotations for node %s: %v", node.Name, err))
 	}
 
 	oc.clearInitialNodeNetworkUnavailableCondition(node)

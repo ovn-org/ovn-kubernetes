@@ -5,17 +5,19 @@ import (
 	"fmt"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
+	"time"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/stretchr/testify/mock"
+
+	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-	"time"
 )
 
 func newPod(namespace, name string, annotations map[string]string) *v1.Pod {
@@ -32,8 +34,19 @@ func newPod(namespace, name string, annotations map[string]string) *v1.Pod {
 	}
 }
 
-func newFakeKubeClientWithPod(pod *v1.Pod) *fake.Clientset {
-	return fake.NewSimpleClientset(&v1.PodList{Items: []v1.Pod{*pod}})
+func newFakeClientSet(pod *v1.Pod, podNamespaceLister *mocks.PodNamespaceLister) *ClientSet {
+	podLister := mocks.PodLister{}
+	podLister.On("Pods", mock.AnythingOfType("string")).Return(podNamespaceLister)
+	podList := &v1.PodList{}
+	if pod != nil {
+		podList.Items = []v1.Pod{*pod}
+	}
+	fakeClient := fake.NewSimpleClientset(podList)
+
+	return &ClientSet{
+		kclient:   fakeClient,
+		podLister: &podLister,
+	}
 }
 
 var _ = Describe("CNI Utils tests", func() {
@@ -101,15 +114,17 @@ var _ = Describe("CNI Utils tests", func() {
 	})
 
 	Context("GetPodAnnotations", func() {
-		var podLister mocks.PodLister
 		var podNamespaceLister mocks.PodNamespaceLister
 		var pod *v1.Pod
 
+		const (
+			namespace = "some-ns"
+			podName   = "some-pod"
+		)
+
 		BeforeEach(func() {
 			podNamespaceLister = mocks.PodNamespaceLister{}
-			pod = newPod("some-ns", "some-pod", nil)
-			podLister = mocks.PodLister{}
-			podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
+			pod = newPod(namespace, podName, nil)
 		})
 
 		It("Returns Pod annotation if annotation condition is met", func() {
@@ -125,9 +140,10 @@ var _ = Describe("CNI Utils tests", func() {
 				return nil, false
 			}
 
-			fakeClient := newFakeKubeClientWithPod(pod)
+			clientset := newFakeClientSet(pod, &podNamespaceLister)
+
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			uid, annot, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", ovntypes.DefaultNetworkName, cond)
+			uid, annot, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(annot).To(Equal(podAnnot))
 			Expect(uid).To(Equal(string(pod.UID)))
@@ -145,9 +161,10 @@ var _ = Describe("CNI Utils tests", func() {
 				cancelFunc()
 			}()
 
-			fakeClient := newFakeKubeClientWithPod(pod)
+			clientset := newFakeClientSet(pod, &podNamespaceLister)
+
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			_, _, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", ovntypes.DefaultNetworkName, cond)
+			_, _, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -164,9 +181,10 @@ var _ = Describe("CNI Utils tests", func() {
 				return nil, false
 			}
 
-			fakeClient := newFakeKubeClientWithPod(pod)
+			clientset := newFakeClientSet(pod, &podNamespaceLister)
+
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			_, _, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", ovntypes.DefaultNetworkName, cond)
+			_, _, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -178,9 +196,10 @@ var _ = Describe("CNI Utils tests", func() {
 				return nil, false
 			}
 
-			fakeClient := newFakeKubeClientWithPod(pod)
+			clientset := newFakeClientSet(pod, &podNamespaceLister)
+
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, fmt.Errorf("failed to list pods"))
-			_, _, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", ovntypes.DefaultNetworkName, cond)
+			_, _, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to list pods"))
 		})
@@ -198,9 +217,10 @@ var _ = Describe("CNI Utils tests", func() {
 				return nil, false
 			}
 
-			fakeClient := newFakeKubeClientWithPod(pod)
+			clientset := newFakeClientSet(pod, &podNamespaceLister)
+
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, errors.NewNotFound(v1.Resource("pod"), name))
-			_, _, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", ovntypes.DefaultNetworkName, cond)
+			_, _, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -212,9 +232,10 @@ var _ = Describe("CNI Utils tests", func() {
 				return nil, false
 			}
 
-			fakeClient := fake.NewSimpleClientset(&v1.PodList{Items: []v1.Pod{}})
+			clientset := newFakeClientSet(nil, &podNamespaceLister)
+
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, errors.NewNotFound(v1.Resource("pod"), name))
-			_, _, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", ovntypes.DefaultNetworkName, cond)
+			_, _, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("timed out waiting for pod after 1s"))
 		})

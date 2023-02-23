@@ -25,14 +25,12 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
-	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // OVNClientset is a wrapper around all clientsets used by OVN-Kubernetes
@@ -43,6 +41,41 @@ type OVNClientset struct {
 	CloudNetworkClient    ocpcloudnetworkclientset.Interface
 	EgressQoSClient       egressqosclientset.Interface
 	NetworkAttchDefClient networkattchmentdefclientset.Interface
+}
+
+// OVNMasterClientset
+type OVNMasterClientset struct {
+	KubeClient           kubernetes.Interface
+	EgressIPClient       egressipclientset.Interface
+	EgressFirewallClient egressfirewallclientset.Interface
+	CloudNetworkClient   ocpcloudnetworkclientset.Interface
+	EgressQoSClient      egressqosclientset.Interface
+}
+
+type OVNNodeClientset struct {
+	KubeClient kubernetes.Interface
+}
+
+func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
+	return &OVNMasterClientset{
+		KubeClient:           cs.KubeClient,
+		EgressIPClient:       cs.EgressIPClient,
+		EgressFirewallClient: cs.EgressFirewallClient,
+		CloudNetworkClient:   cs.CloudNetworkClient,
+		EgressQoSClient:      cs.EgressQoSClient,
+	}
+}
+
+func (cs *OVNClientset) GetNodeClientset() *OVNNodeClientset {
+	return &OVNNodeClientset{
+		KubeClient: cs.KubeClient,
+	}
+}
+
+func (cs *OVNMasterClientset) GetNodeClientset() *OVNNodeClientset {
+	return &OVNNodeClientset{
+		KubeClient: cs.KubeClient,
+	}
 }
 
 func adjustCommit() string {
@@ -401,7 +434,7 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 	}
 
 	return map[string]string{
-		types.OvnK8sPrefix + "/owner": nsn.String(),
-		types.OvnK8sPrefix + "/kind":  gk.String(),
+		types.LoadBalancerOwnerExternalID: nsn.String(),
+		types.LoadBalancerKindExternalID:  gk.String(),
 	}
 }

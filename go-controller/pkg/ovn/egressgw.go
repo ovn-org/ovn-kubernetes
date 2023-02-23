@@ -525,7 +525,6 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 }
 
 // buildPodSNAT builds per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
-// if allSNATs flag is set, then all the SNATs (including against egressIPs if any) for that pod will be returned
 func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
 	nats := make([]*nbdb.NAT, 0, len(extIPs)*len(podIPNets))
 	var nat *nbdb.NAT
@@ -568,21 +567,35 @@ func getExternalIPsGR(watchFactory *factory.WatchFactory, nodeName string) ([]*n
 }
 
 // deletePodSNAT removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
-// if allSNATs flag is set, then all the SNATs (including against egressIPs if any) for that pod will be deleted
 // used when disableSNATMultipleGWs=true
 func deletePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs, podIPNets []*net.IPNet) error {
-	nats, err := buildPodSNAT(extIPs, podIPNets)
+	ops, err := deletePodSNATOps(nbClient, nil, nodeName, extIPs, podIPNets)
 	if err != nil {
 		return err
+	}
+
+	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s: %w", types.GWRouterPrefix+nodeName, err)
+	}
+	return nil
+}
+
+// deletePodSNATOps creates ovsdb operation that removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
+// used when disableSNATMultipleGWs=true
+func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, nodeName string, extIPs, podIPNets []*net.IPNet) ([]ovsdb.Operation, error) {
+	nats, err := buildPodSNAT(extIPs, podIPNets)
+	if err != nil {
+		return nil, err
 	}
 	logicalRouter := nbdb.LogicalRouter{
 		Name: types.GWRouterPrefix + nodeName,
 	}
-	err = libovsdbops.DeleteNATs(nbClient, &logicalRouter, nats...)
+	ops, err = libovsdbops.DeleteNATsOps(nbClient, ops, &logicalRouter, nats...)
 	if err != nil {
-		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s: %v", logicalRouter.Name, err)
+		return nil, fmt.Errorf("failed create operation for deleting SNAT rule for pod on gateway router %s: %v", logicalRouter.Name, err)
 	}
-	return nil
+	return ops, nil
 }
 
 // addOrUpdatePodSNAT adds or updates per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
@@ -601,17 +614,17 @@ func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs,
 	return nil
 }
 
-// addOrUpdatePodSNATReturnOps returns the operation that adds or updates per pod SNAT rules towards the nodeIP that are
+// addOrUpdatePodSNATOps returns the operation that adds or updates per pod SNAT rules towards the nodeIP that are
 // applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func (oc *DefaultNetworkController) addOrUpdatePodSNATReturnOps(nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
 	gr := types.GWRouterPrefix + nodeName
 	router := &nbdb.LogicalRouter{Name: gr}
 	nats, err := buildPodSNAT(extIPs, podIfAddrs)
 	if err != nil {
 		return nil, err
 	}
-	if ops, err = libovsdbops.CreateOrUpdateNATsOps(oc.nbClient, ops, router, nats...); err != nil {
+	if ops, err = libovsdbops.CreateOrUpdateNATsOps(nbClient, ops, router, nats...); err != nil {
 		return nil, fmt.Errorf("failed to update SNAT for pods of router: %s, error: %v", gr, err)
 	}
 	return ops, nil
@@ -649,7 +662,7 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 		if err != nil {
 			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, types.GWRouterToJoinSwitchPrefix, err)
 		}
-		grJoinIfAddr, err := util.MatchIPNetFamily(utilnet.IsIPv6(podIP), grJoinIfAddrs)
+		grJoinIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(podIP), grJoinIfAddrs)
 		if err != nil {
 			return fmt.Errorf("failed to match gateway router join interface IPs: %v, err: %v", grJoinIfAddr, err)
 		}

@@ -460,7 +460,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
 
 	if config.Kubernetes.OVNEmptyLbEvents {
-		klog.Infof("Starting unidling controller")
+		klog.Infof("Starting unidling controllers")
 		unidlingController, err := unidling.NewController(
 			oc.recorder,
 			oc.watchFactory.ServiceInformer(),
@@ -474,6 +474,8 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 			defer oc.wg.Done()
 			unidlingController.Run(oc.stopChan)
 		}()
+
+		unidling.NewUnidledAtController(oc.kube, oc.watchFactory.ServiceInformer())
 	}
 
 	// Final step to cleanup after resource handlers have synced
