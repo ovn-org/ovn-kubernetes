@@ -29,6 +29,7 @@ var _ = Describe("Multi Homing", func() {
 		secondaryNetworkName       = "tenant-blue"
 		secondaryFlatL2IgnoreCIDR  = "10.128.0.0/29"
 		secondaryFlatL2NetworkCIDR = "10.128.0.0/24"
+		netPrefixLengthPerNode     = 24
 	)
 	f := wrappedTestFramework("multi-homing")
 
@@ -78,7 +79,7 @@ var _ = Describe("Multi Homing", func() {
 			table.Entry(
 				"when attaching to an L3 - routed - network",
 				networkAttachmentConfig{
-					cidr:     netCIDR(secondaryNetworkCIDR, 24),
+					cidr:     netCIDR(secondaryNetworkCIDR, netPrefixLengthPerNode),
 					name:     secondaryNetworkName,
 					topology: "layer3",
 				},
@@ -184,7 +185,7 @@ var _ = Describe("Multi Homing", func() {
 					By("asserting the server pod has an IP from the configured range")
 					Expect(netStatus[0].IPs).NotTo(BeEmpty())
 					serverIP = netStatus[0].IPs[0]
-					Expect(inRange(secondaryNetworkCIDR, serverIP)).To(Succeed())
+					Expect(inRange(popCIDRsPerNodePrefix(netConfig.cidr, netPrefixLengthPerNode), serverIP)).To(Succeed())
 				}
 
 				By("instantiating the *client* pod")
@@ -271,7 +272,7 @@ var _ = Describe("Multi Homing", func() {
 				networkAttachmentConfig{
 					name:     secondaryNetworkName,
 					topology: "layer3",
-					cidr:     netCIDR(secondaryNetworkCIDR, 24),
+					cidr:     netCIDR(secondaryNetworkCIDR, netPrefixLengthPerNode),
 				},
 				podConfiguration{
 					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
@@ -394,6 +395,10 @@ var _ = Describe("Multi Homing", func() {
 
 func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
 	return fmt.Sprintf("%s/%d", netCIDR, netPrefixLengthPerNode)
+}
+
+func popCIDRsPerNodePrefix(netCIDR string, netPrefixLengthPerNode int) string {
+	return strings.ReplaceAll(netCIDR, fmt.Sprintf("/%d", netPrefixLengthPerNode), "")
 }
 
 type networkAttachmentConfig struct {
