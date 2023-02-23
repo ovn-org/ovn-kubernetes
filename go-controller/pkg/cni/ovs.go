@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -316,7 +317,9 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 			}
 
 			// try again later
-			time.Sleep(200 * time.Millisecond)
+			waitTime := 200 * time.Millisecond
+			time.Sleep(waitTime)
+			metrics.MetricOvsInterfaceUpWait.Add(waitTime.Seconds())
 		}
 	}
 }
