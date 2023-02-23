@@ -12,16 +12,16 @@ RUN dnf install -y --nodocs \
 	selinux-policy procps-ng && \
 	dnf clean all
 
-ARG ovsver=3.0.0-28.el9fdp
+ARG ovsver=3.1.0-2.el9fdp
 ARG ovnver=22.12.0-18.el9fdp
 
 RUN INSTALL_PKGS="iptables" && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
-	dnf install -y --nodocs "openvswitch3.0 = $ovsver" "python3-openvswitch3.0 = $ovsver" && \
+	dnf install -y --nodocs "openvswitch3.1 = $ovsver" "python3-openvswitch3.1 = $ovsver" && \
 	dnf install -y --nodocs "ovn22.12 = $ovnver" "ovn22.12-central = $ovnver" "ovn22.12-host = $ovnver" && \
 	dnf clean all && rm -rf /var/cache/*
 
-RUN sed 's/%/"/g' <<<"%openvswitch3.0-devel = $ovsver% %openvswitch3.0-ipsec = $ovsver% %ovn22.12-vtep = $ovnver%" > /more-pkgs
+RUN sed 's/%/"/g' <<<"%openvswitch3.1-devel = $ovsver% %openvswitch3.1-ipsec = $ovsver% %ovn22.12-vtep = $ovnver%" > /more-pkgs
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
