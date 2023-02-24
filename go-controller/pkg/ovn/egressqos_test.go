@@ -8,10 +8,12 @@ import (
 	"github.com/onsi/ginkgo"
 	ginkgotable "github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/gomega"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/urfave/cli/v2"
@@ -35,9 +37,18 @@ func newEgressQoSObject(name, namespace string, egressRules []egressqosapi.Egres
 
 var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 	var (
-		app     *cli.App
-		fakeOVN *FakeOVN
+		app            *cli.App
+		fakeOVN        *FakeOVN
+		controllerName = DefaultNetworkControllerName
 	)
+
+	namespaceT := *newNamespace("namespace1")
+	// namespace address set hash name
+	asv4, asv6 := addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(namespaceT.Name, controllerName))
+	qosAS := getEgressQosAddrSetDbIDs(namespaceT.Name, fmt.Sprintf("%d", EgressQoSFlowStartPriority), controllerName)
+	// egress qos 0th rule address set hash names
+	qosASv4, qosASv6 := addressset.GetHashNamesForAS(qosAS)
+
 	const (
 		node1Name string = "node1"
 		node2Name string = "node2"
@@ -64,7 +75,6 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.IPv4Mode = ipv4Mode
 				config.IPv6Mode = ipv6Mode
-				namespaceT := *newNamespace("namespace1")
 
 				staleQoS := &nbdb.QoS{
 					Direction:   nbdb.QoSDirectionToLport,
@@ -74,13 +84,9 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					ExternalIDs: map[string]string{"EgressQoS": "staleNS"},
 					UUID:        "staleQoS-UUID",
 				}
-
-				staleAddrSet := &nbdb.AddressSet{
-					Name:        "egress-qos-pods-staleNS",
-					ExternalIDs: map[string]string{"name": "egress-qos-pods-staleNS-1000"},
-					UUID:        "staleAS-UUID",
-					Addresses:   []string{"1.2.3.4"},
-				}
+				staleAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressQosAddrSetDbIDs("staleNS", "1000", controllerName),
+					[]net.IP{net.ParseIP("1.2.3.4")})
 
 				node1Switch := &nbdb.LogicalSwitch{
 					UUID:     "node1-UUID",
@@ -212,14 +218,14 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		},
 		ginkgotable.Entry("ipv4", true, false, "1.2.3.4/32", "5.6.7.8/32",
-			"(ip4.dst == 1.2.3.4/32) && ip4.src == $a10481622940199974102",
-			"(ip4.dst == 5.6.7.8/32) && ip4.src == $a10481622940199974102"),
+			fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", asv4),
+			fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", asv4)),
 		ginkgotable.Entry("ipv6", false, true, "2001:0db8:85a3:0000:0000:8a2e:0370:7334/128", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
-			"(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7334/128) && ip6.src == $a10481620741176717680",
-			"(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && ip6.src == $a10481620741176717680"),
+			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7334/128) && ip6.src == $%s", asv6),
+			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && ip6.src == $%s", asv6)),
 		ginkgotable.Entry("dual", true, true, "1.2.3.4/32", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
-			"(ip4.dst == 1.2.3.4/32) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680)",
-			"(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680)"),
+			fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && (ip4.src == $%s || ip6.src == $%s)", asv4, asv6),
+			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && (ip4.src == $%s || ip6.src == $%s)", asv4, asv6)),
 	)
 
 	ginkgotable.DescribeTable("reconciles existing and non-existing egressqoses with PodSelectors",
@@ -227,7 +233,6 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.IPv4Mode = ipv4Mode
 				config.IPv6Mode = ipv6Mode
-				namespaceT := *newNamespace("namespace1")
 
 				staleQoS := &nbdb.QoS{
 					Direction:   nbdb.QoSDirectionToLport,
@@ -237,13 +242,9 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					ExternalIDs: map[string]string{"EgressQoS": "staleNS"},
 					UUID:        "staleQoS-UUID",
 				}
-
-				staleAddrSet := &nbdb.AddressSet{
-					Name:        "egress-qos-pods-staleNS",
-					ExternalIDs: map[string]string{"name": "egress-qos-pods-staleNS-1000"},
-					UUID:        "staleAS-UUID",
-					Addresses:   []string{"1.2.3.4"},
-				}
+				staleAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressQosAddrSetDbIDs("staleNS", "1000", controllerName),
+					[]net.IP{net.ParseIP("1.2.3.4")})
 
 				podT := newPodWithLabels(
 					namespaceT.Name,
@@ -403,14 +404,14 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		},
 		ginkgotable.Entry("ipv4", true, false, "10.128.1.3", "1.2.3.4/32", "5.6.7.8/32",
-			"(ip4.dst == 1.2.3.4/32) && ip4.src == $a8797969223947225899",
-			"(ip4.dst == 5.6.7.8/32) && ip4.src == $a10481622940199974102"),
+			fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", qosASv4),
+			fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", asv4)),
 		ginkgotable.Entry("ipv6", false, true, "fd00:10:244:2::3", "2001:0db8:85a3:0000:0000:8a2e:0370:7334/128", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
-			"(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7334/128) && ip6.src == $a8797971422970482321",
-			"(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && ip6.src == $a10481620741176717680"),
+			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7334/128) && ip6.src == $%s", qosASv6),
+			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && ip6.src == $%s", asv6)),
 		ginkgotable.Entry("dual", true, true, "10.128.1.3", "1.2.3.4/32", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
-			"(ip4.dst == 1.2.3.4/32) && (ip4.src == $a8797969223947225899 || ip6.src == $a8797971422970482321)",
-			"(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680)"),
+			fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && (ip4.src == $%s || ip6.src == $%s)", qosASv4, qosASv6),
+			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && (ip4.src == $%s || ip6.src == $%s)", asv4, asv6)),
 	)
 
 	ginkgo.It("should respond to node events correctly", func() {
@@ -466,7 +467,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 
 			qos1 := &nbdb.QoS{
 				Direction:   nbdb.QoSDirectionToLport,
-				Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $a10481622940199974102",
+				Match:       fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", asv4),
 				Priority:    EgressQoSFlowStartPriority,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 50},
 				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
@@ -474,7 +475,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			}
 			qos2 := &nbdb.QoS{
 				Direction:   nbdb.QoSDirectionToLport,
-				Match:       "(ip4.dst == 5.6.7.8/32) && ip4.src == $a10481622940199974102",
+				Match:       fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", asv4),
 				Priority:    EgressQoSFlowStartPriority - 1,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 60},
 				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
@@ -600,23 +601,27 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 
 			qos1 := &nbdb.QoS{
 				Direction:   nbdb.QoSDirectionToLport,
-				Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $a10481622940199974102",
+				Match:       fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", asv4),
 				Priority:    EgressQoSFlowStartPriority,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 40},
 				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
 				UUID:        "qos1-UUID",
 			}
+			qosAS := getEgressQosAddrSetDbIDs(namespaceT.Name, fmt.Sprintf("%d", EgressQoSFlowStartPriority-1), controllerName)
+			qosASv4, _ := addressset.GetHashNamesForAS(qosAS)
 			qos2 := &nbdb.QoS{
 				Direction:   nbdb.QoSDirectionToLport,
-				Match:       "(ip4.dst == 5.6.7.8/32) && ip4.src == $a9674238683727775701",
+				Match:       fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", qosASv4),
 				Priority:    EgressQoSFlowStartPriority - 1,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 50},
 				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
 				UUID:        "qos2-UUID",
 			}
+			qosAS = getEgressQosAddrSetDbIDs(namespaceT.Name, fmt.Sprintf("%d", EgressQoSFlowStartPriority-2), controllerName)
+			qosASv4, _ = addressset.GetHashNamesForAS(qosAS)
 			qos3 := &nbdb.QoS{
 				Direction:   nbdb.QoSDirectionToLport,
-				Match:       "(ip4.dst == 5.6.7.8/32) && ip4.src == $a9793665459849671364",
+				Match:       fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", qosASv4),
 				Priority:    EgressQoSFlowStartPriority - 2,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 60},
 				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
@@ -631,9 +636,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			}
 
 			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
-
-			qos2AS := "egress-qos-pods-namespace1-999"
-			qos3AS := "egress-qos-pods-namespace1-998"
+			qos2AS := getEgressQosAddrSetDbIDs(namespaceT.Name, "999", controllerName)
+			qos3AS := getEgressQosAddrSetDbIDs(namespaceT.Name, "998", controllerName)
 
 			ginkgo.By("Creating pod that matches the first rule only should add its ips to the first address set")
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos2AS, []string{"10.128.1.3"})
