@@ -25,7 +25,7 @@ import (
 // are kept in sync
 type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
-	Init(factory.NodeWatchFactory, <-chan struct{}, *sync.WaitGroup) error
+	Init() error
 	Start()
 	GetGatewayBridgeIface() string
 }
@@ -204,10 +204,7 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 
 }
 
-func (g *gateway) Init(wf factory.NodeWatchFactory, stopChan <-chan struct{}, wg *sync.WaitGroup) error {
-	g.stopChan = stopChan
-	g.wg = wg
-
+func (g *gateway) Init() error {
 	var err error
 	if err = g.initFunc(); err != nil {
 		return err
@@ -254,23 +251,51 @@ func setupUDPAggregationUplink(ifname string) error {
 	return nil
 }
 
-func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
+func gatewayInitInternal(nc *DefaultNodeNetworkController, nodeAnnotator kube.Annotator) (*gateway,
 	*bridgeConfiguration, *bridgeConfiguration, error) {
-	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, gwIPs)
+	gwNextHops, gwIface, err := getGatewayNextHops()
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "Bridge for interface failed for %s", gwIntf)
+		return nil, nil, nil, err
+	}
+
+	egressGatewayIntf := ""
+	if config.Gateway.EgressGWInterface != "" {
+		egressGatewayIntf = interfaceForEXGW(config.Gateway.EgressGWInterface)
+	}
+
+	var kubeNodeIP net.IP
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		kubeNodeIP, err = getNodePrimaryIP(nc)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+
+	gatewayBridge, err := bridgeForInterface(gwIface, nc.name, types.PhysicalNetworkName, kubeNodeIP)
+	if err != nil {
+		return nil, nil, nil, errors.Wrapf(err, "Bridge for interface failed for %s", gwIface)
 	}
 	var egressGWBridge *bridgeConfiguration
 	if egressGatewayIntf != "" {
-		egressGWBridge, err = bridgeForInterface(egressGatewayIntf, nodeName, types.PhysicalNetworkExGwName, nil)
+		egressGWBridge, err = bridgeForInterface(egressGatewayIntf, nc.name, types.PhysicalNetworkExGwName, nil)
 		if err != nil {
-			return nil, nil, errors.Wrapf(err, "Bridge for interface failed for %s", egressGatewayIntf)
+			return nil, nil, nil, errors.Wrapf(err, "Bridge for interface failed for %s", egressGatewayIntf)
 		}
+	}
+
+	gw := &gateway{
+		stopChan:     nc.stopChan,
+		wg:           nc.wg,
+		watchFactory: nc.watchFactory.(*factory.WatchFactory),
+	}
+
+	if err := util.SetNodePrimaryIfAddrs(nodeAnnotator, gatewayBridge.ips); err != nil {
+		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
 	}
 
 	chassisID, err := util.GetNodeChassisID()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Set annotation that determines if options:gateway_mtu shall be set for this node.
@@ -283,7 +308,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	} else {
 		chkPktLengthSupported, err := util.DetectCheckPktLengthSupport(gatewayBridge.bridgeName)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if !chkPktLengthSupported {
 			klog.Warningf("OVS does not support check_packet_length action. " +
@@ -300,7 +325,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 			 */
 			ovsHardwareOffloadEnabled, err := util.IsOvsHwOffloadEnabled()
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			if ovsHardwareOffloadEnabled {
 				klog.Warningf("OVS hardware offloading is enabled. " +
@@ -311,7 +336,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 		}
 	}
 	if err := util.SetGatewayMTUSupport(nodeAnnotator, enableGatewayMTU); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if config.Default.EnableUDPAggregation {
@@ -342,7 +367,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	}
 
 	err = util.SetL3GatewayConfig(nodeAnnotator, &l3GwConfig)
-	return gatewayBridge, egressGWBridge, err
+	return gw, gatewayBridge, egressGWBridge, err
 }
 
 func gatewayReady(patchPort string) (bool, error) {
@@ -383,7 +408,7 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses() ([]*net.IPNet, error)
 	return ifAddrs, err
 }
 
-func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
+func bridgeForInterface(intfName, nodeName, physicalNetworkName string, kubeNodeIP net.IP) (*bridgeConfiguration, error) {
 	res := bridgeConfiguration{}
 	gwIntf := intfName
 
@@ -416,16 +441,13 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 	}
 	var err error
 	// Now, we get IP addresses for the bridge
-	if len(gwIPs) > 0 {
-		// use gwIPs if provided
-		res.ips = gwIPs
-	} else {
-		// get IP addresses from OVS bridge. If IP does not exist,
-		// error out.
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		res.ips, err = getNetworkInterfaceIPAddresses(gwIntf)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get interface details for %s", gwIntf)
-		}
+	} else {
+		res.ips, err = getDPUHostPrimaryIPAddresses(gwIntf, kubeNodeIP)
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	res.macAddress, err = util.GetOVSPortMACAddress(gwIntf)

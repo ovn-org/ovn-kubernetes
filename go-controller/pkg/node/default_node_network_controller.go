@@ -505,15 +505,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 	}
 
-	nodeAddrStr, err := util.GetNodePrimaryIP(node)
-	if err != nil {
-		return err
-	}
-	nodeAddr := net.ParseIP(nodeAddrStr)
-	if nodeAddr == nil {
-		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
-	}
-
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 			if err := auth.SetDBAuth(); err != nil {
@@ -589,13 +580,13 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// Initialize gateway
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		err = nc.initGatewayDPUHost(nodeAddr)
+		err = nc.initGatewayDPUHost()
 		if err != nil {
 			return err
 		}
 	} else {
 		// Initialize gateway for OVS internal port or representor management port
-		if err := nc.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig, nodeAddr); err != nil {
+		if err := nc.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig); err != nil {
 			return err
 		}
 	}

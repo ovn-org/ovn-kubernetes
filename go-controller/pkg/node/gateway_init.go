@@ -145,7 +145,7 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 
 // getDPUHostPrimaryIPAddresses returns the DPU host IP/Network based on K8s Node IP
 // and DPU IP subnet overriden by config config.Gateway.RouterSubnet
-func getDPUHostPrimaryIPAddresses(k8sNodeIP net.IP, ifAddrs []*net.IPNet) ([]*net.IPNet, error) {
+func getDPUHostPrimaryIPAddresses(gatewayIface string, k8sNodeIP net.IP) ([]*net.IPNet, error) {
 	// Note(adrianc): No Dual-Stack support at this point as we rely on k8s node IP to derive gateway information
 	// for each node.
 	var gwIps []*net.IPNet
@@ -168,6 +168,11 @@ func getDPUHostPrimaryIPAddresses(k8sNodeIP net.IP, ifAddrs []*net.IPNet) ([]*ne
 		addr.IP = k8sNodeIP
 		gwIps = append(gwIps, addr)
 	} else {
+		ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIface)
+		if err != nil {
+			return nil, err
+		}
+
 		// Assume Host and DPU share the same subnet
 		// in this case just update the matching IPNet with the Host's IP address
 		for _, addr := range ifAddrs {
@@ -237,14 +242,59 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 	return nil
 }
 
-func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
-	waiter *startupWaiter, managementPortConfig *managementPortConfig, kubeNodeIP net.IP) error {
-	klog.Info("Initializing Gateway Functionality")
-	var err error
+func newDisabledModeGateway(nc *DefaultNodeNetworkController, nodeAnnotator kube.Annotator) (*gateway, error) {
 	var ifAddrs []*net.IPNet
+	var gatewayIntf string
+	var err error
 
+	_, gatewayIntf, err = getGatewayNextHops()
+	if err != nil {
+		return nil, err
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
+		ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf)
+	} else {
+		var kubeNodeIP net.IP
+		kubeNodeIP, err = getNodePrimaryIP(nc)
+		if err != nil {
+			return nil, err
+		}
+		ifAddrs, err = getDPUHostPrimaryIPAddresses(gatewayIntf, kubeNodeIP)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if err := util.SetNodePrimaryIfAddrs(nodeAnnotator, ifAddrs); err != nil {
+		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
+	}
+
+	chassisID, err := util.GetNodeChassisID()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+		Mode:      config.GatewayModeDisabled,
+		ChassisID: chassisID,
+	}); err != nil {
+		return nil, err
+	}
+
+	return &gateway{
+		initFunc:     func() error { return nil },
+		readyFunc:    func() (bool, error) { return true, nil },
+		watchFactory: nc.watchFactory.(*factory.WatchFactory),
+	}, nil
+}
+
+func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
+	waiter *startupWaiter, managementPortConfig *managementPortConfig) error {
+	klog.Info("Initializing Gateway Functionality")
 	var loadBalancerHealthChecker *loadBalancerHealthChecker
 	var portClaimWatcher *portClaimWatcher
+	var err error
 
 	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
 		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
@@ -254,78 +304,31 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 		}
 	}
 
-	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-	if err != nil {
-		return err
-	}
-
-	egressGWInterface := ""
-	if config.Gateway.EgressGWInterface != "" {
-		egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
-	}
-
-	ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf)
-	if err != nil {
-		return err
-	}
-
-	// For DPU need to use the host IP addr which currently is assumed to be K8s Node cluster
-	// internal IP address.
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		ifAddrs, err = getDPUHostPrimaryIPAddresses(kubeNodeIP, ifAddrs)
-		if err != nil {
-			return err
-		}
-	}
-
-	if err := util.SetNodePrimaryIfAddrs(nodeAnnotator, ifAddrs); err != nil {
-		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
-	}
-
 	var gw *gateway
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, nc.Kube, nc.watchFactory)
+		gw, err = newLocalGateway(nc, subnets, nodeAnnotator, managementPortConfig)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")
-		gw, err = newSharedGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, nc.Kube,
-			managementPortConfig, nc.watchFactory)
+		gw, err = newSharedGateway(nc, subnets, nodeAnnotator, managementPortConfig)
 	case config.GatewayModeDisabled:
-		var chassisID string
 		klog.Info("Gateway Mode is disabled")
-		gw = &gateway{
-			initFunc:     func() error { return nil },
-			readyFunc:    func() (bool, error) { return true, nil },
-			watchFactory: nc.watchFactory.(*factory.WatchFactory),
-		}
-		chassisID, err = util.GetNodeChassisID()
-		if err != nil {
-			return err
-		}
-		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
-			Mode:      config.GatewayModeDisabled,
-			ChassisID: chassisID,
-		})
+		gw, err = newDisabledModeGateway(nc, nodeAnnotator)
 	}
 	if err != nil {
 		return err
 	}
+
 	// a golang interface has two values <type, value>. an interface is nil if both type and
 	// value is nil. so, you cannot directly set the value to an interface and later check if
 	// value was nil by comparing the interface to nil. this is because if the value is `nil`,
 	// then the interface will still hold the type of the value being set.
-
 	if loadBalancerHealthChecker != nil {
 		gw.loadBalancerHealthChecker = loadBalancerHealthChecker
 	}
 	if portClaimWatcher != nil {
 		gw.portClaimWatcher = portClaimWatcher
-	}
-
-	initGwFunc := func() error {
-		return gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
 	}
 
 	readyGwFunc := func() (bool, error) {
@@ -337,7 +340,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 		return gw.readyFunc()
 	}
 
-	waiter.AddWait(readyGwFunc, initGwFunc)
+	waiter.AddWait(readyGwFunc, gw.Init)
 	nc.gateway = gw
 
 	return nc.validateVTEPInterfaceMTU()
@@ -361,13 +364,17 @@ func interfaceForEXGW(intfName string) string {
 	return intfName
 }
 
-func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) error {
+func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 	// A DPU host gateway is complementary to the shared gateway running
 	// on the DPU embedded CPU. it performs some initializations and
 	// watch on services for iptable rule updates and run a loadBalancerHealth checker
 	// Note: all K8s Node related annotations are handled from DPU.
 	klog.Info("Initializing Shared Gateway Functionality on DPU host")
-	var err error
+
+	kubeNodeIP, err := getNodePrimaryIP(nc)
+	if err != nil {
+		return err
+	}
 
 	// Force gateway interface to be the interface associated with kubeNodeIP
 	gwIntf, err := getInterfaceByIP(kubeNodeIP)
@@ -402,6 +409,8 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 	gw := &gateway{
 		initFunc:     func() error { return nil },
 		readyFunc:    func() (bool, error) { return true, nil },
+		stopChan:     nc.stopChan,
+		wg:           nc.wg,
 		watchFactory: nc.watchFactory.(*factory.WatchFactory),
 	}
 
@@ -424,7 +433,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		return fmt.Errorf("failed to add MAC bindings for service routing")
 	}
 
-	err = gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
+	err = gw.Init()
 	nc.gateway = gw
 	return err
 }
@@ -456,4 +465,23 @@ func CleanupClusterNode(name string) error {
 	DelMgtPortIptRules()
 
 	return nil
+}
+
+func getNodePrimaryIP(nc *DefaultNodeNetworkController) (net.IP, error) {
+	node, err := nc.Kube.GetNode(nc.name)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving node %s: %v", nc.name, err)
+	}
+
+	nodeAddrStr, err := util.GetNodePrimaryIP(node)
+	if err != nil {
+		return nil, err
+	}
+
+	kubeNodeIP := net.ParseIP(nodeAddrStr)
+	if kubeNodeIP == nil {
+		return nil, fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
+	}
+
+	return kubeNodeIP, nil
 }

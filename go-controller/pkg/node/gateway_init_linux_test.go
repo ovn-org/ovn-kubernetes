@@ -229,16 +229,16 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
 
+		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, wf, nil, nodeName, false)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
+
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator, k,
-				&fakeMgmtPortConfig, wf)
+			sharedGw, err := newSharedGateway(nc, ovntest.MustParseIPNets(nodeSubnet), nodeAnnotator, &fakeMgmtPortConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf, stop, wg)
+			err = sharedGw.Init()
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
@@ -563,16 +563,16 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		ifAddrs := ovntest.MustParseIPNets(hostCIDR)
 		ifAddrs[0].IP = ovntest.MustParseIP(dpuIP)
 
+		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, wf, nil, nodeName, false)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
+
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			Expect(err).NotTo(HaveOccurred())
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf)
+			sharedGw, err := newSharedGateway(nc, ovntest.MustParseIPNets(nodeSubnet), nodeAnnotator, &fakeMgmtPortConfig)
 
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf, stop, wg)
+			err = sharedGw.Init()
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
@@ -664,13 +664,13 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		cnnci := NewCommonNodeNetworkControllerInfo(nil, wf, nil, nodeName, false)
+		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, wf, nil, nodeName, false)
 		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := nc.initGatewayDPUHost(net.ParseIP(hostIP))
+			err := nc.initGatewayDPUHost()
 			Expect(err).NotTo(HaveOccurred())
 
 			link, err := netlink.LinkByName(uplinkName)
@@ -947,16 +947,16 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
 
+		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, wf, nil, nodeName, false)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
+
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
-			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
-				nodeAnnotator, &fakeMgmtPortConfig, k, wf)
+			localGw, err := newLocalGateway(nc, ovntest.MustParseIPNets(nodeSubnet), nodeAnnotator, &fakeMgmtPortConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = localGw.Init(wf, stop, wg)
+			err = localGw.Init()
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
@@ -1070,6 +1070,93 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 	Expect(err).NotTo(HaveOccurred())
 }
 
+func disabledGatewayInterfaceTest(app *cli.App, testNS ns.NetNS, eth0Name, eth0GWIP, eth0CIDR string, l netlink.Link) {
+	const clusterCIDR string = "10.1.0.0/16"
+
+	// And a default route
+	err := testNS.Do(func(ns.NetNS) error {
+		defRoute := &netlink.Route{
+			LinkIndex: l.Attrs().Index,
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Dst:       ovntest.MustParseIPNet("0.0.0.0/0"),
+			Gw:        ovntest.MustParseIP(eth0GWIP),
+		}
+		return netlink.RouteAdd(defRoute)
+	})
+	Expect(err).NotTo(HaveOccurred())
+
+	app.Action = func(ctx *cli.Context) error {
+		const (
+			nodeName   string = "node1"
+			systemID   string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
+			nodeSubnet string = "10.1.1.0/24"
+		)
+
+		fexec := ovntest.NewLooseCompareFakeExec()
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+			Output: systemID,
+		})
+		err := util.SetExec(fexec)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = config.InitConfig(ctx, fexec, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		expectedAddr, err := netlink.ParseAddr(eth0CIDR)
+		Expect(err).NotTo(HaveOccurred())
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: expectedAddr.IP.String()}
+		existingNode := v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+			Status:     v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		}
+
+		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{Items: []v1.Node{existingNode}})
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
+		}
+
+		stop := make(chan struct{})
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		wg := &sync.WaitGroup{}
+		defer func() {
+			close(stop)
+			wg.Wait()
+			wf.Shutdown()
+		}()
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		k := &kube.Kube{kubeFakeClient}
+		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
+		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, wf, nil, nodeName, false)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
+
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			_, err = newDisabledModeGateway(nc, nodeAnnotator)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = nodeAnnotator.Run()
+			Expect(err).NotTo(HaveOccurred())
+
+			return nil
+		})
+
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(fexec.CalledMatchesExpected, 0).Should(BeTrue(), fexec.ErrorDesc)
+		return nil
+	}
+
+	err = app.Run([]string{
+		app.Name,
+		"--cluster-subnets=" + clusterCIDR,
+	})
+	Expect(err).NotTo(HaveOccurred())
+}
+
 var _ = Describe("Gateway Init Operations", func() {
 
 	var (
@@ -1129,6 +1216,10 @@ var _ = Describe("Gateway Init Operations", func() {
 				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		ovntest.OnSupportedPlatformsIt("sets up disabled mode gateway", func() {
+			disabledGatewayInterfaceTest(app, testNS, eth0Name, eth0GWIP, eth0CIDR, link)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a local gateway with predetermined interface", func() {
@@ -1288,6 +1379,8 @@ var _ = Describe("Gateway Operations DPU", func() {
 
 var _ = Describe("Gateway unit tests", func() {
 	var netlinkMock *utilMock.NetLinkOps
+	gwIface := "eth0"
+	gwLink := &linkMock.Link{}
 	origNetlinkInst := util.GetNetLinkOps()
 
 	BeforeEach(func() {
@@ -1308,7 +1401,9 @@ var _ = Describe("Gateway unit tests", func() {
 			expectedGwSubnet := []*net.IPNet{
 				{IP: nodeIP, Mask: net.CIDRMask(24, 32)},
 			}
-			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			netlinkMock.On("LinkByName", gwIface).Return(gwLink, nil)
+			netlinkMock.On("AddrList", gwLink, mock.Anything).Return([]netlink.Addr{{IPNet: dpuSubnet}}, nil)
+			gwSubnet, err := getDPUHostPrimaryIPAddresses(gwIface, nodeIP)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gwSubnet).To(Equal(expectedGwSubnet))
 		})
@@ -1316,27 +1411,27 @@ var _ = Describe("Gateway unit tests", func() {
 		It("Fails if node IP is not in host subnets", func() {
 			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.1.11")
-			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			netlinkMock.On("LinkByName", gwIface).Return(gwLink, nil)
+			netlinkMock.On("AddrList", gwLink, mock.Anything).Return([]netlink.Addr{{IPNet: dpuSubnet}}, nil)
+			_, err := getDPUHostPrimaryIPAddresses(gwIface, nodeIP)
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("returns node IP with config.Gateway.RouterSubnet subnet", func() {
 			config.Gateway.RouterSubnet = "10.1.0.0/16"
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.1.0.11")
 			expectedGwSubnet := []*net.IPNet{
 				{IP: nodeIP, Mask: net.CIDRMask(16, 32)},
 			}
-			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			gwSubnet, err := getDPUHostPrimaryIPAddresses(gwIface, nodeIP)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gwSubnet).To(Equal(expectedGwSubnet))
 		})
 
 		It("Fails if node IP is not in config.Gateway.RouterSubnet subnet", func() {
 			config.Gateway.RouterSubnet = "10.1.0.0/16"
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.0.11")
-			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			_, err := getDPUHostPrimaryIPAddresses(gwIface, nodeIP)
 			Expect(err).To(HaveOccurred())
 		})
 	})
