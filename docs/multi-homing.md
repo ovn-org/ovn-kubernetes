@@ -22,8 +22,10 @@ configurations are defined in a CRD named `NetworkAttachmentDefinition`.
 Below you will find example attachment configurations for each of the current
 topologies OVN-K allows for secondary networks.
 
-**NOTE**: currently, all the secondary networks **only** allow for east/west
-traffic.
+**NOTE**:
+- networks are **not** namespaced - i.e. creating multiple
+  `network-attachment-definition`s with different configurations pointing at the
+  same network (same `NetConf.Name` attribute) is **not** supported.
 
 ### Routed - layer 3 - topology
 This topology is a simplification of the topology for the cluster default
@@ -54,14 +56,21 @@ spec:
     }
 ```
 
-**NOTE**
-- the `netAttachDefName` parameter **must** match <namespace>/<net-attach-def name>
-  of the surrounding object.
-- the `subnets` attribute is a comma separated list of subnets. When multiple subnets
+#### Network Configuration reference
+- `name` (string, required): the name of the network. This attribute is **not** namespaced.
+- `type` (string, required): "ovn-k8s-cni-overlay".
+- `topology` (string, required): "layer3".
+- `subnets` (string, required): a comma separated list of subnets. When multiple subnets
   are provided, the user will get an IP from each subnet.
+- `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
+- `netAttachDefName` (string, required): must match <namespace>/<net-attach-def name>
+  of the surrounding object.
+
+**NOTE**
 - the `subnets` attribute indicates both the subnet across the cluster, and per node.
   The example above means you have a /16 subnet for the network, but each **node** has
   a /24 subnet.
+- routed - layer3 - topology networks **only** allow for east/west traffic.
 
 ### Switched - layer 2 - topology
 This topology interconnects the workloads via a cluster-wide logical switch.
@@ -84,9 +93,29 @@ spec:
             "topology":"layer2",
             "subnets": "10.100.200.0/24",
             "mtu": 1300,
-            "netAttachDefName": "ns1/l2-network"
+            "netAttachDefName": "ns1/l2-network",
+            "excludeSubnets": "10.100.200.0/29"
     }
 ```
+
+#### Network Configuration reference
+- `name` (string, required): the name of the network. This attribute is **not** namespaced.
+- `type` (string, required): "ovn-k8s-cni-overlay".
+- `topology` (string, required): "layer2".
+  `subnets` (string, optional): a comma separated list of subnets. When multiple subnets
+  are provided, the user will get an IP from each subnet.
+- `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
+- `netAttachDefName` (string, required): must match <namespace>/<net-attach-def name>
+  of the surrounding object.
+- `excludeSubnets` (string, optional): a comma separated list of CIDRs / IPs.
+  These IPs will be removed from the assignable IP pool, and never handed over
+  to the pods.
+
+**NOTE**
+- when the subnets attribute is omitted, the logical switch implementing the
+  network will only provide layer 2 communication, and the users must configure
+  IPs for the pods. Port security will only prevent MAC spoofing.
+- switched - layer2 - secondary networks **only** allow for east/west traffic.
 
 ### Switched - localnet - topology
 This topology interconnects the workloads via a cluster-wide logical switch to
@@ -118,6 +147,25 @@ spec:
 Note that in order to connect to the physical network, it is expected that
 ovn-bridge-mappings is configured appropriately on the chassis for this
 localnet network.
+
+#### Network Configuration reference
+- `name` (string, required): the name of the network.
+- `type` (string, required): "ovn-k8s-cni-overlay".
+- `topology` (string, required): "layer2".
+  `subnets` (string, optional): a comma separated list of subnets. When multiple subnets
+  are provided, the user will get an IP from each subnet.
+- `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
+- `netAttachDefName` (string, required): must match <namespace>/<net-attach-def name>
+  of the surrounding object.
+- `excludeSubnets` (string, optional): a comma separated list of CIDRs / IPs.
+  These IPs will be removed from the assignable IP pool, and never handed over
+  to the pods.
+- `vlanID` (integer, optional): assign VLAN tag. Defaults to none.
+
+**NOTE**
+- when the subnets attribute is omitted, the logical switch implementing the
+  network will only provide layer 2 communication, and the users must configure
+  IPs for the pods. Port security will only prevent MAC spoofing.
 
 ## Pod configuration
 The user must specify the secondary network attachments via the
