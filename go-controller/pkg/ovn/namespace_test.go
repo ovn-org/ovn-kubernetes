@@ -2,10 +2,11 @@ package ovn
 
 import (
 	"context"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"net"
 	"sync"
 	"time"
+
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -255,8 +256,10 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{kube.Kube{fakeOvn.fakeClient.KubeClient},
-				fakeOvn.fakeClient.EgressIPClient, fakeOvn.fakeClient.EgressFirewallClient, nil}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{
+				Kube:                 kube.Kube{KClient: fakeOvn.fakeClient.KubeClient},
+				EIPClient:            fakeOvn.fakeClient.EgressIPClient,
+				EgressFirewallClient: fakeOvn.fakeClient.EgressFirewallClient}, testNode.Name)
 
 			vlanID := uint(1024)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, vlanID)
