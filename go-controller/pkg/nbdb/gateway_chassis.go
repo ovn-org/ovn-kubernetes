@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const GatewayChassisTable = "Gateway_Chassis"
+
 // GatewayChassis defines an object in Gateway_Chassis table
 type GatewayChassis struct {
 	UUID        string            `ovsdb:"_uuid"`
@@ -13,6 +15,18 @@ type GatewayChassis struct {
 	Name        string            `ovsdb:"name"`
 	Options     map[string]string `ovsdb:"options"`
 	Priority    int               `ovsdb:"priority"`
+}
+
+func (a *GatewayChassis) GetUUID() string {
+	return a.UUID
+}
+
+func (a *GatewayChassis) GetChassisName() string {
+	return a.ChassisName
+}
+
+func (a *GatewayChassis) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyGatewayChassisExternalIDs(a map[string]string) map[string]string {
@@ -41,6 +55,14 @@ func equalGatewayChassisExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *GatewayChassis) GetName() string {
+	return a.Name
+}
+
+func (a *GatewayChassis) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copyGatewayChassisOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -65,6 +87,10 @@ func equalGatewayChassisOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *GatewayChassis) GetPriority() int {
+	return a.Priority
 }
 
 func (a *GatewayChassis) DeepCopyInto(b *GatewayChassis) {

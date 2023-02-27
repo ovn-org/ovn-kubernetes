@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set_syncer"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
@@ -36,6 +37,8 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 )
+
+const DefaultNetworkControllerName = "default-network-controller"
 
 // DefaultNetworkController structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints) for default l3 network
@@ -158,7 +161,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient)
 	}
 	svcController, svcFactory := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
-	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory, defaultStopChan)
+	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory,
+		defaultStopChan, DefaultNetworkControllerName)
 	var hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
 	if config.HybridOverlay.Enabled {
 		hybridOverlaySubnetAllocator = subnetallocator.NewHostSubnetAllocator()
@@ -166,6 +170,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
+			controllerName:              DefaultNetworkControllerName,
 			NetConfInfo:                 &util.DefaultNetConfInfo{},
 			NetInfo:                     &util.DefaultNetInfo{},
 			lsManager:                   lsm.NewLogicalSwitchManager(),
@@ -265,7 +270,15 @@ func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (oc *DefaultNetworkController) Start(ctx context.Context) error {
-	if err := oc.Init(); err != nil {
+	// sync address sets, only required for DefaultNetworkController, since any old objects in the db without
+	// Owner set are owned by the default network controller.
+	syncer := address_set_syncer.NewAddressSetSyncer(oc.nbClient, DefaultNetworkControllerName)
+	err := syncer.SyncAddressSets()
+	if err != nil {
+		return fmt.Errorf("failed to sync address sets on controller init: %v", err)
+	}
+
+	if err = oc.Init(); err != nil {
 		return err
 	}
 
@@ -425,7 +438,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
 		var err error
-		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
+		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan)
 		if err != nil {
 			return err
 		}
@@ -473,13 +486,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}()
 
 		unidling.NewUnidledAtController(oc.kube, oc.watchFactory.ServiceInformer())
-	}
-
-	// Final step to cleanup after resource handlers have synced
-	err := oc.ovnTopologyCleanup()
-	if err != nil {
-		klog.Errorf("Failed to cleanup OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
-		return err
 	}
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN and the ConfigMap

@@ -17,7 +17,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
@@ -53,6 +52,14 @@ type externalRouteInfo struct {
 	// external gateways are used. The first map key is the podIP (src-ip of the route),
 	// the second the GW IP (next hop), and the third the GR name
 	podExternalRoutes map[string]map[string]string
+}
+
+func getHybridRouteAddrSetDbIDs(nodeName, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetHybridNodeRoute, controller,
+		map[libovsdbops.ExternalIDKey]string{
+			// there is only 1 address set of this type per node
+			libovsdbops.ObjectNameKey: nodeName,
+		})
 }
 
 // ensureRouteInfoLocked either gets the current routeInfo in the cache with a lock, or creates+locks a new one if missing
@@ -635,7 +642,8 @@ func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, nodeName string, extI
 func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Add podIP to the node's address_set.
-		as, err := oc.addressSetFactory.EnsureAddressSet(types.HybridRoutePolicyPrefix + node)
+		asIndex := getHybridRouteAddrSetDbIDs(node, oc.controllerName)
+		as, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot ensure that addressSet for node %s exists %v", node, err)
 		}
@@ -708,7 +716,8 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 func (oc *DefaultNetworkController) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Delete podIP from the node's address_set.
-		as, err := oc.addressSetFactory.EnsureAddressSet(types.HybridRoutePolicyPrefix + node)
+		asIndex := getHybridRouteAddrSetDbIDs(node, oc.controllerName)
+		as, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
 		}
@@ -788,9 +797,8 @@ func (oc *DefaultNetworkController) delAllHybridRoutePolicies() error {
 
 	// nuke all the address-sets.
 	// if we fail to remove LRP's above, we don't attempt to remove ASes due to dependency constraints.
-	asPred := func(item *nbdb.AddressSet) bool {
-		return strings.Contains(item.ExternalIDs["name"], types.HybridRoutePolicyPrefix)
-	}
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetHybridNodeRoute, oc.controllerName, nil)
+	asPred := libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, nil)
 	err = libovsdbops.DeleteAddressSetsWithPredicate(oc.nbClient, asPred)
 	if err != nil {
 		return fmt.Errorf("failed to remove hybrid route address sets: %v", err)

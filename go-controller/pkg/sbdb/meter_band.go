@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const MeterBandTable = "Meter_Band"
+
 type (
 	MeterBandAction = string
 )
@@ -19,6 +21,22 @@ type MeterBand struct {
 	Action    MeterBandAction `ovsdb:"action"`
 	BurstSize int             `ovsdb:"burst_size"`
 	Rate      int             `ovsdb:"rate"`
+}
+
+func (a *MeterBand) GetUUID() string {
+	return a.UUID
+}
+
+func (a *MeterBand) GetAction() MeterBandAction {
+	return a.Action
+}
+
+func (a *MeterBand) GetBurstSize() int {
+	return a.BurstSize
+}
+
+func (a *MeterBand) GetRate() int {
+	return a.Rate
 }
 
 func (a *MeterBand) DeepCopyInto(b *MeterBand) {

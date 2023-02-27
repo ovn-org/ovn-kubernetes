@@ -5,11 +5,25 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const PortGroupTable = "Port_Group"
+
 // PortGroup defines an object in Port_Group table
 type PortGroup struct {
 	UUID  string   `ovsdb:"_uuid"`
 	Name  string   `ovsdb:"name"`
 	Ports []string `ovsdb:"ports"`
+}
+
+func (a *PortGroup) GetUUID() string {
+	return a.UUID
+}
+
+func (a *PortGroup) GetName() string {
+	return a.Name
+}
+
+func (a *PortGroup) GetPorts() []string {
+	return a.Ports
 }
 
 func copyPortGroupPorts(a []string) []string {

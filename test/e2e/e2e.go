@@ -2613,7 +2613,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		stdout, err := framework.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname", net.JoinHostPort(pod2IP, port)))
 
 		if err != nil || stdout != pod2Name {
-			framework.Failf("Error: attempted connection to pod %s found err:  %v", pod2Name, err)
+			errChan <- fmt.Errorf("Error: attempted connection to pod %s found err:  %v", pod2Name, err)
 		}
 
 		syncChan <- "connectivity test pods are ready"
@@ -2661,8 +2661,15 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 				defer ginkgo.GinkgoRecover()
 				twoPodsContinuousConnectivityTest(f, ovnWorkerNode, ovnWorkerNode2, syncChan, errChan)
 			}()
-			// wait for the connectivity test pods to be ready
-			framework.Logf(<-syncChan + ": delete and restart db pods.")
+
+			select {
+			case msg := <-syncChan:
+				// wait for the connectivity test pods to be ready
+				framework.Logf(msg + ": delete and restart db pods.")
+			case err := <-errChan:
+				// fail if error is returned before test pods are ready
+				framework.Fail(err.Error())
+			}
 
 			// Start the db disruption - delete the db files and delete the db-pod in order to emulate the cluster/pod restart
 

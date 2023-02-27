@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const ServiceMonitorTable = "Service_Monitor"
+
 type (
 	ServiceMonitorProtocol = string
 	ServiceMonitorStatus   = string
@@ -30,6 +32,14 @@ type ServiceMonitor struct {
 	SrcIP       string                  `ovsdb:"src_ip"`
 	SrcMAC      string                  `ovsdb:"src_mac"`
 	Status      *ServiceMonitorStatus   `ovsdb:"status"`
+}
+
+func (a *ServiceMonitor) GetUUID() string {
+	return a.UUID
+}
+
+func (a *ServiceMonitor) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyServiceMonitorExternalIDs(a map[string]string) map[string]string {
@@ -58,6 +68,18 @@ func equalServiceMonitorExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *ServiceMonitor) GetIP() string {
+	return a.IP
+}
+
+func (a *ServiceMonitor) GetLogicalPort() string {
+	return a.LogicalPort
+}
+
+func (a *ServiceMonitor) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copyServiceMonitorOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -84,6 +106,14 @@ func equalServiceMonitorOptions(a, b map[string]string) bool {
 	return true
 }
 
+func (a *ServiceMonitor) GetPort() int {
+	return a.Port
+}
+
+func (a *ServiceMonitor) GetProtocol() *ServiceMonitorProtocol {
+	return a.Protocol
+}
+
 func copyServiceMonitorProtocol(a *ServiceMonitorProtocol) *ServiceMonitorProtocol {
 	if a == nil {
 		return nil
@@ -100,6 +130,18 @@ func equalServiceMonitorProtocol(a, b *ServiceMonitorProtocol) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *ServiceMonitor) GetSrcIP() string {
+	return a.SrcIP
+}
+
+func (a *ServiceMonitor) GetSrcMAC() string {
+	return a.SrcMAC
+}
+
+func (a *ServiceMonitor) GetStatus() *ServiceMonitorStatus {
+	return a.Status
 }
 
 func copyServiceMonitorStatus(a *ServiceMonitorStatus) *ServiceMonitorStatus {

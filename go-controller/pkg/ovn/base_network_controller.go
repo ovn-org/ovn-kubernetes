@@ -66,6 +66,9 @@ type CommonNetworkControllerInfo struct {
 // by more than one type of network controllers.
 type BaseNetworkController struct {
 	CommonNetworkControllerInfo
+	// controllerName should be used to identify objects owned by given controller in the db
+	controllerName string
+
 	// per controller NAD/netconf name information
 	util.NetInfo
 	util.NetConfInfo

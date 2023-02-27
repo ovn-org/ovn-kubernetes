@@ -11,7 +11,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -54,7 +53,7 @@ func (p multicastPolicy) getMulticastPolicyExpectedData(ns string, ports []strin
 	pg_hash := hashedPortGroup(ns)
 	egressMatch := getACLMatch(pg_hash, getMulticastACLEgrMatch(), lportEgressAfterLB)
 
-	ip4AddressSet, ip6AddressSet := addressset.MakeAddressSetHashNames(ns)
+	ip4AddressSet, ip6AddressSet := getNsAddrSetHashNames(ns)
 	mcastMatch := getACLMatchAF(getMulticastACLIgrMatchV4(ip4AddressSet), getMulticastACLIgrMatchV6(ip6AddressSet))
 	ingressMatch := getACLMatch(pg_hash, mcastMatch, lportIngress)
 

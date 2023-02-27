@@ -2,26 +2,26 @@ package ovn
 
 import (
 	"context"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"net"
 	"sync"
-
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -64,11 +64,16 @@ func newNamespace(namespace string) *v1.Namespace {
 	}
 }
 
+func getNsAddrSetHashNames(ns string) (string, string) {
+	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, DefaultNetworkControllerName))
+}
+
 var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	const (
-		namespaceName        = "namespace1"
-		clusterIPNet  string = "10.1.0.0"
-		clusterCIDR   string = clusterIPNet + "/16"
+		namespaceName         = "namespace1"
+		clusterIPNet   string = "10.1.0.0"
+		clusterCIDR    string = clusterIPNet + "/16"
+		controllerName        = DefaultNetworkControllerName
 	)
 	var (
 		fakeOvn *FakeOVN
@@ -93,40 +98,34 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		ginkgo.It("only cleans up address sets owned by namespace", func() {
 			namespace1 := newNamespace(namespaceName)
 			// namespace-owned address set for existing namespace, should stay
-			fakeOvn.asf.NewAddressSet(namespaceName, []net.IP{net.ParseIP("1.1.1.1")})
+			ns1 := getNamespaceAddrSetDbIDs(namespaceName, DefaultNetworkControllerName)
+			fakeOvn.asf.NewAddressSet(ns1, []net.IP{net.ParseIP("1.1.1.1")})
 			// namespace-owned address set for stale namespace, should be deleted
-			fakeOvn.asf.NewAddressSet("namespace2", []net.IP{net.ParseIP("1.1.1.2")})
+			ns2 := getNamespaceAddrSetDbIDs("namespace2", DefaultNetworkControllerName)
+			fakeOvn.asf.NewAddressSet(ns2, []net.IP{net.ParseIP("1.1.1.2")})
 			// netpol-owned address set for existing netpol, should stay
-			fakeOvn.asf.NewAddressSet("namespace1.netpol1.egress.0", []net.IP{net.ParseIP("1.1.1.3")})
+			netpol := getNetpolAddrSetDbIDs("namespace1", "netpol1", "egress", "0", controllerName)
+			fakeOvn.asf.NewAddressSet(netpol, []net.IP{net.ParseIP("1.1.1.3")})
 			// egressQoS-owned address set, should stay
-			fakeOvn.asf.NewAddressSet(ovntypes.EgressQoSRulePrefix+"namespace", []net.IP{net.ParseIP("1.1.1.4")})
+			qos := getEgressQosAddrSetDbIDs("namespace", "0", controllerName)
+			fakeOvn.asf.NewAddressSet(qos, []net.IP{net.ParseIP("1.1.1.4")})
 			// hybridNode-owned address set, should stay
-			fakeOvn.asf.NewAddressSet(ovntypes.HybridRoutePolicyPrefix+"node", []net.IP{net.ParseIP("1.1.1.5")})
+			hybridNode := getHybridRouteAddrSetDbIDs("node", DefaultNetworkControllerName)
+			fakeOvn.asf.NewAddressSet(hybridNode, []net.IP{net.ParseIP("1.1.1.5")})
 			// egress firewall-owned address set, should stay
-			// needs existing ACL to distinguish from namespace-owned
-			dnsAS, err := fakeOvn.asf.NewAddressSet("dnsname", []net.IP{net.ParseIP("1.1.1.6")})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			dnsHashName, _ := dnsAS.GetASHashNames()
-			egressFirewallACL := BuildACL(
-				"aclName",
-				1,
-				"ip4.dst == $"+dnsHashName,
-				nbdb.ACLActionAllow,
-				nil,
-				lportIngress,
-				map[string]string{egressFirewallACLExtIdKey: "egressfirewall1"},
-			)
+			ef := getEgressFirewallDNSAddrSetDbIDs("dnsname", controllerName)
+			fakeOvn.asf.NewAddressSet(ef, []net.IP{net.ParseIP("1.1.1.6")})
 
-			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{egressFirewallACL}})
-			err = fakeOvn.controller.syncNamespaces([]interface{}{namespace1})
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{}})
+			err := fakeOvn.controller.syncNamespaces([]interface{}{namespace1})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName, []string{"1.1.1.1"})
-			fakeOvn.asf.EventuallyExpectNoAddressSet("namespace2")
-			fakeOvn.asf.ExpectAddressSetWithIPs("namespace1.netpol1.egress.0", []string{"1.1.1.3"})
-			fakeOvn.asf.ExpectAddressSetWithIPs(ovntypes.EgressQoSRulePrefix+"namespace", []string{"1.1.1.4"})
-			fakeOvn.asf.ExpectAddressSetWithIPs(ovntypes.HybridRoutePolicyPrefix+"node", []string{"1.1.1.5"})
-			fakeOvn.asf.ExpectAddressSetWithIPs("dnsname", []string{"1.1.1.6"})
+			fakeOvn.asf.ExpectAddressSetWithIPs(ns1, []string{"1.1.1.1"})
+			fakeOvn.asf.EventuallyExpectNoAddressSet(ns2)
+			fakeOvn.asf.ExpectAddressSetWithIPs(netpol, []string{"1.1.1.3"})
+			fakeOvn.asf.ExpectAddressSetWithIPs(qos, []string{"1.1.1.4"})
+			fakeOvn.asf.ExpectAddressSetWithIPs(hybridNode, []string{"1.1.1.5"})
+			fakeOvn.asf.ExpectAddressSetWithIPs(ef, []string{"1.1.1.6"})
 		})
 
 		ginkgo.It("reconciles an existing namespace with pods", func() {
@@ -335,7 +334,11 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, *metav1.NewDeleteOptions(1))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			fakeOvn.asf.EventuallyExpectNoAddressSet(namespaceName)
+
+			// namespace's address set deletion is delayed by 20 second to let other handlers cleanup
+			gomega.Eventually(func() bool {
+				return fakeOvn.asf.AddressSetExists(namespaceName)
+			}, 21*time.Second).Should(gomega.BeFalse())
 		})
 	})
 })

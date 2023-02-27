@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const DHCPv6OptionsTable = "DHCPv6_Options"
+
 type (
 	DHCPv6OptionsType = string
 )
@@ -21,6 +23,22 @@ type DHCPv6Options struct {
 	Code int               `ovsdb:"code"`
 	Name string            `ovsdb:"name"`
 	Type DHCPv6OptionsType `ovsdb:"type"`
+}
+
+func (a *DHCPv6Options) GetUUID() string {
+	return a.UUID
+}
+
+func (a *DHCPv6Options) GetCode() int {
+	return a.Code
+}
+
+func (a *DHCPv6Options) GetName() string {
+	return a.Name
+}
+
+func (a *DHCPv6Options) GetType() DHCPv6OptionsType {
+	return a.Type
 }
 
 func (a *DHCPv6Options) DeepCopyInto(b *DHCPv6Options) {

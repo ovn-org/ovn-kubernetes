@@ -205,7 +205,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					// check severity was reset from default to nil
 					keepACL.Severity = nil
 					// subnet exclusion will be deleted
-					keepACL.Match = "(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102"
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
+					keepACL.Match = "(ip4.dst == 1.2.3.4/23) && ip4.src == $" + asHash
 
 					// purgeACL ACL will be deleted when test server starts deleting dereferenced ACLs
 					// for now we need to update its fields, since it is present in the db
@@ -272,12 +273,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					ipv4ACL := libovsdbops.BuildACL(
 						buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
-						"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102",
+						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
 						nbdb.ACLActionAllow,
 						t.OvnACLLoggingMeter,
 						"",
@@ -340,12 +341,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
+					_, asHash6 := getNsAddrSetHashNames(namespace1.Name)
 					ipv6ACL := libovsdbops.BuildACL(
 						buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
-						"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && ip6.src == $a10481620741176717680",
+						"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && ip6.src == $"+asHash6,
 						nbdb.ACLActionAllow,
 						t.OvnACLLoggingMeter,
 						"",
@@ -417,12 +418,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					fakeOVN.controller.WatchEgressFirewall()
-
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					udpACL := libovsdbops.BuildACL(
 						buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
-						"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 )))",
+						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash+" && ((udp && ( udp.dst == 100 )))",
 						nbdb.ACLActionDrop,
 						t.OvnACLLoggingMeter,
 						"",
@@ -492,11 +493,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					err = fakeOVN.controller.WatchEgressFirewall()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					ipv4ACL := libovsdbops.BuildACL(
 						buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
-						"(ip4.dst == 1.2.3.5/23) && ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 )))",
+						"(ip4.dst == 1.2.3.5/23) && ip4.src == $"+asHash+" && ((tcp && ( tcp.dst == 100 )))",
 						nbdb.ACLActionAllow,
 						t.OvnACLLoggingMeter,
 						"",
@@ -574,11 +576,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					err = fakeOVN.controller.WatchEgressFirewall()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					ipv4ACL := libovsdbops.BuildACL(
 						buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
-						"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102",
+						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
 						nbdb.ACLActionAllow,
 						t.OvnACLLoggingMeter,
 						"",
@@ -651,11 +654,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					fakeOVN.controller.WatchEgressFirewall()
 
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					ipv4ACL := libovsdbops.BuildACL(
 						buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
-						"(ip4.dst == 1.2.3.5/23) && ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 )))",
+						"(ip4.dst == 1.2.3.5/23) && ip4.src == $"+asHash+" && ((tcp && ( tcp.dst == 100 )))",
 						nbdb.ACLActionAllow,
 						t.OvnACLLoggingMeter,
 						"",
@@ -758,11 +762,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					err = fakeOVN.controller.WatchEgressFirewall()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					ipv4ACL := libovsdbops.BuildACL(
 						buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
-						"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102",
+						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
 						nbdb.ACLActionAllow,
 						t.OvnACLLoggingMeter,
 						"",
@@ -860,11 +865,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					err = fakeOVN.controller.WatchEgressFirewall()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					ipv4ACL := libovsdbops.BuildACL(
 						buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
-						"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102",
+						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
 						nbdb.ACLActionAllow,
 						t.OvnACLLoggingMeter,
 						"",
@@ -945,11 +951,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					fakeOVN.controller.WatchEgressFirewall()
 
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					acl := libovsdbops.BuildACL(
 						buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
-						fmt.Sprintf("(ip4.dst == 0.0.0.0/0 && ip4.dst != %s) && ip4.src == $a10481622940199974102", clusterSubnetStr),
+						"(ip4.dst == 0.0.0.0/0 && ip4.dst != "+clusterSubnetStr+") && ip4.src == $"+asHash,
 						nbdb.ACLActionDrop,
 						t.OvnACLLoggingMeter,
 						"",

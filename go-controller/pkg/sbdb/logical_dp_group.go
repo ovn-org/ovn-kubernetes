@@ -5,10 +5,20 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LogicalDPGroupTable = "Logical_DP_Group"
+
 // LogicalDPGroup defines an object in Logical_DP_Group table
 type LogicalDPGroup struct {
 	UUID      string   `ovsdb:"_uuid"`
 	Datapaths []string `ovsdb:"datapaths"`
+}
+
+func (a *LogicalDPGroup) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LogicalDPGroup) GetDatapaths() []string {
+	return a.Datapaths
 }
 
 func copyLogicalDPGroupDatapaths(a []string) []string {

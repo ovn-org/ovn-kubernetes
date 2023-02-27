@@ -12,6 +12,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -41,6 +43,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 		node2IPv6       string = "fc00:f853:ccd:e793::2"
 		node2IPv4Subnet string = "10.128.2.0/24"
 		node2IPv6Subnet string = "fe00:10:128:2::/64"
+		controllerName         = DefaultNetworkControllerName
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -197,7 +200,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					Policies: []string{"staleLRP1-UUID", "staleLRP2-UUID", "staleLRP3-UUID", "staleLRP4-UUID", "toKeepLRP1-UUID", "toKeepLRP2-UUID"},
 				}
 
-				noRerouteLRPS := getDefaultNoReroutePolicies()
+				noRerouteLRPS := getDefaultNoReroutePolicies(controllerName)
 
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
@@ -699,7 +702,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v6lrp2,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -726,7 +729,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v6lrp2,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -739,7 +742,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				clusterRouter.Policies = []string{}
 				expectedDatabaseState = []libovsdbtest.TestData{clusterRouter}
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1112,7 +1115,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v4lrp2,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1133,7 +1136,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v6lrp1,
 					v6lrp2,
 				}
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1160,7 +1163,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v6lrp1,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1175,7 +1178,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v6lrp1,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1189,7 +1192,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1273,7 +1276,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1297,7 +1300,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v4lrp1,
 					v4lrp2,
 				}
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1324,7 +1327,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1522,7 +1525,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					svc1v6lrp1,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1608,7 +1611,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					svc2v4lrp1,
 					svc2v6lrp1,
 				}
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1622,7 +1625,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				expectedDatabaseState = []libovsdbtest.TestData{
 					clusterRouter,
 				}
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1756,7 +1759,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					svc1v6lrp1,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1792,7 +1795,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}).ShouldNot(gomega.HaveOccurred())
 				clusterRouter.Policies = []string{}
 				expectedDatabaseState = []libovsdbtest.TestData{clusterRouter}
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1835,7 +1838,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					svc1v6lrp1,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies() {
+				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1873,22 +1876,27 @@ func lrpForEgressSvcEndpoint(uuid, key, addr, nexthop string) *nbdb.LogicalRoute
 	}
 }
 
-func getDefaultNoReroutePolicies() []*nbdb.LogicalRouterPolicy {
+func getDefaultNoReroutePolicies(controllerName string) []*nbdb.LogicalRouterPolicy {
 	allLRPS := []*nbdb.LogicalRouterPolicy{}
+	egressSvcPodsV4, egressSvcPodsV6 := addressset.GetHashNamesForAS(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName))
+	egressipPodsV4, egressipPodsV6 := addressset.GetHashNamesForAS(getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, controllerName))
+	nodeIPsV4, nodeIPsV6 := addressset.GetHashNamesForAS(getEgressIPAddrSetDbIDs(NodeIPAddrSetName, controllerName))
 	allLRPS = append(allLRPS,
 		&nbdb.LogicalRouterPolicy{
 			Priority: types.DefaultNoRereoutePriority,
-			Match:    "(ip4.src == $a12749576804119081385 || ip4.src == $a16335301576733828072) && ip4.dst == $a11079093880111560446",
-			Action:   nbdb.LogicalRouterPolicyActionAllow,
-			UUID:     "default-no-reroute-node-UUID",
-			Options:  map[string]string{"pkt_mark": "1008"},
+			Match: fmt.Sprintf("(ip4.src == $%s || ip4.src == $%s) && ip4.dst == $%s",
+				egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
+			Action:  nbdb.LogicalRouterPolicyActionAllow,
+			UUID:    "default-no-reroute-node-UUID",
+			Options: map[string]string{"pkt_mark": "1008"},
 		},
 		&nbdb.LogicalRouterPolicy{
 			Priority: types.DefaultNoRereoutePriority,
-			Match:    "(ip6.src == $a12749574605095824963 || ip6.src == $a16335303775757084494) && ip6.dst == $a11079091681088304024",
-			Action:   nbdb.LogicalRouterPolicyActionAllow,
-			UUID:     "default-v6-no-reroute-node-UUID",
-			Options:  map[string]string{"pkt_mark": "1008"},
+			Match: fmt.Sprintf("(ip6.src == $%s || ip6.src == $%s) && ip6.dst == $%s",
+				egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
+			Action:  nbdb.LogicalRouterPolicyActionAllow,
+			UUID:    "default-v6-no-reroute-node-UUID",
+			Options: map[string]string{"pkt_mark": "1008"},
 		},
 	)
 

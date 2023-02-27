@@ -38,16 +38,25 @@ const (
 	svcExternalIDKey = "EgressSVC" // key set on lrps to identify to which egress service it belongs
 )
 
+type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
+	controllerName string) error
+type CreateNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
+	node *corev1.Node, controllerName string) error
+type DeleteNoRerouteNodePoliciesFunc func(addressSetFactory addressset.AddressSetFactory, nodeName string,
+	v4NodeAddr, v6NodeAddr net.IP, controllerName string) error
+type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(libovsdbclient.Client, string) error
+
 type Controller struct {
-	client   kubernetes.Interface
-	nbClient libovsdbclient.Client
-	stopCh   <-chan struct{}
+	controllerName string
+	client         kubernetes.Interface
+	nbClient       libovsdbclient.Client
+	stopCh         <-chan struct{}
 	sync.Mutex
 
-	initClusterEgressPolicies                func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory) error
-	createNoRerouteNodePolicies              func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, node *corev1.Node) error
-	deleteNoRerouteNodePolicies              func(addressSetFactory addressset.AddressSetFactory, nodeName string, v4NodeAddr, v6NodeAddr net.IP) error
-	deleteLegacyDefaultNoRerouteNodePolicies func(libovsdbclient.Client, string) error
+	initClusterEgressPolicies                InitClusterEgressPoliciesFunc
+	createNoRerouteNodePolicies              CreateNoRerouteNodePoliciesFunc
+	deleteNoRerouteNodePolicies              DeleteNoRerouteNodePoliciesFunc
+	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc
 	IsReachable                              func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool // TODO: make a universal cache instead
 
 	services map[string]*svcState  // svc key -> state
@@ -96,13 +105,14 @@ type nodeState struct {
 }
 
 func NewController(
+	controllerName string,
 	client kubernetes.Interface,
 	nbClient libovsdbclient.Client,
 	addressSetFactory addressset.AddressSetFactory,
-	initClusterEgressPolicies func(libovsdbclient.Client, addressset.AddressSetFactory) error,
-	createNoRerouteNodePolicies func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, node *corev1.Node) error,
-	deleteNoRerouteNodePolicies func(addressSetFactory addressset.AddressSetFactory, nodeName string, v4NodeAddr, v6NodeAddr net.IP) error,
-	deleteLegacyDefaultNoRerouteNodePolicies func(libovsdbclient.Client, string) error,
+	initClusterEgressPolicies InitClusterEgressPoliciesFunc,
+	createNoRerouteNodePolicies CreateNoRerouteNodePoliciesFunc,
+	deleteNoRerouteNodePolicies DeleteNoRerouteNodePoliciesFunc,
+	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc,
 	isReachable func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool,
 	stopCh <-chan struct{},
 	serviceInformer coreinformers.ServiceInformer,
@@ -110,6 +120,7 @@ func NewController(
 	nodeInformer coreinformers.NodeInformer) *Controller {
 	klog.Info("Setting up event handlers for Egress Services")
 	c := &Controller{
+		controllerName:                           controllerName,
 		client:                                   client,
 		nbClient:                                 nbClient,
 		addressSetFactory:                        addressSetFactory,
@@ -188,7 +199,7 @@ func (c *Controller) Run(threadiness int) {
 		klog.Errorf("Failed to repair Egress Services entries: %v", err)
 	}
 
-	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory)
+	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, c.controllerName)
 	if err != nil {
 		klog.Errorf("Failed to init Egress Services cluster policies: %v", err)
 	}

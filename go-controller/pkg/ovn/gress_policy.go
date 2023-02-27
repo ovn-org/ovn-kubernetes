@@ -9,9 +9,9 @@ import (
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -21,7 +21,17 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+func getNetpolAddrSetDbIDs(policyNamespace, policyName, direction, idx, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetNetworkPolicy, controller, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: buildAddrSetName(policyNamespace, policyName),
+		// direction and idx uniquely identify address set (= gress policy rule)
+		libovsdbops.PolicyDirectionKey: direction,
+		libovsdbops.GressIdxKey:        idx,
+	})
+}
+
 type gressPolicy struct {
+	controllerName  string
 	policyNamespace string
 	policyName      string
 	policyType      knet.PolicyType
@@ -46,7 +56,8 @@ type gressPolicy struct {
 	// the rule in question.
 	portPolicies []*portPolicy
 
-	ipBlock []*knet.IPBlock
+	ipBlock      []*knet.IPBlock
+	addrSetDbIDs *libovsdbops.DbObjectIDs
 }
 
 type portPolicy struct {
@@ -76,8 +87,9 @@ func (pp *portPolicy) getL4Match() (string, error) {
 	return foundProtocol, nil
 }
 
-func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string) *gressPolicy {
+func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string) *gressPolicy {
 	return &gressPolicy{
+		controllerName:    controllerName,
 		policyNamespace:   namespace,
 		policyName:        name,
 		policyType:        policyType,
@@ -85,6 +97,7 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string)
 		peerV4AddressSets: &sync.Map{},
 		peerV6AddressSets: &sync.Map{},
 		portPolicies:      make([]*portPolicy, 0),
+		addrSetDbIDs:      getNetpolAddrSetDbIDs(namespace, name, strings.ToLower(string(policyType)), strconv.Itoa(idx), controllerName),
 	}
 }
 
@@ -113,15 +126,17 @@ func syncMapLen(m *sync.Map) int {
 	return result
 }
 
+func buildAddrSetName(policyNamespace, policyName string) string {
+	return policyNamespace + "_" + policyName
+}
+
 // must be called with network policy write lock
 func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory) error {
 	if gp.peerAddressSet != nil {
 		return nil
 	}
 
-	direction := strings.ToLower(string(gp.policyType))
-	asName := fmt.Sprintf("%s.%s.%s.%d", gp.policyNamespace, gp.policyName, direction, gp.idx)
-	as, err := factory.NewAddressSet(asName, nil)
+	as, err := factory.NewAddressSet(gp.addrSetDbIDs, nil)
 	if err != nil {
 		return err
 	}
@@ -266,12 +281,17 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string 
 	return ipBlockMatches
 }
 
-// addNamespaceAddressSet adds a namespace address set to the gress policy
-// if the address set does not exist and returns `true`;  if the address set already exists,
-// it returns `false`.
+// addNamespaceAddressSet adds a namespace address set to the gress policy.
+// If the address set is not found in the db, return error.
+// If the address set is already added for this policy, return false, otherwise returns true.
 // This function is safe for concurrent use, doesn't require additional synchronization
-func (gp *gressPolicy) addNamespaceAddressSet(name string) bool {
-	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
+func (gp *gressPolicy) addNamespaceAddressSet(name string, asf addressset.AddressSetFactory) (bool, error) {
+	dbIDs := getNamespaceAddrSetDbIDs(name, gp.controllerName)
+	as, err := asf.GetAddressSet(dbIDs)
+	if err != nil {
+		return false, fmt.Errorf("cannot add peer namespace %s: failed to get address set: %v", name, err)
+	}
+	v4HashName, v6HashName := as.GetASHashNames()
 	v4HashName = "$" + v4HashName
 	v6HashName = "$" + v6HashName
 
@@ -286,16 +306,17 @@ func (gp *gressPolicy) addNamespaceAddressSet(name string) bool {
 	}
 	if v4NoUpdate && v6NoUpdate {
 		// no changes were applied, return false
-		return false
+		return false, nil
 	}
-	return true
+	return true, nil
 }
 
-// delNamespaceAddressSet removes a namespace address set from the gress policy
-// and returns whether the address set was in the policy or not.
+// delNamespaceAddressSet removes a namespace address set from the gress policy.
+// If the address set is already deleted for this policy, return false, otherwise returns true.
 // This function is safe for concurrent use, doesn't require additional synchronization
 func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
-	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
+	dbIDs := getNamespaceAddrSetDbIDs(name, gp.controllerName)
+	v4HashName, v6HashName := addressset.GetHashNamesForAS(dbIDs)
 	v4HashName = "$" + v4HashName
 	v6HashName = "$" + v6HashName
 

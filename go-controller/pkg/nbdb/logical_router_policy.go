@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LogicalRouterPolicyTable = "Logical_Router_Policy"
+
 type (
 	LogicalRouterPolicyAction = string
 )
@@ -25,6 +27,18 @@ type LogicalRouterPolicy struct {
 	Nexthops    []string                  `ovsdb:"nexthops"`
 	Options     map[string]string         `ovsdb:"options"`
 	Priority    int                       `ovsdb:"priority"`
+}
+
+func (a *LogicalRouterPolicy) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LogicalRouterPolicy) GetAction() LogicalRouterPolicyAction {
+	return a.Action
+}
+
+func (a *LogicalRouterPolicy) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyLogicalRouterPolicyExternalIDs(a map[string]string) map[string]string {
@@ -53,6 +67,14 @@ func equalLogicalRouterPolicyExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalRouterPolicy) GetMatch() string {
+	return a.Match
+}
+
+func (a *LogicalRouterPolicy) GetNexthop() *string {
+	return a.Nexthop
+}
+
 func copyLogicalRouterPolicyNexthop(a *string) *string {
 	if a == nil {
 		return nil
@@ -69,6 +91,10 @@ func equalLogicalRouterPolicyNexthop(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalRouterPolicy) GetNexthops() []string {
+	return a.Nexthops
 }
 
 func copyLogicalRouterPolicyNexthops(a []string) []string {
@@ -95,6 +121,10 @@ func equalLogicalRouterPolicyNexthops(a, b []string) bool {
 	return true
 }
 
+func (a *LogicalRouterPolicy) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copyLogicalRouterPolicyOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -119,6 +149,10 @@ func equalLogicalRouterPolicyOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalRouterPolicy) GetPriority() int {
+	return a.Priority
 }
 
 func (a *LogicalRouterPolicy) DeepCopyInto(b *LogicalRouterPolicy) {

@@ -3,7 +3,6 @@ package ovn
 import (
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -283,51 +282,33 @@ func (oc *DefaultNetworkController) updateStaleDefaultDenyACLNames(npType knet.P
 }
 
 func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interface{}) error {
-	expectedPolicies := make(map[string]map[string]bool)
+	expectedAddressSets := make(map[string]bool)
 	for _, npInterface := range networkPolicies {
 		policy, ok := npInterface.(*knet.NetworkPolicy)
 		if !ok {
 			return fmt.Errorf("spurious object in syncNetworkPolicies: %v", npInterface)
 		}
-
-		if nsMap, ok := expectedPolicies[policy.Namespace]; ok {
-			nsMap[policy.Name] = true
-		} else {
-			expectedPolicies[policy.Namespace] = map[string]bool{
-				policy.Name: true,
-			}
-		}
+		expectedAddressSets[buildAddrSetName(policy.Namespace, policy.Name)] = true
 	}
 
 	stalePGs := []string{}
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(_, addrSetName string) error {
-		// netpol name has format fmt.Sprintf("%s.%s.%s.%d", gp.policyNamespace, gp.policyName, direction, gp.idx)
-		s := strings.Split(addrSetName, ".")
-		sLen := len(s)
-		// priority should be a number
-		_, numErr := strconv.Atoi(s[sLen-1])
-		if sLen < 4 || (s[sLen-2] != "ingress" && s[sLen-2] != "egress") || numErr != nil {
-			// address set name is not formatted by network policy
-			return nil
-		}
-
-		// address set is owned by network policy
-		// namespace doesn't have dots
-		namespaceName := s[0]
-		// policyName may have dots, join in that case
-		policyName := strings.Join(s[1:sLen-2], ".")
-		if !expectedPolicies[namespaceName][policyName] {
-			// policy doesn't exist on k8s. Delete the port group
-			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
-			hashedLocalPortGroup := hashedPortGroup(portGroupName)
-			stalePGs = append(stalePGs, hashedLocalPortGroup)
-			// delete the address sets for this old policy from OVN
-			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
-				return err
+	err := oc.addressSetFactory.ProcessEachAddressSet(oc.controllerName, libovsdbops.AddressSetNetworkPolicy,
+		func(dbIDs *libovsdbops.DbObjectIDs) error {
+			asName := dbIDs.GetObjectID(libovsdbops.ObjectNameKey)
+			if !expectedAddressSets[asName] {
+				// policy doesn't exist on k8s. Delete the port group.
+				// port group name is build same as address set name, which is <namespace>_<name>
+				portGroupName := asName
+				hashedLocalPortGroup := hashedPortGroup(portGroupName)
+				stalePGs = append(stalePGs, hashedLocalPortGroup)
+				// delete the address sets for this old policy from OVN
+				if err := oc.addressSetFactory.DestroyAddressSet(dbIDs); err != nil {
+					klog.Errorf(err.Error())
+					return err
+				}
 			}
-		}
-		return nil
-	})
+			return nil
+		})
 	if err != nil {
 		return fmt.Errorf("error in syncing network policies: %v", err)
 	}
@@ -1040,7 +1021,7 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 		for i, ingressJSON := range policy.Spec.Ingress {
 			klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
-			ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name)
+			ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name, oc.controllerName)
 			// append ingress policy to be able to cleanup created address set
 			// see cleanupNetworkPolicy for details
 			np.ingressPolicies = append(np.ingressPolicies, ingress)
@@ -1074,7 +1055,7 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 		for i, egressJSON := range policy.Spec.Egress {
 			klog.V(5).Infof("Network policy egress is %+v", egressJSON)
 
-			egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name)
+			egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name, oc.controllerName)
 			// append ingress policy to be able to cleanup created address set
 			// see cleanupNetworkPolicy for details
 			np.egressPolicies = append(np.egressPolicies, egress)
@@ -1593,19 +1574,27 @@ func (oc *DefaultNetworkController) handlePeerNamespaceSelectorAdd(np *networkPo
 		return nil
 	}
 	updated := false
+	var errors []error
 	for _, obj := range objs {
 		namespace := obj.(*kapi.Namespace)
 		// addNamespaceAddressSet is safe for concurrent use, doesn't require additional synchronization
-		if gp.addNamespaceAddressSet(namespace.Name) {
+		nsUpdated, err := gp.addNamespaceAddressSet(namespace.Name, oc.addressSetFactory)
+		if err != nil {
+			errors = append(errors, err)
+		} else if nsUpdated {
 			updated = true
 		}
 	}
 	np.RUnlock()
 	// unlock networkPolicy, before calling peerNamespaceUpdate
 	if updated {
-		return oc.peerNamespaceUpdate(np, gp)
+		err := oc.peerNamespaceUpdate(np, gp)
+		if err != nil {
+			errors = append(errors, err)
+		}
 	}
-	return nil
+	return kerrorsutil.NewAggregate(errors)
+
 }
 
 func (oc *DefaultNetworkController) handlePeerNamespaceSelectorDel(np *networkPolicy, gp *gressPolicy, objs ...interface{}) error {

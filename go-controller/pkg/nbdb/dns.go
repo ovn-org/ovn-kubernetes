@@ -5,11 +5,21 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const DNSTable = "DNS"
+
 // DNS defines an object in DNS table
 type DNS struct {
 	UUID        string            `ovsdb:"_uuid"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Records     map[string]string `ovsdb:"records"`
+}
+
+func (a *DNS) GetUUID() string {
+	return a.UUID
+}
+
+func (a *DNS) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyDNSExternalIDs(a map[string]string) map[string]string {
@@ -36,6 +46,10 @@ func equalDNSExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *DNS) GetRecords() map[string]string {
+	return a.Records
 }
 
 func copyDNSRecords(a map[string]string) map[string]string {

@@ -5,12 +5,22 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LoadBalancerHealthCheckTable = "Load_Balancer_Health_Check"
+
 // LoadBalancerHealthCheck defines an object in Load_Balancer_Health_Check table
 type LoadBalancerHealthCheck struct {
 	UUID        string            `ovsdb:"_uuid"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Options     map[string]string `ovsdb:"options"`
 	Vip         string            `ovsdb:"vip"`
+}
+
+func (a *LoadBalancerHealthCheck) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LoadBalancerHealthCheck) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyLoadBalancerHealthCheckExternalIDs(a map[string]string) map[string]string {
@@ -39,6 +49,10 @@ func equalLoadBalancerHealthCheckExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LoadBalancerHealthCheck) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copyLoadBalancerHealthCheckOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -63,6 +77,10 @@ func equalLoadBalancerHealthCheckOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LoadBalancerHealthCheck) GetVip() string {
+	return a.Vip
 }
 
 func (a *LoadBalancerHealthCheck) DeepCopyInto(b *LoadBalancerHealthCheck) {
