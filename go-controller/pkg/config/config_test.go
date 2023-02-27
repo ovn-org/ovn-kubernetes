@@ -148,6 +148,7 @@ tokenFile=/path/to/token
 cacert=/path/to/kubeca.crt
 service-cidrs=172.18.0.0/24
 no-hostsubnet-nodes=label=another-test-label
+healthz-bind-address=0.0.0.0:1234
 
 [metrics]
 bind-address=1.1.1.1:8080
@@ -289,6 +290,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal(DefaultAPIServer))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.16.1.0/24"))
 			gomega.Expect(Kubernetes.RawNoHostSubnetNodes).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.HealthzBindAddress).To(gomega.Equal(""))
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal(""))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal(""))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
@@ -571,6 +573,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Kubernetes.TokenFile).To(gomega.Equal("/path/to/token"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://1.2.3.4:6443"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.18.0.0/24"))
+			gomega.Expect(Kubernetes.HealthzBindAddress).To(gomega.Equal("0.0.0.0:1234"))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
 			}))
@@ -658,6 +661,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://4.4.3.2:8080"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.15.0.0/24"))
 			gomega.Expect(Kubernetes.RawNoHostSubnetNodes).To(gomega.Equal("test=pass"))
+			gomega.Expect(Kubernetes.HealthzBindAddress).To(gomega.Equal("0.0.0.0:4321"))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.130.0.0/15"), 24},
 			}))
@@ -754,6 +758,7 @@ var _ = Describe("Config Operations", func() {
 			"-egressip-reachability-total-timeout=5",
 			"-egressip-node-healthcheck-port=4321",
 			"-enable-multi-network=true",
+			"-healthz-bind-address=0.0.0.0:4321",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
