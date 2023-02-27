@@ -27,29 +27,33 @@ import (
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // OVNClientset is a wrapper around all clientsets used by OVN-Kubernetes
 type OVNClientset struct {
-	KubeClient            kubernetes.Interface
-	EgressIPClient        egressipclientset.Interface
-	EgressFirewallClient  egressfirewallclientset.Interface
-	CloudNetworkClient    ocpcloudnetworkclientset.Interface
-	EgressQoSClient       egressqosclientset.Interface
-	NetworkAttchDefClient networkattchmentdefclientset.Interface
+	KubeClient             kubernetes.Interface
+	EgressIPClient         egressipclientset.Interface
+	EgressFirewallClient   egressfirewallclientset.Interface
+	CloudNetworkClient     ocpcloudnetworkclientset.Interface
+	EgressQoSClient        egressqosclientset.Interface
+	NetworkAttchDefClient  networkattchmentdefclientset.Interface
+	AdminPolicyRouteClient adminpolicybasedrouteclientset.Interface
 }
 
 // OVNMasterClientset
 type OVNMasterClientset struct {
-	KubeClient           kubernetes.Interface
-	EgressIPClient       egressipclientset.Interface
-	EgressFirewallClient egressfirewallclientset.Interface
-	CloudNetworkClient   ocpcloudnetworkclientset.Interface
-	EgressQoSClient      egressqosclientset.Interface
+	KubeClient             kubernetes.Interface
+	EgressIPClient         egressipclientset.Interface
+	EgressFirewallClient   egressfirewallclientset.Interface
+	CloudNetworkClient     ocpcloudnetworkclientset.Interface
+	EgressQoSClient        egressqosclientset.Interface
+	AdminPolicyRouteClient adminpolicybasedrouteclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -58,11 +62,12 @@ type OVNNodeClientset struct {
 
 func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 	return &OVNMasterClientset{
-		KubeClient:           cs.KubeClient,
-		EgressIPClient:       cs.EgressIPClient,
-		EgressFirewallClient: cs.EgressFirewallClient,
-		CloudNetworkClient:   cs.CloudNetworkClient,
-		EgressQoSClient:      cs.EgressQoSClient,
+		KubeClient:             cs.KubeClient,
+		EgressIPClient:         cs.EgressIPClient,
+		EgressFirewallClient:   cs.EgressFirewallClient,
+		CloudNetworkClient:     cs.CloudNetworkClient,
+		EgressQoSClient:        cs.EgressQoSClient,
+		AdminPolicyRouteClient: cs.AdminPolicyRouteClient,
 	}
 }
 
@@ -183,13 +188,19 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		return nil, err
 	}
 
+	adminPolicyBasedRouteClientset, err := adminpolicybasedrouteclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+
 	return &OVNClientset{
-		KubeClient:            kclientset,
-		EgressIPClient:        egressIPClientset,
-		EgressFirewallClient:  egressFirewallClientset,
-		CloudNetworkClient:    cloudNetworkClientset,
-		EgressQoSClient:       egressqosClientset,
-		NetworkAttchDefClient: networkAttchmntDefClientset,
+		KubeClient:             kclientset,
+		EgressIPClient:         egressIPClientset,
+		EgressFirewallClient:   egressFirewallClientset,
+		CloudNetworkClient:     cloudNetworkClientset,
+		EgressQoSClient:        egressqosClientset,
+		NetworkAttchDefClient:  networkAttchmntDefClientset,
+		AdminPolicyRouteClient: adminPolicyBasedRouteClientset,
 	}, nil
 }
 

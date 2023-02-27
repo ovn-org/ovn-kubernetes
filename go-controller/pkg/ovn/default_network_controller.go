@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set_syncer"
+	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
@@ -100,6 +101,9 @@ type DefaultNetworkController struct {
 	svcController *svccontroller.Controller
 	// Controller used to handle egress services
 	egressSvcController *egresssvc.Controller
+
+	// Controller used to handle the admin policy based external route resources
+	apbExternalRouteController *apbroutecontroller.ExternalController
 	// svcFactory used to handle service related events
 	svcFactory informers.SharedInformerFactory
 
@@ -163,6 +167,17 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	svcController, svcFactory := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
 	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory,
 		defaultStopChan, DefaultNetworkControllerName)
+	apbExternalRouteController := apbroutecontroller.NewExternalController(
+		cnci.client,
+		cnci.kube,
+		defaultStopChan,
+		cnci.watchFactory.ExternalRouteInformer(),
+		cnci.watchFactory.PodCoreInformer(),
+		cnci.watchFactory.NamespaceInformer(),
+		cnci.watchFactory.NodeCoreInformer().Lister(),
+		cnci.nbClient,
+		addressSetFactory,
+	)
 	var hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
 	if config.HybridOverlay.Enabled {
 		hybridOverlaySubnetAllocator = subnetallocator.NewHostSubnetAllocator()
@@ -200,13 +215,14 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			reachabilityCheckInterval:         egressIPReachabilityCheckInterval,
 			egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
 		},
-		loadbalancerClusterCache: make(map[kapi.Protocol]string),
-		loadBalancerGroupUUID:    "",
-		aclLoggingEnabled:        true,
-		joinSwIPManager:          nil,
-		svcController:            svcController,
-		svcFactory:               svcFactory,
-		egressSvcController:      egressSvcController,
+		loadbalancerClusterCache:   make(map[kapi.Protocol]string),
+		loadBalancerGroupUUID:      "",
+		aclLoggingEnabled:          true,
+		joinSwIPManager:            nil,
+		svcController:              svcController,
+		svcFactory:                 svcFactory,
+		egressSvcController:        egressSvcController,
+		apbExternalRouteController: apbExternalRouteController,
 	}
 
 	oc.initRetryFramework()
@@ -465,6 +481,12 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	go func() {
 		defer oc.wg.Done()
 		oc.egressSvcController.Run(1)
+	}()
+
+	oc.wg.Add(1)
+	go func() {
+		defer oc.wg.Done()
+		oc.apbExternalRouteController.Run(1)
 	}()
 
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))

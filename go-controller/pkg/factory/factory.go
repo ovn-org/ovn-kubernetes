@@ -27,6 +27,9 @@ import (
 	egressqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions"
 	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
 
+	adminpolicybasedroutefactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions"
+	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
+
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
 	kapi "k8s.io/api/core/v1"
@@ -54,12 +57,14 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory         informerfactory.SharedInformerFactory
-	eipFactory       egressipinformerfactory.SharedInformerFactory
-	efFactory        egressfirewallinformerfactory.SharedInformerFactory
-	cpipcFactory     ocpcloudnetworkinformerfactory.SharedInformerFactory
-	egressQoSFactory egressqosinformerfactory.SharedInformerFactory
-	informers        map[reflect.Type]*informer
+	iFactory                informerfactory.SharedInformerFactory
+	eipFactory              egressipinformerfactory.SharedInformerFactory
+	efFactory               egressfirewallinformerfactory.SharedInformerFactory
+	cpipcFactory            ocpcloudnetworkinformerfactory.SharedInformerFactory
+	egressQoSFactory        egressqosinformerfactory.SharedInformerFactory
+	apbExternalRouteFactory adminpolicybasedroutefactory.SharedInformerFactory
+
+	informers map[reflect.Type]*informer
 
 	stopChan chan struct{}
 }
@@ -145,13 +150,14 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:         informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:       egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efFactory:        egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
-		cpipcFactory:     ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
-		egressQoSFactory: egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
-		informers:        make(map[reflect.Type]*informer),
-		stopChan:         make(chan struct{}),
+		iFactory:                informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:              egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efFactory:               egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
+		cpipcFactory:            ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
+		egressQoSFactory:        egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
+		apbExternalRouteFactory: adminpolicybasedroutefactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
+		informers:               make(map[reflect.Type]*informer),
+		stopChan:                make(chan struct{}),
 	}
 
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
@@ -846,8 +852,8 @@ func (wf *WatchFactory) PodCoreInformer() v1coreinformers.PodInformer {
 	return wf.iFactory.Core().V1().Pods()
 }
 
-func (wf *WatchFactory) NamespaceInformer() cache.SharedIndexInformer {
-	return wf.informers[NamespaceType].inf
+func (wf *WatchFactory) NamespaceInformer() v1coreinformers.NamespaceInformer {
+	return wf.iFactory.Core().V1().Namespaces()
 }
 
 func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
@@ -856,6 +862,10 @@ func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
 
 func (wf *WatchFactory) EgressQoSInformer() egressqosinformer.EgressQoSInformer {
 	return wf.egressQoSFactory.K8s().V1().EgressQoSes()
+}
+
+func (wf *WatchFactory) ExternalRouteInformer() adminpolicybasedrouteinformer.AdminPolicyBasedExternalRouteInformer {
+	return wf.apbExternalRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes()
 }
 
 // withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the

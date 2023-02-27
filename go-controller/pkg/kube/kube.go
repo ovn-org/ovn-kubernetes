@@ -6,6 +6,8 @@ import (
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
+	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
+	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -33,6 +35,7 @@ type InterfaceOVN interface {
 	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
+	UpdateStatusAPBExternalRoute(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) error
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -70,6 +73,7 @@ type KubeOVN struct {
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
+	APBRouteClient       adminpolicybasedrouteclientset.Interface
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -386,4 +390,9 @@ func (k *KubeOVN) UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetwo
 
 func (k *KubeOVN) DeleteCloudPrivateIPConfig(name string) error {
 	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Delete(context.TODO(), name, metav1.DeleteOptions{})
+}
+
+func (k *KubeOVN) UpdateStatusAPBExternalRoute(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) error {
+	_, err := k.APBRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().UpdateStatus(context.TODO(), route, metav1.UpdateOptions{})
+	return err
 }
