@@ -121,7 +121,7 @@ if [ "$KIND_IPV4_SUPPORT" == false ] || [ "$KIND_IPV6_SUPPORT" == false ]; then
 fi
 
 # If dulastack conversion, skip certain tests due to unknown flakes upstream (FIXME)
-if [ "DUALSTACK_CONVERSION" == true ]; then
+if [ "$DUALSTACK_CONVERSION" == true ]; then
   SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_CONVERSION_TESTS
 fi
 
