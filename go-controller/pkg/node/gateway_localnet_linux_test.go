@@ -68,7 +68,7 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset,
 		return err
 	}
 
-	k := &kube.Kube{fakeClient.KubeClient}
+	k := &kube.Kube{KClient: fakeClient.KubeClient}
 	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
 	localHostNetEp := "192.168.18.15/32"
 	ip, _, _ := net.ParseCIDR(localHostNetEp)
@@ -100,7 +100,7 @@ func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNNodeC
 		return nil, err
 	}
 
-	k := &kube.Kube{fakeClient.KubeClient}
+	k := &kube.Kube{KClient: fakeClient.KubeClient}
 	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
 	localHostNetEp := "192.168.18.15/32"
 	ip, _, _ := net.ParseCIDR(localHostNetEp)
@@ -2630,7 +2630,7 @@ var _ = Describe("Node Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeShared
 				_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
-				config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{cidr4, 24}}
+				config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: cidr4, HostSubnetLength: 24}}
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ovs-ofctl show ",
 					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
