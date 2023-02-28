@@ -93,7 +93,7 @@ type externalRouteInfo struct {
 
 type ExternalController struct {
 	client kubernetes.Interface
-	kube   kube.Interface
+	kube   kube.InterfaceOVN
 	stopCh <-chan struct{}
 	sync.Mutex
 
@@ -114,15 +114,12 @@ type ExternalController struct {
 	namespaceLister corev1listers.NamespaceLister
 	namespaceSynced cache.InformerSynced
 
-	// mux to ensure policies are not modified while being updated
-	policyCache map[string]*sync.Mutex
-
 	// cache for set of policies impacting a given namespace
-	namespacePoliciesCache map[string]sets.String
+	namespaceInfoCache map[string]*namespaceInfo
 	// cache for namespaces where pod gateways reside.
-	// it contains namespace->podName->set of namespaces where the pod IP is used as a gateway
+	// it contains type.NamespacedName(namespace,podName)->set of namespaces where the pod IP is used as a gateway
 	// Used when veryfing updates to pods.
-	gatewayPodsNamespaceCache map[string]map[string]sets.String
+	gatewayPodsNamespaceCache map[ktypes.NamespacedName]sets.String
 
 	// NorthBound client
 	nbClient libovsdbclient.Client
@@ -135,9 +132,15 @@ type ExternalController struct {
 	addressSetFactory addressset.AddressSetFactory
 }
 
+type namespaceInfo struct {
+	policies        sets.String
+	staticGateways  sets.String
+	dynamicGateways map[ktypes.NamespacedName]*gatewayInfo
+}
+
 func NewExternalController(
 	client kubernetes.Interface,
-	kube kube.Interface,
+	kube kube.InterfaceOVN,
 	stopCh <-chan struct{},
 	externalRouteInformer adminpolicybasedrouteinformer.AdminPolicyBasedExternalRouteInformer,
 	podInformer coreinformers.PodInformer,
@@ -170,7 +173,6 @@ func NewExternalController(
 			"apbexternalroutenamespaces",
 		),
 		nodeLister:        nodeLister,
-		policyCache:       make(map[string]*sync.Mutex),
 		nbClient:          nbClient,
 		addressSetFactory: addressSetFactory,
 	}
@@ -356,13 +358,6 @@ func (c *ExternalController) onRouteDelete(obj interface{}) {
 
 func (c *ExternalController) processAddRoute(routePolicy *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) error {
 	// it's a new policy
-	if _, exists := c.policyCache[routePolicy.Name]; exists {
-		return fmt.Errorf("admin policy based external route %s already exists when it is being added", routePolicy.Name)
-	}
-	c.policyCache[routePolicy.Name] = &sync.Mutex{}
-	c.policyCache[routePolicy.Name].Lock()
-	defer c.policyCache[routePolicy.Name].Unlock()
-
 	var errors []error
 	for _, policy := range routePolicy.Spec.Policies {
 		err := c.applyPolicy(policy)
@@ -390,9 +385,9 @@ func (c *ExternalController) applyPolicy(policy *adminpolicybasedrouteapi.Extern
 	return kerrors.NewAggregate(errors)
 }
 
-func (c *ExternalController) processRoutePolicies(routePolicies []*routePolicy) (sets.String, error) {
+func (c *ExternalController) processRoutePolicies(routePolicies []*routePolicy) (map[string]*gatewayInfo, error) {
 
-	nsSet := sets.NewString()
+	nsGwInfo := map[string]*gatewayInfo{}
 	for _, pp := range routePolicies {
 		targetNs, err := c.namespaceLister.List(*pp.labelSelector)
 		if err != nil {
@@ -403,12 +398,12 @@ func (c *ExternalController) processRoutePolicies(routePolicies []*routePolicy) 
 				c.addGWRoutesForNamespace(ns.Name, gatewayInfoList{info})
 			}
 			for pod, info := range pp.dynamicGateways {
-				c.addPodExternalGWForNamespace(ns.Name, pod, info)
+				c.addPodExternalGWForNamespace(ns.Name, pod.Name, info)
+				nsGwInfo[ns.Name] = info
 			}
-			nsSet.Insert(ns.Name)
 		}
 	}
-	return nsSet, nil
+	return nsGwInfo, nil
 }
 
 func (c *ExternalController) GetNamespacesBySelector(selector *metav1.LabelSelector) ([]*v1.Namespace, error) {
@@ -423,8 +418,6 @@ func (c *ExternalController) GetNamespacesBySelector(selector *metav1.LabelSelec
 func (c *ExternalController) processUpdateRoute(old, new *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) error {
 	klog.Infof("Processing update for Admin Policy Based External Route resource %s", new.Name)
 	var errors []error
-	c.policyCache[new.Name].Lock()
-	defer c.policyCache[new.Name].Unlock()
 
 	//To update the policies, first we'll process the diff between old and new and remove the old policies that are not found in the new object.
 	//Afterwards, we'll process the diff between the new and the old and apply the diff policies, ensuring that we are no reduplicating the gatewayInfo.
@@ -459,6 +452,9 @@ func (c *ExternalController) processUpdateRoute(old, new *adminpolicybasedroutea
 		// something changed, we need to identify which of the policy fields has changed.
 		if !containsFrom(old.Spec.Policies, &p.From) {
 			err = c.applyPolicy(p)
+			if err != nil {
+				errors = append(errors, err)
+			}
 			// We have applied the new policy, no need to continue evaluating this policy
 			continue
 		}
@@ -493,6 +489,7 @@ func (c *ExternalController) parseStaticGatewayIPs(hops []*adminpolicybasedroute
 }
 
 func (c *ExternalController) addStaticHops(hops []*adminpolicybasedrouteapi.StaticHop, targetNamespaces []*v1.Namespace) error {
+
 	gwList, err := c.parseStaticGatewayIPs(hops)
 	if err != nil {
 		return err
@@ -514,9 +511,14 @@ func (c *ExternalController) addDynamicHops(hops []*adminpolicybasedrouteapi.Dyn
 	}
 	// update each of the target's namespace's routing information
 	for _, ns := range targetNamespaces {
-		for pod, gwInfo := range podsInfo {
-			c.addPodExternalGWForNamespace(ns.Name, pod, gwInfo)
+
+		for podNamespaceName, gwInfo := range podsInfo {
+			err := c.addPodExternalGWForNamespace(ns.Name, podNamespaceName.Name, gwInfo)
+			if err != nil {
+				return err
+			}
 		}
+
 	}
 	return nil
 }
@@ -571,15 +573,7 @@ func getDiffDynamicHops(oldHops []*adminpolicybasedrouteapi.DynamicHop, newHops 
 }
 
 func (c *ExternalController) processDeleteRoute(policy *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) error {
-	mux, exists := c.policyCache[policy.Name]
-	if !exists {
-		return fmt.Errorf("admin policy based external route %s does not exist for deletion", policy.Name)
-	}
-	mux.Lock()
-	defer func() {
-		delete(c.policyCache, policy.Name)
-		mux.Unlock()
-	}()
+
 	var errors []error
 	for _, p := range policy.Spec.Policies {
 		err := c.deletePolicy(p)
@@ -614,9 +608,11 @@ func (c *ExternalController) deleteStaticHops(hops []*adminpolicybasedrouteapi.S
 	}
 	// update each of the target's namespace's routing information
 	for _, ns := range targetNamespaces {
-		err = c.deleteGWRoutesForNamespace(ns.Name, gwList)
-		if err != nil {
-			return err
+		for _, gw := range gwList {
+			err = c.deleteGWRoutesForNamespace(ns.Name, gw.gws)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -629,8 +625,11 @@ func (c *ExternalController) deleteDynamicHops(hops []*adminpolicybasedrouteapi.
 	}
 	// update each of the target's namespace's routing information
 	for _, ns := range targetNamespaces {
-		for pod, gwInfo := range podsInfo {
-			c.deletePodExternalGWForNamespace(ns.Name, pod, gwInfo)
+		for _, gwInfo := range podsInfo {
+			err = c.deleteGWRoutesForNamespace(ns.Name, gwInfo.gws)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -639,7 +638,7 @@ func (c *ExternalController) deleteDynamicHops(hops []*adminpolicybasedrouteapi.
 type routePolicy struct {
 	labelSelector   *labels.Selector
 	staticGateways  gatewayInfoList
-	dynamicGateways map[string]*gatewayInfo
+	dynamicGateways map[ktypes.NamespacedName]*gatewayInfo
 }
 
 func (c *ExternalController) processPolicies(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) ([]*routePolicy, error) {
@@ -657,14 +656,14 @@ func (c *ExternalController) processPolicies(route *adminpolicybasedrouteapi.Adm
 		}
 		policies = append(policies, pp)
 	}
-	return policies, nil
+	return policies, kerrors.NewAggregate(errors)
 }
 
 func (c *ExternalController) processPolicy(policy *adminpolicybasedrouteapi.ExternalPolicy) (*routePolicy, error) {
 	var (
 		errors        []error
 		staticGWInfo  gatewayInfoList
-		dynamicGWInfo map[string]*gatewayInfo
+		dynamicGWInfo map[ktypes.NamespacedName]*gatewayInfo
 	)
 	l, err := metav1.LabelSelectorAsSelector(&policy.From.NamespaceSelector)
 	if err != nil {
@@ -710,12 +709,12 @@ func (c *ExternalController) listPodsInNamespaceWithSelector(namespace string, s
 	return c.podLister.Pods(namespace).List(s)
 }
 
-func (c *ExternalController) getDynamicRoutePods(hops []*adminpolicybasedrouteapi.DynamicHop) (map[string]*gatewayInfo, error) {
+func (c *ExternalController) getDynamicRoutePods(hops []*adminpolicybasedrouteapi.DynamicHop) (map[ktypes.NamespacedName]*gatewayInfo, error) {
 	allNamespaces, err := c.namespaceLister.List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
-	podsInfo := map[string]*gatewayInfo{}
+	podsInfo := map[ktypes.NamespacedName]*gatewayInfo{}
 	for _, h := range hops {
 		podNS := allNamespaces
 		if h.NamespaceSelector != nil {
@@ -743,10 +742,7 @@ func (c *ExternalController) getDynamicRoutePods(hops []*adminpolicybasedrouteap
 					klog.Warningf("No valid gateway IPs found for requested external gateway pod %s/%s", pod.Namespace, pod.Name)
 					continue
 				}
-				key, err := cache.MetaNamespaceKeyFunc(pod)
-				if err != nil {
-					return nil, err
-				}
+				key := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 				if _, ok := podsInfo[key]; ok {
 					klog.Warningf("Found overlapping dynamic hop policy for pod %s, discarding match entry", key)
 					continue
@@ -803,11 +799,6 @@ func getMultusIPsFromNetworkName(pod *v1.Pod, networkName string) (sets.String, 
 	return nil, fmt.Errorf("unable to find multus network %s in pod %s/%s", networkName, pod.Namespace, pod.Name)
 }
 
-func (c *ExternalController) deleteGateways(list gatewayInfoList) error {
-
-	return nil
-}
-
 // wrapper function to log if there are duplicate gateway IPs present in the cache
 func validateRoutingPodGWs(podGWs map[string]gatewayInfo) error {
 	// map to hold IP/podName
@@ -831,50 +822,36 @@ func (c *ExternalController) addPodExternalGWForNamespace(targetNamespace, podGW
 	if err != nil {
 		return err
 	}
-
-	klog.Infof("Adding routes for external gateway pod: %s, next hops: %q, namespace: %s, bfd-enabled: %t",
-		podGWName, strings.Join(egress.gws.UnsortedList(), ","), targetNamespace, egress.bfdEnabled)
-	// add the exgw podIP to the namespace's k8s.ovn.org/external-gw-pod-ips list
-	if err := util.UpdateExternalGatewayPodIPsAnnotation(c.kube, targetNamespace, existingGWs.List()); err != nil {
-		klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", util.ExternalGatewayPodIPsAnnotation, existingGWs, targetNamespace, err)
+	err = c.addGWRoutesForNamespace(targetNamespace, gatewayInfoList{egress})
+	if err != nil {
+		return err
 	}
-	return c.addGWRoutesForNamespace(targetNamespace, gatewayInfoList{egress})
+	return nil
 
 }
 
 func (c *ExternalController) validateRoutingPodGWs(namespace, podGWName string, egress *gatewayInfo) error {
-	for name := range c.namespacePoliciesCache[namespace] {
-		mutex, found := c.policyCache[name]
-		if !found {
-			return fmt.Errorf("unable to find policy %s in cache", name)
-		}
-		// lock the policy to ensure no one is about to modify it while being validated
-		mutex.Lock()
+	for name := range c.namespaceInfoCache[namespace].policies {
 		policy, err := c.routeLister.Get(name)
 		if err != nil {
-			mutex.Unlock()
 			return err
 		}
 		pp, err := c.processPolicies(policy)
 		if err != nil {
-			mutex.Unlock()
 			return err
 		}
 		for _, p := range pp {
 			for ip := range egress.gws {
 				if p.staticGateways.HasIP(ip) {
-					mutex.Unlock()
 					return fmt.Errorf("duplicate IP %s for pod %s/%s found in static gateway route policy %s", ip, namespace, podGWName, name)
 				}
 				for gwPodNamespacedName, info := range p.dynamicGateways {
 					if info.gws.Has(ip) {
-						mutex.Unlock()
 						return fmt.Errorf("duplicate IP %s for pod %s/%s found in pod gateway %s for route policy %s ", ip, namespace, podGWName, gwPodNamespacedName, name)
 					}
 				}
 			}
 		}
-		mutex.Unlock()
 	}
 	return nil
 }
@@ -895,7 +872,7 @@ func (c *ExternalController) addGWRoutesForNamespace(namespace string, egress ga
 }
 
 func (c *ExternalController) addGWRoutesForPodInNamespace(pod *v1.Pod, egress gatewayInfoList) error {
-	if util.PodCompleted(pod) || !util.PodWantsNetwork(pod) {
+	if util.PodCompleted(pod) || !util.PodWantsHostNetwork(pod) {
 		return nil
 	}
 	podIPs := make([]*net.IPNet, 0)
@@ -1165,7 +1142,7 @@ func (c *ExternalController) addHybridRoutePolicyForPod(podIP net.IP, node strin
 		if err != nil {
 			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, types.GWRouterToJoinSwitchPrefix, err)
 		}
-		grJoinIfAddr, err := util.MatchIPNetFamily(utilnet.IsIPv6(podIP), grJoinIfAddrs)
+		grJoinIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(podIP), grJoinIfAddrs)
 		if err != nil {
 			return fmt.Errorf("failed to match gateway router join interface IPs: %v, err: %v", grJoinIfAddr, err)
 		}
@@ -1204,4 +1181,194 @@ func (c *ExternalController) addHybridRoutePolicyForPod(podIP net.IP, node strin
 		}
 	}
 	return nil
+}
+
+// deletePodGWRoute deletes all associated gateway routing resources for one
+// pod gateway route
+func (c *ExternalController) deletePodGWRoute(routeInfo *externalRouteInfo, podIP, gw, gr string) error {
+	if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
+		return nil
+	}
+
+	mask := util.GetIPFullMask(podIP)
+	if err := c.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
+		return fmt.Errorf("unable to delete pod %s ECMP route to GR %s, GW: %s: %w",
+			routeInfo.podName, gr, gw, err)
+	}
+
+	klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s",
+		routeInfo.podName, gr, gw)
+
+	node := util.GetWorkerFromGatewayRouter(gr)
+	// The gw is deleted from the routes cache after this func is called, length 1
+	// means it is the last gw for the pod and the hybrid route policy should be deleted.
+	if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 1 {
+		if err := c.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+			return fmt.Errorf("unable to delete hybrid route policy for pod %s: err: %v", routeInfo.podName, err)
+		}
+	}
+
+	portPrefix, err := c.extSwitchPrefix(node)
+	if err != nil {
+		return err
+	}
+	return c.cleanUpBFDEntry(gw, gr, portPrefix)
+}
+
+func (c *ExternalController) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr string) error {
+	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.Policy != nil &&
+			*item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP &&
+			item.IPPrefix == podIP+mask &&
+			item.Nexthop == gw
+	}
+	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(c.nbClient, gr, p)
+	if err != nil {
+		return fmt.Errorf("error deleting static route from router %s: %v", gr, err)
+	}
+
+	return nil
+}
+
+// delHybridRoutePolicyForPod handles deleting a logical route policy that
+// forces pod egress traffic to be rerouted to a gateway router for local gateway mode.
+func (c *ExternalController) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		// Delete podIP from the node's address_set.
+		as, err := c.addressSetFactory.EnsureAddressSet(types.HybridRoutePolicyPrefix + node)
+		if err != nil {
+			return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
+		}
+		err = as.DeleteIPs([]net.IP{(podIP)})
+		if err != nil {
+			return fmt.Errorf("unable to remove PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
+		}
+
+		// delete hybrid policy to bypass lr-policy in GR, only if there are zero pods on this node.
+		ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
+		ipv4PodIPs, ipv6PodIPs := as.GetIPs()
+		deletePolicy := false
+		var l3Prefix string
+		var matchSrcAS string
+		if utilnet.IsIPv6(podIP) {
+			l3Prefix = "ip6"
+			if len(ipv6PodIPs) == 0 {
+				deletePolicy = true
+			}
+			matchSrcAS = ipv6HashedAS
+		} else {
+			l3Prefix = "ip4"
+			if len(ipv4PodIPs) == 0 {
+				deletePolicy = true
+			}
+			matchSrcAS = ipv4HashedAS
+		}
+		if deletePolicy {
+			var matchDst string
+			var clusterL3Prefix string
+			for _, clusterSubnet := range config.Default.ClusterSubnets {
+				if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+					clusterL3Prefix = "ip6"
+				} else {
+					clusterL3Prefix = "ip4"
+				}
+				if l3Prefix != clusterL3Prefix {
+					continue
+				}
+				matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
+			}
+			matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, node, l3Prefix, matchSrcAS)
+			matchStr += matchDst
+
+			p := func(item *nbdb.LogicalRouterPolicy) bool {
+				return item.Priority == types.HybridOverlayReroutePriority && item.Match == matchStr
+			}
+			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(c.nbClient, types.OVNClusterRouter, p)
+			if err != nil {
+				return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, types.OVNClusterRouter, err)
+			}
+		}
+		if len(ipv4PodIPs) == 0 && len(ipv6PodIPs) == 0 {
+			// delete address set.
+			err := as.Destroy()
+			if err != nil {
+				return fmt.Errorf("failed to remove address set: %s, on: %s, err: %v",
+					as.GetName(), node, err)
+			}
+		}
+	}
+	return nil
+}
+
+// cleanUpBFDEntry checks if the BFD table entry related to the associated
+// gw router / port / gateway ip is referenced by other routing rules, and if
+// not removes the entry to avoid having dangling BFD entries.
+func (c *ExternalController) cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) error {
+	portName := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
+	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.OutputPort != nil && *item.OutputPort == portName && item.Nexthop == gatewayIP && item.BFD != nil && *item.BFD != ""
+	}
+	logicalRouterStaticRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(c.nbClient, p)
+	if err != nil {
+		return fmt.Errorf("cleanUpBFDEntry failed to list routes for %s: %w", portName, err)
+	}
+
+	if len(logicalRouterStaticRoutes) > 0 {
+		return nil
+	}
+
+	bfd := nbdb.BFD{
+		LogicalPort: portName,
+		DstIP:       gatewayIP,
+	}
+
+	err = libovsdbops.DeleteBFDs(c.nbClient, &bfd)
+	if err != nil {
+		return fmt.Errorf("error deleting BFD %+v: %v", bfd, err)
+	}
+
+	return nil
+}
+
+// deleteGwRoutesForNamespace handles deleting routes to gateways for a pod on a specific GR.
+// If a set of gateways is given, only routes for that gateway are deleted. If no gateways
+// are given, all routes for the namespace are deleted.
+func (c *ExternalController) deleteGWRoutesForNamespace(namespace string, matchGWs sets.String) error {
+	deleteAll := (matchGWs == nil || matchGWs.Len() == 0)
+	for _, routeInfo := range c.getRouteInfosForNamespace(namespace) {
+		routeInfo.Lock()
+		if routeInfo.deleted {
+			routeInfo.Unlock()
+			continue
+		}
+		for podIP, routes := range routeInfo.podExternalRoutes {
+			for gw, gr := range routes {
+				if deleteAll || matchGWs.Has(gw) {
+					if err := c.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
+						// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
+						routeInfo.Unlock()
+						return fmt.Errorf("delete pod GW route failed: %w", err)
+					}
+					delete(routes, gw)
+				}
+			}
+		}
+		routeInfo.Unlock()
+	}
+	return nil
+}
+
+// getRouteInfosForNamespace returns all routeInfos for a specific namespace
+func (c *ExternalController) getRouteInfosForNamespace(namespace string) []*externalRouteInfo {
+	c.exGWCacheMutex.RLock()
+	defer c.exGWCacheMutex.RUnlock()
+
+	routes := make([]*externalRouteInfo, 0)
+	for namespacedName, routeInfo := range c.externalGWCache {
+		if namespacedName.Namespace == namespace {
+			routes = append(routes, routeInfo)
+		}
+	}
+
+	return routes
 }

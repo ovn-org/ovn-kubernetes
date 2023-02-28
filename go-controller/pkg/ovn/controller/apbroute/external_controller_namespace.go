@@ -1,13 +1,17 @@
 package apbroute
 
 import (
+	"fmt"
 	"reflect"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 )
 
 func (c *ExternalController) onNamespaceAdd(obj interface{}) {
@@ -83,39 +87,64 @@ func (c *ExternalController) processNextNamespaceWorkItem(wg *sync.WaitGroup) bo
 }
 
 func (c *ExternalController) processAddNamespace(new *v1.Namespace) error {
-	matches := sets.NewString()
-	matches, err := c.filterPoliciesByNamespace(new.Name)
+	matches, err := c.getPoliciesForTargetNamespace(new.Name)
 	if err != nil {
 		return err
 	}
-	// set of policies that apply to this namespace based on the label selector of the policies
-	c.namespacePoliciesCache[new.Name] = matches
-	return err
+	nsInfo := namespaceInfo{
+		policies:        matches,
+		dynamicGateways: make(map[ktypes.NamespacedName]*gatewayInfo),
+		staticGateways:  sets.NewString(),
+	}
+	// populate the cache with the policies that apply to this namespace as well as the static and dynamic gateway IPs
+	nsInfo.staticGateways, nsInfo.dynamicGateways, err = c.populateNamespaceInfo(new.Name, matches)
+	if err != nil {
+		return err
+	}
+	c.namespaceInfoCache[new.Name] = &nsInfo
+	return c.addGatewayAnnotation(new.Name, nsInfo.dynamicGateways)
 }
 
-func (c *ExternalController) filterPoliciesByNamespace(namespaceName string) (sets.String, error) {
-	var errors []error
-	matches := sets.NewString()
+func (c *ExternalController) populateNamespaceInfo(namespaceName string, policies sets.String) (sets.String, map[ktypes.NamespacedName]*gatewayInfo, error) {
 
-	policies, err := c.routeLister.List(labels.Everything())
-	if err != nil {
-		errors = append(errors, err)
-	}
-	for _, policy := range policies {
-		for _, p := range policy.Spec.Policies {
-			targetNamespaces, err := c.GetNamespacesBySelector(&p.From.NamespaceSelector)
-			if err != nil {
-				errors = append(errors, err)
+	static := sets.NewString()
+	dynamic := make(map[ktypes.NamespacedName]*gatewayInfo)
+	for policyName := range policies {
+		externalPolicy, err := c.routeLister.Get(policyName)
+		if err != nil {
+			return nil, nil, err
+		}
+		routePolicyList, err := c.processPolicies(externalPolicy)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, pp := range routePolicyList {
+			for _, gatewayInfo := range pp.staticGateways {
+				static.Insert(gatewayInfo.gws.UnsortedList()...)
 			}
-			for _, ns := range targetNamespaces {
-				if namespaceName == ns.Name {
-					// this policy's from namespace selector includes this namespace.
-					matches = matches.Insert(policy.Name)
-				}
+			for podName, gatewayInfo := range pp.dynamicGateways {
+				dynamic[podName] = gatewayInfo
 			}
 		}
 	}
-	return matches, kerrors.NewAggregate(errors)
+	return static, dynamic, nil
+}
+func (c *ExternalController) addGatewayAnnotation(namespaceName string, dynamicGateways map[ktypes.NamespacedName]*gatewayInfo) error {
+
+	egressIPs := sets.NewString()
+	for _, gwInfo := range dynamicGateways {
+		for ip := range gwInfo.gws {
+			if egressIPs.Has(ip) {
+				return fmt.Errorf("duplicated IP %s found while iterating through the list of pod gateways for namespace %s", ip, namespaceName)
+			}
+		}
+		egressIPs.Insert(gwInfo.gws.UnsortedList()...)
+	}
+	// add the exgw podIP to the namespace's k8s.ovn.org/external-gw-pod-ips list
+	if err := util.UpdateExternalGatewayPodIPsAnnotation(c.kube, namespaceName, egressIPs.List()); err != nil {
+		klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", util.ExternalGatewayPodIPsAnnotation, egressIPs, namespaceName, err)
+	}
+	return nil
 }
 
 func (c *ExternalController) processUpdateNamespace(old, new *v1.Namespace) error {
@@ -125,12 +154,12 @@ func (c *ExternalController) processUpdateNamespace(old, new *v1.Namespace) erro
 	if err != nil {
 		return err
 	}
-	if c.namespacePoliciesCache[new.Name].Equal(newPolicies) {
+	if c.namespaceInfoCache[new.Name].policies.Equal(newPolicies) {
 		// same policies apply
 		return nil
 	}
 	// some differences apply, let's figure out if previous policies have been removed first
-	oldPoliciesDiff := c.namespacePoliciesCache[new.Name].Difference(newPolicies)
+	oldPoliciesDiff := c.namespaceInfoCache[new.Name].policies.Difference(newPolicies)
 	// iterate through the policies that no longer apply to this namespace
 	for policyName := range oldPoliciesDiff {
 		err = c.removePolicyFromNamespace(new.Name, policyName)
@@ -138,7 +167,7 @@ func (c *ExternalController) processUpdateNamespace(old, new *v1.Namespace) erro
 			return err
 		}
 	}
-	newPoliciesDiff := newPolicies.Difference(c.namespacePoliciesCache[new.Name])
+	newPoliciesDiff := newPolicies.Difference(c.namespaceInfoCache[new.Name].policies)
 	for policyName := range newPoliciesDiff {
 		err = c.applyPolicyToNamespace(new.Name, policyName)
 		if err != nil {
@@ -147,11 +176,11 @@ func (c *ExternalController) processUpdateNamespace(old, new *v1.Namespace) erro
 	}
 	if len(newPolicies) == 0 {
 		// no policies apply to this namespace anymore, delete it from the cache
-		delete(c.namespacePoliciesCache, new.Name)
+		delete(c.namespaceInfoCache, new.Name)
 		return nil
 	}
 	// at least one policy apply, let's update the cache
-	c.namespacePoliciesCache[new.Name] = newPolicies
+	c.namespaceInfoCache[new.Name].policies = newPolicies
 	return nil
 
 }
@@ -223,6 +252,6 @@ func (c *ExternalController) removePolicyFromNamespace(targetNamespace, policyNa
 }
 
 func (c *ExternalController) processDeleteNamespace(ns *v1.Namespace) error {
-	delete(c.namespacePoliciesCache, ns.Name)
+	delete(c.namespaceInfoCache, ns.Name)
 	return nil
 }
