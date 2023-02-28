@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"regexp"
@@ -1048,4 +1049,14 @@ func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
 	args = []string{"exec", ovnKubePodName, "-c", "ovnkube-node", "--", "iptables", "--" + op}
 	framework.Logf("%s iptables input rule for protocol %s port %s action DROP on node %s", op, protocol, port, nodeName)
 	framework.RunKubectlOrDie(ovnNamespace, append(args, ipTablesArgs...)...)
+}
+
+func randStr(n int) string {
+	rand.Seed(time.Now().UnixNano())
+	b := make([]byte, n)
+	for i := range b {
+		// randomly select 1 character from given charset
+		b[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(b)
 }

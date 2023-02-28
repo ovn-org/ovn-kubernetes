@@ -99,6 +99,9 @@ type egressIPPod struct{}
 type egressIPNamespace struct{}
 type egressNode struct{}
 
+// types for handlers related to egress Firewall
+type egressFwNode struct{}
+
 // types for handlers in use by ovn-k node
 type namespaceExGw struct{}
 type endpointSliceForStaleConntrackRemoval struct{}
@@ -119,6 +122,7 @@ var (
 	EgressIPNamespaceType                 reflect.Type = reflect.TypeOf(&egressIPNamespace{})
 	EgressIPPodType                       reflect.Type = reflect.TypeOf(&egressIPPod{})
 	EgressNodeType                        reflect.Type = reflect.TypeOf(&egressNode{})
+	EgressFwNodeType                      reflect.Type = reflect.TypeOf(&egressFwNode{})
 	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
 	EgressQoSType                         reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
 	PeerNamespaceAndPodSelectorType       reflect.Type = reflect.TypeOf(&peerNamespaceAndPodSelector{})
@@ -431,7 +435,7 @@ type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.
 // This is relevant only for handlers that are sharing the same resources:
 // Pods: shared by PodType (0), EgressIPPodType (1), PeerPodSelectorType (2), PeerPodForNamespaceAndPodSelectorType (3), LocalPodSelectorType (4)
 // Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1), PeerNamespaceSelectorType (3), PeerNamespaceAndPodSelectorType (4)
-// Nodes: shared by NodeType (0), EgressNodeType (1)
+// Nodes: shared by NodeType (0), EgressNodeType (1), EgressFwNodeType (1)
 // By default handlers get the defaultHandlerPriority which is 0 (highest priority). Higher the number, lower the priority to get an event.
 // Example: EgressIPPodType will always get the pod event after PodType and PeerPodSelectorType will always get the event after PodType and EgressIPPodType
 // NOTE: If you are touching this function to add a new object type that uses shared objects, please make sure to update `minHandlerPriority` if needed
@@ -453,6 +457,8 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 		return 3
 	case EgressNodeType:
 		return 1
+	case EgressFwNodeType:
+		return 1
 	default:
 		return defaultHandlerPriority
 	}
@@ -473,7 +479,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddPolicyHandler(funcs, processExisting)
 		}, nil
 
-	case NodeType, EgressNodeType:
+	case NodeType, EgressNodeType, EgressFwNodeType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNodeHandler(funcs, processExisting, priority)
@@ -753,6 +759,15 @@ func (wf *WatchFactory) ListNodes(selector labels.Selector) ([]*kapi.Node, error
 func (wf *WatchFactory) GetNode(name string) (*kapi.Node, error) {
 	nodeLister := wf.informers[NodeType].lister.(listers.NodeLister)
 	return nodeLister.Get(name)
+}
+
+// GetNodesBySelector returns all the nodes selected by the label selector
+func (wf *WatchFactory) GetNodesBySelector(labelSelector metav1.LabelSelector) ([]*kapi.Node, error) {
+	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
+	if err != nil {
+		return nil, err
+	}
+	return wf.ListNodes(selector)
 }
 
 // GetService returns the service spec of a service in a given namespace

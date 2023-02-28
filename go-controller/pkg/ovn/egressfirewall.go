@@ -13,8 +13,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -48,6 +52,8 @@ type destination struct {
 	// Based on this flag we can omit clusterSubnet exclusion from the related ACL.
 	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
 	clusterSubnetIntersection bool
+	nodeAddrs                 sets.String
+	nodeSelector              metav1.LabelSelector
 }
 
 // cloneEgressFirewall shallow copies the egressfirewallapi.EgressFirewall object provided.
@@ -64,7 +70,7 @@ func cloneEgressFirewall(originalEgressfirewall *egressfirewallapi.EgressFirewal
 
 // newEgressFirewallRule creates a new egressFirewallRule. For the logging level, it will pick either of
 // aclLoggingAllow or aclLoggingDeny depending if this is an allow or deny rule.
-func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewallRule, id int) (*egressFirewallRule, error) {
+func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewallRule, id int) (*egressFirewallRule, error) {
 	efr := &egressFirewallRule{
 		id:     id,
 		access: rawEgressFirewallRule.Type,
@@ -72,8 +78,7 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 
 	if rawEgressFirewallRule.To.DNSName != "" {
 		efr.to.dnsName = rawEgressFirewallRule.To.DNSName
-	} else {
-
+	} else if len(rawEgressFirewallRule.To.CIDRSelector) > 0 {
 		_, ipNet, err := net.ParseCIDR(rawEgressFirewallRule.To.CIDRSelector)
 		if err != nil {
 			return nil, err
@@ -87,6 +92,25 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 			}
 		}
 		efr.to.clusterSubnetIntersection = intersect
+	} else {
+		efr.to.nodeSelector = rawEgressFirewallRule.To.NodeSelector
+		efr.to.nodeAddrs = sets.NewString()
+		// validate node selector
+		_, err := metav1.LabelSelectorAsSelector(&rawEgressFirewallRule.To.NodeSelector)
+		if err != nil {
+			return nil, fmt.Errorf("rule destination has invalid node selector, err: %v", err)
+		}
+		nodes, err := oc.watchFactory.GetNodesBySelector(rawEgressFirewallRule.To.NodeSelector)
+		if err != nil {
+			return efr, fmt.Errorf("unable to query nodes for egress firewall: %w", err)
+		}
+		for _, node := range nodes {
+			for _, addr := range node.Status.Addresses {
+				if addr.Type == kapi.NodeInternalIP {
+					efr.to.nodeAddrs.Insert(addr.Address)
+				}
+			}
+		}
 	}
 	efr.ports = rawEgressFirewallRule.Ports
 
@@ -216,7 +240,7 @@ func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfire
 				egressFirewall.Namespace)
 			break
 		}
-		efr, err := newEgressFirewallRule(egressFirewallRule, i)
+		efr, err := oc.newEgressFirewallRule(egressFirewallRule, i)
 		if err != nil {
 			addErrors = errors.Wrapf(addErrors, "error: cannot create EgressFirewall Rule to destination %s for namespace %s - %v",
 				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err)
@@ -294,8 +318,22 @@ func (oc *DefaultNetworkController) updateEgressFirewallStatusWithRetry(egressfi
 	return nil
 }
 
-func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string, efStartPriority int, aclLogging *ACLLoggingLevels) error {
+func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, hashedAddressSetNameIPv4,
+	hashedAddressSetNameIPv6 string, efStartPriority int, aclLogging *ACLLoggingLevels, ruleIDs ...int) error {
 	for _, rule := range ef.egressRules {
+		// check if only specific rule ids are requested to be added
+		if len(ruleIDs) > 0 {
+			found := false
+			for _, providedID := range ruleIDs {
+				if rule.id == providedID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
 		var action string
 		var matchTargets []matchTarget
 		if rule.access == egressfirewallapi.EgressFirewallRuleAllow {
@@ -303,13 +341,21 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 		} else {
 			action = nbdb.ACLActionDrop
 		}
-		if rule.to.cidrSelector != "" {
+		if len(rule.to.nodeAddrs) > 0 {
+			for addr := range rule.to.nodeAddrs {
+				if utilnet.IsIPv6CIDRString(addr) {
+					matchTargets = append(matchTargets, matchTarget{matchKindV6CIDR, addr, false})
+				} else {
+					matchTargets = append(matchTargets, matchTarget{matchKindV4CIDR, addr, false})
+				}
+			}
+		} else if rule.to.cidrSelector != "" {
 			if utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
 				matchTargets = []matchTarget{{matchKindV6CIDR, rule.to.cidrSelector, rule.to.clusterSubnetIntersection}}
 			} else {
 				matchTargets = []matchTarget{{matchKindV4CIDR, rule.to.cidrSelector, rule.to.clusterSubnetIntersection}}
 			}
-		} else {
+		} else if len(rule.to.dnsName) > 0 {
 			// rule based on DNS NAME
 			dnsNameAddressSets, err := oc.egressFirewallDNS.Add(ef.namespace, rule.to.dnsName)
 			if err != nil {
@@ -323,6 +369,16 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 				matchTargets = append(matchTargets, matchTarget{matchKindV6AddressSet, dnsNameIPv6ASHashName, rule.to.clusterSubnetIntersection})
 			}
 		}
+
+		if len(matchTargets) == 0 {
+			klog.Warningf("Egress Firewall rule: %#v has no destination...ignoring", *rule)
+			// ensure the ACL is removed from OVN
+			if err := oc.deleteEgressFirewallRule(buildEgressFwAclName(ef.namespace, efStartPriority-rule.id)); err != nil {
+				return err
+			}
+			continue
+		}
+
 		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
 		err := oc.createEgressFirewallRules(efStartPriority-rule.id, match, action, ef.namespace, aclLogging)
 		if err != nil {
@@ -367,6 +423,31 @@ func (oc *DefaultNetworkController) createEgressFirewallRules(priority int, matc
 	}
 
 	return nil
+}
+
+func (oc *DefaultNetworkController) deleteEgressFirewallRule(name string) error {
+	// Find ACLs for a given egressFirewall
+	pACL := func(item *nbdb.ACL) bool {
+		if item.Name != nil {
+			return *item.Name == name
+		}
+		return false
+	}
+	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, pACL)
+	if err != nil {
+		return fmt.Errorf("unable to list egress firewall ACLs, cannot cleanup old stale data, err: %v", err)
+	}
+
+	if len(egressFirewallACLs) == 0 {
+		return nil
+	}
+
+	if len(egressFirewallACLs) > 1 {
+		klog.Errorf("Duplicate ACL found for egress firewall: %s", name)
+	}
+
+	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{types.ClusterPortGroupName}, egressFirewallACLs...)
+	return err
 }
 
 // deleteEgressFirewallRules delete egress firewall Acls
@@ -618,4 +699,77 @@ func (oc *DefaultNetworkController) updateACLLoggingForEgressFirewall(egressFire
 
 func buildEgressFwAclName(namespace string, priority int) string {
 	return fmt.Sprintf("egressFirewall_%s_%d", namespace, priority)
+}
+
+func getNodeInternalAddrsToString(node *kapi.Node) []string {
+	v4, v6 := util.GetNodeInternalAddrs(node)
+	var addrs []string
+	for _, addr := range []net.IP{v4, v6} {
+		if addr != nil {
+			addrs = append(addrs, addr.String())
+		}
+	}
+
+	return addrs
+}
+
+func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode *kapi.Node) error {
+
+	var addressesToAdd []string
+	var addressesToRemove []string
+
+	if oldNode != nil {
+		addressesToRemove = getNodeInternalAddrsToString(oldNode)
+	}
+
+	if newNode != nil {
+		addressesToAdd = getNodeInternalAddrsToString(newNode)
+	}
+
+	// cycle through egress firewalls and check if any match this node's labels
+	var efErr error
+	oc.egressFirewalls.Range(func(k, v interface{}) bool {
+		ef := v.(*egressFirewall)
+		namespace := k.(string)
+		ef.Lock()
+		defer ef.Unlock()
+		var modifiedRuleIDs []int
+		for _, rule := range ef.egressRules {
+			// nodeSelector will always have a value, but it is mutually exclusive from cidrSelector and dnsName
+			if len(rule.to.cidrSelector) != 0 || len(rule.to.dnsName) != 0 {
+				continue
+			}
+			selector, err := metav1.LabelSelectorAsSelector(&rule.to.nodeSelector)
+			if err != nil {
+				klog.Errorf("Error while parsing label selector %#v for egress firewall in namespace %s",
+					rule.to.nodeSelector, namespace)
+				continue
+			}
+			// no need to check selector on old node here, ips are unique and regardless of if selector
+			// matches or not we shouldn't have those addresses anymore
+			rule.to.nodeAddrs.Delete(addressesToRemove...)
+			// check if selector matches
+			if selector.Matches(labels.Set(newNode.Labels)) {
+				rule.to.nodeAddrs.Insert(addressesToAdd...)
+			}
+			modifiedRuleIDs = append(modifiedRuleIDs, rule.id)
+		}
+		// update egress firewall rules
+		asIndex := getNamespaceAddrSetDbIDs(ef.namespace, oc.controllerName)
+		as, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
+		if err != nil {
+			efErr = fmt.Errorf("cannot ensure addressSet for namespace %s: %v", ef.namespace, err)
+			return false
+		}
+		ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
+		aclLoggingLevels := oc.GetNamespaceACLLogging(ef.namespace)
+		if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority,
+			aclLoggingLevels, modifiedRuleIDs...); err != nil {
+			efErr = fmt.Errorf("failed to add egress firewall for namespace: %s, error: %w", namespace, err)
+			return false
+		}
+		return true
+	})
+
+	return efErr
 }

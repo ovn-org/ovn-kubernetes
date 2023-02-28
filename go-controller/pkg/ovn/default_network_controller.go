@@ -124,6 +124,8 @@ type DefaultNetworkController struct {
 	retryEgressIPPods *retry.RetryFramework
 	// retry framework for Egress nodes
 	retryEgressNodes *retry.RetryFramework
+	// retry framework for Egress Firewall Nodes
+	retryEgressFwNodes *retry.RetryFramework
 	// EgressIP Node-specific syncMap used by egressip node event handler
 	addEgressNodeFailed sync.Map
 
@@ -224,6 +226,7 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 	oc.retryEgressIPNamespaces = oc.newRetryFrameworkWithParameters(factory.EgressIPNamespaceType, nil, nil)
 	oc.retryEgressIPPods = oc.newRetryFrameworkWithParameters(factory.EgressIPPodType, nil, nil)
 	oc.retryEgressNodes = oc.newRetryFrameworkWithParameters(factory.EgressNodeType, nil, nil)
+	oc.retryEgressFwNodes = oc.newRetryFrameworkWithParameters(factory.EgressFwNodeType, nil, nil)
 	oc.retryCloudPrivateIPConfig = oc.newRetryFrameworkWithParameters(factory.CloudPrivateIPConfigType, nil, nil)
 	oc.retryNamespaces = oc.newRetryFrameworkWithParameters(factory.NamespaceType, nil, nil)
 }
@@ -444,6 +447,10 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}
 		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 		err = oc.WatchEgressFirewall()
+		if err != nil {
+			return err
+		}
+		err = oc.WatchEgressFwNodes()
 		if err != nil {
 			return err
 		}
@@ -735,6 +742,14 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			}
 		}
 
+	case factory.EgressFwNodeType:
+		node := obj.(*kapi.Node)
+		if err = h.oc.updateEgressFirewallForNode(nil, node); err != nil {
+			klog.Infof("Node add failed during egress firewall eval for node: %s, will try again later: %v",
+				node.Name, err)
+			return err
+		}
+
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return h.oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
@@ -894,6 +909,11 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		}
 		return nil
 
+	case factory.EgressFwNodeType:
+		oldNode := oldObj.(*kapi.Node)
+		newNode := newObj.(*kapi.Node)
+		return h.oc.updateEgressFirewallForNode(oldNode, newNode)
+
 	case factory.CloudPrivateIPConfigType:
 		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
@@ -992,6 +1012,13 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		}
 		return nil
 
+	case factory.EgressFwNodeType:
+		node, ok := obj.(*kapi.Node)
+		if !ok {
+			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
+		}
+		return h.oc.updateEgressFirewallForNode(node, nil)
+
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return h.oc.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
@@ -1037,6 +1064,9 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 
 		case factory.EgressNodeType:
 			syncFunc = h.oc.initClusterEgressPolicies
+
+		case factory.EgressFwNodeType:
+			syncFunc = nil
 
 		case factory.EgressIPPodType,
 			factory.EgressIPType,

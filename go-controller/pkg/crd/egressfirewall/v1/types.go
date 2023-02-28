@@ -67,11 +67,15 @@ type EgressFirewallPort struct {
 
 // EgressFirewallDestination is the endpoint that traffic is either allowed or denied to
 type EgressFirewallDestination struct {
-	// cidrSelector is the CIDR range to allow/deny traffic to. If this is set, dnsName must be unset.
+	// cidrSelector is the CIDR range to allow/deny traffic to. If this is set, dnsName and nodeSelector must be unset.
 	CIDRSelector string `json:"cidrSelector,omitempty"`
-	// dnsName is the domain name to allow/deny traffic to. If this is set, cidrSelector must be unset.
+	// dnsName is the domain name to allow/deny traffic to. If this is set, cidrSelector and nodeSelector must be unset.
 	// +kubebuilder:validation:Pattern=^([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$
 	DNSName string `json:"dnsName,omitempty"`
+	// nodeSelector will allow/deny traffic to the Kubernetes node IP of selected nodes. If this is, set
+	// cidrSelector and DNSName must be unset.
+	// +optional
+	NodeSelector metav1.LabelSelector `json:"nodeSelector,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
