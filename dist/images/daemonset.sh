@@ -92,6 +92,9 @@ while [ "$1" != "" ]; do
   --image)
     OVN_IMAGE=$VALUE
     ;;
+  --ovnkube-image)
+    OVNKUBE_IMAGE=$VALUE
+    ;;
   --image-pull-policy)
     OVN_IMAGE_PULL_POLICY=$VALUE
     ;;
@@ -291,6 +294,9 @@ echo "output_dir: $output_dir"
 image=${OVN_IMAGE:-"docker.io/ovnkube/ovn-daemonset:latest"}
 echo "image: ${image}"
 
+ovnkube_image=${OVNKUBE_IMAGE:-${image}}
+echo "ovnkube_image: ${ovnkube_image}"
+
 image_pull_policy=${OVN_IMAGE_PULL_POLICY:-"IfNotPresent"}
 echo "imagePullPolicy: ${image_pull_policy}"
 
@@ -406,7 +412,7 @@ echo "ovnkube_node_mgmt_port_netdev: ${ovnkube_node_mgmt_port_netdev}"
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
 echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
 
-ovn_image=${image} \
+ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -478,7 +484,7 @@ ovn_image=${image} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu-host.yaml
 
-ovn_image=${image} \
+ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \

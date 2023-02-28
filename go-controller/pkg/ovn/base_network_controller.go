@@ -110,6 +110,8 @@ type BaseNetworkController struct {
 	wg *sync.WaitGroup
 }
 
+const arpProxyAddress = "169.254.1.1"
+
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
 // configuration for secondary network controller
 type BaseSecondaryNetworkController struct {
@@ -245,7 +247,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 	}
 
 	err = libovsdbops.CreateOrUpdateLogicalRouterPort(bnc.nbClient, &logicalRouter, &logicalRouterPort,
-		&gatewayChassis, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
+		&gatewayChassis, &logicalRouterPort.MAC, &logicalRouterPort.Networks, &logicalRouterPort.Options)
 	if err != nil {
 		klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
 		return err
@@ -330,12 +332,17 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		return fmt.Errorf("failed to add logical switch %+v: %v", logicalSwitch, err)
 	}
 
+	arpProxyMAC := util.IPAddrToHWAddr(net.ParseIP(arpProxyAddress))
+
 	// Connect the switch to the router.
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
 		Name:      types.SwitchToRouterPrefix + switchName,
 		Type:      "router",
 		Addresses: []string{"router"},
-		Options:   map[string]string{"router-port": types.RouterToSwitchPrefix + switchName},
+		Options: map[string]string{
+			"router-port": types.RouterToSwitchPrefix + switchName,
+			"arp_proxy":   fmt.Sprintf("%s %s", arpProxyMAC, arpProxyAddress),
+		},
 	}
 	sw := nbdb.LogicalSwitch{Name: switchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)

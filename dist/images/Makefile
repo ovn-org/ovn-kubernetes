@@ -18,6 +18,7 @@ ifeq ($(ARCH),arm64)
         DOCKERFILE_ARCH=.arm64
 endif
 OVS_BRANCH ?= master
+OVN_REPO ?= https://github.com/ovn-org/ovn
 OVN_BRANCH ?= main
 OCI_BIN ?= docker
 
@@ -42,6 +43,7 @@ fedora: bld
 fedora-dev: bld
 	${OCI_BIN} build \
 		     --build-arg OVS_BRANCH=$(OVS_BRANCH) \
+		     --build-arg OVN_REPO=$(OVN_REPO) \
 		     --build-arg OVN_BRANCH=$(OVN_BRANCH) \
 		     -t ovn-kube-f-dev -f Dockerfile.fedora.dev .
 	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube

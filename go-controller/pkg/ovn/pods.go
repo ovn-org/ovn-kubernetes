@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -107,6 +108,22 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 	pInfo, err := oc.deletePodLogicalPort(pod, portInfo, ovntypes.DefaultNetworkName)
 	if err != nil {
 		return err
+	}
+
+	if kubevirt.AllowPodBridgeNetworkLiveMigration(pod) {
+		isLiveMigrationLefover, err := kubevirt.PodIsLiveMigrationLeftOver(oc.client, pod)
+		if err != nil {
+			return err
+		}
+
+		if !isLiveMigrationLefover {
+			if err := oc.deleteDHCPOptions(pod); err != nil {
+				return err
+			}
+			if err := oc.deletePodEnrouting(pod); err != nil {
+				return err
+			}
+		}
 	}
 
 	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
@@ -253,6 +270,11 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	if oc.multicastSupport && isNamespaceMulticastEnabled(ns.Annotations) {
 		if err := podAddAllowMulticastPolicy(oc.nbClient, pod.Namespace, portInfo); err != nil {
+			return err
+		}
+	}
+	if kubevirt.AllowPodBridgeNetworkLiveMigration(pod) {
+		if err := oc.addDHCPOptions(pod, lsp); err != nil {
 			return err
 		}
 	}

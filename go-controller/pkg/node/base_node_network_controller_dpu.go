@@ -165,7 +165,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *kapi.Pod, vfRepName strin
 		return fmt.Errorf("failed to get dpu annotation. %v", err)
 	}
 
-	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, getter)
+	err = cni.ConfigureOVS(context.TODO(), pod, vfRepName, ifInfo, dpuCD.SandboxId, getter)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = bnnc.delRepPort(vfRepName)

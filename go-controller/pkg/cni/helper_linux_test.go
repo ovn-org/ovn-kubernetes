@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
+	kapi "k8s.io/api/core/v1"
 )
 
 func TestRenameLink(t *testing.T) {
@@ -323,7 +324,7 @@ func TestSetupNetwork(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.linkMockHelper)
 			ovntest.ProcessMockFnList(&mockCNIPlugin.Mock, tc.cniPluginMockHelper)
 
-			err := setupNetwork(tc.inpLink, tc.inpPodIfaceInfo)
+			err := setupNetwork(tc.inpLink, tc.inpPodIfaceInfo, &kapi.Pod{})
 			t.Log(err)
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
@@ -402,7 +403,7 @@ func TestSetupInterface(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockCNIPlugin.Mock, tc.cniPluginMockHelper)
 			ovntest.ProcessMockFnList(&mockNS.Mock, tc.nsMockHelper)
 
-			hostIface, contIface, err := setupInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo)
+			hostIface, contIface, err := setupInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, nil)
 			t.Log(hostIface, contIface, err)
 			if tc.errExp {
 				assert.NotNil(t, err)
@@ -1064,7 +1065,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.linkMockHelper)
 			netNsDoError = nil
 
-			hostIface, contIface, err := setupSriovInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, tc.inpPCIAddrs)
+			hostIface, contIface, err := setupSriovInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, tc.inpPCIAddrs, &kapi.Pod{})
 			t.Log(hostIface, contIface, err)
 			if err == nil {
 				err = netNsDoError

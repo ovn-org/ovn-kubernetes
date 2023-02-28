@@ -28,7 +28,9 @@ RUN INSTALL_PKGS=" \
     python3-openvswitch python3-pyOpenSSL \
     autoconf automake libtool g++ gcc fedora-packager rpmdevtools \
     unbound unbound-devel groff python3-sphinx graphviz openssl openssl-devel \
-    checkpolicy libcap-ng-devel selinux-policy-devel" && \
+    checkpolicy libcap-ng-devel selinux-policy-devel \
+    libbpf-devel libxdp-devel numactl-devel" && \
+
     dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
     dnf clean all && rm -rf /var/cache/dnf/*
 
@@ -50,8 +52,10 @@ RUN git log -n 1
 # Clone OVN Source Code.
 ARG OVN_REPO=https://github.com/ovn-org/ovn.git
 ARG OVN_BRANCH=main
+ARG OVN_COMMIT=HEAD
 WORKDIR /root
-RUN git clone $OVN_REPO --single-branch --branch=$OVN_BRANCH
+RUN git clone $OVN_REPO --single-branch --branch=$OVN_BRANCH && \
+    cd ovn && git reset --hard $OVN_COMMIT
 
 # Build OVN rpms.
 WORKDIR /root/ovn/

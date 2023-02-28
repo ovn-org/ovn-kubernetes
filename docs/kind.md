@@ -134,6 +134,7 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 -cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'.
 -ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled.
 -eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge.
+-lr  |--local-kind-registry         Will start and connect a kind local registry to push/retrieve images
 --delete                      	    Delete current cluster
 ```
 
