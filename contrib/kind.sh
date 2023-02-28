@@ -329,6 +329,8 @@ print_params() {
      echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
      echo "KIND_LOCAL_REGISTRY = $KIND_LOCAL_REGISTRY"
+     echo "KIND_LOCAL_REGISTRY_NAME = $KIND_LOCAL_REGISTRY_NAME"
+     echo "KIND_LOCAL_REGISTRY_PORT = $KIND_LOCAL_REGISTRY_PORT"
      echo "KIND_DNS_DOMAIN = $KIND_DNS_DOMAIN"
      echo "KIND_CONFIG_FILE = $KIND_CONFIG"
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
@@ -465,6 +467,8 @@ set_default_params() {
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
+  KIND_LOCAL_REGISTRY_NAME=${KIND_LOCAL_REGISTRY_NAME:-kind-registry}
+  KIND_LOCAL_REGISTRY_PORT=${KIND_LOCAL_REGISTRY_PORT:-5000}
   KIND_DNS_DOMAIN=${KIND_DNS_DOMAIN:-"cluster.local"}
   KIND_CONFIG=${KIND_CONFIG:-${DIR}/kind.yaml.j2}
   KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
@@ -593,28 +597,74 @@ set_cluster_cidr_ip_families() {
   fi
 }
 
+create_local_registry() {
+    # create registry container unless it already exists
+    if [ "$($OCI_BIN inspect -f '{{.State.Running}}' "${KIND_LOCAL_REGISTRY_NAME}" 2>/dev/null || true)" != 'true' ]; then
+      $OCI_BIN run \
+        -d --restart=always -p "127.0.0.1:${KIND_LOCAL_REGISTRY_PORT}:5000" --name "${$KIND_LOCAL_REGISTRY_NAME}" \
+        registry:2
+    fi
+}
+
+connect_local_registry() {
+    # connect the registry to the cluster network if not already connected
+    if [ "$($OCI_BIN inspect -f='{{json .NetworkSettings.Networks.kind}}' "${KIND_LOCAL_REGISTRY_NAME}")" = 'null' ]; then
+      $OCI_BIN network connect "kind" "${KIND_LOCAL_REGISTRY_NAME}"
+    fi
+
+    # Reference docs for local registry:
+    # - https://kind.sigs.k8s.io/docs/user/local-registry/
+    # - https://github.com/kubernetes/enhancements/tree/master/keps/sig-cluster-lifecycle/generic/1755-communicating-a-local-registry
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-registry-hosting
+  namespace: kube-public
+data:
+  localRegistryHosting.v1: |
+    host: "localhost:${KIND_LOCAL_REGISTRY_PORT}"
+    help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
+EOF
+
+}
+
 create_kind_cluster() {
   # Output of the j2 command
   KIND_CONFIG_LCL=${DIR}/kind-${KIND_CLUSTER_NAME}.yaml
 
-    ovn_ip_family=${IP_FAMILY} \
-    ovn_ha=${OVN_HA} \
-    net_cidr=${NET_CIDR} \
-    svc_cidr=${SVC_CIDR} \
-    use_local_registy=${KIND_LOCAL_REGISTRY} \
-    dns_domain=${KIND_DNS_DOMAIN} \
-    ovn_num_master=${KIND_NUM_MASTER} \
-    ovn_num_worker=${KIND_NUM_WORKER} \
-    cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
-    j2 "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
+  ovn_ip_family=${IP_FAMILY} \
+  ovn_ha=${OVN_HA} \
+  net_cidr=${NET_CIDR} \
+  svc_cidr=${SVC_CIDR} \
+  use_local_registy=${KIND_LOCAL_REGISTRY} \
+  dns_domain=${KIND_DNS_DOMAIN} \
+  ovn_num_master=${KIND_NUM_MASTER} \
+  ovn_num_worker=${KIND_NUM_WORKER} \
+  cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
+  kind_local_registry_port=${KIND_LOCAL_REGISTRY_PORT} \
+  kind_local_registry_name=${KIND_LOCAL_REGISTRY_NAME} \
+  j2 "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
 
   # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
   if kind get clusters | grep ovn; then
     delete
   fi
+  
+  if [[ "${KIND_LOCAL_REGISTRY}" == true ]]; then
+    create_local_registry
+  fi
+  
   kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image "${KIND_IMAGE}":"${K8S_VERSION}" --config=${KIND_CONFIG_LCL} --retain
+  
+  if [[ "${KIND_LOCAL_REGISTRY}" == true ]]; then
+    connect_local_registry
+  fi
+
   cat "${KUBECONFIG}"
 }
+
+
 
 docker_disable_ipv6() {
   # Docker disables IPv6 globally inside containers except in the eth0 interface.
@@ -672,7 +722,7 @@ build_ovn_image() {
       OVN_IMAGE="localhost/ovn-daemonset-f:dev"
     fi
 
-    # Build ovn docker image
+    # Build ovn image
     pushd ${DIR}/../go-controller
     make
     popd
@@ -686,18 +736,24 @@ build_ovn_image() {
 
     # store in local registry
     if [ "$KIND_LOCAL_REGISTRY" == true ];then
-      echo "Pushing built image to local docker registry"
-      docker push "${OVN_IMAGE}"
+      echo "Pushing built image to local $OCI_BIN registry"
+      $OCI_BIN push "${OVN_IMAGE}"
     fi
     popd
   fi
 }
 
 create_ovn_kube_manifests() {
+    local ovnkube_image=${OVN_IMAGE}
+    if [ "$KIND_LOCAL_REGISTRY" == true ];then
+      # When updating with local registry we have to reference the sha
+      ovnkube_image=$($OCI_BIN inspect --format='{{index .RepoDigests 0}}' $OVN_IMAGE)
+    fi
     pushd ${DIR}/../dist/images
   ./daemonset.sh \
     --output-directory="${MANIFEST_OUTPUT_DIR}"\
     --image="${OVN_IMAGE}" \
+    --ovnkube-image="${ovnkube_image}" \
     --net-cidr="${NET_CIDR}" \
     --svc-cidr="${SVC_CIDR}" \
     --gateway-mode="${OVN_GATEWAY_MODE}" \
@@ -783,8 +839,9 @@ install_ovn() {
 
   popd
 
-  # Force pod reload just the ones with golang containers
-  if [ "${KIND_CREATE}" == false ]; then
+  # When using internal registry force pod reload just the ones with 
+  # non OVS containers, restarting OVS pods breaks the cluster.
+  if [ "${KIND_CREATE}" == false ] && [ "${KIND_LOCAL_REGISTRY}" == false ] ; then
     for pod in ${OVN_DEPLOY_PODS}; do
         run_kubectl delete pod -n ovn-kubernetes -l name=$pod
     done
