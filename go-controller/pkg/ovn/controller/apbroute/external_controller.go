@@ -42,6 +42,10 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 )
 
+const (
+	controllerName = "ovn-external-route-controller"
+)
+
 type gatewayInfoList []*gatewayInfo
 
 func (g gatewayInfoList) Has(item *gatewayInfo) bool {
@@ -130,6 +134,7 @@ type ExternalController struct {
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
+	controllerName    string
 }
 
 type namespaceInfo struct {
@@ -1110,12 +1115,21 @@ func (c *ExternalController) createBFDStaticRoute(bfdEnabled bool, gw string, po
 	return nil
 }
 
+func getHybridRouteAddrSetDbIDs(nodeName, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetHybridNodeRoute, controller,
+		map[libovsdbops.ExternalIDKey]string{
+			// there is only 1 address set of this type per node
+			libovsdbops.ObjectNameKey: nodeName,
+		})
+}
+
 // addHybridRoutePolicyForPod handles adding a higher priority allow policy to allow traffic to be routed normally
 // by ecmp routes
 func (c *ExternalController) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Add podIP to the node's address_set.
-		as, err := c.addressSetFactory.EnsureAddressSet(types.HybridRoutePolicyPrefix + node)
+		asIndex := getHybridRouteAddrSetDbIDs(node, controllerName)
+		as, err := c.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot ensure that addressSet for node %s exists %v", node, err)
 		}
@@ -1235,7 +1249,8 @@ func (c *ExternalController) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr 
 func (c *ExternalController) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Delete podIP from the node's address_set.
-		as, err := c.addressSetFactory.EnsureAddressSet(types.HybridRoutePolicyPrefix + node)
+		asIndex := getHybridRouteAddrSetDbIDs(node, controllerName)
+		as, err := c.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
 		}
