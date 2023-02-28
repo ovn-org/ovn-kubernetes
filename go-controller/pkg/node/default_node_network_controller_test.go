@@ -30,7 +30,7 @@ var _ = Describe("Node", func() {
 			netlinkOpsMock  *utilMocks.NetLinkOps
 			netlinkLinkMock *netlink_mocks.Link
 
-			ovnNode *OvnNode
+			nc *DefaultNodeNetworkController
 		)
 
 		const (
@@ -57,9 +57,15 @@ var _ = Describe("Node", func() {
 				Return([]netlink.Addr{{LinkIndex: linkIndex, IPNet: ovntest.MustParseIPNet(linkIPNet)}}, nil)
 			netlinkOpsMock.On("LinkByIndex", 4).Return(netlinkLinkMock, nil)
 
-			ovnNode = &OvnNode{
-				name: nodeName,
-				Kube: kubeMock,
+			nc = &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name: nodeName,
+						Kube: kubeMock,
+					},
+					NetConfInfo: &util.DefaultNetConfInfo{},
+					NetInfo:     &util.DefaultNetInfo{},
+				},
 			}
 
 			config.Default.MTU = configDefaultMTU
@@ -86,7 +92,7 @@ var _ = Describe("Node", func() {
 						Name: linkName,
 					})
 
-					err := ovnNode.validateVTEPInterfaceMTU()
+					err := nc.validateVTEPInterfaceMTU()
 					Expect(err).To(HaveOccurred())
 				})
 			})
@@ -99,7 +105,7 @@ var _ = Describe("Node", func() {
 						Name: linkName,
 					})
 
-					err := ovnNode.validateVTEPInterfaceMTU()
+					err := nc.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
 				})
 			})
@@ -119,7 +125,7 @@ var _ = Describe("Node", func() {
 						Name: linkName,
 					})
 
-					err := ovnNode.validateVTEPInterfaceMTU()
+					err := nc.validateVTEPInterfaceMTU()
 					Expect(err).To(HaveOccurred())
 				})
 			})
@@ -132,7 +138,7 @@ var _ = Describe("Node", func() {
 						Name: linkName,
 					})
 
-					err := ovnNode.validateVTEPInterfaceMTU()
+					err := nc.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
 				})
 			})
@@ -152,7 +158,7 @@ var _ = Describe("Node", func() {
 						Name: linkName,
 					})
 
-					err := ovnNode.validateVTEPInterfaceMTU()
+					err := nc.validateVTEPInterfaceMTU()
 					Expect(err).To(HaveOccurred())
 				})
 			})
@@ -165,7 +171,7 @@ var _ = Describe("Node", func() {
 						Name: linkName,
 					})
 
-					err := ovnNode.validateVTEPInterfaceMTU()
+					err := nc.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
 				})
 			})
@@ -184,7 +190,7 @@ var _ = Describe("Node", func() {
 						Name: linkName,
 					})
 
-					err := ovnNode.validateVTEPInterfaceMTU()
+					err := nc.validateVTEPInterfaceMTU()
 					Expect(err).To(HaveOccurred())
 				})
 			})
@@ -197,7 +203,7 @@ var _ = Describe("Node", func() {
 						Name: linkName,
 					})
 
-					err := ovnNode.validateVTEPInterfaceMTU()
+					err := nc.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
 				})
 			})

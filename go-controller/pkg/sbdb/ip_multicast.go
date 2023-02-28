@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const IPMulticastTable = "IP_Multicast"
+
 // IPMulticast defines an object in IP_Multicast table
 type IPMulticast struct {
 	UUID          string `ovsdb:"_uuid"`
@@ -19,6 +21,18 @@ type IPMulticast struct {
 	QueryMaxResp  *int   `ovsdb:"query_max_resp"`
 	SeqNo         int    `ovsdb:"seq_no"`
 	TableSize     *int   `ovsdb:"table_size"`
+}
+
+func (a *IPMulticast) GetUUID() string {
+	return a.UUID
+}
+
+func (a *IPMulticast) GetDatapath() string {
+	return a.Datapath
+}
+
+func (a *IPMulticast) GetEnabled() *bool {
+	return a.Enabled
 }
 
 func copyIPMulticastEnabled(a *bool) *bool {
@@ -39,6 +53,14 @@ func equalIPMulticastEnabled(a, b *bool) bool {
 	return *a == *b
 }
 
+func (a *IPMulticast) GetEthSrc() string {
+	return a.EthSrc
+}
+
+func (a *IPMulticast) GetIdleTimeout() *int {
+	return a.IdleTimeout
+}
+
 func copyIPMulticastIdleTimeout(a *int) *int {
 	if a == nil {
 		return nil
@@ -55,6 +77,18 @@ func equalIPMulticastIdleTimeout(a, b *int) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *IPMulticast) GetIp4Src() string {
+	return a.Ip4Src
+}
+
+func (a *IPMulticast) GetIp6Src() string {
+	return a.Ip6Src
+}
+
+func (a *IPMulticast) GetQuerier() *bool {
+	return a.Querier
 }
 
 func copyIPMulticastQuerier(a *bool) *bool {
@@ -75,6 +109,10 @@ func equalIPMulticastQuerier(a, b *bool) bool {
 	return *a == *b
 }
 
+func (a *IPMulticast) GetQueryInterval() *int {
+	return a.QueryInterval
+}
+
 func copyIPMulticastQueryInterval(a *int) *int {
 	if a == nil {
 		return nil
@@ -93,6 +131,10 @@ func equalIPMulticastQueryInterval(a, b *int) bool {
 	return *a == *b
 }
 
+func (a *IPMulticast) GetQueryMaxResp() *int {
+	return a.QueryMaxResp
+}
+
 func copyIPMulticastQueryMaxResp(a *int) *int {
 	if a == nil {
 		return nil
@@ -109,6 +151,14 @@ func equalIPMulticastQueryMaxResp(a, b *int) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *IPMulticast) GetSeqNo() int {
+	return a.SeqNo
+}
+
+func (a *IPMulticast) GetTableSize() *int {
+	return a.TableSize
 }
 
 func copyIPMulticastTableSize(a *int) *int {

@@ -116,6 +116,25 @@ func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 	return modelClient.CreateOrUpdateOps(ops, opModels...)
 }
 
+func UpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
+	opModels := make([]operationModel, 0, len(acls))
+	for i := range acls {
+		// can't use i in the predicate, for loop replaces it in-memory
+		acl := acls[i]
+		opModel := operationModel{
+			Model:          acl,
+			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
+			ErrNotFound:    true,
+			BulkOp:         false,
+		}
+		opModels = append(opModels, opModel)
+	}
+
+	modelClient := newModelClient(nbClient)
+	return modelClient.CreateOrUpdateOps(ops, opModels...)
+}
+
 // CreateOrUpdateACLs creates or updates the provided ACLs
 func CreateOrUpdateACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
 	ops, err := CreateOrUpdateACLsOps(nbClient, nil, acls...)

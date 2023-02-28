@@ -638,10 +638,84 @@ func Test_getLbEndpoints(t *testing.T) {
 			},
 			want: LbEndpoints{[]string{"10.0.0.2", "10.1.1.2", "10.2.2.2"}, []string{}, 80},
 		},
+		{
+			name: "slices with non-ready but serving endpoints",
+			args: args{
+				slices: []*discovery.EndpointSlice{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "svc-ab23",
+							Namespace: "ns",
+							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+						},
+						Ports: []discovery.EndpointPort{
+							{
+								Name:     utilpointer.StringPtr("tcp-example"),
+								Protocol: protoPtr(v1.ProtocolTCP),
+								Port:     utilpointer.Int32Ptr(int32(80)),
+							},
+						},
+						AddressType: discovery.AddressTypeIPv6,
+						Endpoints: []discovery.Endpoint{
+							{
+								Conditions: discovery.EndpointConditions{
+									Ready:   utilpointer.BoolPtr(false),
+									Serving: utilpointer.BoolPtr(true),
+								},
+								Addresses: []string{"2001:db2::2"},
+							},
+						},
+					},
+				},
+				svcPort: v1.ServicePort{
+					Name:       "tcp-example",
+					TargetPort: intstr.FromInt(80),
+					Protocol:   v1.ProtocolTCP,
+				},
+			},
+			want: LbEndpoints{[]string{}, []string{"2001:db2::2"}, 80},
+		},
+		{
+			name: "slices with non-ready non-serving endpoints",
+			args: args{
+				slices: []*discovery.EndpointSlice{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "svc-ab23",
+							Namespace: "ns",
+							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+						},
+						Ports: []discovery.EndpointPort{
+							{
+								Name:     utilpointer.StringPtr("tcp-example"),
+								Protocol: protoPtr(v1.ProtocolTCP),
+								Port:     utilpointer.Int32Ptr(int32(80)),
+							},
+						},
+						AddressType: discovery.AddressTypeIPv6,
+						Endpoints: []discovery.Endpoint{
+							{
+								Conditions: discovery.EndpointConditions{
+									Ready:   utilpointer.BoolPtr(false),
+									Serving: utilpointer.BoolPtr(false),
+								},
+								Addresses: []string{"2001:db2::2"},
+							},
+						},
+					},
+				},
+				svcPort: v1.ServicePort{
+					Name:       "tcp-example",
+					TargetPort: intstr.FromInt(80),
+					Protocol:   v1.ProtocolTCP,
+				},
+			},
+			want: LbEndpoints{[]string{}, []string{}, 80},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GetLbEndpoints(tt.args.slices, tt.args.svcPort)
+			got := GetLbEndpoints(tt.args.slices, tt.args.svcPort, false)
 			assert.Equal(t, tt.want, got)
 		})
 	}

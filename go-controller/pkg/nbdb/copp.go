@@ -5,12 +5,22 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const CoppTable = "Copp"
+
 // Copp defines an object in Copp table
 type Copp struct {
 	UUID        string            `ovsdb:"_uuid"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Meters      map[string]string `ovsdb:"meters"`
 	Name        string            `ovsdb:"name"`
+}
+
+func (a *Copp) GetUUID() string {
+	return a.UUID
+}
+
+func (a *Copp) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyCoppExternalIDs(a map[string]string) map[string]string {
@@ -39,6 +49,10 @@ func equalCoppExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *Copp) GetMeters() map[string]string {
+	return a.Meters
+}
+
 func copyCoppMeters(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -63,6 +77,10 @@ func equalCoppMeters(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *Copp) GetName() string {
+	return a.Name
 }
 
 func (a *Copp) DeepCopyInto(b *Copp) {

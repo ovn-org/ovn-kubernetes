@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -23,6 +24,7 @@ type EgressDNS struct {
 	dnsEntries map[string]*dnsEntry
 	// allows for the creation of addresssets
 	addressSetFactory addressset.AddressSetFactory
+	controllerName    string
 
 	// Report change when Add operation is done
 	added          chan struct{}
@@ -41,7 +43,16 @@ type dnsEntry struct {
 	dnsAddressSet addressset.AddressSet
 }
 
-func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerStop <-chan struct{}) (*EgressDNS, error) {
+func getEgressFirewallDNSAddrSetDbIDs(dnsName, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressFirewallDNS, controller,
+		map[libovsdbops.ExternalIDKey]string{
+			// dns address sets are cluster-wide objects, they have unique names
+			libovsdbops.ObjectNameKey: dnsName,
+		})
+}
+
+func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerName string,
+	controllerStop <-chan struct{}) (*EgressDNS, error) {
 	dnsInfo, err := util.NewDNS("/etc/resolv.conf")
 	if err != nil {
 		return nil, err
@@ -51,6 +62,7 @@ func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerStop
 		dns:               dnsInfo,
 		dnsEntries:        make(map[string]*dnsEntry),
 		addressSetFactory: addressSetFactory,
+		controllerName:    controllerName,
 
 		added:          make(chan struct{}),
 		deleted:        make(chan string, 1),
@@ -73,7 +85,8 @@ func (e *EgressDNS) Add(namespace, dnsName string) (addressset.AddressSet, error
 		if e.addressSetFactory == nil {
 			return nil, fmt.Errorf("error adding EgressFirewall DNS rule for host %s, in namespace %s: addressSetFactory is nil", dnsName, namespace)
 		}
-		dnsEntry.dnsAddressSet, err = e.addressSetFactory.NewAddressSet(dnsName, nil)
+		asIndex := getEgressFirewallDNSAddrSetDbIDs(dnsName, e.controllerName)
+		dnsEntry.dnsAddressSet, err = e.addressSetFactory.NewAddressSet(asIndex, nil)
 		if err != nil {
 			return nil, fmt.Errorf("cannot create addressSet for %s: %v", dnsName, err)
 		}

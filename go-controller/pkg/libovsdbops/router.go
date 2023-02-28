@@ -313,6 +313,26 @@ func CreateOrUpdateLogicalRouterPolicyWithPredicateOps(nbClient libovsdbclient.C
 	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
+func UpdateLogicalRouterPoliciesOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation,
+	lrps ...*nbdb.LogicalRouterPolicy) ([]libovsdb.Operation, error) {
+	opModels := make([]operationModel, 0, len(lrps))
+	for i := range lrps {
+		lrp := lrps[i]
+		opModel := []operationModel{
+			{
+				Model:          lrp,
+				OnModelUpdates: onModelUpdatesAllNonDefault(),
+				ErrNotFound:    true,
+				BulkOp:         false,
+			},
+		}
+		opModels = append(opModels, opModel...)
+	}
+
+	m := newModelClient(nbClient)
+	return m.CreateOrUpdateOps(ops, opModels...)
+}
+
 // DeleteLogicalRouterPolicyWithPredicateOps looks up a logical
 // router policy from the cache based on a given predicate and returns the
 // corresponding ops to delete it and remove it from the provided router.

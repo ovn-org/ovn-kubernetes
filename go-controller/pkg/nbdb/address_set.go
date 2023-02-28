@@ -5,12 +5,22 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const AddressSetTable = "Address_Set"
+
 // AddressSet defines an object in Address_Set table
 type AddressSet struct {
 	UUID        string            `ovsdb:"_uuid"`
 	Addresses   []string          `ovsdb:"addresses"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Name        string            `ovsdb:"name"`
+}
+
+func (a *AddressSet) GetUUID() string {
+	return a.UUID
+}
+
+func (a *AddressSet) GetAddresses() []string {
+	return a.Addresses
 }
 
 func copyAddressSetAddresses(a []string) []string {
@@ -37,6 +47,10 @@ func equalAddressSetAddresses(a, b []string) bool {
 	return true
 }
 
+func (a *AddressSet) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
+}
+
 func copyAddressSetExternalIDs(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -61,6 +75,10 @@ func equalAddressSetExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *AddressSet) GetName() string {
+	return a.Name
 }
 
 func (a *AddressSet) DeepCopyInto(b *AddressSet) {

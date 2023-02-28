@@ -55,3 +55,4 @@ This list is to help notify if there are additions, changes or removals to metri
 - Remove `ovnkube_master_skipped_nbctl_daemon_total` (https://github.com/ovn-org/ovn-kubernetes/pull/2707)
 - Add `ovnkube_master_egress_routing_via_host` (https://github.com/ovn-org/ovn-kubernetes/pull/2833)
 - Add `ovnkube_resource_retry_failures_total` (https://github.com/ovn-org/ovn-kubernetes/pull/3314)
+- Add `ovs_vswitchd_interfaces_total` and `ovs_vswitchd_interface_up_wait_seconds_total` (https://github.com/ovn-org/ovn-kubernetes/pull/3391)

@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const PortGroupTable = "Port_Group"
+
 // PortGroup defines an object in Port_Group table
 type PortGroup struct {
 	UUID        string            `ovsdb:"_uuid"`
@@ -12,6 +14,14 @@ type PortGroup struct {
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Name        string            `ovsdb:"name"`
 	Ports       []string          `ovsdb:"ports"`
+}
+
+func (a *PortGroup) GetUUID() string {
+	return a.UUID
+}
+
+func (a *PortGroup) GetACLs() []string {
+	return a.ACLs
 }
 
 func copyPortGroupACLs(a []string) []string {
@@ -38,6 +48,10 @@ func equalPortGroupACLs(a, b []string) bool {
 	return true
 }
 
+func (a *PortGroup) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
+}
+
 func copyPortGroupExternalIDs(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -62,6 +76,14 @@ func equalPortGroupExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *PortGroup) GetName() string {
+	return a.Name
+}
+
+func (a *PortGroup) GetPorts() []string {
+	return a.Ports
 }
 
 func copyPortGroupPorts(a []string) []string {

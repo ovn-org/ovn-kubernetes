@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const BFDTable = "BFD"
+
 type (
 	BFDStatus = string
 )
@@ -29,6 +31,14 @@ type BFD struct {
 	Status      *BFDStatus        `ovsdb:"status"`
 }
 
+func (a *BFD) GetUUID() string {
+	return a.UUID
+}
+
+func (a *BFD) GetDetectMult() *int {
+	return a.DetectMult
+}
+
 func copyBFDDetectMult(a *int) *int {
 	if a == nil {
 		return nil
@@ -45,6 +55,14 @@ func equalBFDDetectMult(a, b *int) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *BFD) GetDstIP() string {
+	return a.DstIP
+}
+
+func (a *BFD) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyBFDExternalIDs(a map[string]string) map[string]string {
@@ -73,6 +91,14 @@ func equalBFDExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *BFD) GetLogicalPort() string {
+	return a.LogicalPort
+}
+
+func (a *BFD) GetMinRx() *int {
+	return a.MinRx
+}
+
 func copyBFDMinRx(a *int) *int {
 	if a == nil {
 		return nil
@@ -91,6 +117,10 @@ func equalBFDMinRx(a, b *int) bool {
 	return *a == *b
 }
 
+func (a *BFD) GetMinTx() *int {
+	return a.MinTx
+}
+
 func copyBFDMinTx(a *int) *int {
 	if a == nil {
 		return nil
@@ -107,6 +137,10 @@ func equalBFDMinTx(a, b *int) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *BFD) GetOptions() map[string]string {
+	return a.Options
 }
 
 func copyBFDOptions(a map[string]string) map[string]string {
@@ -133,6 +167,10 @@ func equalBFDOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *BFD) GetStatus() *BFDStatus {
+	return a.Status
 }
 
 func copyBFDStatus(a *BFDStatus) *BFDStatus {

@@ -56,7 +56,7 @@ type FakeOVN struct {
 
 func NewFakeOVN() *FakeOVN {
 	return &FakeOVN{
-		asf:          addressset.NewFakeAddressSetFactory(),
+		asf:          addressset.NewFakeAddressSetFactory(DefaultNetworkControllerName),
 		fakeRecorder: record.NewFakeRecorder(10),
 		egressQoSWg:  &sync.WaitGroup{},
 		egressSVCWg:  &sync.WaitGroup{},

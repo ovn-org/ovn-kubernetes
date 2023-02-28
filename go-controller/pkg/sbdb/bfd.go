@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const BFDTable = "BFD"
+
 type (
 	BFDStatus = string
 )
@@ -29,6 +31,26 @@ type BFD struct {
 	Options     map[string]string `ovsdb:"options"`
 	SrcPort     int               `ovsdb:"src_port"`
 	Status      BFDStatus         `ovsdb:"status"`
+}
+
+func (a *BFD) GetUUID() string {
+	return a.UUID
+}
+
+func (a *BFD) GetDetectMult() int {
+	return a.DetectMult
+}
+
+func (a *BFD) GetDisc() int {
+	return a.Disc
+}
+
+func (a *BFD) GetDstIP() string {
+	return a.DstIP
+}
+
+func (a *BFD) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyBFDExternalIDs(a map[string]string) map[string]string {
@@ -57,6 +79,22 @@ func equalBFDExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *BFD) GetLogicalPort() string {
+	return a.LogicalPort
+}
+
+func (a *BFD) GetMinRx() int {
+	return a.MinRx
+}
+
+func (a *BFD) GetMinTx() int {
+	return a.MinTx
+}
+
+func (a *BFD) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copyBFDOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -81,6 +119,14 @@ func equalBFDOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *BFD) GetSrcPort() int {
+	return a.SrcPort
+}
+
+func (a *BFD) GetStatus() BFDStatus {
+	return a.Status
 }
 
 func (a *BFD) DeepCopyInto(b *BFD) {

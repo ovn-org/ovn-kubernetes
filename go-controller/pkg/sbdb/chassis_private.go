@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const ChassisPrivateTable = "Chassis_Private"
+
 // ChassisPrivate defines an object in Chassis_Private table
 type ChassisPrivate struct {
 	UUID           string            `ovsdb:"_uuid"`
@@ -13,6 +15,14 @@ type ChassisPrivate struct {
 	Name           string            `ovsdb:"name"`
 	NbCfg          int               `ovsdb:"nb_cfg"`
 	NbCfgTimestamp int               `ovsdb:"nb_cfg_timestamp"`
+}
+
+func (a *ChassisPrivate) GetUUID() string {
+	return a.UUID
+}
+
+func (a *ChassisPrivate) GetChassis() *string {
+	return a.Chassis
 }
 
 func copyChassisPrivateChassis(a *string) *string {
@@ -31,6 +41,10 @@ func equalChassisPrivateChassis(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *ChassisPrivate) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyChassisPrivateExternalIDs(a map[string]string) map[string]string {
@@ -57,6 +71,18 @@ func equalChassisPrivateExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *ChassisPrivate) GetName() string {
+	return a.Name
+}
+
+func (a *ChassisPrivate) GetNbCfg() int {
+	return a.NbCfg
+}
+
+func (a *ChassisPrivate) GetNbCfgTimestamp() int {
+	return a.NbCfgTimestamp
 }
 
 func (a *ChassisPrivate) DeepCopyInto(b *ChassisPrivate) {

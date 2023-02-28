@@ -35,7 +35,6 @@ const (
 	maxEgressQoSRetries        = 10
 	defaultEgressQoSName       = "default"
 	EgressQoSFlowStartPriority = 1000
-	rulePriorityDelimeter      = "-"
 )
 
 type egressQoS struct {
@@ -53,6 +52,14 @@ type egressQoSRule struct {
 	addrSet     addressset.AddressSet
 	pods        *sync.Map // pods name -> ips in the addrSet
 	podSelector metav1.LabelSelector
+}
+
+func getEgressQosAddrSetDbIDs(namespace, priority, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, controller, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: namespace,
+		// priority is the unique id for address set within given namespace
+		libovsdbops.PriorityKey: priority,
+	})
 }
 
 // shallow copies the EgressQoS object provided.
@@ -120,7 +127,8 @@ func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.
 
 	selector, _ := metav1.LabelSelectorAsSelector(&podSelector)
 	if selector.Empty() { // empty selector means that the rule applies to all pods in the namespace
-		addrSet, err := oc.addressSetFactory.EnsureAddressSet(namespace)
+		asIndex := getNamespaceAddrSetDbIDs(namespace, oc.controllerName)
+		addrSet, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return nil, nil, fmt.Errorf("cannot ensure that addressSet for namespace %s exists %v", namespace, err)
 		}
@@ -133,12 +141,11 @@ func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.
 	if err != nil {
 		return nil, nil, err
 	}
-
-	addrSet, err = oc.addressSetFactory.EnsureAddressSet(fmt.Sprintf("%s%s%s%d", types.EgressQoSRulePrefix, namespace, rulePriorityDelimeter, priority))
+	asIndex := getEgressQosAddrSetDbIDs(namespace, fmt.Sprintf("%d", priority), oc.controllerName)
+	addrSet, err = oc.addressSetFactory.EnsureAddressSet(asIndex)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	podsIps := []net.IP{}
 	for _, pod := range pods {
 		// we don't handle HostNetworked or completed pods
@@ -401,18 +408,12 @@ func (oc *DefaultNetworkController) repairEgressQoSes() error {
 			return fmt.Errorf("unable to remove stale qoses, err: %v", err)
 		}
 	}
-
-	asPredicate := func(as *nbdb.AddressSet) bool {
-		if !strings.HasPrefix(as.ExternalIDs["name"], types.EgressQoSRulePrefix) {
-			return false
-		}
-
-		// we extract the namespace from the id by removing the prefix and the priority suffix
-		// egress-qos-pods-my-namespace-123 -> my-namespace
-		ns := strings.TrimPrefix(as.ExternalIDs["name"], types.EgressQoSRulePrefix)
-		ns = ns[:strings.LastIndex(ns, rulePriorityDelimeter)]
-		return !nsWithQoS[ns]
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName, nil)
+	predicateFunc := func(as *nbdb.AddressSet) bool {
+		// ObjectNameKey is namespace
+		return !nsWithQoS[as.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
 	}
+	asPredicate := libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, predicateFunc)
 	if err := libovsdbops.DeleteAddressSetsWithPredicate(oc.nbClient, asPredicate); err != nil {
 		return fmt.Errorf("failed to remove stale egress qos address sets, err: %v", err)
 	}
@@ -509,10 +510,11 @@ func (oc *DefaultNetworkController) cleanEgressQoSNS(namespace string) error {
 			return fmt.Errorf("failed to delete qos, err: %s", err)
 		}
 	}
-
-	asPredicate := func(as *nbdb.AddressSet) bool {
-		return strings.HasPrefix(as.ExternalIDs["name"], types.EgressQoSRulePrefix+eq.namespace)
-	}
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: eq.namespace,
+		})
+	asPredicate := libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, nil)
 	if err := libovsdbops.DeleteAddressSetsWithPredicate(oc.nbClient, asPredicate); err != nil {
 		return fmt.Errorf("failed to remove egress qos address sets, err: %v", err)
 	}

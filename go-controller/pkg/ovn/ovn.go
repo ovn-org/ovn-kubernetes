@@ -192,6 +192,13 @@ func (oc *DefaultNetworkController) WatchEgressNodes() error {
 	return err
 }
 
+// WatchEgressFwNodes starts the watching of nodes for Egress Firewall where
+// firewall rules may match nodes using a node selector
+func (oc *DefaultNetworkController) WatchEgressFwNodes() error {
+	_, err := oc.retryEgressFwNodes.WatchResource()
+	return err
+}
+
 // WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
 // resource and calls back the appropriate handler logic.
 func (oc *DefaultNetworkController) WatchCloudPrivateIPConfig() error {
@@ -435,13 +442,13 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 }
 
 func newEgressServiceController(client clientset.Interface, nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	svcFactory informers.SharedInformerFactory, stopCh <-chan struct{}) *egresssvc.Controller {
+	svcFactory informers.SharedInformerFactory, stopCh <-chan struct{}, controllerName string) *egresssvc.Controller {
 
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
-	initClusterEgressPolicies := func(libovsdbclient.Client, addressset.AddressSetFactory) error { return nil }
-	createNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, *kapi.Node) error { return nil }
-	deleteNodeNoReroutePolicies := func(addressset.AddressSetFactory, string, net.IP, net.IP) error { return nil }
+	initClusterEgressPolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string) error { return nil }
+	createNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, *kapi.Node, string) error { return nil }
+	deleteNodeNoReroutePolicies := func(addressset.AddressSetFactory, string, net.IP, net.IP, string) error { return nil }
 	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string) error { return nil }
 
 	if !config.OVNKubernetesFeature.EnableEgressIP {
@@ -470,7 +477,7 @@ func newEgressServiceController(client clientset.Interface, nbClient libovsdbcli
 		return isReachableViaGRPC(mgmtIPs, healthClient, hcPort, timeout)
 	}
 
-	return egresssvc.NewController(client, nbClient, addressSetFactory,
+	return egresssvc.NewController(controllerName, client, nbClient, addressSetFactory,
 		initClusterEgressPolicies, createNodeNoReroutePolicies,
 		deleteNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies, isReachable,
 		stopCh, svcFactory.Core().V1().Services(),

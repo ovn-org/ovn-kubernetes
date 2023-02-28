@@ -48,6 +48,12 @@ const (
 
 	// types.OVNLayer2Switch is the name of layer2 topology switch
 	OVNLayer2Switch = "ovn_layer2_switch"
+	// types.OVNLocalnetSwitch is the name of localnet topology switch
+	OVNLocalnetSwitch = "ovn_localnet_switch"
+	// types.OVNLocalnetPort is the name of localnet topology localnet port
+	OVNLocalnetPort = "ovn_localnet_port"
+	// Local Bridge used for localnet topology network access
+	LocalNetBridgeName = "br-localnet"
 
 	// ACL Priorities
 
@@ -117,13 +123,6 @@ const (
 	OVNRejectRateLimiter           = "reject"
 	OVNTCPRSTRateLimiter           = "tcp-reset"
 
-	// OVN-K8S Address Sets Names
-	HybridRoutePolicyPrefix = "hybrid-route-pods-"
-	EgressQoSRulePrefix     = "egress-qos-pods-"
-	ClusterNodeIP           = "cluster-node-ips"
-	EgressIPServedPods      = "egressip-served-pods"
-	EgressServiceServedPods = "egresssvc-served-pods"
-
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
 	OvnNamespacedDenyPGTopoVersion = 2
@@ -177,6 +176,7 @@ const (
 	LoadBalancerOwnerExternalID = OvnK8sPrefix + "/" + "owner"
 
 	// different secondary network topology type defined in CNI netconf
-	Layer3Topology = "layer3"
-	Layer2Topology = "layer2"
+	Layer3Topology   = "layer3"
+	Layer2Topology   = "layer2"
+	LocalnetTopology = "localnet"
 )
