@@ -13,6 +13,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
@@ -128,6 +129,17 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 	if !util.PodScheduled(pod) {
 		return nil
 	}
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			eventName := "add"
+			if !addPort {
+				eventName = "update"
+			}
+			metrics.RecordPodEvent(eventName, duration)
+		}()
+	}
 
 	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
 		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
@@ -157,6 +169,13 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordPodEvent("delete", duration)
+		}()
+	}
 	if util.PodWantsHostNetwork(pod) {
 		if err := oc.deletePodExternalGW(pod); err != nil {
 			return fmt.Errorf("unable to delete external gateway routes for pod %s: %w",
