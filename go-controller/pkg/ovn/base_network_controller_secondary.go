@@ -156,7 +156,7 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 			pod.Namespace, pod.Name, nadName, time.Since(start), libovsdbExecuteTime)
 	}()
 
-	ops, lsp, podAnnotation, newlyCreated, _, _, err := bsnc.addLogicalPortToNetwork(nil, pod, nadName, network)
+	ops, lsp, podAnnotation, newlyCreated, err := bsnc.addLogicalPortToNetwork(pod, nadName, network)
 	if err != nil {
 		return err
 	}

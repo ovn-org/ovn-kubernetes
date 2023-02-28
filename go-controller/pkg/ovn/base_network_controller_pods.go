@@ -331,10 +331,8 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitchSubnetsInCache(switchN
 	return nil
 }
 
-// OCPHACK this function is modified to carry ICNIv1 patches downstream
 func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nadapi.NetworkSelectionElement,
-	podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet, routingExternalGWs *gatewayInfo, routingPodGWs map[string]gatewayInfo,
-	hybridOverlayExternalGW net.IP) error {
+	podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error {
 	if bnc.IsSecondary() {
 		// for secondary network, see if its network-attachment's annotation has default-route key.
 		// If present, then we need to add default route for it
@@ -392,16 +390,6 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 		if err != nil {
 			return err
 		}
-		// OCP HACK
-		// DUALSTACK FIXME: hybridOverlayExternalGW is not Dualstack
-		// When oc.getHybridOverlayExternalGwAnnotation() supports dualstack, return error if no match.
-		// If external gateway mode is configured, need to use it for all outgoing traffic, so don't want
-		// to fall back to the default gateway here
-		if hybridOverlayExternalGW != nil && utilnet.IsIPv6(hybridOverlayExternalGW) != isIPv6 {
-			klog.Warningf("Pod %s/%s has no external gateway for %s", pod.Namespace, pod.Name, util.IPFamilyName(isIPv6))
-			continue
-		}
-		// END OCP HACK
 
 		gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
 
@@ -410,10 +398,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 			otherDefaultRoute = otherDefaultRouteV6
 		}
 		var gatewayIP net.IP
-		// OCP HACK
-		hasRoutingExternalGWs := len(routingExternalGWs.gws) > 0
-		hasPodRoutingGWs := len(routingPodGWs) > 0
-		if otherDefaultRoute || (hybridOverlayExternalGW != nil && !hasRoutingExternalGWs && !hasPodRoutingGWs) {
+		if otherDefaultRoute {
 			for _, clusterSubnet := range config.Default.ClusterSubnets {
 				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
@@ -430,13 +415,9 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 					})
 				}
 			}
-			if hybridOverlayExternalGW != nil {
-				gatewayIP = util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
-			}
 		} else {
 			gatewayIP = gatewayIPnet.IP
 		}
-		// END OCP HACK
 
 		if gatewayIP != nil {
 			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIP)
@@ -472,19 +453,15 @@ func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, 
 	return switchName, nil
 }
 
-// OCP HACK
-// function is modified to take DefaultNetworkController as a parameter
-// and to return gateways as well as add routes with including ICNIv1 logic
-func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkController, pod *kapi.Pod, nadName string,
+func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName string,
 	network *nadapi.NetworkSelectionElement) (ops []ovsdb.Operation,
-	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool,
-	routingExternalGWs *gatewayInfo, routingPodGWs map[string]gatewayInfo, err error) {
+	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool, err error) {
 	var ls *nbdb.LogicalSwitch
 
 	podDesc := fmt.Sprintf("%s/%s/%s", nadName, pod.Namespace, pod.Name)
 	switchName, err := bnc.getExpectedSwitchName(pod)
 	if err != nil {
-		return nil, nil, nil, false, nil, nil, err
+		return nil, nil, nil, false, err
 	}
 	// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
 	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
@@ -496,13 +473,13 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 		if util.PodTerminating(pod) {
 			podState = "terminating"
 		}
-		return nil, nil, nil, false, nil, nil, fmt.Errorf("[%s/%s] Non-existent node: %s in API for pod with %s state",
+		return nil, nil, nil, false, fmt.Errorf("[%s/%s] Non-existent node: %s in API for pod with %s state",
 			pod.Namespace, pod.Name, pod.Spec.NodeName, podState)
 	}
 
 	ls, err = bnc.waitForNodeLogicalSwitch(switchName)
 	if err != nil {
-		return nil, nil, nil, false, nil, nil, err
+		return nil, nil, nil, false, err
 	}
 
 	portName := bnc.GetLogicalPortName(pod, nadName)
@@ -522,7 +499,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 	lsp = &nbdb.LogicalSwitchPort{Name: portName}
 	existingLSP, err := libovsdbops.GetLogicalSwitchPort(bnc.nbClient, lsp)
 	if err != nil && err != libovsdbclient.ErrNotFound {
-		return nil, nil, nil, false, nil, nil, fmt.Errorf("unable to get the lsp %s from the nbdb: %s", portName, err)
+		return nil, nil, nil, false, fmt.Errorf("unable to get the lsp %s from the nbdb: %s", portName, err)
 	}
 	lspExist = err != libovsdbclient.ErrNotFound
 
@@ -531,7 +508,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 		portFound := false
 		ls, err = libovsdbops.GetLogicalSwitch(bnc.nbClient, ls)
 		if err != nil {
-			return nil, nil, nil, false, nil, nil, fmt.Errorf("[%s] unable to find logical switch %s in NBDB",
+			return nil, nil, nil, false, fmt.Errorf("[%s] unable to find logical switch %s in NBDB",
 				podDesc, switchName)
 		}
 		for _, currPortUUID := range ls.Ports {
@@ -542,7 +519,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 		}
 		if !portFound {
 			// This should never happen and indicates we failed to clean up an LSP for a pod that was recreated
-			return nil, nil, nil, false, nil, nil, fmt.Errorf("[%s] failed to locate existing logical port %s (%s) in logical switch %s",
+			return nil, nil, nil, false, fmt.Errorf("[%s] failed to locate existing logical port %s (%s) in logical switch %s",
 				podDesc, existingLSP.Name, existingLSP.UUID, switchName)
 		}
 	}
@@ -600,13 +577,13 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 		if bnc.doesNetworkRequireIPAM() {
 			// ensure we have reserved the IPs in the annotation
 			if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-				return nil, nil, nil, false, nil, nil, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
+				return nil, nil, nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
 					podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
 			} else {
 				needsIP = false
 			}
 		} else if len(podIfAddrs) > 0 {
-			return nil, nil, nil, false, nil, nil, fmt.Errorf("IPAMless network with IPs present in the annotations; rejecting to handle this request")
+			return nil, nil, nil, false, fmt.Errorf("IPAMless network with IPs present in the annotations; rejecting to handle this request")
 		}
 	}
 
@@ -615,7 +592,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 			// try to get the MAC and IPs from existing OVN port first
 			podMac, podIfAddrs, err = bnc.getPortAddresses(switchName, existingLSP)
 			if err != nil {
-				return nil, nil, nil, false, nil, nil, fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
+				return nil, nil, nil, false, fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
 					podDesc, switchName, err)
 			}
 		}
@@ -636,7 +613,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 			// Previous attempts to use already configured IPs failed, need to assign new
 			generatedPodMac, generatedPodIfAddrs, err := bnc.assignPodAddresses(switchName)
 			if err != nil {
-				return nil, nil, nil, false, nil, nil, fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
+				return nil, nil, nil, false, fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					podDesc, switchName, err)
 			}
 			if podMac == nil {
@@ -648,25 +625,13 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 		}
 
 		releaseIPs = true
-	}
-
-	var hybridOverlayExternalGW net.IP
-	if oc != nil {
-		// Ensure the namespace/nsInfo exists
-		routingExternalGWs, routingPodGWs, ops, err = oc.addPodToNamespace(pod.Namespace, podIfAddrs)
-		if err != nil {
-			return nil, nil, nil, false, routingExternalGWs, routingPodGWs, err
-		}
-	}
-	// OCP HACK
-	if needsIP {
 		// handle error cases separately first to ensure binding to err, otherwise the
 		// defer will fail
 		if network != nil && network.MacRequest != "" {
 			klog.V(5).Infof("Pod %s requested custom MAC: %s", podDesc, network.MacRequest)
 			podMac, err = net.ParseMAC(network.MacRequest)
 			if err != nil {
-				return nil, nil, nil, false, nil, nil, fmt.Errorf("failed to parse mac %s requested in annotation for pod %s: Error %v",
+				return nil, nil, nil, false, fmt.Errorf("failed to parse mac %s requested in annotation for pod %s: Error %v",
 					network.MacRequest, podDesc, err)
 			}
 		}
@@ -676,12 +641,12 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 		}
 		var nodeSubnets []*net.IPNet
 		if nodeSubnets = bnc.lsManager.GetSwitchSubnets(switchName); nodeSubnets == nil && bnc.doesNetworkRequireIPAM() {
-			return nil, nil, nil, false, nil, nil, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
+			return nil, nil, nil, false, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
 				podDesc, switchName)
 		}
-		err = bnc.addRoutesGatewayIP(pod, network, podAnnotation, nodeSubnets, routingExternalGWs, routingPodGWs, hybridOverlayExternalGW)
+		err = bnc.addRoutesGatewayIP(pod, network, podAnnotation, nodeSubnets)
 		if err != nil {
-			return nil, nil, nil, false, nil, nil, err
+			return nil, nil, nil, false, err
 		}
 
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s",
@@ -691,7 +656,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 		podAnnoTime := time.Since(annoStart)
 		klog.Infof("[%s] addLogicalPort annotation time took %v", podDesc, podAnnoTime)
 		if err != nil {
-			return nil, nil, nil, false, nil, nil, err
+			return nil, nil, nil, false, err
 		}
 		releaseIPs = false
 	}
@@ -718,11 +683,11 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 
 	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(bnc.nbClient, ops, ls, lsp)
 	if err != nil {
-		return nil, nil, nil, false, nil, nil,
+		return nil, nil, nil, false,
 			fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
 	}
 
-	return ops, lsp, podAnnotation, needsIP && !lspExist, routingExternalGWs, routingPodGWs, nil
+	return ops, lsp, podAnnotation, needsIP && !lspExist, nil
 }
 
 func (bnc *BaseNetworkController) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation, nadName string) error {

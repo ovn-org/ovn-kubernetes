@@ -169,14 +169,17 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}()
 
 	nadName := ovntypes.DefaultNetworkName
-	// OCP HACK
-	var routingExternalGWs *gatewayInfo
-	var routingPodGWs map[string]gatewayInfo
-	ops, lsp, podAnnotation, newlyCreatedPort, routingExternalGWs, routingPodGWs, err = oc.addLogicalPortToNetwork(oc, pod, nadName, network)
+	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, nadName, network)
 	if err != nil {
 		return err
 	}
-	// END OCP HACK
+
+	// Ensure the namespace/nsInfo exists
+	routingExternalGWs, routingPodGWs, addOps, err := oc.addPodToNamespace(pod.Namespace, podAnnotation.IPs)
+	if err != nil {
+		return err
+	}
+	ops = append(ops, addOps...)
 
 	// if we have any external or pod Gateways, add routes
 	gateways := make([]*gatewayInfo, 0, len(routingExternalGWs.gws)+len(routingPodGWs))
