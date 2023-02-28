@@ -1145,7 +1145,12 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage: "The interface on nodes that will be the gateway interface. " +
 			"If none specified, then the node's interface on which the " +
 			"default gateway is configured will be used as the gateway " +
-			"interface. Only useful with \"init-gateways\"",
+			"interface." +
+			"If interface is a switchdev VF or SF, then ovnkube will find " +
+			"related representor and plug it to OVS bridge and bypass " +
+			"configuration will be applied, where IP and routes added to " +
+			"the gateway interface and not to the OVS bridge. " +
+			"Only useful with \"--gateway-mode=shared\"",
 		Destination: &cliConfig.Gateway.Interface,
 	},
 	&cli.StringFlag{
@@ -1160,7 +1165,7 @@ var OVNGatewayFlags = []cli.Flag{
 			"OVN gateway.  This is many times just the default gateway " +
 			"of the node in question. If not specified, the default gateway" +
 			"configured in the node is used. Only useful with " +
-			"\"init-gateways\"",
+			"\"--gateway-mode=shared\"",
 		Destination: &cliConfig.Gateway.NextHop,
 	},
 	&cli.UintFlag{

@@ -458,7 +458,7 @@ func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter
 					config.OvnKubeNode.MgmtPortNetdev, types.K8sMgmtIntfName, err)
 			}
 		}
-		rep, err := util.GetFunctionRepresentorName(deviceID)
+		rep, _, err := util.GetFunctionRepresentorName(deviceID)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -616,16 +616,16 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 		klog.Infof("Current control-plane topology version is %d", initialTopoVersion)
 
-		bridgeName := ""
+		gatewayIface := ""
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
-			bridgeName = nc.gateway.GetGatewayBridgeIface()
+			gatewayIface = nc.gateway.GetGatewayIface()
 
 			needLegacySvcRoute := true
 			if (initialTopoVersion >= types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
 				(initialTopoVersion >= types.OvnRoutingViaHostTopoVersion) {
 				// Configure route for svc towards shared gw bridge
 				// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
-				if err := configureSvcRouteViaBridge(bridgeName); err != nil {
+				if err := configureSvcRouteViaBridge(gatewayIface); err != nil {
 					return err
 				}
 				needLegacySvcRoute = false
@@ -666,7 +666,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				// migrate service route from ovn-k8s-mp0 to shared gw bridge
 				if (initialTopoVersion < types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
 					(initialTopoVersion < types.OvnRoutingViaHostTopoVersion) {
-					if err := upgradeServiceRoute(bridgeName); err != nil {
+					if err := upgradeServiceRoute(gatewayIface); err != nil {
 						klog.Fatalf("Failed to upgrade service route for node, error: %v", err)
 					}
 				}
@@ -1022,7 +1022,7 @@ func configureSvcRouteViaBridge(bridge string) error {
 	return configureSvcRouteViaInterface(bridge, DummyNextHopIPs())
 }
 
-func upgradeServiceRoute(bridgeName string) error {
+func upgradeServiceRoute(gatewayIface string) error {
 	klog.Info("Updating K8S Service route")
 	// Flush old routes
 	link, err := util.LinkSetUp(types.K8sMgmtIntfName)
@@ -1033,7 +1033,7 @@ func upgradeServiceRoute(bridgeName string) error {
 		return fmt.Errorf("unable to delete routes on upgrade, error: %v", err)
 	}
 	// add route via OVS bridge
-	if err := configureSvcRouteViaBridge(bridgeName); err != nil {
+	if err := configureSvcRouteViaBridge(gatewayIface); err != nil {
 		return fmt.Errorf("unable to add svc route via OVS bridge interface, error: %v", err)
 	}
 	klog.Info("Successfully updated Kubernetes service route towards OVS")

@@ -112,14 +112,16 @@ func TestGetFunctionRepresentorName(t *testing.T) {
 	tests := []struct {
 		desc           string
 		deviceID       string
-		expVal         string
+		expRep         string
+		expUpl         string
 		expErr         error
 		sriovOpsHelper []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:     "PCI: success",
 			deviceID: "0000:00:00.1",
-			expVal:   "eno1",
+			expRep:   "eno1",
+			expUpl:   "ens0",
 			expErr:   nil,
 			sriovOpsHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ens0", nil}},
@@ -130,7 +132,8 @@ func TestGetFunctionRepresentorName(t *testing.T) {
 		{
 			desc:     "PCI: GetUplinkRepresentor failure",
 			deviceID: "0000:00:00.2",
-			expVal:   "",
+			expRep:   "",
+			expUpl:   "",
 			expErr:   mockUplErr,
 			sriovOpsHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", mockUplErr}},
@@ -139,7 +142,8 @@ func TestGetFunctionRepresentorName(t *testing.T) {
 		{
 			desc:     "PCI: GetVfIndexByPciAddress failure",
 			deviceID: "0000:00:00.3",
-			expVal:   "",
+			expRep:   "",
+			expUpl:   "",
 			expErr:   mockIdxErr,
 			sriovOpsHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ens0", nil}},
@@ -149,7 +153,8 @@ func TestGetFunctionRepresentorName(t *testing.T) {
 		{
 			desc:     "PCI: GetVfRepresentor failure",
 			deviceID: "0000:00:00.4",
-			expVal:   "",
+			expRep:   "",
+			expUpl:   "",
 			expErr:   mockRepErr,
 			sriovOpsHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ens0", nil}},
@@ -160,7 +165,8 @@ func TestGetFunctionRepresentorName(t *testing.T) {
 		{
 			desc:     "Auxiliary: success",
 			deviceID: "foo.bar.5",
-			expVal:   "eno1",
+			expRep:   "eno1",
+			expUpl:   "ens0",
 			expErr:   nil,
 			sriovOpsHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentorFromAux", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ens0", nil}},
@@ -171,7 +177,8 @@ func TestGetFunctionRepresentorName(t *testing.T) {
 		{
 			desc:     "Auxiliary: GetUplinkRepresentorFromAux failure",
 			deviceID: "foo.bar.6",
-			expVal:   "",
+			expRep:   "",
+			expUpl:   "",
 			expErr:   mockUplErr,
 			sriovOpsHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentorFromAux", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", mockUplErr}},
@@ -180,7 +187,8 @@ func TestGetFunctionRepresentorName(t *testing.T) {
 		{
 			desc:     "Auxiliary: GetSfIndexByAuxDev failure",
 			deviceID: "foo.bar.7",
-			expVal:   "",
+			expRep:   "",
+			expUpl:   "",
 			expErr:   mockIdxErr,
 			sriovOpsHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentorFromAux", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ens0", nil}},
@@ -190,7 +198,8 @@ func TestGetFunctionRepresentorName(t *testing.T) {
 		{
 			desc:     "Auxiliary: GetSfRepresentor failure",
 			deviceID: "foo.bar.8",
-			expVal:   "",
+			expRep:   "",
+			expUpl:   "",
 			expErr:   mockRepErr,
 			sriovOpsHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentorFromAux", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ens0", nil}},
@@ -204,9 +213,12 @@ func TestGetFunctionRepresentorName(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockSriovnetOps.Mock, tc.sriovOpsHelper)
 
-			ret, err := GetFunctionRepresentorName(tc.deviceID)
-			if tc.expVal != ret {
-				t.Errorf("Expected - '%v', got - '%v' for '%s'", tc.expVal, ret, tc.deviceID)
+			rep, upl, err := GetFunctionRepresentorName(tc.deviceID)
+			if tc.expRep != rep {
+				t.Errorf("Expected representor - '%v', got - '%v' for '%s'", tc.expRep, rep, tc.deviceID)
+			}
+			if tc.expUpl != upl {
+				t.Errorf("Expected uplink - '%v', got - '%v' for '%s'", tc.expUpl, upl, tc.deviceID)
 			}
 			if tc.expErr == nil && err != nil {
 				t.Errorf("Expected not to fail for '%s', got error: %v", tc.deviceID, err)

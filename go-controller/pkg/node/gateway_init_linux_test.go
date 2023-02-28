@@ -411,6 +411,9 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 get interface p0 ofport",
 		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 --if-exists get bridge " + brphys + " external_ids:ovn-bypass-cfg",
+		})
 		// bridgedGatewayNodeSetup
 		// GetOVSPortMACAddress
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -716,6 +719,581 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		"--k8s-service-cidrs=" + svcCIDR,
 		"--ovnkube-node-mode=dpu-host",
 		"--ovnkube-node-mgmt-port-netdev=pf0vf0",
+	})
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func sharedGatewayBypassInterfaceTest(app *cli.App, testNS ns.NetNS, l netlink.Link,
+	eth0Name, eth0MAC, eth0GWIP, eth0CIDR, bypassNetdev, bypassRep string, newLayout, netdevChange bool) {
+	const (
+		clusterCIDR string = "10.1.0.0/16"
+		deviceID    string = "0000:01:00.0"
+	)
+
+	brName := "br" + eth0Name
+	oldNetdev := "dummy0"
+	oldRep := "dummy0_0"
+	// Add IP, default route and create bridge
+	gwIP := ovntest.MustParseIP(eth0GWIP)
+	eth0IPNet, err := netlink.ParseAddr(eth0CIDR)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = testNS.Do(func(ns.NetNS) error {
+		if newLayout {
+			err := netlink.AddrAdd(l, eth0IPNet)
+			Expect(err).NotTo(HaveOccurred())
+			defRoute := &netlink.Route{
+				LinkIndex: l.Attrs().Index,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Gw:        gwIP,
+			}
+			return netlink.RouteAdd(defRoute)
+		} else {
+			defer GinkgoRecover()
+			ovntest.AddLink(brName)
+			l, err = netlink.LinkByName(brName)
+			Expect(err).NotTo(HaveOccurred())
+			mac, err := net.ParseMAC(eth0MAC)
+			Expect(err).NotTo(HaveOccurred())
+			err = netlink.LinkSetHardwareAddr(l, mac)
+			Expect(err).NotTo(HaveOccurred())
+			if netdevChange {
+				ovntest.AddLink(oldNetdev)
+				l, err = netlink.LinkByName(oldNetdev)
+				Expect(err).NotTo(HaveOccurred())
+				mac, err := net.ParseMAC(eth0MAC)
+				Expect(err).NotTo(HaveOccurred())
+				err = netlink.LinkSetHardwareAddr(l, mac)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			err = netlink.AddrAdd(l, eth0IPNet)
+			Expect(err).NotTo(HaveOccurred())
+			defRoute := &netlink.Route{
+				LinkIndex: l.Attrs().Index,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Gw:        gwIP,
+			}
+			err = netlink.RouteAdd(defRoute)
+			Expect(err).NotTo(HaveOccurred())
+			// add masquerade IP and routes
+			masqIPNet, err := netlink.ParseAddr(types.V4OVNMasqueradeIP + "/29")
+			Expect(err).NotTo(HaveOccurred())
+			err = netlink.AddrAdd(l, masqIPNet)
+			Expect(err).NotTo(HaveOccurred())
+			masqRoute := &netlink.Route{
+				LinkIndex: l.Attrs().Index,
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				Src:       eth0IPNet.IP,
+			}
+			return netlink.RouteAdd(masqRoute)
+		}
+	})
+	Expect(err).NotTo(HaveOccurred())
+
+	app.Action = func(ctx *cli.Context) error {
+		const (
+			nodeName   string = "node1"
+			systemID   string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
+			nodeSubnet string = "10.1.1.0/24"
+		)
+
+		// sriovNet mocks
+		sriovnetMock := &utilMock.SriovnetOps{}
+		util.SetSriovnetOpsInst(sriovnetMock)
+		sriovnetMock.On("GetUplinkRepresentor", deviceID).Return(eth0Name, nil)
+		sriovnetMock.On("GetVfIndexByPciAddress", deviceID).Return(0, nil)
+		sriovnetMock.On("GetVfRepresentor", eth0Name, 0).Return(bypassRep, nil)
+
+		// fileSystem mocks
+		fsMock := &utilMock.FileSystemOps{}
+		fsMock.On("Readlink", mock.AnythingOfType("string")).Return("../../../"+deviceID, nil)
+		util.SetFileSystemOps(fsMock)
+
+		// exec mocks
+		fexec := ovntest.NewLooseCompareFakeExec()
+		// bridgeForInterface
+		if newLayout {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: "ovs-vsctl --timeout=15 port-to-br " + eth0Name,
+				Err: fmt.Errorf("not exist"),
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 -- --may-exist add-br %[1]s "+
+					"-- br-set-external-id %[1]s bridge-id %[1]s "+
+					"-- br-set-external-id %[1]s bridge-uplink %[2]s "+
+					"-- set bridge %[1]s fail-mode=standalone other_config:hwaddr=%[3]s "+
+					"-- --may-exist add-port %[1]s %[2]s "+
+					"-- set port %[2]s other-config:transient=true", brName, eth0Name, eth0MAC),
+				Action: func() error {
+					return testNS.Do(func(ns.NetNS) error {
+						defer GinkgoRecover()
+
+						// Create breth0 as a dummy link
+						err := netlink.LinkAdd(&netlink.Dummy{
+							LinkAttrs: netlink.LinkAttrs{
+								Name:         brName,
+								HardwareAddr: ovntest.MustParseMAC(eth0MAC),
+							},
+						})
+						Expect(err).NotTo(HaveOccurred())
+						_, err = netlink.LinkByName(brName)
+						Expect(err).NotTo(HaveOccurred())
+						return nil
+					})
+				},
+			})
+		} else {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=15 port-to-br " + eth0Name,
+				Output: brName,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: "ovs-vsctl --timeout=15 port-to-br " + bypassRep,
+				Err: fmt.Errorf("not exist"),
+			})
+			if netdevChange {
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get bridge " + brName + " external_ids:ovn-bypass-cfg",
+					Output: oldNetdev + "," + oldRep,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists del-port %s %s", brName, oldRep),
+				})
+			} else {
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --if-exists get bridge " + brName + " external_ids:ovn-bypass-cfg",
+				})
+			}
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-ofctl -O OpenFlow13 --bundle replace-flows " + brName + " -",
+			})
+		}
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovs-vsctl --timeout=15 -- --may-exist add-port %[1]s %[2]s -- set bridge %[1]s external_ids:ovn-bypass-cfg=%[3]s,%[2]s", brName, bypassRep, bypassNetdev),
+		})
+		// bridgedGatewayNodeSetup
+		// GetOVSPortMACAddress
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + eth0Name + " mac_in_use",
+			Output: eth0MAC,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-bridge-mappings",
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":" + brName,
+		})
+		// GetNodeChassisID
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+			Output: systemID,
+		})
+		// DetectCheckPktLengthSupport
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-appctl --timeout=15 dpif/show-dp-features " + brName,
+			Output: "Check pkt length action: Yes",
+		})
+		// IsOvsHwOffloadEnabled
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
+			Output: "false",
+		})
+		// newGatewayOpenFlowManager
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-" + brName + "_node1-to-br-int ofport",
+			Output: "5",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 get interface " + eth0Name + " ofport",
+			Output: "7",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 get interface " + bypassRep + " ofport",
+			Output: "8",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-encap-ip=192.168.1.10",
+			"ovn-appctl --timeout=5 -t ovn-controller exit --restart",
+		})
+		err := util.SetExec(fexec)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = config.InitConfig(ctx, fexec, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: eth0IPNet.IP.String()}
+		existingNode := v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+			Status:     v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		}
+
+		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{Items: []v1.Node{existingNode}})
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
+		}
+
+		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make a fake MgmtPortConfig with only the fields we care about
+		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
+			ipt:        nil,
+			allSubnets: nil,
+			ifAddr:     nodeNet,
+			gwIP:       nodeNet.IP,
+		}
+
+		fakeMgmtPortConfig := managementPortConfig{
+			ifName:    nodeName,
+			link:      nil,
+			routerMAC: nil,
+			ipv4:      &fakeMgmtPortIPFamilyConfig,
+			ipv6:      nil,
+		}
+
+		stop := make(chan struct{})
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		wg := &sync.WaitGroup{}
+		defer func() {
+			close(stop)
+			wg.Wait()
+			wf.Shutdown()
+		}()
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		k := &kube.Kube{kubeFakeClient}
+		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
+		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, wf, nil, nodeName, false)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
+
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			sharedGw, err := newSharedGateway(nc, ovntest.MustParseIPNets(nodeSubnet), nodeAnnotator, &fakeMgmtPortConfig)
+			Expect(err).NotTo(HaveOccurred())
+			err = sharedGw.Init()
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify that IPs had been moved to netdevice link
+			netdevLink, err := netlink.LinkByName(bypassNetdev)
+			Expect(err).NotTo(HaveOccurred())
+			addrs, err := netlink.AddrList(netdevLink, syscall.AF_INET)
+			Expect(err).NotTo(HaveOccurred())
+			var found bool
+			for _, a := range addrs {
+				if a.IP.Equal(eth0IPNet.IP) && bytes.Equal(a.Mask, eth0IPNet.Mask) {
+					found = true
+					break
+				}
+			}
+			Expect(found).To(BeTrue())
+
+			// Check netdevice link MAC address is eth0 MAC address
+			Expect(netdevLink.Attrs().HardwareAddr.String()).To(Equal(eth0MAC))
+
+			// Check that the routes were moved
+			routes, err := netlink.RouteList(netdevLink, syscall.AF_INET)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(routes).To(HaveLen(4)) // 2 GW routes + 2 masquerade routes
+
+			// Check masquerade route had been moved
+			expRoute := &netlink.Route{
+				LinkIndex: netdevLink.Attrs().Index,
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				Src:       eth0IPNet.IP,
+			}
+			route, err := util.LinkRouteGetFilteredRoute(
+				expRoute,
+				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(route).ToNot(BeNil())
+
+			return nil
+		})
+
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(fexec.CalledMatchesExpected, 0).Should(BeTrue(), fexec.ErrorDesc)
+		return nil
+	}
+
+	err = app.Run([]string{
+		app.Name,
+		"--cluster-subnets=" + clusterCIDR,
+		"--gateway-mode=shared",
+		"--gateway-interface=" + bypassNetdev,
+	})
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func sharedGatewayBypassInterfaceRestoreRegularConfigTest(app *cli.App, testNS ns.NetNS,
+	eth0Name, eth0MAC, eth0GWIP, eth0CIDR, bypassNetdev, bypassRep string, isBridge bool) {
+	const (
+		clusterCIDR string = "10.1.0.0/16"
+		deviceID    string = "0000:01:00.0"
+	)
+
+	brName := "br" + eth0Name
+	gwIface := eth0Name
+	if isBridge {
+		gwIface = brName
+	}
+
+	// Add IP, default route and create bridge
+	gwIP := ovntest.MustParseIP(eth0GWIP)
+	eth0IPNet, err := netlink.ParseAddr(eth0CIDR)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = testNS.Do(func(ns.NetNS) error {
+		defer GinkgoRecover()
+		ovntest.AddLink(brName)
+		l, err := netlink.LinkByName(brName)
+		Expect(err).NotTo(HaveOccurred())
+		mac, err := net.ParseMAC(eth0MAC)
+		Expect(err).NotTo(HaveOccurred())
+		err = netlink.LinkSetHardwareAddr(l, mac)
+		Expect(err).NotTo(HaveOccurred())
+		l, err = netlink.LinkByName(bypassNetdev)
+		Expect(err).NotTo(HaveOccurred())
+		mac, err = net.ParseMAC(eth0MAC)
+		Expect(err).NotTo(HaveOccurred())
+		err = netlink.LinkSetHardwareAddr(l, mac)
+		Expect(err).NotTo(HaveOccurred())
+		err = netlink.AddrAdd(l, eth0IPNet)
+		Expect(err).NotTo(HaveOccurred())
+		defRoute := &netlink.Route{
+			LinkIndex: l.Attrs().Index,
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Gw:        gwIP,
+		}
+		err = netlink.RouteAdd(defRoute)
+		Expect(err).NotTo(HaveOccurred())
+		// add masquerade IP and routes
+		masqIPNet, err := netlink.ParseAddr(types.V4OVNMasqueradeIP + "/29")
+		Expect(err).NotTo(HaveOccurred())
+		err = netlink.AddrAdd(l, masqIPNet)
+		Expect(err).NotTo(HaveOccurred())
+		masqRoute := &netlink.Route{
+			LinkIndex: l.Attrs().Index,
+			Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+			Src:       eth0IPNet.IP,
+		}
+		return netlink.RouteAdd(masqRoute)
+	})
+	Expect(err).NotTo(HaveOccurred())
+
+	app.Action = func(ctx *cli.Context) error {
+		const (
+			nodeName   string = "node1"
+			systemID   string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
+			nodeSubnet string = "10.1.1.0/24"
+		)
+
+		// sriovNet mocks
+		sriovnetMock := &utilMock.SriovnetOps{}
+		util.SetSriovnetOpsInst(sriovnetMock)
+		sriovnetMock.On("GetUplinkRepresentor", deviceID).Return("", fmt.Errorf(""))
+
+		// fileSystem mocks
+		fsMock := &utilMock.FileSystemOps{}
+		fsMock.On("Readlink", mock.AnythingOfType("string")).Return("../../../"+deviceID, nil)
+		util.SetFileSystemOps(fsMock)
+
+		// exec mocks
+		fexec := ovntest.NewLooseCompareFakeExec()
+		// bridgeForInterface
+		if isBridge {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: "ovs-vsctl --timeout=15 port-to-br " + brName,
+				Err: fmt.Errorf(""),
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 br-exists " + brName,
+			})
+		} else {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=15 port-to-br " + eth0Name,
+				Output: brName,
+			})
+		}
+
+		// util.GetNicName
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 list-ports " + brName,
+			Output: eth0Name,
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 get Port " + eth0Name + " Interfaces",
+			Output: eth0Name,
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 get Interface " + eth0Name + " Type",
+			Output: "system",
+		})
+
+		if isBridge {
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 get interface " + eth0Name + " ofport",
+			})
+		}
+
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get bridge " + brName + " external_ids:ovn-bypass-cfg",
+			Output: bypassNetdev + "," + bypassRep,
+		})
+		// util.RestoreOVSRegularConfig
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 --if-exists remove bridge " + brName + " external_ids ovn-bypass-cfg",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 --if-exists del-port " + brName + " " + bypassRep,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-ofctl -O OpenFlow13 --bundle replace-flows " + brName + " -",
+		})
+		// bridgedGatewayNodeSetup
+		// GetOVSPortMACAddress
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + gwIface + " mac_in_use",
+			Output: eth0MAC,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-bridge-mappings",
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":" + brName,
+		})
+		// GetNodeChassisID
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+			Output: systemID,
+		})
+		// DetectCheckPktLengthSupport
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-appctl --timeout=15 dpif/show-dp-features " + brName,
+			Output: "Check pkt length action: Yes",
+		})
+		// IsOvsHwOffloadEnabled
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
+			Output: "false",
+		})
+		// newGatewayOpenFlowManager
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-" + brName + "_node1-to-br-int ofport",
+			Output: "5",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 get interface " + eth0Name + " ofport",
+			Output: "7",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-encap-ip=192.168.1.10",
+			"ovn-appctl --timeout=5 -t ovn-controller exit --restart",
+		})
+		err := util.SetExec(fexec)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = config.InitConfig(ctx, fexec, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: eth0IPNet.IP.String()}
+		existingNode := v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+			Status:     v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		}
+
+		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{Items: []v1.Node{existingNode}})
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
+		}
+
+		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make a fake MgmtPortConfig with only the fields we care about
+		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
+			ipt:        nil,
+			allSubnets: nil,
+			ifAddr:     nodeNet,
+			gwIP:       nodeNet.IP,
+		}
+
+		fakeMgmtPortConfig := managementPortConfig{
+			ifName:    nodeName,
+			link:      nil,
+			routerMAC: nil,
+			ipv4:      &fakeMgmtPortIPFamilyConfig,
+			ipv6:      nil,
+		}
+
+		stop := make(chan struct{})
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		wg := &sync.WaitGroup{}
+		defer func() {
+			close(stop)
+			wg.Wait()
+			wf.Shutdown()
+		}()
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		k := &kube.Kube{kubeFakeClient}
+		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
+		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, wf, nil, nodeName, false)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
+
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			sharedGw, err := newSharedGateway(nc, ovntest.MustParseIPNets(nodeSubnet), nodeAnnotator, &fakeMgmtPortConfig)
+			Expect(err).NotTo(HaveOccurred())
+			err = sharedGw.Init()
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify that IPs had been moved to the bridge
+			bridgeLink, err := netlink.LinkByName(brName)
+			Expect(err).NotTo(HaveOccurred())
+			addrs, err := netlink.AddrList(bridgeLink, syscall.AF_INET)
+			Expect(err).NotTo(HaveOccurred())
+			var found bool
+			for _, a := range addrs {
+				if a.IP.Equal(eth0IPNet.IP) && bytes.Equal(a.Mask, eth0IPNet.Mask) {
+					found = true
+					break
+				}
+			}
+			Expect(found).To(BeTrue())
+			// Check that the routes were moved
+			routes, err := netlink.RouteList(bridgeLink, syscall.AF_INET)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(routes).To(HaveLen(4)) // 2 GW routes + 2 masquerade routes
+
+			// Check masquerade route had been moved
+			expRoute := &netlink.Route{
+				LinkIndex: bridgeLink.Attrs().Index,
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				Src:       eth0IPNet.IP,
+			}
+			route, err := util.LinkRouteGetFilteredRoute(
+				expRoute,
+				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(route).ToNot(BeNil())
+
+			return nil
+		})
+
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(fexec.CalledMatchesExpected, 0).Should(BeTrue(), fexec.ErrorDesc)
+		return nil
+	}
+
+	err = app.Run([]string{
+		app.Name,
+		"--cluster-subnets=" + clusterCIDR,
+		"--gateway-mode=shared",
+		"--gateway-interface=" + gwIface,
 	})
 	Expect(err).NotTo(HaveOccurred())
 }
@@ -1164,6 +1742,8 @@ var _ = Describe("Gateway Init Operations", func() {
 		app    *cli.App
 	)
 
+	origSriovNetOps := util.GetSriovnetOps()
+
 	BeforeEach(func() {
 		// Restore global default values before each testcase
 		Expect(config.PrepareTestConfig()).To(Succeed())
@@ -1180,6 +1760,7 @@ var _ = Describe("Gateway Init Operations", func() {
 	AfterEach(func() {
 		Expect(testNS.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(testNS)).To(Succeed())
+		util.SetSriovnetOpsInst(origSriovNetOps)
 	})
 
 	Context("Setting up the gateway bridge", func() {
@@ -1261,6 +1842,67 @@ var _ = Describe("Gateway Init Operations", func() {
 			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false, false)
 		})
 	})
+
+	Context("Bypass configuration", func() {
+		const (
+			eth0Name     string = "eth0"
+			eth0IP       string = "192.168.1.10"
+			eth0CIDR     string = eth0IP + "/24"
+			eth0GWIP     string = "192.168.1.1"
+			bypassNetdev string = "eth0v0"
+			bypassRep    string = "eth0_0"
+		)
+		var eth0MAC string
+		var link netlink.Link
+
+		origFileSystemOps := util.GetFileSystemOps()
+
+		BeforeEach(func() {
+			// Set up a fake eth0, bypass netdevice and bypass representor
+			err := testNS.Do(func(ns.NetNS) error {
+				defer GinkgoRecover()
+
+				ovntest.AddLink(eth0Name)
+				ovntest.AddLink(bypassNetdev)
+				ovntest.AddLink(bypassRep)
+
+				var err error
+				link, err = netlink.LinkByName(eth0Name)
+				Expect(err).NotTo(HaveOccurred())
+				err = netlink.LinkSetUp(link)
+				Expect(err).NotTo(HaveOccurred())
+
+				eth0MAC = link.Attrs().HardwareAddr.String()
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			util.SetFileSystemOps(origFileSystemOps)
+		})
+
+		ovntest.OnSupportedPlatformsIt("sets up bypass bridge layout from scratch", func() {
+			sharedGatewayBypassInterfaceTest(app, testNS, link, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, bypassNetdev, bypassRep, true, false)
+		})
+
+		ovntest.OnSupportedPlatformsIt("sets up bypass bridge layout when regular bridge layout was configured", func() {
+			sharedGatewayBypassInterfaceTest(app, testNS, link, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, bypassNetdev, bypassRep, false, false)
+		})
+
+		ovntest.OnSupportedPlatformsIt("sets up bypass bridge layout when bypass interface changed", func() {
+			sharedGatewayBypassInterfaceTest(app, testNS, link, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, bypassNetdev, bypassRep, false, true)
+		})
+
+		ovntest.OnSupportedPlatformsIt("switches from bypass to regular bridge configuration - gwIface=Uplink", func() {
+			sharedGatewayBypassInterfaceRestoreRegularConfigTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, bypassNetdev, bypassRep, false)
+		})
+
+		ovntest.OnSupportedPlatformsIt("switches from bypass to regular bridge configuration - gwIface=Bridge", func() {
+			sharedGatewayBypassInterfaceRestoreRegularConfigTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, bypassNetdev, bypassRep, true)
+		})
+	})
 })
 
 var _ = Describe("Gateway Operations DPU", func() {
@@ -1268,6 +1910,8 @@ var _ = Describe("Gateway Operations DPU", func() {
 		testNS ns.NetNS
 		app    *cli.App
 	)
+
+	origSriovNetOps := util.GetSriovnetOps()
 
 	BeforeEach(func() {
 		var err error
@@ -1284,6 +1928,7 @@ var _ = Describe("Gateway Operations DPU", func() {
 
 	AfterEach(func() {
 		Expect(testNS.Close()).To(Succeed())
+		util.SetSriovnetOpsInst(origSriovNetOps)
 	})
 
 	Context("DPU Operations", func() {

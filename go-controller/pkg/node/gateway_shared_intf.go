@@ -1137,6 +1137,11 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	ofPortPatch := bridge.ofPortPatch
 	ofPortHost := bridge.ofPortHost
 	bridgeIPs := bridge.ips
+	ofPortGW := ovsLocalPort
+
+	if bridge.bypassRep != "" {
+		ofPortGW = ofPortHost
+	}
 
 	var dftFlows []string
 
@@ -1155,7 +1160,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		// table0, Geneve packets coming from LOCAL. Skip conntrack and go directly to external
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
-				"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
+				"actions=output:%s", defaultOpenFlowCookie, ofPortGW, config.Default.EncapPort, ofPortPhys))
 
 		physicalIP, err := util.MatchFirstIPNetFamily(false, bridgeIPs)
 		if err != nil {
@@ -1211,7 +1216,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		// table0, Geneve packets coming from LOCAL. Skip conntrack and send to external
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
-				"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
+				"actions=output:%s", defaultOpenFlowCookie, ofPortGW, config.Default.EncapPort, ofPortPhys))
 
 		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
 		if err != nil {
@@ -1593,7 +1598,16 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 				hostRep, stderr, err)
 		}
 	} else {
-		bridge.ofPortHost = ovsLocalPort
+		if bridge.bypassRep == "" {
+			bridge.ofPortHost = ovsLocalPort
+		} else {
+			ofport, stderr, err := util.GetOVSOfPort("get", "interface", bridge.bypassRep, "ofport")
+			if err != nil {
+				return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
+					bridge.bypassRep, stderr, err)
+			}
+			bridge.ofPortHost = ofport
+		}
 	}
 
 	return nil
@@ -1699,11 +1713,11 @@ func newSharedGateway(nc *DefaultNodeNetworkController, subnets []*net.IPNet,
 		nodeIPs := gw.nodeIPManager.ListAddresses()
 
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
-			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
-				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
+			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.gwIface); err != nil {
+				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.gwIface, err)
 			}
 
-			if err := addMasqueradeRoute(gwBridge.bridgeName, nc.name, gwBridge.ips, nc.watchFactory); err != nil {
+			if err := addMasqueradeRoute(gwBridge.gwIface, nc.name, gwBridge.ips, nc.watchFactory); err != nil {
 				return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 			}
 		}
@@ -1742,7 +1756,7 @@ func newSharedGateway(nc *DefaultNodeNetworkController, subnets []*net.IPNet,
 			gw.openflowManager.requestFlowSync()
 		}
 
-		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
+		if err := addHostMACBindings(gwBridge.gwIface); err != nil {
 			return fmt.Errorf("failed to add MAC bindings for service routing")
 		}
 

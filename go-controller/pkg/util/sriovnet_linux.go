@@ -84,9 +84,9 @@ func (defaultSriovnetOps) GetRepresentorPortFlavour(netdev string) (sriovnet.Por
 	return sriovnet.GetRepresentorPortFlavour(netdev)
 }
 
-// GetFunctionRepresentorName returns representor name for passed device ID. Supported devices are Virtual Function
-// or Scalable Function
-func GetFunctionRepresentorName(deviceID string) (string, error) {
+// GetFunctionRepresentorName returns representor name for passed device ID along with uplink name.
+// Supported devices are Virtual Function or SubFunction
+func GetFunctionRepresentorName(deviceID string) (string, string, error) {
 	var rep, uplink string
 	var err error
 	var index int
@@ -94,30 +94,30 @@ func GetFunctionRepresentorName(deviceID string) (string, error) {
 	if IsPCIDeviceName(deviceID) { // PCI device
 		uplink, err = GetSriovnetOps().GetUplinkRepresentor(deviceID)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		index, err = GetSriovnetOps().GetVfIndexByPciAddress(deviceID)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		rep, err = GetSriovnetOps().GetVfRepresentor(uplink, index)
 	} else if IsAuxDeviceName(deviceID) { // Auxiliary device
 		uplink, err = GetSriovnetOps().GetUplinkRepresentorFromAux(deviceID)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		index, err = GetSriovnetOps().GetSfIndexByAuxDev(deviceID)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		rep, err = GetSriovnetOps().GetSfRepresentor(uplink, index)
 	} else {
-		return "", fmt.Errorf("cannot determine device type for id '%s'", deviceID)
+		return "", "", fmt.Errorf("cannot determine device type for id '%s'", deviceID)
 	}
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return rep, nil
+	return rep, uplink, nil
 }
 
 // GetNetdevNameFromDeviceId returns the netdevice name from the passed device ID.
