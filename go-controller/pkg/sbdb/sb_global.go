@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const SBGlobalTable = "SB_Global"
+
 // SBGlobal defines an object in SB_Global table
 type SBGlobal struct {
 	UUID        string            `ovsdb:"_uuid"`
@@ -14,6 +16,14 @@ type SBGlobal struct {
 	NbCfg       int               `ovsdb:"nb_cfg"`
 	Options     map[string]string `ovsdb:"options"`
 	SSL         *string           `ovsdb:"ssl"`
+}
+
+func (a *SBGlobal) GetUUID() string {
+	return a.UUID
+}
+
+func (a *SBGlobal) GetConnections() []string {
+	return a.Connections
 }
 
 func copySBGlobalConnections(a []string) []string {
@@ -38,6 +48,10 @@ func equalSBGlobalConnections(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *SBGlobal) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copySBGlobalExternalIDs(a map[string]string) map[string]string {
@@ -66,6 +80,18 @@ func equalSBGlobalExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *SBGlobal) GetIpsec() bool {
+	return a.Ipsec
+}
+
+func (a *SBGlobal) GetNbCfg() int {
+	return a.NbCfg
+}
+
+func (a *SBGlobal) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copySBGlobalOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -90,6 +116,10 @@ func equalSBGlobalOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *SBGlobal) GetSSL() *string {
+	return a.SSL
 }
 
 func copySBGlobalSSL(a *string) *string {

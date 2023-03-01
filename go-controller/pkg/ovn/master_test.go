@@ -21,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -1002,8 +1001,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		recorder = record.NewFakeRecorder(10)
-		oc = NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			nbClient, sbClient, recorder, wg)
+		oc = NewOvnController(fakeClient, f, stopChan, nil, nbClient, sbClient, recorder, wg)
 		oc.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 		gomega.Expect(oc).NotTo(gomega.BeNil())
 		oc.defaultCOPPUUID, err = EnsureDefaultCOPP(nbClient)
@@ -1590,7 +1588,7 @@ func TestController_syncNodes(t *testing.T) {
 				fakeClient,
 				f,
 				stopChan,
-				addressset.NewFakeAddressSetFactory(),
+				nil,
 				nbClient,
 				sbClient,
 				record.NewFakeRecorder(0),
@@ -1682,7 +1680,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				fakeClient,
 				f,
 				stopChan,
-				addressset.NewFakeAddressSetFactory(),
+				nil,
 				nbClient,
 				sbClient,
 				record.NewFakeRecorder(0),

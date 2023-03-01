@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const ConnectionTable = "Connection"
+
 // Connection defines an object in Connection table
 type Connection struct {
 	UUID            string            `ovsdb:"_uuid"`
@@ -15,6 +17,14 @@ type Connection struct {
 	OtherConfig     map[string]string `ovsdb:"other_config"`
 	Status          map[string]string `ovsdb:"status"`
 	Target          string            `ovsdb:"target"`
+}
+
+func (a *Connection) GetUUID() string {
+	return a.UUID
+}
+
+func (a *Connection) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyConnectionExternalIDs(a map[string]string) map[string]string {
@@ -43,6 +53,10 @@ func equalConnectionExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *Connection) GetInactivityProbe() *int {
+	return a.InactivityProbe
+}
+
 func copyConnectionInactivityProbe(a *int) *int {
 	if a == nil {
 		return nil
@@ -61,6 +75,14 @@ func equalConnectionInactivityProbe(a, b *int) bool {
 	return *a == *b
 }
 
+func (a *Connection) GetIsConnected() bool {
+	return a.IsConnected
+}
+
+func (a *Connection) GetMaxBackoff() *int {
+	return a.MaxBackoff
+}
+
 func copyConnectionMaxBackoff(a *int) *int {
 	if a == nil {
 		return nil
@@ -77,6 +99,10 @@ func equalConnectionMaxBackoff(a, b *int) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *Connection) GetOtherConfig() map[string]string {
+	return a.OtherConfig
 }
 
 func copyConnectionOtherConfig(a map[string]string) map[string]string {
@@ -105,6 +131,10 @@ func equalConnectionOtherConfig(a, b map[string]string) bool {
 	return true
 }
 
+func (a *Connection) GetStatus() map[string]string {
+	return a.Status
+}
+
 func copyConnectionStatus(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -129,6 +159,10 @@ func equalConnectionStatus(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *Connection) GetTarget() string {
+	return a.Target
 }
 
 func (a *Connection) DeepCopyInto(b *Connection) {

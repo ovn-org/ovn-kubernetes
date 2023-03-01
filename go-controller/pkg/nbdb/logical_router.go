@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LogicalRouterTable = "Logical_Router"
+
 // LogicalRouter defines an object in Logical_Router table
 type LogicalRouter struct {
 	UUID              string            `ovsdb:"_uuid"`
@@ -19,6 +21,14 @@ type LogicalRouter struct {
 	Policies          []string          `ovsdb:"policies"`
 	Ports             []string          `ovsdb:"ports"`
 	StaticRoutes      []string          `ovsdb:"static_routes"`
+}
+
+func (a *LogicalRouter) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LogicalRouter) GetCopp() *string {
+	return a.Copp
 }
 
 func copyLogicalRouterCopp(a *string) *string {
@@ -39,6 +49,10 @@ func equalLogicalRouterCopp(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *LogicalRouter) GetEnabled() *bool {
+	return a.Enabled
+}
+
 func copyLogicalRouterEnabled(a *bool) *bool {
 	if a == nil {
 		return nil
@@ -55,6 +69,10 @@ func equalLogicalRouterEnabled(a, b *bool) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalRouter) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyLogicalRouterExternalIDs(a map[string]string) map[string]string {
@@ -83,6 +101,10 @@ func equalLogicalRouterExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalRouter) GetLoadBalancer() []string {
+	return a.LoadBalancer
+}
+
 func copyLogicalRouterLoadBalancer(a []string) []string {
 	if a == nil {
 		return nil
@@ -105,6 +127,10 @@ func equalLogicalRouterLoadBalancer(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalRouter) GetLoadBalancerGroup() []string {
+	return a.LoadBalancerGroup
 }
 
 func copyLogicalRouterLoadBalancerGroup(a []string) []string {
@@ -131,6 +157,14 @@ func equalLogicalRouterLoadBalancerGroup(a, b []string) bool {
 	return true
 }
 
+func (a *LogicalRouter) GetName() string {
+	return a.Name
+}
+
+func (a *LogicalRouter) GetNat() []string {
+	return a.Nat
+}
+
 func copyLogicalRouterNat(a []string) []string {
 	if a == nil {
 		return nil
@@ -153,6 +187,10 @@ func equalLogicalRouterNat(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalRouter) GetOptions() map[string]string {
+	return a.Options
 }
 
 func copyLogicalRouterOptions(a map[string]string) map[string]string {
@@ -181,6 +219,10 @@ func equalLogicalRouterOptions(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalRouter) GetPolicies() []string {
+	return a.Policies
+}
+
 func copyLogicalRouterPolicies(a []string) []string {
 	if a == nil {
 		return nil
@@ -205,6 +247,10 @@ func equalLogicalRouterPolicies(a, b []string) bool {
 	return true
 }
 
+func (a *LogicalRouter) GetPorts() []string {
+	return a.Ports
+}
+
 func copyLogicalRouterPorts(a []string) []string {
 	if a == nil {
 		return nil
@@ -227,6 +273,10 @@ func equalLogicalRouterPorts(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalRouter) GetStaticRoutes() []string {
+	return a.StaticRoutes
 }
 
 func copyLogicalRouterStaticRoutes(a []string) []string {

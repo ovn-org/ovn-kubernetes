@@ -5,12 +5,30 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const FDBTable = "FDB"
+
 // FDB defines an object in FDB table
 type FDB struct {
 	UUID    string `ovsdb:"_uuid"`
 	DpKey   int    `ovsdb:"dp_key"`
 	MAC     string `ovsdb:"mac"`
 	PortKey int    `ovsdb:"port_key"`
+}
+
+func (a *FDB) GetUUID() string {
+	return a.UUID
+}
+
+func (a *FDB) GetDpKey() int {
+	return a.DpKey
+}
+
+func (a *FDB) GetMAC() string {
+	return a.MAC
+}
+
+func (a *FDB) GetPortKey() int {
+	return a.PortKey
 }
 
 func (a *FDB) DeepCopyInto(b *FDB) {

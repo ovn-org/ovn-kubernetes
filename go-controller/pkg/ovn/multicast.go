@@ -81,12 +81,12 @@ func getMcastACLName(nsORpg, mcastSuffix string) string {
 }
 
 // Creates a policy to allow multicast traffic within 'ns':
-// - a port group containing all logical ports associated with 'ns'
-// - one "from-lport" ACL allowing egress multicast traffic from the pods
-//   in 'ns'
-// - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
-//   This matches only traffic originated by pods in 'ns' (based on the
-//   namespace address set).
+//   - a port group containing all logical ports associated with 'ns'
+//   - one "from-lport" ACL allowing egress multicast traffic from the pods
+//     in 'ns'
+//   - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
+//     This matches only traffic originated by pods in 'ns' (based on the
+//     namespace address set).
 func (oc *DefaultNetworkController) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
 	portGroupName := hashedPortGroup(ns)
 
@@ -151,10 +151,11 @@ func deleteMulticastAllowPolicy(nbClient libovsdbclient.Client, ns string) error
 }
 
 // Creates a global default deny multicast policy:
-// - one ACL dropping egress multicast traffic from all pods: this is to
-//   protect OVN controller from processing IP multicast reports from nodes
-//   that are not allowed to receive multicast traffic.
-// - one ACL dropping ingress multicast traffic to all pods.
+//   - one ACL dropping egress multicast traffic from all pods: this is to
+//     protect OVN controller from processing IP multicast reports from nodes
+//     that are not allowed to receive multicast traffic.
+//   - one ACL dropping ingress multicast traffic to all pods.
+//
 // Caller must hold the namespace's namespaceInfo object lock.
 func (oc *DefaultNetworkController) createDefaultDenyMulticastPolicy() error {
 	match := getMulticastACLMatch()

@@ -189,9 +189,6 @@ func (h *secondaryLayer3NetworkControllerEventHandler) IsObjectInTerminalState(o
 type SecondaryLayer3NetworkController struct {
 	BaseSecondaryNetworkController
 
-	// waitGroup per-Controller
-	wg *sync.WaitGroup
-
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator *subnetallocator.HostSubnetAllocator
 
@@ -204,10 +201,12 @@ type SecondaryLayer3NetworkController struct {
 func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
 	netconfInfo util.NetConfInfo) *SecondaryLayer3NetworkController {
 	stopChan := make(chan struct{})
+	// controllerName must be unique to identify db object owned by given controller
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 			BaseNetworkController: BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
+				controllerName:              netInfo.GetNetworkName() + "-network-controller",
 				NetConfInfo:                 netconfInfo,
 				NetInfo:                     netInfo,
 				lsManager:                   lsm.NewLogicalSwitchManager(),
@@ -216,9 +215,9 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				namespacesMutex:             sync.Mutex{},
 				addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient),
 				stopChan:                    stopChan,
+				wg:                          &sync.WaitGroup{},
 			},
 		},
-		wg:                          &sync.WaitGroup{},
 		masterSubnetAllocator:       subnetallocator.NewHostSubnetAllocator(),
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},

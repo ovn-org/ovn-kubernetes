@@ -44,6 +44,27 @@ func CreateOrUpdateQoSesOps(nbClient libovsdbclient.Client, ops []libovsdb.Opera
 	return modelClient.CreateOrUpdateOps(ops, opModels...)
 }
 
+func UpdateQoSesOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, qoses ...*nbdb.QoS) ([]libovsdb.Operation, error) {
+	opModels := make([]operationModel, 0, len(qoses))
+	for i := range qoses {
+		// can't use i in the predicate, for loop replaces it in-memory
+		qos := qoses[i]
+		opModel := operationModel{
+			Model: qos,
+			ModelPredicate: func(q *nbdb.QoS) bool {
+				return strings.Contains(q.Match, qos.Match) && q.Priority == qos.Priority
+			},
+			OnModelUpdates: []interface{}{}, // update all fields
+			ErrNotFound:    true,
+			BulkOp:         false,
+		}
+		opModels = append(opModels, opModel)
+	}
+
+	modelClient := newModelClient(nbClient)
+	return modelClient.CreateOrUpdateOps(ops, opModels...)
+}
+
 // AddQoSesToLogicalSwitchOps returns the ops to add the provided QoSes to the switch
 func AddQoSesToLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, name string, qoses ...*nbdb.QoS) ([]libovsdb.Operation, error) {
 	sw := &nbdb.LogicalSwitch{

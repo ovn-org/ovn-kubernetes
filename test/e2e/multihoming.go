@@ -14,6 +14,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
@@ -29,6 +30,8 @@ var _ = Describe("Multi Homing", func() {
 		secondaryNetworkName       = "tenant-blue"
 		secondaryFlatL2IgnoreCIDR  = "10.128.0.0/29"
 		secondaryFlatL2NetworkCIDR = "10.128.0.0/24"
+		netPrefixLengthPerNode     = 24
+		secondaryIPv6CIDR          = "10:100:200::0/64"
 	)
 	f := wrappedTestFramework("multi-homing")
 
@@ -78,7 +81,7 @@ var _ = Describe("Multi Homing", func() {
 			table.Entry(
 				"when attaching to an L3 - routed - network",
 				networkAttachmentConfig{
-					cidr:     netCIDR(secondaryNetworkCIDR, 24),
+					cidr:     netCIDR(secondaryNetworkCIDR, netPrefixLengthPerNode),
 					name:     secondaryNetworkName,
 					topology: "layer3",
 				},
@@ -123,6 +126,30 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
+			table.Entry(
+				"when attaching to an L2 - switched - network with an IPv6 subnet",
+				networkAttachmentConfig{
+					cidr:     secondaryIPv6CIDR,
+					name:     secondaryNetworkName,
+					topology: "layer2",
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        podName,
+				},
+			),
+			table.Entry(
+				"when attaching to an L2 - switched - network with a dual stack configuration",
+				networkAttachmentConfig{
+					cidr:     strings.Join([]string{secondaryFlatL2NetworkCIDR, secondaryIPv6CIDR}, ","),
+					name:     secondaryNetworkName,
+					topology: "layer2",
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        podName,
+				},
+			),
 		)
 	})
 
@@ -133,6 +160,8 @@ var _ = Describe("Multi Homing", func() {
 			port              = 9000
 			workerOneNodeName = "ovn-worker"
 			workerTwoNodeName = "ovn-worker2"
+			clientIP          = "192.168.200.10/24"
+			staticServerIP    = "192.168.200.20/24"
 		)
 
 		table.DescribeTable(
@@ -168,23 +197,6 @@ var _ = Describe("Multi Homing", func() {
 					return updatedPod.Status.Phase
 				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 
-				pod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
-					return status.Name == namespacedName(f.Namespace.Name, secondaryNetworkName)
-				})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(netStatus).To(HaveLen(1))
-
-				serverIP := ""
-				if netConfig.cidr != "" {
-					By("asserting the server pod has an IP from the configured range")
-					Expect(netStatus[0].IPs).NotTo(BeEmpty())
-					serverIP = netStatus[0].IPs[0]
-					Expect(inRange(secondaryNetworkCIDR, serverIP)).To(Succeed())
-				}
-
 				By("instantiating the *client* pod")
 				clientPod, err := cs.CoreV1().Pods(clientPodConfig.namespace).Create(
 					context.Background(),
@@ -202,30 +214,53 @@ var _ = Describe("Multi Homing", func() {
 					return updatedPod.Status.Phase
 				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 
+				pod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
+					return status.Name == namespacedName(f.Namespace.Name, secondaryNetworkName)
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(netStatus).To(HaveLen(1))
+
+				serverIP := ""
 				if netConfig.cidr == "" {
 					By("configuring static IP addresses in the pods")
 					const (
 						clientIP       = "192.168.200.10/24"
 						staticServerIP = "192.168.200.20/24"
 					)
-					Expect(configurePodStaticIP(f.Namespace.Name, clientPodName, clientIP)).To(Succeed())
-					Expect(configurePodStaticIP(f.Namespace.Name, serverPod.GetName(), staticServerIP)).To(Succeed())
+					if !areStaticIPsConfiguredViaCNI(clientPodConfig) {
+						Expect(configurePodStaticIP(clientPodConfig.namespace, clientPodName, clientIP)).To(Succeed())
+					}
+					if !areStaticIPsConfiguredViaCNI(serverPodConfig) {
+						Expect(configurePodStaticIP(serverPodConfig.namespace, serverPod.GetName(), staticServerIP)).To(Succeed())
+					}
 					serverIP = strings.ReplaceAll(staticServerIP, "/24", "")
 				}
 
-				By("asserting the *client* pod can contact the server pod exposed endpoint")
-				Eventually(func() error {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return err
+				for i, subnet := range strings.Split(netConfig.cidr, ",") {
+					if subnet != "" {
+						By("asserting the server pod has an IP from the configured range")
+						Expect(netStatus[0].IPs).NotTo(BeEmpty())
+						serverIP = netStatus[0].IPs[i]
+						Expect(inRange(popCIDRsPerNodePrefix(subnet, netPrefixLengthPerNode), serverIP)).To(Succeed())
 					}
 
-					if updatedPod.Status.Phase == v1.PodRunning {
-						return connectToServer(f.Namespace.Name, clientPodName, serverIP, port)
-					}
+					By("asserting the *client* pod can contact the server pod exposed endpoint")
+					Eventually(func() error {
+						updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
 
-					return fmt.Errorf("pod not running. /me is sad")
-				}, 2*time.Minute, 6*time.Second).Should(Succeed())
+						if updatedPod.Status.Phase == v1.PodRunning {
+							return connectToServer(f.Namespace.Name, clientPodName, serverIP, port)
+						}
+
+						return fmt.Errorf("pod not running. /me is sad")
+					}, 2*time.Minute, 6*time.Second).Should(Succeed())
+				}
 			},
 			table.Entry(
 				"can communicate over an L2 secondary network when the pods are scheduled in different nodes",
@@ -269,7 +304,7 @@ var _ = Describe("Multi Homing", func() {
 				networkAttachmentConfig{
 					name:     secondaryNetworkName,
 					topology: "layer3",
-					cidr:     netCIDR(secondaryNetworkCIDR, 24),
+					cidr:     netCIDR(secondaryNetworkCIDR, netPrefixLengthPerNode),
 				},
 				podConfiguration{
 					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
@@ -297,6 +332,66 @@ var _ = Describe("Multi Homing", func() {
 					name:         podName,
 					containerCmd: httpServerContainerCmd(port),
 					isPrivileged: true,
+				},
+			),
+			table.Entry(
+				"can communicate over an L2 secondary network without IPAM, with static IPs configured via network selection elements",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "layer2",
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{
+						Name:      secondaryNetworkName,
+						IPRequest: []string{clientIP},
+					}},
+					name: clientPodName,
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{
+						Name:      secondaryNetworkName,
+						IPRequest: []string{staticServerIP},
+					}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+				},
+			),
+			table.Entry(
+				"can communicate over an L2 secondary network with an IPv6 subnet when pods are scheduled in different nodes",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "layer2",
+					cidr:     secondaryIPv6CIDR,
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         clientPodName,
+					nodeSelector: map[string]string{nodeHostnameKey: workerOneNodeName},
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+				},
+			),
+			table.Entry(
+				"can communicate over an L2 secondary network with a dual stack configuration",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "layer2",
+					cidr:     strings.Join([]string{secondaryFlatL2NetworkCIDR, secondaryIPv6CIDR}, ","),
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         clientPodName,
+					nodeSelector: map[string]string{nodeHostnameKey: workerOneNodeName},
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
 		)
@@ -372,6 +467,13 @@ func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
 	return fmt.Sprintf("%s/%d", netCIDR, netPrefixLengthPerNode)
 }
 
+func popCIDRsPerNodePrefix(netCIDR string, netPrefixLengthPerNode int) string {
+	if strings.Count(netCIDR, "/") > 1 {
+		return strings.ReplaceAll(netCIDR, fmt.Sprintf("/%d", netPrefixLengthPerNode), "")
+	}
+	return netCIDR
+}
+
 type networkAttachmentConfig struct {
 	cidr         string
 	excludeCIDRs []string
@@ -385,7 +487,12 @@ func (nac networkAttachmentConfig) attachmentName() string {
 	if nac.networkName != "" {
 		return nac.networkName
 	}
-	return nac.name
+	return uniqueNadName(nac.name)
+}
+
+func uniqueNadName(originalNetName string) string {
+	const randomStringLength = 5
+	return fmt.Sprintf("%s_%s", rand.String(randomStringLength), originalNetName)
 }
 
 func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
@@ -521,16 +628,17 @@ func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topolog
 
 func configurePodStaticIP(podNamespace string, podName string, staticIP string) error {
 	_, err := framework.RunKubectl(
-		podNamespace,
-		"exec",
-		podName,
-		"--",
-		"ip",
-		"addr",
-		"add",
-		staticIP,
-		"dev",
-		"net1",
+		podNamespace, "exec", podName, "--",
+		"ip", "addr", "add", staticIP, "dev", "net1",
 	)
 	return err
+}
+
+func areStaticIPsConfiguredViaCNI(podConfig podConfiguration) bool {
+	for _, attachment := range podConfig.attachments {
+		if len(attachment.IPRequest) > 0 {
+			return true
+		}
+	}
+	return false
 }

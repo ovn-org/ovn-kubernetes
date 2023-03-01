@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const RBACPermissionTable = "RBAC_Permission"
+
 // RBACPermission defines an object in RBAC_Permission table
 type RBACPermission struct {
 	UUID          string   `ovsdb:"_uuid"`
@@ -12,6 +14,14 @@ type RBACPermission struct {
 	InsertDelete  bool     `ovsdb:"insert_delete"`
 	Table         string   `ovsdb:"table"`
 	Update        []string `ovsdb:"update"`
+}
+
+func (a *RBACPermission) GetUUID() string {
+	return a.UUID
+}
+
+func (a *RBACPermission) GetAuthorization() []string {
+	return a.Authorization
 }
 
 func copyRBACPermissionAuthorization(a []string) []string {
@@ -36,6 +46,18 @@ func equalRBACPermissionAuthorization(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *RBACPermission) GetInsertDelete() bool {
+	return a.InsertDelete
+}
+
+func (a *RBACPermission) GetTable() string {
+	return a.Table
+}
+
+func (a *RBACPermission) GetUpdate() []string {
+	return a.Update
 }
 
 func copyRBACPermissionUpdate(a []string) []string {

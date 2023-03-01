@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LoadBalancerTable = "Load_Balancer"
+
 type (
 	LoadBalancerProtocol        = string
 	LoadBalancerSelectionFields = string
@@ -35,6 +37,14 @@ type LoadBalancer struct {
 	Vips            map[string]string             `ovsdb:"vips"`
 }
 
+func (a *LoadBalancer) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LoadBalancer) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
+}
+
 func copyLoadBalancerExternalIDs(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -61,6 +71,10 @@ func equalLoadBalancerExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LoadBalancer) GetHealthCheck() []string {
+	return a.HealthCheck
+}
+
 func copyLoadBalancerHealthCheck(a []string) []string {
 	if a == nil {
 		return nil
@@ -83,6 +97,10 @@ func equalLoadBalancerHealthCheck(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LoadBalancer) GetIPPortMappings() map[string]string {
+	return a.IPPortMappings
 }
 
 func copyLoadBalancerIPPortMappings(a map[string]string) map[string]string {
@@ -111,6 +129,14 @@ func equalLoadBalancerIPPortMappings(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LoadBalancer) GetName() string {
+	return a.Name
+}
+
+func (a *LoadBalancer) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copyLoadBalancerOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -137,6 +163,10 @@ func equalLoadBalancerOptions(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LoadBalancer) GetProtocol() *LoadBalancerProtocol {
+	return a.Protocol
+}
+
 func copyLoadBalancerProtocol(a *LoadBalancerProtocol) *LoadBalancerProtocol {
 	if a == nil {
 		return nil
@@ -153,6 +183,10 @@ func equalLoadBalancerProtocol(a, b *LoadBalancerProtocol) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LoadBalancer) GetSelectionFields() []LoadBalancerSelectionFields {
+	return a.SelectionFields
 }
 
 func copyLoadBalancerSelectionFields(a []LoadBalancerSelectionFields) []LoadBalancerSelectionFields {
@@ -177,6 +211,10 @@ func equalLoadBalancerSelectionFields(a, b []LoadBalancerSelectionFields) bool {
 		}
 	}
 	return true
+}
+
+func (a *LoadBalancer) GetVips() map[string]string {
+	return a.Vips
 }
 
 func copyLoadBalancerVips(a map[string]string) map[string]string {

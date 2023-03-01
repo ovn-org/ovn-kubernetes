@@ -479,6 +479,7 @@ jobs:
       OVN_HYBRID_OVERLAY_ENABLE: "false"
       OVN_GATEWAY_MODE: "shared"
       OVN_MULTICAST_ENABLE:  "false"
+      DUALSTACK_CONVERSION:  "true"
     steps:
 
     - name: Set up Go
@@ -522,15 +523,10 @@ jobs:
 
     - name: Run Dual-Stack Tests
       run: |
-        DUALSTACK_CONVERSION="true"
-        KIND_IPV4_SUPPORT="true"
-        KIND_IPV6_SUPPORT="true"
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
 
     - name: Run Dual-Stack Control-Plane Tests
       run: |
-        KIND_IPV4_SUPPORT="true"
-        KIND_IPV6_SUPPORT="true"
         make -C test control-plane WHAT="DualStack"
 
     - name: Export kind logs

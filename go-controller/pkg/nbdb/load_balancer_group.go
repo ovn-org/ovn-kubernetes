@@ -5,11 +5,21 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LoadBalancerGroupTable = "Load_Balancer_Group"
+
 // LoadBalancerGroup defines an object in Load_Balancer_Group table
 type LoadBalancerGroup struct {
 	UUID         string   `ovsdb:"_uuid"`
 	LoadBalancer []string `ovsdb:"load_balancer"`
 	Name         string   `ovsdb:"name"`
+}
+
+func (a *LoadBalancerGroup) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LoadBalancerGroup) GetLoadBalancer() []string {
+	return a.LoadBalancer
 }
 
 func copyLoadBalancerGroupLoadBalancer(a []string) []string {
@@ -34,6 +44,10 @@ func equalLoadBalancerGroupLoadBalancer(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LoadBalancerGroup) GetName() string {
+	return a.Name
 }
 
 func (a *LoadBalancerGroup) DeepCopyInto(b *LoadBalancerGroup) {

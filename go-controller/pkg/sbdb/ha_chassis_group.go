@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const HAChassisGroupTable = "HA_Chassis_Group"
+
 // HAChassisGroup defines an object in HA_Chassis_Group table
 type HAChassisGroup struct {
 	UUID        string            `ovsdb:"_uuid"`
@@ -12,6 +14,14 @@ type HAChassisGroup struct {
 	HaChassis   []string          `ovsdb:"ha_chassis"`
 	Name        string            `ovsdb:"name"`
 	RefChassis  []string          `ovsdb:"ref_chassis"`
+}
+
+func (a *HAChassisGroup) GetUUID() string {
+	return a.UUID
+}
+
+func (a *HAChassisGroup) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyHAChassisGroupExternalIDs(a map[string]string) map[string]string {
@@ -40,6 +50,10 @@ func equalHAChassisGroupExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *HAChassisGroup) GetHaChassis() []string {
+	return a.HaChassis
+}
+
 func copyHAChassisGroupHaChassis(a []string) []string {
 	if a == nil {
 		return nil
@@ -62,6 +76,14 @@ func equalHAChassisGroupHaChassis(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *HAChassisGroup) GetName() string {
+	return a.Name
+}
+
+func (a *HAChassisGroup) GetRefChassis() []string {
+	return a.RefChassis
 }
 
 func copyHAChassisGroupRefChassis(a []string) []string {

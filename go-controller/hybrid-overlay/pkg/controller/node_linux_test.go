@@ -506,12 +506,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				flows:       []string{"table=10,cookie=0x" + podIPToCookie(net.ParseIP(pod1IP)) + ",priority=100,ip,nw_dst=" + pod1IP + ",actions=set_field:" + thisNodeDRMAC + "->eth_src,set_field:" + pod1MAC + "->eth_dst,output:ext"},
 				ignoreLearn: true,
 			}
-			// OCP HACK
-			// ICNIv1 will set ignore learn flag to false during syncFlows so that
-			// the next round of sync will learn from the newly installed flow.
-			// ignoreLearn isn't used upstream and TBD may be removed
-			initialFlowCache[podIPToCookie(net.ParseIP(pod1IP))].ignoreLearn = false
-			// END OCP HACK
 			Eventually(func() error {
 				linuxNode.flowMutex.Lock()
 				defer linuxNode.flowMutex.Unlock()

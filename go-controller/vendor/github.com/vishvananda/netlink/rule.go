@@ -25,10 +25,23 @@ type Rule struct {
 	Invert            bool
 	Dport             *RulePortRange
 	Sport             *RulePortRange
+	IPProto           int
+	UIDRange          *RuleUIDRange
 }
 
 func (r Rule) String() string {
-	return fmt.Sprintf("ip rule %d: from %s table %d", r.Priority, r.Src, r.Table)
+	from := "all"
+	if r.Src != nil && r.Src.String() != "<nil>" {
+		from = r.Src.String()
+	}
+
+	to := "all"
+	if r.Dst != nil && r.Dst.String() != "<nil>" {
+		to = r.Dst.String()
+	}
+
+	return fmt.Sprintf("ip rule %d: from %s to %s table %d",
+		r.Priority, from, to, r.Table)
 }
 
 // NewRule return empty rules.
@@ -53,4 +66,15 @@ func NewRulePortRange(start, end uint16) *RulePortRange {
 type RulePortRange struct {
 	Start uint16
 	End   uint16
+}
+
+// NewRuleUIDRange creates rule uid range.
+func NewRuleUIDRange(start, end uint32) *RuleUIDRange {
+	return &RuleUIDRange{Start: start, End: end}
+}
+
+// RuleUIDRange represents rule uid range.
+type RuleUIDRange struct {
+	Start uint32
+	End   uint32
 }

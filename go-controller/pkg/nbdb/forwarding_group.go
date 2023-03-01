@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const ForwardingGroupTable = "Forwarding_Group"
+
 // ForwardingGroup defines an object in Forwarding_Group table
 type ForwardingGroup struct {
 	UUID        string            `ovsdb:"_uuid"`
@@ -14,6 +16,14 @@ type ForwardingGroup struct {
 	Name        string            `ovsdb:"name"`
 	Vip         string            `ovsdb:"vip"`
 	Vmac        string            `ovsdb:"vmac"`
+}
+
+func (a *ForwardingGroup) GetUUID() string {
+	return a.UUID
+}
+
+func (a *ForwardingGroup) GetChildPort() []string {
+	return a.ChildPort
 }
 
 func copyForwardingGroupChildPort(a []string) []string {
@@ -40,6 +50,10 @@ func equalForwardingGroupChildPort(a, b []string) bool {
 	return true
 }
 
+func (a *ForwardingGroup) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
+}
+
 func copyForwardingGroupExternalIDs(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -64,6 +78,22 @@ func equalForwardingGroupExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *ForwardingGroup) GetLiveness() bool {
+	return a.Liveness
+}
+
+func (a *ForwardingGroup) GetName() string {
+	return a.Name
+}
+
+func (a *ForwardingGroup) GetVip() string {
+	return a.Vip
+}
+
+func (a *ForwardingGroup) GetVmac() string {
+	return a.Vmac
 }
 
 func (a *ForwardingGroup) DeepCopyInto(b *ForwardingGroup) {

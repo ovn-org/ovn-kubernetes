@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LogicalFlowTable = "Logical_Flow"
+
 type (
 	LogicalFlowPipeline = string
 )
@@ -29,6 +31,18 @@ type LogicalFlow struct {
 	Tags            map[string]string   `ovsdb:"tags"`
 }
 
+func (a *LogicalFlow) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LogicalFlow) GetActions() string {
+	return a.Actions
+}
+
+func (a *LogicalFlow) GetControllerMeter() *string {
+	return a.ControllerMeter
+}
+
 func copyLogicalFlowControllerMeter(a *string) *string {
 	if a == nil {
 		return nil
@@ -45,6 +59,10 @@ func equalLogicalFlowControllerMeter(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalFlow) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyLogicalFlowExternalIDs(a map[string]string) map[string]string {
@@ -73,6 +91,10 @@ func equalLogicalFlowExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalFlow) GetLogicalDatapath() *string {
+	return a.LogicalDatapath
+}
+
 func copyLogicalFlowLogicalDatapath(a *string) *string {
 	if a == nil {
 		return nil
@@ -91,6 +113,10 @@ func equalLogicalFlowLogicalDatapath(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *LogicalFlow) GetLogicalDpGroup() *string {
+	return a.LogicalDpGroup
+}
+
 func copyLogicalFlowLogicalDpGroup(a *string) *string {
 	if a == nil {
 		return nil
@@ -107,6 +133,26 @@ func equalLogicalFlowLogicalDpGroup(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalFlow) GetMatch() string {
+	return a.Match
+}
+
+func (a *LogicalFlow) GetPipeline() LogicalFlowPipeline {
+	return a.Pipeline
+}
+
+func (a *LogicalFlow) GetPriority() int {
+	return a.Priority
+}
+
+func (a *LogicalFlow) GetTableID() int {
+	return a.TableID
+}
+
+func (a *LogicalFlow) GetTags() map[string]string {
+	return a.Tags
 }
 
 func copyLogicalFlowTags(a map[string]string) map[string]string {

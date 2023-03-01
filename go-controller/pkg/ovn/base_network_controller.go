@@ -66,6 +66,9 @@ type CommonNetworkControllerInfo struct {
 // by more than one type of network controllers.
 type BaseNetworkController struct {
 	CommonNetworkControllerInfo
+	// controllerName should be used to identify objects owned by given controller in the db
+	controllerName string
+
 	// per controller NAD/netconf name information
 	util.NetInfo
 	util.NetConfInfo
@@ -102,6 +105,9 @@ type BaseNetworkController struct {
 
 	// stopChan per controller
 	stopChan chan struct{}
+
+	// waitGroup per-Controller
+	wg *sync.WaitGroup
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -502,6 +508,8 @@ func (bnc *BaseNetworkController) updateL2TopologyVersion() error {
 	switch topoType {
 	case types.Layer2Topology:
 		switchName = bnc.GetNetworkScopedName(types.OVNLayer2Switch)
+	case types.LocalnetTopology:
+		switchName = bnc.GetNetworkScopedName(types.OVNLocalnetSwitch)
 	default:
 		return fmt.Errorf("topology type %s is not supported", topoType)
 	}
@@ -534,6 +542,8 @@ func (bnc *BaseNetworkController) determineOVNTopoVersionFromOVN() error {
 			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalRouter(bnc.GetNetworkScopedName(types.OVNClusterRouter))
 		case types.Layer2Topology:
 			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalSwitch(bnc.GetNetworkScopedName(types.OVNLayer2Switch))
+		case types.LocalnetTopology:
+			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalSwitch(bnc.GetNetworkScopedName(types.OVNLocalnetSwitch))
 		default:
 			return fmt.Errorf("topology type %s not supported", topoType)
 		}

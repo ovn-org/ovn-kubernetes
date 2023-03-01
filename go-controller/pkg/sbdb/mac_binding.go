@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const MACBindingTable = "MAC_Binding"
+
 // MACBinding defines an object in MAC_Binding table
 type MACBinding struct {
 	UUID        string `ovsdb:"_uuid"`
@@ -12,6 +14,26 @@ type MACBinding struct {
 	IP          string `ovsdb:"ip"`
 	LogicalPort string `ovsdb:"logical_port"`
 	MAC         string `ovsdb:"mac"`
+}
+
+func (a *MACBinding) GetUUID() string {
+	return a.UUID
+}
+
+func (a *MACBinding) GetDatapath() string {
+	return a.Datapath
+}
+
+func (a *MACBinding) GetIP() string {
+	return a.IP
+}
+
+func (a *MACBinding) GetLogicalPort() string {
+	return a.LogicalPort
+}
+
+func (a *MACBinding) GetMAC() string {
+	return a.MAC
 }
 
 func (a *MACBinding) DeepCopyInto(b *MACBinding) {

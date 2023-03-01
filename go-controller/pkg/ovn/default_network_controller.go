@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set_syncer"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
@@ -37,13 +38,12 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const DefaultNetworkControllerName = "default-network-controller"
+
 // DefaultNetworkController structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints) for default l3 network
 type DefaultNetworkController struct {
 	BaseNetworkController
-
-	// waitGroup per-Controller
-	wg *sync.WaitGroup
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator        *subnetallocator.HostSubnetAllocator
@@ -124,6 +124,8 @@ type DefaultNetworkController struct {
 	retryEgressIPPods *retry.RetryFramework
 	// retry framework for Egress nodes
 	retryEgressNodes *retry.RetryFramework
+	// retry framework for Egress Firewall Nodes
+	retryEgressFwNodes *retry.RetryFramework
 	// EgressIP Node-specific syncMap used by egressip node event handler
 	addEgressNodeFailed sync.Map
 
@@ -161,7 +163,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient)
 	}
 	svcController, svcFactory := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
-	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory, defaultStopChan)
+	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory,
+		defaultStopChan, DefaultNetworkControllerName)
 	var hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
 	if config.HybridOverlay.Enabled {
 		hybridOverlaySubnetAllocator = subnetallocator.NewHostSubnetAllocator()
@@ -169,6 +172,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
+			controllerName:              DefaultNetworkControllerName,
 			NetConfInfo:                 &util.DefaultNetConfInfo{},
 			NetInfo:                     &util.DefaultNetInfo{},
 			lsManager:                   lsm.NewLogicalSwitchManager(),
@@ -177,8 +181,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			namespacesMutex:             sync.Mutex{},
 			addressSetFactory:           addressSetFactory,
 			stopChan:                    defaultStopChan,
+			wg:                          defaultWg,
 		},
-		wg:                           defaultWg,
 		masterSubnetAllocator:        subnetallocator.NewHostSubnetAllocator(),
 		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
 		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
@@ -222,6 +226,7 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 	oc.retryEgressIPNamespaces = oc.newRetryFrameworkWithParameters(factory.EgressIPNamespaceType, nil, nil)
 	oc.retryEgressIPPods = oc.newRetryFrameworkWithParameters(factory.EgressIPPodType, nil, nil)
 	oc.retryEgressNodes = oc.newRetryFrameworkWithParameters(factory.EgressNodeType, nil, nil)
+	oc.retryEgressFwNodes = oc.newRetryFrameworkWithParameters(factory.EgressFwNodeType, nil, nil)
 	oc.retryCloudPrivateIPConfig = oc.newRetryFrameworkWithParameters(factory.CloudPrivateIPConfigType, nil, nil)
 	oc.retryNamespaces = oc.newRetryFrameworkWithParameters(factory.NamespaceType, nil, nil)
 }
@@ -268,7 +273,15 @@ func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (oc *DefaultNetworkController) Start(ctx context.Context) error {
-	if err := oc.Init(); err != nil {
+	// sync address sets, only required for DefaultNetworkController, since any old objects in the db without
+	// Owner set are owned by the default network controller.
+	syncer := address_set_syncer.NewAddressSetSyncer(oc.nbClient, DefaultNetworkControllerName)
+	err := syncer.SyncAddressSets()
+	if err != nil {
+		return fmt.Errorf("failed to sync address sets on controller init: %v", err)
+	}
+
+	if err = oc.Init(); err != nil {
 		return err
 	}
 
@@ -428,12 +441,16 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
 		var err error
-		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
+		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan)
 		if err != nil {
 			return err
 		}
 		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 		err = oc.WatchEgressFirewall()
+		if err != nil {
+			return err
+		}
+		err = oc.WatchEgressFwNodes()
 		if err != nil {
 			return err
 		}
@@ -476,13 +493,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}()
 
 		unidling.NewUnidledAtController(oc.kube, oc.watchFactory.ServiceInformer())
-	}
-
-	// Final step to cleanup after resource handlers have synced
-	err := oc.ovnTopologyCleanup()
-	if err != nil {
-		klog.Errorf("Failed to cleanup OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
-		return err
 	}
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN and the ConfigMap
@@ -732,6 +742,14 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			}
 		}
 
+	case factory.EgressFwNodeType:
+		node := obj.(*kapi.Node)
+		if err = h.oc.updateEgressFirewallForNode(nil, node); err != nil {
+			klog.Infof("Node add failed during egress firewall eval for node: %s, will try again later: %v",
+				node.Name, err)
+			return err
+		}
+
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return h.oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
@@ -891,6 +909,11 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		}
 		return nil
 
+	case factory.EgressFwNodeType:
+		oldNode := oldObj.(*kapi.Node)
+		newNode := newObj.(*kapi.Node)
+		return h.oc.updateEgressFirewallForNode(oldNode, newNode)
+
 	case factory.CloudPrivateIPConfigType:
 		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
@@ -989,6 +1012,13 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		}
 		return nil
 
+	case factory.EgressFwNodeType:
+		node, ok := obj.(*kapi.Node)
+		if !ok {
+			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
+		}
+		return h.oc.updateEgressFirewallForNode(node, nil)
+
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return h.oc.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
@@ -1034,6 +1064,9 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 
 		case factory.EgressNodeType:
 			syncFunc = h.oc.initClusterEgressPolicies
+
+		case factory.EgressFwNodeType:
+			syncFunc = nil
 
 		case factory.EgressIPPodType,
 			factory.EgressIPType,

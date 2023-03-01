@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const NATTable = "NAT"
+
 type (
 	NATType = string
 )
@@ -30,6 +32,14 @@ type NAT struct {
 	Type              NATType           `ovsdb:"type"`
 }
 
+func (a *NAT) GetUUID() string {
+	return a.UUID
+}
+
+func (a *NAT) GetAllowedExtIPs() *string {
+	return a.AllowedExtIPs
+}
+
 func copyNATAllowedExtIPs(a *string) *string {
 	if a == nil {
 		return nil
@@ -48,6 +58,10 @@ func equalNATAllowedExtIPs(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *NAT) GetExemptedExtIPs() *string {
+	return a.ExemptedExtIPs
+}
+
 func copyNATExemptedExtIPs(a *string) *string {
 	if a == nil {
 		return nil
@@ -64,6 +78,10 @@ func equalNATExemptedExtIPs(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *NAT) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyNATExternalIDs(a map[string]string) map[string]string {
@@ -92,6 +110,14 @@ func equalNATExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *NAT) GetExternalIP() string {
+	return a.ExternalIP
+}
+
+func (a *NAT) GetExternalMAC() *string {
+	return a.ExternalMAC
+}
+
 func copyNATExternalMAC(a *string) *string {
 	if a == nil {
 		return nil
@@ -110,6 +136,18 @@ func equalNATExternalMAC(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *NAT) GetExternalPortRange() string {
+	return a.ExternalPortRange
+}
+
+func (a *NAT) GetLogicalIP() string {
+	return a.LogicalIP
+}
+
+func (a *NAT) GetLogicalPort() *string {
+	return a.LogicalPort
+}
+
 func copyNATLogicalPort(a *string) *string {
 	if a == nil {
 		return nil
@@ -126,6 +164,10 @@ func equalNATLogicalPort(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *NAT) GetOptions() map[string]string {
+	return a.Options
 }
 
 func copyNATOptions(a map[string]string) map[string]string {
@@ -152,6 +194,10 @@ func equalNATOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *NAT) GetType() NATType {
+	return a.Type
 }
 
 func (a *NAT) DeepCopyInto(b *NAT) {

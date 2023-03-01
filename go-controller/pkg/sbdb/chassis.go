@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const ChassisTable = "Chassis"
+
 // Chassis defines an object in Chassis table
 type Chassis struct {
 	UUID                string            `ovsdb:"_uuid"`
@@ -16,6 +18,14 @@ type Chassis struct {
 	OtherConfig         map[string]string `ovsdb:"other_config"`
 	TransportZones      []string          `ovsdb:"transport_zones"`
 	VtepLogicalSwitches []string          `ovsdb:"vtep_logical_switches"`
+}
+
+func (a *Chassis) GetUUID() string {
+	return a.UUID
+}
+
+func (a *Chassis) GetEncaps() []string {
+	return a.Encaps
 }
 
 func copyChassisEncaps(a []string) []string {
@@ -40,6 +50,10 @@ func equalChassisEncaps(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *Chassis) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyChassisExternalIDs(a map[string]string) map[string]string {
@@ -68,6 +82,22 @@ func equalChassisExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *Chassis) GetHostname() string {
+	return a.Hostname
+}
+
+func (a *Chassis) GetName() string {
+	return a.Name
+}
+
+func (a *Chassis) GetNbCfg() int {
+	return a.NbCfg
+}
+
+func (a *Chassis) GetOtherConfig() map[string]string {
+	return a.OtherConfig
+}
+
 func copyChassisOtherConfig(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -94,6 +124,10 @@ func equalChassisOtherConfig(a, b map[string]string) bool {
 	return true
 }
 
+func (a *Chassis) GetTransportZones() []string {
+	return a.TransportZones
+}
+
 func copyChassisTransportZones(a []string) []string {
 	if a == nil {
 		return nil
@@ -116,6 +150,10 @@ func equalChassisTransportZones(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *Chassis) GetVtepLogicalSwitches() []string {
+	return a.VtepLogicalSwitches
 }
 
 func copyChassisVtepLogicalSwitches(a []string) []string {

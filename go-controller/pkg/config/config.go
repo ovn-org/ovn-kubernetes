@@ -306,6 +306,7 @@ type KubernetesConfig struct {
 	NoHostSubnetNodes    *metav1.LabelSelector
 	HostNetworkNamespace string `gcfg:"host-network-namespace"`
 	PlatformType         string `gcfg:"platform-type"`
+	HealthzBindAddress   string `gcfg:"healthz-bind-address"`
 
 	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
 	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
@@ -976,6 +977,11 @@ var K8sFlags = []cli.Flag{
 			"Valid values can be found in: https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/vendor/github.com/openshift/api/config/v1/types_infrastructure.go#L130-L172",
 		Destination: &cliConfig.Kubernetes.PlatformType,
 		Value:       Kubernetes.PlatformType,
+	},
+	&cli.StringFlag{
+		Name:        "healthz-bind-address",
+		Usage:       "The IP address and port for the node proxy healthz server to serve on (set to '0.0.0.0:10256' or '[::]:10256' for listening in all interfaces and IP families). Disabled by default.",
+		Destination: &cliConfig.Kubernetes.HealthzBindAddress,
 	},
 }
 

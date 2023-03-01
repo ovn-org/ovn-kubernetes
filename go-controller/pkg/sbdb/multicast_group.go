@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const MulticastGroupTable = "Multicast_Group"
+
 // MulticastGroup defines an object in Multicast_Group table
 type MulticastGroup struct {
 	UUID      string   `ovsdb:"_uuid"`
@@ -12,6 +14,22 @@ type MulticastGroup struct {
 	Name      string   `ovsdb:"name"`
 	Ports     []string `ovsdb:"ports"`
 	TunnelKey int      `ovsdb:"tunnel_key"`
+}
+
+func (a *MulticastGroup) GetUUID() string {
+	return a.UUID
+}
+
+func (a *MulticastGroup) GetDatapath() string {
+	return a.Datapath
+}
+
+func (a *MulticastGroup) GetName() string {
+	return a.Name
+}
+
+func (a *MulticastGroup) GetPorts() []string {
+	return a.Ports
 }
 
 func copyMulticastGroupPorts(a []string) []string {
@@ -36,6 +54,10 @@ func equalMulticastGroupPorts(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *MulticastGroup) GetTunnelKey() int {
+	return a.TunnelKey
 }
 
 func (a *MulticastGroup) DeepCopyInto(b *MulticastGroup) {

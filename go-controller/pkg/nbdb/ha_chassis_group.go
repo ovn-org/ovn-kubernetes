@@ -5,12 +5,22 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const HAChassisGroupTable = "HA_Chassis_Group"
+
 // HAChassisGroup defines an object in HA_Chassis_Group table
 type HAChassisGroup struct {
 	UUID        string            `ovsdb:"_uuid"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	HaChassis   []string          `ovsdb:"ha_chassis"`
 	Name        string            `ovsdb:"name"`
+}
+
+func (a *HAChassisGroup) GetUUID() string {
+	return a.UUID
+}
+
+func (a *HAChassisGroup) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyHAChassisGroupExternalIDs(a map[string]string) map[string]string {
@@ -39,6 +49,10 @@ func equalHAChassisGroupExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *HAChassisGroup) GetHaChassis() []string {
+	return a.HaChassis
+}
+
 func copyHAChassisGroupHaChassis(a []string) []string {
 	if a == nil {
 		return nil
@@ -61,6 +75,10 @@ func equalHAChassisGroupHaChassis(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *HAChassisGroup) GetName() string {
+	return a.Name
 }
 
 func (a *HAChassisGroup) DeepCopyInto(b *HAChassisGroup) {

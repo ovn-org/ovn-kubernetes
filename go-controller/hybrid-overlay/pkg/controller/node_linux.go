@@ -49,9 +49,6 @@ type NodeController struct {
 	gwLRPIP     net.IP
 	vxlanPort   uint16
 	// contains a map of pods to corresponding tunnels
-	tunMap      map[string]string
-	tunMapMutex sync.Mutex
-	// flow cache map of cookies to flows
 	flowCache map[string]*flowCacheEntry
 	flowMutex sync.Mutex
 	// channel to indicate we need to update flows immediately
@@ -72,14 +69,12 @@ func newNodeController(
 ) (nodeController, error) {
 
 	node := &NodeController{
-		nodeName:    nodeName,
-		vxlanPort:   uint16(config.HybridOverlay.VXLANPort),
-		tunMap:      make(map[string]string),
-		tunMapMutex: sync.Mutex{},
-		flowCache:   make(map[string]*flowCacheEntry),
-		flowMutex:   sync.Mutex{},
-		flowChan:    make(chan struct{}, 1),
-		nodeLister:  nodeLister,
+		nodeName:   nodeName,
+		vxlanPort:  uint16(config.HybridOverlay.VXLANPort),
+		flowCache:  make(map[string]*flowCacheEntry),
+		flowMutex:  sync.Mutex{},
+		flowChan:   make(chan struct{}, 1),
+		nodeLister: nodeLister,
 	}
 	return node, nil
 }
@@ -156,33 +151,6 @@ func (n *NodeController) DeletePod(pod *kapi.Pod) error {
 	if err != nil {
 		return fmt.Errorf("error getting pod details: %v", err)
 	}
-	tunIPs := make(map[string]struct{})
-	n.tunMapMutex.Lock()
-	for _, podIP := range podIPs {
-		// need to check if any pods in the tunMap still correspond to a tunnel
-		// store the tunIP so we can delete cookie later
-		tunIPs[n.tunMap[podIP.IP.String()]] = struct{}{}
-		delete(n.tunMap, podIP.IP.String())
-	}
-	for tunIP := range tunIPs {
-		if len(tunIP) > 0 {
-			// check if any pods still belong to this tunnel so we can clean up the flow if not
-			tunStillActive := false
-			for _, tun := range n.tunMap {
-				if tunIP == tun {
-					tunStillActive = true
-					break
-				}
-			}
-			if !tunStillActive {
-				cookie := podIPToCookie(net.ParseIP(tunIP))
-				if cookie != "" {
-					n.deleteFlowsByCookie(cookie)
-				}
-			}
-		}
-	}
-	n.tunMapMutex.Unlock()
 	for _, podIP := range podIPs {
 		cookie := podIPToCookie(podIP.IP)
 		if cookie == "" {
@@ -740,7 +708,7 @@ func (n *NodeController) syncFlows() {
 			// and we accidentally pick up the old vtep flow and cache it. This should only ever happen on a pod update
 			// with an NS annotation VTEP change. We only need to ignore it for one iteration of sync.
 			if cacheEntry.ignoreLearn {
-				klog.Infof("Ignoring learned flow to add to hybrid cache for this iteration: %s", line)
+				klog.V(5).Infof("Ignoring learned flow to add to hybrid cache for this iteration: %s", line)
 				cacheEntry.ignoreLearn = false
 				cacheEntry.learnedFlow = ""
 				continue
@@ -765,13 +733,6 @@ func (n *NodeController) syncFlows() {
 	_, stderr, err = util.ReplaceOFFlows(extBridgeName, flows)
 	if err != nil {
 		klog.Errorf("Failed to add flows, error: %v, stderr: %s, flows: %s", err, stderr, flows)
-		return
-	}
-
-	// handle resetting ignore learn as we may not have encountered some pods while
-	// iterating through the flows in OVS
-	for _, entry := range n.flowCache {
-		entry.ignoreLearn = false
 	}
 }
 

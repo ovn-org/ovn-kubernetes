@@ -219,6 +219,21 @@ var metricOvsInterfaceCollisionsTotal = prometheus.NewGauge(prometheus.GaugeOpts
 	Help:      "The total number of packet collisions transmitted by Open vSwitch interface(s).",
 })
 
+var metricOvsInterfaceTotal = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "interfaces_total",
+	Help:      "The total number of Open vSwitch interface(s) created for pods",
+})
+
+var MetricOvsInterfaceUpWait = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "interface_up_wait_seconds_total",
+	Help: "The total number of seconds that is required to wait for pod " +
+		"Open vSwitch interface until its available",
+})
+
 // ovs memory metrics
 var metricOvsHandlersTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvsNamespace,
@@ -519,7 +534,7 @@ func updateOvsInterfaceMetrics(ovsVsctl ovsClient) error {
 	if stdout == "" {
 		return fmt.Errorf("unable to update OVS interface metrics because blank output received from OVS client")
 	}
-	var linkReset, rxDropped, txDropped, rxErr, txErr, collisions, statValue float64
+	var linkReset, rxDropped, txDropped, rxErr, txErr, collisions, statValue, interfaceCount float64
 	for _, kvPair := range strings.Split(stdout, "\n") {
 		if kvPair == "" {
 			continue
@@ -533,6 +548,7 @@ func updateOvsInterfaceMetrics(ovsVsctl ovsClient) error {
 			return fmt.Errorf("expected string to contain an integer. Failed to get OVS interface metrics: %v", err)
 		}
 		linkReset += statValue
+		interfaceCount++
 		// sum statistics
 		for _, field := range strings.Fields(interfaceFieldValues[1]) {
 			statsField := strings.Split(field, "=")
@@ -557,6 +573,7 @@ func updateOvsInterfaceMetrics(ovsVsctl ovsClient) error {
 			}
 		}
 	}
+	metricOvsInterfaceTotal.Set(interfaceCount)
 	metricOvsInterfaceResetsTotal.Set(linkReset)
 	metricOvsInterfaceRxDroppedTotal.Set(rxDropped)
 	metricOvsInterfaceTxDroppedTotal.Set(txDropped)
@@ -883,6 +900,8 @@ func registerOvsMetrics(registry prometheus.Registerer, stopChan <-chan struct{}
 		registry.MustRegister(metricOvsInterfaceRxErrorsTotal)
 		registry.MustRegister(metricOvsInterfaceTxErrorsTotal)
 		registry.MustRegister(metricOvsInterfaceCollisionsTotal)
+		registry.MustRegister(metricOvsInterfaceTotal)
+		registry.MustRegister(MetricOvsInterfaceUpWait)
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
