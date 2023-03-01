@@ -53,7 +53,7 @@ type destination struct {
 	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
 	clusterSubnetIntersection bool
 	nodeAddrs                 sets.String
-	nodeSelector              metav1.LabelSelector
+	nodeSelector              *metav1.LabelSelector
 }
 
 // cloneEgressFirewall shallow copies the egressfirewallapi.EgressFirewall object provided.
@@ -96,11 +96,11 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 		efr.to.nodeSelector = rawEgressFirewallRule.To.NodeSelector
 		efr.to.nodeAddrs = sets.NewString()
 		// validate node selector
-		_, err := metav1.LabelSelectorAsSelector(&rawEgressFirewallRule.To.NodeSelector)
+		_, err := metav1.LabelSelectorAsSelector(rawEgressFirewallRule.To.NodeSelector)
 		if err != nil {
 			return nil, fmt.Errorf("rule destination has invalid node selector, err: %v", err)
 		}
-		nodes, err := oc.watchFactory.GetNodesBySelector(rawEgressFirewallRule.To.NodeSelector)
+		nodes, err := oc.watchFactory.GetNodesBySelector(*rawEgressFirewallRule.To.NodeSelector)
 		if err != nil {
 			return efr, fmt.Errorf("unable to query nodes for egress firewall: %w", err)
 		}
@@ -739,7 +739,7 @@ func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode
 			if len(rule.to.cidrSelector) != 0 || len(rule.to.dnsName) != 0 {
 				continue
 			}
-			selector, err := metav1.LabelSelectorAsSelector(&rule.to.nodeSelector)
+			selector, err := metav1.LabelSelectorAsSelector(rule.to.nodeSelector)
 			if err != nil {
 				klog.Errorf("Error while parsing label selector %#v for egress firewall in namespace %s",
 					rule.to.nodeSelector, namespace)

@@ -32,7 +32,8 @@ type Interface interface {
 	K8sV1() k8sv1.K8sV1Interface
 }
 
-// Clientset contains the clients for groups.
+// Clientset contains the clients for groups. Each group has exactly one
+// version included in a Clientset.
 type Clientset struct {
 	*discovery.DiscoveryClient
 	k8sV1 *k8sv1.K8sV1Client
@@ -58,10 +59,6 @@ func (c *Clientset) Discovery() discovery.DiscoveryInterface {
 // where httpClient was generated with rest.HTTPClientFor(c).
 func NewForConfig(c *rest.Config) (*Clientset, error) {
 	configShallowCopy := *c
-
-	if configShallowCopy.UserAgent == "" {
-		configShallowCopy.UserAgent = rest.DefaultKubernetesUserAgent()
-	}
 
 	// share the transport between all clients
 	httpClient, err := rest.HTTPClientFor(&configShallowCopy)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
 	"net"
 	"time"
 
@@ -687,7 +686,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						{
 							Type: "Allow",
 							To: egressfirewallapi.EgressFirewallDestination{
-								NodeSelector: selector,
+								NodeSelector: &selector,
 							},
 						},
 					})
@@ -1157,7 +1156,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						{
 							Type: "Allow",
 							To: egressfirewallapi.EgressFirewallDestination{
-								NodeSelector: selector,
+								NodeSelector: &selector,
 							},
 						},
 					})
@@ -1292,10 +1291,17 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 })
 
 var _ = ginkgo.Describe("OVN test basic functions", func() {
-
 	var (
-		app     *cli.App
-		fakeOVN *FakeOVN
+		app       *cli.App
+		fakeOVN   *FakeOVN
+		nodeLabel = map[string]string{"use": "this"}
+	)
+
+	const (
+		node1Name string = "node1"
+		node1Addr string = "9.9.9.9"
+		node2Name string = "node2"
+		node2Addr string = "10.10.10.10"
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -1308,8 +1314,25 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
+		dbSetup := libovsdbtest.TestSetup{}
 		fakeOVN = NewFakeOVN()
-		fakeOVN.start()
+		a := newObjectMeta(node1Name, "")
+		a.Labels = nodeLabel
+		node1 := v1.Node{
+			Status: v1.NodeStatus{
+				Phase:     v1.NodeRunning,
+				Addresses: []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: node1Addr}},
+			},
+			ObjectMeta: a,
+		}
+		node2 := v1.Node{
+			Status: v1.NodeStatus{
+				Phase:     v1.NodeRunning,
+				Addresses: []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: node2Addr}},
+			},
+			ObjectMeta: newObjectMeta(node2Name, ""),
+		}
+		fakeOVN.startWithDBSetup(dbSetup, &v1.NodeList{Items: []v1.Node{node1, node2}})
 	})
 
 	ginkgo.AfterEach(func() {
@@ -1638,17 +1661,49 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 					to:     destination{cidrSelector: "2002:0:0:1234:0001::/80", clusterSubnetIntersection: true},
 				},
 			},
+			// nodeSelector tests
+			// selector matches nothing
 			{
 				egressFirewallRule: egressfirewallapi.EgressFirewallRule{
 					Type: egressfirewallapi.EgressFirewallRuleAllow,
-					To:   egressfirewallapi.EgressFirewallDestination{NodeSelector: metav1.LabelSelector{}},
+					To: egressfirewallapi.EgressFirewallDestination{NodeSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"no": "match"}}},
 				},
 				id:  1,
 				err: false,
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{nodeAddrs: sets.NewString()},
+					to: destination{nodeAddrs: sets.NewString(), nodeSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"no": "match"}}},
+				},
+			},
+			// empty selector, match all
+			{
+				egressFirewallRule: egressfirewallapi.EgressFirewallRule{
+					Type: egressfirewallapi.EgressFirewallRuleAllow,
+					To:   egressfirewallapi.EgressFirewallDestination{NodeSelector: &metav1.LabelSelector{}},
+				},
+				id:  1,
+				err: false,
+				output: egressFirewallRule{
+					id:     1,
+					access: egressfirewallapi.EgressFirewallRuleAllow,
+					to:     destination{nodeAddrs: sets.NewString("9.9.9.9", "10.10.10.10"), nodeSelector: &metav1.LabelSelector{}},
+				},
+			},
+			// match one node
+			{
+				egressFirewallRule: egressfirewallapi.EgressFirewallRule{
+					Type: egressfirewallapi.EgressFirewallRuleAllow,
+					To:   egressfirewallapi.EgressFirewallDestination{NodeSelector: &metav1.LabelSelector{MatchLabels: nodeLabel}},
+				},
+				id:  1,
+				err: false,
+				output: egressFirewallRule{
+					id:     1,
+					access: egressfirewallapi.EgressFirewallRuleAllow,
+					to:     destination{nodeAddrs: sets.NewString(node1Addr), nodeSelector: &metav1.LabelSelector{MatchLabels: nodeLabel}},
 				},
 			},
 		}
