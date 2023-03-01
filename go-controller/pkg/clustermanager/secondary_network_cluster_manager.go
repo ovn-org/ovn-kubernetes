@@ -1,8 +1,6 @@
 package clustermanager
 
 import (
-	"context"
-
 	"github.com/containernetworking/cni/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -22,16 +20,14 @@ type secondaryNetworkClusterManager struct {
 	nadController *nad.NetAttachDefinitionController
 	ovnClient     *util.OVNClusterManagerClientset
 	watchFactory  *factory.WatchFactory
-	stopChan      chan struct{}
 }
 
 func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset,
 	wf *factory.WatchFactory, recorder record.EventRecorder) *secondaryNetworkClusterManager {
-	klog.Infof("Creating new multi network cluster manager")
+	klog.Infof("Creating secondary network cluster manager")
 	sncm := &secondaryNetworkClusterManager{
 		ovnClient:    ovnClient,
 		watchFactory: wf,
-		stopChan:     make(chan struct{}),
 	}
 	sncm.nadController = nad.NewNetAttachDefinitionController(
 		"cluster-manager", sncm, ovnClient.NetworkAttchDefClient, recorder)
@@ -39,28 +35,14 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 }
 
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
-func (sncm *secondaryNetworkClusterManager) Start(cancel context.CancelFunc) error {
-	klog.Infof("Starting cluster-manager/net-attach-def-controller")
-	go func() {
-		// nadController Run blocks until the stopChan is closed.
-		if err := sncm.nadController.Run(sncm.stopChan); err != nil {
-			klog.Errorf("Nad controller run failed %v", err)
-			cancel()
-		}
-	}()
-	return nil
+func (sncm *secondaryNetworkClusterManager) Start() error {
+	klog.Infof("Starting secondary network cluster manager")
+	return sncm.nadController.Start()
 }
 
 func (sncm *secondaryNetworkClusterManager) Stop() {
-	close(sncm.stopChan)
-
-	// stops each network controller associated with net-attach-def; it is ok
-	// to call GetAllControllers here as net-attach-def controller has been stopped,
-	// and no more change of network controllers
-	klog.Infof("Stopping cluster-manager/net-attach-def-controller")
-	for _, oc := range sncm.nadController.GetAllNetworkControllers() {
-		oc.Stop()
-	}
+	klog.Infof("Stopping secondary network cluster manager")
+	sncm.nadController.Stop()
 }
 
 // NewNetworkController implements the networkAttachDefController.NetworkControllerManager
@@ -68,7 +50,6 @@ func (sncm *secondaryNetworkClusterManager) Stop() {
 // a layer2 or layer3 secondary network is created.  Layer2 type is not handled here.
 func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo,
 	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
-	klog.Infof("New net-attach-def controller for network %s called", nInfo.GetNetworkName())
 	topoType := netConfInfo.TopologyType()
 	if topoType == ovntypes.Layer3Topology {
 		layer3NetConfInfo := netConfInfo.(*util.Layer3NetConfInfo)
