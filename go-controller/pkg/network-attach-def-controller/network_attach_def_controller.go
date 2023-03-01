@@ -18,13 +18,13 @@ import (
 	"k8s.io/klog/v2"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
-	netattachdefinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
-	networkattachmentdefinitioninformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
-	networkattachmentdefinitionlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+	nadclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
+	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 )
 
@@ -82,11 +82,13 @@ type NetAttachDefinitionController struct {
 	name               string
 	recorder           record.EventRecorder
 	ncm                NetworkControllerManager
-	nadFactory         networkattachmentdefinitioninformerfactory.SharedInformerFactory
-	netAttachDefLister networkattachmentdefinitionlisters.NetworkAttachmentDefinitionLister
+	nadFactory         nadinformers.SharedInformerFactory
+	netAttachDefLister nadlisters.NetworkAttachmentDefinitionLister
 	netAttachDefSynced cache.InformerSynced
 	queue              workqueue.RateLimitingInterface
 	loopPeriod         time.Duration
+	stopChan           chan struct{}
+	wg                 sync.WaitGroup
 
 	// key is nadName, value is nadNetConfInfo
 	perNADNetConfInfo *syncmap.SyncMap[*nadNetConfInfo]
@@ -96,9 +98,9 @@ type NetAttachDefinitionController struct {
 	perNetworkNADInfo *syncmap.SyncMap[*networkNADInfo]
 }
 
-func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager, networkAttchDefClient networkattchmentdefclientset.Interface,
+func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager, networkAttchDefClient nadclientset.Interface,
 	recorder record.EventRecorder) *NetAttachDefinitionController {
-	nadFactory := netattachdefinformers.NewSharedInformerFactoryWithOptions(
+	nadFactory := nadinformers.NewSharedInformerFactoryWithOptions(
 		networkAttchDefClient,
 		avoidResync,
 	)
@@ -116,6 +118,7 @@ func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager,
 		netAttachDefSynced: netAttachDefInformer.Informer().HasSynced,
 		queue:              workqueue.NewNamedRateLimitingQueue(rateLimiter, "net-attach-def"),
 		loopPeriod:         time.Second,
+		stopChan:           make(chan struct{}),
 		perNADNetConfInfo:  syncmap.NewSyncMap[*nadNetConfInfo](),
 		perNetworkNADInfo:  syncmap.NewSyncMap[*networkNADInfo](),
 	}
@@ -128,17 +131,19 @@ func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager,
 	return nadController
 }
 
-func (nadController *NetAttachDefinitionController) Run(stopChan <-chan struct{}) error {
-	defer utilruntime.HandleCrash()
-	defer func() {
-		klog.Infof("Shutting down controller %s", nadController.name)
-		nadController.queue.ShutDown()
-	}()
+func (nadController *NetAttachDefinitionController) Start() error {
+	klog.Infof("Starting %s NAD controller", nadController.name)
+	g := errgroup.Group{}
+	// run on a goroutine so that we can be stopped if we happen to
+	// be stuck waiting for cache sync
+	g.Go(nadController.start)
+	return g.Wait()
+}
 
-	nadController.nadFactory.Start(stopChan)
-	klog.Infof("Starting controller %s", nadController.name)
-	if !cache.WaitForNamedCacheSync(nadController.name, stopChan, nadController.netAttachDefSynced) {
-		return fmt.Errorf("error syncing cache")
+func (nadController *NetAttachDefinitionController) start() error {
+	nadController.nadFactory.Start(nadController.stopChan)
+	if !cache.WaitForNamedCacheSync(nadController.name, nadController.stopChan, nadController.netAttachDefSynced) {
+		return fmt.Errorf("stop requested while syncing caches")
 	}
 
 	err := nadController.SyncNetworkControllers()
@@ -146,20 +151,31 @@ func (nadController *NetAttachDefinitionController) Run(stopChan <-chan struct{}
 		return fmt.Errorf("failed to sync all existing NAD entries: %v", err)
 	}
 
-	klog.Info("Starting workers for controller %s", nadController.name)
-	wg := &sync.WaitGroup{}
+	klog.Info("Starting workers for %s NAD controller", nadController.name)
 	for i := 0; i < numberOfWorkers; i++ {
-		wg.Add(1)
+		nadController.wg.Add(1)
 		go func() {
-			defer wg.Done()
-			wait.Until(nadController.worker, nadController.loopPeriod, stopChan)
+			defer nadController.wg.Done()
+			wait.Until(nadController.worker, nadController.loopPeriod, nadController.stopChan)
 		}()
 	}
-	wg.Wait()
 
-	// wait until we're told to stop
-	<-stopChan
 	return nil
+}
+
+func (nadController *NetAttachDefinitionController) Stop() {
+	klog.Infof("Shutting down %s NAD controller", nadController.name)
+
+	close(nadController.stopChan)
+	nadController.queue.ShutDown()
+
+	// wait for the workers to terminate
+	nadController.wg.Wait()
+
+	// stop each network controller
+	for _, oc := range nadController.getAllNetworkControllers() {
+		oc.Stop()
+	}
 }
 
 func (nadController *NetAttachDefinitionController) SyncNetworkControllers() (err error) {
@@ -187,7 +203,7 @@ func (nadController *NetAttachDefinitionController) SyncNetworkControllers() (er
 		}
 	}
 
-	return nadController.ncm.CleanupDeletedNetworks(nadController.GetAllNetworkControllers())
+	return nadController.ncm.CleanupDeletedNetworks(nadController.getAllNetworkControllers())
 }
 
 func (nadController *NetAttachDefinitionController) worker() {
@@ -312,10 +328,10 @@ func (nadController *NetAttachDefinitionController) onNetworkAttachDefinitionDel
 	nadController.queueNetworkAttachDefinition(obj)
 }
 
-// GetAllNetworkControllers returns a snapshot of all managed NAD associated network controllers.
+// getAllNetworkControllers returns a snapshot of all managed NAD associated network controllers.
 // Caller needs to note that there are no guarantees the return results reflect the real time
 // condition. There maybe more controllers being added, and returned controllers may be deleted
-func (nadController *NetAttachDefinitionController) GetAllNetworkControllers() []NetworkController {
+func (nadController *NetAttachDefinitionController) getAllNetworkControllers() []NetworkController {
 	allNetworkNames := nadController.perNetworkNADInfo.GetKeys()
 	allNetworkControllers := make([]NetworkController, 0, len(allNetworkNames))
 	for _, netName := range allNetworkNames {

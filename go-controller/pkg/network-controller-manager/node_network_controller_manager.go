@@ -99,48 +99,32 @@ func (ncm *nodeNetworkControllerManager) getOVNIfUpCheckMode() error {
 	return nil
 }
 
-// Init initializes the node network controller manager and create default controller
-func (ncm *nodeNetworkControllerManager) Init() error {
-	if err := ncm.getOVNIfUpCheckMode(); err != nil {
+// Start the node network controller manager
+func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) {
+	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
+
+	if err = ncm.getOVNIfUpCheckMode(); err != nil {
 		return err
 	}
 
 	// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
 	// Must happen before calling any OVS exec from pkg/cni to prevent races.
 	// Not required in DPUHost mode as OVS is not present there.
-	if err := cni.SetExec(kexec.New()); err != nil {
+	if err = cni.SetExec(kexec.New()); err != nil {
 		return err
 	}
 
-	ncm.defaultNodeNetworkController = node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo())
-	return nil
-}
+	err = ncm.watchFactory.Start()
+	if err != nil {
+		return err
+	}
 
-// Start initializes and starts the node network controller manager, which handles both default and secondary controllers
-func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) {
-	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
+	// make sure we clean up after ourselves on failure
 	defer func() {
 		if err != nil {
 			ncm.Stop()
 		}
 	}()
-
-	// Start the watch factory to begin listening for events
-	err = ncm.Init()
-	if err != nil {
-		return err
-	}
-
-	return ncm.Run(ctx)
-}
-
-// Run starts the node network controller manager, including default network controllers and the NAD controller
-// that handles all net-attach-def and the associated secondary network controllers.
-func (ncm *nodeNetworkControllerManager) Run(ctx context.Context) error {
-	err := ncm.watchFactory.Start()
-	if err != nil {
-		return err
-	}
 
 	if config.OvnKubeNode.Mode != ovntypes.NodeModeDPUHost {
 		// start health check to ensure there are no stale OVS internal ports
@@ -150,6 +134,7 @@ func (ncm *nodeNetworkControllerManager) Run(ctx context.Context) error {
 		}, time.Minute, ncm.stopChan)
 	}
 
+	ncm.defaultNodeNetworkController = node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo())
 	err = ncm.defaultNodeNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)
@@ -157,28 +142,24 @@ func (ncm *nodeNetworkControllerManager) Run(ctx context.Context) error {
 
 	// nadController is nil if multi-network is disabled
 	if ncm.nadController != nil {
-		klog.Infof("Starts net-attach-def controller")
-		return ncm.nadController.Run(ncm.stopChan)
+		err = ncm.nadController.Start()
 	}
 
-	return nil
+	return err
 }
 
 // Stop gracefully stops all managed controllers
 func (ncm *nodeNetworkControllerManager) Stop() {
+	// stops stale ovs ports cleanup
 	close(ncm.stopChan)
 
 	if ncm.defaultNodeNetworkController != nil {
 		ncm.defaultNodeNetworkController.Stop()
 	}
 
-	// then stops each network controller associated with net-attach-def; it is ok
-	// to call GetAllNetworkControllers here as net-attach-def controller has been stopped,
-	// and no more change of network controllers
+	// stops the NAD controller
 	if ncm.nadController != nil {
-		for _, nc := range ncm.nadController.GetAllNetworkControllers() {
-			nc.Stop()
-		}
+		ncm.nadController.Stop()
 	}
 }
 
