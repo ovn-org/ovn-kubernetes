@@ -957,7 +957,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 
 	case factory.PeerPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
+		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -965,7 +965,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
+		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
