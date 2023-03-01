@@ -363,23 +363,12 @@ func nodeGatewayMTUSupportChanged(oldNode, node *kapi.Node) bool {
 	return util.ParseNodeGatewayMTUSupport(oldNode) != util.ParseNodeGatewayMTUSupport(node)
 }
 
-// noHostSubnet() compares the no-hostsubnet-nodes flag with node labels to see if the node is managing its
-// own network.
-func noHostSubnet(node *kapi.Node) bool {
-	if config.Kubernetes.NoHostSubnetNodes == nil {
-		return false
-	}
-
-	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
-	return nodeSelector.Matches(labels.Set(node.Labels))
-}
-
 // shouldUpdateNode() determines if the ovn-kubernetes plugin should update the state of the node.
 // ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
 // whether or not ovn-kubernetes assigns a hostsubnet
 func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
-	newNoHostSubnet := noHostSubnet(node)
-	oldNoHostSubnet := noHostSubnet(oldNode)
+	newNoHostSubnet := util.NoHostSubnet(node)
+	oldNoHostSubnet := util.NoHostSubnet(oldNode)
 
 	if oldNoHostSubnet && newNoHostSubnet {
 		return false, nil

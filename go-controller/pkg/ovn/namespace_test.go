@@ -255,9 +255,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = fakeOvn.controller.masterSubnetAllocator.InitRanges(config.Default.ClusterSubnets)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{kube.Kube{fakeOvn.fakeClient.KubeClient},
 				fakeOvn.fakeClient.EgressIPClient, fakeOvn.fakeClient.EgressFirewallClient, nil}, testNode.Name)
 

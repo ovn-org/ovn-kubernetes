@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -31,16 +32,16 @@ type nodeNetworkControllerManager struct {
 	recorder       record.EventRecorder
 	isOvnUpEnabled bool
 
-	defaultNodeNetworkController BaseNetworkController
+	defaultNodeNetworkController nad.BaseNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete secondary controllers
 	// nil in dpu-host mode
-	nadController *netAttachDefinitionController
+	nadController *nad.NetAttachDefinitionController
 }
 
 // NewNetworkController create secondary node network controllers for the given NetInfo and NetConfInfo
 func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo,
-	netConfInfo util.NetConfInfo) (NetworkController, error) {
+	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
 	topoType := netConfInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
@@ -50,7 +51,7 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 }
 
 // CleanupDeletedNetworks cleans up all stale entities giving list of all existing secondary network controllers
-func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(allControllers []NetworkController) error {
+func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
 	return nil
 }
 
@@ -73,8 +74,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	if config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
-		klog.Infof("Multiple network supported, creating %s", controllerName)
-		ncm.nadController = newNetAttachDefinitionController(ncm, ovnClient.NetworkAttchDefClient, eventRecorder)
+		ncm.nadController = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, ovnClient.NetworkAttchDefClient, eventRecorder)
 	}
 	return ncm
 }

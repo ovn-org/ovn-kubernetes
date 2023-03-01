@@ -132,7 +132,14 @@ var (
 	}
 
 	// MasterHA holds master HA related config options.
-	MasterHA = MasterHAConfig{
+	MasterHA = HAConfig{
+		ElectionLeaseDuration: 60,
+		ElectionRenewDeadline: 30,
+		ElectionRetryPeriod:   20,
+	}
+
+	// ClusterMgrHA holds cluster manager HA related config options.
+	ClusterMgrHA = HAConfig{
 		ElectionLeaseDuration: 60,
 		ElectionRenewDeadline: 30,
 		ElectionRetryPeriod:   20,
@@ -402,9 +409,9 @@ type OvnAuthConfig struct {
 	exec kexec.Interface
 }
 
-// MasterHAConfig holds configuration for master HA
+// HAConfig holds configuration for HA
 // configuration.
-type MasterHAConfig struct {
+type HAConfig struct {
 	ElectionLeaseDuration int `gcfg:"election-lease-duration"`
 	ElectionRenewDeadline int `gcfg:"election-renew-deadline"`
 	ElectionRetryPeriod   int `gcfg:"election-retry-period"`
@@ -458,7 +465,8 @@ type config struct {
 	OvnNorth             OvnAuthConfig
 	OvnSouth             OvnAuthConfig
 	Gateway              GatewayConfig
-	MasterHA             MasterHAConfig
+	MasterHA             HAConfig
+	ClusterMgrHA         HAConfig
 	HybridOverlay        HybridOverlayConfig
 	OvnKubeNode          OvnKubeNodeConfig
 }
@@ -475,7 +483,8 @@ var (
 	savedOvnNorth             OvnAuthConfig
 	savedOvnSouth             OvnAuthConfig
 	savedGateway              GatewayConfig
-	savedMasterHA             MasterHAConfig
+	savedMasterHA             HAConfig
+	savedClusterMgrHA         HAConfig
 	savedHybridOverlay        HybridOverlayConfig
 	savedOvnKubeNode          OvnKubeNodeConfig
 	// legacy service-cluster-ip-range CLI option
@@ -611,7 +620,15 @@ var CommonFlags = []cli.Flag{
 	// Mode flags
 	&cli.StringFlag{
 		Name:  "init-master",
-		Usage: "initialize master, requires the hostname as argument",
+		Usage: "initialize master (both cluster-manager and network-controller-manager), requires the hostname as argument",
+	},
+	&cli.StringFlag{
+		Name:  "init-cluster-manager",
+		Usage: "initialize cluster manager (but not network-controller-manager), requires the hostname as argument",
+	},
+	&cli.StringFlag{
+		Name:  "init-network-controller-manager",
+		Usage: "initialize network-controller-manager (but not cluster-manager), requires the hostname as argument",
 	},
 	&cli.StringFlag{
 		Name:  "init-node",
@@ -1204,7 +1221,7 @@ var OVNGatewayFlags = []cli.Flag{
 	},
 }
 
-// MasterHAFlags capture OVN northbound database options
+// MasterHAFlags capture leader election flags for master
 var MasterHAFlags = []cli.Flag{
 	&cli.IntFlag{
 		Name:        "ha-election-lease-duration",
@@ -1214,19 +1231,41 @@ var MasterHAFlags = []cli.Flag{
 	},
 	&cli.IntFlag{
 		Name:        "ha-election-renew-deadline",
-		Usage:       "Leader election renew deadline (in secs) (default: 35)",
+		Usage:       "Leader election renew deadline (in secs) (default: 30)",
 		Destination: &cliConfig.MasterHA.ElectionRenewDeadline,
 		Value:       MasterHA.ElectionRenewDeadline,
 	},
 	&cli.IntFlag{
 		Name:        "ha-election-retry-period",
-		Usage:       "Leader election retry period (in secs) (default: 10)",
+		Usage:       "Leader election retry period (in secs) (default: 20)",
 		Destination: &cliConfig.MasterHA.ElectionRetryPeriod,
 		Value:       MasterHA.ElectionRetryPeriod,
 	},
 }
 
-// HybridOverlayFlats capture hybrid overlay feature options
+// ClusterMgrHAFlags capture leader election flags for cluster manager
+var ClusterMgrHAFlags = []cli.Flag{
+	&cli.IntFlag{
+		Name:        "cluster-manager-ha-election-lease-duration",
+		Usage:       "Leader election lease duration (in secs) (default: 60)",
+		Destination: &cliConfig.ClusterMgrHA.ElectionLeaseDuration,
+		Value:       ClusterMgrHA.ElectionLeaseDuration,
+	},
+	&cli.IntFlag{
+		Name:        "cluster-manager-ha-election-renew-deadline",
+		Usage:       "Leader election renew deadline (in secs) (default: 30)",
+		Destination: &cliConfig.ClusterMgrHA.ElectionRenewDeadline,
+		Value:       ClusterMgrHA.ElectionRenewDeadline,
+	},
+	&cli.IntFlag{
+		Name:        "cluster-manager-ha-election-retry-period",
+		Usage:       "Leader election retry period (in secs) (default: 20)",
+		Destination: &cliConfig.ClusterMgrHA.ElectionRetryPeriod,
+		Value:       ClusterMgrHA.ElectionRetryPeriod,
+	},
+}
+
+// HybridOverlayFlags capture hybrid overlay feature options
 var HybridOverlayFlags = []cli.Flag{
 	&cli.BoolFlag{
 		Name:        "enable-hybrid-overlay",
@@ -1293,6 +1332,7 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, OvnSBFlags...)
 	flags = append(flags, OVNGatewayFlags...)
 	flags = append(flags, MasterHAFlags...)
+	flags = append(flags, ClusterMgrHAFlags...)
 	flags = append(flags, HybridOverlayFlags...)
 	flags = append(flags, MonitoringFlags...)
 	flags = append(flags, IPFIXFlags...)
@@ -1622,6 +1662,31 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
+func buildClusterMgrHAConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&ClusterMgrHA, &file.ClusterMgrHA, &savedClusterMgrHA); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&ClusterMgrHA, &cli.ClusterMgrHA, &savedClusterMgrHA); err != nil {
+		return err
+	}
+
+	if ClusterMgrHA.ElectionLeaseDuration <= ClusterMgrHA.ElectionRenewDeadline {
+		return fmt.Errorf("invalid HA election lease duration '%d'. "+
+			"It should be greater than HA election renew deadline '%d'",
+			ClusterMgrHA.ElectionLeaseDuration, ClusterMgrHA.ElectionRenewDeadline)
+	}
+
+	if ClusterMgrHA.ElectionRenewDeadline <= ClusterMgrHA.ElectionRetryPeriod {
+		return fmt.Errorf("invalid HA election renew deadline duration '%d'. "+
+			"It should be greater than HA election retry period '%d'",
+			ClusterMgrHA.ElectionRenewDeadline, ClusterMgrHA.ElectionRetryPeriod)
+	}
+	return nil
+}
+
 func buildMonitoringConfig(ctx *cli.Context, cli, file *config) error {
 	var err error
 	if err = overrideFields(&Monitoring, &file.Monitoring, &savedMonitoring); err != nil {
@@ -1890,6 +1955,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if err = buildMasterHAConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
+	if err = buildClusterMgrHAConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
 

@@ -162,9 +162,9 @@ file.  For e.g. on Ubuntu, if you installed ovn-controller via the package
 ```
 OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-ca-cert=/etc/openvswitch/cacert.pem"
 ```
-
-Now, when you start the ovnkube utility on master, you should pass the SSL
-certificates to it. For e.g:
+If you start the ovnkube utility on master with "--init-master"
+or with "--init-network-control-manager",
+you should pass the SSL certificates to it. For e.g:
 
 ```
 sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
@@ -182,7 +182,19 @@ sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
  -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
  -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
  -sb-client-cacert /etc/openvswitch/cacert.pem \
- -sb-cert-common-name ovncontroller 
+ -sb-cert-common-name ovncontroller
+```
+
+If you start the ovnkube utility with "--init-cluster-manager",
+there is no need to pass the SSL certificates to it as it doesn't
+connect to the OVN databases. For e.g:
+
+```
+sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
+ -k8s-apiserver="http://$CENTRAL_IP:8080" \
+ -logfile="/var/log/ovn-kubernetes/ovnkube-cluster-manager.log" \
+ -init-cluster-manager="$NODE_NAME" -cluster-subnets=$CLUSTER_IP_SUBNET \
+ -k8s-service-cidr=$SERVICE_IP_SUBNET
 ```
 
 And when you start your ovnkube utility on nodes, you should pass the SSL

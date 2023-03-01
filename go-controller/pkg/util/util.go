@@ -22,6 +22,8 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -376,4 +378,15 @@ func IsEndpointServing(endpoint discovery.Endpoint) bool {
 // if includeTerminating is true and falls back to IsEndpointServing otherwise.
 func IsEndpointValid(endpoint discovery.Endpoint, includeTerminating bool) bool {
 	return includeTerminating || IsEndpointServing(endpoint)
+}
+
+// NoHostSubnet() compares the no-hostsubnet-nodes flag with node labels to see if the node is managing its
+// own network.
+func NoHostSubnet(node *v1.Node) bool {
+	if config.Kubernetes.NoHostSubnetNodes == nil {
+		return false
+	}
+
+	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
+	return nodeSelector.Matches(labels.Set(node.Labels))
 }
