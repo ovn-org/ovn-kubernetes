@@ -262,6 +262,8 @@ func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (oc *DefaultNetworkController) Start(ctx context.Context) error {
+	klog.Infof("Starting the default network controller")
+
 	// sync address sets, only required for DefaultNetworkController, since any old objects in the db without
 	// Owner set are owned by the default network controller.
 	syncer := address_set_syncer.NewAddressSetSyncer(oc.nbClient, DefaultNetworkControllerName)

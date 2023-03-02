@@ -420,12 +420,12 @@ func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
+	klog.Infof("Starting the default node network controller")
+
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
 	var cniServer *cni.Server
-
-	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
@@ -689,7 +689,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	klog.Infof("OVN Kube Node initialized and ready.")
+	klog.Infof("Default node network controller initialized and ready.")
 	return nil
 }
 

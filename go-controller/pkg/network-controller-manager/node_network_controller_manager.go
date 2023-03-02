@@ -101,7 +101,7 @@ func (ncm *nodeNetworkControllerManager) getOVNIfUpCheckMode() error {
 
 // Start the node network controller manager
 func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) {
-	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
+	klog.Infof("Starting the node network controller manager, Mode: %s", config.OvnKubeNode.Mode)
 
 	if err = ncm.getOVNIfUpCheckMode(); err != nil {
 		return err
@@ -150,14 +150,14 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 
 // Stop gracefully stops all managed controllers
 func (ncm *nodeNetworkControllerManager) Stop() {
-	// stops stale ovs ports cleanup
+	// stop stale ovs ports cleanup
 	close(ncm.stopChan)
 
 	if ncm.defaultNodeNetworkController != nil {
 		ncm.defaultNodeNetworkController.Stop()
 	}
 
-	// stops the NAD controller
+	// stop the NAD controller
 	if ncm.nadController != nil {
 		ncm.nadController.Stop()
 	}

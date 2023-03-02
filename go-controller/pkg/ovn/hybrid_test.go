@@ -226,7 +226,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			defer cancel()
 			clusterManager := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-			err = clusterManager.Start(c, cancel)
+			err = clusterManager.Start(c)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer clusterManager.Stop()
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
@@ -397,7 +397,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			defer cancel()
 			clusterManager := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-			err = clusterManager.Start(c, cancel)
+			err = clusterManager.Start(c)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer clusterManager.Stop()
 
@@ -717,7 +717,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			defer cancel()
 			clusterManager := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-			err = clusterManager.Start(c, cancel)
+			err = clusterManager.Start(c)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer clusterManager.Stop()
 
@@ -893,7 +893,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			defer cancel()
 			clusterManager := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-			err = clusterManager.Start(c, cancel)
+			err = clusterManager.Start(c)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer clusterManager.Stop()
 
