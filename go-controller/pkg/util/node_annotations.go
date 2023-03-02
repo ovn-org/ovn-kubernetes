@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 
+	corev1 "k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -73,6 +74,12 @@ const (
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
 	cloudEgressIPConfigAnnotationKey = "cloud.network.openshift.io/egress-ipconfig"
+
+	// ovnNodeID is the id (of type integer) of a node. It is set by cluster-manager.
+	ovnNodeID = "k8s.ovn.org/node-id"
+
+	// InvalidNodeID indicates an invalid node id
+	InvalidNodeID = -1
 )
 
 type L3GatewayConfig struct {
@@ -554,4 +561,36 @@ func ParseNodeHostAddresses(node *kapi.Node) (sets.Set[string], error) {
 	}
 
 	return sets.New(cfg...), nil
+}
+
+// UpdateNodeIDAnnotation updates the ovnNodeID annotation with the node id in the annotations map
+// and returns it.
+func UpdateNodeIDAnnotation(annotations map[string]string, nodeID int) map[string]string {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+
+	annotations[ovnNodeID] = strconv.Itoa(nodeID)
+	return annotations
+}
+
+// GetNodeID returns the id of the node set in the 'ovnNodeID' node annotation.
+// Returns InvalidNodeID (-1) if the 'ovnNodeID' node annotation is not set or if the value is
+// not an integer value.
+func GetNodeID(node *kapi.Node) int {
+	nodeID, ok := node.Annotations[ovnNodeID]
+	if !ok {
+		return InvalidNodeID
+	}
+
+	id, err := strconv.Atoi(nodeID)
+	if err != nil {
+		return InvalidNodeID
+	}
+	return id
+}
+
+// NodeIDAnnotationChanged returns true if the ovnNodeID in the corev1.Nodes doesn't match
+func NodeIDAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	return oldNode.Annotations[ovnNodeID] != newNode.Annotations[ovnNodeID]
 }
