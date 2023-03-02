@@ -221,6 +221,8 @@ parse_args() {
                                                 ;;
             -sw | --allow-system-writes )       KIND_ALLOW_SYSTEM_WRITES=true
                                                 ;;
+            -scm | --separate-cluster-manager)  OVN_SEPARATE_CLUSTER_MANAGER=true
+                                                ;;
             -gm | --gateway-mode )              shift
                                                 if [ "$1" != "local" ] && [ "$1" != "shared" ]; then
                                                     echo "Invalid gateway mode: $1"
@@ -361,6 +363,7 @@ print_params() {
      echo "OVN_DEPLOY_PODS = $OVN_DEPLOY_PODS"
      echo "OVN_ISOLATED = $OVN_ISOLATED"
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
+     echo "OVN_SEPARATE_CLUSTER_MANAGER = $OVN_SEPARATE_CLUSTER_MANAGER"
      echo ""
 }
 
@@ -513,6 +516,7 @@ set_default_params() {
     OVN_GATEWAY_OPTS="--gateway-interface=eth0"
   fi
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
+  OVN_SEPARATE_CLUSTER_MANAGER=${OVN_SEPARATE_CLUSTER_MANAGER:-false}
 }
 
 detect_apiserver_url() {
@@ -764,8 +768,13 @@ install_ovn() {
     run_kubectl apply -f ovnkube-db.yaml
   fi
   run_kubectl apply -f ovs-node.yaml
-  run_kubectl apply -f ovnkube-master.yaml
+  if [ "$OVN_SEPARATE_CLUSTER_MANAGER" ==  true ]; then
+    run_kubectl apply -f ovnkube-cm-ncm.yaml
+  else
+    run_kubectl apply -f ovnkube-master.yaml
+  fi
   run_kubectl apply -f ovnkube-node.yaml
+
   popd
 
   # Force pod reload just the ones with golang containers
@@ -854,6 +863,7 @@ kubectl_wait_pods() {
     echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
     kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
   done
+
   for name in ovnkube-db ovnkube-master; do
     timeout=$(calculate_timeout ${endtime})
     echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."

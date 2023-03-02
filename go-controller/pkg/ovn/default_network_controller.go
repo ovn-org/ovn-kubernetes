@@ -22,7 +22,6 @@ import (
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -44,10 +43,6 @@ const DefaultNetworkControllerName = "default-network-controller"
 // and reacting upon the watched resources (e.g. pods, endpoints) for default l3 network
 type DefaultNetworkController struct {
 	BaseNetworkController
-
-	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator        *subnetallocator.HostSubnetAllocator
-	hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
 
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
@@ -165,10 +160,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	svcController, svcFactory := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
 	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory,
 		defaultStopChan, DefaultNetworkControllerName)
-	var hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
-	if config.HybridOverlay.Enabled {
-		hybridOverlaySubnetAllocator = subnetallocator.NewHostSubnetAllocator()
-	}
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
@@ -183,12 +174,10 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			stopChan:                    defaultStopChan,
 			wg:                          defaultWg,
 		},
-		masterSubnetAllocator:        subnetallocator.NewHostSubnetAllocator(),
-		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
-		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:               sync.RWMutex{},
-		networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
-		sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
+		externalGWCache:        make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:         sync.RWMutex{},
+		networkPolicies:        syncmap.NewSyncMap[*networkPolicy](),
+		sharedNetpolPortGroups: syncmap.NewSyncMap[*defaultDenyPortGroups](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
@@ -314,18 +303,6 @@ func (oc *DefaultNetworkController) Init() error {
 	if err != nil {
 		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
 		return err
-	}
-
-	klog.Infof("Allocating subnets")
-	if err := oc.masterSubnetAllocator.InitRanges(config.Default.ClusterSubnets); err != nil {
-		klog.Errorf("Failed to initialize host subnet allocator ranges: %v", err)
-		return err
-	}
-	if config.HybridOverlay.Enabled {
-		if err := oc.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets); err != nil {
-			klog.Errorf("Failed to initialize hybrid overlay subnet allocator ranges: %v", err)
-			return err
-		}
 	}
 
 	err = oc.createACLLoggingMeter()

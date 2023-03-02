@@ -722,11 +722,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					fakeOVN.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOVN.nbClient)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					_, clusterNetwork, err := net.ParseCIDR(clusterCIDR)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					netEntry := config.CIDRNetworkEntry{CIDR: clusterNetwork, HostSubnetLength: 24}
-					fakeOVN.controller.masterSubnetAllocator.InitRanges([]config.CIDRNetworkEntry{netEntry})
-
 					// Add subnet to otherconfig for node
 					expectedNodeSwitch.OtherConfig = map[string]string{"subnet": node1.NodeSubnet}
 

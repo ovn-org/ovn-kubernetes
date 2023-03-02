@@ -77,6 +77,16 @@ var _ = Describe("Multi Homing", func() {
 				}
 				return updatedPod.Status.Phase
 			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+
+			if netConfig.excludeCIDRs != nil {
+				podIP, err := podIPForAttachment(cs, pod.GetNamespace(), pod.GetName(), secondaryNetworkName, 0)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(inRange(secondaryNetworkCIDR, podIP)).To(Succeed())
+				for _, excludedRange := range netConfig.excludeCIDRs {
+					Expect(inRange(excludedRange, podIP)).To(
+						MatchError(fmt.Errorf("ip [%s] is NOT in range %s", podIP, excludedRange)))
+				}
+			}
 		},
 			table.Entry(
 				"when attaching to an L3 - routed - network",
@@ -214,15 +224,6 @@ var _ = Describe("Multi Homing", func() {
 					return updatedPod.Status.Phase
 				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 
-				pod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
-					return status.Name == namespacedName(f.Namespace.Name, secondaryNetworkName)
-				})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(netStatus).To(HaveLen(1))
-
 				serverIP := ""
 				if netConfig.cidr == "" {
 					By("configuring static IP addresses in the pods")
@@ -242,8 +243,8 @@ var _ = Describe("Multi Homing", func() {
 				for i, subnet := range strings.Split(netConfig.cidr, ",") {
 					if subnet != "" {
 						By("asserting the server pod has an IP from the configured range")
-						Expect(netStatus[0].IPs).NotTo(BeEmpty())
-						serverIP = netStatus[0].IPs[i]
+						serverIP, err = podIPForAttachment(cs, f.Namespace.Name, serverPod.GetName(), netConfig.name, i)
+						Expect(err).NotTo(HaveOccurred())
 						Expect(inRange(popCIDRsPerNodePrefix(subnet, netPrefixLengthPerNode), serverIP)).To(Succeed())
 					}
 
@@ -641,4 +642,24 @@ func areStaticIPsConfiguredViaCNI(podConfig podConfiguration) bool {
 		}
 	}
 	return false
+}
+
+func podIPForAttachment(k8sClient clientset.Interface, podNamespace string, podName string, attachmentName string, ipIndex int) (string, error) {
+	pod, err := k8sClient.CoreV1().Pods(podNamespace).Get(context.Background(), podName, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
+		return status.Name == namespacedName(podNamespace, attachmentName)
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(netStatus) != 1 {
+		return "", fmt.Errorf("more than one status entry for attachment %s on pod %s", attachmentName, namespacedName(podNamespace, podName))
+	}
+	if len(netStatus[0].IPs) == 0 {
+		return "", fmt.Errorf("no IPs for attachment %s on pod %s", attachmentName, namespacedName(podNamespace, podName))
+	}
+	return netStatus[0].IPs[ipIndex], nil
 }

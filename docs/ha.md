@@ -74,10 +74,17 @@ sudo ovs-appctl -t /var/run/openvswitch/ovnsb_db.ctl \
     cluster/status OVN_Southbound
 ```
 
-## Start 'ovn-kube -init-master'
+## ovnkube master HA setup
 
-On any one of the masters, we need to start 'ovnkube -init-master'.
-(This should ideally be a daemonset with replica count of 1.)
+ovnkube master has 2 main components - cluster-manager and network-controller-manager.
+
+Starting ovnkube with '-init-master', runs both the components.  It is also possible
+to run these components individually by starting 2 ovnkube's one with '-init-cluster-manager'
+and the other with '-init-network-controller-manager'.
+
+On the master nodes, we can either
+   * start ovnkube with '-init-master'
+     This should be a deployment running on master nodes. Eg.
 
 IP1="$MASTER1"
 IP2="$MASTER2"
@@ -97,6 +104,42 @@ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
  -nodeport \
  -nb-address="${ovn_nb}" \
  -sb-address="${ovn_sb}"  2>&1 &
+
+ * start 'ovnkube -init-cluster-manager' and 'ovnkube -init-network-controller-manager'
+   This should be a deployment with these 2 as containers
+
+Eg.
+
+
+ovnkube master supports running in 3 modes.
+init-master mode, init-cluster-manager mode or init-network-controller-manager
+mode.  If ovnkube is run with "-init-master" mode, then there is
+no need to run the other modes because master mode enables both cluster-manager
+and network-controller-manager.  If the user desires to run cluster-manager
+and network-controller-manager separately, then it is possible to do
+so by running 
+
+nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
+ -loglevel=4 \
+ -k8s-apiserver="http://$K8S_APISERVER_IP:8080" \
+ -logfile="/var/log/openvswitch/ovnkube.log" \
+ -init-network-controller-manager="$NODENAME" -cluster-subnets="$CLUSTER_IP_SUBNET" \
+ -init-node="$NODENAME" \
+ -k8s-service-cidr="$SERVICE_IP_SUBNET" \
+ -k8s-token="$TOKEN" \
+ -nodeport \
+ -nb-address="${ovn_nb}" \
+ -sb-address="${ovn_sb}"  2>&1 &
+
+nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
+ -loglevel=4 \
+ -k8s-apiserver="http://$K8S_APISERVER_IP:8080" \
+ -logfile="/var/log/openvswitch/ovnkube.log" \
+ -init-cluster-manager="$NODENAME" -cluster-subnets="$CLUSTER_IP_SUBNET" \
+ -init-node="$NODENAME" \
+ -k8s-service-cidr="$SERVICE_IP_SUBNET" \
+ -k8s-token="$TOKEN" \
+ -nodeport  2>&1 &
 
 ## start ovn-northd
 
