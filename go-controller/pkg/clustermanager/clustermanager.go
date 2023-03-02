@@ -129,7 +129,6 @@ func (cm *ClusterManager) Start(ctx context.Context, cancel context.CancelFunc) 
 		},
 	}
 
-	leaderelection.SetProvider(ovnkubeClusterManagerLeaderMetricsProvider{})
 	leaderElector, err := leaderelection.NewLeaderElector(lec)
 	if err != nil {
 		return err
@@ -208,27 +207,4 @@ func (cm *ClusterManager) halt() error {
 
 	cm.isActive = false
 	return nil
-}
-
-// ovnkubeClusterManagerLeaderMetrics object is used for the cluster manager
-// leader election metrics
-type ovnkubeClusterManagerLeaderMetrics struct{}
-
-// On will be called by leader election (LE) when cluster manager becomes a leader
-func (ovnkubeClusterManagerLeaderMetrics) On(string) {
-	metrics.MetricClusterManagerLeader.Set(1)
-}
-
-// Off will be called by LE when cluster manager becomes a follower
-func (ovnkubeClusterManagerLeaderMetrics) Off(string) {
-	metrics.MetricClusterManagerLeader.Set(0)
-}
-
-// ovnkubeClusterManagerLeaderMetricsProvider is used by LE
-type ovnkubeClusterManagerLeaderMetricsProvider struct{}
-
-// ovnkubeClusterManagerLeaderMetricsProvider is called by LE to create an instance of
-// ovnkubeClusterManagerLeaderMetrics
-func (_ ovnkubeClusterManagerLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
-	return ovnkubeClusterManagerLeaderMetrics{}
 }
