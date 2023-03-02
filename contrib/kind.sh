@@ -806,6 +806,7 @@ create_ovn_kube_manifests() {
     --ovn-loglevel-sb="${OVN_LOG_LEVEL_SB}" \
     --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
     --ovnkube-config-duration-enable=true \
+    --admin-network-policy-enable=true \
     --egress-ip-enable=true \
     --egress-ip-healthcheck-port="${OVN_EGRESSIP_HEALTHCHECK_PORT}" \
     --egress-firewall-enable=true \
