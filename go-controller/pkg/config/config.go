@@ -369,6 +369,8 @@ type MetricsConfig struct {
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
+	// Admin Network Policy feature is enabled
+	EnableAdminNetworkPolicy bool `gcfg:"enable-admin-network-policy"`
 	// EgressIP feature is enabled
 	EnableEgressIP bool `gcfg:"enable-egress-ip"`
 	// EgressIP node reachability total timeout in seconds
@@ -947,6 +949,12 @@ var CNIFlags = []cli.Flag{
 
 // OVNK8sFeatureFlags capture OVN-Kubernetes feature related options
 var OVNK8sFeatureFlags = []cli.Flag{
+	&cli.BoolFlag{
+		Name:        "enable-admin-network-policy",
+		Usage:       "Configure to use Admin Network Policy CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableAdminNetworkPolicy,
+		Value:       OVNKubernetesFeature.EnableAdminNetworkPolicy,
+	},
 	&cli.BoolFlag{
 		Name:        "enable-egress-ip",
 		Usage:       "Configure to use EgressIP CRD feature with ovn-kubernetes.",
