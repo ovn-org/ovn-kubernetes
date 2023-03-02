@@ -15,7 +15,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -189,9 +188,6 @@ func (h *secondaryLayer3NetworkControllerEventHandler) IsObjectInTerminalState(o
 type SecondaryLayer3NetworkController struct {
 	BaseSecondaryNetworkController
 
-	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator *subnetallocator.HostSubnetAllocator
-
 	// Node-specific syncMaps used by node event handler
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
@@ -218,11 +214,9 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				wg:                          &sync.WaitGroup{},
 			},
 		},
-		masterSubnetAllocator:       subnetallocator.NewHostSubnetAllocator(),
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},
 	}
-
 	// disable multicast support for secondary networks
 	oc.multicastSupport = false
 
@@ -291,25 +285,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 	var ops []ovsdb.Operation
 	var err error
 
-	// remove hostsubnet annotation for this network
-	klog.Infof("Remove node-subnets annotation for network %s on all nodes", netName)
-	existingNodes, err := oc.watchFactory.GetNodes()
-	if err != nil {
-		klog.Errorf("Error in initializing/fetching subnets: %v", err)
-		return nil
-	}
-	for _, node := range existingNodes {
-		if noHostSubnet(node) {
-			klog.V(5).Infof("Node %s is not managed by OVN", node.Name)
-			continue
-		}
-		hostSubnetsMap := map[string][]*net.IPNet{netName: nil}
-		err = oc.UpdateNodeHostSubnetAnnotationWithRetry(node.Name, hostSubnetsMap, nil)
-		if err != nil {
-			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
-				node.Name, netName)
-		}
-	}
+	// Note : Cluster manager removes the subnet annotation for the node.
 
 	klog.Infof("Delete OVN logical entities for %s network controller of network %s", types.Layer3Topology, netName)
 	// first delete node logical switches
@@ -373,13 +349,6 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 }
 
 func (oc *SecondaryLayer3NetworkController) Init() error {
-	klog.Infof("Allocating subnets")
-	layer3NetConfInfo := oc.NetConfInfo.(*util.Layer3NetConfInfo)
-	if err := oc.masterSubnetAllocator.InitRanges(layer3NetConfInfo.ClusterSubnets); err != nil {
-		klog.Errorf("Failed to initialize host subnet allocator ranges: %v", err)
-		return err
-	}
-
 	_, err := oc.createOvnClusterRouter()
 	return err
 }
@@ -389,7 +358,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, 
 	var errs []error
 	var err error
 
-	if noHostSubnet := noHostSubnet(node); noHostSubnet {
+	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetSwitch(oc.GetNetworkScopedName(node.Name))
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for switch %s: %w", oc.GetNetworkScopedName(node.Name), err)
@@ -432,15 +401,12 @@ func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, 
 }
 
 func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	hostSubnets, err := oc.allocateNodeSubnets(node, oc.masterSubnetAllocator)
-	if err != nil {
-		return nil, err
-	}
-
-	hostSubnetsMap := map[string][]*net.IPNet{oc.GetNetworkName(): hostSubnets}
-	err = oc.UpdateNodeHostSubnetAnnotationWithRetry(node.Name, hostSubnetsMap, nil)
-	if err != nil {
-		return nil, err
+	// Node subnet for the secondary layer3 network is allocated by cluster manager.
+	// Make sure that the node is allocated with the subnet before proceeding
+	// to create OVN Northbound resources.
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+	if err != nil || len(hostSubnets) < 1 {
+		return nil, fmt.Errorf("subnet annotation in the node %q for the layer3 secondary network %s is missing : %w", node.Name, oc.GetNetworkName(), err)
 	}
 
 	err = oc.createNodeLogicalSwitch(node.Name, hostSubnets, "")
@@ -465,8 +431,6 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 }
 
 func (oc *SecondaryLayer3NetworkController) deleteNode(nodeName string) error {
-	oc.masterSubnetAllocator.ReleaseAllNodeSubnets(nodeName)
-
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
 	}
@@ -485,7 +449,11 @@ func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error
 		if !ok {
 			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
-		_ = oc.updateNodesManageHostSubnets(node, oc.masterSubnetAllocator, foundNodes)
+		if util.NoHostSubnet(node) {
+			continue
+		}
+
+		foundNodes.Insert(node.Name)
 	}
 
 	p := func(item *nbdb.LogicalSwitch) bool {

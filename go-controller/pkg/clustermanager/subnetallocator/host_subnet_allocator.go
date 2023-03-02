@@ -3,6 +3,7 @@ package subnetallocator
 import (
 	"fmt"
 	"net"
+	"sync"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -12,6 +13,7 @@ import (
 )
 
 type HostSubnetAllocator struct {
+	sync.Mutex
 	// Don't inherit from BaseSubnetAllocator to ensure users of
 	// hostSubnetAllocator can't directly call the underlying methods
 	base SubnetAllocator
