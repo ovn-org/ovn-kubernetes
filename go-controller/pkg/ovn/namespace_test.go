@@ -103,8 +103,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			// namespace-owned address set for stale namespace, should be deleted
 			ns2 := getNamespaceAddrSetDbIDs("namespace2", DefaultNetworkControllerName)
 			fakeOvn.asf.NewAddressSet(ns2, []net.IP{net.ParseIP("1.1.1.2")})
-			// netpol-owned address set for existing netpol, should stay
-			netpol := getNetpolAddrSetDbIDs("namespace1", "netpol1", "egress", "0", controllerName)
+			// netpol peer address set for existing netpol, should stay
+			netpol := getPodSelectorAddrSetDbIDs("pasName", DefaultNetworkControllerName)
 			fakeOvn.asf.NewAddressSet(netpol, []net.IP{net.ParseIP("1.1.1.3")})
 			// egressQoS-owned address set, should stay
 			qos := getEgressQosAddrSetDbIDs("namespace", "0", controllerName)
