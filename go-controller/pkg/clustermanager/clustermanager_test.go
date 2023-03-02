@@ -2,7 +2,9 @@ package clustermanager
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"strconv"
 	"sync"
 
 	v1 "k8s.io/api/core/v1"
@@ -19,6 +21,11 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
+)
+
+const (
+	// ovnNodeIDAnnotaton is the node annotation name used to store the node id.
+	ovnNodeIDAnnotaton = "k8s.ovn.org/node-id"
 )
 
 var _ = ginkgo.Describe("Cluster Manager", func() {
@@ -390,6 +397,444 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				"-gateway-mode=shared",
 				"-enable-hybrid-overlay",
 				"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
+
+	ginkgo.Context("Node Id allocations", func() {
+		ginkgo.It("check for node id allocations", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer clusterManager.Stop()
+
+				// Check that cluster manager has allocated id for each node
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						nodeId, ok := updatedNode.Annotations[ovnNodeIDAnnotaton]
+						if !ok {
+							return fmt.Errorf("expected node annotation for node %s to have node id allocated", n.Name)
+						}
+
+						_, err = strconv.Atoi(nodeId)
+						if err != nil {
+							return fmt.Errorf("expected node annotation for node %s to be an integer value, got %s", n.Name, nodeId)
+						}
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("clear the node ids and check", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer clusterManager.Stop()
+
+				nodeIds := make(map[string]string)
+				// Check that cluster manager has allocated id for each node before clearing
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						nodeId, ok := updatedNode.Annotations[ovnNodeIDAnnotaton]
+						if !ok {
+							return fmt.Errorf("expected node annotation for node %s to have node id allocated", n.Name)
+						}
+
+						_, err = strconv.Atoi(nodeId)
+						if err != nil {
+							return fmt.Errorf("expected node annotation for node %s to be an integer value, got %s", n.Name, nodeId)
+						}
+
+						nodeIds[n.Name] = nodeId
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				// Clear the node id annotation of nodes and make sure it is reset by cluster manager
+				// with the same ids.
+				for _, n := range nodes {
+					nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient}, n.Name)
+
+					nodeAnnotations := n.Annotations
+					for k, v := range nodeAnnotations {
+						nodeAnnotator.Set(k, v)
+					}
+					nodeAnnotator.Delete(ovnNodeIDAnnotaton)
+					err = nodeAnnotator.Run()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						nodeId, ok := updatedNode.Annotations[ovnNodeIDAnnotaton]
+						if !ok {
+							return fmt.Errorf("expected node annotation for node %s to have node id allocated", n.Name)
+						}
+
+						_, err = strconv.Atoi(nodeId)
+						if err != nil {
+							return fmt.Errorf("expected node annotation for node %s to be an integer value, got %s", n.Name, nodeId)
+						}
+
+						gomega.Expect(nodeId).To(gomega.Equal(nodeIds[n.Name]))
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("Stop and start a new cluster manager and verify the node ids", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				wg1 := &sync.WaitGroup{}
+				clusterManager, err := NewClusterManager(fakeClient, f, "cm1", wg1, nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Check that cluster manager has allocated id for each node before clearing
+				nodeIds := make(map[string]string)
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						nodeId, ok := updatedNode.Annotations[ovnNodeIDAnnotaton]
+						if !ok {
+							return fmt.Errorf("expected node annotation for node %s to have node id allocated", n.Name)
+						}
+
+						_, err = strconv.Atoi(nodeId)
+						if err != nil {
+							return fmt.Errorf("expected node annotation for node %s to be an integer value, got %s", n.Name, nodeId)
+						}
+
+						nodeIds[n.Name] = nodeId
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				updatedNodes := []v1.Node{}
+				for _, n := range nodes {
+					updatedNode, _ := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+					updatedNodes = append(updatedNodes, *updatedNode)
+				}
+				// stop the cluster manager and start a new instance and make sure the node ids are same.
+				clusterManager.Stop()
+				wg1.Wait()
+
+				// Close the watch factory and create a new one
+				f.Shutdown()
+				kubeFakeClient = fake.NewSimpleClientset(&v1.NodeList{
+					Items: updatedNodes,
+				})
+				fakeClient = &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				cm2, err := NewClusterManager(fakeClient, f, "cm2", wg, nil)
+				gomega.Expect(cm2).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = cm2.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer cm2.Stop()
+
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						nodeId, ok := updatedNode.Annotations[ovnNodeIDAnnotaton]
+						if !ok {
+							return fmt.Errorf("expected node annotation for node %s to have node id allocated", n.Name)
+						}
+
+						_, err = strconv.Atoi(nodeId)
+						if err != nil {
+							return fmt.Errorf("expected node annotation for node %s to be an integer value, got %s", n.Name, nodeId)
+						}
+
+						gomega.Expect(nodeId).To(gomega.Equal(nodeIds[n.Name]))
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("Stop cluster manager, set duplicate id, restart and verify the node ids", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				wg1 := &sync.WaitGroup{}
+				clusterManager, err := NewClusterManager(fakeClient, f, "cm1", wg1, nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				nodeIds := make(map[string]string)
+				// Check that cluster manager has allocated id for each node before clearing
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						nodeId, ok := updatedNode.Annotations[ovnNodeIDAnnotaton]
+						if !ok {
+							return fmt.Errorf("expected node annotation for node %s to have node id allocated", n.Name)
+						}
+
+						_, err = strconv.Atoi(nodeId)
+						if err != nil {
+							return fmt.Errorf("expected node annotation for node %s to be an integer value, got %s", n.Name, nodeId)
+						}
+
+						nodeIds[n.Name] = nodeId
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				// stop the cluster manager.
+				clusterManager.Stop()
+				wg1.Wait()
+
+				updatedNodes := []v1.Node{}
+				node2, _ := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node2", metav1.GetOptions{})
+				for _, n := range nodes {
+					updatedNode, _ := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+					if updatedNode.Name == "node3" {
+						// Make the id of node3 duplicate.
+						updatedNode.Annotations[ovnNodeIDAnnotaton] = node2.Annotations[ovnNodeIDAnnotaton]
+					}
+					updatedNodes = append(updatedNodes, *updatedNode)
+				}
+
+				// Close the watch factory and create a new one
+				f.Shutdown()
+				kubeFakeClient = fake.NewSimpleClientset(&v1.NodeList{
+					Items: updatedNodes,
+				})
+				fakeClient = &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Start a new cluster manager
+				cm2, err := NewClusterManager(fakeClient, f, "cm2", wg, nil)
+				gomega.Expect(cm2).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = cm2.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer cm2.Stop()
+
+				// Get the node ids of node2 and node3 and make sure that they are not equal
+				gomega.Eventually(func() error {
+					n2, _ := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node2", metav1.GetOptions{})
+					n3, _ := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node3", metav1.GetOptions{})
+					n2Id := n2.Annotations[ovnNodeIDAnnotaton]
+					n3Id := n3.Annotations[ovnNodeIDAnnotaton]
+					if n2Id == n3Id {
+						return fmt.Errorf("expected node annotation for node2 and node3 to be not equal, but they are : node id %s", n2Id)
+					}
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
