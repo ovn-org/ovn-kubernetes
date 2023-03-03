@@ -25,13 +25,16 @@ import (
 
 var _ = Describe("Multi Homing", func() {
 	const (
-		podName                    = "tinypod"
-		secondaryNetworkCIDR       = "10.128.0.0/16"
-		secondaryNetworkName       = "tenant-blue"
-		secondaryFlatL2IgnoreCIDR  = "10.128.0.0/29"
-		secondaryFlatL2NetworkCIDR = "10.128.0.0/24"
-		netPrefixLengthPerNode     = 24
-		secondaryIPv6CIDR          = "10:100:200::0/64"
+		podName                      = "tinypod"
+		secondaryNetworkCIDR         = "10.128.0.0/16"
+		secondaryNetworkName         = "tenant-blue"
+		secondaryFlatL2IgnoreCIDR    = "10.128.0.0/29"
+		secondaryFlatL2NetworkCIDR   = "10.128.0.0/24"
+		secondaryLocalnetIgnoreCIDR  = "60.128.0.0/29"
+		secondaryLocalnetNetworkCIDR = "60.128.0.0/24"
+		netPrefixLengthPerNode       = 24
+		localnetVLANID               = 10
+		secondaryIPv6CIDR            = "10:100:200::0/64"
 	)
 	f := wrappedTestFramework("multi-homing")
 
@@ -81,7 +84,7 @@ var _ = Describe("Multi Homing", func() {
 			if netConfig.excludeCIDRs != nil {
 				podIP, err := podIPForAttachment(cs, pod.GetNamespace(), pod.GetName(), secondaryNetworkName, 0)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(inRange(secondaryNetworkCIDR, podIP)).To(Succeed())
+				Expect(inRange(popCIDRsPerNodePrefix(netConfig.cidr, netPrefixLengthPerNode), podIP)).To(Succeed())
 				for _, excludedRange := range netConfig.excludeCIDRs {
 					Expect(inRange(excludedRange, podIP)).To(
 						MatchError(fmt.Errorf("ip [%s] is NOT in range %s", podIP, excludedRange)))
@@ -154,6 +157,71 @@ var _ = Describe("Multi Homing", func() {
 					cidr:     strings.Join([]string{secondaryFlatL2NetworkCIDR, secondaryIPv6CIDR}, ","),
 					name:     secondaryNetworkName,
 					topology: "layer2",
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        podName,
+				},
+			),
+			table.Entry(
+				"when attaching to an localnet - switched - network",
+				networkAttachmentConfig{
+					cidr:     secondaryLocalnetNetworkCIDR,
+					name:     secondaryNetworkName,
+					topology: "localnet",
+					vlanID:   localnetVLANID,
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        podName,
+				},
+			),
+			table.Entry(
+				"when attaching to an Localnet - switched - network featuring `excludeCIDR`s",
+				networkAttachmentConfig{
+					cidr:         secondaryLocalnetNetworkCIDR,
+					name:         secondaryNetworkName,
+					topology:     "localnet",
+					excludeCIDRs: []string{secondaryLocalnetIgnoreCIDR},
+					vlanID:       localnetVLANID,
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        podName,
+				},
+			),
+			table.Entry(
+				"when attaching to an localnet - switched - network without IPAM",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "localnet",
+					vlanID:   localnetVLANID,
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        podName,
+				},
+			),
+			table.Entry(
+				"when attaching to an localnet - switched - network with an IPv6 subnet",
+				networkAttachmentConfig{
+					cidr:     secondaryIPv6CIDR,
+					name:     secondaryNetworkName,
+					topology: "localnet",
+					vlanID:   localnetVLANID,
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        podName,
+				},
+			),
+			table.Entry(
+				"when attaching to an L2 - switched - network with a dual stack configuration",
+				networkAttachmentConfig{
+					cidr:     strings.Join([]string{secondaryLocalnetNetworkCIDR, secondaryIPv6CIDR}, ","),
+					name:     secondaryNetworkName,
+					topology: "localnet",
+					vlanID:   localnetVLANID,
 				},
 				podConfiguration{
 					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
@@ -395,6 +463,107 @@ var _ = Describe("Multi Homing", func() {
 					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
+			table.Entry(
+				"can communicate over an Localnet secondary network when the pods are scheduled on the same node",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "localnet",
+					cidr:     secondaryLocalnetNetworkCIDR,
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         clientPodName,
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+				},
+			),
+			table.Entry(
+				"can communicate over an Localnet secondary network without IPAM when the pods are scheduled on the same node",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "localnet",
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         clientPodName,
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+					isPrivileged: true,
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+					isPrivileged: true,
+				},
+			),
+			table.Entry(
+				"can communicate over an localnet secondary network without IPAM when the pods are scheduled on the same node, with static IPs configured via network selection elements",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "localnet",
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{
+						Name:      secondaryNetworkName,
+						IPRequest: []string{clientIP},
+					}},
+					name: clientPodName,
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{
+						Name:      secondaryNetworkName,
+						IPRequest: []string{staticServerIP},
+					}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+				},
+			),
+			table.Entry(
+				"can communicate over an localnet secondary network with an IPv6 subnet when pods are scheduled on the same node",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "localnet",
+					cidr:     secondaryIPv6CIDR,
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         clientPodName,
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+				},
+			),
+			table.Entry(
+				"can communicate over an localnet secondary network with a dual stack configuration when pods are scheduled on the same node",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "localnet",
+					cidr:     strings.Join([]string{secondaryLocalnetNetworkCIDR, secondaryIPv6CIDR}, ","),
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         clientPodName,
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+				},
+			),
 		)
 	})
 
@@ -482,6 +651,7 @@ type networkAttachmentConfig struct {
 	name         string
 	topology     string
 	networkName  string
+	vlanID       int
 }
 
 func (nac networkAttachmentConfig) attachmentName() string {
@@ -507,7 +677,8 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
         "subnets": %q,
         "excludeSubnets": %q,
         "mtu": 1300,
-        "netAttachDefName": %q
+        "netAttachDefName": %q,
+        "vlanID": %d
 }
 `,
 		config.attachmentName(),
@@ -515,6 +686,7 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
 		config.cidr,
 		strings.Join(config.excludeCIDRs, ","),
 		namespacedName(config.namespace, config.name),
+		config.vlanID,
 	)
 	return generateNetAttachDef(config.namespace, config.name, nadSpec)
 }
