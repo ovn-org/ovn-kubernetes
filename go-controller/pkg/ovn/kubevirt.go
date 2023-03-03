@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 )
 
 func (oc *DefaultNetworkController) addDHCPOptions(pod *kapi.Pod, lsp *nbdb.LogicalSwitchPort) error {
@@ -125,8 +126,10 @@ func (oc *DefaultNetworkController) enroutePodAddressesToNode(pod *kapi.Pod) err
 
 func (oc *DefaultNetworkController) enrouteVirtualMachine(pod *kapi.Pod) error {
 	targetNode := pod.Labels[kubevirt.NodeNameLabel]
-	// There is no live migration or live migration has finished
-	if targetNode == "" || targetNode == pod.Spec.NodeName {
+	targetStartTimestamp := pod.Annotations[kubevirt.MigrationTargetStartTimestampAnnotation]
+	klog.Infof("deleteme, enrouteVirtualMachine: %s", targetStartTimestamp)
+	// No live migration or target node was reached || qemu is already ready
+	if targetNode == pod.Spec.NodeName || targetStartTimestamp != "" {
 		if err := oc.enroutePodAddressesToNode(pod); err != nil {
 			return fmt.Errorf("failed enroutePodAddressesToNode for  %s/%s: %w", pod.Namespace, pod.Name, err)
 		}

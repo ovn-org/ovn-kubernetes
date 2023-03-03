@@ -16,6 +16,7 @@ const (
 	NodeNameLabel                                = "kubevirt.io/nodeName"
 	IPPoolNameAnnotation                         = "kubevirt.io/ipPoolName"
 	AllowPodBridgeNetworkLiveMigrationAnnotation = "kubevirt.io/allow-pod-bridge-network-live-migration"
+	MigrationTargetStartTimestampAnnotation      = "kubevirt.io/migration-target-start-timestamp"
 )
 
 type IPConfig struct {

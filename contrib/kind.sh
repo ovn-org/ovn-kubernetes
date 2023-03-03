@@ -724,7 +724,7 @@ build_ovn_image() {
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
     OVN_REPO=https://github.com/qinqon/ovn 
     OVN_BRANCH=arp-proxy-additional-features
-    OVN_COMMIT=d1f985c68ffc1e83b5acc116c3111340ef7616bc
+    OVN_COMMIT=8b5383730c21155453ebc3a605e942ea7e2270e5
     OVN_DOCKERFILE=Dockerfile.fedora.dev
     $OCI_BIN build --build-arg OVN_REPO=${OVN_REPO} --build-arg OVN_BRANCH=${OVN_BRANCH} --build-arg=OVN_COMMIT=${OVN_COMMIT} -t "${OVN_IMAGE}" -f  ${OVN_DOCKERFILE} .
 
