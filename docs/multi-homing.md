@@ -152,7 +152,7 @@ localnet network.
 - `name` (string, required): the name of the network.
 - `type` (string, required): "ovn-k8s-cni-overlay".
 - `topology` (string, required): "layer2".
-  `subnets` (string, optional): a comma separated list of subnets. When multiple subnets
+- `subnets` (string, optional): a comma separated list of subnets. When multiple subnets
   are provided, the user will get an IP from each subnet.
 - `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
 - `netAttachDefName` (string, required): must match <namespace>/<net-attach-def name>
