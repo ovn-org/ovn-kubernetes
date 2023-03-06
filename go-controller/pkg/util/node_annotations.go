@@ -90,6 +90,13 @@ const (
 
 	// InvalidNodeID indicates an invalid node id
 	InvalidNodeID = -1
+
+	// ovnNetworkIDs is the constant string representing the ids allocated for the
+	// default network and other layer3 secondary networks by cluster manager.
+	ovnNetworkIDs = "k8s.ovn.org/network-ids"
+
+	// invalidNetworkID signifies its an invalid network id
+	InvalidNetworkID = -1
 )
 
 type L3GatewayConfig struct {
@@ -697,4 +704,125 @@ func GetNodeZone(node *kapi.Node) string {
 // NodeZoneAnnotationChanged returns true if the ovnNodeZoneName in the corev1.Nodes doesn't match
 func NodeZoneAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[ovnNodeZoneName] != newNode.Annotations[ovnNodeZoneName]
+}
+
+func parseNetworkIDsAnnotation(nodeAnnotations map[string]string, annotationName string) (map[string]string, error) {
+	annotation, ok := nodeAnnotations[annotationName]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
+	}
+
+	networkIdsStrMap := map[string]string{}
+	networkIds := make(map[string]string)
+	if err := json.Unmarshal([]byte(annotation), &networkIds); err != nil {
+		return nil, fmt.Errorf("could not parse %q annotation %q : %v",
+			annotationName, annotation, err)
+	}
+	for netName, v := range networkIds {
+		networkIdsStrMap[netName] = v
+	}
+
+	if len(networkIdsStrMap) == 0 {
+		return nil, fmt.Errorf("unexpected empty %s annotation", annotationName)
+	}
+
+	return networkIdsStrMap, nil
+}
+
+// ParseNetworkIDAnnotation parses the 'ovnNetworkIDs' annotation for the specified
+// network in 'netName' and returns the network id.
+func ParseNetworkIDAnnotation(node *kapi.Node, netName string) (int, error) {
+	networkIDsMap, err := parseNetworkIDsAnnotation(node.Annotations, ovnNetworkIDs)
+	if err != nil {
+		return InvalidNetworkID, err
+	}
+
+	networkID, ok := networkIDsMap[netName]
+	if !ok {
+		return InvalidNetworkID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNetworkIDs, netName)
+	}
+
+	return strconv.Atoi(networkID)
+}
+
+// updateNetworkIDsAnnotation updates the ovnNetworkIDs annotation in the 'annotations' map
+// with the provided network id in 'networkID'.  If 'networkID' is InvalidNetworkID (-1)
+// it deletes the ovnNetworkIDs annotation from the map.
+func updateNetworkIDsAnnotation(annotations map[string]string, netName string, networkID int) error {
+	var bytes []byte
+
+	// First get the all network ids for all existing networks
+	networkIDsMap, err := parseNetworkIDsAnnotation(annotations, ovnNetworkIDs)
+	if err != nil {
+		if !IsAnnotationNotSetError(err) {
+			return fmt.Errorf("failed to parse node network id annotation %q: %v",
+				annotations, err)
+		}
+		// in the case that the annotation does not exist
+		networkIDsMap = map[string]string{}
+	}
+
+	// add or delete network id of the specified network
+	if networkID == InvalidNetworkID {
+		delete(networkIDsMap, netName)
+	} else {
+		networkIDsMap[netName] = strconv.Itoa(networkID)
+	}
+
+	// if no networks left, just delete the network ids annotation from node annotations.
+	if len(networkIDsMap) == 0 {
+		delete(annotations, ovnNetworkIDs)
+		return nil
+	}
+
+	// Marshal all network ids back to annotations.
+	networkIdsStrMap := make(map[string]string)
+	for n, id := range networkIDsMap {
+		networkIdsStrMap[n] = id
+	}
+	bytes, err = json.Marshal(networkIdsStrMap)
+	if err != nil {
+		return err
+	}
+	annotations[ovnNetworkIDs] = string(bytes)
+	return nil
+}
+
+// UpdateNetworkIDAnnotation updates the ovnNetworkIDs annotation for the network name 'netName' with the network id 'networkID'.
+// If 'networkID' is invalid network ID (-1), then it deletes that network from the network ids annotation.
+func UpdateNetworkIDAnnotation(annotations map[string]string, netName string, networkID int) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	err := updateNetworkIDsAnnotation(annotations, netName, networkID)
+	if err != nil {
+		return nil, err
+	}
+	return annotations, nil
+}
+
+// GetNodeNetworkIDsAnnotationNetworkIDs parses the "k8s.ovn.org/network-ids" annotation
+// on a node and returns the map of network name and ids.
+func GetNodeNetworkIDsAnnotationNetworkIDs(node *kapi.Node) (map[string]int, error) {
+	networkIDsStrMap, err := parseNetworkIDsAnnotation(node.Annotations, ovnNetworkIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	networkIDsMap := map[string]int{}
+	for netName, v := range networkIDsStrMap {
+		id, e := strconv.Atoi(v)
+		if e == nil {
+			networkIDsMap[netName] = id
+		}
+	}
+
+	return networkIDsMap, nil
+}
+
+// NodeNetworkIDAnnotationChanged returns true if the ovnNetworkIDs annotation in the corev1.Nodes doesn't match
+func NodeNetworkIDAnnotationChanged(oldNode, newNode *corev1.Node, netName string) bool {
+	oldNodeNetID, _ := ParseNetworkIDAnnotation(oldNode, netName)
+	newNodeNetID, _ := ParseNetworkIDAnnotation(newNode, netName)
+	return oldNodeNetID != newNodeNetID
 }

@@ -87,21 +87,6 @@ func (oc *DefaultNetworkController) addRemotePodToNamespace(ns string, ips []*ne
 	return err
 }
 
-func (oc *DefaultNetworkController) deleteRemotePodFromNamespace(ns string, ips []*net.IPNet) error {
-	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
-	if nsInfo == nil {
-		return nil
-	}
-	defer nsUnlock()
-
-	if nsInfo.addressSet != nil {
-		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(ips)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func createIPAddressSlice(ips []*net.IPNet) []net.IP {
 	ipAddrs := make([]net.IP, 0)
 	for _, ip := range ips {

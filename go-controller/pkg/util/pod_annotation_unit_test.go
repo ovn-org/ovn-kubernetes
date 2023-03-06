@@ -290,7 +290,7 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 			} else {
 				assert.Equal(t, tc.outExp, res1)
 			}
-			res2, e := GetPodCIDRsWithFullMask(tc.inpPod)
+			res2, e := GetPodCIDRsWithFullMask(tc.inpPod, &DefaultNetInfo{})
 			t.Log(res2, e)
 			if tc.errAssert {
 				assert.Error(t, e)

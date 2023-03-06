@@ -226,7 +226,7 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				// So testing the cleanup one at a time.
 				netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology})
 				layer3NetConfInfo := &util.Layer3NetConfInfo{}
-				oc := newNetworkClusterController(netInfo.GetNetworkName(), layer3NetConfInfo.ClusterSubnets,
+				oc := newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, layer3NetConfInfo.ClusterSubnets,
 					sncm.ovnClient, sncm.watchFactory, false, netInfo, layer3NetConfInfo)
 				nadControllers := []nad.NetworkController{oc}
 

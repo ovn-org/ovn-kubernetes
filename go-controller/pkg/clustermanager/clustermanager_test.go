@@ -125,6 +125,23 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 					}, 2).Should(gomega.HaveLen(1))
 				}
 
+				// Check that the network id 0 is allocated for the default network
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						networkId, err := util.ParseNetworkIDAnnotation(updatedNode, "default")
+						if err != nil {
+							return fmt.Errorf("expected node network id annotation for node %s to have been allocated", n.Name)
+						}
+
+						gomega.Expect(networkId).To(gomega.Equal(0))
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
 				return nil
 			}
 

@@ -17,7 +17,6 @@ import (
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -183,7 +182,7 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, a
 	if len(pod.Status.PodIPs) < 1 {
 		return nil
 	}
-	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod)
+	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
 	if err != nil {
 		return fmt.Errorf("failed to get pod ips for the pod  %s/%s : %w", pod.Namespace, pod.Name, err)
 	}
@@ -255,33 +254,8 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *
 // It removes the remote pod ips from the namespace address set and if its an external gw pod, removes
 // its routes.
 func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
-	podDesc := fmt.Sprintf("pod %s/%s/%s", types.DefaultNetworkName, pod.Namespace, pod.Name)
-	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod)
-	if err != nil {
-		return fmt.Errorf("failed to get pod ips for the pod  %s/%s : %w", pod.Namespace, pod.Name, err)
-	}
-
-	// Remove the pod ips from the namespace address set. Before that check if its a completed pod and
-	// make sure that the ips are not colliding with other pod.
-	shouldRelease := true
-	if util.PodCompleted(pod) {
-		shouldRelease, err := oc.canReleasePodIPs(podIfAddrs)
-		if err != nil {
-			klog.Errorf("Unable to determine if completed remote pod IP is in use by another pod. "+
-				"Will not release pod %s/%s IP: %#v from namespace addressset. %w", pod.Namespace, pod.Name, podIfAddrs, err)
-			shouldRelease = false
-		}
-
-		if !shouldRelease {
-			klog.Infof("Cannot release IP address: %s for %s/%s from namespace address set. Detected another pod"+
-				" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), pod.Namespace, pod.Name)
-		}
-	}
-
-	if shouldRelease {
-		if err := oc.deleteRemotePodFromNamespace(pod.Namespace, podIfAddrs); err != nil {
-			return fmt.Errorf("failed to delete remote pod %s's IP from namespace: %w", podDesc, err)
-		}
+	if err := oc.removeRemoteZonePodFromNamespaceAddressSet(pod); err != nil {
+		return fmt.Errorf("failed to remove the remote zone pod : %w", err)
 	}
 
 	if util.PodWantsHostNetwork(pod) {
@@ -290,7 +264,6 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
 			return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
 				getPodNamespacedName(pod), err)
 		}
-		return nil
 	}
 
 	return nil

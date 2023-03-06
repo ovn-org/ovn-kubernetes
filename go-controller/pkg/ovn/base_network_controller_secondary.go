@@ -188,6 +188,16 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		return nil
 	}
 
+	if bsnc.isPodScheduledinLocalZone(pod) {
+		return bsnc.ensureLocalZonePodForSecondaryNetwork(pod, addPort)
+	}
+
+	return bsnc.ensureRemoteZonePodForSecondaryNetwork(pod, addPort)
+}
+
+// ensureLocalZonePodForSecondaryNetwork tries to set up secondary network for a local zone pod. It returns nil on success and error
+// on failure; failure indicates the pod set up should be retried later.
+func (bsnc *BaseSecondaryNetworkController) ensureLocalZonePodForSecondaryNetwork(pod *kapi.Pod, addPort bool) error {
 	// If a node does not have an assigned hostsubnet don't wait for the logical switch to appear
 	switchName, err := bsnc.getExpectedSwitchName(pod)
 	if err != nil {
@@ -228,6 +238,38 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 	if len(errs) != 0 {
 		return kerrors.NewAggregate(errs)
 	}
+	return nil
+}
+
+// ensureRemoteZonePodForSecondaryNetwork tries to set up remote zone pod bits required to interconnect it.
+//   - Adds the remote pod ips to the pod namespace address set for network policy and egress gw
+//
+// It returns nil on success and error on failure; failur indicates the pod set up should be retried later.
+func (bsnc *BaseSecondaryNetworkController) ensureRemoteZonePodForSecondaryNetwork(pod *kapi.Pod, addPort bool) error {
+
+	if !bsnc.doesNetworkRequireIPAM() {
+		return nil
+	}
+
+	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, bsnc.NetInfo)
+	if err != nil {
+		return fmt.Errorf("failed to get pod ips for the pod  %s/%s : %w", pod.Namespace, pod.Name, err)
+	}
+	if len(podIfAddrs) == 0 {
+		return nil
+	}
+
+	// Ensure the namespace/nsInfo exists
+	ops, err := bsnc.addPodToNamespaceForSecondaryNetwork(pod.Namespace, podIfAddrs)
+	if err != nil {
+		return err
+	}
+
+	_, err = libovsdbops.TransactAndCheck(bsnc.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("could not add pod IPs to the namespace address set - %w", err)
+	}
+
 	return nil
 }
 
@@ -283,15 +325,26 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	return nil
 }
 
-// removePodForSecondaryNetwork tried to tear down a for on a secondary network. It returns nil on success
-// and error on failure; failure indicates the pod tear down should be retried later.
+// removePodForSecondaryNetwork tried to tear down a pod. It returns nil on success and error on failure;
+// failure indicates the pod tear down should be retried later.
 func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *kapi.Pod, portInfoMap map[string]*lpInfo) error {
-	podDesc := pod.Namespace + "/" + pod.Name
-	klog.Infof("Deleting pod: %s for network %s", podDesc, bsnc.GetNetworkName())
-
 	if util.PodWantsHostNetwork(pod) || !util.PodScheduled(pod) {
 		return nil
 	}
+
+	if bsnc.isPodScheduledinLocalZone(pod) {
+		return bsnc.removeLocalZonePodForSecondaryNetwork(pod, portInfoMap)
+	}
+
+	// For remote pods, we just need to remove the pod IPs from the pod namespace address set
+	return bsnc.removeRemoteZonePodFromNamespaceAddressSet(pod)
+}
+
+// removePodForSecondaryNetwork tried to tear down a local zone pod on a secondary network. It returns nil on success
+// and error on failure; failure indicates the pod tear down should be retried later.
+func (bsnc *BaseSecondaryNetworkController) removeLocalZonePodForSecondaryNetwork(pod *kapi.Pod, portInfoMap map[string]*lpInfo) error {
+	podDesc := pod.Namespace + "/" + pod.Name
+	klog.Infof("Deleting pod: %s for network %s", podDesc, bsnc.GetNetworkName())
 
 	// for a specific NAD belongs to this network, Pod's logical port might already be created half-way
 	// without its lpInfo cache being created; need to deleted resources created for that NAD as well.

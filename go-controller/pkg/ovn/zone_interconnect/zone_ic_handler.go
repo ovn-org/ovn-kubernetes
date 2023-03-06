@@ -21,10 +21,11 @@ import (
 )
 
 const (
-	transitSwitchTunnelKey = "16711683"
-	lportTypeRouter        = "router"
-	lportTypeRouterAddr    = "router"
-	lportTypeRemote        = "remote"
+	lportTypeRouter     = "router"
+	lportTypeRouterAddr = "router"
+	lportTypeRemote     = "remote"
+
+	BaseTransitSwitchTunnelKey = 16711683
 )
 
 /*
@@ -235,6 +236,12 @@ func (zic *ZoneInterconnectHandler) SyncNodes(kNodes []interface{}) error {
 	return nil
 }
 
+// Cleanup deletes the transit switch for the network
+func (zic *ZoneInterconnectHandler) Cleanup() error {
+	klog.Infof("Deleting the transit switch %s for the network %s", zic.networkTransitSwitchName, zic.GetNetworkName())
+	return libovsdbops.DeleteLogicalSwitch(zic.nbClient, zic.networkTransitSwitchName)
+}
+
 // createLocalZoneNodeResources creates the local zone node resources for interconnect
 //   - creates Transit switch if it doesn't yet exit
 //   - creates a logical switch port of type "router" in the transit switch with the name as - <network_name>.tstor-<node_name>
@@ -249,17 +256,23 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 		return fmt.Errorf("failed to get the node transit switch port ips for node %s: %w", node.Name, err)
 	}
 
+	networkId, err := util.ParseNetworkIDAnnotation(node, zic.GetNetworkName())
+	if err != nil {
+		return fmt.Errorf("failed to get the network id for the network %s on node %s: %v", zic.GetNetworkName(), node.Name, err)
+	}
+
 	transitRouterPortMac := util.IPAddrToHWAddr(nodeTransitSwitchPortIPs[0].IP)
 	var transitRouterPortNetworks []string
 	for _, ip := range nodeTransitSwitchPortIPs {
 		transitRouterPortNetworks = append(transitRouterPortNetworks, ip.String())
 	}
 
+	transitSwitchTunnelKey := BaseTransitSwitchTunnelKey + networkId
 	ts := &nbdb.LogicalSwitch{
 		Name: zic.networkTransitSwitchName,
 		OtherConfig: map[string]string{
 			"interconn-ts":             zic.networkTransitSwitchName,
-			"requested-tnl-key":        transitSwitchTunnelKey,
+			"requested-tnl-key":        strconv.Itoa(transitSwitchTunnelKey),
 			"mcast_snoop":              "true",
 			"mcast_flood_unregistered": "true",
 		},
@@ -321,11 +334,17 @@ func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.N
 		return fmt.Errorf("failed to get the node transit switch port Ips : %w", err)
 	}
 
+	networkId, err := util.ParseNetworkIDAnnotation(node, zic.GetNetworkName())
+	if err != nil {
+		return fmt.Errorf("failed to get the network id for the network %s on node %s: %v", zic.GetNetworkName(), node.Name, err)
+	}
+
+	transitSwitchTunnelKey := BaseTransitSwitchTunnelKey + networkId
 	ts := &nbdb.LogicalSwitch{
 		Name: zic.networkTransitSwitchName,
 		OtherConfig: map[string]string{
 			"interconn-ts":             zic.networkTransitSwitchName,
-			"requested-tnl-key":        transitSwitchTunnelKey,
+			"requested-tnl-key":        strconv.Itoa(transitSwitchTunnelKey),
 			"mcast_snoop":              "true",
 			"mcast_flood_unregistered": "true",
 		},
