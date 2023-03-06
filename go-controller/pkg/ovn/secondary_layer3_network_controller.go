@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -89,21 +91,37 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
-		var nodeParams *nodeSyncs
-		if fromRetryLoop {
-			_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
-			_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
-			nodeParams = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync}
+
+		if h.oc.isLocalZoneNode(node) {
+			var nodeParams *nodeSyncs
+			if fromRetryLoop {
+				_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
+				_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
+				_, syncZoneIC := h.oc.syncZoneICFailed.Load(node.Name)
+				nodeParams = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncZoneIC: syncZoneIC}
+			} else {
+				nodeParams = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
+			}
+			if err := h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
+				klog.Errorf("Node add failed for %s, will try again later: %v",
+					node.Name, err)
+				return err
+			}
 		} else {
-			nodeParams = &nodeSyncs{syncNode: true, syncClusterRouterPort: true}
+			if err := h.oc.addUpdateRemoteNodeEvent(node, config.OVNKubernetesFeature.EnableInterconnect); err != nil {
+				return err
+			}
 		}
-
-		if err := h.oc.addUpdateNodeEvent(node, nodeParams); err != nil {
-			klog.Errorf("Node add failed for %s, will try again later: %v",
-				node.Name, err)
-			return err
+	case factory.PodType:
+		pod, ok := obj.(*kapi.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
 		}
-
+		// Check if the pod is local zone pod or not. If its not a local zone pod, we can ignore it.
+		if !h.oc.isPodScheduledinLocalZone(pod) {
+			return nil
+		}
+		fallthrough
 	default:
 		return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
 	}
@@ -125,12 +143,37 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
-		// determine what actually changed in this update
-		_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
-		_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-		clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+		if h.oc.isLocalZoneNode(newNode) {
+			var nodeSyncsParam *nodeSyncs
+			if h.oc.isLocalZoneNode(oldNode) {
+				// determine what actually changed in this update
+				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
+				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
+				syncZoneIC = syncZoneIC || util.NodeNetworkIDAnnotation(oldNode, newNode, h.oc.GetNetworkName())
+				nodeSyncsParam = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncZoneIC: syncZoneIC}
+			} else {
+				klog.Infof("Node %s moved from the remote zone %s to local zone.",
+					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
+				// The node is now a local zone node. Trigger a full node sync.
+				nodeSyncsParam = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
+			}
 
-		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync})
+			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
+		} else {
+			return h.oc.addUpdateRemoteNodeEvent(newNode, config.OVNKubernetesFeature.EnableInterconnect)
+		}
+	case factory.PodType:
+		pod, ok := newObj.(*kapi.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *knet.Pod", newObj)
+		}
+		// Check if the pod is local zone pod or not. If its not a local zone pod, we can ignore it.
+		if !h.oc.isPodScheduledinLocalZone(pod) {
+			return nil
+		}
+		fallthrough
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 	}
@@ -148,6 +191,16 @@ func (h *secondaryLayer3NetworkControllerEventHandler) DeleteResource(obj, cache
 		}
 		return h.oc.deleteNodeEvent(node)
 
+	case factory.PodType:
+		pod, ok := obj.(*kapi.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
+		}
+		// Check if the pod is local zone pod or not. If its not a local zone pod, we can ignore it.
+		if !h.oc.isPodScheduledinLocalZone(pod) {
+			return nil
+		}
+		fallthrough
 	default:
 		return h.oc.DeleteSecondaryNetworkResourceCommon(h.objType, obj, cachedObj)
 	}
@@ -191,12 +244,21 @@ type SecondaryLayer3NetworkController struct {
 	// Node-specific syncMaps used by node event handler
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
+	syncZoneICFailed            sync.Map
+
+	//List of nodes which belong to the local zone (stored as a sync map)
+	localZoneNodes sync.Map
+	zoneICHandler  *zoneic.ZoneInterconnectHandler
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
 func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
 	netconfInfo util.NetConfInfo) *SecondaryLayer3NetworkController {
 	stopChan := make(chan struct{})
+	var zoneICHandler *zoneic.ZoneInterconnectHandler
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		zoneICHandler = zoneic.NewZoneInterconnectHandler(netInfo, cnci.nbClient, cnci.sbClient)
+	}
 	// controllerName must be unique to identify db object owned by given controller
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
@@ -216,6 +278,8 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		},
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},
+		syncZoneICFailed:            sync.Map{},
+		zoneICHandler:               zoneICHandler,
 	}
 	// disable multicast support for secondary networks
 	oc.multicastSupport = false
@@ -310,6 +374,12 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to deleting routers/switches of network %s: %v", netName, err)
 	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err = oc.zoneICHandler.Cleanup(); err != nil {
+			return fmt.Errorf("failed to delete interconnect transit switch of network %s: %v", netName, err)
+		}
+	}
 	return nil
 }
 
@@ -353,10 +423,12 @@ func (oc *SecondaryLayer3NetworkController) Init() error {
 	return err
 }
 
-func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
+
+	_, _ = oc.localZoneNodes.LoadOrStore(node.Name, true)
 
 	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetSwitch(oc.GetNetworkScopedName(node.Name))
@@ -371,6 +443,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, 
 		if hostSubnets, err = oc.addNode(node); err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
+			oc.syncZoneICFailed.Store(node.Name, true)
 			err = fmt.Errorf("nodeAdd: error adding node %q for network %s: %w", node.Name, oc.GetNetworkName(), err)
 			oc.recordNodeErrorEvent(node, err)
 			return err
@@ -393,9 +466,39 @@ func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, 
 		errs = append(errs, errors...)
 	}
 
+	if nSyncs.syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.zoneICHandler.AddLocalZoneNode(node); err != nil {
+			errs = append(errs, err)
+			oc.syncZoneICFailed.Store(node.Name, true)
+		} else {
+			oc.syncZoneICFailed.Delete(node.Name)
+		}
+	}
+
 	err = kerrors.NewAggregate(errs)
 	if err != nil {
 		oc.recordNodeErrorEvent(node, err)
+	}
+	return err
+}
+
+func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIc bool) error {
+	_, present := oc.localZoneNodes.Load(node.Name)
+
+	if present {
+		if err := oc.deleteNodeEvent(node); err != nil {
+			return err
+		}
+	}
+
+	var err error
+	if syncZoneIc && config.OVNKubernetesFeature.EnableInterconnect {
+		if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
+			err = fmt.Errorf("failed to add the remote zone node [%s] to the zone interconnect handler, err : %v", node.Name, err)
+			oc.syncZoneICFailed.Store(node.Name, true)
+		} else {
+			oc.syncZoneICFailed.Delete(node.Name)
+		}
 	}
 	return err
 }
@@ -424,9 +527,17 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 		return err
 	}
 
+	oc.localZoneNodes.Delete(node.Name)
+
 	oc.lsManager.DeleteSwitch(oc.GetNetworkScopedName(node.Name))
 	oc.addNodeFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.zoneICHandler.DeleteNode(node); err != nil {
+			return err
+		}
+		oc.syncZoneICFailed.Delete(node.Name)
+	}
 	return nil
 }
 
@@ -436,6 +547,15 @@ func (oc *SecondaryLayer3NetworkController) deleteNode(nodeName string) error {
 	}
 
 	return nil
+}
+
+func (oc *SecondaryLayer3NetworkController) isPodScheduledinLocalZone(pod *kapi.Pod) bool {
+	if !util.PodScheduled(pod) {
+		return false
+	}
+
+	_, isLocalZoneNode := oc.localZoneNodes.Load(pod.Spec.NodeName)
+	return isLocalZoneNode
 }
 
 // We only deal with cleaning up nodes that shouldn't exist here, since
@@ -453,7 +573,11 @@ func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error
 			continue
 		}
 
-		foundNodes.Insert(node.Name)
+		// Add the node to the foundNodes only if it belongs to the local zone.
+		if oc.isLocalZoneNode(node) {
+			foundNodes.Insert(node.Name)
+			oc.localZoneNodes.Store(node.Name, true)
+		}
 	}
 
 	p := func(item *nbdb.LogicalSwitch) bool {
@@ -475,5 +599,12 @@ func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error
 			}
 		}
 	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.zoneICHandler.SyncNodes(nodes); err != nil {
+			return fmt.Errorf("zoneICHandler failed to sync nodes: error: %w", err)
+		}
+	}
+
 	return nil
 }

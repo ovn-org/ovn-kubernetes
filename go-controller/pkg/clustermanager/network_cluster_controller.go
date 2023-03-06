@@ -23,9 +23,13 @@ import (
 )
 
 // networkClusterController is the cluster controller for the networks.
-// It listens to the node events and allocates subnet from the
-// cluster subnet pool. It also allocates subnets from the hybrid overlay subnet pool
-// if hybrid overlay is enabled.
+// An instance of this struct is expected to be created for each network.
+// A network is identified by its name and its unique id.
+// It listens to the node events and does the following.
+//   - allocates subnet from the cluster subnet pool. It also allocates subnets
+//     from the hybrid overlay subnet pool if hybrid overlay is enabled.
+//     It stores these allocated subnets in the node annotation
+//   - stores the network id in each node's annotation.
 type networkClusterController struct {
 	kube         kube.Interface
 	watchFactory *factory.WatchFactory
@@ -38,7 +42,11 @@ type networkClusterController struct {
 	// retry framework for nodes
 	retryNodes *objretry.RetryFramework
 
-	networkName            string
+	// name of the network
+	networkName string
+	// unique id of the network
+	networkID int
+
 	clusterSubnetAllocator *subnetallocator.HostSubnetAllocator
 	clusterSubnets         []config.CIDRNetworkEntry
 
@@ -49,7 +57,7 @@ type networkClusterController struct {
 	util.NetConfInfo
 }
 
-func newNetworkClusterController(networkName string, clusterSubnets []config.CIDRNetworkEntry,
+func newNetworkClusterController(networkName string, networkID int, clusterSubnets []config.CIDRNetworkEntry,
 	ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
 	enableHybridOverlaySubnetAllocator bool, netInfo util.NetInfo, netConfInfo util.NetConfInfo) *networkClusterController {
 
@@ -69,6 +77,7 @@ func newNetworkClusterController(networkName string, clusterSubnets []config.CID
 		stopChan:                           make(chan struct{}),
 		wg:                                 wg,
 		networkName:                        networkName,
+		networkID:                          networkID,
 		clusterSubnetAllocator:             subnetallocator.NewHostSubnetAllocator(),
 		clusterSubnets:                     clusterSubnets,
 		hybridOverlaySubnetAllocator:       hybridOverlaySubnetAllocator,
@@ -190,10 +199,13 @@ func (ncc *networkClusterController) handleAddUpdateNodeEvent(node *corev1.Node)
 		return nil
 	}
 
-	return ncc.syncNodeClusterSubnet(node)
+	return ncc.syncNodeNetworkAnnotations(node)
 }
 
-func (ncc *networkClusterController) syncNodeClusterSubnet(node *corev1.Node) error {
+// syncNodeNetworkAnnotations does 2 things
+//   - syncs the node's allocated subnets in the node subnet annotation
+//   - syncs the network id in the node network id annotation
+func (ncc *networkClusterController) syncNodeNetworkAnnotations(node *corev1.Node) error {
 	ncc.clusterSubnetAllocator.Lock()
 	defer ncc.clusterSubnetAllocator.Unlock()
 
@@ -201,6 +213,12 @@ func (ncc *networkClusterController) syncNodeClusterSubnet(node *corev1.Node) er
 	if err != nil && !util.IsAnnotationNotSetError(err) {
 		// Log the error and try to allocate new subnets
 		klog.Warningf("Failed to get node %s host subnets annotations for network %s : %v", node.Name, ncc.networkName, err)
+	}
+
+	networkID, err := util.ParseNetworkIDAnnotation(node, ncc.networkName)
+	if err != nil && !util.IsAnnotationNotSetError(err) {
+		// Log the error and try to allocate new subnets
+		klog.Warningf("Failed to get node %s network id annotations for network %s : %v", node.Name, ncc.networkName, err)
 	}
 
 	// On return validExistingSubnets will contain any valid subnets that
@@ -218,9 +236,10 @@ func (ncc *networkClusterController) syncNodeClusterSubnet(node *corev1.Node) er
 	// 1) new node: no existing subnets and one or more new subnets were allocated
 	// 2) dual-stack to single-stack conversion: two existing subnets but only one will be valid, and no allocated subnets
 	// 3) bad subnet annotation: one more existing subnets will be invalid and might have allocated a correct one
-	if len(existingSubnets) != len(validExistingSubnets) || len(allocatedSubnets) > 0 {
+	// Also update the node annotation if the networkID doesn't match
+	if len(existingSubnets) != len(validExistingSubnets) || len(allocatedSubnets) > 0 || ncc.networkID != networkID {
 		updatedSubnetsMap := map[string][]*net.IPNet{ncc.networkName: validExistingSubnets}
-		err = ncc.updateNodeSubnetAnnotationWithRetry(node.Name, updatedSubnetsMap)
+		err = ncc.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, ncc.networkID)
 		if err != nil {
 			if errR := ncc.clusterSubnetAllocator.ReleaseNodeSubnets(node.Name, allocatedSubnets...); errR != nil {
 				klog.Warningf("Error releasing node %s subnets: %v", node.Name, errR)
@@ -284,7 +303,8 @@ func (ncc *networkClusterController) syncNodes(nodes []interface{}) error {
 	return nil
 }
 
-func (ncc *networkClusterController) updateNodeSubnetAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet) error {
+// updateNodeNetworkAnnotationsWithRetry will update the node's subnet annotation and network id annotation
+func (ncc *networkClusterController) updateNodeNetworkAnnotationsWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId int) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
 	// retry mechanism.
@@ -302,6 +322,12 @@ func (ncc *networkClusterController) updateNodeSubnetAnnotationWithRetry(nodeNam
 				return fmt.Errorf("failed to update node %q annotation subnet %s",
 					node.Name, util.JoinIPNets(hostSubnets, ","))
 			}
+		}
+
+		cnode.Annotations, err = util.UpdateNetworkIDAnnotation(cnode.Annotations, ncc.networkName, networkId)
+		if err != nil {
+			return fmt.Errorf("failed to update node %q network id annotation %d for network %s",
+				node.Name, networkId, ncc.networkName)
 		}
 		return ncc.kube.UpdateNode(cnode)
 	})
@@ -331,7 +357,8 @@ func (ncc *networkClusterController) Cleanup(netName string) error {
 		}
 
 		hostSubnetsMap := map[string][]*net.IPNet{ncc.networkName: nil}
-		err = ncc.updateNodeSubnetAnnotationWithRetry(node.Name, hostSubnetsMap)
+		// passing util.InvalidNetworkID deletes the network id annotation for the network.
+		err = ncc.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, util.InvalidNetworkID)
 		if err != nil {
 			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
 				node.Name, ncc.networkName)

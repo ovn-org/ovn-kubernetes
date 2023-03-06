@@ -16,6 +16,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	// ID of the default network.
+	defaultNetworkID = 0
+)
+
 // ClusterManager structure is the object which manages the cluster nodes.
 // It creates a default network controller for the default network and a
 // secondary network cluster controller manager to manage the multi networks.
@@ -37,7 +42,7 @@ type ClusterManager struct {
 // NewClusterManager creates a new cluster manager to manage the cluster nodes.
 func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
 	identity string, wg *sync.WaitGroup, recorder record.EventRecorder) (*ClusterManager, error) {
-	defaultNetClusterController := newNetworkClusterController(ovntypes.DefaultNetworkName, config.Default.ClusterSubnets,
+	defaultNetClusterController := newNetworkClusterController(ovntypes.DefaultNetworkName, defaultNetworkID, config.Default.ClusterSubnets,
 		ovnClient, wf, config.HybridOverlay.Enabled, &util.DefaultNetInfo{}, &util.DefaultNetConfInfo{})
 
 	zoneClusterController, err := newZoneClusterController(ovnClient, wf)
