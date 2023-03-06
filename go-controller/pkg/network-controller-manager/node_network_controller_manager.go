@@ -134,7 +134,9 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		}, time.Minute, ncm.stopChan)
 	}
 
-	ncm.defaultNodeNetworkController = node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo())
+	if ncm.defaultNodeNetworkController, err = node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo()); err != nil {
+		return err
+	}
 	err = ncm.defaultNodeNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)

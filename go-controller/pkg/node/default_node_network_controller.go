@@ -113,17 +113,23 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) *DefaultNodeNetworkController {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*DefaultNodeNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
-		nc.healthzServer = newNodeProxyHealthzServer(nc.name, config.Kubernetes.HealthzBindAddress, nc.recorder)
+		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
+		var err error
+		nc.healthzServer, err = newNodeProxyHealthzServer(
+			nc.name, config.Kubernetes.HealthzBindAddress, nc.recorder, nc.watchFactory)
+		if err != nil {
+			return nil, fmt.Errorf("could not create node proxy healthz server: %w", err)
+		}
 	}
 
 	nc.initRetryFrameworkForNode()
-	return nc
+	return nc, nil
 }
 
 func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
