@@ -1406,6 +1406,20 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
+					// NOTE1: syncEgressFirewall is not calling libovsdbops.BuildACL and directly calls CreateOrUpdateACLs
+					// it doesn't truncate long names for acls if they are over 63 and we run into errors:
+					// E0228 09:54:13.167495       1 factory.go:567] Failed (will retry) in processExisting [0xc00176a000]:
+					// unable to update ACL information (direction and logging) during resync operation, err: error in transact
+					// with ops constraint violation: "egressFirewall_allow-traffic-apache-server-on-lbdns-node-run1-1_9999"
+					// length 68 is greater than maximum allowed length 63]: 1 ovsdb operations failed
+					// NOTE2: This is not caught by testing because our test server
+					// is not smart enough. See https://github.com/ovn-org/libovsdb/issues/338
+					err = fakeOVN.controller.syncEgressFirewall([]interface{}{*egressFirewall})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					*ipv4ACL1.Name = buildEgressFwAclName(namespace1.Name, t.EgressFirewallStartPriority)   // we end up resetting the name to long value
+					*ipv4ACL2.Name = buildEgressFwAclName(namespace1.Name, t.EgressFirewallStartPriority-1) // we end up resetting the name to long value
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
 					err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
