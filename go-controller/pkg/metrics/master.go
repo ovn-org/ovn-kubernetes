@@ -145,6 +145,17 @@ var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The duration for the master to get to ready state",
 })
 
+// MetricMasterSyncDuration is the time taken to complete initial Watch for different resource.
+// Resource name is in the label.
+var MetricMasterSyncDuration = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "sync_duration_seconds",
+	Help:      "The duration to sync and setup all handlers for a given resource"},
+	[]string{
+		"resource_name",
+	})
+
 // MetricMasterLeader identifies whether this instance of ovnkube-master is a leader or not
 var MetricMasterLeader = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
@@ -189,6 +200,66 @@ var metricEgressIPRebalanceCount = prometheus.NewCounter(prometheus.CounterOpts{
 	Name:      "egress_ips_rebalance_total",
 	Help:      "The total number of times assigned egress IP(s) needed to be moved to a different node"},
 )
+
+var metricNetpolEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "network_policy_event_latency_seconds",
+	Help:      "The latency of full network policy event handling (create, delete)",
+	Buckets:   prometheus.ExponentialBuckets(.004, 2, 15)},
+	[]string{
+		"event",
+	})
+
+var metricNetpolLocalPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "network_policy_local_pod_event_latency_seconds",
+	Help:      "The latency of local pod events handling (add, delete)",
+	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
+	[]string{
+		"event",
+	})
+
+var metricNetpolPeerPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "network_policy_peer_pod_event_latency_seconds",
+	Help:      "The latency of peer pod events handling (add, delete)",
+	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
+	[]string{
+		"event",
+	})
+
+var metricNetpolPeerNamespaceEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "network_policy_peer_namespace_event_latency_seconds",
+	Help:      "The latency of peer namespace events handling (add, delete)",
+	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
+	[]string{
+		"event",
+	})
+
+var metricNetpolPeerNamespaceAndPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "network_policy_peer_namespace_and_pod_event_latency_seconds",
+	Help:      "The latency of peer namespace events handling (add, delete)",
+	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
+	[]string{
+		"event",
+	})
+
+var metricPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "pod_event_latency_seconds",
+	Help:      "The latency of pod events handling (add, update, delete)",
+	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
+	[]string{
+		"event",
+	})
 
 var metricEgressFirewallRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
@@ -288,6 +359,7 @@ const (
 func RegisterMasterBase() {
 	prometheus.MustRegister(MetricMasterLeader)
 	prometheus.MustRegister(MetricMasterReadyDuration)
+	prometheus.MustRegister(MetricMasterSyncDuration)
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnkubeNamespace,
@@ -341,9 +413,16 @@ func RegisterMasterPerformance(nbClient libovsdbclient.Client) {
 func RegisterMasterFunctional() {
 	// No need to unregister because process exits when leadership is lost.
 	prometheus.MustRegister(metricEgressIPCount)
-	if config.Metrics.EnableEIPScaleMetrics {
+	if config.Metrics.EnableScaleMetrics {
+		klog.Infof("Scale metrics are enabled")
 		prometheus.MustRegister(metricEgressIPAssignLatency)
 		prometheus.MustRegister(metricEgressIPUnassignLatency)
+		prometheus.MustRegister(metricNetpolEventLatency)
+		prometheus.MustRegister(metricNetpolLocalPodEventLatency)
+		prometheus.MustRegister(metricNetpolPeerPodEventLatency)
+		prometheus.MustRegister(metricNetpolPeerNamespaceEventLatency)
+		prometheus.MustRegister(metricNetpolPeerNamespaceAndPodEventLatency)
+		prometheus.MustRegister(metricPodEventLatency)
 	}
 	prometheus.MustRegister(metricEgressIPNodeUnreacheableCount)
 	prometheus.MustRegister(metricEgressIPRebalanceCount)
@@ -446,6 +525,30 @@ func RecordEgressIPUnreachableNode() {
 // RecordEgressIPRebalance records how many EgressIPs had to move to a different egress node.
 func RecordEgressIPRebalance(count int) {
 	metricEgressIPRebalanceCount.Add(float64(count))
+}
+
+func RecordNetpolEvent(eventName string, duration time.Duration) {
+	metricNetpolEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
+}
+
+func RecordNetpolLocalPodEvent(eventName string, duration time.Duration) {
+	metricNetpolLocalPodEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
+}
+
+func RecordNetpolPeerPodEvent(eventName string, duration time.Duration) {
+	metricNetpolPeerPodEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
+}
+
+func RecordNetpolPeerNamespaceEvent(eventName string, duration time.Duration) {
+	metricNetpolPeerNamespaceEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
+}
+
+func RecordNetpolPeerNamespaceAndPodEvent(eventName string, duration time.Duration) {
+	metricNetpolPeerNamespaceAndPodEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
+}
+
+func RecordPodEvent(eventName string, duration time.Duration) {
+	metricPodEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
 }
 
 // UpdateEgressFirewallRuleCount records the number of Egress firewall rules.

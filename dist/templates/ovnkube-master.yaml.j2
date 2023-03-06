@@ -164,6 +164,8 @@ spec:
           value: "{{ ovnkube_logfile_maxage }}"
         - name: OVNKUBE_CONFIG_DURATION_ENABLE
           value: "{{ ovnkube_config_duration_enable }}"
+        - name: OVNKUBE_METRICS_SCALE_ENABLE
+          value: "{{ ovnkube_metrics_scale_enable }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
