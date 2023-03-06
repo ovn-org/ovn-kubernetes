@@ -28,7 +28,8 @@ const (
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
 	// egressFirewallACLExtIdKey external ID key for egress firewall ACLs
-	egressFirewallACLExtIdKey = "egressFirewall"
+	egressFirewallACLExtIdKey    = "egressFirewall"
+	egressFirewallACLPriorityKey = "priority"
 )
 
 type egressFirewall struct {
@@ -403,7 +404,10 @@ func (oc *DefaultNetworkController) createEgressFirewallRules(priority int, matc
 		aclLogging,
 		// since egressFirewall has direction to-lport, set type to ingress
 		lportIngress,
-		map[string]string{egressFirewallACLExtIdKey: externalID},
+		map[string]string{
+			egressFirewallACLExtIdKey:    externalID,
+			egressFirewallACLPriorityKey: fmt.Sprintf("%d", priority),
+		},
 	)
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressFirewallACL)
 	if err != nil {
