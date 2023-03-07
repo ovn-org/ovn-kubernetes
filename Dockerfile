@@ -4,7 +4,7 @@
 #
 # The standard name for this image is ovn-kube
 
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.19-openshift-4.13 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.19-openshift-4.14 AS builder
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
@@ -12,8 +12,6 @@ COPY . .
 # build the binaries
 RUN cd go-controller; CGO_ENABLED=0 make
 RUN cd go-controller; CGO_ENABLED=0 make windows
-
-FROM registry.ci.openshift.org/ocp/4.13:cli AS cli
 
 # ovn-kubernetes-base image is built from Dockerfile.base
 # The following changes are included in ovn-kubernetes-base
@@ -23,7 +21,7 @@ FROM registry.ci.openshift.org/ocp/4.13:cli AS cli
 # - creating directories required by ovn-kubernetes
 # - git commit number
 # - ovnkube.sh script
-FROM registry.ci.openshift.org/ocp/4.13:ovn-kubernetes-base
+FROM registry.ci.openshift.org/ocp/4.14:ovn-kubernetes-base
 
 USER root
 
@@ -35,12 +33,13 @@ ENV PYTHONDONTWRITEBYTECODE yes
 # - openvswitch-ipsec
 # - ovn-vtep
 RUN INSTALL_PKGS=" \
-	openssl python3-pyOpenSSL firewalld-filesystem \
+	openssl firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
 	containernetworking-plugins \
 	tcpdump iputils \
 	libreswan \
 	ethtool conntrack-tools \
+	openshift-clients \
 	" && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
 	eval "dnf install -y --nodocs $(cat /more-pkgs)" && \
@@ -53,8 +52,6 @@ COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_o
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovndbchecker /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-trace /usr/bin/
 
-COPY --from=cli /usr/bin/oc /usr/bin/
-RUN ln -s /usr/bin/oc /usr/bin/kubectl
 RUN stat /usr/bin/oc
 
 LABEL io.k8s.display-name="ovn kubernetes" \

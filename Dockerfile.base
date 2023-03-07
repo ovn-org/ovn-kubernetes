@@ -5,23 +5,23 @@
 # The standard name for this image is ovn-kubernetes-base
 
 # build base image shared by both OpenShift and MicroShift
-FROM registry.ci.openshift.org/ocp/4.13:base
+FROM registry.ci.openshift.org/ocp/4.14:base-rhel9
 
 # install selinux-policy first to avoid a race
 RUN dnf install -y --nodocs \
-	selinux-policy && \
+	selinux-policy procps-ng && \
 	dnf clean all
 
-ARG ovsver=2.17.0-62.el8fdp
-ARG ovnver=22.12.0-18.el8fdp
+ARG ovsver=3.1.0-2.el9fdp
+ARG ovnver=23.03.0-7.el9fdp
 
 RUN INSTALL_PKGS="iptables" && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
-	dnf install -y --nodocs "openvswitch2.17 = $ovsver" "python3-openvswitch2.17 = $ovsver" && \
-	dnf install -y --nodocs "ovn22.12 = $ovnver" "ovn22.12-central = $ovnver" "ovn22.12-host = $ovnver" && \
+	dnf install -y --nodocs "openvswitch3.1 = $ovsver" "python3-openvswitch3.1 = $ovsver" && \
+	dnf install -y --nodocs "ovn23.03 = $ovnver" "ovn23.03-central = $ovnver" "ovn23.03-host = $ovnver" && \
 	dnf clean all && rm -rf /var/cache/*
 
-RUN sed 's/%/"/g' <<<"%openvswitch2.17-devel = $ovsver% %openvswitch2.17-ipsec = $ovsver% %ovn22.12-vtep = $ovnver%" > /more-pkgs
+RUN sed 's/%/"/g' <<<"%openvswitch3.1-devel = $ovsver% %openvswitch3.1-ipsec = $ovsver% %ovn23.03-vtep = $ovnver%" > /more-pkgs
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
