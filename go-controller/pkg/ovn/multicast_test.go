@@ -618,6 +618,57 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			})
 
+			ginkgo.It("tests enabling multicast in multiple namespaces with a long name > 42 characters "+ipModeStr(m), func() {
+				app.Action = func(ctx *cli.Context) error {
+					longNameSpace1Name := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk" // create with 63 characters
+					namespace1 := *newNamespace(longNameSpace1Name)
+					longNameSpace2Name := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijl" // create with 63 characters
+					namespace2 := *newNamespace(longNameSpace2Name)
+
+					fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: getNodeSwitch(nodeName)},
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespace1,
+								namespace2,
+							},
+						},
+					)
+					setIpMode(m)
+
+					err := fakeOvn.controller.WatchNamespaces()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					fakeOvn.controller.WatchPods()
+					ns1, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespace1.Name, metav1.GetOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(ns1).NotTo(gomega.BeNil())
+					ns2, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespace2.Name, metav1.GetOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(ns2).NotTo(gomega.BeNil())
+
+					portsns1 := []string{}
+					expectedData := getMulticastPolicyExpectedData(longNameSpace1Name, portsns1)
+					acl := expectedData[0].(*nbdb.ACL)
+					// Post ACL indexing work, multicast ACL's don't have names
+					// We use externalIDs instead; so we can check if the expected IDs exist for the long namespace so that
+					// isEquivalent logic will be correct
+					gomega.Expect(acl.Name).To(gomega.BeNil())
+					gomega.Expect(acl.ExternalIDs[libovsdbops.ObjectNameKey.String()]).To(gomega.Equal(longNameSpace1Name))
+					expectedData = append(expectedData, getMulticastPolicyExpectedData(longNameSpace2Name, nil)...)
+					acl = expectedData[3].(*nbdb.ACL)
+					gomega.Expect(acl.Name).To(gomega.BeNil())
+					gomega.Expect(acl.ExternalIDs[libovsdbops.ObjectNameKey.String()]).To(gomega.Equal(longNameSpace2Name))
+					expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})...)
+					// Enable multicast in the namespace.
+					updateMulticast(fakeOvn, ns1, true)
+					updateMulticast(fakeOvn, ns2, true)
+					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+					return nil
+				}
+
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			})
+
 			ginkgo.It("tests adding a pod to a multicast enabled namespace "+ipModeStr(m), func() {
 				app.Action = func(ctx *cli.Context) error {
 					namespace1 := *newNamespace(namespaceName1)
