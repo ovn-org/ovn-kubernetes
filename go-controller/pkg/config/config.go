@@ -333,8 +333,8 @@ type MetricsConfig struct {
 	NodeServerCert        string `gcfg:"node-server-cert"`
 	// EnableConfigDuration holds the boolean flag to enable OVN-Kubernetes master to monitor OVN-Kubernetes master
 	// configuration duration and optionally, its application to all nodes
-	EnableConfigDuration  bool `gcfg:"enable-config-duration"`
-	EnableEIPScaleMetrics bool `gcfg:"enable-eip-scale-metrics"`
+	EnableConfigDuration bool `gcfg:"enable-config-duration"`
+	EnableScaleMetrics   bool `gcfg:"enable-scale-metrics"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -1041,9 +1041,9 @@ var MetricsFlags = []cli.Flag{
 		Destination: &cliConfig.Metrics.EnableConfigDuration,
 	},
 	&cli.BoolFlag{
-		Name:        "metrics-enable-eip-scale",
-		Usage:       "Enables metrics related to Egress IP scaling",
-		Destination: &cliConfig.Metrics.EnableEIPScaleMetrics,
+		Name:        "metrics-enable-scale",
+		Usage:       "Enables metrics related to scaling",
+		Destination: &cliConfig.Metrics.EnableScaleMetrics,
 	},
 }
 

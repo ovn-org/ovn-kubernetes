@@ -60,8 +60,8 @@ func (c *ClientSet) getPod(namespace, name string) (*kapi.Pod, error) {
 }
 
 // GetPodAnnotations obtains the pod UID and annotation from the cache or apiserver
-func GetPodAnnotations(ctx context.Context, getter PodInfoGetter,
-	namespace, name, nadName string, annotCond podAnnotWaitCond) (string, map[string]string, *util.PodAnnotation, error) {
+func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
+	namespace, name, nadName string, annotCond podAnnotWaitCond) (*kapi.Pod, map[string]string, *util.PodAnnotation, error) {
 	var notFoundCount uint
 
 	for {
@@ -71,23 +71,23 @@ func GetPodAnnotations(ctx context.Context, getter PodInfoGetter,
 			if ctx.Err() == context.Canceled {
 				detail = "canceled while"
 			}
-			return "", nil, nil, fmt.Errorf("%s waiting for annotations: %w", detail, ctx.Err())
+			return nil, nil, nil, fmt.Errorf("%s waiting for annotations: %w", detail, ctx.Err())
 		default:
 			pod, err := getter.getPod(namespace, name)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
-					return "", nil, nil, fmt.Errorf("failed to get pod for annotations: %v", err)
+					return nil, nil, nil, fmt.Errorf("failed to get pod for annotations: %v", err)
 				}
 				// Allow up to 1 second for pod to be found
 				notFoundCount++
 				if notFoundCount >= 5 {
-					return "", nil, nil, fmt.Errorf("timed out waiting for pod after 1s: %v", err)
+					return nil, nil, nil, fmt.Errorf("timed out waiting for pod after 1s: %v", err)
 				}
 				// drop through to try again
 			} else if pod != nil {
 				podNADAnnotation, ready := annotCond(pod.Annotations, nadName)
 				if ready {
-					return string(pod.UID), pod.Annotations, podNADAnnotation, nil
+					return pod, pod.Annotations, podNADAnnotation, nil
 				}
 			}
 
@@ -133,3 +133,28 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 	}
 	return podInterfaceInfo, nil
 }
+
+//START taken from https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/types/pod_update.go
+const (
+	ConfigSourceAnnotationKey = "kubernetes.io/config.source"
+	// ApiserverSource identifies updates from Kubernetes API Server.
+	ApiserverSource = "api"
+)
+
+// GetPodSource returns the source of the pod based on the annotation.
+func GetPodSource(pod *kapi.Pod) (string, error) {
+	if pod.Annotations != nil {
+		if source, ok := pod.Annotations[ConfigSourceAnnotationKey]; ok {
+			return source, nil
+		}
+	}
+	return "", fmt.Errorf("cannot get source of pod %q", pod.UID)
+}
+
+// IsStaticPod returns true if the pod is a static pod.
+func IsStaticPod(pod *kapi.Pod) bool {
+	source, err := GetPodSource(pod)
+	return err == nil && source != ApiserverSource
+}
+
+//END taken from https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/types/pod_update.go

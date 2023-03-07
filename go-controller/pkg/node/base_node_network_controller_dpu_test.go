@@ -175,7 +175,7 @@ var _ = Describe("Node DPU tests", func() {
 
 		It("Fails if dpu.connection-details Pod annotation is not present", func() {
 			pod.Annotations = map[string]string{}
-			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 			err := dnnc.addRepPort(&pod, vfRep, ifInfo, clientset)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to get dpu annotation"))
@@ -198,7 +198,7 @@ var _ = Describe("Node DPU tests", func() {
 				Cmd: genOVSDelPortCmd("pf0vf9"),
 			})
 
-			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 			// call addRepPort()
 			err := dnnc.addRepPort(&pod, vfRep, ifInfo, clientset)
@@ -226,7 +226,7 @@ var _ = Describe("Node DPU tests", func() {
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSDelPortCmd("pf0vf9"),
 			})
-			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 			// call addRepPort()
 			err := dnnc.addRepPort(&pod, vfRep, ifInfo, clientset)
@@ -282,7 +282,7 @@ var _ = Describe("Node DPU tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 					err := dnnc.addRepPort(&pod, vfRep, ifInfo, clientset)
 					Expect(err).To(HaveOccurred())
@@ -298,7 +298,7 @@ var _ = Describe("Node DPU tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 					err := dnnc.addRepPort(&pod, vfRep, ifInfo, clientset)
 					Expect(err).To(HaveOccurred())
@@ -315,7 +315,7 @@ var _ = Describe("Node DPU tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 					err := dnnc.addRepPort(&pod, vfRep, ifInfo, clientset)
 					Expect(err).To(HaveOccurred())
@@ -337,7 +337,7 @@ var _ = Describe("Node DPU tests", func() {
 				Expect(err).ToNot(HaveOccurred())
 				kubeMock.On("UpdatePod", cpod).Return(nil)
 
-				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 				err = dnnc.addRepPort(&pod, vfRep, ifInfo, clientset)
 				Expect(err).ToNot(HaveOccurred())
@@ -363,7 +363,7 @@ var _ = Describe("Node DPU tests", func() {
 					Cmd: genOVSDelPortCmd("pf0vf9"),
 				})
 
-				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 				err = dnnc.addRepPort(&pod, vfRep, ifInfo, clientset)
 				Expect(err).To(HaveOccurred())

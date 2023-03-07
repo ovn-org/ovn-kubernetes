@@ -14,6 +14,7 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -118,22 +119,42 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	}
 	oc.defaultCOPPUUID = *(logicalRouter.Copp)
 
-	// Create a cluster-wide port group that all logical switch ports are part of
-	pg := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
-	err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
-	if err != nil {
-		klog.Errorf("Failed to create cluster port group: %v", err)
+	pg := &nbdb.PortGroup{
+		Name: types.ClusterPortGroupName,
+	}
+	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
+	if err != nil && err != libovsdbclient.ErrNotFound {
 		return err
 	}
+	if pg == nil {
+		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
+		// Create a cluster-wide port group that all logical switch ports are part of
+		pg := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
+		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
+		if err != nil {
+			klog.Errorf("Failed to create cluster port group: %v", err)
+			return err
+		}
+	}
 
-	// Create a cluster-wide port group with all node-to-cluster router
-	// logical switch ports.  Currently the only user is multicast but it might
-	// be used for other features in the future.
-	pg = libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
-	err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
-	if err != nil {
-		klog.Errorf("Failed to create cluster port group: %v", err)
+	pg = &nbdb.PortGroup{
+		Name: types.ClusterRtrPortGroupName,
+	}
+	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
+	if err != nil && err != libovsdbclient.ErrNotFound {
 		return err
+	}
+	if pg == nil {
+		// we didn't find an existing clusterRtrPG, let's create a new empty PG (fresh cluster install)
+		// Create a cluster-wide port group with all node-to-cluster router
+		// logical switch ports. Currently the only user is multicast but it might
+		// be used for other features in the future.
+		pg = libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
+		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
+		if err != nil {
+			klog.Errorf("Failed to create cluster port group: %v", err)
+			return err
+		}
 	}
 
 	// If supported, enable IGMP relay on the router to forward multicast

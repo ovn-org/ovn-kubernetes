@@ -102,6 +102,11 @@ func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 	for i := range acls {
 		// can't use i in the predicate, for loop replaces it in-memory
 		acl := acls[i]
+		// ensure names are truncated (let's cover our bases from snippets that don't call BuildACL and call this directly)
+		if acl.Name != nil {
+			// node ACLs won't have names set
+			*acl.Name = fmt.Sprintf("%.63s", *acl.Name)
+		}
 		opModel := operationModel{
 			Model:          acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },

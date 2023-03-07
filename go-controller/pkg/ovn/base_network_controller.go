@@ -658,5 +658,5 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr 
 }
 
 func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
-	return !(bnc.TopologyType() == types.Layer2Topology && len(bnc.Subnets()) == 0)
+	return !((bnc.TopologyType() == types.Layer2Topology || bnc.TopologyType() == types.LocalnetTopology) && len(bnc.Subnets()) == 0)
 }
