@@ -2,10 +2,12 @@ package cni
 
 import (
 	"fmt"
+	"net"
+
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
-	"net"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
@@ -80,11 +82,17 @@ func (pr *PodRequest) String() string {
 // and the best we can do is use the given UID for the duration of the request.
 // But if the existing UID is valid and does not match the given UID then the
 // sandbox request is for a different pod instance and should be terminated.
-func (pr *PodRequest) checkOrUpdatePodUID(podUID string) error {
-	if pr.PodUID == "" {
-		// Runtime didn't pass UID, use the one we got from the pod object
-		pr.PodUID = podUID
-	} else if podUID != pr.PodUID {
+// Static pod UID is a hash of the pod itself that does not match
+// the UID of the mirror kubelet creates on the api /server.
+// We will use the UID of the mirror.
+// The hash is annotated in the mirror pod (kubernetes.io/config.hash)
+// and we could match against it, but let's avoid that for now as it is not
+// a published standard.
+func (pr *PodRequest) checkOrUpdatePodUID(pod *kapi.Pod) error {
+	if pr.PodUID == "" || IsStaticPod(pod) {
+		// Runtime didn't pass UID, or the pod is a static pod, use the one we got from the pod object
+		pr.PodUID = string(pod.UID)
+	} else if string(pod.UID) != pr.PodUID {
 		// Exit early if the pod was deleted and recreated already
 		return fmt.Errorf("pod deleted before sandbox %v operation began", pr.Command)
 	}
@@ -142,12 +150,12 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, useOVS
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
-	podUID, annotations, podNADAnnotation, err := GetPodAnnotations(pr.ctx, clientset, namespace, podName,
+	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName,
 		pr.nadName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
-	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
+	if err = pr.checkOrUpdatePodUID(pod); err != nil {
 		return nil, err
 	}
 	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, podNADAnnotation, useOVSExternalIDs, pr.PodUID, vfNetdevName,
