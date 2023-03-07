@@ -364,7 +364,8 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			table: "filter",
 			chain: "FORWARD",
 			args: []string{
-				"-i", ifname,
+				"-o", ifname,
+				"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED",
 				"-j", "ACCEPT",
 			},
 			protocol: protocol,
@@ -373,8 +374,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			table: "filter",
 			chain: "FORWARD",
 			args: []string{
-				"-o", ifname,
-				"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED",
+				"-i", ifname,
 				"-j", "ACCEPT",
 			},
 			protocol: protocol,
@@ -393,7 +393,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			table: "nat",
 			chain: "POSTROUTING",
 			args: []string{
-				"-s", cidr.String(),
+				"-s", masqueradeIP,
 				"-j", "MASQUERADE",
 			},
 			protocol: protocol,
@@ -402,7 +402,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			table: "nat",
 			chain: "POSTROUTING",
 			args: []string{
-				"-s", masqueradeIP,
+				"-s", cidr.String(),
 				"-j", "MASQUERADE",
 			},
 			protocol: protocol,
@@ -412,7 +412,8 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 
 // initLocalGatewayNATRules sets up iptables rules for interfaces
 func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
-	return insertIptRules(getLocalGatewayNATRules(ifname, cidr))
+	// Append and not insert as these rules should be evaluated last
+	return appendIptRules(getLocalGatewayNATRules(ifname, cidr))
 }
 
 func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {
