@@ -1393,7 +1393,7 @@ func (oc *DefaultNetworkController) handlePeerPodSelectorAddUpdate(np *networkPo
 // handlePeerPodSelectorDelete removes the IP address of a pod that no longer
 // matches a NetworkPolicy ingress/egress section's selectors from that
 // ingress/egress address set
-func (oc *DefaultNetworkController) handlePeerPodSelectorDelete(np *networkPolicy, gp *gressPolicy, obj interface{}) error {
+func (oc *DefaultNetworkController) handlePeerPodSelectorDelete(np *networkPolicy, gp *gressPolicy, podSelector labels.Selector, obj interface{}) error {
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -1404,6 +1404,29 @@ func (oc *DefaultNetworkController) handlePeerPodSelectorDelete(np *networkPolic
 		klog.Infof("Pod %s/%s not scheduled on any node, skipping it", pod.Namespace, pod.Name)
 		return nil
 	}
+
+	if util.PodCompleted(pod) {
+		ips, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+		if err != nil {
+			return fmt.Errorf("can't get pod IPs %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
+
+		collidingPod, err := oc.findPodWithIPAddresses(ips)
+		if err != nil {
+			return fmt.Errorf("lookup for pods with the same IPs [%s] failed: %w", util.JoinIPs(ips, " "), err)
+		}
+
+		if collidingPod != nil {
+
+			// If the IP is used by another Pod that is targeted by the same network policy, don't remove the IP from the Address_Set
+			if podSelector.Matches(labels.Set(collidingPod.Labels)) {
+				klog.Infof("Not deleting Pod %s/%s IPs [%s] as they are used by %s/%s", pod.Namespace, pod.Name,
+					util.JoinIPs(ips, " "), collidingPod.Namespace, collidingPod.Name)
+				return nil
+			}
+		}
+	}
+
 	// gressPolicy.deletePeerPod must be called with networkPolicy RLock.
 	if err := gp.deletePeerPod(pod); err != nil {
 		return err
@@ -1439,8 +1462,9 @@ func (oc *DefaultNetworkController) addPeerPodHandler(podSelector *metav1.LabelS
 		factory.PeerPodSelectorType,
 		syncFunc,
 		&NetworkPolicyExtraParameters{
-			np: np,
-			gp: gp,
+			np:          np,
+			gp:          gp,
+			podSelector: sel,
 		})
 
 	podHandler, err := retryPeerPods.WatchResourceFiltered(namespace, sel)
@@ -1477,8 +1501,9 @@ func (oc *DefaultNetworkController) handlePeerNamespaceAndPodAdd(np *networkPoli
 		factory.PeerPodForNamespaceAndPodSelectorType,
 		syncFunc,
 		&NetworkPolicyExtraParameters{
-			gp: gp,
-			np: np,
+			gp:          gp,
+			np:          np,
+			podSelector: podSelector,
 		},
 	)
 	// syncFunc and factory.PeerPodForNamespaceAndPodSelectorType add event handler also take np.RLock,
