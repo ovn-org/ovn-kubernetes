@@ -137,7 +137,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	nodeInformer := c.watchFactory.NodeInformer()
 	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
-			c.handleNodeChanges(new)
+			c.handleNodePrimaryAddrChange()
 		},
 	})
 
@@ -170,14 +170,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 					addrChanged = c.delAddr(a.LinkAddress.IP)
 				}
 
-				nodePrimaryAddrChanged, err := c.nodePrimaryAddrChanged()
-				if err != nil {
-					klog.Error("Address Manager failed to check node primary address change: %v", err)
-				}
-				if nodePrimaryAddrChanged {
-					klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
-					c.updateOVNEncapIPAndReconnect()
-				}
+				c.handleNodePrimaryAddrChange()
 				if addrChanged || !c.doesNodeHostAddressesMatch() {
 					klog.Infof("Host addresses changed to %v. Updating node address annotation.", c.addresses)
 					err := c.updateNodeAddressAnnotations()
@@ -204,10 +197,8 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	klog.Info("Node IP manager is running")
 }
 
-// handleNodeChanges takes a node obj, extracts its name and determines if the node's address changed. If so, it
-// updates the node's OVS encapsulation IP.
-func (c *addressManager) handleNodeChanges(obj interface{}) {
-	var err error
+// updates OVN's EncapIP if the node IP changed
+func (c *addressManager) handleNodePrimaryAddrChange() {
 	nodePrimaryAddrChanged, err := c.nodePrimaryAddrChanged()
 	if err != nil {
 		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
@@ -407,14 +398,7 @@ func (c *addressManager) sync() {
 	}
 
 	addrChanged := c.assignAddresses(currAddresses)
-	nodePrimaryAddrChanged, err := c.nodePrimaryAddrChanged()
-	if err != nil {
-		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
-	}
-	if nodePrimaryAddrChanged {
-		klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
-		c.updateOVNEncapIPAndReconnect()
-	}
+	c.handleNodePrimaryAddrChange()
 	if addrChanged || !c.doesNodeHostAddressesMatch() {
 		klog.Infof("Node address changed to %v. Updating annotations.", currAddresses)
 		err := c.updateNodeAddressAnnotations()
