@@ -1406,6 +1406,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
+					// NOTE: syncEgressFirewall is not calling libovsdbops.BuildACL and directly calls CreateOrUpdateACLs
+					// This part of test ensures syncEgressFirewall code path is tested well and that we truncate the ACL names correctly
+					err = fakeOVN.controller.syncEgressFirewall([]interface{}{*egressFirewall})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
 					err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
