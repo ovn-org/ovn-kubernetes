@@ -63,7 +63,7 @@ spec:
 - `subnets` (string, required): a comma separated list of subnets. When multiple subnets
   are provided, the user will get an IP from each subnet.
 - `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
-- `netAttachDefName` (string, required): must match <namespace>/<net-attach-def name>
+- `netAttachDefName` (string, required): must match `<namespace>/<net-attach-def name>`
   of the surrounding object.
 
 **NOTE**
@@ -105,7 +105,7 @@ spec:
   `subnets` (string, optional): a comma separated list of subnets. When multiple subnets
   are provided, the user will get an IP from each subnet.
 - `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
-- `netAttachDefName` (string, required): must match <namespace>/<net-attach-def name>
+- `netAttachDefName` (string, required): must match `<namespace>/<net-attach-def name>`
   of the surrounding object.
 - `excludeSubnets` (string, optional): a comma separated list of CIDRs / IPs.
   These IPs will be removed from the assignable IP pool, and never handed over
@@ -155,7 +155,7 @@ localnet network.
 - `subnets` (string, optional): a comma separated list of subnets. When multiple subnets
   are provided, the user will get an IP from each subnet.
 - `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
-- `netAttachDefName` (string, required): must match <namespace>/<net-attach-def name>
+- `netAttachDefName` (string, required): must match `<namespace>/<net-attach-def name>`
   of the surrounding object.
 - `excludeSubnets` (string, optional): a comma separated list of CIDRs / IPs.
   These IPs will be removed from the assignable IP pool, and never handed over
