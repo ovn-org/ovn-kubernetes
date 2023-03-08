@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 	kexec "k8s.io/utils/exec"
+	"k8s.io/utils/pointer"
 )
 
 func TestRenameLink(t *testing.T) {
@@ -316,6 +317,31 @@ func TestSetupNetwork(t *testing.T) {
 			},
 			linkMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Flags: net.FlagUp}}},
+			},
+		},
+		{
+			desc:    "test skip ip config",
+			inpLink: mockLink,
+			inpPodIfaceInfo: &PodInterfaceInfo{
+				NetName: "default",
+				PodAnnotation: util.PodAnnotation{
+					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
+					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
+					Gateways: ovntest.MustParseIPs("192.168.0.1"),
+					Routes: []util.PodRoute{
+						{
+							Dest:    ovntest.MustParseIPNet("192.168.1.0/24"),
+							NextHop: net.ParseIP("192.168.1.1"),
+						},
+					},
+					SkipIPConfig: pointer.Bool(true),
+				},
+			},
+			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
+			},
+			linkMockHelper: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 	}
