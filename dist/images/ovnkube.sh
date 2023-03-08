@@ -235,6 +235,7 @@ ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
+ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
 
@@ -993,6 +994,12 @@ ovn-master() {
   fi
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
 
+  ovnkube_metrics_scale_enable_flag=
+  if [[ ${ovnkube_metrics_scale_enable} == "true" ]]; then
+    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale"
+  fi
+  echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1019,6 +1026,7 @@ ovn-master() {
     ${egressfirewall_enabled_flag} \
     ${egressqos_enabled_flag} \
     ${ovnkube_config_duration_enable_flag} \
+    ${ovnkube_metrics_scale_enable_flag} \
     ${multi_network_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &

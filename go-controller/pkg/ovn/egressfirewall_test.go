@@ -202,8 +202,26 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					// Both ACLs will be removed from the node switch
 					nodeSwitch.ACLs = nil
 
+					// keepACL will be re-created with the new external ID
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
+					newKeepACL := libovsdbops.BuildACL(
+						buildEgressFwAclName(namespace1.Name, t.EgressFirewallStartPriority),
+						nbdb.ACLDirectionToLport,
+						t.EgressFirewallStartPriority,
+						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
+						nbdb.ACLActionAllow,
+						t.OvnACLLoggingMeter,
+						"",
+						false,
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
+						nil,
+					)
+					newKeepACL.UUID = "newKeepACL-UUID"
 					// keepACL will be added to the clusterPortGroup
-					clusterPortGroup.ACLs = []string{keepACL.UUID}
+					clusterPortGroup.ACLs = []string{newKeepACL.UUID}
 
 					// Direction of both ACLs will be converted to
 					keepACL.Direction = nbdb.ACLDirectionToLport
@@ -211,10 +229,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					keepACL.Name = &newName
 					// check severity was reset from default to nil
 					keepACL.Severity = nil
-					// subnet exclusion will be deleted
-					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
-					keepACL.Match = "(ip4.dst == 1.2.3.4/23) && ip4.src == $" + asHash
-
 					// purgeACL ACL will be deleted when test server starts deleting dereferenced ACLs
 					// for now we need to update its fields, since it is present in the db
 					purgeACL.Direction = nbdb.ACLDirectionToLport
@@ -225,6 +239,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					expectedDatabaseState := []libovsdb.TestData{
 						otherACL,
 						purgeACL,
+						newKeepACL,
 						keepACL,
 						nodeSwitch,
 						joinSwitch,
@@ -290,7 +305,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{egressFirewallACLExtIdKey: "namespace1"},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -358,7 +376,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{egressFirewallACLExtIdKey: "namespace1"},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					ipv6ACL.UUID = "ipv6ACL-UUID"
@@ -435,7 +456,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{egressFirewallACLExtIdKey: "namespace1"},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					udpACL.UUID = "udpACL-UUID"
@@ -510,7 +534,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{egressFirewallACLExtIdKey: "namespace1"},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -593,7 +620,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{egressFirewallACLExtIdKey: "namespace1"},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -819,7 +849,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{"egressFirewall": "namespace1"},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -898,7 +931,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{egressFirewallACLExtIdKey: "namespace1"},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1006,7 +1042,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{egressFirewallACLExtIdKey: "namespace1"},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1109,7 +1148,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{egressFirewallACLExtIdKey: "namespace1"},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1197,7 +1239,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{"egressFirewall": namespace1.Name},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1267,7 +1312,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						map[string]string{egressFirewallACLExtIdKey: "namespace1"},
+						map[string]string{
+							egressFirewallACLExtIdKey:    "namespace1",
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
 					acl.UUID = "acl-UUID"
@@ -1279,6 +1327,103 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					return nil
 				}
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			})
+			ginkgo.It(fmt.Sprintf("correctly creates an egressfirewall for namespace name > 43 symbols, gateway mode %s", gwMode), func() {
+				app.Action = func(ctx *cli.Context) error {
+					// 52 characters namespace
+					namespace1 := *newNamespace("abcdefghigklmnopqrstuvwxyzabcdefghigklmnopqrstuvwxyz")
+					egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+						{
+							Type: "Allow",
+							To: egressfirewallapi.EgressFirewallDestination{
+								CIDRSelector: "1.2.3.5/23",
+							},
+						},
+						{
+							Type: "Allow",
+							To: egressfirewallapi.EgressFirewallDestination{
+								CIDRSelector: "2.2.3.5/23",
+							},
+						},
+					})
+
+					fakeOVN.startWithDBSetup(dbSetup,
+						&egressfirewallapi.EgressFirewallList{
+							Items: []egressfirewallapi.EgressFirewall{
+								*egressFirewall,
+							},
+						},
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespace1,
+							},
+						})
+
+					err := fakeOVN.controller.WatchNamespaces()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					err = fakeOVN.controller.WatchEgressFirewall()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
+					ipv4ACL1 := libovsdbops.BuildACL(
+						buildEgressFwAclName(namespace1.Name, t.EgressFirewallStartPriority),
+						nbdb.ACLDirectionToLport,
+						t.EgressFirewallStartPriority,
+						"(ip4.dst == 1.2.3.5/23) && ip4.src == $"+asHash,
+						nbdb.ACLActionAllow,
+						t.OvnACLLoggingMeter,
+						"",
+						false,
+						map[string]string{
+							egressFirewallACLExtIdKey:    namespace1.Name,
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
+						nil,
+					)
+					ipv4ACL1.UUID = "ipv4ACL1-UUID"
+					ipv4ACL2 := libovsdbops.BuildACL(
+						buildEgressFwAclName(namespace1.Name, t.EgressFirewallStartPriority-1),
+						nbdb.ACLDirectionToLport,
+						t.EgressFirewallStartPriority-1,
+						"(ip4.dst == 2.2.3.5/23) && ip4.src == $"+asHash,
+						nbdb.ACLActionAllow,
+						t.OvnACLLoggingMeter,
+						"",
+						false,
+						map[string]string{
+							egressFirewallACLExtIdKey:    namespace1.Name,
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority-1),
+						},
+						nil,
+					)
+					ipv4ACL2.UUID = "ipv4ACL2-UUID"
+
+					// new ACL will be added to the port group
+					clusterPortGroup.ACLs = []string{ipv4ACL1.UUID, ipv4ACL2.UUID}
+					expectedDatabaseState := append(initialData, ipv4ACL1, ipv4ACL2)
+
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+					// NOTE: syncEgressFirewall is not calling libovsdbops.BuildACL and directly calls CreateOrUpdateACLs
+					// This part of test ensures syncEgressFirewall code path is tested well and that we truncate the ACL names correctly
+					err = fakeOVN.controller.syncEgressFirewall([]interface{}{*egressFirewall})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+					err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					// ACL should be removed from the port group egfw is deleted
+					clusterPortGroup.ACLs = []string{}
+					// this ACL will be deleted when test server starts deleting dereferenced ACLs
+					expectedDatabaseState = append(initialData, ipv4ACL1, ipv4ACL2)
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+					return nil
+				}
+
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			})

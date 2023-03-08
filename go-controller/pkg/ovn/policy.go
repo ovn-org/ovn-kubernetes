@@ -5,11 +5,14 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	ovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -820,6 +823,13 @@ func (oc *DefaultNetworkController) denyPGDeletePorts(np *networkPolicy, portNam
 
 // handleLocalPodSelectorAddFunc adds a new pod to an existing NetworkPolicy, should be retriable.
 func (oc *DefaultNetworkController) handleLocalPodSelectorAddFunc(np *networkPolicy, objs ...interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolLocalPodEvent("add", duration)
+		}()
+	}
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -864,6 +874,13 @@ func (oc *DefaultNetworkController) handleLocalPodSelectorAddFunc(np *networkPol
 
 // handleLocalPodSelectorDelFunc handles delete event for local pod, should be retriable
 func (oc *DefaultNetworkController) handleLocalPodSelectorDelFunc(np *networkPolicy, objs ...interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolLocalPodEvent("delete", duration)
+		}()
+	}
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -1172,7 +1189,13 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 // if addNetworkPolicy fails, create or delete operation can be retried
 func (oc *DefaultNetworkController) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 	klog.Infof("Adding network policy %s", getPolicyKey(policy))
-
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolEvent("add", duration)
+		}()
+	}
 	// To not hold nsLock for the whole process on network policy creation, we do the following:
 	// 1. save required namespace information to use for netpol create
 	// 2. create network policy without ns Lock
@@ -1277,7 +1300,13 @@ func (oc *DefaultNetworkController) buildNetworkPolicyACLs(np *networkPolicy, ac
 func (oc *DefaultNetworkController) deleteNetworkPolicy(policy *knet.NetworkPolicy) error {
 	npKey := getPolicyKey(policy)
 	klog.Infof("Deleting network policy %s", npKey)
-
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolEvent("delete", duration)
+		}()
+	}
 	// First lock and update namespace
 	nsInfo, nsUnlock := oc.getNamespaceLocked(policy.Namespace, false)
 	if nsInfo != nil {
@@ -1372,6 +1401,13 @@ func (oc *DefaultNetworkController) cleanupNetworkPolicy(np *networkPolicy) erro
 // selected as a peer by a NetworkPolicy's ingress/egress section to that
 // ingress/egress address set
 func (oc *DefaultNetworkController) handlePeerPodSelectorAddUpdate(np *networkPolicy, gp *gressPolicy, objs ...interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerPodEvent("add", duration)
+		}()
+	}
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -1394,6 +1430,13 @@ func (oc *DefaultNetworkController) handlePeerPodSelectorAddUpdate(np *networkPo
 // matches a NetworkPolicy ingress/egress section's selectors from that
 // ingress/egress address set
 func (oc *DefaultNetworkController) handlePeerPodSelectorDelete(np *networkPolicy, gp *gressPolicy, podSelector labels.Selector, obj interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerPodEvent("delete", duration)
+		}()
+	}
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -1479,6 +1522,13 @@ func (oc *DefaultNetworkController) addPeerPodHandler(podSelector *metav1.LabelS
 
 func (oc *DefaultNetworkController) handlePeerNamespaceAndPodAdd(np *networkPolicy, gp *gressPolicy,
 	podSelector labels.Selector, obj interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerNamespaceAndPodEvent("add", duration)
+		}()
+	}
 	namespace := obj.(*kapi.Namespace)
 	np.RLock()
 	locked := true
@@ -1528,6 +1578,13 @@ func (oc *DefaultNetworkController) handlePeerNamespaceAndPodAdd(np *networkPoli
 }
 
 func (oc *DefaultNetworkController) handlePeerNamespaceAndPodDel(np *networkPolicy, gp *gressPolicy, obj interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerNamespaceAndPodEvent("delete", duration)
+		}()
+	}
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -1593,6 +1650,13 @@ func (oc *DefaultNetworkController) addPeerNamespaceAndPodHandler(namespaceSelec
 }
 
 func (oc *DefaultNetworkController) handlePeerNamespaceSelectorAdd(np *networkPolicy, gp *gressPolicy, objs ...interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerNamespaceEvent("add", duration)
+		}()
+	}
 	np.RLock()
 	if np.deleted {
 		np.RUnlock()
@@ -1623,6 +1687,13 @@ func (oc *DefaultNetworkController) handlePeerNamespaceSelectorAdd(np *networkPo
 }
 
 func (oc *DefaultNetworkController) handlePeerNamespaceSelectorDel(np *networkPolicy, gp *gressPolicy, objs ...interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerNamespaceEvent("delete", duration)
+		}()
+	}
 	np.RLock()
 	if np.deleted {
 		np.RUnlock()
