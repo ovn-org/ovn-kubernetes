@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -32,7 +33,19 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
 
-		if !oc.isPodScheduledinLocalZone(pod) {
+		switchName := pod.Spec.NodeName
+		if kubevirt.IsPodLiveMigratable(pod) {
+			annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
+			if err != nil {
+				continue
+			}
+			zoneContainsPodSubnet := false
+			switchName, zoneContainsPodSubnet = kubevirt.ZoneContainsPodSubnet(oc.lsManager, annotation)
+			// Don't allocate ip if this zone does not own the ip
+			if !zoneContainsPodSubnet {
+				continue
+			}
+		} else if !oc.isPodScheduledinLocalZone(pod) {
 			continue
 		}
 
@@ -40,7 +53,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		if err != nil {
 			continue
 		}
-		expectedLogicalPortName, err := oc.allocatePodIPs(pod, annotations, ovntypes.DefaultNetworkName)
+		expectedLogicalPortName, err := oc.allocatePodIPsOnSwitch(pod, annotations, ovntypes.DefaultNetworkName, switchName)
 		if err != nil {
 			return err
 		}
@@ -50,8 +63,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 
 		// delete the outdated hybrid overlay subnet route if it exists
 		newRoutes := []util.PodRoute{}
-		switchName := pod.Spec.NodeName
-		for _, subnet := range oc.lsManager.GetSwitchSubnets(switchName) {
+		for _, subnet := range oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName) {
 			hybridOverlayIFAddr := util.GetNodeHybridOverlayIfAddr(subnet).IP
 			for _, route := range annotations.Routes {
 				if !route.NextHop.Equal(hybridOverlayIFAddr) {

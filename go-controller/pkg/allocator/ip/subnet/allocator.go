@@ -26,6 +26,7 @@ type Allocator interface {
 	ReleaseIPs(name string, ips []*net.IPNet) error
 	ConditionalIPRelease(name string, ips []*net.IPNet, predicate func() (bool, error)) (bool, error)
 	ForSubnet(name string) NamedAllocator
+	GetSubnetName(subnets []*net.IPNet) (string, bool)
 }
 
 // NamedAllocator manages the allocation of IPs within a specific subnet
@@ -337,6 +338,24 @@ func (allocator *allocator) ForSubnet(name string) NamedAllocator {
 		name:      name,
 		allocator: allocator,
 	}
+}
+
+// GetSubnetName will find the switch that contains one of the subnets
+// from "subnets" if not it will return "", false
+func (allocator *allocator) GetSubnetName(subnets []*net.IPNet) (string, bool) {
+	allocator.RLock()
+	defer allocator.RUnlock()
+	for _, subnet := range subnets {
+		for switchName, lsInfo := range allocator.cache {
+			for _, ipam := range lsInfo.ipams {
+				ipamCIDR := ipam.CIDR()
+				if ipamCIDR.Contains(subnet.IP) {
+					return switchName, true
+				}
+			}
+		}
+	}
+	return "", false
 }
 
 type IPAllocator struct {
