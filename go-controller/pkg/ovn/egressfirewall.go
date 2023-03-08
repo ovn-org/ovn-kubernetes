@@ -185,8 +185,15 @@ func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interfa
 	// delete acls from all switches, they reside on the port group now
 	if len(egressFirewallACLs) != 0 {
 		err = batching.Batch[*nbdb.ACL](aclDeleteBatchSize, egressFirewallACLs, func(batchACLs []*nbdb.ACL) error {
-			return libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, func(item *nbdb.LogicalSwitch) bool { return true },
-				batchACLs...)
+			// optimize the predicate to exclude switches that don't reference deleting acls.
+			aclsToDelete := sets.NewString()
+			for _, acl := range batchACLs {
+				aclsToDelete.Insert(acl.UUID)
+			}
+			swWithACLsPred := func(sw *nbdb.LogicalSwitch) bool {
+				return aclsToDelete.HasAny(sw.ACLs...)
+			}
+			return libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, swWithACLsPred, batchACLs...)
 		})
 		if err != nil {
 			return fmt.Errorf("failed to remove egress firewall acls from node logical switches: %v", err)
