@@ -44,7 +44,7 @@ const (
 	retryInterval        = 1 * time.Second  // polling interval timer
 	retryTimeout         = 40 * time.Second // polling timeout
 	rolloutTimeout       = 10 * time.Minute
-	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
+	agnhostImage         = "registry.k8s.io/e2e-test-images/agnhost:2.26"
 	iperf3Image          = "quay.io/sronanrh/iperf"
 	ovnNs                = "ovn-kubernetes" //OVN kubernetes namespace
 )
