@@ -63,7 +63,7 @@ spec:
 - `subnets` (string, required): a comma separated list of subnets. When multiple subnets
   are provided, the user will get an IP from each subnet.
 - `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
-- `netAttachDefName` (string, required): must match <namespace>/<net-attach-def name>
+- `netAttachDefName` (string, required): must match `<namespace>/<net-attach-def name>`
   of the surrounding object.
 
 **NOTE**
@@ -105,7 +105,7 @@ spec:
   `subnets` (string, optional): a comma separated list of subnets. When multiple subnets
   are provided, the user will get an IP from each subnet.
 - `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
-- `netAttachDefName` (string, required): must match <namespace>/<net-attach-def name>
+- `netAttachDefName` (string, required): must match `<namespace>/<net-attach-def name>`
   of the surrounding object.
 - `excludeSubnets` (string, optional): a comma separated list of CIDRs / IPs.
   These IPs will be removed from the assignable IP pool, and never handed over
@@ -152,10 +152,10 @@ localnet network.
 - `name` (string, required): the name of the network.
 - `type` (string, required): "ovn-k8s-cni-overlay".
 - `topology` (string, required): "layer2".
-  `subnets` (string, optional): a comma separated list of subnets. When multiple subnets
+- `subnets` (string, optional): a comma separated list of subnets. When multiple subnets
   are provided, the user will get an IP from each subnet.
 - `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
-- `netAttachDefName` (string, required): must match <namespace>/<net-attach-def name>
+- `netAttachDefName` (string, required): must match `<namespace>/<net-attach-def name>`
   of the surrounding object.
 - `excludeSubnets` (string, optional): a comma separated list of CIDRs / IPs.
   These IPs will be removed from the assignable IP pool, and never handed over
@@ -191,6 +191,47 @@ spec:
     imagePullPolicy: IfNotPresent
     name: agnhost-container
 ```
+
+### Setting static IP addresses on a pod
+The user can specify attachment parameters via
+[network-selection-elements](https://github.com/k8snetworkplumbingwg/network-attachment-definition-client/blob/63033d5c63d1cf56f924a5454c8f2ac444b6736d/pkg/apis/k8s.cni.cncf.io/v1/types.go#L137)
+, namely IP, MAC, and interface name.
+
+Refer to the following yaml for an example on how to request a static IP for a
+pod, a MAC address, and specify the pod interface name.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    k8s.v1.cni.cncf.io/networks: '[
+      {
+        "name": "l2-network",
+        "mac": "02:03:04:05:06:07",
+        "interface": "myiface1",
+        "ips": [
+          "192.0.2.20/24"
+        ]
+      }
+    ]'
+  name: tinypod
+  namespace: ns1
+spec:
+  containers:
+  - args:
+    - pause
+    image: k8s.gcr.io/e2e-test-images/agnhost:2.36
+    imagePullPolicy: IfNotPresent
+    name: agnhost-container
+```
+
+**NOTE:**
+- the user can specify the IP address for a pod's secondary attachment
+  **only** for an L2 or localnet attachment.
+- specifying a static IP address for the pod is only possible when the
+  attachment configuration does **not** feature subnets.
+
 ## Limitations
 OVN-K currently does **not** support:
 - the same attachment configured multiple times in the same pod - i.e.
