@@ -12,6 +12,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc_zone "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
@@ -226,7 +227,7 @@ func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) e
 		return oc.removeLocalZonePod(pod, portInfo)
 	}
 
-	return oc.removeRemoteZonePod(pod)
+	return oc.removeRemoteZonePod(pod, portInfo)
 }
 
 // removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;
@@ -259,7 +260,7 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *
 // failure indicates the pod tear down should be retried later.
 // It removes the remote pod ips from the namespace address set and if its an external gw pod, removes
 // its routes.
-func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
+func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod, portInfo *lpInfo) error {
 	if err := oc.removeRemoteZonePodFromNamespaceAddressSet(pod); err != nil {
 		return fmt.Errorf("failed to remove the remote zone pod : %w", err)
 	}
@@ -268,6 +269,14 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
 		// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
 		if err := oc.deletePodExternalGW(pod); err != nil {
 			return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
+				getPodNamespacedName(pod), err)
+		}
+	}
+	if kubevirt.IsPodLiveMigratable(pod) {
+		// After live migration to a different zone ip should be deallocated
+		// from remote zone if VM is gone
+		if err := oc.deleteLogicalPort(pod, portInfo); err != nil {
+			return fmt.Errorf("deleteLogicalPort failed for VM pod %s: %w at remote zone",
 				getPodNamespacedName(pod), err)
 		}
 	}

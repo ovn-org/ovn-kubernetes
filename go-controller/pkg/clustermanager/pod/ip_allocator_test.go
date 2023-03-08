@@ -106,6 +106,10 @@ func (a *allocatorStub) ForSubnet(name string) subnet.NamedAllocator {
 	return nil
 }
 
+func (a *allocatorStub) FindSwitchBySubnets([]*net.IPNet) (string, bool) {
+	panic("not implemented") // TODO: Implement
+}
+
 func TestPodIPAllocator_reconcileForNAD(t *testing.T) {
 	type args struct {
 		old     *testPod

@@ -11,6 +11,7 @@ import (
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	subnetipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -32,6 +33,15 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 	if err != nil {
 		return "", err
 	}
+	return bnc.allocatePodIPsForSwitch(pod, annotations, nadName, switchName)
+}
+
+// allocatePodIPsForSwitch will allocate the the ip from pod annotation at
+// a specified switch, this switch can be different than the one the pod is
+// attachted to, for example hypershift kubevirt provider live migration.
+func (bnc *BaseNetworkController) allocatePodIPsForSwitch(pod *kapi.Pod,
+	annotations *util.PodAnnotation, nadName string, switchName string) (expectedLogicalPortName string, err error) {
+
 	if !util.PodScheduled(pod) || util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) {
 		return "", nil
 	}
@@ -210,8 +220,17 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 	}
 
 	shouldRelease := true
-	// check to make sure no other pods are using this IP before we try to release it if this is a completed pod.
-	if util.PodCompleted(pod) {
+	isMigratedSourcePodStale, err := kubevirt.IsMigratedSourcePodStale(bnc.watchFactory, pod)
+	if err != nil {
+		return nil, fmt.Errorf("unable to determine if ip should be released at kubevirt scenario: %v", err)
+	}
+
+	// There is a VM still running we should not deallocate the IP
+	if isMigratedSourcePodStale {
+		shouldRelease = false
+
+		// check to make sure no other pods are using this IP before we try to release it if this is a completed pod.
+	} else if util.PodCompleted(pod) {
 		if shouldRelease, err = bnc.lsManager.ConditionalIPRelease(switchName, podIfAddrs, func() (bool, error) {
 
 			// Ignore pods on other switches
@@ -411,16 +430,27 @@ func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, 
 	return switchName, nil
 }
 
+// ensurePodAnnotation will copy pod annotations at migratable pods related
+// to the same virtual machine, for normal pods it will unmarshal and return
+// it.
+func (bnc *BaseNetworkController) ensurePodAnnotation(pod *kapi.Pod, nadName string) (*util.PodAnnotation, error) {
+	if !kubevirt.IsPodLiveMigratable(pod) {
+		return util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	}
+	return kubevirt.EnsurePodAnnotationForVM(bnc.watchFactory, bnc.kube, pod, bnc.NetInfo, nadName)
+}
+
 func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName string,
 	network *nadapi.NetworkSelectionElement) (ops []ovsdb.Operation,
 	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool, err error) {
 	var ls *nbdb.LogicalSwitch
 
-	podDesc := fmt.Sprintf("%s/%s/%s", nadName, pod.Namespace, pod.Name)
 	switchName, err := bnc.getExpectedSwitchName(pod)
 	if err != nil {
-		return nil, nil, nil, false, err
+		return nil, nil, nil, false, fmt.Errorf("failed geting expected switch name when adding logical switch port for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 	}
+
+	podDesc := fmt.Sprintf("%s/%s/%s", nadName, pod.Namespace, pod.Name)
 	// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
 	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
 	// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
@@ -723,7 +753,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingL
 
 	switchName := pod.Spec.NodeName
 
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	podAnnotation, err := bnc.ensurePodAnnotation(pod, nadName)
 
 	// the IPs we allocate in this function need to be released back to the
 	// IPAM pool if there is some error in any step of addLogicalPort past
@@ -749,12 +779,16 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingL
 		podIfAddrs = podAnnotation.IPs
 
 		if bnc.doesNetworkRequireIPAM() {
-			// ensure we have reserved the IPs in the annotation
-			if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-				return nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
-					podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
-			} else {
-				needsIP = false
+			// The live migrated pods will have the pod annotation but the switch manager running
+			// at the node will not contain the switch as expected
+			if !kubevirt.IsPodLiveMigratable(pod) || bnc.lsManager.GetSwitchSubnets(switchName) != nil {
+				// ensure we have reserved the IPs in the annotation
+				if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+					return nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
+						podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
+				} else {
+					needsIP = false
+				}
 			}
 		} else if len(podIfAddrs) > 0 {
 			return nil, false, fmt.Errorf("IPAMless network with IPs present in the annotations; rejecting to handle this request")
