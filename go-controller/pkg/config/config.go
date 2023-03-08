@@ -109,6 +109,8 @@ var (
 		OVNConfigNamespace:   "ovn-kubernetes",
 		HostNetworkNamespace: "",
 		PlatformType:         "",
+		DNSServiceNamespace:  "kube-system",
+		DNSServiceName:       "kube-dns",
 	}
 
 	// Metrics holds Prometheus metrics-related parameters.
@@ -329,6 +331,9 @@ type KubernetesConfig struct {
 	CompatOVNMetricsBindAddress string `gcfg:"ovn-metrics-bind-address"`
 	// CompatMetricsEnablePprof is overridden by the corresponding option in MetricsConfig
 	CompatMetricsEnablePprof bool `gcfg:"metrics-enable-pprof"`
+
+	DNSServiceNamespace string `gcfg:"dns-service-namespace"`
+	DNSServiceName      string `gcfg:"dns-service-name"`
 }
 
 // MetricsConfig holds Prometheus metrics-related parameters.
@@ -1067,6 +1072,18 @@ var K8sFlags = []cli.Flag{
 		Name:        "healthz-bind-address",
 		Usage:       "The IP address and port for the node proxy healthz server to serve on (set to '0.0.0.0:10256' or '[::]:10256' for listening in all interfaces and IP families). Disabled by default.",
 		Destination: &cliConfig.Kubernetes.HealthzBindAddress,
+	},
+	&cli.StringFlag{
+		Name:        "dns-service-namespace",
+		Usage:       "DNS kubernetes service namespace used to expose name resolving with DHCPOptions.",
+		Destination: &cliConfig.Kubernetes.DNSServiceNamespace,
+		Value:       Kubernetes.DNSServiceNamespace,
+	},
+	&cli.StringFlag{
+		Name:        "dns-service-name",
+		Usage:       "DNS kubernetes service name used to expose name resolving with DHCPOptions.",
+		Destination: &cliConfig.Kubernetes.DNSServiceName,
+		Value:       Kubernetes.DNSServiceName,
 	},
 }
 

@@ -224,10 +224,16 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, a
 // failure indicates the pod tear down should be retried later.
 func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
 	if oc.isPodScheduledinLocalZone(pod) {
-		return oc.removeLocalZonePod(pod, portInfo)
+		if err := oc.removeLocalZonePod(pod, portInfo); err != nil {
+			return err
+		}
+	} else {
+		if err := oc.removeRemoteZonePod(pod, portInfo); err != nil {
+			return err
+		}
 	}
 
-	return oc.removeRemoteZonePod(pod, portInfo)
+	return kubevirt.CleanUpForVM(oc.controllerName, oc.nbClient, oc.watchFactory, pod, oc.GetNetworkName())
 }
 
 // removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;

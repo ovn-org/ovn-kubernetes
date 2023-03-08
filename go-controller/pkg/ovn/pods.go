@@ -275,6 +275,13 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 	}
+
+	if kubevirt.IsPodLiveMigratable(pod) {
+		if err := kubevirt.EnsureDHCPOptionsForVM(oc.controllerName, oc.nbClient, oc.watchFactory, pod, podAnnotation, lsp); err != nil {
+			return err
+		}
+	}
+
 	//observe the pod creation latency metric for newly created pods only
 	if newlyCreatedPort {
 		metrics.RecordPodCreated(pod, oc.NetInfo)
