@@ -12,6 +12,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc_zone "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
@@ -264,6 +265,21 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
 		if err := oc.deletePodExternalGW(pod); err != nil {
 			return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
 				getPodNamespacedName(pod), err)
+		}
+	}
+
+	if kubevirt.IsPodLiveMigratable(pod) {
+		// After live migration to a different zone ip should be deallocated
+		// from remote zone if VM is gone.
+		podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
+		if err != nil {
+			return fmt.Errorf("unable to unmarshal pod annotation to release IPs at removeRemoteZonePod: %v", err)
+		}
+		switchName, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(oc.lsManager, podAnnotation)
+		if zoneContainsPodSubnet {
+			if err := oc.lsManager.ReleaseIPs(switchName, podAnnotation.IPs); err != nil {
+				return err
+			}
 		}
 	}
 
