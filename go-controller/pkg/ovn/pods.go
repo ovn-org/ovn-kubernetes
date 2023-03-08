@@ -27,6 +27,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 	//
 	// TBD: Before this succeeds, add Pod handler should not continue to allocate IPs for the new Pods.
 	expectedLogicalPorts := make(map[string]bool)
+	vms := make(map[ktypes.NamespacedName]bool)
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
 		if !ok {
@@ -35,6 +36,19 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 
 		switchName := pod.Spec.NodeName
 		if kubevirt.IsPodLiveMigratable(pod) {
+			isStale, err := kubevirt.IsMigratedSourcePodStale(oc.watchFactory, pod)
+			if err != nil {
+				return err
+			}
+			// The stale pods are "old" information from a live migration
+			// so it's not needed to be in sync
+			if isStale {
+				continue
+			}
+			vm := kubevirt.ExtractVMNameFromPod(pod)
+			if vm != nil {
+				vms[*vm] = oc.isPodScheduledinLocalZone(pod)
+			}
 			annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 			if err != nil {
 				continue
@@ -103,7 +117,9 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 			}
 		}
 	}
-
+	if err := kubevirt.SyncVirtualMachines(oc.nbClient, vms); err != nil {
+		return fmt.Errorf("failed syncing running virtual machines: %v", err)
+	}
 	return oc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
 }
 
@@ -270,6 +286,13 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 	}
+
+	if kubevirt.IsPodLiveMigratable(pod) {
+		if err := kubevirt.EnsureDHCPOptionsForMigratablePod(oc.controllerName, oc.nbClient, oc.watchFactory, pod, podAnnotation.IPs, lsp); err != nil {
+			return err
+		}
+	}
+
 	//observe the pod creation latency metric for newly created pods only
 	if newlyCreatedPort {
 		metrics.RecordPodCreated(pod, oc.NetInfo)

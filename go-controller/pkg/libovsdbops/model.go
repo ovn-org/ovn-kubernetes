@@ -68,6 +68,8 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *nbdb.ChassisTemplateVar:
 		return t.UUID
+	case *nbdb.DHCPOptions:
+		return t.UUID
 	default:
 		panic(fmt.Sprintf("getUUID: unknown model %T", t))
 	}
@@ -128,6 +130,8 @@ func setUUID(model model.Model, uuid string) {
 	case *nbdb.QoS:
 		t.UUID = uuid
 	case *nbdb.ChassisTemplateVar:
+		t.UUID = uuid
+	case *nbdb.DHCPOptions:
 		t.UUID = uuid
 	default:
 		panic(fmt.Sprintf("setUUID: unknown model %T", t))
@@ -271,6 +275,11 @@ func copyIndexes(model model.Model) model.Model {
 			UUID:    t.UUID,
 			Chassis: t.Chassis,
 		}
+	case *nbdb.DHCPOptions:
+		return &nbdb.DHCPOptions{
+			UUID:        t.UUID,
+			ExternalIDs: copyExternalIDs(t.ExternalIDs, types.PrimaryIDKey),
+		}
 	default:
 		panic(fmt.Sprintf("copyIndexes: unknown model %T", t))
 	}
@@ -330,6 +339,8 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]nbdb.QoS{}
 	case *nbdb.ChassisTemplateVar:
 		return &[]*nbdb.ChassisTemplateVar{}
+	case *nbdb.DHCPOptions:
+		return &[]nbdb.DHCPOptions{}
 	default:
 		panic(fmt.Sprintf("getModelList: unknown model %T", t))
 	}
@@ -451,4 +462,18 @@ func getAllUpdatableFields(model model.Model) []interface{} {
 	default:
 		panic(fmt.Sprintf("getAllUpdatableFields: unknown model %T", t))
 	}
+}
+
+func copyExternalIDs(externalIDs map[string]string, keys ...string) map[string]string {
+	var externalIDsCopy map[string]string
+	for _, key := range keys {
+		value, ok := externalIDs[key]
+		if ok {
+			if externalIDsCopy == nil {
+				externalIDsCopy = map[string]string{}
+			}
+			externalIDsCopy[key] = value
+		}
+	}
+	return externalIDsCopy
 }

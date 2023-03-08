@@ -5,12 +5,17 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -142,4 +147,44 @@ func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bo
 // this zone owns the that subnet.
 func ZoneContainsPodSubnet(lsManager *logicalswitchmanager.LogicalSwitchManager, podAnnotation *util.PodAnnotation) (string, bool) {
 	return lsManager.GetSubnetName(podAnnotation.IPs)
+}
+
+// ExtractVMNameFromPod retunes namespace and name of vm backed up but the pod
+// for regular pods return nil
+func ExtractVMNameFromPod(pod *corev1.Pod) *ktypes.NamespacedName {
+	vmName, ok := pod.Labels[kubevirtv1.VirtualMachineNameLabel]
+	if !ok {
+		return nil
+	}
+	return &ktypes.NamespacedName{Namespace: pod.Namespace, Name: vmName}
+}
+
+func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod) error {
+	// This pod is not part of ip migration so we don't need to clean up
+	if !IsPodLiveMigratable(pod) {
+		return nil
+	}
+	isMigratedSourcePodStale, err := IsMigratedSourcePodStale(watchFactory, pod)
+	if err != nil {
+		return fmt.Errorf("failed cleaning up VM when checking if pod is leftover: %v", err)
+	}
+	// Everything has already being cleand up since this is an old migration
+	// pod
+	if isMigratedSourcePodStale {
+		return nil
+	}
+
+	if err := DeleteDHCPOptions(nbClient, pod); err != nil {
+		return err
+	}
+	return nil
+}
+
+func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool) error {
+	if err := libovsdbops.DeleteDHCPOptionsWithPredicate(nbClient, func(item *nbdb.DHCPOptions) bool {
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+	}); err != nil {
+		return fmt.Errorf("failed deleting stale dhcp options: %v", err)
+	}
+	return nil
 }
