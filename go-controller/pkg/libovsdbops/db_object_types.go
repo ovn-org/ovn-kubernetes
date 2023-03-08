@@ -3,6 +3,7 @@ package libovsdbops
 const (
 	addressSet dbObjType = iota
 	acl
+	dhcpOptions
 )
 
 const (
@@ -23,6 +24,7 @@ const (
 	MulticastClusterOwnerType   ownerType = "MulticastCluster"
 	NetpolNodeOwnerType         ownerType = "NetpolNode"
 	NetpolNamespaceOwnerType    ownerType = "NetpolNamespace"
+	VirtualMachineOwnerType     ownerType = "VirtualMachine"
 
 	// owner extra IDs, make sure to define only 1 ExternalIDKey for every string value
 	PriorityKey           ExternalIDKey = "priority"
@@ -34,6 +36,7 @@ const (
 	PortPolicyIndexKey    ExternalIDKey = "port-policy-index"
 	IpBlockIndexKey       ExternalIDKey = "ip-block-index"
 	RuleIndex             ExternalIDKey = "rule-index"
+	HostnameIndex         ExternalIDKey = "hostname"
 )
 
 // ObjectIDsTypes should only be created here
@@ -157,4 +160,12 @@ var ACLEgressFirewall = newObjectIDsType(acl, EgressFirewallOwnerType, []Externa
 	// there can only be 1 egress firewall object in every namespace, named "default"
 	// The only additional id we need is the index of the EgressFirewall.Spec.Egress rule.
 	RuleIndex,
+})
+
+var VirtualMachineDHCPOptions = newObjectIDsType(dhcpOptions, VirtualMachineOwnerType, []ExternalIDKey{
+	// cidr
+	ObjectNameKey,
+	// We can have multiple VMs with same CIDR they  may have different
+	// hostname
+	HostnameIndex,
 })

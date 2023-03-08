@@ -57,3 +57,24 @@ func FindNetworkInfo(client *factory.WatchFactory, pod *corev1.Pod) (NetworkInfo
 	}
 	return networkInfo, nil
 }
+
+// PodIsLiveMigrationLeftOver return true if there are other pods related to
+// to it and any of them has newer creation timestamp.
+func PodIsLiveMigrationLeftOver(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
+	vmPods, err := FindVMRelatedPods(client, pod)
+	if err != nil {
+		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking live migration left overs: %v", pod.Namespace, pod.Name, err)
+	}
+
+	for _, vmPod := range vmPods {
+		if vmPod.CreationTimestamp.After(pod.CreationTimestamp.Time) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func PodMatchesExternalIDs(pod *corev1.Pod, externalIDs map[string]string) bool {
+	return len(externalIDs) > 1 && externalIDs[NamespaceExternalIDKey] == pod.Namespace && externalIDs[kvv1.VirtualMachineNameLabel] == pod.Labels[kvv1.VirtualMachineNameLabel]
+}
