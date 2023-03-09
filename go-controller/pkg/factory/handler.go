@@ -76,6 +76,13 @@ type listerInterface interface{}
 
 type initialAddFn func(*Handler, []interface{})
 
+type queueMap struct {
+	sync.Mutex
+	entries map[ktypes.NamespacedName]*queueMapEntry
+	queues  []chan *event
+	wg      *sync.WaitGroup
+}
+
 type queueMapEntry struct {
 	queue    uint32
 	refcount int32
@@ -91,14 +98,14 @@ type informer struct {
 	// NOTE: we can have multiple handlers with the same priority hence the value
 	// is a map of handlers keyed by its unique id.
 	handlers map[int]map[uint64]*Handler
-	queues   []chan *event
 	lister   listerInterface
 	// initialAddFunc will be called to deliver the initial list of objects
 	// when a handler is added
 	initialAddFunc initialAddFn
 	shutdownWg     sync.WaitGroup
-	queueMap       map[ktypes.NamespacedName]*queueMapEntry
-	queueMapLock   sync.Mutex
+
+	// queueMap handles distributing events across a queued handler's queues
+	queueMap *queueMap
 }
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
@@ -211,8 +218,20 @@ func (i *informer) removeHandler(handler *Handler) {
 	}()
 }
 
-func (i *informer) processEvents(queue chan *event, stopChan <-chan struct{}) {
-	defer i.shutdownWg.Done()
+func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup) *queueMap {
+	qm := &queueMap{
+		entries: make(map[ktypes.NamespacedName]*queueMapEntry),
+		queues:  make([]chan *event, numEventQueues),
+		wg:      wg,
+	}
+	for j := 0; j < int(numEventQueues); j++ {
+		qm.queues[j] = make(chan *event, 10)
+	}
+	return qm
+}
+
+func (qm *queueMap) processEvents(queue chan *event, stopChan <-chan struct{}) {
+	defer qm.wg.Done()
 	for {
 		select {
 		case e, ok := <-queue:
@@ -226,14 +245,31 @@ func (i *informer) processEvents(queue chan *event, stopChan <-chan struct{}) {
 	}
 }
 
-func (i *informer) getNewQueueNum(numEventQueues uint32) uint32 {
+func (qm *queueMap) start(stopChan chan struct{}) {
+	qm.wg.Add(len(qm.queues))
+	for _, q := range qm.queues {
+		go qm.processEvents(q, stopChan)
+	}
+}
+
+func (qm *queueMap) shutdown() {
+	// Close all the event channels
+	for _, q := range qm.queues {
+		close(q)
+	}
+}
+
+// getNewQueueNum finds and returns the index of the queue with the lowest
+// number of items
+func (qm *queueMap) getNewQueueNum() uint32 {
 	var j, startIdx, queueIdx uint32
+	numEventQueues := uint32(len(qm.queues))
 	startIdx = uint32(rand.Intn(int(numEventQueues - 1)))
 	queueIdx = startIdx
-	lowestNum := len(i.queues[startIdx])
+	lowestNum := len(qm.queues[startIdx])
 	for j = 0; j < numEventQueues; j++ {
 		tryQueue := (startIdx + j) % numEventQueues
-		num := len(i.queues[tryQueue])
+		num := len(qm.queues[tryQueue])
 		if num < lowestNum {
 			lowestNum = num
 			queueIdx = tryQueue
@@ -242,7 +278,19 @@ func (i *informer) getNewQueueNum(numEventQueues uint32) uint32 {
 	return queueIdx
 }
 
-func (i *informer) refQueueEntry(oType reflect.Type, obj interface{}, numEventQueues uint32) (ktypes.NamespacedName, *queueMapEntry) {
+// getQueueMapEntry creates or returns an existing entry for the given object's
+// NamespacedName. This entry tracks the queue number for that NamespacedName
+// so that all objects with the NamespacedName are serialized into the same
+// queue slot. This prevents parallel processing of events for the same object
+// that might happen out-of-order.
+//
+// If there is no entry for the NamespacedName a new one is created and assigned
+// a queue slot with the least number of items (to attempt to balance queue
+// length).
+//
+// If an existing entry exists it will be returned and the already-assigned
+// queue slot will be used to ensure serialization.
+func (qm *queueMap) getQueueMapEntry(oType reflect.Type, obj interface{}) (ktypes.NamespacedName, *queueMapEntry) {
 	meta, err := getObjectMeta(oType, obj)
 	if err != nil {
 		klog.Errorf("Object has no meta: %v", err)
@@ -251,29 +299,34 @@ func (i *informer) refQueueEntry(oType reflect.Type, obj interface{}, numEventQu
 
 	namespacedName := ktypes.NamespacedName{Namespace: meta.Namespace, Name: meta.Name}
 
-	i.queueMapLock.Lock()
-	defer i.queueMapLock.Unlock()
+	qm.Lock()
+	defer qm.Unlock()
 
-	entry, ok := i.queueMap[namespacedName]
+	entry, ok := qm.entries[namespacedName]
 	if ok {
 		if atomic.AddInt32(&entry.refcount, 1) == 1 {
 			// Entry is unused because add/update operations completed
 			// but we haven't seen a delete yet. Assign new queue to
 			// ensure queue balance.
-			entry.queue = i.getNewQueueNum(numEventQueues)
+			entry.queue = qm.getNewQueueNum()
 		}
 	} else {
 		// no entry found, assign new queue
 		entry = &queueMapEntry{
 			refcount: 1,
-			queue:    i.getNewQueueNum(numEventQueues),
+			queue:    qm.getNewQueueNum(),
 		}
-		i.queueMap[namespacedName] = entry
+		qm.entries[namespacedName] = entry
 	}
 	return namespacedName, entry
 }
 
-func (i *informer) unrefQueueEntry(key ktypes.NamespacedName, entry *queueMapEntry, del bool) {
+// releaseQueueMapEntry is called when an event has finished processing. It
+// decreases the reference count on the queue map entry and if that entry
+// is less-than-or-equal-to-zero (meaning there are no in-flight events for the
+// object) removes it from the entries map. The next event for the given
+// NamespacedName will be rebalanced to a new queue slot.
+func (qm *queueMap) releaseQueueMapEntry(key ktypes.NamespacedName, entry *queueMapEntry, del bool) {
 	if entry == nil {
 		return
 	}
@@ -286,16 +339,16 @@ func (i *informer) unrefQueueEntry(key ktypes.NamespacedName, entry *queueMapEnt
 		return
 	}
 
-	i.queueMapLock.Lock()
-	defer i.queueMapLock.Unlock()
+	qm.Lock()
+	defer qm.Unlock()
 	if atomic.AddInt32(&entry.refcount, -1) <= 0 {
-		delete(i.queueMap, key)
+		delete(qm.entries, key)
 	}
 }
 
 // enqueueEvent adds an event to the appropriate queue for the object
-func (i *informer) enqueueEvent(oldObj, obj interface{}, queueNum uint32, processFunc func(*event)) {
-	i.queues[queueNum] <- &event{
+func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, queueNum uint32, processFunc func(*event)) {
+	qm.queues[queueNum] <- &event{
 		obj:     obj,
 		oldObj:  oldObj,
 		process: processFunc,
@@ -322,20 +375,20 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			key, entry := i.refQueueEntry(i.oType, obj, numEventQueues)
-			i.enqueueEvent(nil, obj, entry.queue, func(e *event) {
+			key, entry := i.queueMap.getQueueMapEntry(i.oType, obj)
+			i.queueMap.enqueueEvent(nil, obj, entry.queue, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnAdd(e.obj)
 				})
 				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
-				i.unrefQueueEntry(key, entry, false)
+				i.queueMap.releaseQueueMapEntry(key, entry, false)
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			key, entry := i.refQueueEntry(i.oType, newObj, numEventQueues)
-			i.enqueueEvent(oldObj, newObj, entry.queue, func(e *event) {
+			key, entry := i.queueMap.getQueueMapEntry(i.oType, newObj)
+			i.queueMap.enqueueEvent(oldObj, newObj, entry.queue, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -351,7 +404,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 					}
 				})
 				metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
-				i.unrefQueueEntry(key, entry, false)
+				i.queueMap.releaseQueueMapEntry(key, entry, false)
 			})
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -360,15 +413,15 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				klog.Errorf(err.Error())
 				return
 			}
-			key, entry := i.refQueueEntry(i.oType, realObj, numEventQueues)
-			i.enqueueEvent(nil, realObj, entry.queue, func(e *event) {
+			key, entry := i.queueMap.getQueueMapEntry(i.oType, realObj)
+			i.queueMap.enqueueEvent(nil, realObj, entry.queue, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
 				i.forEachQueuedHandlerReversed(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
-				i.unrefQueueEntry(key, entry, true)
+				i.queueMap.releaseQueueMapEntry(key, entry, true)
 			})
 		},
 	}
@@ -476,7 +529,6 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 		inf:      sharedInformer,
 		lister:   lister,
 		handlers: make(map[int]map[uint64]*Handler),
-		queueMap: make(map[ktypes.NamespacedName]*queueMapEntry),
 	}, nil
 }
 
@@ -500,56 +552,33 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	if err != nil {
 		return nil, err
 	}
-	i.queues = make([]chan *event, numEventQueues)
-	i.shutdownWg.Add(len(i.queues))
-	for j := range i.queues {
-		i.queues[j] = make(chan *event, 10)
-		go i.processEvents(i.queues[j], stopChan)
-	}
+	i.queueMap = newQueueMap(numEventQueues, &i.shutdownWg)
+	i.queueMap.start(stopChan)
+
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
 		// Make a handler-specific channel array across which the
 		// initial add events will be distributed. When a new handler
 		// is added, only that handler should receive events for all
 		// existing objects.
-		type initialAddEntry struct {
-			obj      interface{}
-			doneFunc func()
-		}
-		adds := make([]chan *initialAddEntry, numEventQueues)
-		queueWg := &sync.WaitGroup{}
-		queueWg.Add(len(adds))
-		for j := range adds {
-			adds[j] = make(chan *initialAddEntry, 10)
-			go func(addChan chan *initialAddEntry) {
-				defer queueWg.Done()
-				for {
-					entry, ok := <-addChan
-					if !ok {
-						return
-					}
-					h.OnAdd(entry.obj)
-					entry.doneFunc()
-				}
-			}(adds[j])
-		}
+		addsWg := &sync.WaitGroup{}
+		addsMap := newQueueMap(numEventQueues, addsWg)
+		addsMap.start(stopChan)
+
 		// Distribute the existing items into the handler-specific
 		// channel array.
 		for _, obj := range items {
-			key, entry := i.refQueueEntry(i.oType, obj, numEventQueues)
-			adds[entry.queue] <- &initialAddEntry{
-				obj: obj,
-				doneFunc: func() {
-					i.unrefQueueEntry(key, entry, false)
-				},
-			}
+			key, entry := addsMap.getQueueMapEntry(i.oType, obj)
+			addsMap.enqueueEvent(nil, obj, entry.queue, func(e *event) {
+				h.OnAdd(e.obj)
+				addsMap.releaseQueueMapEntry(key, entry, false)
+			})
 		}
-		// Close all the channels
-		for j := range adds {
-			close(adds[j])
-		}
+
 		// Wait until all the object additions have been processed
-		queueWg.Wait()
+		addsMap.shutdown()
+		addsWg.Wait()
 	}
+
 	i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues))
 	return i, nil
 }
