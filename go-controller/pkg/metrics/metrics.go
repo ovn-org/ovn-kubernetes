@@ -484,6 +484,7 @@ func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, k
 		defer wg.Done()
 		var server *http.Server
 		go utilwait.Until(func() {
+			klog.Infof("Starting metrics server to serve at address %q", bindAddress)
 			var err error
 			if certFile != "" && keyFile != "" {
 				server = getTLSServer(bindAddress, certFile, keyFile, mux)
@@ -496,8 +497,9 @@ func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, k
 				err = server.ListenAndServe()
 			}
 			if err != nil && err != http.ErrServerClosed {
-				utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+				utilruntime.HandleError(fmt.Errorf("starting metrics server to serve at address %q failed: %v", bindAddress, err))
 			}
+			klog.Infof("Metrics server has stopped serving at address %q", bindAddress)
 		}, 5*time.Second, stopChan)
 
 		<-stopChan
@@ -526,6 +528,7 @@ func StartOVNMetricsServer(bindAddress, certFile, keyFile string,
 	go func() {
 		defer wg.Done()
 		go utilwait.Until(func() {
+			klog.Infof("Starting OVN related metrics server to serve at address %q", bindAddress)
 			var err error
 			if certFile != "" && keyFile != "" {
 				server = getTLSServer(bindAddress, certFile, keyFile, mux)
@@ -538,8 +541,10 @@ func StartOVNMetricsServer(bindAddress, certFile, keyFile string,
 				err = server.ListenAndServe()
 			}
 			if err != nil && err != http.ErrServerClosed {
-				utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+				utilruntime.HandleError(fmt.Errorf("starting OVN related metrics server to serve at address %q failed: %v",
+					bindAddress, err))
 			}
+			klog.Infof("OVN related metrics server has stopped serving at address %q", bindAddress)
 		}, 5*time.Second, stopChan)
 
 		<-stopChan
