@@ -84,11 +84,6 @@ echo "Editing egressFirewall CRD"
 ## metav1.ObjectMeta it is required that we add it after the generation of the CRD.
 sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
 	_output/crds/k8s.ovn.org_egressfirewalls.yaml
-## It is also required that we restrict the number of properties on the 'to' section of the egressfirewall
-## so that either 'dnsName' or 'cidrSelector is set in the crd and currently kubebuilder does not support
-## adding validation to objects only to the fields
-sed -i -e ':begin;$!N;s/                          type: string\n.*type: object/&\n                      minProperties: 1\n                      maxProperties: 1/;P;D' \
-	_output/crds/k8s.ovn.org_egressfirewalls.yaml
 
 echo "Editing EgressQoS CRD"
 ## We desire that only EgressQoS with the name "default" are accepted by the apiserver.
