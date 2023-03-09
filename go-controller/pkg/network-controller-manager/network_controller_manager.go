@@ -39,7 +39,7 @@ func (ovnkubeMasterLeaderMetrics) Off(string) {
 
 type ovnkubeMasterLeaderMetricsProvider struct{}
 
-func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
+func (ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
 	return ovnkubeMasterLeaderMetrics{}
 }
 
@@ -222,13 +222,7 @@ func (cm *networkControllerManager) Start(ctx context.Context, cancel context.Ca
 					metrics.MetricMasterReadyDuration.Set(end.Seconds())
 				}()
 
-				if err := cm.Init(); err != nil {
-					klog.Error(err)
-					cancel()
-					return
-				}
-
-				if err = cm.Run(ctx); err != nil {
+				if err = cm.start(ctx); err != nil {
 					klog.Error(err)
 					cancel()
 					return
@@ -302,26 +296,6 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 	return cm
 }
 
-// Init initializes the controller manager and create/start default controller
-func (cm *networkControllerManager) Init() error {
-	cm.configureMetrics(cm.stopChan)
-
-	err := cm.configureSCTPSupport()
-	if err != nil {
-		return err
-	}
-
-	cm.configureMulticastSupport()
-
-	err = cm.enableOVNLogicalDataPathGroups()
-	if err != nil {
-		return err
-	}
-
-	cm.NewDefaultNetworkController()
-	return nil
-}
-
 func (cm *networkControllerManager) configureSCTPSupport() error {
 	hasSCTPSupport, err := util.DetectSCTPSupport()
 	if err != nil {
@@ -376,15 +350,28 @@ func (cm *networkControllerManager) newCommonNetworkControllerInfo() *ovn.Common
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport)
 }
 
-// NewDefaultNetworkController creates the controller for default network
-func (cm *networkControllerManager) NewDefaultNetworkController() {
+// initDefaultNetworkController creates the controller for default network
+func (cm *networkControllerManager) initDefaultNetworkController() {
 	defaultController := ovn.NewDefaultNetworkController(cm.newCommonNetworkControllerInfo())
 	cm.defaultNetworkController = defaultController
 }
 
-// Run starts default controller and to starts level driven net-attach-def controller to which manages network
-// controller associated with net-attach-def
-func (cm *networkControllerManager) Run(ctx context.Context) error {
+// start the network controller manager
+func (cm *networkControllerManager) start(ctx context.Context) error {
+	cm.configureMetrics(cm.stopChan)
+
+	err := cm.configureSCTPSupport()
+	if err != nil {
+		return err
+	}
+
+	cm.configureMulticastSupport()
+
+	err = cm.enableOVNLogicalDataPathGroups()
+	if err != nil {
+		return err
+	}
+
 	if config.Metrics.EnableConfigDuration {
 		// with k=10,
 		//  for a cluster with 10 nodes, measurement of 1 in every 100 requests
@@ -393,11 +380,12 @@ func (cm *networkControllerManager) Run(ctx context.Context) error {
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
 
-	err := cm.watchFactory.Start()
+	err = cm.watchFactory.Start()
 	if err != nil {
 		return err
 	}
 
+	cm.initDefaultNetworkController()
 	err = cm.defaultNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)
@@ -405,15 +393,15 @@ func (cm *networkControllerManager) Run(ctx context.Context) error {
 
 	// nadController is nil if multi-network is disabled
 	if cm.nadController != nil {
-		klog.Infof("Starts net-attach-def controller")
-		return cm.nadController.Run(cm.stopChan)
+		return cm.nadController.Start()
 	}
+
 	return nil
 }
 
 // Stop gracefully stops all managed controllers
 func (cm *networkControllerManager) Stop() {
-	// stops the net-attach-def controller
+	// stop metric recorders
 	close(cm.stopChan)
 
 	// stops the default network controller
@@ -421,12 +409,8 @@ func (cm *networkControllerManager) Stop() {
 		cm.defaultNetworkController.Stop()
 	}
 
-	// then stops each network controller associated with net-attach-def; it is ok
-	// to call GetAllControllers here as net-attach-def controller has been stopped,
-	// and no more change of network controllers
+	// stops the NAD controller
 	if cm.nadController != nil {
-		for _, oc := range cm.nadController.GetAllNetworkControllers() {
-			oc.Stop()
-		}
+		cm.nadController.Stop()
 	}
 }

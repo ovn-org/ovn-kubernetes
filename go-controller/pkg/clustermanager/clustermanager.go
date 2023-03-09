@@ -34,16 +34,10 @@ type ClusterManager struct {
 	// used for leader election
 	identity string
 
-	// Indicates if cluster manager is leader and it is active or not.  This variable is protected
-	// by the mutex and is modified by only  ClusterManager.run() and ClusterManager.halt().
-	// Once 'isActive' is set, calling ClusterManager.run() will be a no-op and once
-	// it is false, calling ClusterManager.halt() will be a no-op.
-	// ClusterManager.halt() is called from two places
-	//    - ClusterManagber.Stop()
-	//    - and when ClusterManager LE loses the lock and become standby
-	// and 'isActive' makes sure that ClusterManager.halt() is idempotent.
-	isActive   bool
-	sync.Mutex // This lock protects accessing the run and halt function from different go routines
+	// Cluster manager can be started and stopped several times concurrently.
+	// Make sure it is synchronous and idempotent.
+	isActive bool
+	sync.Mutex
 }
 
 // NewClusterManager creates a new Cluster Manager for managing the
@@ -102,7 +96,7 @@ func (cm *ClusterManager) Start(ctx context.Context, cancel context.CancelFunc) 
 			OnStartedLeading: func(ctx context.Context) {
 				klog.Infof("Won leader election; in active mode")
 				// run only on the active master node
-				if err := cm.run(ctx, cancel); err != nil {
+				if err := cm.start(ctx); err != nil {
 					klog.Error(err)
 					cancel()
 				}
@@ -110,13 +104,12 @@ func (cm *ClusterManager) Start(ctx context.Context, cancel context.CancelFunc) 
 			OnStoppedLeading: func() {
 				klog.Infof("No longer leader; transitioning to standby mode")
 				// This node was leader and it lost the election.
-				// Call halt() to stop all the cluster manager responsibilities
+				// Stop all the cluster manager responsibilities
 				// and become a standby. This doesn't exit the process because
 				//    - network cluster manager may also be running in an another
 				//      leader election session and we don't want to disrupt it.
-				//    - ClusterManager run() can be called again if it starts
-				//      leading again.
-				if err := cm.halt(); err != nil {
+				//    - ClusterManager can be started again if it regains leadership.
+				if err := cm.stop(); err != nil {
 					klog.Error(err)
 					cancel()
 				}
@@ -143,16 +136,16 @@ func (cm *ClusterManager) Start(ctx context.Context, cancel context.CancelFunc) 
 	return nil
 }
 
-// Stop stops the cluster manager if it is active
+// Stop the cluster manager if it is active
 func (cm *ClusterManager) Stop() {
-	if err := cm.halt(); err != nil {
+	if err := cm.stop(); err != nil {
 		klog.Error(err)
 	}
 }
 
-// run starts managing the cluster operations
+// start managing the cluster operations
 // It starts the default network cluster controller
-func (cm *ClusterManager) run(ctx context.Context, cancel context.CancelFunc) error {
+func (cm *ClusterManager) start(ctx context.Context) error {
 	cm.Lock()
 	defer cm.Unlock()
 	if cm.isActive {
@@ -160,7 +153,7 @@ func (cm *ClusterManager) run(ctx context.Context, cancel context.CancelFunc) er
 		return nil
 	}
 
-	klog.Info("Starting the cluster manager active operations")
+	klog.Info("Starting the cluster manager")
 	metrics.RegisterClusterManagerFunctional()
 
 	start := time.Now()
@@ -179,7 +172,7 @@ func (cm *ClusterManager) run(ctx context.Context, cancel context.CancelFunc) er
 	}
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		if err := cm.secondaryNetClusterManager.Start(cancel); err != nil {
+		if err := cm.secondaryNetClusterManager.Start(); err != nil {
 			return err
 		}
 	}
@@ -188,9 +181,9 @@ func (cm *ClusterManager) run(ctx context.Context, cancel context.CancelFunc) er
 	return nil
 }
 
-// halt stops managing the cluster operations by stopping the default
+// stop managing the cluster operations by stopping the default
 // network cluster controller
-func (cm *ClusterManager) halt() error {
+func (cm *ClusterManager) stop() error {
 	cm.Lock()
 	defer cm.Unlock()
 	if !cm.isActive {
@@ -198,7 +191,7 @@ func (cm *ClusterManager) halt() error {
 		return nil
 	}
 
-	klog.Info("Halting the cluster manager operations")
+	klog.Info("Stopping the cluster manager")
 	metrics.UnregisterClusterManagerFunctional()
 	cm.defaultNetClusterController.Stop()
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
