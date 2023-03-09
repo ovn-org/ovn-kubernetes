@@ -91,7 +91,7 @@ type informer struct {
 	// NOTE: we can have multiple handlers with the same priority hence the value
 	// is a map of handlers keyed by its unique id.
 	handlers map[int]map[uint64]*Handler
-	events   []chan *event
+	queues   []chan *event
 	lister   listerInterface
 	// initialAddFunc will be called to deliver the initial list of objects
 	// when a handler is added
@@ -211,11 +211,11 @@ func (i *informer) removeHandler(handler *Handler) {
 	}()
 }
 
-func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
+func (i *informer) processEvents(queue chan *event, stopChan <-chan struct{}) {
 	defer i.shutdownWg.Done()
 	for {
 		select {
-		case e, ok := <-events:
+		case e, ok := <-queue:
 			if !ok {
 				return
 			}
@@ -230,10 +230,10 @@ func (i *informer) getNewQueueNum(numEventQueues uint32) uint32 {
 	var j, startIdx, queueIdx uint32
 	startIdx = uint32(rand.Intn(int(numEventQueues - 1)))
 	queueIdx = startIdx
-	lowestNum := len(i.events[startIdx])
+	lowestNum := len(i.queues[startIdx])
 	for j = 0; j < numEventQueues; j++ {
 		tryQueue := (startIdx + j) % numEventQueues
-		num := len(i.events[tryQueue])
+		num := len(i.queues[tryQueue])
 		if num < lowestNum {
 			lowestNum = num
 			queueIdx = tryQueue
@@ -295,7 +295,7 @@ func (i *informer) unrefQueueEntry(key ktypes.NamespacedName, entry *queueMapEnt
 
 // enqueueEvent adds an event to the appropriate queue for the object
 func (i *informer) enqueueEvent(oldObj, obj interface{}, queueNum uint32, processFunc func(*event)) {
-	i.events[queueNum] <- &event{
+	i.queues[queueNum] <- &event{
 		obj:     obj,
 		oldObj:  oldObj,
 		process: processFunc,
@@ -500,11 +500,11 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	if err != nil {
 		return nil, err
 	}
-	i.events = make([]chan *event, numEventQueues)
-	i.shutdownWg.Add(len(i.events))
-	for j := range i.events {
-		i.events[j] = make(chan *event, 10)
-		go i.processEvents(i.events[j], stopChan)
+	i.queues = make([]chan *event, numEventQueues)
+	i.shutdownWg.Add(len(i.queues))
+	for j := range i.queues {
+		i.queues[j] = make(chan *event, 10)
+		go i.processEvents(i.queues[j], stopChan)
 	}
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
 		// Make a handler-specific channel array across which the
