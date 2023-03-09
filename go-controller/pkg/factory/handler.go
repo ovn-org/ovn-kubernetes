@@ -347,11 +347,15 @@ func (qm *queueMap) releaseQueueMapEntry(key ktypes.NamespacedName, entry *queue
 }
 
 // enqueueEvent adds an event to the appropriate queue for the object
-func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, queueNum uint32, processFunc func(*event)) {
-	qm.queues[queueNum] <- &event{
-		obj:     obj,
-		oldObj:  oldObj,
-		process: processFunc,
+func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, oType reflect.Type, isDel bool, processFunc func(*event)) {
+	key, entry := qm.getQueueMapEntry(oType, obj)
+	qm.queues[entry.queue] <- &event{
+		obj:    obj,
+		oldObj: oldObj,
+		process: func(e *event) {
+			processFunc(e)
+			qm.releaseQueueMapEntry(key, entry, isDel)
+		},
 	}
 }
 
@@ -375,20 +379,17 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			key, entry := i.queueMap.getQueueMapEntry(i.oType, obj)
-			i.queueMap.enqueueEvent(nil, obj, entry.queue, func(e *event) {
+			i.queueMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnAdd(e.obj)
 				})
 				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
-				i.queueMap.releaseQueueMapEntry(key, entry, false)
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			key, entry := i.queueMap.getQueueMapEntry(i.oType, newObj)
-			i.queueMap.enqueueEvent(oldObj, newObj, entry.queue, func(e *event) {
+			i.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -404,7 +405,6 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 					}
 				})
 				metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
-				i.queueMap.releaseQueueMapEntry(key, entry, false)
 			})
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -413,15 +413,13 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				klog.Errorf(err.Error())
 				return
 			}
-			key, entry := i.queueMap.getQueueMapEntry(i.oType, realObj)
-			i.queueMap.enqueueEvent(nil, realObj, entry.queue, func(e *event) {
+			i.queueMap.enqueueEvent(nil, realObj, i.oType, true, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
 				i.forEachQueuedHandlerReversed(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
-				i.queueMap.releaseQueueMapEntry(key, entry, true)
 			})
 		},
 	}
@@ -567,10 +565,8 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// Distribute the existing items into the handler-specific
 		// channel array.
 		for _, obj := range items {
-			key, entry := addsMap.getQueueMapEntry(i.oType, obj)
-			addsMap.enqueueEvent(nil, obj, entry.queue, func(e *event) {
+			addsMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
 				h.OnAdd(e.obj)
-				addsMap.releaseQueueMapEntry(key, entry, false)
 			})
 		}
 
