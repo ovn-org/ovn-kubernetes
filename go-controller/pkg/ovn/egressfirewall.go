@@ -6,8 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pkg/errors"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -18,6 +16,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -233,7 +232,7 @@ func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfire
 			egressFirewall.Name, egressFirewall.Namespace)
 	}
 
-	var addErrors error
+	var errorList []error
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
 		// process Rules into egressFirewallRules for egressFirewall struct
 		if i > types.EgressFirewallStartPriority-types.MinimumReservedEgressFirewallPriority {
@@ -243,15 +242,15 @@ func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfire
 		}
 		efr, err := oc.newEgressFirewallRule(egressFirewallRule, i)
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create EgressFirewall Rule to destination %s for namespace %s - %v",
-				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err)
+			errorList = append(errorList, fmt.Errorf("cannot create EgressFirewall Rule to destination %s for namespace %s: %w",
+				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err))
 			continue
 
 		}
 		ef.egressRules = append(ef.egressRules, efr)
 	}
-	if addErrors != nil {
-		return addErrors
+	if len(errorList) > 0 {
+		return errors.NewAggregate(errorList)
 	}
 
 	// EgressFirewall needs to make sure that the address_set for the namespace exists independently of the namespace object
