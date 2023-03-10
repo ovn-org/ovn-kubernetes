@@ -160,6 +160,8 @@ var _ = ginkgo.Describe("Unidling", func() {
 		})
 
 		ginkgo.It("Should not generate a NeedPods event when removing the annotation", func() {
+			ginkgo.Skip("Not supported by OVN: Enable back when https://bugzilla.redhat.com/show_bug.cgi?id=2177173 is fixed")
+
 			_, err := jig.UpdateService(func(service *v1.Service) {
 				service.Annotations = nil
 			})
