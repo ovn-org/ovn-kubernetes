@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/apimachinery/pkg/types"
 	"math/rand"
 	"net"
 	"net/http"
@@ -16,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
@@ -266,7 +267,7 @@ func createGenericPodWithLabel(f *framework.Framework, podName, nodeSelector, na
 	return createPod(f, podName, nodeSelector, namespace, command, labels)
 }
 
-func createServiceForPodsWithLabel(f *framework.Framework, namespace string, servicePort int32, targetPort string, nodePort int32, serviceType string, labels map[string]string) (string, error) {
+func createServiceForPodsWithLabel(f *framework.Framework, namespace string, servicePort int32, targetPort string, serviceType string, labels map[string]string) (string, error) {
 	service := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "service-for-pods",
@@ -283,9 +284,6 @@ func createServiceForPodsWithLabel(f *framework.Framework, namespace string, ser
 			Type:     v1.ServiceType(serviceType),
 			Selector: labels,
 		},
-	}
-	if serviceType == "NodePort" {
-		service.Spec.Ports[0].NodePort = nodePort
 	}
 	serviceClient := f.ClientSet.CoreV1().Services(namespace)
 	res, err := serviceClient.Create(context.Background(), service, metav1.CreateOptions{})
