@@ -63,9 +63,9 @@ func composeDHCPConfigs(k8scli *factory.WatchFactory, controllerName string, vmK
 			return nil, fmt.Errorf("failed converting podIPs to cidr to configure dhcp: %v", err)
 		}
 		if utilnet.IsIPv4CIDR(cidr) {
-			dhcpConfigs.V4 = composeDHCPv4Options(cidr.String(), dnsServerIPv4, controllerName, vmKey)
+			dhcpConfigs.V4 = ComposeDHCPv4Options(cidr.String(), dnsServerIPv4, controllerName, vmKey)
 		} else if utilnet.IsIPv6CIDR(cidr) {
-			dhcpConfigs.V6 = composeDHCPv6Options(cidr.String(), dnsServerIPv6, controllerName, vmKey)
+			dhcpConfigs.V6 = ComposeDHCPv6Options(cidr.String(), dnsServerIPv6, controllerName, vmKey)
 		}
 	}
 	return dhcpConfigs, nil
@@ -88,7 +88,7 @@ func retrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string,
 	return clusterIPv4, clusterIPv6, nil
 }
 
-func composeDHCPv4Options(cidr, dnsServer, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
+func ComposeDHCPv4Options(cidr, dnsServer, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
 	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv4)).String()
 	dhcpOptions := &nbdb.DHCPOptions{
 		Cidr: cidr,
@@ -104,7 +104,7 @@ func composeDHCPv4Options(cidr, dnsServer, controllerName string, vmKey ktypes.N
 	return composeDHCPOptions(controllerName, vmKey, dhcpOptions)
 }
 
-func composeDHCPv6Options(cidr, dnsServer, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
+func ComposeDHCPv6Options(cidr, dnsServer, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
 	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv6)).String()
 	dhcpOptions := &nbdb.DHCPOptions{
 		Cidr: cidr,
