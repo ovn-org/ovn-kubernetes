@@ -170,6 +170,9 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 			return fmt.Errorf("addLogicalPort failed for %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	} else {
+		if err := oc.ensureRoutingForVM(pod); err != nil {
+			return fmt.Errorf("failed ensureRoutingForVM for %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
 		// either pod is host-networked or its an update for a normal pod (addPort=false case)
 		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
 			if err := oc.addPodExternalGW(pod); err != nil {

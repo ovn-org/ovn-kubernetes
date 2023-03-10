@@ -111,7 +111,7 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 		return err
 	}
 
-	if err := oc.kubevirtCleanUp(pod); err != nil {
+	if err := oc.cleanupForVM(pod); err != nil {
 		return err
 	}
 

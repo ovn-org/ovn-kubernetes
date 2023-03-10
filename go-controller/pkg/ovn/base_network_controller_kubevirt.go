@@ -19,12 +19,12 @@ func (bnc *BaseNetworkController) ensureNetworkInfoForVM(origPod *corev1.Pod) er
 		return err
 	}
 	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
-		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := bnc.watchFactory.GetPod(origPod.Namespace, origPod.Name)
 		if err != nil {
 			return err
 		}
 
+		// Informer cache should not be mutated, so get a copy of the object
 		cpod := pod.DeepCopy()
 		_, ok := cpod.Labels[kubevirt.OriginalSwitchNameLabel]
 		if !ok {

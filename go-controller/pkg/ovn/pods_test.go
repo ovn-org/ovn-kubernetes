@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -19,6 +20,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilnet "k8s.io/utils/net"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -79,8 +81,12 @@ func newPodWithLabels(namespace, name, node, podIP string, additionalLabels map[
 
 func newPod(namespace, name, node, podIP string) *v1.Pod {
 	podIPs := []v1.PodIP{}
-	if podIP != "" {
-		podIPs = append(podIPs, v1.PodIP{IP: podIP})
+	ips := strings.Split(podIP, " ")
+	if len(ips) > 0 {
+		podIP = ips[0]
+		for _, ip := range ips {
+			podIPs = append(podIPs, v1.PodIP{IP: ip})
+		}
 	}
 	return &v1.Pod{
 		ObjectMeta: newPodMeta(namespace, name, nil),
@@ -176,7 +182,11 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 
 func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN, uuid string) {
 	gomega.Expect(p.nodeName).NotTo(gomega.Equal(""))
-	err := fakeOvn.controller.lsManager.AddSwitch(p.nodeName, uuid, []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)})
+	subnets := []*net.IPNet{}
+	for _, subnet := range strings.Split(p.nodeSubnet, " ") {
+		subnets = append(subnets, ovntest.MustParseIPNet(subnet))
+	}
+	err := fakeOvn.controller.lsManager.AddSwitch(p.nodeName, uuid, subnets)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
@@ -195,8 +205,17 @@ func (p testPod) getAnnotationsJson() string {
 	if len(podRoutes) > 0 {
 		podRoutesJSON = `, "routes":[` + podRoutes + `]`
 	}
-	return `{"default": {"ip_addresses":["` + p.podIP + `/24"], "mac_address":"` + p.podMAC + `",
-		"gateway_ips": ["` + p.nodeGWIP + `"], "ip_address":"` + p.podIP + `/24", "gateway_ip": "` + p.nodeGWIP + `"` + podRoutesJSON + `}}`
+	addresses := []string{}
+	for _, podIP := range strings.Split(p.podIP, " ") {
+		if utilnet.IsIPv4String(podIP) {
+			podIP += "/24"
+		} else if utilnet.IsIPv6String(podIP) {
+			podIP += "/64"
+		}
+		addresses = append(addresses, `"`+podIP+`"`)
+	}
+	return `{"default": {"ip_addresses":[` + strings.Join(addresses, ", ") + `], "mac_address":"` + p.podMAC + `",
+		"gateway_ips": ["` + p.nodeGWIP + `"], "ip_address":` + addresses[0] + `, "gateway_ip": "` + p.nodeGWIP + `"` + podRoutesJSON + `}}`
 
 }
 
