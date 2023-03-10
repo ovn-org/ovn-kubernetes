@@ -6,9 +6,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
-	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -67,9 +68,9 @@ func composeDHCPConfigs(k8scli *factory.WatchFactory, controllerName, namespace,
 			return nil, fmt.Errorf("failed converting podIPs to cidr to configure dhcp: %v", err)
 		}
 		if utilnet.IsIPv4CIDR(cidr) {
-			dhcpConfigs.V4 = composeDHCPv4Options(cidr.String(), dnsServerIPv4, controllerName, namespace, vmName)
+			dhcpConfigs.V4 = ComposeDHCPv4Options(cidr.String(), dnsServerIPv4, controllerName, namespace, vmName)
 		} else if utilnet.IsIPv6CIDR(cidr) {
-			dhcpConfigs.V6 = composeDHCPv6Options(cidr.String(), dnsServerIPv6, controllerName, namespace, vmName)
+			dhcpConfigs.V6 = ComposeDHCPv6Options(cidr.String(), dnsServerIPv6, controllerName, namespace, vmName)
 		}
 	}
 	return dhcpConfigs, nil
@@ -92,7 +93,7 @@ func retrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string,
 	return clusterIPv4, clusterIPv6, nil
 }
 
-func composeDHCPv4Options(cidr, dnsServer, controllerName, namespace, vmName string) *nbdb.DHCPOptions {
+func ComposeDHCPv4Options(cidr, dnsServer, controllerName, namespace, vmName string) *nbdb.DHCPOptions {
 	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv4)).String()
 	dhcpOptions := &nbdb.DHCPOptions{
 		Cidr: cidr,
@@ -108,7 +109,7 @@ func composeDHCPv4Options(cidr, dnsServer, controllerName, namespace, vmName str
 	return composeDHCPOptions(controllerName, namespace, vmName, dhcpOptions)
 }
 
-func composeDHCPv6Options(cidr, dnsServer, controllerName, namespace, vmName string) *nbdb.DHCPOptions {
+func ComposeDHCPv6Options(cidr, dnsServer, controllerName, namespace, vmName string) *nbdb.DHCPOptions {
 	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv6)).String()
 	dhcpOptions := &nbdb.DHCPOptions{
 		Cidr: cidr,
@@ -130,6 +131,7 @@ func composeDHCPOptions(controllerName, namespace, vmName string, dhcpOptions *n
 			libovsdbops.NamespaceKey:      namespace,
 		})
 	dhcpOptions.ExternalIDs = dhcpvOptionsDbObjectID.GetExternalIDs()
+	dhcpOptions.ExternalIDs[OvnZoneExternalIDKey] = OvnLocalZone
 	return dhcpOptions
 }
 

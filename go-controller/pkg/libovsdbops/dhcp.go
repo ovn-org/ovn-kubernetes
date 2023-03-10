@@ -68,3 +68,17 @@ func DeleteDHCPOptions(nbClient libovsdbclient.Client, dhcpOptions *nbdb.DHCPOpt
 	return m.Delete(opModels...)
 
 }
+
+func DeleteDHCPOptionsWithPredicate(nbClient libovsdbclient.Client, p DHCPOptionsPredicate) error {
+	opModels := []operationModel{}
+	opModel := operationModel{
+		Model:          &nbdb.DHCPOptions{},
+		ModelPredicate: p,
+		ErrNotFound:    false,
+		BulkOp:         true,
+	}
+	opModels = append(opModels, opModel)
+	m := newModelClient(nbClient)
+	return m.Delete(opModels...)
+
+}

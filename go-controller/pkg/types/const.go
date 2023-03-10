@@ -81,6 +81,7 @@ const (
 	DefaultNoRereoutePriority             = 102
 	EgressSVCReroutePriority              = 101
 	EgressIPReroutePriority               = 100
+	EgressLiveMigrationReroutePiority     = 10
 
 	V6NodeLocalNATSubnet           = "fd99::/64"
 	V6NodeLocalNATSubnetPrefix     = 64

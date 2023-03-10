@@ -173,12 +173,17 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 			return fmt.Errorf("addLogicalPort failed for %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	} else {
+
 		// either pod is host-networked or its an update for a normal pod (addPort=false case)
 		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
 			if err := oc.addPodExternalGW(pod); err != nil {
 				return fmt.Errorf("addPodExternalGW failed for %s/%s: %w", pod.Namespace, pod.Name, err)
 			}
 		}
+	}
+
+	if kubevirt.IsPodLiveMigratable(pod) {
+		return kubevirt.EnsureLocalZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, pod, ovntypes.DefaultNetworkName)
 	}
 
 	return nil
@@ -216,6 +221,9 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, a
 		if err := oc.addPodExternalGW(pod); err != nil {
 			return fmt.Errorf("addPodExternalGW failed for remote pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
+	}
+	if kubevirt.IsPodLiveMigratable(pod) {
+		return kubevirt.EnsureRemoteZonePodAddressesToNodeRoute(oc.controllerName, oc.watchFactory, oc.nbClient, pod, ovntypes.DefaultNetworkName)
 	}
 	return nil
 }
@@ -259,6 +267,7 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *
 		return fmt.Errorf("deleteLogicalPort failed for pod %s: %w",
 			getPodNamespacedName(pod), err)
 	}
+
 	return nil
 }
 

@@ -11,7 +11,6 @@ import (
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -159,6 +158,9 @@ func CleanUpForVM(controllerName string, nbClient libovsdbclient.Client, watchFa
 	}
 
 	if err := DeleteDHCPOptions(controllerName, nbClient, pod, networkName); err != nil {
+		return err
+	}
+	if err := DeleteRoutingForMigratedPod(nbClient, pod); err != nil {
 		return err
 	}
 	return nil

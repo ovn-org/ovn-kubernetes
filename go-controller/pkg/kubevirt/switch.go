@@ -2,6 +2,8 @@ package kubevirt
 
 import (
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 const (
@@ -19,9 +21,14 @@ const (
 )
 
 // ComposeARPProxyLSPOption returns the "arp_proxy" field needed at router type
-// LSP to implement stable default gw for pod ip migration, it consist of
-// generated MAC address and a link local ipv4 and ipv6, it's the same
-// for all the logical switches.
+// LSP to implement stable default gw for pod ip migration, it consiste of
+// generated MAC address, a link local ipv4 and ipv6( it's the same
+// for all the logical switches) and the cluster subnet to allow the migrated
+// vm to ping pods from the same subnet).
 func ComposeARPProxyLSPOption() string {
-	return strings.Join([]string{ARPProxyMAC, ARPProxyIPv4, ARPProxyIPv6}, " ")
+	arpProxy := []string{ARPProxyMAC, ARPProxyIPv4, ARPProxyIPv6}
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		arpProxy = append(arpProxy, clusterSubnet.CIDR.String())
+	}
+	return strings.Join(arpProxy, " ")
 }
