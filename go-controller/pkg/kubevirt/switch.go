@@ -4,6 +4,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -18,5 +19,9 @@ const (
 // for all the logical switches.
 func ComposeARPProxyLSPOption() string {
 	mac := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv4)).String()
-	return strings.Join([]string{mac, ARPProxyIPv4, ARPProxyIPv6}, " ")
+	arpProxy := []string{mac, ARPProxyIPv4, ARPProxyIPv6}
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		arpProxy = append(arpProxy, clusterSubnet.CIDR.String())
+	}
+	return strings.Join(arpProxy, " ")
 }
