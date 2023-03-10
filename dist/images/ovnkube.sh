@@ -230,6 +230,9 @@ ovn_ipfix_targets=${OVN_IPFIX_TARGETS:-}
 ovn_ipfix_sampling=${OVN_IPFIX_SAMPLING:-} \
 ovn_ipfix_cache_max_flows=${OVN_IPFIX_CACHE_MAX_FLOWS:-} \
 ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
+#OVN_STATELESS_NETPOL_ENABLE - enable stateless network policy for ovn-kubernetes
+ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE:-false}
+
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -1003,6 +1006,12 @@ ovn-master() {
     ovnkube_metrics_scale_enable_flag="--metrics-enable-scale"
   fi
   echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
+  
+  ovn_stateless_netpol_enable_flag=
+  if [[ ${ovn_stateless_netpol_enable} == "true" ]]; then
+          ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
+  fi
+  echo "ovn_stateless_netpol_enable_flag: ${ovn_stateless_netpol_enable_flag}"
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
@@ -1032,6 +1041,7 @@ ovn-master() {
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
     ${multi_network_enabled_flag} \
+    ${ovn_stateless_netpol_enable_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 

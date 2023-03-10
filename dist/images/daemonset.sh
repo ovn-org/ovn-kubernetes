@@ -78,6 +78,7 @@ OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
 OVNKUBE_CONFIG_DURATION_ENABLE=
 OVNKUBE_METRICS_SCALE_ENABLE=
+OVN_STATELESS_NETPOL_ENABLE="false"
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -276,6 +277,9 @@ while [ "$1" != "" ]; do
   --in-upgrade)
     IN_UPGRADE=true
     ;;
+  --stateless-netpol-enable)
+    OVN_STATELESS_NETPOL_ENABLE=$VALUE
+    ;;
 
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
@@ -420,6 +424,8 @@ ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
 echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE}
 echo "ovnkube_metrics_scale_enable: ${ovnkube_metrics_scale_enable}"
+ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE}
+echo "ovn_stateless_netpol_enable: ${ovn_stateless_netpol_enable}"
 
 ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -520,6 +526,7 @@ ovn_image=${ovnkube_image} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_stateless_netpol_enable=${ovn_netpol_acl_enable} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${image} \

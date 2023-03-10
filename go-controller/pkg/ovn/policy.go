@@ -54,6 +54,9 @@ const (
 	// used when removing stale ACLs from the syncNetworkPolicy function and should NOT be used in any main logic.
 	staleArpAllowPolicyMatch = "arp"
 	allowHairpinningACLID    = "allow-hairpinning"
+	// ovnStatelessNetPolAnnotationName is an annotation on K8s Network Policy resource to specify that all
+	// the resulting OVN ACLs must be created as stateless
+	ovnStatelessNetPolAnnotationName = "k8s.ovn.org/acl-stateless"
 )
 
 // defaultDenyPortGroups is a shared object and should be used by only 1 thread at a time
@@ -1022,6 +1025,20 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 	var np *networkPolicy
 	var policyHandlers []*policyHandler
 
+	// network policy will be annotated with this
+	// annotation -- [ "k8s.ovn.org/acl-stateless": "true"] for the ingress/egress
+	// policies to be added as stateless OVN ACL's.
+	// if the above annotation is not present or set to false in network policy,
+	// then corresponding egress/ingress policies will be added as stateful OVN ACL's.
+	var statelessNetPol bool
+	if config.OVNKubernetesFeature.EnableStatelessNetPol {
+		// look for stateless annotation if the statlessNetPol feature flag is enabled
+		val, ok := policy.Annotations[ovnStatelessNetPolAnnotationName]
+		if ok && val == "true" {
+			statelessNetPol = true
+		}
+	}
+
 	err := oc.networkPolicies.DoWithLock(npKey, func(npKey string) error {
 		oldNP, found := oc.networkPolicies.Load(npKey)
 		if found {
@@ -1068,7 +1085,7 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 		for i, ingressJSON := range policy.Spec.Ingress {
 			klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
-			ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name, oc.controllerName)
+			ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name, oc.controllerName, statelessNetPol)
 			// append ingress policy to be able to cleanup created address set
 			// see cleanupNetworkPolicy for details
 			np.ingressPolicies = append(np.ingressPolicies, ingress)
@@ -1094,7 +1111,7 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 		for i, egressJSON := range policy.Spec.Egress {
 			klog.V(5).Infof("Network policy egress is %+v", egressJSON)
 
-			egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name, oc.controllerName)
+			egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name, oc.controllerName, statelessNetPol)
 			// append ingress policy to be able to cleanup created address set
 			// see cleanupNetworkPolicy for details
 			np.egressPolicies = append(np.egressPolicies, egress)
