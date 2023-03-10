@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/onsi/ginkgo"
@@ -145,7 +146,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 			})
 			serviceAddress := net.JoinHostPort(serviceName, strconv.Itoa(port))
 			framework.Logf("waiting up to %v to connect to %v", e2eservice.KubeProxyEndpointLagTimeout, serviceAddress)
-			cmd = fmt.Sprintf("/agnhost connect --timeout=3s %s", serviceAddress)
+			cmd = fmt.Sprintf("/agnhost connect --timeout=10s %s", serviceAddress)
 		})
 
 		ginkgo.It("Should generate a NeedPods event for traffic destined to idled services", func() {
@@ -159,6 +160,8 @@ var _ = ginkgo.Describe("Unidling", func() {
 		})
 
 		ginkgo.It("Should not generate a NeedPods event when removing the annotation", func() {
+			ginkgo.Skip("Not supported by OVN: Enable back when https://bugzilla.redhat.com/show_bug.cgi?id=2177173 is fixed")
+
 			_, err := jig.UpdateService(func(service *v1.Service) {
 				service.Annotations = nil
 			})
@@ -198,6 +201,29 @@ var _ = ginkgo.Describe("Unidling", func() {
 			gomega.Eventually(func() bool {
 				return hittingGeneratesNewEvents(service, cs, clientPod, cmd)
 			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(true), "New events are not generated")
+		})
+
+		ginkgo.It("Should connect to an unidled backend at the first attempt", func() {
+
+			// Simulate service unidling
+			_, err := jig.UpdateService(func(service *v1.Service) {
+				service.Annotations = nil
+			})
+			framework.ExpectNoError(err)
+
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer ginkgo.GinkgoRecover()
+				wg.Done()
+
+				time.Sleep(time.Second)
+				createBackend(f, serviceName, namespace, node, jig.Labels, port)
+			}()
+			wg.Wait()
+
+			// Connecting to the service should work at the first attempt
+			gomega.Expect(checkService(clientPod, cmd)).To(gomega.Equal(works))
 		})
 	})
 

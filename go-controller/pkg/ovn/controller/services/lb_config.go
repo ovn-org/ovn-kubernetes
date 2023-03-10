@@ -484,6 +484,13 @@ func lbOpts(service *v1.Service) LBOpts {
 
 		if unidling.IsOnGracePeriod(service) {
 			lbOptions.Reject = false
+
+			// Setting to true even if we don't need empty_lb_events from OVN during grace period
+			// because OVN does not support having
+			// <no_backends> event=false reject=false
+			// Remove the following line when https://bugzilla.redhat.com/show_bug.cgi?id=2177173
+			// is fixed
+			lbOptions.EmptyLBEvents = true
 		}
 	}
 
