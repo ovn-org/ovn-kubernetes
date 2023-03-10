@@ -1,6 +1,8 @@
 package kubevirt
 
-import "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+import (
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+)
 
 const (
 	OvnZoneExternalIDKey = types.OvnK8sPrefix + "/zone"

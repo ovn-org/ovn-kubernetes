@@ -2,6 +2,8 @@ package kubevirt
 
 import (
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 const (
@@ -20,10 +22,34 @@ const (
 
 // ComposeARPProxyLSPOption returns the "arp_proxy" field needed at router type
 // LSP to implement stable default gw for pod ip migration, it consists of
-// generated MAC address and a link local ipv4 and ipv6, it's the same
-// for all the logical switches.
-// The used address are link local addresses so they are not part of any subnet
-// and the mac is calculated from the IPv4 arp proxy address.
+// generated MAC address, a link local ipv4 and ipv6( it's the same
+// for all the logical switches) and the cluster subnet to allow the migrated
+// vm to ping pods for the same subnet.
+// This is how it works step by step:
+// For default gw:
+//   - VM is configured with arp proxy IPv4/IPv6 as default gw
+//   - when a VM access an address that do not belong to its subnet it will
+//     send an ARP asking for the default gw IP
+//   - This will reach the OVN flows from arp_proxy and answer back with the
+//     mac address here
+//   - The vm will send the packet with that mac address so it will en being
+//     route by ovn.
+//
+// For vm accessing pods at the same subnet after live migration
+//   - Since the dst address is at the same subnet it will
+//     not use default gw and will send an ARP for dst IP
+//   - The logical switch do not have any LSP with that address since
+//     vm has being live migrated
+//   - ovn will fallback to arp_proxy flows to resolve ARP (these flows have
+//     less priority that LSPs ones so they don't collide with them)
+//   - The ovn flow for the cluster wide CIDR will be hit and ovn will answer
+//     back with arp_proxy mac
+//   - VM will send the message to that mac and it will end being route by
+//     ovn
 func ComposeARPProxyLSPOption() string {
-	return strings.Join([]string{ARPProxyMAC, ARPProxyIPv4, ARPProxyIPv6}, " ")
+	arpProxy := []string{ARPProxyMAC, ARPProxyIPv4, ARPProxyIPv6}
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		arpProxy = append(arpProxy, clusterSubnet.CIDR.String())
+	}
+	return strings.Join(arpProxy, " ")
 }

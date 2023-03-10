@@ -74,7 +74,7 @@ var _ = Describe("Kubevirt", func() {
 			namespace:           "namespace1",
 			vmName:              "foo1",
 			dns:                 svc("kube-system", "kube-dns", []string{"192.167.23.44"}),
-			expectedDHCPConfigs: dhcpConfigs{V4: composeDHCPv4Options("192.168.25.0/24", "192.167.23.44", "defaultController", key("namespace1", "foo1"))},
+			expectedDHCPConfigs: dhcpConfigs{V4: ComposeDHCPv4Options("192.168.25.0/24", "192.167.23.44", "defaultController", key("namespace1", "foo1"))},
 		}),
 		Entry("IPv6 Single stack and k8s dns", dhcpTest{
 			cidrs:               []string{"2002:0:0:1234::/64"},
@@ -82,7 +82,7 @@ var _ = Describe("Kubevirt", func() {
 			namespace:           "namespace1",
 			vmName:              "foo1",
 			dns:                 svc("kube-system", "kube-dns", []string{"2001:1:2:3:4:5:6:7"}),
-			expectedDHCPConfigs: dhcpConfigs{V6: composeDHCPv6Options("2002:0:0:1234::/64", "2001:1:2:3:4:5:6:7", "defaultController", key("namespace1", "foo1"))},
+			expectedDHCPConfigs: dhcpConfigs{V6: ComposeDHCPv6Options("2002:0:0:1234::/64", "2001:1:2:3:4:5:6:7", "defaultController", key("namespace1", "foo1"))},
 		}),
 		Entry("Dual stack and k8s dns", dhcpTest{
 			cidrs:          []string{"192.168.25.0/24", "2002:0:0:1234::/64"},
@@ -91,8 +91,8 @@ var _ = Describe("Kubevirt", func() {
 			vmName:         "foo1",
 			dns:            svc("kube-system", "kube-dns", []string{"192.167.23.44", "2001:1:2:3:4:5:6:7"}),
 			expectedDHCPConfigs: dhcpConfigs{
-				V4: composeDHCPv4Options("192.168.25.0/24", "192.167.23.44", "defaultController", key("namespace1", "foo1")),
-				V6: composeDHCPv6Options("2002:0:0:1234::/64", "2001:1:2:3:4:5:6:7", "defaultController", key("namespace1", "foo1")),
+				V4: ComposeDHCPv4Options("192.168.25.0/24", "192.167.23.44", "defaultController", key("namespace1", "foo1")),
+				V6: ComposeDHCPv6Options("2002:0:0:1234::/64", "2001:1:2:3:4:5:6:7", "defaultController", key("namespace1", "foo1")),
 			},
 		}),
 		Entry("Dual stack and k8s dns with ipv4 only", dhcpTest{
@@ -102,8 +102,8 @@ var _ = Describe("Kubevirt", func() {
 			vmName:         "foo1",
 			dns:            svc("kube-system", "kube-dns", []string{"192.167.23.44", ""}),
 			expectedDHCPConfigs: dhcpConfigs{
-				V4: composeDHCPv4Options("192.168.25.0/24", "192.167.23.44", "defaultController", key("namespace1", "foo1")),
-				V6: composeDHCPv6Options("2002:0:0:1234::/64", "", "defaultController", key("namespace1", "foo1")),
+				V4: ComposeDHCPv4Options("192.168.25.0/24", "192.167.23.44", "defaultController", key("namespace1", "foo1")),
+				V6: ComposeDHCPv6Options("2002:0:0:1234::/64", "", "defaultController", key("namespace1", "foo1")),
 			},
 		}),
 	)

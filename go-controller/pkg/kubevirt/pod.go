@@ -11,12 +11,12 @@ import (
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -149,6 +149,27 @@ func ZoneContainsPodSubnet(lsManager *logicalswitchmanager.LogicalSwitchManager,
 	return lsManager.GetSubnetName(podAnnotation.IPs)
 }
 
+// nodeContainsPodSubnet will return true if the node subnet annotation
+// contains the subnets from the argument
+func nodeContainsPodSubnet(watchFactory *factory.WatchFactory, nodeName string, podAnnotation *util.PodAnnotation, nadName string) (bool, error) {
+	node, err := watchFactory.GetNode(nodeName)
+	if err != nil {
+		return false, err
+	}
+	nodeHostSubNets, err := util.ParseNodeHostSubnetAnnotation(node, nadName)
+	if err != nil {
+		return false, err
+	}
+	for _, subnet := range podAnnotation.IPs {
+		for _, nodeHostSubNet := range nodeHostSubNets {
+			if nodeHostSubNet.Contains(subnet.IP) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // ExtractVMNameFromPod retunes namespace and name of vm backed up but the pod
 // for regular pods return nil
 func ExtractVMNameFromPod(pod *corev1.Pod) *ktypes.NamespacedName {
@@ -177,10 +198,23 @@ func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *fact
 	if err := DeleteDHCPOptions(nbClient, pod); err != nil {
 		return err
 	}
+	if err := DeleteRoutingForMigratedPod(nbClient, pod); err != nil {
+		return err
+	}
 	return nil
 }
 
 func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool) error {
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+	}); err != nil {
+		return fmt.Errorf("failed deleting stale vm static routes: %v", err)
+	}
+	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterPolicy) bool {
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+	}); err != nil {
+		return fmt.Errorf("failed deleting stale vm policies: %v", err)
+	}
 	if err := libovsdbops.DeleteDHCPOptionsWithPredicate(nbClient, func(item *nbdb.DHCPOptions) bool {
 		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
 	}); err != nil {
