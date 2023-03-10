@@ -130,7 +130,7 @@ spec:
     spec:
       containers:
       - name: agnhost
-        image: k8s.gcr.io/e2e-test-images/agnhost:2.21
+        image: registry.k8s.io/e2e-test-images/agnhost:2.21
         args:
           - netexec
           - --http-port=80

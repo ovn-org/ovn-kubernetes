@@ -187,7 +187,7 @@ spec:
   containers:
   - args:
     - pause
-    image: k8s.gcr.io/e2e-test-images/agnhost:2.36
+    image: registry.k8s.io/e2e-test-images/agnhost:2.36
     imagePullPolicy: IfNotPresent
     name: agnhost-container
 ```
@@ -221,7 +221,7 @@ spec:
   containers:
   - args:
     - pause
-    image: k8s.gcr.io/e2e-test-images/agnhost:2.36
+    image: registry.k8s.io/e2e-test-images/agnhost:2.36
     imagePullPolicy: IfNotPresent
     name: agnhost-container
 ```
