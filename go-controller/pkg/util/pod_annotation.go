@@ -52,6 +52,7 @@ const (
 )
 
 var ErrNoPodIPFound = errors.New("no pod IPs found")
+var ErrOverridePodIPs = errors.New("requested pod IPs trying to override IPs exists in pod annotation")
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
 // actual annotation may include the equivalent of multiple PodAnnotations.)
@@ -116,6 +117,19 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 	for _, ip := range podInfo.IPs {
 		pa.IPs = append(pa.IPs, ip.String())
 	}
+
+	existingPa, ok := podNetworks[nadName]
+	if ok {
+		if len(pa.IPs) != len(existingPa.IPs) {
+			return nil, ErrOverridePodIPs
+		}
+		for _, ip := range pa.IPs {
+			if !SliceHasStringItem(existingPa.IPs, ip) {
+				return nil, ErrOverridePodIPs
+			}
+		}
+	}
+
 	for _, gw := range podInfo.Gateways {
 		pa.Gateways = append(pa.Gateways, gw.String())
 	}
