@@ -21,6 +21,11 @@ func GetACLName(acl *nbdb.ACL) string {
 	return ""
 }
 
+func getACLMutableFields(acl *nbdb.ACL) []interface{} {
+	return []interface{}{&acl.Action, &acl.Direction, &acl.ExternalIDs, &acl.Log, &acl.Match, &acl.Meter,
+		&acl.Name, &acl.Options, &acl.Priority, &acl.Severity}
+}
+
 // isEquivalentACL if it has same uuid, or if it has same name
 // and external ids, or if it has same priority, direction, match
 // and action.
@@ -137,7 +142,7 @@ func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 		opModel := operationModel{
 			Model:          acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
-			OnModelUpdates: onModelUpdatesAllNonDefault(),
+			OnModelUpdates: getACLMutableFields(acl),
 			ErrNotFound:    false,
 			BulkOp:         false,
 		}
@@ -156,7 +161,7 @@ func UpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acl
 		opModel := operationModel{
 			Model:          acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
-			OnModelUpdates: onModelUpdatesAllNonDefault(),
+			OnModelUpdates: getACLMutableFields(acl),
 			ErrNotFound:    true,
 			BulkOp:         false,
 		}
