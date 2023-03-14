@@ -17,7 +17,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	"k8s.io/kubernetes/test/e2e/framework/pod/output"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -410,9 +412,9 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			// Assign the egress IP without conflicting with any node IP,
 			// the kind subnet is /16 or /64 so the following should be fine.
 			eipNode := nodes[0]
-			framework.AddOrUpdateLabelOnNode(f.ClientSet, eipNode.Name, "k8s.ovn.org/egress-assignable", "dummy")
+			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, eipNode.Name, "k8s.ovn.org/egress-assignable", "dummy")
 			defer func() {
-				framework.RunKubectlOrDie("default", "label", "node", eipNode.Name, "k8s.ovn.org/egress-assignable-")
+				kubectl.RunKubectlOrDie("default", "label", "node", eipNode.Name, "k8s.ovn.org/egress-assignable-")
 			}()
 			nodev4IP, nodev6IP := getNodeAddresses(&eipNode)
 			egressNodeIP := net.ParseIP(nodev4IP)
@@ -449,9 +451,9 @@ spec:
 			}()
 
 			framework.Logf("Create the EgressIP configuration")
-			framework.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+			kubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
 			defer func() {
-				framework.RunKubectlOrDie("default", "delete", "eip", "egress-svc-test-eip")
+				kubectl.RunKubectlOrDie("default", "delete", "eip", "egress-svc-test-eip")
 			}()
 
 			ginkgo.By("Verifying the pods reach the external container with the service's ingress ip")
@@ -723,7 +725,7 @@ func setSVCRouteOnContainer(container, svcIP, v4Via, v6Via string) {
 func curlAgnHostClientIPFromPod(namespace, pod, expectedIP, dstIP string, containerPort int) error {
 	dst := net.JoinHostPort(dstIP, fmt.Sprint(containerPort))
 	curlCmd := fmt.Sprintf("curl -s --retry-connrefused --retry 5 --max-time 1 http://%s/clientip", dst)
-	out, err := framework.RunHostCmd(namespace, pod, curlCmd)
+	out, err := output.RunHostCmd(namespace, pod, curlCmd)
 	if err != nil {
 		return fmt.Errorf("failed to curl agnhost on %s from %s, err: %w", dstIP, pod, err)
 	}

@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	"k8s.io/kubernetes/test/e2e/framework/pod/output"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 )
 
@@ -70,10 +71,11 @@ var _ = ginkgo.Describe("Unidling", func() {
 		serverPod := e2epod.NewAgnhostPod(namespace, "pod-backend", nil, nil, []v1.ContainerPort{{ContainerPort: 9376}}, "serve-hostname")
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.NodeName = nodeName
-		f.PodClient().CreateSync(serverPod)
+		podClient := e2epod.NewPodClient(f)
+		podClient.CreateSync(serverPod)
 
 		// Emulate the idling feature deleting the pod
-		f.PodClient().DeleteSync(serverPod.Name, metav1.DeleteOptions{}, framework.DefaultPodDeletionTimeout)
+		podClient.DeleteSync(serverPod.Name, metav1.DeleteOptions{}, e2epod.DefaultPodDeletionTimeout)
 
 		// Create exec pod to test the PodEvent is generated if it receives traffic to the idled service
 		ginkgo.By(fmt.Sprintf("creating %v on node %v", podName, nodeName))
@@ -88,7 +90,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 		ginkgo.By(fmt.Sprintf("hitting service %v from pod %v on node %v", serviceAddress, podName, nodeName))
 		nonExpectedErr := "REFUSED"
 		if pollErr := wait.PollImmediate(framework.Poll, e2eservice.KubeProxyEndpointLagTimeout, func() (bool, error) {
-			_, err := framework.RunHostCmd(execPod.Namespace, execPod.Name, cmd)
+			_, err := output.RunHostCmd(execPod.Namespace, execPod.Name, cmd)
 			if err != nil && strings.Contains(err.Error(), nonExpectedErr) {
 				return false, fmt.Errorf("service is rejecting packets")
 			}
@@ -190,7 +192,8 @@ var _ = ginkgo.Describe("Unidling", func() {
 
 		ginkgo.It("Should generate a NeedPods event when backends were added and then removed", func() {
 			be := createBackend(f, serviceName, namespace, node, jig.Labels, port)
-			f.PodClient().DeleteSync(be.Name, metav1.DeleteOptions{}, framework.DefaultPodDeletionTimeout)
+			podClient := e2epod.NewPodClient(f)
+			podClient.DeleteSync(be.Name, metav1.DeleteOptions{}, e2epod.DefaultPodDeletionTimeout)
 			err := framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, 0, time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err)
 
@@ -303,7 +306,8 @@ var _ = ginkgo.Describe("Unidling", func() {
 
 		ginkgo.It("Should not generate a NeedPods event when backends were added and then removed", func() {
 			be := createBackend(f, serviceName, namespace, node, jig.Labels, port)
-			f.PodClient().DeleteSync(be.Name, metav1.DeleteOptions{}, framework.DefaultPodDeletionTimeout)
+			podClient := e2epod.NewPodClient(f)
+			podClient.DeleteSync(be.Name, metav1.DeleteOptions{}, e2epod.DefaultPodDeletionTimeout)
 			err := framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, 0, time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err)
 
@@ -325,7 +329,8 @@ func createBackend(f *framework.Framework, serviceName, namespace, node string, 
 	serverPod := e2epod.NewAgnhostPod(namespace, "pod-backend", nil, nil, []v1.ContainerPort{{ContainerPort: port}}, "netexec", "--http-port=80")
 	serverPod.Labels = labels
 	serverPod.Spec.NodeName = node
-	pod := f.PodClient().CreateSync(serverPod)
+	podClient := e2epod.NewPodClient(f)
+	pod := podClient.CreateSync(serverPod)
 	err := framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, 1, time.Second, wait.ForeverTestTimeout)
 	framework.ExpectNoError(err)
 	return pod
@@ -358,7 +363,7 @@ func hittingGeneratesNewEvents(service *v1.Service, cs clientset.Interface, clie
 // The connection can be refused, can timeout or can work.
 func checkService(clientPod *v1.Pod, cmd string) serviceStatus {
 	refusedError := "REFUSED"
-	stdout, stderr, err := framework.RunHostCmdWithFullOutput(clientPod.Namespace, clientPod.Name, cmd)
+	stdout, stderr, err := output.RunHostCmdWithFullOutput(clientPod.Namespace, clientPod.Name, cmd)
 	framework.Logf("checking service with cmd \"%s\" from pod %s in ns %s returned stdout: %v stderr: %v", cmd,
 		clientPod.Name, clientPod.Namespace, stdout, stderr)
 	if err != nil && strings.Contains(err.Error(), refusedError) {

@@ -16,7 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -513,7 +513,7 @@ var _ = Describe("Multi Homing", func() {
 						Name:      secondaryNetworkName,
 						IPRequest: []string{clientIP},
 					}},
-					name: clientPodName,
+					name:         clientPodName,
 					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 				podConfiguration{
@@ -776,7 +776,7 @@ func inRange(cidr string, ip string) error {
 }
 
 func connectToServer(clientPodNs string, clientPodName, serverIP string, port int) error {
-	_, err := framework.RunKubectl(
+	_, err := kubectl.RunKubectl(
 		clientPodNs,
 		"exec",
 		clientPodName,
@@ -800,7 +800,7 @@ func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topolog
 }
 
 func configurePodStaticIP(podNamespace string, podName string, staticIP string) error {
-	_, err := framework.RunKubectl(
+	_, err := kubectl.RunKubectl(
 		podNamespace, "exec", podName, "--",
 		"ip", "addr", "add", staticIP, "dev", "net1",
 	)

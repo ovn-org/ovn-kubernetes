@@ -16,6 +16,7 @@ import (
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 )
 
@@ -66,12 +67,12 @@ var _ = ginkgo.Describe("e2e EgressQoS validation", func() {
 		dstPod2IPv4, dstPod2IPv6 = getPodAddresses(dstPod2)
 
 		gomega.Eventually(func() error {
-			_, err := framework.RunKubectl(f.Namespace.Name, "exec", dstPod1Name, "--", "which", "tcpdump")
+			_, err := kubectl.RunKubectl(f.Namespace.Name, "exec", dstPod1Name, "--", "which", "tcpdump")
 			if err != nil {
 				return err
 			}
 
-			_, err = framework.RunKubectl(f.Namespace.Name, "exec", dstPod2Name, "--", "which", "tcpdump")
+			_, err = kubectl.RunKubectl(f.Namespace.Name, "exec", dstPod2Name, "--", "which", "tcpdump")
 			return err
 		}, 60*time.Second, 1*time.Second).ShouldNot(gomega.HaveOccurred())
 	})
@@ -114,7 +115,7 @@ spec:
 			}()
 
 			framework.Logf("Create the EgressQoS configuration")
-			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressQoSYaml)
+			kubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressQoSYaml)
 
 			if !podBeforeQoS {
 				_, err := createPod(f, srcPodName, srcNode, f.Namespace.Name, []string{}, map[string]string{"app": "test"})
@@ -143,11 +144,11 @@ spec:
 				framework.Failf("Unable to write CRD config to disk: %v", err)
 			}
 			framework.Logf("Update the EgressQoS configuration")
-			framework.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressQoSYaml)
+			kubectl.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressQoSYaml)
 
 			pingAndCheckDSCP(f, srcPodName, dstPod1Name, *dst1IP, dstPod2Name, *dst2IP, tcpDumpTpl, dscpValue-10, dscpValue-20)
 
-			framework.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressQoSYaml)
+			kubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressQoSYaml)
 
 			pingAndCheckDSCP(f, srcPodName, dstPod1Name, *dst1IP, dstPod2Name, *dst2IP, tcpDumpTpl, 0, 0)
 
@@ -195,7 +196,7 @@ spec:
 			}()
 
 			framework.Logf("Create the EgressQoS configuration")
-			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressQoSYaml)
+			kubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressQoSYaml)
 
 			pingAndCheckDSCP(f, srcPodName, dstPod1Name, *dst1IP, dstPod2Name, *dst2IP, tcpDumpTpl, 0, 0)
 
@@ -253,7 +254,7 @@ spec:
 			}
 		}()
 
-		_, err := framework.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
+		_, err := kubectl.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
 		framework.ExpectError(err, "a resource not named default should be denied")
 		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"not-default\""))
 
@@ -280,7 +281,7 @@ spec:
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 
-		_, err = framework.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
+		_, err = kubectl.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
 		framework.ExpectError(err, "a resource with bad cidrs should be denied")
 		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"1.2.3.256/32\""))
 		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"1.2.3.4/42\""))
@@ -294,13 +295,13 @@ func pingAndCheckDSCP(f *framework.Framework, srcPod, dstPod1, dstPod1IP, dstPod
 	pingSync := errgroup.Group{}
 
 	checkDSCPOnPod := func(pod string, dscp int) error {
-		_, err := framework.RunKubectl(f.Namespace.Name, "exec", pod, "--", "timeout", "10",
+		_, err := kubectl.RunKubectl(f.Namespace.Name, "exec", pod, "--", "timeout", "10",
 			"tcpdump", "-i", "any", "-c", "1", "-v", fmt.Sprintf(tcpDumpTpl, dscp))
 		return err
 	}
 
 	pingFromSrcPod := func(pod, dst string) error {
-		_, err := framework.RunKubectl(f.Namespace.Name, "exec", pod, "--", "ping", "-c", "3", dst)
+		_, err := kubectl.RunKubectl(f.Namespace.Name, "exec", pod, "--", "ping", "-c", "3", dst)
 		return err
 	}
 

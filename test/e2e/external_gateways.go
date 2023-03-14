@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	"k8s.io/kubernetes/test/e2e/framework/skipper"
 )
@@ -144,7 +145,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 				go func(target string) {
 					defer ginkgo.GinkgoRecover()
 					defer pingSync.Done()
-					_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
+					_, err := kubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
 					framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 				}(t)
 			}
@@ -185,7 +186,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 				} else {
 					args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 -u %s %d", target, destPort))
 				}
-				res, err := framework.RunKubectl(f.Namespace.Name, args...)
+				res, err := kubectl.RunKubectl(f.Namespace.Name, args...)
 				framework.ExpectNoError(err, "failed to reach %s (%s)", target, protocol)
 				hostname := strings.TrimSuffix(res, "\n")
 				if hostname != "" {
@@ -260,7 +261,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			"k8s.ovn.org/routing-external-gws-",
 		}
 		ginkgo.By("Resetting the gw annotation")
-		framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
+		kubectl.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -314,7 +315,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			go func(target string) {
 				defer ginkgo.GinkgoRecover()
 				defer pingSync.Done()
-				_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "ping", "-c", testTimeout, target)
+				_, err := kubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "ping", "-c", testTimeout, target)
 				if err != nil {
 					framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
 				}
@@ -428,7 +429,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry del
 			"k8s.ovn.org/routing-external-gws-",
 		}
 		ginkgo.By("Resetting the gw annotation")
-		framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
+		kubectl.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -691,7 +692,7 @@ var _ = ginkgo.Context("BFD", func() {
 					go func(target string) {
 						defer ginkgo.GinkgoRecover()
 						defer pingSync.Done()
-						_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
+						_, err := kubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
 						if err != nil {
 							framework.Logf("error generating a ping from the test pod %s: %v", srcPingPodName, err)
 						}
@@ -720,7 +721,7 @@ var _ = ginkgo.Context("BFD", func() {
 						go func(target string) {
 							defer ginkgo.GinkgoRecover()
 							defer pingSync.Done()
-							_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
+							_, err := kubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
 							framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 						}(t)
 					}
@@ -847,7 +848,7 @@ var _ = ginkgo.Context("BFD", func() {
 				"k8s.ovn.org/routing-external-gws-",
 			}
 			ginkgo.By("Resetting the gw annotation")
-			framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
+			kubectl.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
 		})
 
 		ginkgo.AfterEach(func() {
@@ -903,7 +904,7 @@ var _ = ginkgo.Context("BFD", func() {
 				go func(target string) {
 					defer ginkgo.GinkgoRecover()
 					defer pingSync.Done()
-					_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
+					_, err := kubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
 					if err != nil {
 						framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
 					}
@@ -930,7 +931,7 @@ var _ = ginkgo.Context("BFD", func() {
 				go func(target string) {
 					defer ginkgo.GinkgoRecover()
 					defer pingSync.Done()
-					_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
+					_, err := kubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
 					if err != nil {
 						framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
 					}
@@ -1204,11 +1205,11 @@ func setupGatewayContainersForConntrackTest(f *framework.Framework, nodes *v1.No
 
 	// start iperf3 servers at ports 5201 and 5202 on the src app pod
 	args := []string{"exec", srcPodName, "--", "iperf3", "-s", "--daemon", "-V", fmt.Sprintf("-p %d", 5201)}
-	_, err = framework.RunKubectl(f.Namespace.Name, args...)
+	_, err = kubectl.RunKubectl(f.Namespace.Name, args...)
 	framework.ExpectNoError(err, "failed to start iperf3 server on pod %s at port 5201", srcPodName)
 
 	args = []string{"exec", srcPodName, "--", "iperf3", "-s", "--daemon", "-V", fmt.Sprintf("-p %d", 5202)}
-	_, err = framework.RunKubectl(f.Namespace.Name, args...)
+	_, err = kubectl.RunKubectl(f.Namespace.Name, args...)
 	framework.ExpectNoError(err, "failed to start iperf3 server on pod %s at port 5202", srcPodName)
 
 	addressesv4.srcPodIP, addressesv6.srcPodIP = getPodAddresses(clientPod)
@@ -1279,7 +1280,7 @@ func annotatePodForGateway(podName, podNS, namespace, networkIPs string, bfd boo
 		annotateArgs = append(annotateArgs, "k8s.ovn.org/bfd-enabled=\"\"")
 	}
 	framework.Logf("Annotating the external gateway pod with annotation %s", annotateArgs)
-	framework.RunKubectlOrDie(podNS, annotateArgs...)
+	kubectl.RunKubectlOrDie(podNS, annotateArgs...)
 }
 
 func annotateNamespaceForGateway(namespace string, bfd bool, gateways ...string) {
@@ -1297,7 +1298,7 @@ func annotateNamespaceForGateway(namespace string, bfd bool, gateways ...string)
 		annotateArgs = append(annotateArgs, "k8s.ovn.org/bfd-enabled=\"\"")
 	}
 	framework.Logf("Annotating the external gateway test namespace to container gateways: %s", externalGateways)
-	framework.RunKubectlOrDie(namespace, annotateArgs...)
+	kubectl.RunKubectlOrDie(namespace, annotateArgs...)
 }
 
 func hostNamesForContainers(containers []string) map[string]struct{} {
@@ -1323,7 +1324,7 @@ func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) st
 	} else {
 		args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 -u %s %d", target, port))
 	}
-	res, err := framework.RunKubectl(namespace, args...)
+	res, err := kubectl.RunKubectl(namespace, args...)
 	framework.ExpectNoError(err, "failed to reach %s (%s)", target, protocol)
 	hostname := strings.TrimSuffix(res, "\n")
 	return hostname
@@ -1332,10 +1333,10 @@ func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) st
 // pokeConntrackEntries returns the number of conntrack entries that match the provided pattern, protocol and podIP
 func pokeConntrackEntries(nodeName, podIP, protocol string, patterns []string) int {
 	args := []string{"get", "pods", "--selector=app=ovs-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
-	ovsPodName, err := framework.RunKubectl("ovn-kubernetes", args...)
+	ovsPodName, err := kubectl.RunKubectl("ovn-kubernetes", args...)
 	framework.ExpectNoError(err, "failed to get the ovs pod on node %s", nodeName)
 	args = []string{"exec", ovsPodName, "--", "ovs-appctl", "dpctl/dump-conntrack"}
-	conntrackEntries, err := framework.RunKubectl("ovn-kubernetes", args...)
+	conntrackEntries, err := kubectl.RunKubectl("ovn-kubernetes", args...)
 	framework.ExpectNoError(err, "failed to get the conntrack entries from node %s", nodeName)
 	numOfConnEntries := 0
 	for _, connEntry := range strings.Split(conntrackEntries, "\n") {

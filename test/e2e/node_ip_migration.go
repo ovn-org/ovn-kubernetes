@@ -19,6 +19,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	utilnet "k8s.io/utils/net"
@@ -147,8 +148,9 @@ spec:
 					secondaryWorkerNode.Name,
 					podLabels,
 					podCommand...)
-				_ = f.PodClient().CreateSync(podWorkerNode)
-				_ = f.PodClient().CreateSync(podSecondaryWorkerNode)
+				podClient := e2epod.NewPodClient(f)
+				podClient.CreateSync(podWorkerNode)
+				podClient.CreateSync(podSecondaryWorkerNode)
 
 				By("Waiting until both pods have an IP address")
 				Eventually(func() error {
@@ -276,7 +278,7 @@ spec:
 			Context("when EgressIPs are configured", func() {
 				BeforeEach(func() {
 					By("Adding the \"k8s.ovn.org/egress-assignable\" label to the first node")
-					framework.AddOrUpdateLabelOnNode(f.ClientSet, workerNode.Name, "k8s.ovn.org/egress-assignable", "")
+					e2enode.AddOrUpdateLabelOnNode(f.ClientSet, workerNode.Name, "k8s.ovn.org/egress-assignable", "")
 
 					By("Creating an EgressIP object with one egress IP defined")
 					// Assign the egress IP without conflicting with any node IP,
@@ -298,7 +300,7 @@ spec:
 						tmpDirIPMigration+"/"+egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 						framework.Failf("Unable to write CRD config to disk: %v", err)
 					}
-					_, err = framework.RunKubectl("default", "apply", "-f", tmpDirIPMigration+"/"+egressIPYaml)
+					_, err = kubectl.RunKubectl("default", "apply", "-f", tmpDirIPMigration+"/"+egressIPYaml)
 					Expect(err).NotTo(HaveOccurred())
 
 					By("Verifying egress IP works")
@@ -321,10 +323,10 @@ spec:
 
 				JustAfterEach(func() {
 					By("Deleting the gressip service")
-					framework.RunKubectl("default", "delete", "eip", podLabels["app"])
+					kubectl.RunKubectl("default", "delete", "eip", podLabels["app"])
 
 					By(fmt.Sprintf("Removing the egress assignable label from node %s", workerNode.Name))
-					framework.RunKubectl("default", "label", "node", workerNode.Name, "k8s.ovn.org/egress-assignable-")
+					kubectl.RunKubectl("default", "label", "node", workerNode.Name, "k8s.ovn.org/egress-assignable-")
 				})
 
 				for _, updateKubeletFirst := range []bool{true, false} {
@@ -720,7 +722,7 @@ func targetExternalContainerConnectToEndpoint(externalContainerName, externalCon
 	externalContainerEndpoint, podName, podNamespace string, expectedAnswer string) (bool, error) {
 	containerIPAndPort := net.JoinHostPort(externalContainerIP, externalContainerPort)
 	u := path.Join(containerIPAndPort, externalContainerEndpoint)
-	output, err := framework.RunKubectl(podNamespace, "exec", podName, "--", "curl", "--max-time", "2", u)
+	output, err := kubectl.RunKubectl(podNamespace, "exec", podName, "--", "curl", "--max-time", "2", u)
 	if err != nil {
 		return false, fmt.Errorf("running curl failed, err: %q", err)
 	}
