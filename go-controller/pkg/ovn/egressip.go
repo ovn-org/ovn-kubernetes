@@ -170,7 +170,7 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 	// Add only the diff between what is requested and valid and that which
 	// isn't already assigned.
 	ipsToAssign := validSpecIPs
-	ipsToRemove := sets.NewString()
+	ipsToRemove := sets.New[string]()
 	statusToAdd := make([]egressipv1.EgressIPStatusItem, 0, len(ipsToAssign))
 	statusToKeep := make([]egressipv1.EgressIPStatusItem, 0, len(validStatus))
 	for status := range validStatus {
@@ -949,8 +949,8 @@ func (oc *DefaultNetworkController) executeCloudPrivateIPConfigOps(egressIPName 
 	return nil
 }
 
-func (oc *DefaultNetworkController) validateEgressIPSpec(name string, egressIPs []string) (sets.String, error) {
-	validatedEgressIPs := sets.NewString()
+func (oc *DefaultNetworkController) validateEgressIPSpec(name string, egressIPs []string) (sets.Set[string], error) {
+	validatedEgressIPs := sets.New[string]()
 	for _, egressIP := range egressIPs {
 		ip := net.ParseIP(egressIP)
 		if ip == nil {
@@ -1123,7 +1123,7 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 		podState = &podAssignmentState{
 			egressIPName:         name,
 			egressStatuses:       make(map[egressipv1.EgressIPStatusItem]string),
-			standbyEgressIPNames: sets.NewString(),
+			standbyEgressIPNames: sets.New[string](),
 		}
 		oc.eIPC.podAssignment[podKey] = podState
 	} else if podState.egressIPName == name || podState.egressIPName == "" {
@@ -1343,8 +1343,8 @@ func (oc *DefaultNetworkController) isEgressNodeReachable(egressNode *kapi.Node)
 }
 
 type egressIPCacheEntry struct {
-	egressPods       map[string]sets.String
-	gatewayRouterIPs sets.String
+	egressPods       map[string]sets.Set[string]
+	gatewayRouterIPs sets.Set[string]
 	egressIPs        map[string]string
 }
 
@@ -1423,7 +1423,7 @@ func (oc *DefaultNetworkController) syncPodAssignmentCache(egressIPCache map[str
 			if !ok {
 				podState = &podAssignmentState{
 					egressStatuses:       make(map[egressipv1.EgressIPStatusItem]string),
-					standbyEgressIPNames: sets.NewString(),
+					standbyEgressIPNames: sets.New[string](),
 				}
 			}
 
@@ -1551,7 +1551,7 @@ func (oc *DefaultNetworkController) syncStaleSNATRules(egressIPCache map[string]
 		return nil
 	}
 
-	natIds := sets.String{}
+	natIds := sets.Set[string]{}
 	for _, nat := range nats {
 		natIds.Insert(nat.UUID)
 	}
@@ -1608,8 +1608,8 @@ func (oc *DefaultNetworkController) generateCacheForEgressIP() (map[string]egres
 	}
 	for _, egressIP := range egressIPs {
 		egressIPCache[egressIP.Name] = egressIPCacheEntry{
-			egressPods:       make(map[string]sets.String),
-			gatewayRouterIPs: sets.NewString(),
+			egressPods:       make(map[string]sets.Set[string]),
+			gatewayRouterIPs: sets.New[string](),
 			egressIPs:        map[string]string{},
 		}
 		for _, status := range egressIP.Status.Items {
@@ -1646,7 +1646,7 @@ func (oc *DefaultNetworkController) generateCacheForEgressIP() (map[string]egres
 				podKey := getPodKey(pod)
 				_, ok := egressIPCache[egressIP.Name].egressPods[podKey]
 				if !ok {
-					egressIPCache[egressIP.Name].egressPods[podKey] = sets.NewString()
+					egressIPCache[egressIP.Name].egressPods[podKey] = sets.New[string]()
 				}
 				for _, ipNet := range logicalPort.ips {
 					egressIPCache[egressIP.Name].egressPods[podKey].Insert(ipNet.IP.String())
@@ -2162,7 +2162,7 @@ type podAssignmentState struct {
 	// the list of egressIPs within the above egressIP object that are serving this pod
 	egressStatuses map[egressipv1.EgressIPStatusItem]string
 	// list of other egressIP object names that also match this pod but are on standby
-	standbyEgressIPNames sets.String
+	standbyEgressIPNames sets.Set[string]
 }
 
 // Clone deep-copies and returns the copied podAssignmentState

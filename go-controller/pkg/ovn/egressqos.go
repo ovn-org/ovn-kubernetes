@@ -170,7 +170,7 @@ func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.
 func (oc *DefaultNetworkController) initEgressQoSController(
 	eqInformer egressqosinformer.EgressQoSInformer,
 	podInformer v1coreinformers.PodInformer,
-	nodeInformer v1coreinformers.NodeInformer) {
+	nodeInformer v1coreinformers.NodeInformer) error {
 	klog.Info("Setting up event handlers for EgressQoS")
 	oc.egressQoSLister = eqInformer.Lister()
 	oc.egressQoSSynced = eqInformer.Informer().HasSynced
@@ -178,11 +178,15 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 		"egressqos",
 	)
-	eqInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	_, err := eqInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    oc.onEgressQoSAdd,
 		UpdateFunc: oc.onEgressQoSUpdate,
 		DeleteFunc: oc.onEgressQoSDelete,
 	}))
+	if err != nil {
+		return fmt.Errorf("could not add Event Handler for eqInformer during egressqosController initialization, %w", err)
+
+	}
 
 	oc.egressQoSPodLister = podInformer.Lister()
 	oc.egressQoSPodSynced = podInformer.Informer().HasSynced
@@ -190,11 +194,14 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 		"egressqospods",
 	)
-	podInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	_, err = podInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    oc.onEgressQoSPodAdd,
 		UpdateFunc: oc.onEgressQoSPodUpdate,
 		DeleteFunc: oc.onEgressQoSPodDelete,
 	}))
+	if err != nil {
+		return fmt.Errorf("could not add Event Handler for podInformer during egressqosController initialization, %w", err)
+	}
 
 	oc.egressQoSNodeLister = nodeInformer.Lister()
 	oc.egressQoSNodeSynced = nodeInformer.Informer().HasSynced
@@ -202,11 +209,15 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 		"egressqosnodes",
 	)
-	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err = nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    oc.onEgressQoSNodeAdd, // we only care about new logical switches being added
 		UpdateFunc: func(o, n interface{}) {},
 		DeleteFunc: func(obj interface{}) {},
 	})
+	if err != nil {
+		return fmt.Errorf("could not add Event Handler for nodeInformer during egressqosController initialization, %w", err)
+	}
+	return nil
 }
 
 func (oc *DefaultNetworkController) runEgressQoSController(threadiness int, stopCh <-chan struct{}) {

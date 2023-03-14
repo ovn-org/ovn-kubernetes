@@ -62,7 +62,7 @@ func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.
 
 // NewNodeNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
 func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string,
-	eventRecorder record.EventRecorder) *nodeNetworkControllerManager {
+	eventRecorder record.EventRecorder) (*nodeNetworkControllerManager, error) {
 	ncm := &nodeNetworkControllerManager{
 		name:         name,
 		client:       ovnClient.KubeClient,
@@ -73,10 +73,14 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 	}
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
+	var err error
 	if config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
-		ncm.nadController = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, ovnClient.NetworkAttchDefClient, eventRecorder)
+		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, ovnClient.NetworkAttchDefClient, eventRecorder)
 	}
-	return ncm
+	if err != nil {
+		return nil, err
+	}
+	return ncm, nil
 }
 
 // getOVNIfUpCheckMode check if OVN PortBinding.up can be used

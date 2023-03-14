@@ -57,7 +57,10 @@ type networkControllerManager struct {
 
 func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
 	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
-	cnci := cm.newCommonNetworkControllerInfo()
+	cnci, err := cm.newCommonNetworkControllerInfo()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create network controller info %w", err)
+	}
 	topoType := netConfInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
@@ -72,7 +75,10 @@ func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (cm *networkControllerManager) newDummyNetworkController(topoType, netName string) (nad.NetworkController, error) {
-	cnci := cm.newCommonNetworkControllerInfo()
+	cnci, err := cm.newCommonNetworkControllerInfo()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create network controller info %w", err)
+	}
 	netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
 	case ovntypes.Layer3Topology:
@@ -166,7 +172,7 @@ func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 // NewNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
 func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, wf *factory.WatchFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder, wg *sync.WaitGroup) *networkControllerManager {
+	recorder record.EventRecorder, wg *sync.WaitGroup) (*networkControllerManager, error) {
 	podRecorder := metrics.NewPodRecorder()
 
 	cm := &networkControllerManager{
@@ -188,10 +194,14 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 		identity: identity,
 	}
 
+	var err error
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.nadController = nad.NewNetAttachDefinitionController("network-controller-manager", cm, ovnClient.NetworkAttchDefClient, cm.recorder)
+		cm.nadController, err = nad.NewNetAttachDefinitionController("network-controller-manager", cm, ovnClient.NetworkAttchDefClient, cm.recorder)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return cm
+	return cm, nil
 }
 
 func (cm *networkControllerManager) configureSCTPSupport() error {
@@ -243,15 +253,19 @@ func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
 }
 
 // newCommonNetworkControllerInfo creates and returns the common networkController info
-func (cm *networkControllerManager) newCommonNetworkControllerInfo() *ovn.CommonNetworkControllerInfo {
+func (cm *networkControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
 	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport)
 }
 
 // initDefaultNetworkController creates the controller for default network
-func (cm *networkControllerManager) initDefaultNetworkController() {
-	defaultController := ovn.NewDefaultNetworkController(cm.newCommonNetworkControllerInfo())
+func (cm *networkControllerManager) initDefaultNetworkController() error {
+	defaultController, err := ovn.NewDefaultNetworkController(cm.newCommonNetworkControllerInfo())
+	if err != nil {
+		return err
+	}
 	cm.defaultNetworkController = defaultController
+	return nil
 }
 
 // Start the network controller manager
@@ -284,7 +298,10 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	cm.initDefaultNetworkController()
+	err = cm.initDefaultNetworkController()
+	if err != nil {
+		return fmt.Errorf("failed to init default network controller: %v", err)
+	}
 	err = cm.defaultNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)

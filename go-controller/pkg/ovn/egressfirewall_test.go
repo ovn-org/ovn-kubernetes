@@ -1706,7 +1706,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to: destination{nodeAddrs: sets.NewString(), nodeSelector: &metav1.LabelSelector{
+					to: destination{nodeAddrs: sets.New[string](), nodeSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"no": "match"}}},
 				},
 			},
@@ -1721,7 +1721,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{nodeAddrs: sets.NewString("9.9.9.9", "10.10.10.10"), nodeSelector: &metav1.LabelSelector{}},
+					to:     destination{nodeAddrs: sets.New("9.9.9.9", "10.10.10.10"), nodeSelector: &metav1.LabelSelector{}},
 				},
 			},
 			// match one node
@@ -1735,7 +1735,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{nodeAddrs: sets.NewString(node1Addr), nodeSelector: &metav1.LabelSelector{MatchLabels: nodeLabel}},
+					to:     destination{nodeAddrs: sets.New(node1Addr), nodeSelector: &metav1.LabelSelector{MatchLabels: nodeLabel}},
 				},
 			},
 		}

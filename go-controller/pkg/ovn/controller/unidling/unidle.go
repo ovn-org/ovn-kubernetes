@@ -76,7 +76,7 @@ func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIn
 
 	// we only process events on unidling, there is no reconcilation
 	klog.Info("Setting up event handlers for services")
-	serviceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err = serviceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: uc.onServiceAdd,
 		UpdateFunc: func(old, new interface{}) {
 			uc.onServiceDelete(old)
@@ -84,6 +84,9 @@ func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIn
 		},
 		DeleteFunc: uc.onServiceDelete,
 	})
+	if err != nil {
+		return nil, err
+	}
 	return uc, nil
 }
 

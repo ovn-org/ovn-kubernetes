@@ -1108,7 +1108,7 @@ func DeleteNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, nats
 func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, p natPredicate) ([]libovsdb.Operation, error) {
 	deleted := []*nbdb.NAT{}
 	router := &nbdb.LogicalRouter{}
-	natUUIDs := sets.String{}
+	natUUIDs := sets.Set[string]{}
 	opModels := []operationModel{
 		{
 			ModelPredicate: p,

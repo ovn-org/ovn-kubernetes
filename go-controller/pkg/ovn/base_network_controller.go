@@ -116,7 +116,7 @@ type BaseSecondaryNetworkController struct {
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
-	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport bool) *CommonNetworkControllerInfo {
+	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport bool) (*CommonNetworkControllerInfo, error) {
 	return &CommonNetworkControllerInfo{
 		client:           client,
 		kube:             kube,
@@ -127,7 +127,7 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 		podRecorder:      podRecorder,
 		SCTPSupport:      SCTPSupport,
 		multicastSupport: multicastSupport,
-	}
+	}, nil
 }
 
 func (bnc *BaseNetworkController) GetNetworkScopedName(name string) string {

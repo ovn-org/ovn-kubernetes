@@ -2,8 +2,9 @@ package addressset
 
 import (
 	"fmt"
-	"github.com/pkg/errors"
 	"net"
+
+	"github.com/pkg/errors"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
@@ -152,7 +153,7 @@ func (asf *ovnAddressSetFactory) forEachAddressSet(ownerController string, dbIDs
 // ProcessEachAddressSet calls the given function for each address set of type dbIDsType owned by given ownerController.
 func (asf *ovnAddressSetFactory) ProcessEachAddressSet(ownerController string, dbIDsType *libovsdbops.ObjectIDsType,
 	iteratorFn AddressSetIterFunc) error {
-	processedAddressSets := sets.String{}
+	processedAddressSets := sets.Set[string]{}
 	return asf.forEachAddressSet(ownerController, dbIDsType, func(as *nbdb.AddressSet) error {
 		dbIDs, err := libovsdbops.NewDbObjectIDsFromExternalIDs(dbIDsType, as.ExternalIDs)
 		if err != nil {
