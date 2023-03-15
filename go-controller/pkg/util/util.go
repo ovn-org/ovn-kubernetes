@@ -21,9 +21,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	v1 "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -354,42 +351,4 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	}
 
 	return nil
-}
-
-// IsEndpointReady takes as input an endpoint from an endpoint slice and returns true if the endpoint is
-// to be considered ready. Considering as ready an endpoint with Conditions.Ready==nil
-// as per doc: "In most cases consumers should interpret this unknown state as ready"
-// https://github.com/kubernetes/api/blob/0478a3e95231398d8b380dc2a1905972be8ae1d5/discovery/v1/types.go#L129-L131
-func IsEndpointReady(endpoint discovery.Endpoint) bool {
-	return endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready
-}
-
-// IsEndpointServing takes as input an endpoint from an endpoint slice and returns true if the endpoint is
-// to be considered serving. Falling back to IsEndpointReady when Serving field is nil, as per doc:
-// "If nil, consumers should defer to the ready condition.
-// https://github.com/kubernetes/api/blob/0478a3e95231398d8b380dc2a1905972be8ae1d5/discovery/v1/types.go#L138-L139
-func IsEndpointServing(endpoint discovery.Endpoint) bool {
-	if endpoint.Conditions.Serving != nil {
-		return *endpoint.Conditions.Serving
-	} else {
-		return IsEndpointReady(endpoint)
-	}
-}
-
-// IsEndpointValid takes as input an endpoint from an endpoint slice and a boolean that indicates whether to include
-// all terminating endpoints, as per the PublishNotReadyAddresses feature in kubernetes service spec. It always returns true
-// if includeTerminating is true and falls back to IsEndpointServing otherwise.
-func IsEndpointValid(endpoint discovery.Endpoint, includeTerminating bool) bool {
-	return includeTerminating || IsEndpointServing(endpoint)
-}
-
-// NoHostSubnet() compares the no-hostsubnet-nodes flag with node labels to see if the node is managing its
-// own network.
-func NoHostSubnet(node *v1.Node) bool {
-	if config.Kubernetes.NoHostSubnetNodes == nil {
-		return false
-	}
-
-	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
-	return nodeSelector.Matches(labels.Set(node.Labels))
 }

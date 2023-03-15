@@ -3,15 +3,20 @@ package util
 import (
 	"context"
 	"fmt"
+	"net"
+	"reflect"
 	"testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/assert"
+	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	utilpointer "k8s.io/utils/pointer"
 )
@@ -715,7 +720,7 @@ func Test_getLbEndpoints(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GetLbEndpoints(tt.args.slices, tt.args.svcPort, false)
+			got := GetLbEndpoints(tt.args.slices, tt.args.svcPort, nil)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -783,4 +788,290 @@ func TestExternalIDsForObject(t *testing.T) {
 			types.LoadBalancerKindExternalID:  "Service",
 			types.LoadBalancerOwnerExternalID: "ns/svc-ab23",
 		})
+}
+
+var (
+	testNode   string      = "testNode"
+	ep1Address string      = "10.244.0.3"
+	ep2Address string      = "10.244.0.4"
+	ep3Address string      = "10.244.1.3"
+	tcpv1      v1.Protocol = v1.ProtocolTCP
+	udpv1      v1.Protocol = v1.ProtocolUDP
+
+	httpsPortName   string = "https"
+	httpsPortValue  int32  = int32(443)
+	customPortName  string = "customApp"
+	customPortValue int32  = int32(10600)
+)
+
+func getSampleService(publishNotReadyAddresses bool) *v1.Service {
+	name := "service-test"
+	namespace := "test"
+	return &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       k8stypes.UID(namespace),
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: v1.ServiceSpec{
+			PublishNotReadyAddresses: publishNotReadyAddresses,
+		},
+	}
+}
+
+// returns an endpoint slice with three endpoints, two of which belong to the expected local node
+// and one belongs to "other-node"
+func getSampleEndpointSlice(service *kapi.Service) *discovery.EndpointSlice {
+
+	epPortHttps := discovery.EndpointPort{
+		Name:     &httpsPortName,
+		Port:     &httpsPortValue,
+		Protocol: &tcpv1,
+	}
+
+	epPortCustom := discovery.EndpointPort{
+		Name:     &customPortName,
+		Port:     &customPortValue,
+		Protocol: &udpv1,
+	}
+
+	ep1 := discovery.Endpoint{
+		Addresses: []string{ep1Address},
+		NodeName:  &testNode,
+	}
+	ep2 := discovery.Endpoint{
+		Addresses: []string{ep2Address},
+		NodeName:  &testNode,
+	}
+	otherNodeName := "other-node"
+	nonLocalEndpoint := discovery.Endpoint{
+		Addresses: []string{ep3Address},
+		NodeName:  &otherNodeName,
+	}
+
+	return &discovery.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      service.Name + "ab23",
+			Namespace: service.Namespace,
+			Labels:    map[string]string{discovery.LabelServiceName: service.Name},
+		},
+		Ports:       []discovery.EndpointPort{epPortHttps, epPortCustom},
+		AddressType: discovery.AddressTypeIPv4,
+		Endpoints:   []discovery.Endpoint{ep1, ep2, nonLocalEndpoint},
+	}
+}
+
+func setEndpointToReady(endpoint *discovery.Endpoint) {
+	endpoint.Conditions.Ready = utilpointer.BoolPtr(true)
+	endpoint.Conditions.Serving = utilpointer.BoolPtr(true)
+	endpoint.Conditions.Terminating = utilpointer.BoolPtr(false)
+}
+
+func setEndpointToTerminatingAndServing(endpoint *discovery.Endpoint) {
+	endpoint.Conditions.Ready = utilpointer.BoolPtr(false)
+	endpoint.Conditions.Serving = utilpointer.BoolPtr(true)
+	endpoint.Conditions.Terminating = utilpointer.BoolPtr(true)
+}
+
+func setEndpointToTerminatingAndNotServing(endpoint *discovery.Endpoint) {
+	endpoint.Conditions.Ready = utilpointer.BoolPtr(false)
+	endpoint.Conditions.Serving = utilpointer.BoolPtr(false)
+	endpoint.Conditions.Terminating = utilpointer.BoolPtr(true)
+}
+
+func setAllEndpointsToTerminatingAndServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
+	for i := range endpointSlice.Endpoints {
+		setEndpointToTerminatingAndServing(&endpointSlice.Endpoints[i])
+	}
+	return endpointSlice
+}
+
+func setAllEndpointsToTerminatingAndNotServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
+	for i := range endpointSlice.Endpoints {
+		setEndpointToTerminatingAndNotServing(&endpointSlice.Endpoints[i])
+	}
+	return endpointSlice
+}
+
+func setAllEndpointsToReady(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
+	for i := range endpointSlice.Endpoints {
+		setEndpointToReady(&endpointSlice.Endpoints[i])
+	}
+	return endpointSlice
+}
+
+func setEndpointsToAMixOfStatusConditions(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
+	setEndpointToReady(&endpointSlice.Endpoints[0])
+	setEndpointToTerminatingAndServing(&endpointSlice.Endpoints[1])
+	setEndpointToTerminatingAndNotServing(&endpointSlice.Endpoints[2])
+	return endpointSlice
+}
+
+func TestGetEndpointAddresses(t *testing.T) {
+	service := getSampleService(false)
+	var tests = []struct {
+		name          string
+		endpointSlice *discovery.EndpointSlice
+		want          sets.Set[string]
+	}{
+		{
+			"Tests an endpointslice with all ready endpoints",
+			setAllEndpointsToReady(getSampleEndpointSlice(service)),
+			sets.New(ep1Address, ep2Address, ep3Address),
+		},
+		{
+			"Tests an endpointslice with all non-ready, serving, terminating endpoints",
+			setAllEndpointsToTerminatingAndServing(getSampleEndpointSlice(service)),
+			sets.New(ep1Address, ep2Address, ep3Address),
+		},
+		{
+			"Tests an endpointslice with all non-ready, non-serving, terminating endpoints",
+			setAllEndpointsToTerminatingAndNotServing(getSampleEndpointSlice(service)),
+			sets.New[string](),
+		},
+		{
+			"Tests an endpointslice with endpoints showing a mix of status conditions",
+			setEndpointsToAMixOfStatusConditions(getSampleEndpointSlice(service)),
+			sets.New(ep1Address, ep2Address),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			answer := GetEndpointAddresses([]*discovery.EndpointSlice{tt.endpointSlice}, service)
+			if !reflect.DeepEqual(answer, tt.want) {
+				t.Errorf("got %v, want %v", answer, tt.want)
+			}
+		})
+	}
+}
+
+func TestHasLocalHostNetworkEndpoints(t *testing.T) {
+	ep1IP := net.ParseIP(ep1Address)
+	if ep1IP == nil {
+		t.Errorf("error parsing ep1 address %s", ep1Address)
+	}
+	nodeAddresses := []net.IP{ep1IP}
+	var tests = []struct {
+		name           string
+		localEndpoints sets.Set[string]
+		want           bool
+	}{
+		{
+			"Tests with local endpoints that include the node address",
+			sets.New(ep1Address, ep2Address),
+			true,
+		},
+		{
+			"Tests against a different local endpoint than the node address",
+			sets.New(ep2Address),
+			false,
+		},
+		{
+			"Tests against no local endpoints",
+			sets.New[string](),
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			answer := HasLocalHostNetworkEndpoints(tt.localEndpoints, nodeAddresses)
+			if !reflect.DeepEqual(answer, tt.want) {
+				t.Errorf("got %v, want %v", answer, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetLocalEndpointAddresses(t *testing.T) {
+	service := getSampleService(false)
+	var tests = []struct {
+		name          string
+		endpointSlice *discovery.EndpointSlice
+		want          sets.Set[string]
+	}{
+		{
+			"Tests an endpointslice with all ready endpoints",
+			setAllEndpointsToReady(getSampleEndpointSlice(service)),
+			sets.New(ep1Address, ep2Address),
+		},
+		{
+			"Tests an endpointslice with all non-ready, serving, terminating endpoints",
+			setAllEndpointsToTerminatingAndServing(getSampleEndpointSlice(service)),
+			sets.New(ep1Address, ep2Address),
+		},
+		{
+			"Tests an endpointslice with all non-ready, non-serving, terminating endpoints",
+			setAllEndpointsToTerminatingAndNotServing(getSampleEndpointSlice(service)),
+			sets.New[string](),
+		},
+		{
+			"Tests an endpointslice with endpoints showing a mix of status conditions",
+			setEndpointsToAMixOfStatusConditions(getSampleEndpointSlice(service)),
+			sets.New(ep1Address, ep2Address),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			answer := GetLocalEndpointAddresses([]*discovery.EndpointSlice{tt.endpointSlice}, service, testNode)
+			if !reflect.DeepEqual(answer, tt.want) {
+				t.Errorf("got %v, want %v", answer, tt.want)
+			}
+		})
+	}
+}
+
+func TestDoesEndpointSliceContainEndpoint(t *testing.T) {
+	service := getSampleService(false)
+	var tests = []struct {
+		name          string
+		endpointSlice *discovery.EndpointSlice
+		epIP          string
+		epPort        int32
+		protocol      v1.Protocol
+		want          bool
+	}{
+		{
+			"Tests an endpointslice with all ready endpoints",
+			setAllEndpointsToReady(getSampleEndpointSlice(service)),
+			ep1Address, httpsPortValue, tcpv1,
+			true,
+		},
+		{
+			"Tests an endpointslice with all ready endpoints and a port that is not included",
+			setAllEndpointsToReady(getSampleEndpointSlice(service)),
+			ep1Address, int32(444), tcpv1,
+			false,
+		},
+
+		{
+			"Tests an endpointslice with all non-ready, serving, terminating endpoints",
+			setAllEndpointsToTerminatingAndServing(getSampleEndpointSlice(service)),
+			ep1Address, customPortValue, udpv1,
+			true,
+		},
+		{
+			"Tests an endpointslice with all non-ready, non-serving, terminating endpoints",
+			setAllEndpointsToTerminatingAndNotServing(getSampleEndpointSlice(service)),
+			ep1Address, customPortValue, udpv1,
+			false,
+		},
+		{
+			"Tests an endpointslice with endpoints showing a mix of status conditions",
+			setEndpointsToAMixOfStatusConditions(getSampleEndpointSlice(service)),
+			ep1Address, customPortValue, udpv1,
+			true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			answer := DoesEndpointSliceContainEndpoint(tt.endpointSlice, tt.epIP, tt.epPort, tt.protocol, service)
+			if !reflect.DeepEqual(answer, tt.want) {
+				t.Errorf("got %v, want %v", answer, tt.want)
+			}
+		})
+	}
 }
