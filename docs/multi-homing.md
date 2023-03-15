@@ -116,6 +116,7 @@ spec:
   network will only provide layer 2 communication, and the users must configure
   IPs for the pods. Port security will only prevent MAC spoofing.
 - switched - layer2 - secondary networks **only** allow for east/west traffic.
+- this topology is not supported when Interconnect feature is enabled with multiple zones.
 
 ### Switched - localnet - topology
 This topology interconnects the workloads via a cluster-wide logical switch to
@@ -166,6 +167,7 @@ localnet network.
 - when the subnets attribute is omitted, the logical switch implementing the
   network will only provide layer 2 communication, and the users must configure
   IPs for the pods. Port security will only prevent MAC spoofing.
+- this topology is not supported when Interconnect feature is enabled with multiple zones.
 
 ## Pod configuration
 The user must specify the secondary network attachments via the
@@ -237,3 +239,4 @@ OVN-K currently does **not** support:
 - the same attachment configured multiple times in the same pod - i.e.
   `k8s.v1.cni.cncf.io/networks: l3-network,l3-network` is invalid.
 - updates to the network selection elements lists - i.e. `k8s.v1.cni.cncf.io/networks` annotation
+- layer2 and localnet secondary networks when Interconnect feature is enabled with multiple zones.
