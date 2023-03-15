@@ -6,28 +6,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-	v1 "k8s.io/api/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 )
-
-// pulled from https://github.com/kubernetes/kubernetes/blob/v1.26.2/test/e2e/framework/pod/wait.go#L468
-// had to modify function due to restart policy on static pods being set to always, which caused function to fail
-func waitForPodRunningInNamespaceTimeout(c clientset.Interface, podName, namespace string, timeout time.Duration) error {
-	return e2epod.WaitForPodCondition(c, namespace, podName, fmt.Sprintf("%s", v1.PodRunning), timeout, func(pod *v1.Pod) (bool, error) {
-		switch pod.Status.Phase {
-		case v1.PodRunning:
-			ginkgo.By("Saw pod running")
-			return true, nil
-		default:
-			return false, nil
-		}
-	})
-}
 
 func createStaticPod(f *framework.Framework, nodeName string, podYaml string) {
 	//create file
@@ -60,9 +45,9 @@ func removeStaticPodFile(nodeName string, podFile string) {
 
 }
 
-//This test does the following
-//Applies a static-pod.yaml file to a nodes /etc/kubernetes/manifest dir
-//Expects the static pod to succeed
+// This test does the following
+// Applies a static-pod.yaml file to a nodes /etc/kubernetes/manifest dir
+// Expects the static pod to succeed
 var _ = ginkgo.Describe("Creating a static pod on a node", func() {
 
 	const (
@@ -102,7 +87,7 @@ spec:
       command: ["/bin/bash", "-c", "trap : TERM INT; sleep infinity & wait"]
 `, f.Namespace.Name, agnhostImage)
 		createStaticPod(f, nodeName, staticPodYaml)
-		err = waitForPodRunningInNamespaceTimeout(f.ClientSet, podName, f.Namespace.Name, time.Second*30)
+		err = e2epod.WaitTimeoutForPodRunningInNamespace(f.ClientSet, podName, f.Namespace.Name, time.Second*30)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		ginkgo.By("Removing the pod file from the nodes /etc/kubernetes/manifests")
 		framework.Logf("Removing %s from %s", podName, nodeName)
