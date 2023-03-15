@@ -1471,6 +1471,10 @@ sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.33/go.mod h1:soWkSN
 sigs.k8s.io/json v0.0.0-20220713155537-f223a00ba0e2/go.mod h1:B8JuhiUyNFVKdsE8h686QcCxMaH6HrOAZj4vswFpcB0=
 sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd h1:EDPBXCAspyGV4jQlpZSudPeMmr1bNJefnuqLsRAsHZo=
 sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd/go.mod h1:B8JuhiUyNFVKdsE8h686QcCxMaH6HrOAZj4vswFpcB0=
+sigs.k8s.io/network-policy-api v0.0.0-20230314194016-01119842f374 h1:he+rR0Y9NHS/JlmIFHFiH4fMfRqx7CDEAp9vda+eMVc=
+sigs.k8s.io/network-policy-api v0.0.0-20230314194016-01119842f374/go.mod h1:iYYvcRd58z7Et58oNPOLgHQd8qir6CkpU6s5SOYoxuk=
+sigs.k8s.io/network-policy-api v0.0.0-20230316042715-f51e7d8a5ddf h1:essMWDCC3xv4cDFVmyV6zBH1aVzfWRXxEZS7JsI4B/Y=
+sigs.k8s.io/network-policy-api v0.0.0-20230316042715-f51e7d8a5ddf/go.mod h1:iYYvcRd58z7Et58oNPOLgHQd8qir6CkpU6s5SOYoxuk=
 sigs.k8s.io/structured-merge-diff/v3 v3.0.0-20200116222232-67a7b8c61874/go.mod h1:PlARxl6Hbt/+BC80dRLi1qAmnMqwqDg62YvvVkZjemw=
 sigs.k8s.io/structured-merge-diff/v4 v4.2.3 h1:PRbqxJClWWYMNV1dhaG4NsibJbArud9kFxnAMREiWFE=
 sigs.k8s.io/structured-merge-diff/v4 v4.2.3/go.mod h1:qjx8mGObPmV2aSZepjQjbmb2ihdVs8cGKBraizNC69E=
