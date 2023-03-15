@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
@@ -87,6 +88,8 @@ type DefaultNetworkController struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
+	// Controller used for programming OVN for Admin Network Policy
+	anpController *anpcontroller.Controller
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPZoneController
 
@@ -429,6 +432,19 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	if err := WithSyncDurationMetric("pod", oc.WatchPods); err != nil {
 		return err
+	}
+
+	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
+		err := oc.newANPController(oc.client, oc.nbClient, oc.kube.ANPClient, oc.addressSetFactory, oc.recorder)
+		if err != nil {
+			return err
+		}
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			// Until we have scale issues in future let's spawn only one thread
+			oc.anpController.Run(1, oc.stopChan)
+		}()
 	}
 
 	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
