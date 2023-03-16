@@ -1327,11 +1327,11 @@ func (oc *DefaultNetworkController) addNetworkPolicy(policy *knet.NetworkPolicy)
 func (oc *DefaultNetworkController) buildNetworkPolicyACLs(np *networkPolicy, aclLogging *ACLLoggingLevels) []*nbdb.ACL {
 	acls := []*nbdb.ACL{}
 	for _, gp := range np.ingressPolicies {
-		acl := gp.buildLocalPodACLs(np.portGroupName, aclLogging)
+		acl, _ := gp.buildLocalPodACLs(np.portGroupName, aclLogging)
 		acls = append(acls, acl...)
 	}
 	for _, gp := range np.egressPolicies {
-		acl := gp.buildLocalPodACLs(np.portGroupName, aclLogging)
+		acl, _ := gp.buildLocalPodACLs(np.portGroupName, aclLogging)
 		acls = append(acls, acl...)
 	}
 
@@ -1525,7 +1525,7 @@ func (oc *DefaultNetworkController) peerNamespaceUpdate(np *networkPolicy, gp *g
 		return nil
 	}
 	// buildLocalPodACLs is safe for concurrent use, see function comment for details
-	acls := gp.buildLocalPodACLs(np.portGroupName, aclLogging)
+	acls, deletedACLs := gp.buildLocalPodACLs(np.portGroupName, aclLogging)
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, acls...)
 	if err != nil {
 		return err
@@ -1533,6 +1533,17 @@ func (oc *DefaultNetworkController) peerNamespaceUpdate(np *networkPolicy, gp *g
 	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, np.portGroupName, acls...)
 	if err != nil {
 		return err
+	}
+	if len(deletedACLs) > 0 {
+		deletedACLsWithUUID, err := libovsdbops.FindACLs(oc.nbClient, deletedACLs)
+		if err != nil {
+			return fmt.Errorf("failed to find deleted acls: %w", err)
+		}
+
+		ops, err = libovsdbops.DeleteACLsFromPortGroupOps(oc.nbClient, ops, np.portGroupName, deletedACLsWithUUID...)
+		if err != nil {
+			return err
+		}
 	}
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	return err
