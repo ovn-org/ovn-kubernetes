@@ -19,6 +19,7 @@ import (
 // magic string used in vips to indicate that the node's physical
 // ips should be substituted in
 const placeholderNodeIPs = "node"
+const localWithFallbackAnnotation = "traffic-policy.network.alpha.openshift.io/local-with-fallback"
 
 // lbConfig is the abstract desired load balancer configuration.
 // vips and endpoints are mixed families.
@@ -298,6 +299,29 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 					switchV4targetips = util.FilterIPsSlice(switchV4targetips, node.nodeSubnets(), true)
 					switchV6targetips = util.FilterIPsSlice(switchV6targetips, node.nodeSubnets(), true)
 				}
+				// OCP HACK BEGIN
+				localWithFallback := false
+				zeroV4LocalEndpoints := false
+				zeroV6LocalEndpoints := false
+				if _, set := service.Annotations[localWithFallbackAnnotation]; set && config.externalTrafficLocal {
+					if len(routerV4targetips) == 0 {
+						zeroV4LocalEndpoints = true
+						routerV4targetips = config.eps.V4IPs
+					}
+					if len(routerV6targetips) == 0 {
+						zeroV6LocalEndpoints = true
+						routerV6targetips = config.eps.V6IPs
+					}
+					if len(switchV4targetips) == 0 {
+						zeroV4LocalEndpoints = true
+						switchV4targetips = config.eps.V4IPs
+					}
+					if len(switchV6targetips) == 0 {
+						zeroV6LocalEndpoints = true
+						switchV6targetips = config.eps.V6IPs
+					}
+				}
+				// OCP HACK END
 				if config.internalTrafficLocal {
 					// for InternalTrafficPolicy=Local, remove non-local endpoints from the switch targets only
 					switchV4targetips = util.FilterIPsSlice(switchV4targetips, node.nodeSubnets(), true)
@@ -368,7 +392,14 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 					// with targets that *may* be different
 					targets = routerV4targets
 					if isv6 {
+						if zeroV6LocalEndpoints {
+							localWithFallback = true
+						}
 						targets = routerV6targets
+					} else {
+						if zeroV4LocalEndpoints {
+							localWithFallback = true
+						}
 					}
 					rule := LBRule{
 						Source:  Addr{IP: vip, Port: config.inport},
@@ -378,7 +409,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 					// in other words, is this ExternalTrafficPolicy=local?
 					// if so, this gets a separate load balancer with SNAT disabled
 					// (but there's no need to do this if the list of targets is empty)
-					if config.externalTrafficLocal && len(targets) > 0 {
+					if config.externalTrafficLocal && len(targets) > 0 && !localWithFallback {
 						noSNATRouterRules = append(noSNATRouterRules, rule)
 					} else {
 						routerRules = append(routerRules, rule)
