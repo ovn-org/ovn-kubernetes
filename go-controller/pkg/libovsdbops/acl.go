@@ -53,6 +53,33 @@ func FindACLsWithPredicate(nbClient libovsdbclient.Client, p aclPredicate) ([]*n
 	return acls, err
 }
 
+func FindACLs(nbClient libovsdbclient.Client, acls []*nbdb.ACL) ([]*nbdb.ACL, error) {
+	opModels := make([]operationModel, 0, len(acls))
+	foundACLs := make([]*nbdb.ACL, 0, len(acls))
+	for i := range acls {
+		// can't use i in the predicate, for loop replaces it in-memory
+		acl := acls[i]
+		found := []*nbdb.ACL{}
+		opModel := operationModel{
+			Model:          acl,
+			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
+			ExistingResult: &found,
+			ErrNotFound:    false,
+			BulkOp:         false,
+			DoAfter: func() {
+				if len(found) > 0 {
+					foundACLs = append(foundACLs, found[0])
+				}
+			},
+		}
+		opModels = append(opModels, opModel)
+	}
+
+	modelClient := newModelClient(nbClient)
+	err := modelClient.Lookup(opModels...)
+	return foundACLs, err
+}
+
 // BuildACL builds an ACL with empty optional properties unset
 func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string,
 	severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {

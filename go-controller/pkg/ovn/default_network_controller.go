@@ -82,6 +82,8 @@ type DefaultNetworkController struct {
 	// make sure to keep this order to avoid deadlocks
 	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
+	podSelectorAddressSets *syncmap.SyncMap[*PodSelectorAddressSet]
+
 	// Cluster wide Load_Balancer_Group UUID.
 	loadBalancerGroupUUID string
 
@@ -184,6 +186,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		exGWCacheMutex:         sync.RWMutex{},
 		networkPolicies:        syncmap.NewSyncMap[*networkPolicy](),
 		sharedNetpolPortGroups: syncmap.NewSyncMap[*defaultDenyPortGroups](),
+		podSelectorAddressSets: syncmap.NewSyncMap[*PodSelectorAddressSet](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
@@ -237,8 +240,8 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 // In order to create a retry framework for most resource types, newRetryFrameworkMaster is
 // to be preferred, as it calls newRetryFrameworkWithParameters with all optional parameters unset.
 // newRetryFrameworkWithParameters is instead called directly by the watchers that are
-// dynamically created when a network policy is added: PeerNamespaceAndPodSelectorType,
-// PeerPodForNamespaceAndPodSelectorType, PeerNamespaceSelectorType, PeerPodSelectorType.
+// dynamically created when a network policy is added: AddressSetNamespaceAndPodSelectorType,
+// PeerNamespaceSelectorType, AddressSetPodSelectorType.
 func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 	objectType reflect.Type,
 	syncFunc func([]interface{}) error,
@@ -276,6 +279,13 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	err := syncer.SyncAddressSets()
 	if err != nil {
 		return fmt.Errorf("failed to sync address sets on controller init: %v", err)
+	}
+
+	// sync shared resources
+	// pod selector address sets
+	err = oc.cleanupPodSelectorAddressSets()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale pod selector address sets failed: %w", err)
 	}
 
 	if err = oc.Init(); err != nil {
@@ -683,18 +693,13 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			return err
 		}
 
-	case factory.PeerPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
+	case factory.AddressSetPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handlePodAddUpdate(peerAS, obj)
 
-	case factory.PeerNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerNamespaceAndPodAdd(extraParameters.np, extraParameters.gp,
-			extraParameters.podSelector, obj)
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
+	case factory.AddressSetNamespaceAndPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handleNamespaceAddUpdate(peerAS, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -818,13 +823,9 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 
 		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync, hoSync})
 
-	case factory.PeerPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
+	case factory.AddressSetPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handlePodAddUpdate(peerAS, newObj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -970,17 +971,13 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		}
 		return h.oc.deleteNodeEvent(node)
 
-	case factory.PeerPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
+	case factory.AddressSetPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handlePodDelete(peerAS, obj)
 
-	case factory.PeerNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerNamespaceAndPodDel(extraParameters.np, extraParameters.gp, obj)
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
+	case factory.AddressSetNamespaceAndPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handleNamespaceDel(peerAS, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -1065,9 +1062,8 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = h.oc.syncNodes
 
 		case factory.LocalPodSelectorType,
-			factory.PeerNamespaceAndPodSelectorType,
-			factory.PeerPodSelectorType,
-			factory.PeerPodForNamespaceAndPodSelectorType,
+			factory.AddressSetNamespaceAndPodSelectorType,
+			factory.AddressSetPodSelectorType,
 			factory.PeerNamespaceSelectorType:
 			syncFunc = nil
 

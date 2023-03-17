@@ -9,11 +9,13 @@ const (
 	// owner types
 	EgressFirewallDNSOwnerType ownerType = "EgressFirewallDNS"
 	EgressQoSOwnerType         ownerType = "EgressQoS"
-	NetworkPolicyOwnerType     ownerType = "NetworkPolicy"
-	NamespaceOwnerType         ownerType = "Namespace"
-	HybridNodeRouteOwnerType   ownerType = "HybridNodeRoute"
-	EgressIPOwnerType          ownerType = "EgressIP"
-	EgressServiceOwnerType     ownerType = "EgressService"
+	// only used for cleanup now, as the stale owner of network policy address sets
+	NetworkPolicyOwnerType   ownerType = "NetworkPolicy"
+	PodSelectorOwnerType     ownerType = "PodSelector"
+	NamespaceOwnerType       ownerType = "Namespace"
+	HybridNodeRouteOwnerType ownerType = "HybridNodeRoute"
+	EgressIPOwnerType        ownerType = "EgressIP"
+	EgressServiceOwnerType   ownerType = "EgressService"
 
 	// owner extra IDs, make sure to define only 1 ExternalIDKey for every string value
 	PriorityKey           ExternalIDKey = "priority"
@@ -44,6 +46,13 @@ var AddressSetEgressQoS = newObjectIDsType(addressSet, EgressQoSOwnerType, []Ext
 	AddressSetIPFamilyKey,
 })
 
+var AddressSetPodSelector = newObjectIDsType(addressSet, PodSelectorOwnerType, []ExternalIDKey{
+	// pod selector string representation
+	ObjectNameKey,
+	AddressSetIPFamilyKey,
+})
+
+// deprecated, should only be used for sync
 var AddressSetNetworkPolicy = newObjectIDsType(addressSet, NetworkPolicyOwnerType, []ExternalIDKey{
 	// namespace_name
 	ObjectNameKey,

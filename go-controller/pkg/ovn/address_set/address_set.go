@@ -275,18 +275,11 @@ func (asf *ovnAddressSetFactory) validateDbIDs(dbIDs *libovsdbops.DbObjectIDs) e
 	return fmt.Errorf("wrong set of keys is unset %v", unsetKeys)
 }
 
-// GetHashNamesForAS returns hashed address set names for given dbIDs, based on config.IPv<x>Mode
+// GetHashNamesForAS returns hashed address set names for given dbIDs for both ip families.
 // Can be used to cleanup e.g. address set references if the address set was deleted.
 func GetHashNamesForAS(dbIDs *libovsdbops.DbObjectIDs) (string, string) {
-	var ipv4AS string
-	var ipv6AS string
-	if config.IPv4Mode {
-		ipv4AS = buildAddressSet(dbIDs, ipv4InternalID).Name
-	}
-	if config.IPv6Mode {
-		ipv6AS = buildAddressSet(dbIDs, ipv6InternalID).Name
-	}
-	return ipv4AS, ipv6AS
+	return buildAddressSet(dbIDs, ipv4InternalID).Name,
+		buildAddressSet(dbIDs, ipv6InternalID).Name
 }
 
 // GetDbObjsForAS returns nbdb.AddressSet objects both for ipv4 and ipv6, regardless of current config.
