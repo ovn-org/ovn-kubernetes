@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -382,6 +383,66 @@ type managementPortEntry struct {
 	config *managementPortConfig
 }
 
+// getEnvNameFromResourceName gets the device plugin env variable from the device plugin resource name.
+func getEnvNameFromResourceName(resource string) string {
+	res1 := strings.ReplaceAll(resource, ".", "_")
+	res2 := strings.ReplaceAll(res1, "/", "_")
+	return "PCIDEVICE_" + strings.ToUpper(res2)
+}
+
+// getDeviceIdsFromEnv gets the list of device IDs from the device plugin env variable.
+func getDeviceIdsFromEnv(envName string) ([]string, error) {
+	envVar := os.Getenv(envName)
+	if len(envVar) == 0 {
+		return nil, fmt.Errorf("unexpected empty env variable: %s", envName)
+	}
+	deviceIds := strings.Split(envVar, ",")
+	return deviceIds, nil
+}
+
+// handleDevicePluginResources tries to retrieve any device plugin resources passed in via arguments and device plugin env variables.
+func handleDevicePluginResources() error {
+	mgmtPortEnvName := getEnvNameFromResourceName(config.OvnKubeNode.MgmtPortDPResourceName)
+	deviceIds, err := getDeviceIdsFromEnv(mgmtPortEnvName)
+	if err != nil {
+		return err
+	}
+	// The reason why we want to store the Device Ids in a map is prepare for various features that
+	// require network resources such as the Management Port or Bypass Port. It is likely that these
+	// features share the same device pool.
+	config.OvnKubeNode.DPResourceDeviceIdsMap = make(map[string][]string)
+	config.OvnKubeNode.DPResourceDeviceIdsMap[config.OvnKubeNode.MgmtPortDPResourceName] = deviceIds
+	klog.V(5).Infof("Setting DPResourceDeviceIdsMap for %s using env %s with device IDs %v",
+		config.OvnKubeNode.MgmtPortDPResourceName, mgmtPortEnvName, deviceIds)
+	return nil
+}
+
+// reserveDeviceId takes the first device ID from a list of device IDs
+// This function will not execute during runtime, only once at startup thus there
+// is no undesirable side-effects of multiple allocations (causing pressure on the
+// garbage collector)
+func reserveDeviceId(deviceIds []string) (string, []string) {
+	ret := deviceIds[0]
+	deviceIds = deviceIds[1:]
+	return ret, deviceIds
+}
+
+// handleNetdevResources tries to retrieve any device plugin interfaces to be used by the system such as the management port.
+func handleNetdevResources(resourceName string) (string, error) {
+	var deviceId string
+	deviceIdsMap := &config.OvnKubeNode.DPResourceDeviceIdsMap
+	if len((*deviceIdsMap)[resourceName]) > 0 {
+		deviceId, (*deviceIdsMap)[resourceName] = reserveDeviceId((*deviceIdsMap)[resourceName])
+	} else {
+		return "", fmt.Errorf("insufficient device IDs for resource: %s", resourceName)
+	}
+	netdevice, err := util.GetNetdevNameFromDeviceId(deviceId)
+	if err != nil {
+		return "", err
+	}
+	return netdevice, nil
+}
+
 func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter *startupWaiter,
 	subnets []*net.IPNet) ([]managementPortEntry, *managementPortConfig, error) {
 	// If netdevice name is not provided in the full mode then management port backed by OVS internal port.
@@ -499,6 +560,26 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 	waiter := newStartupWaiter()
+
+	// Use the device from environment when the DP resource name is specified.
+	if config.OvnKubeNode.MgmtPortDPResourceName != "" {
+		if err := handleDevicePluginResources(); err != nil {
+			return err
+		}
+
+		netdevice, err := handleNetdevResources(config.OvnKubeNode.MgmtPortDPResourceName)
+		if err != nil {
+			return err
+		}
+
+		if config.OvnKubeNode.MgmtPortNetdev != "" {
+			klog.Warningf("MgmtPortNetdev is set explicitly (%s), overriding with resource...",
+				config.OvnKubeNode.MgmtPortNetdev)
+		}
+		config.OvnKubeNode.MgmtPortNetdev = netdevice
+		klog.V(5).Infof("Using MgmtPortNetdev (Netdev %s) passed via resource %s",
+			config.OvnKubeNode.MgmtPortNetdev, config.OvnKubeNode.MgmtPortDPResourceName)
+	}
 
 	// Setup management ports
 	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(nc.name, nodeAnnotator, waiter, subnets)

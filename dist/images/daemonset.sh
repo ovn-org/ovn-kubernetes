@@ -14,14 +14,14 @@ install_j2_renderer() {
 # The script renders j2 templates into yaml files in ../yaml/
 
 # ensure j2 renderer installed
-if ! command -v j2 >/dev/null 2>&1 ; then 
-  if ! command -v pip >/dev/null 2>&1 ; then 
+if ! command -v j2 >/dev/null 2>&1 ; then
+  if ! command -v pip >/dev/null 2>&1 ; then
     echo "Dependency not met: 'j2' not installed and cannot install with 'pip'"
     exit 1
   fi
   echo "'j2' not found, installing with 'pip'"
   install_j2_renderer
-fi 
+fi
 
 OVN_OUTPUT_DIR=""
 OVN_IMAGE=""
@@ -87,7 +87,7 @@ while [ "$1" != "" ]; do
   PARAM=$(echo $1 | awk -F= '{print $1}')
   VALUE=$(echo $1 | cut -d= -f2-)
   case $PARAM in
-  --output-directory) 
+  --output-directory)
     OVN_OUTPUT_DIR=$VALUE
     ;;
   --image)
@@ -264,6 +264,9 @@ while [ "$1" != "" ]; do
   --ovnkube-node-mgmt-port-netdev)
     OVNKUBE_NODE_MGMT_PORT_NETDEV=$VALUE
     ;;
+  --ovnkube-node-mgmt-port-dp-resource-name)
+    OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME=$VALUE
+    ;;
   --ovnkube-config-duration-enable)
     OVNKUBE_CONFIG_DURATION_ENABLE=$VALUE
     ;;
@@ -285,14 +288,14 @@ done
 # Create the daemonsets with the desired image
 # They are expanded into daemonsets in the specified
 # output directory.
-if [ -z ${OVN_OUTPUT_DIR} ] ; then 
+if [ -z ${OVN_OUTPUT_DIR} ] ; then
   output_dir="../yaml"
-else 
+else
   output_dir=${OVN_OUTPUT_DIR}
   if [ ! -d ${OVN_OUTPUT_DIR} ]; then
     mkdir $output_dir
-  fi 
-fi 
+  fi
+fi
 echo "output_dir: $output_dir"
 
 image=${OVN_IMAGE:-"docker.io/ovnkube/ovn-daemonset:latest"}

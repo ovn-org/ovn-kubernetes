@@ -434,10 +434,12 @@ type HybridOverlayConfig struct {
 
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
-	Mode                 string `gcfg:"mode"`
-	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
-	MgmtPortRepresentor  string
-	DisableOVNIfaceIdVer bool `gcfg:"disable-ovn-iface-id-ver"`
+	Mode                   string `gcfg:"mode"`
+	DPResourceDeviceIdsMap map[string][]string
+	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
+	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
+	MgmtPortRepresentor    string
+	DisableOVNIfaceIdVer   bool `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1301,11 +1303,18 @@ var OvnKubeNodeFlags = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name: "ovnkube-node-mgmt-port-netdev",
-		Usage: "valid only when ovnkube-node-mode is either dpu or dpu-host. " +
-			"when provided, use this netdev as management port. it will be renamed to ovn-k8s-mp0 " +
+		Usage: "When provided, use this netdev as management port. It will be renamed to ovn-k8s-mp0 " +
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortNetdev,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortNetdev,
+	},
+	&cli.StringFlag{
+		Name: "ovnkube-node-mgmt-port-dp-resource-name",
+		Usage: "When provided, use this device plugin resource name to find the allocated resource as management port. " +
+			"The interface chosen from this resource will be renamed to ovn-k8s-mp0 " +
+			"and used to allow host network services and pods to access k8s pod and service networks. ",
+		Value:       OvnKubeNode.MgmtPortDPResourceName,
+		Destination: &cliConfig.OvnKubeNode.MgmtPortDPResourceName,
 	},
 	&cli.BoolFlag{
 		Name: "disable-ovn-iface-id-ver",
@@ -2311,10 +2320,20 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
 		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
 	}
+
+	// Warn the user if both MgmtPortNetdev and MgmtPortDPResourceName are specified since they
+	// configure the management port.
+	if OvnKubeNode.MgmtPortNetdev != "" && OvnKubeNode.MgmtPortDPResourceName != "" {
+		klog.Warningf("ovnkube-node-mgmt-port-netdev (%s) and ovnkube-node-mgmt-port-dp-resource-name (%s) "+
+			"both specified. The provided netdev in ovnkube-node-mgmt-port-netdev will be overriden by a netdev "+
+			"chosen by the resource provided by ovnkube-node-mgmt-port-dp-resource-name.",
+			OvnKubeNode.MgmtPortNetdev, OvnKubeNode.MgmtPortDPResourceName)
+	}
+
 	// when DPU is used, management port is backed by a VF. get management port VF information
 	if OvnKubeNode.Mode == types.NodeModeDPU || OvnKubeNode.Mode == types.NodeModeDPUHost {
-		if OvnKubeNode.MgmtPortNetdev == "" {
-			return fmt.Errorf("ovnkube-node-mgmt-port-netdev must be provided")
+		if OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
+			return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided")
 		}
 	}
 	return nil
