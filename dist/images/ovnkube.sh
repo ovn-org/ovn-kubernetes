@@ -1269,6 +1269,17 @@ ovn-cluster-manager() {
   echo "=============== ovn-cluster-manager (wait for ready_to_start_node) ========== MASTER ONLY"
   wait_for_event ready_to_start_node
 
+  egressip_enabled_flag=
+  if [[ ${ovn_egressip_enable} == "true" ]]; then
+      egressip_enabled_flag="--enable-egress-ip"
+  fi
+
+  egressip_healthcheck_port_flag=
+  if [[ -n "${ovn_egress_ip_healthcheck_port}" ]]; then
+      egressip_healthcheck_port_flag="--egressip-node-healthcheck-port=${ovn_egress_ip_healthcheck_port}"
+  fi
+  echo "egressip_flags: ${egressip_enabled_flag}, ${egressip_healthcheck_port_flag}"
+
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
@@ -1329,6 +1340,8 @@ ovn-cluster-manager() {
     --logfile /var/log/ovn-kubernetes/ovnkube-cluster-manager.log \
     ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
+    ${egressip_enabled_flag} \
+    ${egressip_healthcheck_port_flag} \
     ${multi_network_enabled_flag} \
     --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
