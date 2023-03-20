@@ -1377,6 +1377,17 @@ ovn-cluster-manager() {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
 
+  egressip_enabled_flag=
+  if [[ ${ovn_egressip_enable} == "true" ]]; then
+      egressip_enabled_flag="--enable-egress-ip"
+  fi
+
+  egressip_healthcheck_port_flag=
+  if [[ -n "${ovn_egress_ip_healthcheck_port}" ]]; then
+      egressip_healthcheck_port_flag="--egressip-node-healthcheck-port=${ovn_egress_ip_healthcheck_port}"
+  fi
+  echo "egressip_flags: ${egressip_enabled_flag}, ${egressip_healthcheck_port_flag}"
+
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
@@ -1443,6 +1454,8 @@ ovn-cluster-manager() {
     --logfile /var/log/ovn-kubernetes/ovnkube-cluster-manager.log \
     ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
+    ${egressip_enabled_flag} \
+    ${egressip_healthcheck_port_flag} \
     ${multi_network_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
     --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
