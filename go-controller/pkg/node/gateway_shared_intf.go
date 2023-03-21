@@ -569,7 +569,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 		hasLocalHostNetworkEp = false
 	} else {
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
+		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(epSlices, nodeIPs, service)
 	}
 	localEndpoints := npw.GetLocalEndpointAddresses(epSlices, service)
 	// If something didn't already do it add correct Service rules
@@ -718,7 +718,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			continue
 		}
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
+		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(epSlices, nodeIPs, service)
 		localEndPoints := npw.GetLocalEndpointAddresses(epSlices, service)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndPoints)
 		// Delete OF rules for service if they exist
@@ -803,7 +803,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 
 	klog.V(5).Infof("Adding endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	nodeIPs := npw.nodeIPManager.ListAddresses()
-	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{epSlice}, nodeIPs)
+	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{epSlice}, nodeIPs, svc)
 
 	epSlices, err := npw.watchFactory.GetEndpointSlices(svc.Namespace, svc.Name)
 	if err != nil {
@@ -959,8 +959,8 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 
 	// Update rules and service cache if hasHostNetworkEndpoints status changed or localEndpoints changed
 	nodeIPs := npw.nodeIPManager.ListAddresses()
-	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{oldEpSlice}, nodeIPs)
-	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{newEpSlice}, nodeIPs)
+	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{oldEpSlice}, nodeIPs, svc)
+	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{newEpSlice}, nodeIPs, svc)
 	epSlices, err := npw.watchFactory.GetEndpointSlices(newEpSlice.Namespace, newEpSlice.Labels[discovery.LabelServiceName])
 	if err != nil {
 		klog.V(5).Infof("Could not fetch endpointslices for service %s during endpointSliceDelete", namespacedName)

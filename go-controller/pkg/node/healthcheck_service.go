@@ -175,10 +175,11 @@ func (l *loadBalancerHealthChecker) CountLocalEndpointAddresses(endpointSlices [
 // hasLocalHostNetworkEndpoints returns true if there is at least one host-networked endpoint
 // in the provided list that is local to this node.
 // It returns false if none of the endpoints are local host-networked endpoints or if ep.Subsets is nil.
-func hasLocalHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddresses []net.IP) bool {
+func hasLocalHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddresses []net.IP, service *kapi.Service) bool {
+	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
 	for _, epSlice := range epSlices {
 		for _, endpoint := range epSlice.Endpoints {
-			if !util.IsEndpointReady(endpoint) {
+			if !util.IsEndpointValid(endpoint, includeTerminating) {
 				continue
 			}
 			for _, ip := range endpoint.Addresses {
