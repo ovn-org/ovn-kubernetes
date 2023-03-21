@@ -23,7 +23,7 @@ import (
 type addressManager struct {
 	nodeName       string
 	watchFactory   factory.NodeWatchFactory
-	addresses      sets.String
+	addresses      sets.Set[string]
 	nodeAnnotator  kube.Annotator
 	mgmtPortConfig *managementPortConfig
 	// useNetlink indicates the addressManager should use machine
@@ -50,7 +50,7 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, config *manage
 	mgr := &addressManager{
 		nodeName:       nodeName,
 		watchFactory:   watchFactory,
-		addresses:      sets.NewString(),
+		addresses:      sets.New[string](),
 		mgmtPortConfig: config,
 		gatewayBridge:  gwBridge,
 		OnChanged:      func() {},
@@ -93,7 +93,7 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 func (c *addressManager) ListAddresses() []net.IP {
 	c.Lock()
 	defer c.Unlock()
-	addrs := c.addresses.List()
+	addrs := c.addresses.UnsortedList()
 	out := make([]net.IP, 0, len(addrs))
 	for _, addr := range addrs {
 		ip := net.ParseIP(addr)
@@ -135,11 +135,14 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	// address but only later update kubelet configuration and restart kubelet (which in turn will update the reported
 	// IP address inside the node's status field).
 	nodeInformer := c.watchFactory.NodeInformer()
-	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
 			c.handleNodeChanges(new)
 		},
 	})
+	if err != nil {
+		klog.Fatalf("Could not add node event handler while starting address manager %v", err)
+	}
 
 	doneWg.Add(1)
 	go func() {
@@ -270,7 +273,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	return nil
 }
 
-func (c *addressManager) assignAddresses(nodeHostAddresses sets.String) bool {
+func (c *addressManager) assignAddresses(nodeHostAddresses sets.Set[string]) bool {
 	c.Lock()
 	defer c.Unlock()
 
@@ -392,7 +395,7 @@ func (c *addressManager) sync() {
 		}
 	}
 
-	currAddresses := sets.NewString()
+	currAddresses := sets.New[string]()
 	for _, addr := range addrs {
 		ip, _, err := net.ParseCIDR(addr.String())
 		if err != nil {

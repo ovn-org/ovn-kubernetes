@@ -214,6 +214,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
 
         readinessProbe:
           exec:

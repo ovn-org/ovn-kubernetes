@@ -21,27 +21,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 )
-
-type ovnkubeMasterLeaderMetrics struct{}
-
-func (ovnkubeMasterLeaderMetrics) On(string) {
-	metrics.MetricMasterLeader.Set(1)
-}
-
-func (ovnkubeMasterLeaderMetrics) Off(string) {
-	metrics.MetricMasterLeader.Set(0)
-}
-
-type ovnkubeMasterLeaderMetricsProvider struct{}
-
-func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
-	return ovnkubeMasterLeaderMetrics{}
-}
 
 // networkControllerManager structure is the object manages all controllers for all networks
 type networkControllerManager struct {
@@ -75,7 +57,10 @@ type networkControllerManager struct {
 
 func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
 	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
-	cnci := cm.newCommonNetworkControllerInfo()
+	cnci, err := cm.newCommonNetworkControllerInfo()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create network controller info %w", err)
+	}
 	topoType := netConfInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
@@ -90,7 +75,10 @@ func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (cm *networkControllerManager) newDummyNetworkController(topoType, netName string) (nad.NetworkController, error) {
-	cnci := cm.newCommonNetworkControllerInfo()
+	cnci, err := cm.newCommonNetworkControllerInfo()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create network controller info %w", err)
+	}
 	netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
 	case ovntypes.Layer3Topology:
@@ -181,100 +169,10 @@ func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	return nil
 }
 
-// Start waits until this process is the leader before starting master functions
-func (cm *networkControllerManager) Start(ctx context.Context, cancel context.CancelFunc) error {
-	// Set up leader election process first
-	rl, err := resourcelock.New(
-		// TODO (rravaiol) (bpickard)
-		// https://github.com/kubernetes/kubernetes/issues/107454
-		// leader election library no longer supports leader-election
-		// locks based solely on `endpoints` or `configmaps` resources.
-		// Slowly migrating to new API across three releases; with k8s 1.24
-		// we're now in the second step ('x+2') bullet from the link above).
-		// This will have to be updated for the next k8s bump: to 1.26.
-		resourcelock.LeasesResourceLock,
-		config.Kubernetes.OVNConfigNamespace,
-		"ovn-kubernetes-master",
-		cm.client.CoreV1(),
-		cm.client.CoordinationV1(),
-		resourcelock.ResourceLockConfig{
-			Identity:      cm.identity,
-			EventRecorder: cm.recorder,
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	lec := leaderelection.LeaderElectionConfig{
-		Lock:            rl,
-		LeaseDuration:   time.Duration(config.MasterHA.ElectionLeaseDuration) * time.Second,
-		RenewDeadline:   time.Duration(config.MasterHA.ElectionRenewDeadline) * time.Second,
-		RetryPeriod:     time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
-		ReleaseOnCancel: true,
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {
-				klog.Infof("Won leader election; in active mode")
-				klog.Infof("Starting cluster master")
-				start := time.Now()
-				defer func() {
-					end := time.Since(start)
-					metrics.MetricMasterReadyDuration.Set(end.Seconds())
-				}()
-
-				if err := cm.Init(); err != nil {
-					klog.Error(err)
-					cancel()
-					return
-				}
-
-				if err = cm.Run(ctx); err != nil {
-					klog.Error(err)
-					cancel()
-					return
-				}
-			},
-			OnStoppedLeading: func() {
-				//This node was leader and it lost the election.
-				// Whenever the node transitions from leader to follower,
-				// we need to handle the transition properly like clearing
-				// the cache.
-				// Note: If cluster manager LE is also running, it will
-				// exit the cluster manager too.
-				// TODO: Remove the leader election from cluster-manager and have one single election
-				// when both cluster manager and network controller manager are running.
-				// See https://issues.redhat.com/browse/OCPBUGS-8080 for details
-				klog.Infof("No longer leader; exiting")
-				cancel()
-			},
-			OnNewLeader: func(newLeaderName string) {
-				if newLeaderName != cm.identity {
-					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
-				}
-			},
-		},
-	}
-
-	leaderelection.SetProvider(ovnkubeMasterLeaderMetricsProvider{})
-	leaderElector, err := leaderelection.NewLeaderElector(lec)
-	if err != nil {
-		return err
-	}
-
-	cm.wg.Add(1)
-	go func() {
-		leaderElector.Run(ctx)
-		klog.Infof("Stopped leader election")
-		cm.wg.Done()
-	}()
-
-	return nil
-}
-
 // NewNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
 func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, wf *factory.WatchFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder, wg *sync.WaitGroup) *networkControllerManager {
+	recorder record.EventRecorder, wg *sync.WaitGroup) (*networkControllerManager, error) {
 	podRecorder := metrics.NewPodRecorder()
 
 	cm := &networkControllerManager{
@@ -296,30 +194,14 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 		identity: identity,
 	}
 
+	var err error
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.nadController = nad.NewNetAttachDefinitionController("network-controller-manager", cm, ovnClient.NetworkAttchDefClient, cm.recorder)
+		cm.nadController, err = nad.NewNetAttachDefinitionController("network-controller-manager", cm, ovnClient.NetworkAttchDefClient, cm.recorder)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return cm
-}
-
-// Init initializes the controller manager and create/start default controller
-func (cm *networkControllerManager) Init() error {
-	cm.configureMetrics(cm.stopChan)
-
-	err := cm.configureSCTPSupport()
-	if err != nil {
-		return err
-	}
-
-	cm.configureMulticastSupport()
-
-	err = cm.enableOVNLogicalDataPathGroups()
-	if err != nil {
-		return err
-	}
-
-	cm.NewDefaultNetworkController()
-	return nil
+	return cm, nil
 }
 
 func (cm *networkControllerManager) configureSCTPSupport() error {
@@ -371,20 +253,38 @@ func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
 }
 
 // newCommonNetworkControllerInfo creates and returns the common networkController info
-func (cm *networkControllerManager) newCommonNetworkControllerInfo() *ovn.CommonNetworkControllerInfo {
+func (cm *networkControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
 	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport)
 }
 
-// NewDefaultNetworkController creates the controller for default network
-func (cm *networkControllerManager) NewDefaultNetworkController() {
-	defaultController := ovn.NewDefaultNetworkController(cm.newCommonNetworkControllerInfo())
+// initDefaultNetworkController creates the controller for default network
+func (cm *networkControllerManager) initDefaultNetworkController() error {
+	defaultController, err := ovn.NewDefaultNetworkController(cm.newCommonNetworkControllerInfo())
+	if err != nil {
+		return err
+	}
 	cm.defaultNetworkController = defaultController
+	return nil
 }
 
-// Run starts default controller and to starts level driven net-attach-def controller to which manages network
-// controller associated with net-attach-def
-func (cm *networkControllerManager) Run(ctx context.Context) error {
+// Start the network controller manager
+func (cm *networkControllerManager) Start(ctx context.Context) error {
+	klog.Info("Starting the network controller manager")
+	cm.configureMetrics(cm.stopChan)
+
+	err := cm.configureSCTPSupport()
+	if err != nil {
+		return err
+	}
+
+	cm.configureMulticastSupport()
+
+	err = cm.enableOVNLogicalDataPathGroups()
+	if err != nil {
+		return err
+	}
+
 	if config.Metrics.EnableConfigDuration {
 		// with k=10,
 		//  for a cluster with 10 nodes, measurement of 1 in every 100 requests
@@ -393,11 +293,15 @@ func (cm *networkControllerManager) Run(ctx context.Context) error {
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
 
-	err := cm.watchFactory.Start()
+	err = cm.watchFactory.Start()
 	if err != nil {
 		return err
 	}
 
+	err = cm.initDefaultNetworkController()
+	if err != nil {
+		return fmt.Errorf("failed to init default network controller: %v", err)
+	}
 	err = cm.defaultNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)
@@ -405,28 +309,24 @@ func (cm *networkControllerManager) Run(ctx context.Context) error {
 
 	// nadController is nil if multi-network is disabled
 	if cm.nadController != nil {
-		klog.Infof("Starts net-attach-def controller")
-		return cm.nadController.Run(cm.stopChan)
+		return cm.nadController.Start()
 	}
+
 	return nil
 }
 
 // Stop gracefully stops all managed controllers
 func (cm *networkControllerManager) Stop() {
-	// stops the net-attach-def controller
+	// stop metric recorders
 	close(cm.stopChan)
 
-	// stops the default network controller
+	// stop the default network controller
 	if cm.defaultNetworkController != nil {
 		cm.defaultNetworkController.Stop()
 	}
 
-	// then stops each network controller associated with net-attach-def; it is ok
-	// to call GetAllControllers here as net-attach-def controller has been stopped,
-	// and no more change of network controllers
+	// stop the NAD controller
 	if cm.nadController != nil {
-		for _, oc := range cm.nadController.GetAllNetworkControllers() {
-			oc.Stop()
-		}
+		cm.nadController.Stop()
 	}
 }

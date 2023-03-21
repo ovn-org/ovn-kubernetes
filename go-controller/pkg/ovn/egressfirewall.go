@@ -6,18 +6,18 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pkg/errors"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -30,6 +30,7 @@ const (
 	// egressFirewallACLExtIdKey external ID key for egress firewall ACLs
 	egressFirewallACLExtIdKey    = "egressFirewall"
 	egressFirewallACLPriorityKey = "priority"
+	aclDeleteBatchSize           = 1000
 )
 
 type egressFirewall struct {
@@ -53,8 +54,8 @@ type destination struct {
 	// Based on this flag we can omit clusterSubnet exclusion from the related ACL.
 	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
 	clusterSubnetIntersection bool
-	nodeAddrs                 sets.String
-	nodeSelector              metav1.LabelSelector
+	nodeAddrs                 sets.Set[string]
+	nodeSelector              *metav1.LabelSelector
 }
 
 // cloneEgressFirewall shallow copies the egressfirewallapi.EgressFirewall object provided.
@@ -95,13 +96,13 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 		efr.to.clusterSubnetIntersection = intersect
 	} else {
 		efr.to.nodeSelector = rawEgressFirewallRule.To.NodeSelector
-		efr.to.nodeAddrs = sets.NewString()
+		efr.to.nodeAddrs = sets.New[string]()
 		// validate node selector
-		_, err := metav1.LabelSelectorAsSelector(&rawEgressFirewallRule.To.NodeSelector)
+		_, err := metav1.LabelSelectorAsSelector(rawEgressFirewallRule.To.NodeSelector)
 		if err != nil {
 			return nil, fmt.Errorf("rule destination has invalid node selector, err: %v", err)
 		}
-		nodes, err := oc.watchFactory.GetNodesBySelector(rawEgressFirewallRule.To.NodeSelector)
+		nodes, err := oc.watchFactory.GetNodesBySelector(*rawEgressFirewallRule.To.NodeSelector)
 		if err != nil {
 			return efr, fmt.Errorf("unable to query nodes for egress firewall: %w", err)
 		}
@@ -182,10 +183,19 @@ func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interfa
 
 	// delete acls from all switches, they reside on the port group now
 	if len(egressFirewallACLs) != 0 {
-		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, func(item *nbdb.LogicalSwitch) bool { return true },
-			egressFirewallACLs...)
+		err = batching.Batch[*nbdb.ACL](aclDeleteBatchSize, egressFirewallACLs, func(batchACLs []*nbdb.ACL) error {
+			// optimize the predicate to exclude switches that don't reference deleting acls.
+			aclsToDelete := sets.NewString()
+			for _, acl := range batchACLs {
+				aclsToDelete.Insert(acl.UUID)
+			}
+			swWithACLsPred := func(sw *nbdb.LogicalSwitch) bool {
+				return aclsToDelete.HasAny(sw.ACLs...)
+			}
+			return libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, swWithACLsPred, batchACLs...)
+		})
 		if err != nil {
-			return fmt.Errorf("failed to remove reject acl from node logical switches: %v", err)
+			return fmt.Errorf("failed to remove egress firewall acls from node logical switches: %v", err)
 		}
 	}
 
@@ -233,7 +243,7 @@ func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfire
 			egressFirewall.Name, egressFirewall.Namespace)
 	}
 
-	var addErrors error
+	var errorList []error
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
 		// process Rules into egressFirewallRules for egressFirewall struct
 		if i > types.EgressFirewallStartPriority-types.MinimumReservedEgressFirewallPriority {
@@ -243,15 +253,15 @@ func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfire
 		}
 		efr, err := oc.newEgressFirewallRule(egressFirewallRule, i)
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create EgressFirewall Rule to destination %s for namespace %s - %v",
-				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err)
+			errorList = append(errorList, fmt.Errorf("cannot create EgressFirewall Rule to destination %s for namespace %s: %w",
+				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err))
 			continue
 
 		}
 		ef.egressRules = append(ef.egressRules, efr)
 	}
-	if addErrors != nil {
-		return addErrors
+	if len(errorList) > 0 {
+		return errors.NewAggregate(errorList)
 	}
 
 	// EgressFirewall needs to make sure that the address_set for the namespace exists independently of the namespace object
@@ -743,7 +753,7 @@ func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode
 			if len(rule.to.cidrSelector) != 0 || len(rule.to.dnsName) != 0 {
 				continue
 			}
-			selector, err := metav1.LabelSelectorAsSelector(&rule.to.nodeSelector)
+			selector, err := metav1.LabelSelectorAsSelector(rule.to.nodeSelector)
 			if err != nil {
 				klog.Errorf("Error while parsing label selector %#v for egress firewall in namespace %s",
 					rule.to.nodeSelector, namespace)

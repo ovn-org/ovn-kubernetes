@@ -117,7 +117,7 @@ func (o *FakeOVN) init() {
 
 	o.stopChan = make(chan struct{})
 	o.wg = &sync.WaitGroup{}
-	o.controller = NewOvnController(o.fakeClient, o.watcher,
+	o.controller, err = NewOvnController(o.fakeClient, o.watcher,
 		o.stopChan, o.asf,
 		o.nbClient, o.sbClient,
 		o.fakeRecorder, o.wg)
@@ -146,13 +146,13 @@ func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFactory, stopChan chan struct{},
 	addressSetFactory addressset.AddressSetFactory, libovsdbOvnNBClient libovsdbclient.Client,
-	libovsdbOvnSBClient libovsdbclient.Client, recorder record.EventRecorder, wg *sync.WaitGroup) *DefaultNetworkController {
+	libovsdbOvnSBClient libovsdbclient.Client, recorder record.EventRecorder, wg *sync.WaitGroup) (*DefaultNetworkController, error) {
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
 
 	podRecorder := metrics.NewPodRecorder()
-	cnci := NewCommonNetworkControllerInfo(
+	cnci, err := NewCommonNetworkControllerInfo(
 		ovnClient.KubeClient,
 		&kube.KubeOVN{
 			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
@@ -168,6 +168,9 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		false,
 		false,
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory)
 }

@@ -86,7 +86,8 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				sncm := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+				sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology})
 				blueNetSubnets, err := config.ParseClusterSubnetEntries("192.168.0.0/16/24")
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -153,7 +154,8 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				sncm := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+				sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer2Topology})
 				layer2NetConfInfo := &util.Layer2NetConfInfo{}
 				nc, err := sncm.NewNetworkController(netInfo, layer2NetConfInfo)
@@ -213,7 +215,8 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				sncm := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+				sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Create a fake nad controller for blue network so that the red network gets cleared
 				// when CleanupDeletedNetworks is called.  If we don't pass any controller to

@@ -53,7 +53,7 @@ func NewController(client clientset.Interface,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
 	recorder record.EventRecorder,
-) *Controller {
+) (*Controller, error) {
 	klog.V(4).Info("Creating event broadcaster")
 
 	c := &Controller{
@@ -66,21 +66,27 @@ func NewController(client clientset.Interface,
 
 	// services
 	klog.Info("Setting up event handlers for services")
-	serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	_, err := serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onServiceAdd,
 		UpdateFunc: c.onServiceUpdate,
 		DeleteFunc: c.onServiceDelete,
 	}))
+	if err != nil {
+		return nil, err
+	}
 	c.serviceLister = serviceInformer.Lister()
 	c.servicesSynced = serviceInformer.Informer().HasSynced
 
 	// endpoints slices
 	klog.Info("Setting up event handlers for endpoint slices")
-	endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	_, err = endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onEndpointSliceAdd,
 		UpdateFunc: c.onEndpointSliceUpdate,
 		DeleteFunc: c.onEndpointSliceDelete,
 	}))
+	if err != nil {
+		return nil, err
+	}
 
 	c.endpointSliceLister = endpointSliceInformer.Lister()
 	c.endpointSlicesSynced = endpointSliceInformer.Informer().HasSynced
@@ -92,11 +98,14 @@ func NewController(client clientset.Interface,
 
 	// load balancers need to be applied to nodes, so
 	// we need to watch Node objects for changes.
-	c.nodeTracker = newNodeTracker(nodeInformer)
+	c.nodeTracker, err = newNodeTracker(nodeInformer)
+	if err != nil {
+		return nil, err
+	}
 	c.nodeTracker.resyncFn = c.RequestFullSync // Need to re-sync all services when a node gains its switch or GWR
 	c.nodesSynced = nodeInformer.Informer().HasSynced
 
-	return c
+	return c, nil
 }
 
 // Controller manages selector-based service endpoints.

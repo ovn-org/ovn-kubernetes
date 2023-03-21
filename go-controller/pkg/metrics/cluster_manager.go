@@ -95,7 +95,6 @@ func UnregisterClusterManagerFunctional() {
 	prometheus.Unregister(metricV6HostSubnetCount)
 	prometheus.Unregister(metricV4AllocatedHostSubnetCount)
 	prometheus.Unregister(metricV6AllocatedHostSubnetCount)
-
 }
 
 // RecordSubnetUsage records the number of subnets allocated for nodes

@@ -1942,7 +1942,7 @@ func Test_idledServices(t *testing.T) {
 			},
 			expected: LBOpts{
 				Reject:        false,
-				EmptyLBEvents: false,
+				EmptyLBEvents: true,
 			},
 		},
 		{

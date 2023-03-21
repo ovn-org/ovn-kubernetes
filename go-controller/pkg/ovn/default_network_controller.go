@@ -82,6 +82,8 @@ type DefaultNetworkController struct {
 	// make sure to keep this order to avoid deadlocks
 	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
+	podSelectorAddressSets *syncmap.SyncMap[*PodSelectorAddressSet]
+
 	// Cluster wide Load_Balancer_Group UUID.
 	loadBalancerGroupUUID string
 
@@ -144,7 +146,7 @@ type DefaultNetworkController struct {
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo) *DefaultNetworkController {
+func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, err error) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil)
@@ -152,14 +154,20 @@ func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo) *DefaultNetw
 
 func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	defaultStopChan chan struct{}, defaultWg *sync.WaitGroup,
-	addressSetFactory addressset.AddressSetFactory) *DefaultNetworkController {
+	addressSetFactory addressset.AddressSetFactory) (*DefaultNetworkController, error) {
 
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient)
 	}
-	svcController, svcFactory := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
-	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory,
+	svcController, svcFactory, err := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)
+	}
+	egressSvcController, err := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory,
 		defaultStopChan, DefaultNetworkControllerName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create new egress service controller while creating new default network controller: %w", err)
+	}
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
@@ -178,6 +186,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		exGWCacheMutex:         sync.RWMutex{},
 		networkPolicies:        syncmap.NewSyncMap[*networkPolicy](),
 		sharedNetpolPortGroups: syncmap.NewSyncMap[*defaultDenyPortGroups](),
+		podSelectorAddressSets: syncmap.NewSyncMap[*PodSelectorAddressSet](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
@@ -201,7 +210,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	}
 
 	oc.initRetryFramework()
-	return oc
+	return oc, nil
 }
 
 func (oc *DefaultNetworkController) initRetryFramework() {
@@ -231,8 +240,8 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 // In order to create a retry framework for most resource types, newRetryFrameworkMaster is
 // to be preferred, as it calls newRetryFrameworkWithParameters with all optional parameters unset.
 // newRetryFrameworkWithParameters is instead called directly by the watchers that are
-// dynamically created when a network policy is added: PeerNamespaceAndPodSelectorType,
-// PeerPodForNamespaceAndPodSelectorType, PeerNamespaceSelectorType, PeerPodSelectorType.
+// dynamically created when a network policy is added: AddressSetNamespaceAndPodSelectorType,
+// PeerNamespaceSelectorType, AddressSetPodSelectorType.
 func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 	objectType reflect.Type,
 	syncFunc func([]interface{}) error,
@@ -262,12 +271,21 @@ func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (oc *DefaultNetworkController) Start(ctx context.Context) error {
+	klog.Infof("Starting the default network controller")
+
 	// sync address sets, only required for DefaultNetworkController, since any old objects in the db without
 	// Owner set are owned by the default network controller.
 	syncer := address_set_syncer.NewAddressSetSyncer(oc.nbClient, DefaultNetworkControllerName)
 	err := syncer.SyncAddressSets()
 	if err != nil {
 		return fmt.Errorf("failed to sync address sets on controller init: %v", err)
+	}
+
+	// sync shared resources
+	// pod selector address sets
+	err = oc.cleanupPodSelectorAddressSets()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale pod selector address sets failed: %w", err)
 	}
 
 	if err = oc.Init(); err != nil {
@@ -438,10 +456,13 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressQoS {
-		oc.initEgressQoSController(
+		err := oc.initEgressQoSController(
 			oc.watchFactory.EgressQoSInformer(),
 			oc.watchFactory.PodCoreInformer(),
 			oc.watchFactory.NodeCoreInformer())
+		if err != nil {
+			return err
+		}
 		oc.wg.Add(1)
 		go func() {
 			defer oc.wg.Done()
@@ -475,7 +496,10 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 			unidlingController.Run(oc.stopChan)
 		}()
 
-		unidling.NewUnidledAtController(oc.kube, oc.watchFactory.ServiceInformer())
+		_, err = unidling.NewUnidledAtController(oc.kube, oc.watchFactory.ServiceInformer())
+		if err != nil {
+			return err
+		}
 	}
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN and the ConfigMap
@@ -669,18 +693,13 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			return err
 		}
 
-	case factory.PeerPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
+	case factory.AddressSetPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handlePodAddUpdate(peerAS, obj)
 
-	case factory.PeerNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerNamespaceAndPodAdd(extraParameters.np, extraParameters.gp,
-			extraParameters.podSelector, obj)
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
+	case factory.AddressSetNamespaceAndPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handleNamespaceAddUpdate(peerAS, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -702,9 +721,9 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
 			metrics.IncrementEgressFirewallCount()
 		}
-		if err = h.oc.updateEgressFirewallStatusWithRetry(egressFirewall); err != nil {
+		if statusErr := h.oc.updateEgressFirewallStatusWithRetry(egressFirewall); statusErr != nil {
 			klog.Errorf("Failed to update egress firewall status %s, error: %v",
-				getEgressFirewallNamespacedName(egressFirewall), err)
+				getEgressFirewallNamespacedName(egressFirewall), statusErr)
 		}
 		return err
 
@@ -804,13 +823,9 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 
 		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync, hoSync})
 
-	case factory.PeerPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
+	case factory.AddressSetPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handlePodAddUpdate(peerAS, newObj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -956,17 +971,13 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		}
 		return h.oc.deleteNodeEvent(node)
 
-	case factory.PeerPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
+	case factory.AddressSetPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handlePodDelete(peerAS, obj)
 
-	case factory.PeerNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerNamespaceAndPodDel(extraParameters.np, extraParameters.gp, obj)
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
+	case factory.AddressSetNamespaceAndPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handleNamespaceDel(peerAS, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -1051,9 +1062,8 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = h.oc.syncNodes
 
 		case factory.LocalPodSelectorType,
-			factory.PeerNamespaceAndPodSelectorType,
-			factory.PeerPodSelectorType,
-			factory.PeerPodForNamespaceAndPodSelectorType,
+			factory.AddressSetNamespaceAndPodSelectorType,
+			factory.AddressSetPodSelectorType,
 			factory.PeerNamespaceSelectorType:
 			syncFunc = nil
 

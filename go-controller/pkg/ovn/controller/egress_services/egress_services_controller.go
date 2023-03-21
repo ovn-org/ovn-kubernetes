@@ -85,8 +85,8 @@ type Controller struct {
 type svcState struct {
 	node        string
 	selector    labels.Selector
-	v4Endpoints sets.String
-	v6Endpoints sets.String
+	v4Endpoints sets.Set[string]
+	v6Endpoints sets.Set[string]
 	stale       bool
 }
 
@@ -117,7 +117,7 @@ func NewController(
 	stopCh <-chan struct{},
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
-	nodeInformer coreinformers.NodeInformer) *Controller {
+	nodeInformer coreinformers.NodeInformer) (*Controller, error) {
 	klog.Info("Setting up event handlers for Egress Services")
 	c := &Controller{
 		controllerName:                           controllerName,
@@ -141,19 +141,25 @@ func NewController(
 		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 		"egressservices",
 	)
-	serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	_, err := serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onServiceAdd,
 		UpdateFunc: c.onServiceUpdate,
 		DeleteFunc: c.onServiceDelete,
 	}))
+	if err != nil {
+		return nil, err
+	}
 
 	c.endpointSliceLister = endpointSliceInformer.Lister()
 	c.endpointSlicesSynced = endpointSliceInformer.Informer().HasSynced
-	endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	_, err = endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onEndpointSliceAdd,
 		UpdateFunc: c.onEndpointSliceUpdate,
 		DeleteFunc: c.onEndpointSliceDelete,
 	}))
+	if err != nil {
+		return nil, err
+	}
 
 	c.nodeLister = nodeInformer.Lister()
 	c.nodesSynced = nodeInformer.Informer().HasSynced
@@ -161,13 +167,16 @@ func NewController(
 		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 		"egressservicenodes",
 	)
-	nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	_, err = nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onNodeAdd,
 		UpdateFunc: c.onNodeUpdate,
 		DeleteFunc: c.onNodeDelete,
 	}))
+	if err != nil {
+		return nil, err
+	}
 
-	return c
+	return c, nil
 }
 
 func (c *Controller) Run(threadiness int) {
@@ -247,8 +256,8 @@ func (c *Controller) repair() error {
 	defer c.Unlock()
 
 	// all the current valid egress services keys to their endpoints from the listers.
-	svcKeyToAllV4Endpoints := map[string]sets.String{}
-	svcKeyToAllV6Endpoints := map[string]sets.String{}
+	svcKeyToAllV4Endpoints := map[string]sets.Set[string]{}
+	svcKeyToAllV6Endpoints := map[string]sets.Set[string]{}
 
 	// all known existing egress services to their endpoints from OVN.
 	svcKeyToConfiguredV4Endpoints := map[string][]string{}
@@ -327,7 +336,7 @@ func (c *Controller) repair() error {
 			svcKeyToAllV6Endpoints[key] = v6
 			svcKeyToConfiguredV4Endpoints[key] = []string{}
 			svcKeyToConfiguredV6Endpoints[key] = []string{}
-			svcState := &svcState{node: svcHost, selector: selector, v4Endpoints: sets.NewString(), v6Endpoints: sets.NewString(), stale: false}
+			svcState := &svcState{node: svcHost, selector: selector, v4Endpoints: sets.New[string](), v6Endpoints: sets.New[string](), stale: false}
 			nodeState.allocations[key] = svcState
 			c.nodes[svcHost] = nodeState
 			c.services[key] = svcState

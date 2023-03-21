@@ -8,6 +8,7 @@ import (
 	"net"
 
 	"github.com/Mellanox/sriovnet"
+	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
 )
 
 type SriovnetOps interface {
@@ -117,4 +118,31 @@ func GetFunctionRepresentorName(deviceID string) (string, error) {
 		return "", err
 	}
 	return rep, nil
+}
+
+// GetNetdevNameFromDeviceId returns the netdevice name from the passed device ID.
+func GetNetdevNameFromDeviceId(deviceId string) (string, error) {
+	var netdevices []string
+	var err error
+
+	if IsPCIDeviceName(deviceId) {
+		// If a vDPA device exists, it takes preference over the vendor device, steering-wize
+		var vdpaDevice kvdpa.VdpaDevice
+		vdpaDevice, err = GetVdpaOps().GetVdpaDeviceByPci(deviceId)
+		if err == nil && vdpaDevice.Driver() == kvdpa.VirtioVdpaDriver {
+			return vdpaDevice.VirtioNet().NetDev(), nil
+		}
+
+		netdevices, err = GetSriovnetOps().GetNetDevicesFromPci(deviceId)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	// Make sure we have 1 netdevice per pci address
+	numNetDevices := len(netdevices)
+	if numNetDevices != 1 {
+		return "", fmt.Errorf("failed to get one netdevice interface (count %d) per Device ID %s", numNetDevices, deviceId)
+	}
+	return netdevices[0], nil
 }

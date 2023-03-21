@@ -135,7 +135,9 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 -cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'.
 -ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled.
 -eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge.
+-lr  |--local-kind-registry         Will start and connect a kind local registry to push/retrieve images
 --delete                      	    Delete current cluster
+--deploy                      	    Deploy ovn kubernetes without restarting kind
 ```
 
 As seen above, if you do not specify any options the script will assume the default values.
@@ -352,7 +354,7 @@ sudo ln -s /usr/bin/kubectl-v1.17.3 /usr/bin/kubectl
 Download and install latest version of `kubectl`:
 
 ```
-$ K8S_VERSION=v1.24.0
+$ K8S_VERSION=v1.26.0
 $ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
 $ chmod +x kubectl
 $ sudo mv kubectl /usr/bin/kubectl-v1.18.0
@@ -407,7 +409,7 @@ $ cd ../dist/images/
 $ make fedora
 
 $ cd ../../contrib/
-$ KIND_IPV4_SUPPORT=true KIND_IPV6_SUPPORT=true K8S_VERSION=v1.24.0 ./kind.sh
+$ KIND_IPV4_SUPPORT=true KIND_IPV6_SUPPORT=true K8S_VERSION=v1.26.0 ./kind.sh
 ```
 
 Once `kind.sh` completes, setup kube config file:
@@ -433,7 +435,32 @@ one (or both of) the following variables:
 
 ```
 $ cd ../../contrib/
-$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.24.0 ./kind.sh
+$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.26.0 ./kind.sh
+```
+
+### Using kind local registry to deploy non ovn-k containers
+
+A local registry can be made available to the cluster if started with:
+```
+./kind.sh --local-kind-registry
+```
+This is useful if you want to make your own local images available to the 
+cluster. These images can be pushed, fetched or used 
+in manifests using the prefix `localhost:5000`.
+
+### Loading ovn-kubernetes changes without restarting kind
+
+Sometimes it is useful to update ovn-kubernetes without redeploying the whole 
+cluster all over again. For example, when testing the update itself. 
+This can be achieve with the "--deploy" flag:
+
+```bash
+# Default options will use kind mechanism to push images directly to the
+./kind.sh --deploy
+
+# Using a local registry is an alternative to deploy ovn-kubernetes updates 
+# while also being useful to deploy other local images
+./kind.sh --deploy --local-kind-registry
 ```
 
 ### Current Status

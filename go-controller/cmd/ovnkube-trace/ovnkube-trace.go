@@ -185,7 +185,8 @@ func execInPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, n
 		stdin = nil
 	}
 
-	err = exec.Stream(remotecommand.StreamOptions{
+	//exec.Stream is deprecated, so we have to use withContext, context.TODO returns a non-nil empty context
+	err = exec.StreamWithContext(context.TODO(), remotecommand.StreamOptions{
 		Stdin:  stdin,
 		Stdout: &stdout,
 		Stderr: &stderr,
