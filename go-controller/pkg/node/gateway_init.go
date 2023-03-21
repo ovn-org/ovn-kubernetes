@@ -119,6 +119,21 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 		}
 	}
 	gatewayIntf := config.Gateway.Interface
+	// Netdevice allocated via resource request overwrites config value
+	if config.OvnKubeNode.BypassPortDPResourceName != "" {
+		err := handleDevicePluginResources(config.OvnKubeNode.BypassPortDPResourceName)
+		if err != nil {
+			return nil, "", err
+		}
+
+		gatewayIntf, err = handleNetdevResources(config.OvnKubeNode.BypassPortDPResourceName)
+		if err != nil {
+			return nil, "", err
+		}
+		klog.V(5).Infof("Using gateway interface %s passed via resource %s",
+			gatewayIntf, config.OvnKubeNode.BypassPortDPResourceName)
+	}
+
 	if needIPv4NextHop || needIPv6NextHop || gatewayIntf == "" {
 		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf)
 		if err != nil {

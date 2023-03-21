@@ -80,6 +80,7 @@ fi
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
 # OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME - ovnkube node management port device plugin resource
+# OVNKUBE_NODE_BYPASS_PORT_DP_RESOURCE_NAME - ovnkube node bypass port device plugin resource
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 
@@ -238,6 +239,9 @@ ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 # OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME - is the device plugin resource name that has
 # allocated interfaces to be used for the management port
 ovnkube_node_mgmt_port_dp_resource_name=${OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME:-}
+# OVNKUBE_NODE_BYPASS_PORT_DP_RESOURCE_NAME - is the device plugin resource name that has
+# allocated interfaces to be used for the bypass port
+ovnkube_node_bypass_port_dp_resource_name=${OVNKUBE_NODE_BYPASS_PORT_DP_RESOURCE_NAME:-}
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
@@ -1486,7 +1490,12 @@ ovn-node() {
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
   fi
   if [[ -n "${ovnkube_node_mgmt_port_dp_resource_name}" ]] ; then
-    node_mgmt_port_netdev_flags="$node_mgmt_port_netdev_flags --ovnkube-node-mgmt-port-dp-resource-name ${ovnkube_node_mgmt_port_dp_resource_name}"
+    ovnkube_node_mgmt_port_netdev_flag="$ovnkube_node_mgmt_port_netdev_flag --ovnkube-node-mgmt-port-dp-resource-name ${ovnkube_node_mgmt_port_dp_resource_name}"
+  fi
+
+  node_bypass_port_dp_resource_name_flag=
+  if [[ -n "${ovnkube_node_bypass_port_dp_resource_name}" ]]; then
+    node_bypass_port_dp_resource_name_flag="--ovnkube-node-bypass-port-dp-resource-name ${ovnkube_node_bypass_port_dp_resource_name}"
   fi
 
   local ovn_node_ssl_opts=""
@@ -1563,7 +1572,8 @@ ovn-node() {
      ${ovnkube_node_mode_flag} \
     ${egress_interface} \
     --host-network-namespace ${ovn_host_network_namespace} \
-     ${ovnkube_node_mgmt_port_netdev_flag} &
+    ${ovnkube_node_mgmt_port_netdev_flag} \
+    ${node_bypass_port_dp_resource_name_flag} &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then

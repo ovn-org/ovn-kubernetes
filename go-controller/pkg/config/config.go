@@ -438,8 +438,10 @@ type OvnKubeNodeConfig struct {
 	DPResourceDeviceIdsMap map[string][]string
 	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
 	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
-	MgmtPortRepresentor    string
-	DisableOVNIfaceIdVer   bool `gcfg:"disable-ovn-iface-id-ver"`
+	// BypassPortDPResourceName is the device plugin resource name used to get the device for bypass port configuration
+	BypassPortDPResourceName string `gcfg:"bypass-port-dp-resource-name"`
+	MgmtPortRepresentor      string
+	DisableOVNIfaceIdVer     bool `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1320,6 +1322,13 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortDPResourceName,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortDPResourceName,
+	},
+	&cli.StringFlag{
+		Name: "ovnkube-node-bypass-port-dp-resource-name",
+		Usage: "When provided, use this device plugin resource name to find the allocated " +
+			"resource for bypass port gateway configuration.",
+		Value:       OvnKubeNode.BypassPortDPResourceName,
+		Destination: &cliConfig.OvnKubeNode.BypassPortDPResourceName,
 	},
 	&cli.BoolFlag{
 		Name: "disable-ovn-iface-id-ver",

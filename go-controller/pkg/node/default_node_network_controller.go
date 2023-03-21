@@ -401,19 +401,22 @@ func getDeviceIdsFromEnv(envName string) ([]string, error) {
 }
 
 // handleDevicePluginResources tries to retrieve any device plugin resources passed in via arguments and device plugin env variables.
-func handleDevicePluginResources() error {
-	mgmtPortEnvName := getEnvNameFromResourceName(config.OvnKubeNode.MgmtPortDPResourceName)
-	deviceIds, err := getDeviceIdsFromEnv(mgmtPortEnvName)
+func handleDevicePluginResources(resource string) error {
+	envName := getEnvNameFromResourceName(resource)
+	deviceIds, err := getDeviceIdsFromEnv(envName)
 	if err != nil {
 		return err
 	}
 	// The reason why we want to store the Device Ids in a map is prepare for various features that
 	// require network resources such as the Management Port or Bypass Port. It is likely that these
 	// features share the same device pool.
-	config.OvnKubeNode.DPResourceDeviceIdsMap = make(map[string][]string)
-	config.OvnKubeNode.DPResourceDeviceIdsMap[config.OvnKubeNode.MgmtPortDPResourceName] = deviceIds
-	klog.V(5).Infof("Setting DPResourceDeviceIdsMap for %s using env %s with device IDs %v",
-		config.OvnKubeNode.MgmtPortDPResourceName, mgmtPortEnvName, deviceIds)
+	if config.OvnKubeNode.DPResourceDeviceIdsMap == nil {
+		config.OvnKubeNode.DPResourceDeviceIdsMap = make(map[string][]string)
+		config.OvnKubeNode.DPResourceDeviceIdsMap[resource] = deviceIds
+	} else if _, exists := config.OvnKubeNode.DPResourceDeviceIdsMap[resource]; !exists {
+		config.OvnKubeNode.DPResourceDeviceIdsMap[resource] = deviceIds
+	}
+	klog.V(5).Infof("Setting DPResourceDeviceIdsMap for %s using env %s with device IDs %v", resource, envName, deviceIds)
 	return nil
 }
 
@@ -554,7 +557,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// Use the device from environment when the DP resource name is specified.
 	if config.OvnKubeNode.MgmtPortDPResourceName != "" {
-		if err := handleDevicePluginResources(); err != nil {
+		if err := handleDevicePluginResources(config.OvnKubeNode.MgmtPortDPResourceName); err != nil {
 			return err
 		}
 
