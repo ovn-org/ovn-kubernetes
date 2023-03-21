@@ -283,6 +283,15 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 
 	eventRecorder := util.EventRecorder(ovnClientset.KubeClient)
 
+	wgMetricSrv := &sync.WaitGroup{}
+	// Start metric server for master and node. Expose the metrics HTTP endpoint if configured.
+	// Non LE master instances also are required to expose the metrics server.
+	if config.Metrics.BindAddress != "" {
+		metrics.StartMetricsServer(config.Metrics.BindAddress, config.Metrics.EnablePprof,
+			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), wgMetricSrv)
+	}
+	defer wgMetricSrv.Wait()
+
 	// no need for leader election in node mode
 	if !runMode.clusterManager && !runMode.networkControllerManager {
 		return runOvnKube(ctx.Context, runMode, ovnClientset, eventRecorder)
@@ -500,13 +509,6 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 		// record delay until ready
 		metrics.MetricNodeReadyDuration.Set(time.Since(startTime).Seconds())
-	}
-
-	// now that ovnkube master/node are running, lets expose the metrics HTTP endpoint if configured
-	// start the prometheus server to serve OVN K8s Metrics (default master port: 9409, node port: 9410)
-	if config.Metrics.BindAddress != "" {
-		metrics.StartMetricsServer(config.Metrics.BindAddress, config.Metrics.EnablePprof,
-			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, stopChan, wg)
 	}
 
 	// start the prometheus server to serve OVS and OVN Metrics (default port: 9476)
