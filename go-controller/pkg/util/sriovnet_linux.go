@@ -13,6 +13,7 @@ import (
 
 type SriovnetOps interface {
 	GetNetDevicesFromPci(pciAddress string) ([]string, error)
+	GetNetDevicesFromAux(auxDev string) ([]string, error)
 	GetUplinkRepresentor(vfPciAddress string) (string, error)
 	GetUplinkRepresentorFromAux(auxDev string) (string, error)
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
@@ -42,6 +43,10 @@ func GetSriovnetOps() SriovnetOps {
 
 func (defaultSriovnetOps) GetNetDevicesFromPci(pciAddress string) ([]string, error) {
 	return sriovnet.GetNetDevicesFromPci(pciAddress)
+}
+
+func (defaultSriovnetOps) GetNetDevicesFromAux(auxDev string) ([]string, error) {
+	return sriovnet.GetNetDevicesFromAux(auxDev)
 }
 
 func (defaultSriovnetOps) GetUplinkRepresentor(vfPciAddress string) (string, error) {
@@ -134,6 +139,8 @@ func GetNetdevNameFromDeviceId(deviceId string) (string, error) {
 		}
 
 		netdevices, err = GetSriovnetOps().GetNetDevicesFromPci(deviceId)
+	} else { // Auxiliary network device
+		netdevices, err = GetSriovnetOps().GetNetDevicesFromAux(deviceId)
 	}
 	if err != nil {
 		return "", err

@@ -267,6 +267,9 @@ while [ "$1" != "" ]; do
   --ovnkube-node-mgmt-port-dp-resource-name)
     OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME=$VALUE
     ;;
+  --ovnkube-node-bypass-port-dp-resource-name)
+    OVNKUBE_NODE_BYPASS_PORT_DP_RESOURCE_NAME=$VALUE
+    ;;
   --ovnkube-config-duration-enable)
     OVNKUBE_CONFIG_DURATION_ENABLE=$VALUE
     ;;
@@ -416,6 +419,10 @@ ovn_ex_gw_networking_interface=${OVN_EX_GW_NETWORK_INTERFACE}
 echo "ovn_ex_gw_networking_interface: ${ovn_ex_gw_networking_interface}"
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV}
 echo "ovnkube_node_mgmt_port_netdev: ${ovnkube_node_mgmt_port_netdev}"
+ovnkube_node_mgmt_port_dp_resource_name=${OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME}
+echo "ovnkube_node_mgmt_port_dp_resource_name: ${ovnkube_node_mgmt_port_dp_resource_name}"
+ovnkube_node_bypass_port_dp_resource_name=${OVNKUBE_NODE_BYPASS_PORT_DP_RESOURCE_NAME}
+echo "ovnkube_node_bypass_port_dp_resource_name: ${ovnkube_node_bypass_port_dp_resource_name}"
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
 echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE}
@@ -457,6 +464,8 @@ ovn_image=${ovnkube_image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovnkube_node_mgmt_port_dp_resource_name=${ovnkube_node_mgmt_port_dp_resource_name} \
+  ovnkube_node_bypass_port_dp_resource_name=${ovnkube_node_bypass_port_dp_resource_name} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 

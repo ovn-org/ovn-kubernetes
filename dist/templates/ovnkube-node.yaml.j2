@@ -202,6 +202,10 @@ spec:
           value: "{{ ovn_lflow_cache_limit_kb }}"
         - name: OVN_MULTI_NETWORK_ENABLE
           value: "{{ ovn_multi_network_enable }}"
+        - name: OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME
+          value: "{{ ovnkube_node_mgmt_port_dp_resource_name }}"
+        - name: OVNKUBE_NODE_BYPASS_PORT_DP_RESOURCE_NAME
+          value: "{{ ovnkube_node_bypass_port_dp_resource_name }}"
         {% endif -%}
         {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
         - name: OVNKUBE_NODE_MODE
@@ -226,6 +230,24 @@ spec:
           initialDelaySeconds: 30
           timeoutSeconds: 30
           periodSeconds: 60
+
+        {% if ovnkube_app_name=="ovnkube-node" and
+          (ovnkube_node_mgmt_port_dp_resource_name != "" or ovnkube_node_bypass_port_dp_resource_name != "") -%}
+          {% set resources = dict() -%}
+          {% for item in [ovnkube_node_mgmt_port_dp_resource_name, ovnkube_node_bypass_port_dp_resource_name] if item != "" -%}
+            {% do resources.update({ item: (resources[item]|default(0)) + 1 }) -%}
+          {% endfor -%}
+        # Resources used by ovnkube-node container for management port and/or bypass port
+        resources:
+          requests:
+            {% for key, value in resources|items -%}
+            {{ key + ': ' + value|string }}
+          {% endfor -%}
+          limits:
+            {% for key, value in resources|items -%}
+            {{ key + ': ' + value|string }}
+            {% endfor -%}
+        {% endif %}{# don't touch indentation within a block or jinja will mess it up otherwise #}
 
       {% if ovnkube_app_name=="ovnkube-node" -%}
       - name: ovn-controller
