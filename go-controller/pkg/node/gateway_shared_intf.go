@@ -95,12 +95,12 @@ type serviceConfig struct {
 	// hasLocalHostNetworkEp will be true for a service if it has at least one endpoint which is "hostnetworked&local-to-this-node".
 	hasLocalHostNetworkEp bool
 	// localEndpoints stores all the local non-host-networked endpoints for this service
-	localEndpoints sets.String
+	localEndpoints sets.Set[string]
 }
 
 type serviceEps struct {
-	v4 sets.String
-	v6 sets.String
+	v4 sets.Set[string]
+	v6 sets.Set[string]
 }
 
 type cidrAndFlags struct {
@@ -393,7 +393,7 @@ func (npw *nodePortWatcher) getServiceInfo(index ktypes.NamespacedName) (out *se
 }
 
 // getAndSetServiceInfo creates and sets the serviceConfig, returns if it existed and whatever was there
-func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, service *kapi.Service, hasLocalHostNetworkEp bool, localEndpoints sets.String) (old *serviceConfig, exists bool) {
+func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, service *kapi.Service, hasLocalHostNetworkEp bool, localEndpoints sets.Set[string]) (old *serviceConfig, exists bool) {
 	npw.serviceInfoLock.Lock()
 	defer npw.serviceInfoLock.Unlock()
 
@@ -407,7 +407,7 @@ func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, se
 }
 
 // addOrSetServiceInfo creates and sets the serviceConfig if it doesn't exist
-func (npw *nodePortWatcher) addOrSetServiceInfo(index ktypes.NamespacedName, service *kapi.Service, hasLocalHostNetworkEp bool, localEndpoints sets.String) (exists bool) {
+func (npw *nodePortWatcher) addOrSetServiceInfo(index ktypes.NamespacedName, service *kapi.Service, hasLocalHostNetworkEp bool, localEndpoints sets.Set[string]) (exists bool) {
 	npw.serviceInfoLock.Lock()
 	defer npw.serviceInfoLock.Unlock()
 
@@ -422,7 +422,7 @@ func (npw *nodePortWatcher) addOrSetServiceInfo(index ktypes.NamespacedName, ser
 
 // updateServiceInfo sets the serviceConfig for a service and returns the existing serviceConfig, if inputs are nil
 // do not update those fields, if it does not exist return nil.
-func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, service *kapi.Service, hasLocalHostNetworkEp *bool, localEndpoints sets.String) (old *serviceConfig, exists bool) {
+func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, service *kapi.Service, hasLocalHostNetworkEp *bool, localEndpoints sets.Set[string]) (old *serviceConfig, exists bool) {
 
 	npw.serviceInfoLock.Lock()
 	defer npw.serviceInfoLock.Unlock()
@@ -577,7 +577,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 	if exists := npw.addOrSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints); !exists {
 		klog.V(5).Infof("Service Add %s event in namespace %s came before endpoint event setting svcConfig",
 			service.Name, service.Namespace)
-		if err := addServiceRules(service, localEndpoints.List(), hasLocalHostNetworkEp, npw); err != nil {
+		if err := addServiceRules(service, localEndpoints.UnsortedList(), hasLocalHostNetworkEp, npw); err != nil {
 			return fmt.Errorf("AddService failed for nodePortWatcher: %v", err)
 		}
 	} else {
@@ -609,14 +609,14 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
 		// Delete old rules if needed, but don't delete svcConfig
 		// so that we don't miss any endpoint update events here
 		klog.V(5).Infof("Deleting old service rules for: %v", old)
-		if err = delServiceRules(old, svcConfig.localEndpoints.List(), npw); err != nil {
+		if err = delServiceRules(old, svcConfig.localEndpoints.UnsortedList(), npw); err != nil {
 			errors = append(errors, err)
 		}
 	}
 
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
 		klog.V(5).Infof("Adding new service rules for: %v", new)
-		if err = addServiceRules(new, svcConfig.localEndpoints.List(), svcConfig.hasLocalHostNetworkEp, npw); err != nil {
+		if err = addServiceRules(new, svcConfig.localEndpoints.UnsortedList(), svcConfig.hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
 		}
 	}
@@ -679,7 +679,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
 	klog.V(5).Infof("Deleting service %s in namespace %s", service.Name, service.Namespace)
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	if svcConfig, exists := npw.getAndDeleteServiceInfo(name); exists {
-		if err = delServiceRules(svcConfig.service, svcConfig.localEndpoints.List(), npw); err != nil {
+		if err = delServiceRules(svcConfig.service, svcConfig.localEndpoints.UnsortedList(), npw); err != nil {
 			errors = append(errors, err)
 		}
 	} else {
@@ -731,12 +731,12 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		}
 		// Add correct iptables rules only for Full mode
 		if !npw.dpuMode {
-			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, localEndPoints.List(), hasLocalHostNetworkEp)...)
+			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, localEndPoints.UnsortedList(), hasLocalHostNetworkEp)...)
 		}
 
 		if !npw.dpuMode && shouldConfigureEgressSVC(service, npw) {
-			v4Eps := sets.NewString()
-			v6Eps := sets.NewString()
+			v4Eps := sets.New[string]()
+			v6Eps := sets.New[string]()
 
 			for _, epSlice := range epSlices {
 				if epSlice.AddressType == discovery.AddressTypeFQDN {
@@ -821,16 +821,16 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	out, exists := npw.getAndSetServiceInfo(namespacedName, svc, hasLocalHostNetworkEp, localEndpoints)
 	if !exists {
 		klog.V(5).Infof("Endpointslice %s ADD event in namespace %s is creating rules", epSlice.Name, epSlice.Namespace)
-		return addServiceRules(svc, localEndpoints.List(), hasLocalHostNetworkEp, npw)
+		return addServiceRules(svc, localEndpoints.UnsortedList(), hasLocalHostNetworkEp, npw)
 	}
 
 	if out.hasLocalHostNetworkEp != hasLocalHostNetworkEp ||
 		(!util.LoadBalancerServiceHasNodePortAllocation(svc) && !reflect.DeepEqual(out.localEndpoints, localEndpoints)) {
 		klog.V(5).Infof("Endpointslice %s ADD event in namespace %s is updating rules", epSlice.Name, epSlice.Namespace)
-		if err = delServiceRules(svc, out.localEndpoints.List(), npw); err != nil {
+		if err = delServiceRules(svc, out.localEndpoints.UnsortedList(), npw); err != nil {
 			errors = append(errors, err)
 		}
-		if err = addServiceRules(svc, localEndpoints.List(), hasLocalHostNetworkEp, npw); err != nil {
+		if err = addServiceRules(svc, localEndpoints.UnsortedList(), hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
 		}
 		return apierrors.NewAggregate(errors)
@@ -876,10 +876,10 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 		npw.serviceInfoLock.Lock()
 		defer npw.serviceInfoLock.Unlock()
 
-		if err = delServiceRules(svcConfig.service, svcConfig.localEndpoints.List(), npw); err != nil {
+		if err = delServiceRules(svcConfig.service, svcConfig.localEndpoints.UnsortedList(), npw); err != nil {
 			errors = append(errors, err)
 		}
-		if err = addServiceRules(svcConfig.service, localEndpoints.List(), hasLocalHostNetworkEp, npw); err != nil {
+		if err = addServiceRules(svcConfig.service, localEndpoints.UnsortedList(), hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
 		}
 		return apierrors.NewAggregate(errors)
@@ -888,8 +888,8 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 }
 
 // GetLocalEndpointAddresses returns a list of endpoints that are local to the node
-func (npw *nodePortWatcher) GetLocalEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.String {
-	localEndpoints := sets.NewString()
+func (npw *nodePortWatcher) GetLocalEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.Set[string] {
+	localEndpoints := sets.New[string]()
 	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
 	for _, endpointSlice := range endpointSlices {
 		for _, endpoint := range endpointSlice.Endpoints {

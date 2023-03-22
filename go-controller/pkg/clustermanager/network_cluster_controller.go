@@ -85,7 +85,7 @@ func (ncc *networkClusterController) initRetryFramework() {
 	ncc.retryNodes = ncc.newRetryFramework(factory.NodeType, true)
 }
 
-// Start starts the network cluster controller
+// Start the network cluster controller
 // It does the following
 //   - initializes the network subnet allocator ranges
 //     and hybrid network subnet allocator ranges if hybrid overlay is enabled.
@@ -306,7 +306,7 @@ func (ncc *networkClusterController) updateNodeSubnetAnnotationWithRetry(nodeNam
 	return nil
 }
 
-// Cleanup cleans up the subnet annotations from the node for the secondary networks
+// Cleanup the subnet annotations from the node for the secondary networks
 func (ncc *networkClusterController) Cleanup(netName string) error {
 	if !ncc.IsSecondary() {
 		return fmt.Errorf("default network can't be cleaned up")

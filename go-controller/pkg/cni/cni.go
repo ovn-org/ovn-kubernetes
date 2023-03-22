@@ -10,7 +10,6 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
-	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -99,27 +98,6 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *kapi.Pod) error {
 	return nil
 }
 
-func (pr *PodRequest) getVFNetdevName() (string, error) {
-	// Get the vf device Name
-
-	// If a vDPA device exists, it takes preference over the vendor device, steering-wize
-	vdpaDevice, err := util.GetVdpaOps().GetVdpaDeviceByPci(pr.CNIConf.DeviceID)
-	if err == nil && vdpaDevice.Driver() == kvdpa.VirtioVdpaDriver {
-		return vdpaDevice.VirtioNet().NetDev(), nil
-	}
-
-	vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pr.CNIConf.DeviceID)
-	if err != nil {
-		return "", err
-
-	}
-	// Make sure we have 1 netdevice per pci address
-	if len(vfNetdevices) != 1 {
-		return "", fmt.Errorf("failed to get one netdevice interface per %s", pr.CNIConf.DeviceID)
-	}
-	return vfNetdevices[0], nil
-}
-
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, useOVSExternalIDs bool) (*Response, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
@@ -133,7 +111,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, useOVS
 	if pr.CNIConf.DeviceID != "" {
 		var err error
 
-		vfNetdevName, err = pr.getVFNetdevName()
+		vfNetdevName, err = util.GetNetdevNameFromDeviceId(pr.CNIConf.DeviceID)
 		if err != nil {
 			return nil, fmt.Errorf("failed in cmdAdd while getting VF Netdevice name: %v", err)
 		}

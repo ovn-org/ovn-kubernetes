@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -535,7 +534,6 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
 		backendName             = "hairpin-backend-pod"
 		endpointHTTPPort        = "80"
 		serviceHTTPPort         = 6666
-		nodeHTTPPort            = 32766
 		V4LBHairpinMasqueradeIP = "169.254.169.5"
 		V6LBHairpinMasqueradeIP = "fd69::5"
 	)
@@ -571,7 +569,7 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
 
 		ginkgo.By("creating a TCP service service-for-pods with type=ClusterIP in namespace " + namespaceName)
 
-		svcIP, err = createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, endpointHTTPPort, 0, "ClusterIP", hairpinPodSel)
+		svcIP, err = createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, endpointHTTPPort, "ClusterIP", hairpinPodSel)
 		framework.ExpectNoError(err, fmt.Sprintf("unable to create service: service-for-pods, err: %v", err))
 
 		err = framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, "service-for-pods", 1, time.Second, wait.ForeverTestTimeout)
@@ -607,15 +605,18 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
 
 		ginkgo.By("creating a TCP service service-for-pods with type=NodePort in namespace " + namespaceName)
 
-		svcIP, err = createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, endpointHTTPPort, nodeHTTPPort, "NodePort", hairpinPodSel)
+		svcIP, err = createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, endpointHTTPPort, "NodePort", hairpinPodSel)
 		framework.ExpectNoError(err, fmt.Sprintf("unable to create service: service-for-pods, err: %v", err))
 
 		err = framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, "service-for-pods", 1, time.Second, wait.ForeverTestTimeout)
-		framework.ExpectNoError(err, fmt.Sprintf("service: service-for-pods never had an enpoint, err: %v", err))
+		framework.ExpectNoError(err, fmt.Sprintf("service: service-for-pods never had an endpoint, err: %v", err))
 
-		ginkgo.By("by sending a TCP packet to service service-for-pods with type=NodePort(" + nodeIP + ":" + strconv.Itoa(nodeHTTPPort) + ") in namespace " + namespaceName + " from node " + backendNodeName)
+		svc, err := f.ClientSet.CoreV1().Services(namespaceName).Get(context.TODO(), "service-for-pods", metav1.GetOptions{})
+		framework.ExpectNoError(err, "failed to fetch service: service-for-pods")
 
-		clientIP := pokeEndpoint("", backendNodeName, "http", nodeIP, nodeHTTPPort, "clientip")
+		ginkgo.By("by sending a TCP packet to service service-for-pods with type=NodePort(" + nodeIP + ":" + fmt.Sprint(svc.Spec.Ports[0].NodePort) + ") in namespace " + namespaceName + " from node " + backendNodeName)
+
+		clientIP := pokeEndpoint("", backendNodeName, "http", nodeIP, svc.Spec.Ports[0].NodePort, "clientip")
 		clientIP, _, err = net.SplitHostPort(clientIP)
 		framework.ExpectNoError(err, "failed to parse client ip:port")
 
@@ -630,7 +631,6 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 		svcName          = "lbservice-test"
 		backendName      = "lb-backend-pod"
 		endpointHTTPPort = 80
-		nodeHTTPPort     = 32766
 		loadBalancerYaml = "loadbalancer.yaml"
 		namespaceName    = "default"
 		svcIP            = "192.168.10.0"

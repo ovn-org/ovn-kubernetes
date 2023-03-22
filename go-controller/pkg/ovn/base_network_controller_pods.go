@@ -618,6 +618,11 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		}
 	}
 
+	// It is possible that IPs have already been allocated for this pod and annotation has been updated, then the last
+	// addLogicalPortToNetwork() failed afterwards. In the current retry attempt, if the input pod argument got from
+	// the informer cache still lags behind, we would fail to get the updated pod annotation. Just continue to allocate
+	// new IPs and this function will eventually fail in updatePodAnnotationWithRetry() with ErrOverridePodIPs
+	// when it tries to override the pod IP annotation. Newly allocated IPs will be released then.
 	if needsIP {
 		if existingLSP != nil {
 			// try to get the MAC and IPs from existing OVN port first

@@ -2,6 +2,7 @@ package networkControllerManager
 
 import (
 	"fmt"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
@@ -44,6 +45,7 @@ var _ = Describe("Healthcheck tests", func() {
 	var execMock *ovntest.FakeExec
 	var factoryMock factoryMocks.NodeWatchFactory
 	var fakeClient *util.OVNClientset
+	var err error
 
 	BeforeEach(func() {
 		execMock = ovntest.NewFakeExec()
@@ -121,7 +123,8 @@ var _ = Describe("Healthcheck tests", func() {
 
 		BeforeEach(func() {
 			// setup kube output
-			ncm = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, nil)
+			ncm, err = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, nil)
+			Expect(err).NotTo(HaveOccurred())
 			factoryMock.On("GetPods", "").Return(podList, nil)
 		})
 

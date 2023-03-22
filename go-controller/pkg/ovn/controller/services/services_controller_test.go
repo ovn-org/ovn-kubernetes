@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -43,6 +44,7 @@ func newController() (*serviceController, error) {
 }
 
 func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceController, error) {
+	gomega.RegisterFailHandler(ginkgo.Fail)
 	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
 	if err != nil {
 		return nil, err
@@ -52,13 +54,15 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 
 	recorder := record.NewFakeRecorder(10)
 
-	controller := NewController(client,
+	controller, err := NewController(client,
 		nbClient,
 		informerFactory.Core().V1().Services(),
 		informerFactory.Discovery().V1().EndpointSlices(),
 		informerFactory.Core().V1().Nodes(),
 		recorder,
 	)
+	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
 	controller.servicesSynced = alwaysReady
 	controller.endpointSlicesSynced = alwaysReady
 	controller.initTopLevelCache()

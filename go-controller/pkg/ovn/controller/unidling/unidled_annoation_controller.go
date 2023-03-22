@@ -26,18 +26,20 @@ type unidledAtController struct {
 // NewUnidledAtController installs a controller on the passed informer. Whenever a service annotation
 // like "*/idled-at" is removed from a service, it sets "k8s.ovn.org/unidled-at" with the current time,
 // indicating the point in time the service has been unidled.
-func NewUnidledAtController(k kube.Interface, serviceInformer cache.SharedIndexInformer) *unidledAtController {
+func NewUnidledAtController(k kube.Interface, serviceInformer cache.SharedIndexInformer) (*unidledAtController, error) {
 
 	uac := &unidledAtController{
 		kube: k,
 	}
 
 	klog.Info("Setting up event handlers for services")
-	serviceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := serviceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: uac.onServiceUpdate,
 	})
-
-	return uac
+	if err != nil {
+		return nil, err
+	}
+	return uac, nil
 }
 
 // HasIdleAt returns true if the service annotation map contains a key like "*/idled-at"

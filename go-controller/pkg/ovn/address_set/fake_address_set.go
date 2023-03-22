@@ -30,14 +30,26 @@ type FakeAddressSetFactory struct {
 	asf            *ovnAddressSetFactory
 	sync.Mutex
 	// maps address set name to object
-	sets map[string]*fakeAddressSets
+	sets                map[string]*fakeAddressSets
+	errOnNextNewAddrSet bool
 }
 
 // fakeFactory implements the AddressSetFactory interface
 var _ AddressSetFactory = &FakeAddressSetFactory{}
 
+const FakeASFError = "fake asf error"
+
+// ErrOnNextNewASCall will make FakeAddressSetFactory return FakeASFError on the next NewAddressSet call
+func (f *FakeAddressSetFactory) ErrOnNextNewASCall() {
+	f.errOnNextNewAddrSet = true
+}
+
 // NewAddressSet returns a new address set object
 func (f *FakeAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, error) {
+	if f.errOnNextNewAddrSet {
+		f.errOnNextNewAddrSet = false
+		return nil, fmt.Errorf(FakeASFError)
+	}
 	if err := f.asf.validateDbIDs(dbIDs); err != nil {
 		return nil, fmt.Errorf("failed to create address set: %w", err)
 	}
@@ -46,7 +58,7 @@ func (f *FakeAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ip
 	name := getOvnAddressSetsName(dbIDs)
 
 	_, ok := f.sets[name]
-	gomega.Expect(ok).To(gomega.BeFalse())
+	gomega.Expect(ok).To(gomega.BeFalse(), fmt.Sprintf("new address set %s already exists", name))
 	set, err := f.newFakeAddressSets(ips, dbIDs, f.removeAddressSet)
 	if err != nil {
 		return nil, err
@@ -147,7 +159,7 @@ func (f *FakeAddressSetFactory) removeAddressSet(name string) {
 func (f *FakeAddressSetFactory) expectAddressSetWithIPs(g gomega.Gomega, dbIDs *libovsdbops.DbObjectIDs, ips []string) {
 	var lenAddressSet int
 	as := f.getAddressSet(dbIDs)
-	gomega.Expect(as).ToNot(gomega.BeNil())
+	gomega.Expect(as).ToNot(gomega.BeNil(), fmt.Sprintf("expected address set %s to exist", dbIDs.String()))
 	defer as.Unlock()
 	as4 := as.ipv4
 	if as4 != nil {
@@ -250,6 +262,11 @@ func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(dbIDsOrNsName any) 
 	gomega.Eventually(func() bool {
 		return f.AddressSetExists(dbIDs)
 	}).Should(gomega.BeFalse())
+}
+
+// ExpectNumberOfAddressSets ensures the number of created address sets equals given number
+func (f *FakeAddressSetFactory) ExpectNumberOfAddressSets(n int) {
+	gomega.Expect(len(f.sets)).To(gomega.Equal(n))
 }
 
 type removeFunc func(string)

@@ -79,6 +79,7 @@ fi
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
+# OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME - ovnkube node management port device plugin resource
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 
@@ -234,6 +235,9 @@ ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
+# OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME - is the device plugin resource name that has
+# allocated interfaces to be used for the management port
+ovnkube_node_mgmt_port_dp_resource_name=${OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME:-}
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
@@ -792,7 +796,7 @@ ovn-dbchecker() {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovn-dbchecker.pid
-  
+
   # wait for ready_to_start_node
   echo "=============== ovn-dbchecker - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
@@ -818,18 +822,18 @@ ovn-dbchecker() {
         --sb-cert-common-name ${ovn_controller_cname}
       "
   }
-  
+
   echo "=============== ovn-dbchecker ========== OVNKUBE_DB"
   /usr/bin/ovndbchecker \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-    ${ovn_db_ssl_opts} \  
+    ${ovn_db_ssl_opts} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
     --pidfile ${OVN_RUNDIR}/ovn-dbchecker.pid \
     --logfile /var/log/ovn-kubernetes/ovn-dbchecker.log &
-  
+
   echo "=============== ovn-dbchecker ========== running"
   wait_for_event attempts=3 process_ready ovn-dbchecker
 
@@ -924,7 +928,7 @@ ovn-master() {
   if [[ -n ${ovn_v4_join_subnet} ]]; then
       ovn_v4_join_subnet_opt="--gateway-v4-join-subnet=${ovn_v4_join_subnet}"
   fi
-  
+
   ovn_v6_join_subnet_opt=
   if [[ -n ${ovn_v6_join_subnet} ]]; then
       ovn_v6_join_subnet_opt="--gateway-v6-join-subnet=${ovn_v6_join_subnet}"
@@ -1480,6 +1484,9 @@ ovn-node() {
   ovnkube_node_mgmt_port_netdev_flag=
   if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
+  fi
+  if [[ -n "${ovnkube_node_mgmt_port_dp_resource_name}" ]] ; then
+    node_mgmt_port_netdev_flags="$node_mgmt_port_netdev_flags --ovnkube-node-mgmt-port-dp-resource-name ${ovnkube_node_mgmt_port_dp_resource_name}"
   fi
 
   local ovn_node_ssl_opts=""

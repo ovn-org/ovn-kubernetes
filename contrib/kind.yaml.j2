@@ -17,8 +17,8 @@ networking:
 {%- if use_local_registy == "true"%}
 containerdConfigPatches:
   - |-
-    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
-      endpoint = ["http://kind-registry:5000"]
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:{{ kind_local_registry_port }}"]
+      endpoint = ["http://{{ kind_local_registry_name }}:5000"]
 {%- endif %}
 kubeadmConfigPatches:
 - |

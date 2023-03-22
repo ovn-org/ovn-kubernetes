@@ -309,7 +309,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 }
 
 func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
-	hostSubnets []*net.IPNet, hostAddrs sets.String) error {
+	hostSubnets []*net.IPNet, hostAddrs sets.Set[string]) error {
 	var err error
 	var gwLRPIPs, clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
@@ -337,7 +337,7 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		if err != nil {
 			return err
 		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs.List())
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs.UnsortedList())
 		if err != nil && err != util.NoIPError {
 			return err
 		}
@@ -609,7 +609,7 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 // Note that this list will include the 'join' cluster switch, which we
 // do not want to delete.
 func (oc *DefaultNetworkController) syncNodes(nodes []interface{}) error {
-	foundNodes := sets.NewString()
+	foundNodes := sets.New[string]()
 	for _, tmp := range nodes {
 		node, ok := tmp.(*kapi.Node)
 		if !ok {

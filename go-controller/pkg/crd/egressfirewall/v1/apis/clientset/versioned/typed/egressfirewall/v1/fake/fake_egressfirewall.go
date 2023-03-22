@@ -116,7 +116,7 @@ func (c *FakeEgressFirewalls) UpdateStatus(ctx context.Context, egressFirewall *
 // Delete takes name of the egressFirewall and deletes it. Returns an error if one occurs.
 func (c *FakeEgressFirewalls) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteActionWithOptions(egressfirewallsResource, c.ns, name, opts), &egressfirewallv1.EgressFirewall{})
+		Invokes(testing.NewDeleteAction(egressfirewallsResource, c.ns, name), &egressfirewallv1.EgressFirewall{})
 
 	return err
 }

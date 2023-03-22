@@ -301,6 +301,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.Equal(false))
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
+			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal(""))
 			gomega.Expect(OvnKubeNode.MgmtPortRepresentor).To(gomega.Equal(""))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
@@ -1666,27 +1667,31 @@ foo=bar
 			}
 			file := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:           types.NodeModeDPU,
-					MgmtPortNetdev: "enp1s0f0v0",
+					Mode:                   types.NodeModeDPU,
+					MgmtPortNetdev:         "enp1s0f0v0",
+					MgmtPortDPResourceName: "openshift.io/mgmtvf",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
+			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal("openshift.io/mgmtvf"))
 		})
 
 		It("Overrides value from CLI", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:           types.NodeModeDPU,
-					MgmtPortNetdev: "enp1s0f0v0",
+					Mode:                   types.NodeModeDPU,
+					MgmtPortNetdev:         "enp1s0f0v0",
+					MgmtPortDPResourceName: "openshift.io/mgmtvf",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
+			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal("openshift.io/mgmtvf"))
 		})
 
 		It("Fails with unsupported mode", func() {
@@ -1721,7 +1726,7 @@ foo=bar
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev must be provided"))
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided"))
 		})
 
 		It("Fails if management port is not provided and ovnkube node mode is dpu-host", func() {
@@ -1732,7 +1737,7 @@ foo=bar
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev must be provided"))
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided"))
 		})
 
 		It("Succeeds if management netdev provided in the full mode", func() {
@@ -1740,6 +1745,22 @@ foo=bar
 				OvnKubeNode: OvnKubeNodeConfig{
 					Mode:           types.NodeModeFull,
 					MgmtPortNetdev: "ens1f0v0",
+				},
+			}
+			file := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeFull,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+
+		It("Succeeds if management port device plugin resource name provided in the full mode", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode:                   types.NodeModeFull,
+					MgmtPortDPResourceName: "openshift.io/mgmtvf",
 				},
 			}
 			file := config{

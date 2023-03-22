@@ -221,16 +221,6 @@ var metricNetpolLocalPodEventLatency = prometheus.NewHistogramVec(prometheus.His
 		"event",
 	})
 
-var metricNetpolPeerPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
-	Name:      "network_policy_peer_pod_event_latency_seconds",
-	Help:      "The latency of peer pod events handling (add, delete)",
-	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
-	[]string{
-		"event",
-	})
-
 var metricNetpolPeerNamespaceEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
@@ -241,10 +231,20 @@ var metricNetpolPeerNamespaceEventLatency = prometheus.NewHistogramVec(prometheu
 		"event",
 	})
 
-var metricNetpolPeerNamespaceAndPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+var metricPodSelectorAddrSetPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
-	Name:      "network_policy_peer_namespace_and_pod_event_latency_seconds",
+	Name:      "pod_selector_address_set_pod_event_latency_seconds",
+	Help:      "The latency of peer pod events handling (add, delete)",
+	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
+	[]string{
+		"event",
+	})
+
+var metricPodSelectorAddrSetNamespaceEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "pod_selector_address_set_namespace_event_latency_seconds",
 	Help:      "The latency of peer namespace events handling (add, delete)",
 	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
 	[]string{
@@ -419,9 +419,9 @@ func RegisterMasterFunctional() {
 		prometheus.MustRegister(metricEgressIPUnassignLatency)
 		prometheus.MustRegister(metricNetpolEventLatency)
 		prometheus.MustRegister(metricNetpolLocalPodEventLatency)
-		prometheus.MustRegister(metricNetpolPeerPodEventLatency)
 		prometheus.MustRegister(metricNetpolPeerNamespaceEventLatency)
-		prometheus.MustRegister(metricNetpolPeerNamespaceAndPodEventLatency)
+		prometheus.MustRegister(metricPodSelectorAddrSetPodEventLatency)
+		prometheus.MustRegister(metricPodSelectorAddrSetNamespaceEventLatency)
 		prometheus.MustRegister(metricPodEventLatency)
 	}
 	prometheus.MustRegister(metricEgressIPNodeUnreacheableCount)
@@ -429,7 +429,11 @@ func RegisterMasterFunctional() {
 	prometheus.MustRegister(metricEgressFirewallRuleCount)
 	prometheus.MustRegister(metricEgressFirewallCount)
 	prometheus.MustRegister(metricEgressRoutingViaHost)
-	prometheus.MustRegister(MetricResourceRetryFailuresCount)
+	if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
+		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+			panic(err)
+		}
+	}
 }
 
 // RunTimestamp adds a goroutine that registers and updates timestamp metrics.
@@ -535,16 +539,16 @@ func RecordNetpolLocalPodEvent(eventName string, duration time.Duration) {
 	metricNetpolLocalPodEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
 }
 
-func RecordNetpolPeerPodEvent(eventName string, duration time.Duration) {
-	metricNetpolPeerPodEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
-}
-
 func RecordNetpolPeerNamespaceEvent(eventName string, duration time.Duration) {
 	metricNetpolPeerNamespaceEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
 }
 
-func RecordNetpolPeerNamespaceAndPodEvent(eventName string, duration time.Duration) {
-	metricNetpolPeerNamespaceAndPodEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
+func RecordPodSelectorAddrSetPodEvent(eventName string, duration time.Duration) {
+	metricPodSelectorAddrSetPodEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
+}
+
+func RecordPodSelectorAddrSetNamespaceEvent(eventName string, duration time.Duration) {
+	metricPodSelectorAddrSetNamespaceEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
 }
 
 func RecordPodEvent(eventName string, duration time.Duration) {

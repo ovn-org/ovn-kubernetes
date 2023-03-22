@@ -68,7 +68,7 @@ var _ = ginkgo.Describe("Creating a static pod on a node", func() {
 	const (
 		podName      string = "static-pod"
 		podFile      string = "static-pod.yaml"
-		agnhostImage string = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
+		agnhostImage string = "registry.k8s.io/e2e-test-images/agnhost:2.26"
 	)
 
 	f := wrappedTestFramework("staticpods")
