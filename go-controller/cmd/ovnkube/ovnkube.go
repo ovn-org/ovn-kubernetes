@@ -283,14 +283,19 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 
 	eventRecorder := util.EventRecorder(ovnClientset.KubeClient)
 
-	wgMetricSrv := &sync.WaitGroup{}
+	ovnKubeStartWg := &sync.WaitGroup{}
+	defer func() {
+		// make sure everything stops and wait
+		cancel()
+		ovnKubeStartWg.Wait()
+	}()
+
 	// Start metric server for master and node. Expose the metrics HTTP endpoint if configured.
 	// Non LE master instances also are required to expose the metrics server.
 	if config.Metrics.BindAddress != "" {
 		metrics.StartMetricsServer(config.Metrics.BindAddress, config.Metrics.EnablePprof,
-			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), wgMetricSrv)
+			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), ovnKubeStartWg)
 	}
-	defer wgMetricSrv.Wait()
 
 	// no need for leader election in node mode
 	if !runMode.clusterManager && !runMode.networkControllerManager {
@@ -337,7 +342,6 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 
 	ovnKubeStopped := false
 	ovnKubeStopLock := sync.Mutex{}
-	ovnKubeRunning := &sync.WaitGroup{}
 	lec := leaderelection.LeaderElectionConfig{
 		Lock:            rl,
 		LeaseDuration:   time.Duration(haConfig.ElectionLeaseDuration) * time.Second,
@@ -357,8 +361,8 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 					ovnKubeStopLock.Unlock()
 					return
 				}
-				ovnKubeRunning.Add(1)
-				defer ovnKubeRunning.Done()
+				ovnKubeStartWg.Add(1)
+				defer ovnKubeStartWg.Done()
 				ovnKubeStopLock.Unlock()
 				klog.Infof("Won leader election; in active mode")
 				if err := runOvnKube(ctx, runMode, ovnClientset, eventRecorder); err != nil {
@@ -395,7 +399,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	ovnKubeStopLock.Lock()
 	ovnKubeStopped = true
 	ovnKubeStopLock.Unlock()
-	ovnKubeRunning.Wait()
+
 	return nil
 }
 
