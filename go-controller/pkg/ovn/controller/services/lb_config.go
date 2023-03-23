@@ -513,11 +513,12 @@ func mergeLBs(lbs []LB) []LB {
 outer:
 	for _, lb := range lbs {
 		for i := range out {
-			// If mergeable, rather than inserting lb to out, just add switches and routers
+			// If mergeable, rather than inserting lb to out, just add switches, routers, groups
 			// and drop
 			if canMergeLB(lb, out[i]) {
 				out[i].Switches = append(out[i].Switches, lb.Switches...)
 				out[i].Routers = append(out[i].Routers, lb.Routers...)
+				out[i].Groups = append(out[i].Groups, lb.Groups...)
 
 				if !strings.HasSuffix(out[i].Name, "_merged") {
 					out[i].Name += "_merged"
