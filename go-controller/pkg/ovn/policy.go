@@ -53,6 +53,7 @@ const (
 	// NOTE: This is succeed by arpAllowPolicyMatch to allow support for IPV6. This is currently only
 	// used when removing stale ACLs from the syncNetworkPolicy function and should NOT be used in any main logic.
 	staleArpAllowPolicyMatch = "arp"
+	allowHairpinningACLID    = "allow-hairpinning"
 )
 
 // defaultDenyPortGroups is a shared object and should be used by only 1 thread at a time
@@ -412,6 +413,12 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 	}
 	if err := oc.updateStaleDefaultDenyACLNames(knet.PolicyTypeIngress, ingressDefaultDenySuffix); err != nil {
 		return fmt.Errorf("cannot clean up ingress default deny ACL name: %v", err)
+	}
+
+	// add default hairpin allow acl
+	err = oc.addHairpinAllowACL()
+	if err != nil {
+		return fmt.Errorf("failed to create allow hairping acl: %w", err)
 	}
 
 	return nil
@@ -1629,4 +1636,52 @@ func getStaleNetpolAddrSetDbIDs(policyNamespace, policyName, policyType, idx, co
 		libovsdbops.PolicyDirectionKey: strings.ToLower(policyType),
 		libovsdbops.GressIdxKey:        idx,
 	})
+}
+
+func (oc *DefaultNetworkController) getNetpolDefaultACLDbIDs(direction string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolDefault, oc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey:      allowHairpinningACLID,
+			libovsdbops.PolicyDirectionKey: direction,
+		})
+}
+
+func (oc *DefaultNetworkController) addHairpinAllowACL() error {
+	var v4Match, v6Match, match string
+	if config.IPv4Mode {
+		v4Match = fmt.Sprintf("%s.src == %s", "ip4", types.V4OVNServiceHairpinMasqueradeIP)
+		match = v4Match
+	}
+	if config.IPv6Mode {
+		v6Match = fmt.Sprintf("%s.src == %s", "ip6", types.V6OVNServiceHairpinMasqueradeIP)
+		match = v6Match
+	}
+	if config.IPv4Mode && config.IPv6Mode {
+		match = fmt.Sprintf("(%s || %s)", v4Match, v6Match)
+	}
+
+	ingressACLIDs := oc.getNetpolDefaultACLDbIDs(string(knet.PolicyTypeIngress))
+	ingressACL := BuildACL("", types.DefaultAllowPriority, match,
+		nbdb.ACLActionAllowRelated, nil, lportIngress, ingressACLIDs.GetExternalIDs())
+
+	egressACLIDs := oc.getNetpolDefaultACLDbIDs(string(knet.PolicyTypeEgress))
+	egressACL := BuildACL("", types.DefaultAllowPriority, match,
+		nbdb.ACLActionAllowRelated, nil, lportEgressAfterLB, egressACLIDs.GetExternalIDs())
+
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, ingressACL, egressACL)
+	if err != nil {
+		return fmt.Errorf("failed to create or update hairpin allow ACL %v", err)
+	}
+
+	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, types.ClusterPortGroupName, ingressACL, egressACL)
+	if err != nil {
+		return fmt.Errorf("failed to add ACL hairpin allow acl to port group: %v", err)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
