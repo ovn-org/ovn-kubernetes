@@ -137,7 +137,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	nodeInformer := c.watchFactory.NodeInformer()
 	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
-			c.handleNodeChanges(new)
+			c.handleNodePrimaryAddrChange()
 		},
 	})
 	if err != nil {
@@ -173,14 +173,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 					addrChanged = c.delAddr(a.LinkAddress.IP)
 				}
 
-				nodePrimaryAddrChanged, err := c.nodePrimaryAddrChanged()
-				if err != nil {
-					klog.Error("Address Manager failed to check node primary address change: %v", err)
-				}
-				if nodePrimaryAddrChanged {
-					klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
-					c.updateOVNEncapIPAndReconnect()
-				}
+				c.handleNodePrimaryAddrChange()
 				if addrChanged || !c.doesNodeHostAddressesMatch() {
 					klog.Infof("Host addresses changed to %v. Updating node address annotation.", c.addresses)
 					err := c.updateNodeAddressAnnotations()
@@ -207,10 +200,8 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	klog.Info("Node IP manager is running")
 }
 
-// handleNodeChanges takes a node obj, extracts its name and determines if the node's address changed. If so, it
-// updates the node's OVS encapsulation IP.
-func (c *addressManager) handleNodeChanges(obj interface{}) {
-	var err error
+// updates OVN's EncapIP if the node IP changed
+func (c *addressManager) handleNodePrimaryAddrChange() {
 	nodePrimaryAddrChanged, err := c.nodePrimaryAddrChanged()
 	if err != nil {
 		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
@@ -312,16 +303,21 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 		return false, err
 	}
 	// check to see if ips on the node differ from what we stored
-	// in addressManager
+	// in addressManager and it's an address that is known locally
 	nodePrimaryAddrStr, err := util.GetNodePrimaryIP(node)
 	if err != nil {
 		return false, err
 	}
 	nodePrimaryAddr := net.ParseIP(nodePrimaryAddrStr)
+
 	if nodePrimaryAddr == nil {
 		return false, fmt.Errorf("failed to parse the primary IP address string from kubernetes node status")
 	}
-	if c.nodePrimaryAddr != nil && c.nodePrimaryAddr.Equal(nodePrimaryAddr) {
+	c.Lock()
+	exists := c.addresses.Has(nodePrimaryAddrStr)
+	c.Unlock()
+
+	if !exists || c.nodePrimaryAddr.Equal(nodePrimaryAddr) {
 		return false, nil
 	}
 	c.nodePrimaryAddr = nodePrimaryAddr
@@ -410,14 +406,7 @@ func (c *addressManager) sync() {
 	}
 
 	addrChanged := c.assignAddresses(currAddresses)
-	nodePrimaryAddrChanged, err := c.nodePrimaryAddrChanged()
-	if err != nil {
-		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
-	}
-	if nodePrimaryAddrChanged {
-		klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
-		c.updateOVNEncapIPAndReconnect()
-	}
+	c.handleNodePrimaryAddrChange()
 	if addrChanged || !c.doesNodeHostAddressesMatch() {
 		klog.Infof("Node address changed to %v. Updating annotations.", currAddresses)
 		err := c.updateNodeAddressAnnotations()
