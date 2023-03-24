@@ -1,4 +1,4 @@
-package address_set_syncer
+package address_set
 
 import (
 	"fmt"
@@ -6,7 +6,6 @@ import (
 	"github.com/onsi/gomega"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -34,10 +33,6 @@ func testSyncerWithData(data []asSync, initialDbState, finalDbState []libovsdbte
 	for _, asSync := range data {
 		dbSetup.NBData = append(dbSetup.NBData, asSync.before)
 	}
-	// Restore global default values before each testcase
-	err := config.PrepareTestConfig()
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	//config.IPv6Mode = true
 	libovsdbOvnNBClient, _, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
 	defer libovsdbCleanup.Cleanup()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())

@@ -10,19 +10,22 @@ const (
 	EgressFirewallDNSOwnerType ownerType = "EgressFirewallDNS"
 	EgressQoSOwnerType         ownerType = "EgressQoS"
 	// only used for cleanup now, as the stale owner of network policy address sets
-	NetworkPolicyOwnerType   ownerType = "NetworkPolicy"
-	NetpolDefaultOwnerType   ownerType = "NetpolDefault"
-	PodSelectorOwnerType     ownerType = "PodSelector"
-	NamespaceOwnerType       ownerType = "Namespace"
-	HybridNodeRouteOwnerType ownerType = "HybridNodeRoute"
-	EgressIPOwnerType        ownerType = "EgressIP"
-	EgressServiceOwnerType   ownerType = "EgressService"
+	NetworkPolicyOwnerType      ownerType = "NetworkPolicy"
+	NetpolDefaultOwnerType      ownerType = "NetpolDefault"
+	PodSelectorOwnerType        ownerType = "PodSelector"
+	NamespaceOwnerType          ownerType = "Namespace"
+	HybridNodeRouteOwnerType    ownerType = "HybridNodeRoute"
+	EgressIPOwnerType           ownerType = "EgressIP"
+	EgressServiceOwnerType      ownerType = "EgressService"
+	MulticastNamespaceOwnerType ownerType = "MulticastNS"
+	MulticastClusterOwnerType   ownerType = "MulticastCluster"
 
 	// owner extra IDs, make sure to define only 1 ExternalIDKey for every string value
 	PriorityKey           ExternalIDKey = "priority"
 	PolicyDirectionKey    ExternalIDKey = "direction"
 	GressIdxKey           ExternalIDKey = "gress-index"
 	AddressSetIPFamilyKey ExternalIDKey = "ip-family"
+	TypeKey               ExternalIDKey = "type"
 )
 
 // ObjectIDsTypes should only be created here
@@ -85,6 +88,21 @@ var AddressSetEgressService = newObjectIDsType(addressSet, EgressServiceOwnerTyp
 var ACLNetpolDefault = newObjectIDsType(acl, NetpolDefaultOwnerType, []ExternalIDKey{
 	// for now there is only 1 acl of this type, but we use a name in case more types are needed in the future
 	ObjectNameKey,
+	// egress or ingress
+	PolicyDirectionKey,
+})
+
+var ACLMulticastNamespace = newObjectIDsType(acl, MulticastNamespaceOwnerType, []ExternalIDKey{
+	// namespace
+	ObjectNameKey,
+	// egress or ingress
+	PolicyDirectionKey,
+})
+
+var ACLMulticastCluster = newObjectIDsType(acl, MulticastClusterOwnerType, []ExternalIDKey{
+	// cluster-scoped multicast acls
+	// there are 2 possible TypeKey values for cluster default multicast acl: DefaultDeny and AllowInterNode
+	TypeKey,
 	// egress or ingress
 	PolicyDirectionKey,
 })

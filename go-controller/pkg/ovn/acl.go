@@ -73,6 +73,17 @@ func hashedPortGroup(s string) string {
 	return util.HashForOVN(s)
 }
 
+// acl.Name is cropped to 64 symbols and is used for logging.
+// currently only egress firewall, gress network policy and default deny network policy ACLs are logged.
+// Other ACLs don't need a name.
+// Just a namespace name may be 63 symbols long, therefore some information may be cropped.
+// Therefore, "feature" as "EF" for EgressFirewall and "NP" for network policy goes first, then namespace,
+// then acl-related info.
+func getACLName(dbIDs *libovsdbops.DbObjectIDs) string {
+	aclName := ""
+	return fmt.Sprintf("%.63s", aclName)
+}
+
 // BuildACL should be used to build ACL instead of directly calling libovsdbops.BuildACL.
 // It can properly set and reset log settings for ACL based on ACLLoggingLevels
 func BuildACL(aclName string, priority int, match, action string,
@@ -90,6 +101,42 @@ func BuildACL(aclName string, priority int, match, action string,
 	default:
 		panic(fmt.Sprintf("Failed to build ACL: unknown acl type %s", aclT))
 	}
+	log, logSeverity := getLogSeverity(action, logLevels)
+	ACL := libovsdbops.BuildACL(
+		aclName,
+		direction,
+		priority,
+		match,
+		action,
+		types.OvnACLLoggingMeter,
+		logSeverity,
+		log,
+		externalIDs,
+		options,
+	)
+	return ACL
+}
+
+// BuildACLFromDbIDs should be used to build ACL instead of directly calling libovsdbops.BuildACL.
+// It can properly set and reset log settings for ACL based on ACLLoggingLevels, and
+// set acl.Name and acl.ExternalIDs based on given DbIDs
+func BuildACLFromDbIDs(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string, logLevels *ACLLoggingLevels,
+	aclT aclPipelineType) *nbdb.ACL {
+	var options map[string]string
+	var direction string
+	switch aclT {
+	case lportEgressAfterLB:
+		direction = nbdb.ACLDirectionFromLport
+		options = map[string]string{
+			"apply-after-lb": "true",
+		}
+	case lportIngress:
+		direction = nbdb.ACLDirectionToLport
+	default:
+		panic(fmt.Sprintf("Failed to build ACL: unknown acl type %s", aclT))
+	}
+	externalIDs := dbIDs.GetExternalIDs()
+	aclName := getACLName(dbIDs)
 	log, logSeverity := getLogSeverity(action, logLevels)
 	ACL := libovsdbops.BuildACL(
 		aclName,

@@ -246,7 +246,7 @@ func (oc *DefaultNetworkController) updateStaleDefaultDenyACLNames(npType knet.P
 	}
 	// loop through the cleanUp map and per namespace update the first ACL's name and delete the rest
 	for namespace, aclList := range cleanUpDefaultDeny {
-		var aclT aclType
+		var aclT aclPipelineType
 		if aclList[0].Direction == nbdb.ACLDirectionToLport {
 			aclT = lportIngress
 		} else {
@@ -459,7 +459,7 @@ func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbcl
 	return nil
 }
 
-func getDefaultDenyPolicyACLName(ns string, aclT aclType) string {
+func getDefaultDenyPolicyACLName(ns string, aclT aclPipelineType) string {
 	var defaultDenySuffix string
 	switch aclT {
 	case lportIngress:
@@ -472,7 +472,7 @@ func getDefaultDenyPolicyACLName(ns string, aclT aclType) string {
 	return joinACLName(ns, defaultDenySuffix)
 }
 
-func getDefaultDenyPolicyExternalIDs(aclT aclType) map[string]string {
+func getDefaultDenyPolicyExternalIDs(aclT aclPipelineType) map[string]string {
 	return map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(aclTypeToPolicyType(aclT))}
 }
 
@@ -484,7 +484,7 @@ func defaultDenyPortGroupName(namespace, gressSuffix string) string {
 	return hashedPortGroup(namespace) + "_" + gressSuffix
 }
 
-func buildDenyACLs(namespace, pg string, aclLogging *ACLLoggingLevels, aclT aclType) (denyACL, allowACL *nbdb.ACL) {
+func buildDenyACLs(namespace, pg string, aclLogging *ACLLoggingLevels, aclT aclPipelineType) (denyACL, allowACL *nbdb.ACL) {
 	denyMatch := getACLMatch(pg, "", aclT)
 	allowMatch := getACLMatch(pg, arpAllowPolicyMatch, aclT)
 	denyACL = BuildACL(getDefaultDenyPolicyACLName(namespace, aclT), types.DefaultDenyPriority, denyMatch,

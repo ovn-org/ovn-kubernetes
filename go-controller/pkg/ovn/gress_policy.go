@@ -16,6 +16,10 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+const (
+	noneMatch = "None"
+)
+
 type gressPolicy struct {
 	controllerName  string
 	policyNamespace string
@@ -315,7 +319,7 @@ func getGressPolicyACLName(ns, policyName string, idx int) string {
 
 // buildACLAllow builds an allow-related ACL for a given match
 func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, aclLogging *ACLLoggingLevels) *nbdb.ACL {
-	aclT := policyTypeToAclType(gp.policyType)
+	aclT := policyTypeToAclPipeline(gp.policyType)
 	priority := types.DefaultAllowPriority
 	action := nbdb.ACLActionAllowRelated
 	if gp.isNetPolStateless {
