@@ -28,7 +28,7 @@ type nodeTracker struct {
 	nodes map[string]nodeInfo
 
 	// resyncFn is the function to call so that all service are resynced
-	resyncFn func()
+	resyncFn func(nodes []nodeInfo)
 }
 
 type nodeInfo struct {
@@ -149,27 +149,29 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
 	}
 
+	klog.Infof("Node %s switch + router changed, syncing services", nodeName)
+
 	nt.Lock()
+	defer nt.Unlock()
 	if existing, ok := nt.nodes[nodeName]; ok {
 		if reflect.DeepEqual(existing, ni) {
-			nt.Unlock()
 			return
 		}
 	}
 
 	nt.nodes[nodeName] = ni
-	nt.Unlock()
 
-	klog.Infof("Node %s switch + router changed, syncing services", nodeName)
 	// Resync all services
-	nt.resyncFn()
+	nt.resyncFn(nt.allNodes())
 }
 
 // removeNodeWithServiceReSync removes a node from the LB -> node mapper
 // *and* forces full reconciliation of services.
 func (nt *nodeTracker) removeNodeWithServiceReSync(nodeName string) {
 	nt.removeNode(nodeName)
-	nt.resyncFn()
+	nt.Lock()
+	nt.resyncFn(nt.allNodes())
+	nt.Unlock()
 }
 
 // RemoveNode removes a node from the LB -> node mapper
@@ -227,9 +229,6 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 
 // allNodes returns a list of all nodes (and their relevant information)
 func (nt *nodeTracker) allNodes() []nodeInfo {
-	nt.Lock()
-	defer nt.Unlock()
-
 	out := make([]nodeInfo, 0, len(nt.nodes))
 	for _, node := range nt.nodes {
 		out = append(out, node)

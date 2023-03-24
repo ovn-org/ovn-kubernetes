@@ -67,13 +67,30 @@ func (r *repair) runBeforeSync() {
 		r.unsyncedServices.Insert(key)
 	}
 
+	// Find all templates.
+	allTemplates, err := listSvcTemplates(r.nbClient)
+	if err != nil {
+		klog.Errorf("Unable to get templates for repair: %v", err)
+	}
+
 	// Find all load-balancers associated with Services
-	existingLBs, err := getLBs(r.nbClient)
+	existingLBs, err := getLBs(r.nbClient, allTemplates)
 	if err != nil {
 		klog.Errorf("Unable to get service lbs for repair: %v", err)
 	}
 
 	// Look for any load balancers whose Service no longer exists in the apiserver
+	// and for any chassis template vars whose Service no longer exists.
+	staleTemplateNames := sets.Set[string]{}
+	for templateName := range allTemplates {
+		// NodeIP templates are always valid, skip those.
+		if isLBNodeIPTemplateName(templateName) {
+			continue
+		}
+
+		// All others are potentially stale.
+		staleTemplateNames.Insert(templateName)
+	}
 	staleLBs := []string{}
 	for _, lb := range existingLBs {
 		// Extract namespace + name, look to see if it exists
@@ -82,12 +99,19 @@ func (r *repair) runBeforeSync() {
 		if err != nil || namespace == "" {
 			klog.Warningf("Service LB %#v has unreadable owner, deleting", lb)
 			staleLBs = append(staleLBs, lb.UUID)
+			continue
 		}
 
 		_, err = r.serviceLister.Services(namespace).Get(name)
 		if apierrors.IsNotFound(err) {
 			klog.V(5).Infof("Found stale service LB %#v", lb)
 			staleLBs = append(staleLBs, lb.UUID)
+			continue
+		}
+
+		// All of the LB's template vars are still useful.
+		for _, t := range lb.Templates {
+			staleTemplateNames.Delete(t.Name)
 		}
 	}
 
@@ -96,6 +120,12 @@ func (r *repair) runBeforeSync() {
 		klog.Errorf("Failed to delete stale LBs: %v", err)
 	}
 	klog.V(2).Infof("Deleted %d stale service LBs", len(staleLBs))
+
+	// Delete those stale template vars
+	if err := libovsdbops.DeleteAllChassisTemplateVarVariables(r.nbClient, staleTemplateNames.UnsortedList()); err != nil {
+		klog.Errorf("Failed to delete stale Chassis Template Vars: %v", err)
+	}
+	klog.V(2).Infof("Deleted %d stale Chassis Template Vars", len(staleTemplateNames))
 
 	// Remove existing reject rules. They are not used anymore
 	// given the introduction of idling loadbalancers

@@ -129,11 +129,13 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 		name string
 		args args
 
-		resultSharedGatewayCluster []lbConfig
-		resultSharedGatewayNode    []lbConfig
+		resultSharedGatewayCluster  []lbConfig
+		resultSharedGatewayTemplate []lbConfig
+		resultSharedGatewayNode     []lbConfig
 
-		resultLocalGatewayNode    []lbConfig
-		resultLocalGatewayCluster []lbConfig
+		resultLocalGatewayNode     []lbConfig
+		resultLocalGatewayTemplate []lbConfig
+		resultLocalGatewayCluster  []lbConfig
 
 		resultsSame bool //if true, then just use the SharedGateway results for the LGW test
 	}{
@@ -503,7 +505,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					Port:  outport,
 				},
 			}},
-			resultSharedGatewayNode: []lbConfig{{
+			resultSharedGatewayTemplate: []lbConfig{{
 				vips:     []string{"node"},
 				protocol: v1.ProtocolTCP,
 				inport:   5,
@@ -538,6 +540,18 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			// In shared and local gateway modes, nodeport and host-network-pods must be per-node
 			resultSharedGatewayNode: []lbConfig{
 				{
+					vips:     []string{"192.168.1.1", "2002::1"},
+					protocol: v1.ProtocolTCP,
+					inport:   inport,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"192.168.0.1"},
+						V6IPs: []string{"2001::1"},
+						Port:  outport,
+					},
+				},
+			},
+			resultSharedGatewayTemplate: []lbConfig{
+				{
 					vips:     []string{"node"},
 					protocol: v1.ProtocolTCP,
 					inport:   5,
@@ -548,6 +562,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					},
 					hasNodePort: true,
 				},
+			},
+			// in local gateway mode, only nodePort is per-node
+			resultLocalGatewayNode: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
 					protocol: v1.ProtocolTCP,
@@ -559,8 +576,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					},
 				},
 			},
-			// in local gateway mode, only nodePort is per-node
-			resultLocalGatewayNode: []lbConfig{
+			resultLocalGatewayTemplate: []lbConfig{
 				{
 					vips:     []string{"node"},
 					protocol: v1.ProtocolTCP,
@@ -571,16 +587,6 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						Port:  outport,
 					},
 					hasNodePort: true,
-				},
-				{
-					vips:     []string{"192.168.1.1", "2002::1"},
-					protocol: v1.ProtocolTCP,
-					inport:   inport,
-					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
-					},
 				},
 			},
 		},
@@ -705,17 +711,20 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 	for i, tt := range tests {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
 			globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
-			perNode, clusterWide := buildServiceLBConfigs(tt.args.service, tt.args.slices)
+			perNode, template, clusterWide := buildServiceLBConfigs(tt.args.service, tt.args.slices, true, true)
 			assert.EqualValues(t, tt.resultSharedGatewayNode, perNode, "SGW per-node configs should be equal")
+			assert.EqualValues(t, tt.resultSharedGatewayTemplate, template, "SGW template configs should be equal")
 			assert.EqualValues(t, tt.resultSharedGatewayCluster, clusterWide, "SGW cluster-wide configs should be equal")
 
 			globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
-			perNode, clusterWide = buildServiceLBConfigs(tt.args.service, tt.args.slices)
+			perNode, template, clusterWide = buildServiceLBConfigs(tt.args.service, tt.args.slices, true, true)
 			if tt.resultsSame {
 				assert.EqualValues(t, tt.resultSharedGatewayNode, perNode, "LGW per-node configs should be equal")
+				assert.EqualValues(t, tt.resultSharedGatewayTemplate, template, "LGW template configs should be equal")
 				assert.EqualValues(t, tt.resultSharedGatewayCluster, clusterWide, "LGW cluster-wide configs should be equal")
 			} else {
 				assert.EqualValues(t, tt.resultLocalGatewayNode, perNode, "LGW per-node configs should be equal")
+				assert.EqualValues(t, tt.resultLocalGatewayTemplate, template, "LGW template configs should be equal")
 				assert.EqualValues(t, tt.resultLocalGatewayCluster, clusterWide, "LGW cluster-wide configs should be equal")
 			}
 		})
@@ -802,12 +811,12 @@ func Test_buildClusterLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Rules: []LBRule{
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"192.168.0.1", 8080}, {"192.168.0.2", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "192.168.0.1", Port: 8080}, {IP: "192.168.0.2", Port: 8080}},
 						},
 						{
-							Source:  Addr{"1.2.3.4", 443},
-							Targets: []Addr{{"192.168.0.1", 8043}},
+							Source:  Addr{IP: "1.2.3.4", Port: 443},
+							Targets: []Addr{{IP: "192.168.0.1", Port: 8043}},
 						},
 					},
 
@@ -849,8 +858,8 @@ func Test_buildClusterLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Rules: []LBRule{
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"192.168.0.1", 8080}, {"192.168.0.2", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "192.168.0.1", Port: 8080}, {IP: "192.168.0.2", Port: 8080}},
 						},
 					},
 
@@ -865,8 +874,8 @@ func Test_buildClusterLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Rules: []LBRule{
 						{
-							Source:  Addr{"1.2.3.4", 443},
-							Targets: []Addr{{"192.168.0.1", 8043}},
+							Source:  Addr{IP: "1.2.3.4", Port: 443},
+							Targets: []Addr{{IP: "192.168.0.1", Port: 8043}},
 						},
 					},
 
@@ -910,20 +919,20 @@ func Test_buildClusterLBs(t *testing.T) {
 					ExternalIDs: defaultExternalIDs,
 					Rules: []LBRule{
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"192.168.0.1", 8080}, {"192.168.0.2", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "192.168.0.1", Port: 8080}, {IP: "192.168.0.2", Port: 8080}},
 						},
 						{
-							Source:  Addr{"fe80::1", 80},
-							Targets: []Addr{{"fe90::1", 8080}, {"fe91::1", 8080}},
+							Source:  Addr{IP: "fe80::1", Port: 80},
+							Targets: []Addr{{IP: "fe90::1", Port: 8080}, {IP: "fe91::1", Port: 8080}},
 						},
 						{
-							Source:  Addr{"1.2.3.4", 443},
-							Targets: []Addr{{"192.168.0.1", 8043}},
+							Source:  Addr{IP: "1.2.3.4", Port: 443},
+							Targets: []Addr{{IP: "192.168.0.1", Port: 8043}},
 						},
 						{
-							Source:  Addr{"fe80::1", 443},
-							Targets: []Addr{{"fe90::1", 8043}},
+							Source:  Addr{IP: "fe80::1", Port: 443},
+							Targets: []Addr{{IP: "fe90::1", Port: 8043}},
 						},
 					},
 
@@ -1022,8 +1031,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1036,8 +1045,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1067,8 +1076,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"10.0.0.1", 80},
-							Targets: []Addr{{"10.128.0.2", 8080}},
+							Source:  Addr{IP: "10.0.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1081,8 +1090,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"10.0.0.2", 80},
-							Targets: []Addr{{"10.128.0.2", 8080}},
+							Source:  Addr{IP: "10.0.0.2", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1097,8 +1106,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"10.0.0.1", 80},
-							Targets: []Addr{{"10.128.0.2", 8080}},
+							Source:  Addr{IP: "10.0.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1111,8 +1120,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"10.0.0.2", 80},
-							Targets: []Addr{{"10.128.0.2", 8080}},
+							Source:  Addr{IP: "10.0.0.2", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1150,12 +1159,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}},
 						},
 						{
-							Source:  Addr{"10.0.0.1", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{IP: "10.0.0.1", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1167,12 +1176,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 						{
-							Source:  Addr{"10.0.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "10.0.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1185,12 +1194,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 						{
-							Source:  Addr{"10.0.0.2", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "10.0.0.2", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1204,12 +1213,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}},
 						},
 						{
-							Source:  Addr{"10.0.0.1", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{IP: "10.0.0.1", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1221,12 +1230,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 						{
-							Source:  Addr{"10.0.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "10.0.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1239,12 +1248,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 						{
-							Source:  Addr{"10.0.0.2", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "10.0.0.2", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1289,8 +1298,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1303,8 +1312,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"10.0.0.1", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}},
+							Source:  Addr{IP: "10.0.0.1", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}},
 						},
 					},
 				},
@@ -1315,16 +1324,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 						{
-							Source:  Addr{"169.254.169.3", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "169.254.169.3", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 						{
-							Source:  Addr{"10.0.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "10.0.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1341,11 +1350,11 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 						{
-							Source:  Addr{"10.0.0.2", 80},
+							Source:  Addr{IP: "10.0.0.2", Port: 80},
 							Targets: []Addr{},
 						},
 					},
@@ -1358,16 +1367,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 						{
-							Source:  Addr{"169.254.169.3", 80},
+							Source:  Addr{IP: "169.254.169.3", Port: 80},
 							Targets: []Addr{},
 						},
 						{
-							Source:  Addr{"10.0.0.2", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}},
+							Source:  Addr{IP: "10.0.0.2", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1406,12 +1415,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.1", Port: 8080}, {IP: "10.128.1.1", Port: 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.1", Port: 8080}, {IP: "10.128.1.1", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1423,12 +1432,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.128.0.1", 8080}}, // filters out the ep present only on node-a
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.1", Port: 8080}}, // filters out the ep present only on node-a
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.1", Port: 8080}, {IP: "10.128.1.1", Port: 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 					Opts: defaultOpts,
@@ -1440,12 +1449,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.128.1.1", 8080}}, // filters out the ep present only on node-b
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.128.1.1", Port: 8080}}, // filters out the ep present only on node-b
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.1", Port: 8080}, {IP: "10.128.1.1", Port: 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 					Opts: defaultOpts,
@@ -1459,12 +1468,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.1", Port: 8080}, {IP: "10.128.1.1", Port: 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.1", Port: 8080}, {IP: "10.128.1.1", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1476,12 +1485,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.128.0.1", 8080}}, // filters out the ep present only on node-a
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.1", Port: 8080}}, // filters out the ep present only on node-a
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.1", Port: 8080}, {IP: "10.128.1.1", Port: 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 					Opts: defaultOpts,
@@ -1493,12 +1502,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.128.1.1", 8080}}, // filters out the ep present only on node-b
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.128.1.1", Port: 8080}}, // filters out the ep present only on node-b
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.128.0.1", 8080}, {"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.128.0.1", Port: 8080}, {IP: "10.128.1.1", Port: 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 					Opts: defaultOpts,
@@ -1537,12 +1546,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}, {IP: "10.0.0.2", Port: 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}, {IP: "10.0.0.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1554,12 +1563,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}}, // filters out the ep present only on node-a
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}}, // filters out the ep present only on node-a
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}, {IP: "10.0.0.2", Port: 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 					Opts: defaultOpts,
@@ -1571,12 +1580,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}, {IP: "169.254.169.2", Port: 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}, {IP: "169.254.169.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1588,12 +1597,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.2", 8080}}, // filters out the ep present only on node-b
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.2", Port: 8080}}, // filters out the ep present only on node-b
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}, {IP: "10.0.0.2", Port: 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 					Opts: defaultOpts,
@@ -1607,12 +1616,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}, {IP: "10.0.0.2", Port: 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}, {"10.0.0.2", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}, {IP: "10.0.0.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1624,12 +1633,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}}, // filters out the ep present only on node-a
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}}, // filters out the ep present only on node-a
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}, {IP: "10.0.0.2", Port: 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 					Opts: defaultOpts,
@@ -1641,12 +1650,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}}, // no filtering on GR LBs for ITP=local
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}, {IP: "169.254.169.2", Port: 8080}}, // no filtering on GR LBs for ITP=local
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}, {"169.254.169.2", 8080}},
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}, {IP: "169.254.169.2", Port: 8080}},
 						},
 					},
 					Opts: defaultOpts,
@@ -1658,12 +1667,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.2", 8080}}, // filters out the ep present only on node-b
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.2", Port: 8080}}, // filters out the ep present only on node-b
 						},
 						{
-							Source:  Addr{"1.2.3.4", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // ITP is only applicable for clusterIPs
+							Source:  Addr{IP: "1.2.3.4", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}, {IP: "10.0.0.2", Port: 8080}}, // ITP is only applicable for clusterIPs
 						},
 					},
 					Opts: defaultOpts,
@@ -1707,8 +1716,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
 						},
 					},
 					Opts: defaultOpts,
@@ -1721,8 +1730,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"10.0.0.1", 34345},
-							Targets: []Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
+							Source:  Addr{IP: "10.0.0.1", Port: 34345},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
 						},
 					},
 				},
@@ -1733,16 +1742,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}}, // filter out eps only on node-a for clusterIP
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}}, // filter out eps only on node-a for clusterIP
 						},
 						{
-							Source:  Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
-							Targets: []Addr{{"10.0.0.1", 8080}},   // filter out eps only on node-a for nodePorts
+							Source:  Addr{IP: "169.254.169.3", Port: 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},   // filter out eps only on node-a for nodePorts
 						},
 						{
-							Source:  Addr{"10.0.0.1", 34345},
-							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+							Source:  Addr{IP: "10.0.0.1", Port: 34345},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
 					Opts: defaultOpts,
@@ -1754,11 +1763,11 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
 						},
 						{
-							Source:  Addr{"10.0.0.2", 34345},
+							Source:  Addr{IP: "10.0.0.2", Port: 34345},
 							Targets: []Addr{}, // filter out eps only on node-b for nodePort on GR when ETP=local
 						},
 					},
@@ -1771,16 +1780,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
 							Targets: []Addr{}, // filter out eps only on node-b for clusterIP
 						},
 						{
-							Source:  Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
-							Targets: []Addr{},                     // filter out eps only on node-b for nodePorts
+							Source:  Addr{IP: "169.254.169.3", Port: 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []Addr{},                               // filter out eps only on node-b for nodePorts
 						},
 						{
-							Source:  Addr{"10.0.0.2", 34345},
-							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+							Source:  Addr{IP: "10.0.0.2", Port: 34345},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
 					Opts: defaultOpts,
@@ -1794,8 +1803,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"169.254.169.2", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
 						},
 					},
 					Opts: defaultOpts,
@@ -1808,8 +1817,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"10.0.0.1", 34345},
-							Targets: []Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
+							Source:  Addr{IP: "10.0.0.1", Port: 34345},
+							Targets: []Addr{{IP: "169.254.169.2", Port: 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
 						},
 					},
 				},
@@ -1820,16 +1829,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}}, // filter out eps only on node-a for clusterIP
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}}, // filter out eps only on node-a for clusterIP
 						},
 						{
-							Source:  Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
-							Targets: []Addr{{"10.0.0.1", 8080}},   // filter out eps only on node-a for nodePorts
+							Source:  Addr{IP: "169.254.169.3", Port: 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}},   // filter out eps only on node-a for nodePorts
 						},
 						{
-							Source:  Addr{"10.0.0.1", 34345},
-							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+							Source:  Addr{IP: "10.0.0.1", Port: 34345},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
 					Opts: defaultOpts,
@@ -1841,11 +1850,11 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
-							Targets: []Addr{{"10.0.0.1", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
 						},
 						{
-							Source:  Addr{"10.0.0.2", 34345},
+							Source:  Addr{IP: "10.0.0.2", Port: 34345},
 							Targets: []Addr{}, // filter out eps only on node-b for nodePort on GR when ETP=local
 						},
 					},
@@ -1858,16 +1867,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Protocol:    "TCP",
 					Rules: []LBRule{
 						{
-							Source:  Addr{"192.168.0.1", 80},
+							Source:  Addr{IP: "192.168.0.1", Port: 80},
 							Targets: []Addr{}, // filter out eps only on node-b for clusterIP
 						},
 						{
-							Source:  Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
-							Targets: []Addr{},                     // filter out eps only on node-b for nodePorts
+							Source:  Addr{IP: "169.254.169.3", Port: 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []Addr{},                               // filter out eps only on node-b for nodePorts
 						},
 						{
-							Source:  Addr{"10.0.0.2", 34345},
-							Targets: []Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+							Source:  Addr{IP: "10.0.0.2", Port: 34345},
+							Targets: []Addr{{IP: "10.0.0.1", Port: 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
 					Opts: defaultOpts,
