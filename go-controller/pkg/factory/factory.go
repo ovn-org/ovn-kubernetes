@@ -444,15 +444,32 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 // mode process.
 func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:  informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		informers: make(map[reflect.Type]*informer),
-		stopChan:  make(chan struct{}),
+		iFactory:     informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:   egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		cpipcFactory: ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
+		informers:    make(map[reflect.Type]*informer),
+		stopChan:     make(chan struct{}),
 	}
 
+	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
+		return nil, err
+	}
 	var err error
 	wf.informers[NodeType], err = newInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer())
 	if err != nil {
 		return nil, err
+	}
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+	if util.PlatformTypeIsEgressIPCloudProvider() {
+		wf.informers[CloudPrivateIPConfigType], err = newInformer(CloudPrivateIPConfigType, wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer())
+		if err != nil {
+			return nil, err
+		}
 	}
 	return wf, nil
 }
