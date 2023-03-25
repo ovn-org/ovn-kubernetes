@@ -678,6 +678,20 @@ func CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient libovsdbclien
 // routes from the cache based on a given predicate, deletes them and removes
 // them from the provided logical router
 func DeleteLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client, routerName string, p logicalRouterStaticRoutePredicate) error {
+	var ops []libovsdb.Operation
+	var err error
+	ops, err = DeleteLogicalRouterStaticRoutesWithPredicateOps(nbClient, ops, routerName, p)
+	if err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
+}
+
+// DeleteLogicalRouterStaticRoutesWithPredicateOps looks up logical router static
+// routes from the cache based on a given predicate, and returns the ops to delete
+// them and remove them from the provided logical router
+func DeleteLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, routerName string, p logicalRouterStaticRoutePredicate) ([]libovsdb.Operation, error) {
 	router := &nbdb.LogicalRouter{
 		Name: routerName,
 	}
@@ -700,7 +714,7 @@ func DeleteLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client
 	}
 
 	m := newModelClient(nbClient)
-	return m.Delete(opModels...)
+	return m.DeleteOps(ops, opModels...)
 }
 
 // DeleteLogicalRouterStaticRoutes deletes the logical router static routes and
