@@ -1095,3 +1095,8 @@ func isMultipleZoneDeployment(c clientset.Interface) (bool, error) {
 
 	return len(foundZones) > 1, nil
 }
+
+func isInterconnectEnabled() bool {
+	val, present := os.LookupEnv("OVN_INTERCONNECT_ENABLE")
+	return present && val == "true"
+}

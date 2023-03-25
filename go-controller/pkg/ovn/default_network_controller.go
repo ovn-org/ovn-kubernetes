@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -88,7 +87,7 @@ type DefaultNetworkController struct {
 	defaultCOPPUUID string
 
 	// Controller used for programming OVN for egress IP
-	eIPC egressIPController
+	eIPC egressIPZoneController
 
 	// Controller used to handle services
 	svcController *svccontroller.Controller
@@ -120,9 +119,6 @@ type DefaultNetworkController struct {
 	nodeClusterRouterPortFailed sync.Map
 	hybridOverlayFailed         sync.Map
 	syncZoneICFailed            sync.Map
-
-	// retry framework for Cloud private IP config
-	retryCloudPrivateIPConfig *retry.RetryFramework
 
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
@@ -187,19 +183,14 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		},
 		externalGWCache: make(map[ktypes.NamespacedName]*externalRouteInfo),
 		exGWCacheMutex:  sync.RWMutex{},
-		eIPC: egressIPController{
-			egressIPAssignmentMutex:           &sync.Mutex{},
-			podAssignmentMutex:                &sync.Mutex{},
-			nodeIPUpdateMutex:                 &sync.Mutex{},
-			podAssignment:                     make(map[string]*podAssignmentState),
-			pendingCloudPrivateIPConfigsMutex: &sync.Mutex{},
-			pendingCloudPrivateIPConfigsOps:   make(map[string]map[string]*cloudPrivateIPConfigOp),
-			allocator:                         allocator{&sync.Mutex{}, make(map[string]*egressNode)},
-			nbClient:                          cnci.nbClient,
-			watchFactory:                      cnci.watchFactory,
-			egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
-			reachabilityCheckInterval:         egressIPReachabilityCheckInterval,
-			egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
+		eIPC: egressIPZoneController{
+			egressIPAssignmentMutex: &sync.Mutex{},
+			nodeIPUpdateMutex:       &sync.Mutex{},
+			podAssignmentMutex:      &sync.Mutex{},
+			podAssignment:           make(map[string]*podAssignmentState),
+			nbClient:                cnci.nbClient,
+			watchFactory:            cnci.watchFactory,
+			nodeZoneState:           syncmap.NewSyncMap[bool](),
 		},
 		loadbalancerClusterCache:     make(map[kapi.Protocol]string),
 		clusterLoadBalancerGroupUUID: "",
@@ -235,7 +226,6 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 	oc.retryEgressIPPods = oc.newRetryFramework(factory.EgressIPPodType)
 	oc.retryEgressNodes = oc.newRetryFramework(factory.EgressNodeType)
 	oc.retryEgressFwNodes = oc.newRetryFramework(factory.EgressFwNodeType)
-	oc.retryCloudPrivateIPConfig = oc.newRetryFramework(factory.CloudPrivateIPConfigType)
 	oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
 	oc.retryNetworkPolicies = oc.newRetryFramework(factory.PolicyType)
 }
@@ -454,11 +444,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}
 		if err := WithSyncDurationMetric("egress ip", oc.WatchEgressIP); err != nil {
 			return err
-		}
-		if util.PlatformTypeIsEgressIPCloudProvider() {
-			if err := WithSyncDurationMetric("could private ip config", oc.WatchCloudPrivateIPConfig); err != nil {
-				return err
-			}
 		}
 		if config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout == 0 {
 			klog.V(2).Infof("EgressIP node reachability check disabled")
@@ -772,7 +757,12 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 
 	case factory.EgressNodeType:
 		node := obj.(*kapi.Node)
-		return h.oc.reconcileNodeForEgressIP(nil, node)
+		// Update node in zone cache; value will be true if node is local
+		// to this zone and false if its not
+		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
+		h.oc.eIPC.nodeZoneState.Store(node.Name, h.oc.isLocalZoneNode(node))
+		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		return h.oc.reconcileEgressIPNode(nil, node)
 
 	case factory.EgressFwNodeType:
 		node := obj.(*kapi.Node)
@@ -781,10 +771,6 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 				node.Name, err)
 			return err
 		}
-
-	case factory.CloudPrivateIPConfigType:
-		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-		return h.oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
 
 	case factory.NamespaceType:
 		ns, ok := obj.(*kapi.Namespace)
@@ -896,17 +882,17 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 	case factory.EgressNodeType:
 		oldNode := oldObj.(*kapi.Node)
 		newNode := newObj.(*kapi.Node)
-		return h.oc.reconcileNodeForEgressIP(oldNode, newNode)
+		// Update node in zone cache; value will be true if node is local
+		// to this zone and false if its not
+		h.oc.eIPC.nodeZoneState.LockKey(newNode.Name)
+		h.oc.eIPC.nodeZoneState.Store(newNode.Name, h.oc.isLocalZoneNode(newNode))
+		h.oc.eIPC.nodeZoneState.UnlockKey(newNode.Name)
+		return h.oc.reconcileEgressIPNode(oldNode, newNode)
 
 	case factory.EgressFwNodeType:
 		oldNode := oldObj.(*kapi.Node)
 		newNode := newObj.(*kapi.Node)
 		return h.oc.updateEgressFirewallForNode(oldNode, newNode)
-
-	case factory.CloudPrivateIPConfigType:
-		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-		return h.oc.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
@@ -966,7 +952,15 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 
 	case factory.EgressNodeType:
 		node := obj.(*kapi.Node)
-		return h.oc.reconcileNodeForEgressIP(node, nil)
+		err := h.oc.reconcileEgressIPNode(node, nil)
+		if err != nil {
+			return err
+		}
+		// Update node in zone cache; remove the node key since node has been deleted.
+		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
+		h.oc.eIPC.nodeZoneState.Delete(node.Name)
+		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		return nil
 
 	case factory.EgressFwNodeType:
 		node, ok := obj.(*kapi.Node)
@@ -974,10 +968,6 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
 		return h.oc.updateEgressFirewallForNode(node, nil)
-
-	case factory.CloudPrivateIPConfigType:
-		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-		return h.oc.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
 
 	case factory.NamespaceType:
 		ns := obj.(*kapi.Namespace)
@@ -1018,8 +1008,7 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = nil
 
 		case factory.EgressIPPodType,
-			factory.EgressIPType,
-			factory.CloudPrivateIPConfigType:
+			factory.EgressIPType:
 			syncFunc = nil
 
 		case factory.NamespaceType:
