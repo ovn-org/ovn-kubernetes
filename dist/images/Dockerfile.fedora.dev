@@ -24,7 +24,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 # Install tools that are required for building ovs/ovn.
 RUN INSTALL_PKGS=" \
     python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
-    libpcap hostname util-linux\
+    libpcap hostname util-linux libbpf-devel libxdp-devel numactl-devel \
     python3-openvswitch python3-pyOpenSSL \
     autoconf automake libtool g++ gcc fedora-packager rpmdevtools \
     unbound unbound-devel groff python3-sphinx graphviz openssl openssl-devel \
@@ -32,14 +32,21 @@ RUN INSTALL_PKGS=" \
     dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
     dnf clean all && rm -rf /var/cache/dnf/*
 
-# Clone OVS Source Code.
-ARG OVS_REPO=https://github.com/openvswitch/ovs.git
-ARG OVS_BRANCH=master
-WORKDIR /root
-RUN git clone $OVS_REPO --single-branch --branch=$OVS_BRANCH
+# Clone OVN Source Code.
+ARG OVN_REPO=https://github.com/putnopvut/ovn.git
+ARG OVN_BRANCH=tiered_acls_v2
 
-# Build OVS rpms.
-WORKDIR /root/ovs
+WORKDIR /root
+RUN git clone $OVN_REPO --single-branch --branch=$OVN_BRANCH
+
+# Log OVN version and init OVS submodule.
+WORKDIR /root/ovn
+RUN git log -n 1 && git submodule update --init
+
+# Build OVS and OVN rpms.
+WORKDIR /root/ovn/ovs
+RUN sed -e 's/@VERSION@/0.0.1/' rhel/openvswitch-fedora.spec.in > /tmp/ovs.spec
+RUN dnf builddep -y /tmp/ovs.spec
 RUN ./boot.sh
 RUN ./configure
 RUN make rpm-fedora
@@ -47,20 +54,14 @@ RUN rm rpm/rpmbuild/RPMS/x86_64/*debug*
 RUN rm rpm/rpmbuild/RPMS/x86_64/*devel*
 RUN git log -n 1
 
-# Clone OVN Source Code.
-ARG OVN_REPO=https://github.com/ovn-org/ovn.git
-ARG OVN_BRANCH=main
-WORKDIR /root
-RUN git clone $OVN_REPO --single-branch --branch=$OVN_BRANCH
-
-# Build OVN rpms.
-WORKDIR /root/ovn/
+WORKDIR /root/ovn
+RUN sed -e 's/@VERSION@/0.0.1/' rhel/ovn-fedora.spec.in > /tmp/ovn.spec
+RUN dnf builddep -y /tmp/ovn.spec
 RUN ./boot.sh
-RUN ./configure --with-ovs-source=/root/ovs/
+RUN ./configure
 RUN make rpm-fedora
 RUN rm rpm/rpmbuild/RPMS/x86_64/*debug*
 RUN rm rpm/rpmbuild/RPMS/x86_64/*docker*
-RUN git log -n 1
 
 # Build the final image
 FROM fedora:37
@@ -75,8 +76,8 @@ RUN mkdir -p /var/run/openvswitch
 
 # Install openvswitch and ovn rpms built in previous stages.
 COPY --from=ovnbuilder /root/ovn/rpm/rpmbuild/RPMS/x86_64/*rpm ./
-COPY --from=ovnbuilder /root/ovs/rpm/rpmbuild/RPMS/x86_64/*rpm ./
-COPY --from=ovnbuilder /root/ovs/rpm/rpmbuild/RPMS/noarch/*rpm ./
+COPY --from=ovnbuilder /root/ovn/ovs/rpm/rpmbuild/RPMS/x86_64/*rpm ./
+COPY --from=ovnbuilder /root/ovn/ovs/rpm/rpmbuild/RPMS/noarch/*rpm ./
 RUN dnf install -y *.rpm && rm -f *.rpm
 
 # Install ovn-kubernetes binaries built in previous stage.
