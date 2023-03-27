@@ -354,7 +354,7 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 		}
 		if len(rule.to.nodeAddrs) > 0 {
 			for addr := range rule.to.nodeAddrs {
-				if utilnet.IsIPv6CIDRString(addr) {
+				if utilnet.IsIPv6String(addr) {
 					matchTargets = append(matchTargets, matchTarget{matchKindV6CIDR, addr, false})
 				} else {
 					matchTargets = append(matchTargets, matchTarget{matchKindV4CIDR, addr, false})
