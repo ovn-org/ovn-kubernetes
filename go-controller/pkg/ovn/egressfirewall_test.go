@@ -1073,81 +1073,103 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			})
-			ginkgo.It(fmt.Sprintf("configures egress firewall correctly with node selector, gateway mode: %s", gwMode), func() {
-				config.Gateway.Mode = gwMode
-				app.Action = func(ctx *cli.Context) error {
-					labelKey := "name"
-					labelValue := "test"
-					selector := metav1.LabelSelector{MatchLabels: map[string]string{labelKey: labelValue}}
-					namespace1 := *newNamespace("namespace1")
-					egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
-						{
-							Type: "Allow",
-							To: egressfirewallapi.EgressFirewallDestination{
-								NodeSelector: &selector,
-							},
-						},
-					})
-					mdata := newObjectMeta(node1Name, "")
-					mdata.Labels = map[string]string{labelKey: labelValue}
+			for _, ipMode := range []string{"IPv4", "IPv6"} {
+				ginkgo.It(fmt.Sprintf("configures egress firewall correctly with node selector, gateway mode: %s, IP mode: %s", gwMode, ipMode), func() {
 					nodeIP := "10.10.10.1"
-					fakeOVN.startWithDBSetup(dbSetup,
-						&egressfirewallapi.EgressFirewallList{
-							Items: []egressfirewallapi.EgressFirewall{
-								*egressFirewall,
-							},
-						},
-						&v1.NamespaceList{
-							Items: []v1.Namespace{
-								namespace1,
-							},
-						},
-						&v1.NodeList{
-							Items: []v1.Node{
-								{
-									Status: v1.NodeStatus{
-										Phase:     v1.NodeRunning,
-										Addresses: []v1.NodeAddress{{v1.NodeInternalIP, nodeIP}},
-									},
-									ObjectMeta: mdata,
+					nodeIP6 := "fc00:f853:ccd:e793::2"
+					config.Gateway.Mode = gwMode
+					var nodeAddr v1.NodeAddress
+					if ipMode == "IPv4" {
+						config.IPv4Mode = true
+						config.IPv6Mode = false
+						nodeAddr = v1.NodeAddress{v1.NodeInternalIP, nodeIP}
+
+					} else {
+						config.IPv4Mode = false
+						config.IPv6Mode = true
+						nodeAddr = v1.NodeAddress{v1.NodeInternalIP, nodeIP6}
+					}
+					app.Action = func(ctx *cli.Context) error {
+						labelKey := "name"
+						labelValue := "test"
+						selector := metav1.LabelSelector{MatchLabels: map[string]string{labelKey: labelValue}}
+						namespace1 := *newNamespace("namespace1")
+						egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+							{
+								Type: "Allow",
+								To: egressfirewallapi.EgressFirewallDestination{
+									NodeSelector: &selector,
 								},
 							},
 						})
-					err := fakeOVN.controller.WatchNamespaces()
+						mdata := newObjectMeta(node1Name, "")
+						mdata.Labels = map[string]string{labelKey: labelValue}
+						fakeOVN.startWithDBSetup(dbSetup,
+							&egressfirewallapi.EgressFirewallList{
+								Items: []egressfirewallapi.EgressFirewall{
+									*egressFirewall,
+								},
+							},
+							&v1.NamespaceList{
+								Items: []v1.Namespace{
+									namespace1,
+								},
+							},
+							&v1.NodeList{
+								Items: []v1.Node{
+									{
+										Status: v1.NodeStatus{
+											Phase:     v1.NodeRunning,
+											Addresses: []v1.NodeAddress{nodeAddr},
+										},
+										ObjectMeta: mdata,
+									},
+								},
+							})
+						err := fakeOVN.controller.WatchNamespaces()
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						err = fakeOVN.controller.WatchEgressFirewall()
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						err = fakeOVN.controller.WatchEgressFwNodes()
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						asHashv4, asHashv6 := getNsAddrSetHashNames(namespace1.Name)
+						var match string
+						if config.IPv4Mode {
+							match = fmt.Sprintf("(ip4.dst == %s) && ip4.src == $%s",
+								nodeIP, asHashv4)
+						} else {
+							match = fmt.Sprintf("(ip6.dst == %s) && ip6.src == $%s",
+								nodeIP6, asHashv6)
+						}
+						acl := libovsdbops.BuildACL(
+							buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
+							nbdb.ACLDirectionToLport,
+							t.EgressFirewallStartPriority,
+							match,
+							nbdb.ACLActionAllow,
+							t.OvnACLLoggingMeter,
+							"",
+							false,
+							map[string]string{
+								egressFirewallACLExtIdKey:    "namespace1",
+								egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+							},
+							nil,
+						)
+						acl.UUID = "ACL-UUID"
+
+						clusterPortGroup.ACLs = []string{acl.UUID}
+						expectedDatabaseState := append(initialData, acl)
+
+						gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+						return nil
+					}
+
+					err := app.Run([]string{app.Name})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOVN.controller.WatchEgressFirewall()
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOVN.controller.WatchEgressFwNodes()
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
-					ipv4ACL := libovsdbops.BuildACL(
-						buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-						nbdb.ACLDirectionToLport,
-						t.EgressFirewallStartPriority,
-						fmt.Sprintf("(ip4.dst == %s) && ip4.src == $%s", nodeIP, asHash),
-						nbdb.ACLActionAllow,
-						t.OvnACLLoggingMeter,
-						"",
-						false,
-						map[string]string{
-							egressFirewallACLExtIdKey:    "namespace1",
-							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
-						},
-						nil,
-					)
-					ipv4ACL.UUID = "ipv4ACL-UUID"
-
-					clusterPortGroup.ACLs = []string{ipv4ACL.UUID}
-					expectedDatabaseState := append(initialData, ipv4ACL)
-
-					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-
-					return nil
-				}
-
-				err := app.Run([]string{app.Name})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			})
+				})
+			}
 			ginkgo.It(fmt.Sprintf("correctly creates an egressfirewall with subnet exclusion, gateway mode %s", gwMode), func() {
 				config.Gateway.Mode = gwMode
 				app.Action = func(ctx *cli.Context) error {

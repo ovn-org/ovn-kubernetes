@@ -127,7 +127,7 @@ func newEgressFirewall(name, namespace string) *egressfirewall.EgressFirewall {
 	return &egressfirewall.EgressFirewall{
 		ObjectMeta: newObjectMeta(name, namespace),
 		Spec: egressfirewall.EgressFirewallSpec{
-			[]egressfirewall.EgressFirewallRule{
+			Egress: []egressfirewall.EgressFirewallRule{
 				{
 					Type: egressfirewall.EgressFirewallRuleAllow,
 					To: egressfirewall.EgressFirewallDestination{
