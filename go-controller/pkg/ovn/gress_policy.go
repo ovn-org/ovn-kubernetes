@@ -146,19 +146,11 @@ func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 	if config.IPv4Mode && len(v4AddressSets) > 0 {
 		v4AddressSetStr := strings.Join(v4AddressSets, ", ")
 		v4Match = fmt.Sprintf("%s.%s == {%s}", "ip4", direction, v4AddressSetStr)
-		if gp.policyType == knet.PolicyTypeIngress {
-			v4Match = fmt.Sprintf("(%s || (%s.src == %s && %s.dst == {%s}))", v4Match, "ip4",
-				types.V4OVNServiceHairpinMasqueradeIP, "ip4", v4AddressSetStr)
-		}
 		match = v4Match
 	}
 	if config.IPv6Mode && len(v6AddressSets) > 0 {
 		v6AddressSetStr := strings.Join(v6AddressSets, ", ")
 		v6Match = fmt.Sprintf("%s.%s == {%s}", "ip6", direction, v6AddressSetStr)
-		if gp.policyType == knet.PolicyTypeIngress {
-			v6Match = fmt.Sprintf("(%s || (%s.src == %s && %s.dst == {%s}))", v6Match, "ip6",
-				types.V6OVNServiceHairpinMasqueradeIP, "ip6", v6AddressSetStr)
-		}
 		match = v6Match
 	}
 	// if at least one match is empty in dualstack mode, the non-empty one will be assigned to match

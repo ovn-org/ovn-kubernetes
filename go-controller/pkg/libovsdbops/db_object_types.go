@@ -2,7 +2,7 @@ package libovsdbops
 
 const (
 	addressSet dbObjType = iota
-	// ACL here
+	acl
 )
 
 const (
@@ -11,6 +11,7 @@ const (
 	EgressQoSOwnerType         ownerType = "EgressQoS"
 	// only used for cleanup now, as the stale owner of network policy address sets
 	NetworkPolicyOwnerType   ownerType = "NetworkPolicy"
+	NetpolDefaultOwnerType   ownerType = "NetpolDefault"
 	PodSelectorOwnerType     ownerType = "PodSelector"
 	NamespaceOwnerType       ownerType = "Namespace"
 	HybridNodeRouteOwnerType ownerType = "HybridNodeRoute"
@@ -79,4 +80,11 @@ var AddressSetEgressService = newObjectIDsType(addressSet, EgressServiceOwnerTyp
 	// cluster-wide address set name
 	ObjectNameKey,
 	AddressSetIPFamilyKey,
+})
+
+var ACLNetpolDefault = newObjectIDsType(acl, NetpolDefaultOwnerType, []ExternalIDKey{
+	// for now there is only 1 acl of this type, but we use a name in case more types are needed in the future
+	ObjectNameKey,
+	// egress or ingress
+	PolicyDirectionKey,
 })

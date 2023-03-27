@@ -1632,6 +1632,51 @@ spec:
 	})
 })
 
+var _ = ginkgo.Describe("e2e network policy hairpinning validation", func() {
+	const (
+		svcName          string = "network-policy"
+		serviceHTTPPort         = 6666
+		endpointHTTPPort        = "80"
+	)
+
+	f := newPrivelegedTestFramework(svcName)
+	hairpinPodSel := map[string]string{"hairpinbackend": "true"}
+
+	ginkgo.It("Should validate the hairpinned traffic is always allowed", func() {
+		namespaceName := f.Namespace.Name
+
+		ginkgo.By("creating a \"default deny\" network policy")
+		_, err := makeDenyAllPolicy(f, namespaceName, "deny-all")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		ginkgo.By("creating pods")
+		cmd := []string{"/bin/bash", "-c", fmt.Sprintf("/agnhost netexec --http-port %s", endpointHTTPPort)}
+		// pod1 is a client and a service backend for hairpinned traffic
+		pod1 := newAgnhostPod(namespaceName, "pod1", cmd...)
+		pod1.Labels = hairpinPodSel
+		pod1 = f.PodClient().CreateSync(pod1)
+		// pod2 is another pod in the same namespace, that should be denied
+		pod2 := newAgnhostPod(namespaceName, "pod2", cmd...)
+		pod2 = f.PodClient().CreateSync(pod2)
+
+		ginkgo.By("creating a service with a single backend")
+		svcIP, err := createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, endpointHTTPPort, "ClusterIP", hairpinPodSel)
+		framework.ExpectNoError(err, fmt.Sprintf("unable to create ClusterIP svc: %v", err))
+
+		err = framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, "service-for-pods", 1, time.Second, wait.ForeverTestTimeout)
+		framework.ExpectNoError(err, fmt.Sprintf("ClusterIP svc never had an endpoint, expected 1: %v", err))
+
+		ginkgo.By("verify hairpinned connection from a pod to its own service is allowed")
+		hostname := pokeEndpoint(namespaceName, pod1.Name, "http", svcIP, serviceHTTPPort, "hostname")
+		framework.ExpectEqual(hostname, pod1.Name, fmt.Sprintf("returned client: %v was not correct", hostname))
+
+		ginkgo.By("verify connection to another pod is denied")
+		err = pokePod(f, pod1.Name, pod2.Status.PodIP)
+		gomega.Expect(err).To(gomega.HaveOccurred())
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Connection timed out"))
+	})
+})
+
 var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 	const (
 		endpointHTTPPort    = 80
