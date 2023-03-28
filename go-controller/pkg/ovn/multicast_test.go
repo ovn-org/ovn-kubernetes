@@ -69,6 +69,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 		map[string]string{
 			"apply-after-lb": "true",
 		},
+		types.DefaultACLTier,
 	)
 	defaultDenyEgressACL.UUID = "defaultDenyEgressACL_UUID"
 
@@ -85,6 +86,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 		false,
 		aclIDs.GetExternalIDs(),
 		nil,
+		types.DefaultACLTier,
 	)
 	defaultDenyIngressACL.UUID = "defaultDenyIngressACL_UUID"
 	clusterPortGroup.ACLs = []string{defaultDenyEgressACL.UUID, defaultDenyIngressACL.UUID}
@@ -105,6 +107,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 		map[string]string{
 			"apply-after-lb": "true",
 		},
+		types.DefaultACLTier,
 	)
 	defaultAllowEgressACL.UUID = "defaultAllowEgressACL_UUID"
 
@@ -122,6 +125,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 		false,
 		aclIDs.GetExternalIDs(),
 		nil,
+		types.DefaultACLTier,
 	)
 	defaultAllowIngressACL.UUID = "defaultAllowIngressACL_UUID"
 	clusterRtrPortGroup.ACLs = []string{defaultAllowEgressACL.UUID, defaultAllowIngressACL.UUID}
@@ -209,6 +213,7 @@ func getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestDa
 		map[string]string{
 			"apply-after-lb": "true",
 		},
+		types.DefaultACLTier,
 	)
 	egressACL.UUID = ns + "mc-egress-UUID"
 
@@ -225,6 +230,7 @@ func getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestDa
 		false,
 		aclIDs.GetExternalIDs(),
 		nil,
+		types.DefaultACLTier,
 	)
 	ingressACL.UUID = ns + "mc-ingress-UUID"
 

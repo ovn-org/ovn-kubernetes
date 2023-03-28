@@ -72,6 +72,11 @@ const (
 	// Default deny acl rule priority
 	DefaultDenyPriority = 1000
 
+	// ACL Tiers
+
+	// Default Tier for all ACLs
+	DefaultACLTier = 2
+
 	// priority of logical router policies on the OVNClusterRouter
 	EgressFirewallStartPriority           = 10000
 	MinimumReservedEgressFirewallPriority = 2000

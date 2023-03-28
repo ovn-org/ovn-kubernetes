@@ -3,6 +3,8 @@ package acl
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -13,7 +15,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"strings"
 )
 
 const (
@@ -99,6 +100,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						defaultDenyPolicyTypeACLExtIdKey: "Egress",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultMcastACLDbIDs(mcastDefaultDenyID, "Egress"),
 			},
@@ -116,6 +118,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						defaultDenyPolicyTypeACLExtIdKey: "Egress",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 			},
 		}
@@ -138,6 +141,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						defaultDenyPolicyTypeACLExtIdKey: "Egress",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultMcastACLDbIDs(mcastDefaultDenyID, "Egress"),
 			},
@@ -156,6 +160,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						defaultDenyPolicyTypeACLExtIdKey: "Ingress",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultMcastACLDbIDs(mcastDefaultDenyID, "Ingress"),
 			},
@@ -174,6 +179,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						defaultDenyPolicyTypeACLExtIdKey: "Egress",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultMcastACLDbIDs(mcastAllowInterNodeID, "Egress"),
 			},
@@ -192,6 +198,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						defaultDenyPolicyTypeACLExtIdKey: "Ingress",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultMcastACLDbIDs(mcastAllowInterNodeID, "Ingress"),
 			},
@@ -210,6 +217,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						defaultDenyPolicyTypeACLExtIdKey: "Egress",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getNamespaceMcastACLDbIDs(namespace1, "Egress"),
 			},
@@ -228,6 +236,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						defaultDenyPolicyTypeACLExtIdKey: "Ingress",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getNamespaceMcastACLDbIDs(namespace1, "Ingress"),
 			},
@@ -252,7 +261,9 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					"",
 					false,
 					nil,
-					nil),
+					nil,
+					types.DefaultACLTier,
+				),
 				after: syncerToBuildData.getAllowFromNodeACLDbIDs(nodeName, ipv4MgmtIP),
 			},
 			// ipv6 acl
@@ -267,7 +278,9 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					"",
 					false,
 					nil,
-					nil),
+					nil,
+					types.DefaultACLTier,
+				),
 				after: syncerToBuildData.getAllowFromNodeACLDbIDs(nodeName, ipv6MgmtIP),
 			},
 		}
@@ -304,6 +317,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						fmt.Sprintf(policyTypeNumACLExtIdKey, knet.PolicyTypeEgress): "0",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getNetpolGressACLDbIDs(policyNamespace, policyName, string(knet.PolicyTypeEgress),
 					0, 0, 0),
@@ -327,6 +341,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						fmt.Sprintf(policyTypeNumACLExtIdKey, knet.PolicyTypeEgress): "0",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getNetpolGressACLDbIDs(policyNamespace, policyName, string(knet.PolicyTypeEgress),
 					0, 0, 1),
@@ -350,6 +365,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						fmt.Sprintf(policyTypeNumACLExtIdKey, knet.PolicyTypeEgress): "0",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getNetpolGressACLDbIDs(policyNamespace, policyName, string(knet.PolicyTypeEgress),
 					0, 1, 0),
@@ -373,6 +389,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						fmt.Sprintf(policyTypeNumACLExtIdKey, knet.PolicyTypeEgress): "0",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getNetpolGressACLDbIDs(policyNamespace, policyName, string(knet.PolicyTypeEgress),
 					0, 1, 1),
@@ -396,6 +413,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 						fmt.Sprintf(policyTypeNumACLExtIdKey, knet.PolicyTypeIngress): "0",
 					},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getNetpolGressACLDbIDs(policyNamespace, policyName, string(knet.PolicyTypeIngress),
 					0, emptyIdx, emptyIdx),
@@ -425,6 +443,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 			false,
 			map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
 			nil,
+			types.DefaultACLTier,
 		)
 		staleARPEgressACL.UUID = "staleARPEgressACL-UUID"
 		egressDenyPG := buildPortGroup(
@@ -446,6 +465,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 			false,
 			map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
 			nil,
+			types.DefaultACLTier,
 		)
 		staleARPIngressACL.UUID = "staleARPIngressACL-UUID"
 		ingressDenyPG := buildPortGroup(
@@ -486,6 +506,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					false,
 					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeEgress), defaultDenyACL),
 			},
@@ -502,6 +523,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					false,
 					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeEgress), arpAllowACL),
 			},
@@ -518,6 +540,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					false,
 					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeIngress), defaultDenyACL),
 			},
@@ -534,6 +557,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					false,
 					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeIngress), arpAllowACL),
 			},
@@ -561,6 +585,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 			false,
 			map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
 			nil,
+			types.DefaultACLTier,
 		)
 		staleARPEgressACL.UUID = "staleARPEgressACL-UUID"
 		egressDenyPG := buildPortGroup(
@@ -582,6 +607,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 			false,
 			map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
 			nil,
+			types.DefaultACLTier,
 		)
 		staleARPIngressACL.UUID = "staleARPIngressACL-UUID"
 		ingressDenyPG := buildPortGroup(
@@ -623,6 +649,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					false,
 					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeEgress), defaultDenyACL),
 			},
@@ -639,6 +666,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					false,
 					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeEgress), arpAllowACL),
 			},
@@ -655,6 +683,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					false,
 					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeIngress), defaultDenyACL),
 			},
@@ -671,6 +700,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					false,
 					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeIngress), arpAllowACL),
 			},
@@ -691,6 +721,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					false,
 					map[string]string{egressFirewallACLExtIdKey: namespace1},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getEgressFirewallACLDbIDs(namespace1, 0),
 			},
@@ -706,6 +737,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					false,
 					map[string]string{egressFirewallACLExtIdKey: namespace1},
 					nil,
+					types.DefaultACLTier,
 				),
 				after: syncerToBuildData.getEgressFirewallACLDbIDs(namespace1, 1),
 			},
