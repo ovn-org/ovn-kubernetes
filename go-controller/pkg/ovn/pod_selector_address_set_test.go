@@ -3,6 +3,10 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"net"
+	"runtime"
+	"time"
+
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/gomega"
@@ -12,9 +16,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"net"
-	"runtime"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -319,6 +320,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			map[string]string{
 				"apply-after-lb": "true",
 			},
+			types.DefaultACLTier,
 		)
 		netpolACL.UUID = "netpolACL-UUID"
 		refPodSelIDs := getPodSelectorAddrSetDbIDs("pasName2", DefaultNetworkControllerName)
@@ -337,6 +339,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			map[string]string{
 				"apply-after-lb": "true",
 			},
+			types.DefaultACLTier,
 		)
 		podSelACL.UUID = "podSelACL-UUID"
 

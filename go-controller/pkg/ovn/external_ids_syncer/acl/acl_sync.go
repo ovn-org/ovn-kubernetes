@@ -2,8 +2,10 @@ package acl
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
@@ -67,75 +69,110 @@ func (syncer *aclSyncer) SyncACLs(existingNodes *v1.NodeList) error {
 	if err != nil {
 		return fmt.Errorf("unable to find stale ACLs, cannot update stale data: %v", err)
 	}
-	if len(legacyACLs) == 0 {
-		return nil
-	}
 
-	var updatedACLs []*nbdb.ACL
-	multicastACLs := syncer.updateStaleMulticastACLsDbIDs(legacyACLs)
-	klog.Infof("Found %d stale multicast ACLs", len(multicastACLs))
-	updatedACLs = append(updatedACLs, multicastACLs...)
+	if len(legacyACLs) > 0 {
+		var updatedACLs []*nbdb.ACL
+		multicastACLs := syncer.updateStaleMulticastACLsDbIDs(legacyACLs)
+		klog.Infof("Found %d stale multicast ACLs", len(multicastACLs))
+		updatedACLs = append(updatedACLs, multicastACLs...)
 
-	allowFromNodeACLs := syncer.updateStaleNetpolNodeACLs(legacyACLs, existingNodes.Items)
-	klog.Infof("Found %d stale allow from node ACLs", len(allowFromNodeACLs))
-	updatedACLs = append(updatedACLs, allowFromNodeACLs...)
+		allowFromNodeACLs := syncer.updateStaleNetpolNodeACLs(legacyACLs, existingNodes.Items)
+		klog.Infof("Found %d stale allow from node ACLs", len(allowFromNodeACLs))
+		updatedACLs = append(updatedACLs, allowFromNodeACLs...)
 
-	gressPolicyACLs, err := syncer.updateStaleGressPolicies(legacyACLs)
-	if err != nil {
-		return fmt.Errorf("failed to update gress policy ACLs: %w", err)
-	}
-	klog.Infof("Found %d stale gress ACLs", len(gressPolicyACLs))
-	updatedACLs = append(updatedACLs, gressPolicyACLs...)
-
-	defaultDenyACLs, deleteACLs, err := syncer.updateStaleDefaultDenyNetpolACLs(legacyACLs)
-	if err != nil {
-		return fmt.Errorf("failed to update stale default deny netpol ACLs: %w", err)
-	}
-	klog.Infof("Found %d stale default deny netpol ACLs", len(defaultDenyACLs))
-	updatedACLs = append(updatedACLs, defaultDenyACLs...)
-
-	egressFirewallACLs := syncer.updateStaleEgressFirewallACLs(legacyACLs)
-	klog.Infof("Found %d stale egress firewall ACLs", len(gressPolicyACLs))
-	updatedACLs = append(updatedACLs, egressFirewallACLs...)
-
-	// delete stale duplicating acls first
-	_, err = libovsdbops.TransactAndCheck(syncer.nbClient, deleteACLs)
-	if err != nil {
-		return fmt.Errorf("faile to trasact db ops: %v", err)
-	}
-
-	// make sure there is only 1 ACL with any given primary ID
-	// 1. collect all existing primary IDs via predicate that will update IDs set, but always return false
-	existingACLPrimaryIDs := sets.Set[string]{}
-	_, err = libovsdbops.FindACLsWithPredicate(syncer.nbClient, func(acl *nbdb.ACL) bool {
-		if acl.ExternalIDs[libovsdbops.PrimaryIDKey.String()] != "" {
-			existingACLPrimaryIDs.Insert(acl.ExternalIDs[libovsdbops.PrimaryIDKey.String()])
+		gressPolicyACLs, err := syncer.updateStaleGressPolicies(legacyACLs)
+		if err != nil {
+			return fmt.Errorf("failed to update gress policy ACLs: %w", err)
 		}
-		return false
-	})
-	if err != nil {
-		return fmt.Errorf("failed to find exisitng primary ID acls: %w", err)
-	}
-	// 2. Check to-be-updated ACLs don't have the same PrimaryID between themselves and with the existingACLPrimaryIDs
-	uniquePrimaryIDACLs := []*nbdb.ACL{}
-	for _, acl := range updatedACLs {
-		primaryID := acl.ExternalIDs[libovsdbops.PrimaryIDKey.String()]
-		if existingACLPrimaryIDs.Has(primaryID) {
-			// don't update that acl, otherwise 2 ACLs with the same primary ID will be in the db
-			klog.Warningf("Skip updating ACL %+v to the new ExternalIDs, since there is another ACL with the same primary ID", acl)
-		} else {
-			existingACLPrimaryIDs.Insert(primaryID)
-			uniquePrimaryIDACLs = append(uniquePrimaryIDACLs, acl)
+		klog.Infof("Found %d stale gress ACLs", len(gressPolicyACLs))
+		updatedACLs = append(updatedACLs, gressPolicyACLs...)
+
+		defaultDenyACLs, deleteACLs, err := syncer.updateStaleDefaultDenyNetpolACLs(legacyACLs)
+		if err != nil {
+			return fmt.Errorf("failed to update stale default deny netpol ACLs: %w", err)
+		}
+		klog.Infof("Found %d stale default deny netpol ACLs", len(defaultDenyACLs))
+		updatedACLs = append(updatedACLs, defaultDenyACLs...)
+
+		egressFirewallACLs := syncer.updateStaleEgressFirewallACLs(legacyACLs)
+		klog.Infof("Found %d stale egress firewall ACLs", len(gressPolicyACLs))
+		updatedACLs = append(updatedACLs, egressFirewallACLs...)
+
+		// delete stale duplicating acls first
+		_, err = libovsdbops.TransactAndCheck(syncer.nbClient, deleteACLs)
+		if err != nil {
+			return fmt.Errorf("faile to trasact db ops: %v", err)
+		}
+
+		// make sure there is only 1 ACL with any given primary ID
+		// 1. collect all existing primary IDs via predicate that will update IDs set, but always return false
+		existingACLPrimaryIDs := sets.Set[string]{}
+		_, err = libovsdbops.FindACLsWithPredicate(syncer.nbClient, func(acl *nbdb.ACL) bool {
+			if acl.ExternalIDs[libovsdbops.PrimaryIDKey.String()] != "" {
+				existingACLPrimaryIDs.Insert(acl.ExternalIDs[libovsdbops.PrimaryIDKey.String()])
+			}
+			return false
+		})
+		if err != nil {
+			return fmt.Errorf("failed to find exisitng primary ID acls: %w", err)
+		}
+		// 2. Check to-be-updated ACLs don't have the same PrimaryID between themselves and with the existingACLPrimaryIDs
+		uniquePrimaryIDACLs := []*nbdb.ACL{}
+		for _, acl := range updatedACLs {
+			primaryID := acl.ExternalIDs[libovsdbops.PrimaryIDKey.String()]
+			if existingACLPrimaryIDs.Has(primaryID) {
+				// don't update that acl, otherwise 2 ACLs with the same primary ID will be in the db
+				klog.Warningf("Skip updating ACL %+v to the new ExternalIDs, since there is another ACL with the same primary ID", acl)
+			} else {
+				existingACLPrimaryIDs.Insert(primaryID)
+				uniquePrimaryIDACLs = append(uniquePrimaryIDACLs, acl)
+			}
+		}
+
+		// update acls with new ExternalIDs
+		err = batching.Batch[*nbdb.ACL](syncer.txnBatchSize, uniquePrimaryIDACLs, func(batchACLs []*nbdb.ACL) error {
+			return libovsdbops.CreateOrUpdateACLs(syncer.nbClient, batchACLs...)
+		})
+		if err != nil {
+			return fmt.Errorf("cannot update stale ACLs: %v", err)
 		}
 	}
 
-	// update acls with new ExternalIDs
-	err = batching.Batch[*nbdb.ACL](syncer.txnBatchSize, uniquePrimaryIDACLs, func(batchACLs []*nbdb.ACL) error {
-		return libovsdbops.CreateOrUpdateACLs(syncer.nbClient, batchACLs...)
-	})
-	if err != nil {
-		return fmt.Errorf("cannot update stale ACLs: %v", err)
+	// Once all the staleACLs are deleted and the externalIDs have been updated (externalIDs update should be a one-time
+	// upgrade operation), let us now update the tier's of all existing ACLs to types.DefaultACLTier. During upgrades after
+	// the OVN schema changes are applied, the nbdb.ACL.Tier column will be added and every row will be updated to 0 by
+	// default (types.PlaceHolderACLTier). For all features using ACLs (egressFirewall, NetworkPolicy, NodeACLs) we want to
+	// move them to Tier2. We need to do this in reverse order of ACL priority to avoid network traffic disruption during
+	// upgrades window (if not done according to priorities we might end up in a window where the ACL with priority 1000
+	// for default deny is in tier0 while 1001 ACL for allow-ing traffic is in tier2 for a given namespace network policy).
+	// NOTE: This is a one-time operation as no ACLs should ever be created in types.PlaceHolderACLTier moving forward.
+	// Fetch all ACLs in types.PlaceHolderACLTier (Tier0); update their Tier to 2 and batch the ACL update.
+	klog.Info("Updating Tier of existing ACLs...")
+	start := time.Now()
+	aclPred := func(item *nbdb.ACL) bool {
+		return item.Tier == types.PlaceHolderACLTier
 	}
+	aclsInTier0, err := libovsdbops.FindACLsWithPredicate(syncer.nbClient, aclPred)
+	if err != nil {
+		return fmt.Errorf("unable to fetch Tier0 ACLs: %v", err)
+	}
+	if len(aclsInTier0) > 0 {
+		sort.Slice(aclsInTier0, func(i, j int) bool {
+			return aclsInTier0[i].Priority < aclsInTier0[j].Priority
+		}) // O(nlogn); unstable sort
+		for _, acl := range aclsInTier0 {
+			acl := acl
+			acl.Tier = types.DefaultACLTier // move tier to 2
+		}
+		// batch ACLs together in order of their priority: lowest first and then highest
+		err = batching.Batch[*nbdb.ACL](syncer.txnBatchSize, aclsInTier0, func(batchACLs []*nbdb.ACL) error {
+			return libovsdbops.CreateOrUpdateACLs(syncer.nbClient, batchACLs...)
+		})
+		if err != nil {
+			return fmt.Errorf("cannot update ACLs to tier2: %v", err)
+		}
+	}
+	klog.Infof("Updating tier's of all ACLs in cluster took %v", time.Since(start))
 	return nil
 }
 
