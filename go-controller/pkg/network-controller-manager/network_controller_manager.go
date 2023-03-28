@@ -264,6 +264,9 @@ func (cm *networkControllerManager) initDefaultNetworkController() error {
 	if err != nil {
 		return err
 	}
+	// Make sure we only set defaultNetworkController in case of no error,
+	// otherwise we would initialize the interface with a nil implementation
+	// which is not the same as nil interface.
 	cm.defaultNetworkController = defaultController
 	return nil
 }

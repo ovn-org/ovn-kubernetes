@@ -601,7 +601,7 @@ create_local_registry() {
     # create registry container unless it already exists
     if [ "$($OCI_BIN inspect -f '{{.State.Running}}' "${KIND_LOCAL_REGISTRY_NAME}" 2>/dev/null || true)" != 'true' ]; then
       $OCI_BIN run \
-        -d --restart=always -p "127.0.0.1:${KIND_LOCAL_REGISTRY_PORT}:5000" --name "${$KIND_LOCAL_REGISTRY_NAME}" \
+        -d --restart=always -p "127.0.0.1:${KIND_LOCAL_REGISTRY_PORT}:5000" --name "${KIND_LOCAL_REGISTRY_NAME}" \
         registry:2
     fi
 }
@@ -656,10 +656,6 @@ create_kind_cluster() {
   fi
   
   kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image "${KIND_IMAGE}":"${K8S_VERSION}" --config=${KIND_CONFIG_LCL} --retain
-  
-  if [[ "${KIND_LOCAL_REGISTRY}" == true ]]; then
-    connect_local_registry
-  fi
 
   cat "${KUBECONFIG}"
 }
@@ -1084,6 +1080,9 @@ if [ "$KIND_CREATE" == true ]; then
     # if cluster name is specified fixup kubeconfig
     if [ "$KIND_CLUSTER_NAME" != "ovn" ]; then
       fixup_kubeconfig_names
+    fi
+    if [[ "${KIND_LOCAL_REGISTRY}" == true ]]; then
+      connect_local_registry
     fi
     docker_disable_ipv6
     if [ "$OVN_ENABLE_EX_GW_NETWORK_BRIDGE" == true ]; then

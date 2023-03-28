@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
+	kexec "k8s.io/utils/exec"
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -219,6 +220,9 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		// Return the full CNI result from ovnkube-node if it configured the pod interface
 		result = response.Result
 	} else {
+		// The onvkube-node is running in un-privileged mode. The responsibility of
+		// plugging an interface into Pod is on the Shim.
+
 		// Use the IPAM details from ovnkube-node to configure the pod interface
 		pr, err := cniRequestToPodRequest(req)
 		if err != nil {
@@ -228,6 +232,16 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		}
 		defer pr.cancel()
 
+		if !response.PodIFInfo.IsDPUHostMode {
+			// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
+			if err := SetExec(kexec.New()); err != nil {
+				err = fmt.Errorf("failed to initialize OVS exec runner: %v", err)
+				klog.Error(err.Error())
+				return err
+			}
+		}
+
+		// In the case where ovnkube-node is running in Unprivileged mode, all the work
 		result, err = pr.getCNIResult(clientset, response.PodIFInfo)
 		if err != nil {
 			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
