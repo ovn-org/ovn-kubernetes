@@ -56,7 +56,10 @@ else
 	RACE=1 hack/test-go.sh
 endif
 
-codegen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
+modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
+	hack/update-modelgen.sh
+
+codegen:
 	hack/update-codegen.sh
 
 install:

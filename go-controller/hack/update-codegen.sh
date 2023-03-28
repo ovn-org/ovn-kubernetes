@@ -4,22 +4,6 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# generate ovsdb bindings
-if  ! ( command -v modelgen > /dev/null ); then
-  echo "modelgen not found, installing github.com/ovn-org/libovsdb/cmd/modelgen"
-  olddir="${PWD}"
-  builddir="$(mktemp -d)"
-  cd "${builddir}"
-  GO111MODULE=on go install github.com/ovn-org/libovsdb/cmd/modelgen@2cbe2d093e1247d42050306dd5c9a2d6c11f2460
-  cd "${olddir}"
-  if [[ "${builddir}" == /tmp/* ]]; then #paranoia
-      rm -rf "${builddir}"
-  fi
-fi
-
-go generate ./pkg/nbdb
-go generate ./pkg/sbdb
-
 crds=$(ls pkg/crd 2> /dev/null)
 if [ -z "${crds}" ]; then
   exit
