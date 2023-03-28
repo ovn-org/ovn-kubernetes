@@ -63,7 +63,8 @@ var schema = `{
                   "allow-related",
                   "allow-stateless",
                   "drop",
-                  "reject"
+                  "reject",
+                  "pass"
                 ]
               ]
             }
@@ -168,6 +169,15 @@ var schema = `{
             },
             "min": 0,
             "max": 1
+          }
+        },
+        "tier": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 0,
+              "maxInteger": 3
+            }
           }
         }
       }
