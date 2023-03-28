@@ -70,6 +70,14 @@ const (
 	// Default deny acl rule priority
 	DefaultDenyPriority = 1000
 
+	// ACL Tiers
+	// Tier 0 is currently un-used and is a placeholder tier for future use cases (can be renamed when we have a use for it).
+	// NOTE: When we upgrade from an OVN version without tiers to the new version with
+	// tiers, all values in the new ACL.Tier column will be set to 0 a.k.a placeholder tier
+	PlaceHolderACLTier = 0
+	// Default Tier for all ACLs
+	DefaultACLTier = 2
+
 	// priority of logical router policies on the OVNClusterRouter
 	EgressFirewallStartPriority           = 10000
 	MinimumReservedEgressFirewallPriority = 2000

@@ -96,6 +96,23 @@ func TestCreateOrUpdateACL(t *testing.T) {
 				Severity:    &aclSev,
 			},
 		},
+		{
+			desc:       "updates Tiers to tier2",
+			initialACL: initialACL,
+			finalACL: &nbdb.ACL{
+				Action:      nbdb.ACLActionAllow,
+				Direction:   nbdb.ACLDirectionToLport,
+				ExternalIDs: nil,
+				Log:         true,
+				Match:       "match",
+				Meter:       &aclMeter,
+				Name:        &aclName,
+				Options:     map[string]string{"key": "value"},
+				Priority:    1,
+				Severity:    &aclSev,
+				Tier:        2, // default tier
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {

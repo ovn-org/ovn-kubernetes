@@ -143,6 +143,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						purgeIDs.GetExternalIDs(),
 						nil,
+						t.PlaceHolderACLTier,
 					)
 					purgeACL.UUID = "purgeACL-UUID"
 					// no externalIDs present => dbIDs can't be built
@@ -157,6 +158,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						nil,
 						nil,
+						// we should not be in a situation where we have ACLs without externalIDs
+						// but if we do have such lame ACLs then they will interfere with AdminNetPol logic
+						t.PlaceHolderACLTier,
 					)
 					purgeACL2.UUID = "purgeACL2-UUID"
 
@@ -184,6 +188,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						updateIDs.GetExternalIDs(),
 						nil,
+						t.PlaceHolderACLTier,
 					)
 					updateACL.UUID = "updateACL-UUID"
 
@@ -199,6 +204,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						nil,
 						nil,
+						// we should not be in a situation where we have unknown ACL that doesn't belong to any feature
+						// but if we do have such lame ACLs then they will interfere with AdminNetPol logic
+						t.PlaceHolderACLTier,
 					)
 					ignoreACL.UUID = "ignoreACL-UUID"
 
@@ -238,6 +246,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					// match shouldn't have cluster exclusion
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					updateACL.Match = "(ip4.dst == 1.2.3.4/23) && ip4.src == $" + asHash
+					updateACL.Tier = t.DefaultACLTier // ensure the tier of the ACL is updated from 0 to 2
 
 					expectedDatabaseState := []libovsdb.TestData{
 						purgeACL,
@@ -290,6 +299,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
 
@@ -336,6 +346,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					ipv6ACL.UUID = "ipv6ACL-UUID"
 
@@ -389,6 +400,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					udpACL.UUID = "udpACL-UUID"
 
@@ -436,6 +448,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
 
@@ -496,6 +509,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
 
@@ -613,6 +627,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
 
@@ -697,6 +712,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
 
@@ -782,6 +798,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
 
@@ -862,6 +879,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					ipv4ACL.UUID = "ipv4ACL-UUID"
 
@@ -980,6 +998,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 							false,
 							dbIDs.GetExternalIDs(),
 							nil,
+							t.DefaultACLTier,
 						)
 						acl.UUID = "ACL-UUID"
 
@@ -1029,6 +1048,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					acl.UUID = "acl-UUID"
 
@@ -1076,6 +1096,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						aclIDs1.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					ipv4ACL1.UUID = "ipv4ACL1-UUID"
 
@@ -1091,6 +1112,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						aclIDs2.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					ipv4ACL2.UUID = "ipv4ACL2-UUID"
 
@@ -1210,6 +1232,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						dbIDs.GetExternalIDs(),
 						nil,
+						t.DefaultACLTier,
 					)
 					acl.UUID = "acl-UUID"
 					clusterPortGroup.ACLs = []string{acl.UUID}
