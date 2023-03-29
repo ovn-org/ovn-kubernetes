@@ -12,7 +12,7 @@ RUN dnf install -y --nodocs \
 	selinux-policy procps-ng && \
 	dnf clean all
 
-ARG ovsver=3.1.0-2.el9fdp
+ARG ovsver=3.1.0-10.el9fdp
 ARG ovnver=23.03.0-7.el9fdp
 
 RUN INSTALL_PKGS="iptables" && \
