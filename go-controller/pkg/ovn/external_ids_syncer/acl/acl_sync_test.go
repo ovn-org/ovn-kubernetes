@@ -9,10 +9,18 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strings"
+)
+
+const (
+	ingressDefaultDenySuffix = "ingressDefaultDeny"
+	egressDefaultDenySuffix  = "egressDefaultDeny"
+	arpAllowPolicySuffix     = "ARPallowPolicy"
+	arpAllowPolicyMatch      = "(arp || nd)"
 )
 
 type aclSync struct {
@@ -20,22 +28,33 @@ type aclSync struct {
 	after  *libovsdbops.DbObjectIDs
 }
 
-func testSyncerWithData(data []aclSync, controllerName string, initialDbState []libovsdbtest.TestData,
+func testSyncerWithData(data []aclSync, controllerName string, initialDbState, finalDbState []libovsdbtest.TestData,
 	existingNodes []v1.Node) {
 	// create initial db setup
 	dbSetup := libovsdbtest.TestSetup{NBData: initialDbState}
 	for _, asSync := range data {
-		asSync.before.UUID = asSync.after.String() + "-UUID"
+		if asSync.after != nil {
+			asSync.before.UUID = asSync.after.String() + "-UUID"
+		} else {
+			asSync.before.UUID = asSync.before.Match
+		}
 		dbSetup.NBData = append(dbSetup.NBData, asSync.before)
 	}
 	libovsdbOvnNBClient, _, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
 	defer libovsdbCleanup.Cleanup()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	// create expected data using addressSetFactory
-	expectedDbState := initialDbState
+	var expectedDbState []libovsdbtest.TestData
+	if finalDbState != nil {
+		expectedDbState = finalDbState
+	} else {
+		expectedDbState = initialDbState
+	}
 	for _, aclSync := range data {
 		acl := aclSync.before
-		acl.ExternalIDs = aclSync.after.GetExternalIDs()
+		if aclSync.after != nil {
+			acl.ExternalIDs = aclSync.after.GetExternalIDs()
+		}
 		expectedDbState = append(expectedDbState, acl)
 	}
 	// run sync
@@ -59,6 +78,44 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 		controllerName: controllerName,
 	}
 
+	ginkgo.It("doesn't add 2 acls with the same PrimaryID", func() {
+		testData := []aclSync{
+			{
+				before: libovsdbops.BuildACL(
+					joinACLName(types.ClusterPortGroupName, "DefaultDenyMulticastEgress"),
+					nbdb.ACLDirectionFromLport,
+					types.DefaultMcastDenyPriority,
+					"(ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))",
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{
+						defaultDenyPolicyTypeACLExtIdKey: "Egress",
+					},
+					nil,
+				),
+				after: syncerToBuildData.getDefaultMcastACLDbIDs(mcastDefaultDenyID, "Egress"),
+			},
+			{
+				before: libovsdbops.BuildACL(
+					joinACLName(types.ClusterPortGroupName, "DefaultDenyMulticastEgress"),
+					nbdb.ACLDirectionFromLport,
+					types.DefaultMcastDenyPriority,
+					"(ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))",
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{
+						defaultDenyPolicyTypeACLExtIdKey: "Egress",
+					},
+					nil,
+				),
+			},
+		}
+		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil, nil)
+	})
 	ginkgo.It("updates multicast acls", func() {
 		testData := []aclSync{
 			// defaultDenyEgressACL
@@ -170,7 +227,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 				after: syncerToBuildData.getNamespaceMcastACLDbIDs(namespace1, "Ingress"),
 			},
 		}
-		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil)
+		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil, nil)
 	})
 	ginkgo.It("updates allow from node acls", func() {
 		nodeName := "node1"
@@ -217,7 +274,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 				Name:        nodeName,
 				Annotations: map[string]string{"k8s.ovn.org/node-subnets": string(bytes)},
 			}}}
-		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, existingNodes)
+		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil, existingNodes)
 	})
 	ginkgo.It("updates gress policy acls", func() {
 		policyNamespace := "policyNamespace"
@@ -339,6 +396,280 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					0, emptyIdx, emptyIdx),
 			},
 		}
-		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil)
+		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil, nil)
+	})
+	ginkgo.It("updates default deny policy acls", func() {
+		policyNamespace := "policyNamespace"
+
+		defaultDenyPortGroupName := func(namespace, gressSuffix string) string {
+			return joinACLName(util.HashForOVN(namespace), gressSuffix)
+		}
+		getStaleARPAllowACLName := func(ns string) string {
+			return joinACLName(ns, arpAllowPolicySuffix)
+		}
+		egressPGName := defaultDenyPortGroupName(policyNamespace, egressDefaultDenySuffix)
+		ingressPGName := defaultDenyPortGroupName(policyNamespace, ingressDefaultDenySuffix)
+		staleARPEgressACL := libovsdbops.BuildACL(
+			getStaleARPAllowACLName(policyNamespace),
+			nbdb.ACLDirectionFromLport,
+			types.DefaultAllowPriority,
+			"inport == @"+egressPGName+" && "+staleArpAllowPolicyMatch,
+			nbdb.ACLActionAllow,
+			types.OvnACLLoggingMeter,
+			"",
+			false,
+			map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
+			nil,
+		)
+		staleARPEgressACL.UUID = "staleARPEgressACL-UUID"
+		egressDenyPG := libovsdbops.BuildPortGroup(
+			egressPGName,
+			egressPGName,
+			nil,
+			[]*nbdb.ACL{staleARPEgressACL},
+		)
+		egressDenyPG.UUID = egressDenyPG.Name + "-UUID"
+
+		staleARPIngressACL := libovsdbops.BuildACL(
+			getStaleARPAllowACLName(policyNamespace),
+			nbdb.ACLDirectionToLport,
+			types.DefaultAllowPriority,
+			"outport == @"+ingressPGName+" && "+staleArpAllowPolicyMatch,
+			nbdb.ACLActionAllow,
+			types.OvnACLLoggingMeter,
+			"",
+			false,
+			map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
+			nil,
+		)
+		staleARPIngressACL.UUID = "staleARPIngressACL-UUID"
+		ingressDenyPG := libovsdbops.BuildPortGroup(
+			ingressPGName,
+			ingressPGName,
+			nil,
+			[]*nbdb.ACL{staleARPIngressACL},
+		)
+		ingressDenyPG.UUID = ingressDenyPG.Name + "-UUID"
+		initialDb := []libovsdbtest.TestData{staleARPEgressACL, egressDenyPG, staleARPIngressACL, ingressDenyPG}
+		finalEgressDenyPG := libovsdbops.BuildPortGroup(
+			egressPGName,
+			egressPGName,
+			nil,
+			nil,
+		)
+		finalEgressDenyPG.UUID = finalEgressDenyPG.Name + "-UUID"
+		finalIngressDenyPG := libovsdbops.BuildPortGroup(
+			ingressPGName,
+			ingressPGName,
+			nil,
+			nil,
+		)
+		finalIngressDenyPG.UUID = finalIngressDenyPG.Name + "-UUID"
+		// acls will stay since they are no garbage-collected by test server
+		finalDb := []libovsdbtest.TestData{staleARPEgressACL, finalEgressDenyPG, staleARPIngressACL, finalIngressDenyPG}
+		testData := []aclSync{
+			// egress deny
+			{
+				before: libovsdbops.BuildACL(
+					policyNamespace+"_"+egressDefaultDenySuffix,
+					nbdb.ACLDirectionFromLport,
+					types.DefaultDenyPriority,
+					"inport == @"+egressPGName,
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
+					nil,
+				),
+				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeEgress), defaultDenyACL),
+			},
+			// egress allow ARP
+			{
+				before: libovsdbops.BuildACL(
+					getStaleARPAllowACLName(policyNamespace),
+					nbdb.ACLDirectionFromLport,
+					types.DefaultAllowPriority,
+					"inport == @"+egressPGName+" && "+arpAllowPolicyMatch,
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
+					nil,
+				),
+				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeEgress), arpAllowACL),
+			},
+			// egress deny
+			{
+				before: libovsdbops.BuildACL(
+					policyNamespace+"_"+ingressDefaultDenySuffix,
+					nbdb.ACLDirectionToLport,
+					types.DefaultDenyPriority,
+					"outport == @"+ingressPGName,
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
+					nil,
+				),
+				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeIngress), defaultDenyACL),
+			},
+			// egress allow ARP
+			{
+				before: libovsdbops.BuildACL(
+					getStaleARPAllowACLName(policyNamespace),
+					nbdb.ACLDirectionToLport,
+					types.DefaultAllowPriority,
+					"outport == @"+ingressPGName+" && "+arpAllowPolicyMatch,
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
+					nil,
+				),
+				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeIngress), arpAllowACL),
+			},
+		}
+		testSyncerWithData(testData, controllerName, initialDb, finalDb, nil)
+	})
+	ginkgo.It("updates default deny policy acl with long names", func() {
+		policyNamespace := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk" // longest allowed namespace name
+		defaultDenyPortGroupName := func(namespace, gressSuffix string) string {
+			return joinACLName(util.HashForOVN(namespace), gressSuffix)
+		}
+		getStaleARPAllowACLName := func(ns string) string {
+			return joinACLName(ns, arpAllowPolicySuffix)
+		}
+		egressPGName := defaultDenyPortGroupName(policyNamespace, egressDefaultDenySuffix)
+		ingressPGName := defaultDenyPortGroupName(policyNamespace, ingressDefaultDenySuffix)
+		staleARPEgressACL := libovsdbops.BuildACL(
+			getStaleARPAllowACLName(policyNamespace),
+			nbdb.ACLDirectionFromLport,
+			types.DefaultAllowPriority,
+			"inport == @"+egressPGName+" && "+staleArpAllowPolicyMatch,
+			nbdb.ACLActionAllow,
+			types.OvnACLLoggingMeter,
+			"",
+			false,
+			map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
+			nil,
+		)
+		staleARPEgressACL.UUID = "staleARPEgressACL-UUID"
+		egressDenyPG := libovsdbops.BuildPortGroup(
+			egressPGName,
+			egressPGName,
+			nil,
+			[]*nbdb.ACL{staleARPEgressACL},
+		)
+		egressDenyPG.UUID = egressDenyPG.Name + "-UUID"
+
+		staleARPIngressACL := libovsdbops.BuildACL(
+			getStaleARPAllowACLName(policyNamespace),
+			nbdb.ACLDirectionToLport,
+			types.DefaultAllowPriority,
+			"outport == @"+ingressPGName+" && "+staleArpAllowPolicyMatch,
+			nbdb.ACLActionAllow,
+			types.OvnACLLoggingMeter,
+			"",
+			false,
+			map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
+			nil,
+		)
+		staleARPIngressACL.UUID = "staleARPIngressACL-UUID"
+		ingressDenyPG := libovsdbops.BuildPortGroup(
+			ingressPGName,
+			ingressPGName,
+			nil,
+			[]*nbdb.ACL{staleARPIngressACL},
+		)
+		ingressDenyPG.UUID = ingressDenyPG.Name + "-UUID"
+		initialDb := []libovsdbtest.TestData{staleARPEgressACL, egressDenyPG, staleARPIngressACL, ingressDenyPG}
+		finalEgressDenyPG := libovsdbops.BuildPortGroup(
+			egressPGName,
+			egressPGName,
+			nil,
+			nil,
+		)
+		finalEgressDenyPG.UUID = finalEgressDenyPG.Name + "-UUID"
+		finalIngressDenyPG := libovsdbops.BuildPortGroup(
+			ingressPGName,
+			ingressPGName,
+			nil,
+			nil,
+		)
+		finalIngressDenyPG.UUID = finalIngressDenyPG.Name + "-UUID"
+		// acls will stay since they are no garbage-collected by test server
+		finalDb := []libovsdbtest.TestData{staleARPEgressACL, finalEgressDenyPG, staleARPIngressACL, finalIngressDenyPG}
+
+		testData := []aclSync{
+			// egress deny
+			{
+				before: libovsdbops.BuildACL(
+					policyNamespace,
+					nbdb.ACLDirectionFromLport,
+					types.DefaultDenyPriority,
+					"inport == @"+egressPGName,
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
+					nil,
+				),
+				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeEgress), defaultDenyACL),
+			},
+			// egress allow ARP
+			{
+				before: libovsdbops.BuildACL(
+					getStaleARPAllowACLName(policyNamespace),
+					nbdb.ACLDirectionFromLport,
+					types.DefaultAllowPriority,
+					"inport == @"+egressPGName+" && "+arpAllowPolicyMatch,
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)},
+					nil,
+				),
+				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeEgress), arpAllowACL),
+			},
+			// egress deny
+			{
+				before: libovsdbops.BuildACL(
+					policyNamespace,
+					nbdb.ACLDirectionToLport,
+					types.DefaultDenyPriority,
+					"outport == @"+ingressPGName,
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
+					nil,
+				),
+				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeIngress), defaultDenyACL),
+			},
+			// egress allow ARP
+			{
+				before: libovsdbops.BuildACL(
+					getStaleARPAllowACLName(policyNamespace),
+					nbdb.ACLDirectionToLport,
+					types.DefaultAllowPriority,
+					"outport == @"+ingressPGName+" && "+arpAllowPolicyMatch,
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress)},
+					nil,
+				),
+				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeIngress), arpAllowACL),
+			},
+		}
+		testSyncerWithData(testData, controllerName, initialDb, finalDb, nil)
 	})
 })

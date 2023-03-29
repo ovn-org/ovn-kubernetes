@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -14,6 +15,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -30,6 +32,12 @@ const (
 	policyTypeNumACLExtIdKey         = "%s_num"
 	noneMatch                        = "None"
 	emptyIdx                         = -1
+	defaultDenyACL                   = "defaultDeny"
+	arpAllowACL                      = "arpAllow"
+	// staleArpAllowPolicyMatch "was" the old match used when creating default allow ARP ACLs for a namespace
+	// NOTE: This is succeed by arpAllowPolicyMatch to allow support for IPV6. This is currently only
+	// used when removing stale ACLs from the syncNetworkPolicy function and should NOT be used in any main logic.
+	staleArpAllowPolicyMatch = "arp"
 )
 
 type aclSyncer struct {
@@ -78,7 +86,46 @@ func (syncer *aclSyncer) SyncACLs(existingNodes *v1.NodeList) error {
 	klog.Infof("Found %d stale gress ACLs", len(gressPolicyACLs))
 	updatedACLs = append(updatedACLs, gressPolicyACLs...)
 
-	err = batching.Batch[*nbdb.ACL](syncer.txnBatchSize, updatedACLs, func(batchACLs []*nbdb.ACL) error {
+	defaultDenyACLs, deleteACLs, err := syncer.updateStaleDefaultDenyNetpolACLs(legacyACLs)
+	if err != nil {
+		return fmt.Errorf("failed to update stale default deny netpol ACLs: %w", err)
+	}
+	klog.Infof("Found %d stale default deny netpol ACLs", len(gressPolicyACLs))
+	updatedACLs = append(updatedACLs, defaultDenyACLs...)
+
+	// delete stale duplicating acls first
+	_, err = libovsdbops.TransactAndCheck(syncer.nbClient, deleteACLs)
+	if err != nil {
+		return fmt.Errorf("faile to trasact db ops: %v", err)
+	}
+
+	// make sure there is only 1 ACL with any given primary ID
+	// 1. collect all existing primary IDs via predicate that will update IDs set, but always return false
+	existingACLPrimaryIDs := sets.Set[string]{}
+	_, err = libovsdbops.FindACLsWithPredicate(syncer.nbClient, func(acl *nbdb.ACL) bool {
+		if acl.ExternalIDs[libovsdbops.PrimaryIDKey.String()] != "" {
+			existingACLPrimaryIDs.Insert(acl.ExternalIDs[libovsdbops.PrimaryIDKey.String()])
+		}
+		return false
+	})
+	if err != nil {
+		return fmt.Errorf("failed to find exisitng primary ID acls: %w", err)
+	}
+	// 2. Check to-be-updated ACLs don't have the same PrimaryID between themselves and with the existingACLPrimaryIDs
+	uniquePrimaryIDACLs := []*nbdb.ACL{}
+	for _, acl := range updatedACLs {
+		primaryID := acl.ExternalIDs[libovsdbops.PrimaryIDKey.String()]
+		if existingACLPrimaryIDs.Has(primaryID) {
+			// don't update that acl, otherwise 2 ACLs with the same primary ID will be in the db
+			klog.Warningf("Skip updating ACL %+v to the new ExternalIDs, since there is another ACL with the same primary ID", acl)
+		} else {
+			existingACLPrimaryIDs.Insert(primaryID)
+			uniquePrimaryIDACLs = append(uniquePrimaryIDACLs, acl)
+		}
+	}
+
+	// update acls with new ExternalIDs
+	err = batching.Batch[*nbdb.ACL](syncer.txnBatchSize, uniquePrimaryIDACLs, func(batchACLs []*nbdb.ACL) error {
 		return libovsdbops.CreateOrUpdateACLs(syncer.nbClient, batchACLs...)
 	})
 	if err != nil {
@@ -290,6 +337,67 @@ func (syncer *aclSyncer) updateStaleGressPolicies(legacyACLs []*nbdb.ACL) (updat
 		}
 		dbIDs := syncer.getNetpolGressACLDbIDs(policyNamespace, policyName,
 			policyType, idx, portIdx, ipBlockIdx)
+		acl.ExternalIDs = dbIDs.GetExternalIDs()
+		updatedACLs = append(updatedACLs, acl)
+	}
+	return
+}
+
+func (syncer *aclSyncer) getDefaultDenyPolicyACLIDs(ns, policyType, defaultACLType string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNamespace, syncer.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: ns,
+			// in the same namespace there can be 2 default deny port groups, egress and ingress,
+			// every port group has default deny and arp allow acl.
+			libovsdbops.PolicyDirectionKey: policyType,
+			libovsdbops.TypeKey:            defaultACLType,
+		})
+}
+
+func (syncer *aclSyncer) updateStaleDefaultDenyNetpolACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
+	deleteOps []libovsdb.Operation, err error) {
+	for _, acl := range legacyACLs {
+		// sync default Deny policies
+		if acl.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == "" {
+			// not default deny policy
+			continue
+		}
+
+		// remove stale egress and ingress allow arp ACLs that were leftover as a result
+		// of ACL migration for "ARPallowPolicy" when the match changed from "arp" to "(arp || nd)"
+		if strings.Contains(acl.Match, " && "+staleArpAllowPolicyMatch) {
+			pgName := ""
+			if strings.Contains(acl.Match, "inport") {
+				// egress default ARP allow policy ("inport == @a16323395479447859119_egressDefaultDeny && arp")
+				pgName = strings.TrimPrefix(acl.Match, "inport == @")
+			} else if strings.Contains(acl.Match, "outport") {
+				// ingress default ARP allow policy ("outport == @a16323395479447859119_ingressDefaultDeny && arp")
+				pgName = strings.TrimPrefix(acl.Match, "outport == @")
+			}
+			pgName = strings.TrimSuffix(pgName, " && "+staleArpAllowPolicyMatch)
+			deleteOps, err = libovsdbops.DeleteACLsFromPortGroupOps(syncer.nbClient, deleteOps, pgName, acl)
+			if err != nil {
+				err = fmt.Errorf("failed getting delete acl ops: %w", err)
+				return
+			}
+			// acl will be deleted, no need to update it
+			continue
+		}
+
+		// acl Name can be truncated (max length 64), but k8s namespace is limited to 63 symbols,
+		// therefore it is safe to extract it from the name.
+		// works for both older name <namespace>_<policyname> and newer
+		// <namespace>_egressDefaultDeny OR <namespace>_ingressDefaultDeny
+		ns := strings.Split(libovsdbops.GetACLName(acl), "_")[0]
+
+		// distinguish ARPAllowACL from DefaultDeny
+		var defaultDenyACLType string
+		if strings.Contains(acl.Match, "(arp || nd)") {
+			defaultDenyACLType = arpAllowACL
+		} else {
+			defaultDenyACLType = defaultDenyACL
+		}
+		dbIDs := syncer.getDefaultDenyPolicyACLIDs(ns, acl.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey], defaultDenyACLType)
 		acl.ExternalIDs = dbIDs.GetExternalIDs()
 		updatedACLs = append(updatedACLs, acl)
 	}

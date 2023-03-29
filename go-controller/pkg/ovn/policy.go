@@ -8,7 +8,7 @@ import (
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	ovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -26,22 +26,20 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+type netpolDefaultDenyACLType string
+
 const (
-	// defaultDenyPolicyTypeACLExtIdKey external ID key for default deny policy type
-	defaultDenyPolicyTypeACLExtIdKey = "default-deny-policy-type"
+	// netpolDefaultDenyACLType is used to distinguish default deny and arp allow acls create for the same port group
+	defaultDenyACL netpolDefaultDenyACLType = "defaultDeny"
+	arpAllowACL    netpolDefaultDenyACLType = "arpAllow"
+	// port groups suffixes
 	// ingressDefaultDenySuffix is the suffix used when creating the ingress port group for a namespace
 	ingressDefaultDenySuffix = "ingressDefaultDeny"
 	// egressDefaultDenySuffix is the suffix used when creating the ingress port group for a namespace
 	egressDefaultDenySuffix = "egressDefaultDeny"
-	// arpAllowPolicySuffix is the suffix used when creating default ACLs for a namespace
-	arpAllowPolicySuffix = "ARPallowPolicy"
 	// arpAllowPolicyMatch is the match used when creating default allow ARP ACLs for a namespace
-	arpAllowPolicyMatch = "(arp || nd)"
-	// staleArpAllowPolicyMatch "was" the old match used when creating default allow ARP ACLs for a namespace
-	// NOTE: This is succeed by arpAllowPolicyMatch to allow support for IPV6. This is currently only
-	// used when removing stale ACLs from the syncNetworkPolicy function and should NOT be used in any main logic.
-	staleArpAllowPolicyMatch = "arp"
-	allowHairpinningACLID    = "allow-hairpinning"
+	arpAllowPolicyMatch   = "(arp || nd)"
+	allowHairpinningACLID = "allow-hairpinning"
 	// ovnStatelessNetPolAnnotationName is an annotation on K8s Network Policy resource to specify that all
 	// the resulting OVN ACLs must be created as stateless
 	ovnStatelessNetPolAnnotationName = "k8s.ovn.org/acl-stateless"
@@ -203,71 +201,6 @@ func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 	return np
 }
 
-// updateStaleDefaultDenyACLNames updates the naming of the default ingress and egress deny ACLs per namespace
-// oldName: <namespace>_<policyname> (lucky winner will be first policy created in the namespace)
-// newName: <namespace>_egressDefaultDeny OR <namespace>_ingressDefaultDeny
-func (oc *DefaultNetworkController) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gressSuffix string) error {
-	cleanUpDefaultDeny := make(map[string][]*nbdb.ACL)
-	p := func(item *nbdb.ACL) bool {
-		if item.Name != nil { // we don't care about node ACLs
-			aclNameSuffix := strings.Split(*item.Name, "_")
-			if len(aclNameSuffix) == 1 {
-				// doesn't have suffix; no update required; append the actual suffix since this ACL can be skipped
-				aclNameSuffix = append(aclNameSuffix, gressSuffix)
-			}
-			return item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(npType) && // default-deny-policy-type:Egress or default-deny-policy-type:Ingress
-				strings.Contains(item.Match, gressSuffix) && // Match:inport ==	@ablah80448_egressDefaultDeny or Match:inport == @ablah80448_ingressDefaultDeny
-				!strings.Contains(item.Match, arpAllowPolicyMatch) && // != match: (arp || nd)
-				!strings.HasPrefix(gressSuffix, aclNameSuffix[1]) // filter out already converted ACLs or ones that are a no-op
-		}
-		return false
-	}
-	gressACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
-	if err != nil {
-		return fmt.Errorf("cannot find NetworkPolicy default deny ACLs: %v", err)
-	}
-	for _, acl := range gressACLs {
-		acl := acl
-		// parse the namespace.Name from the ACL name (if ACL name is 63 chars, then it will fully be namespace.Name)
-		namespace := strings.Split(*acl.Name, "_")[0]
-		cleanUpDefaultDeny[namespace] = append(cleanUpDefaultDeny[namespace], acl)
-	}
-	// loop through the cleanUp map and per namespace update the first ACL's name and delete the rest
-	for namespace, aclList := range cleanUpDefaultDeny {
-		var aclT aclPipelineType
-		if aclList[0].Direction == nbdb.ACLDirectionToLport {
-			aclT = lportIngress
-		} else {
-			aclT = lportEgressAfterLB
-		}
-		newName := getDefaultDenyPolicyACLName(namespace, aclT)
-		if len(aclList) > 1 {
-			// this should never be the case but delete everything except 1st ACL
-			ingressPGName := defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix)
-			egressPGName := defaultDenyPortGroupName(namespace, egressDefaultDenySuffix)
-			err := libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{ingressPGName, egressPGName}, aclList[1:]...)
-			if err != nil {
-				return err
-			}
-		}
-		newACL := BuildACL(
-			newName, // this is the only thing we need to change, keep the rest same
-			aclList[0].Priority,
-			aclList[0].Match,
-			aclList[0].Action,
-			oc.GetNamespaceACLLogging(namespace),
-			aclT,
-			aclList[0].ExternalIDs,
-		)
-		newACL.UUID = aclList[0].UUID // for performance
-		err := libovsdbops.CreateOrUpdateACLs(oc.nbClient, newACL)
-		if err != nil {
-			return fmt.Errorf("cannot update old NetworkPolicy ACLs for namespace %s: %v", namespace, err)
-		}
-	}
-	return nil
-}
-
 func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interface{}) error {
 	// find network policies that don't exist in k8s anymore, but still present in the dbs, and cleanup.
 	// Peer address sets and network policy's port groups (together with acls) will be cleaned up.
@@ -279,7 +212,6 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 		if !ok {
 			return fmt.Errorf("spurious object in syncNetworkPolicies: %v", npInterface)
 		}
-
 		if nsMap, ok := expectedPolicies[policy.Namespace]; ok {
 			nsMap[policy.Name] = true
 		} else {
@@ -290,7 +222,7 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 	}
 
 	// cleanup port groups based on acl search
-	// netpol-owned acls
+	// netpol-owned port groups first
 	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, oc.controllerName, nil)
 	p := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
 	netpolACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
@@ -310,18 +242,16 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 			stalePGs.Insert(portGroupName)
 		}
 	}
-	// default deny acls
-	p = func(item *nbdb.ACL) bool {
-		return item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != ""
-	}
+	// default deny port groups
+	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNamespace, oc.controllerName, nil)
+	p = libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
 	netpolACLs, err = libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
 	if err != nil {
-		return fmt.Errorf("cannot find NetworkPolicy ACLs: %v", err)
+		return fmt.Errorf("cannot find default deny NetworkPolicy ACLs: %v", err)
 	}
 	for _, netpolACL := range netpolACLs {
 		// default deny acl
-		// parse the namespace.Name from the ACL name (if ACL name is 63 chars, then it will fully be namespace.Name)
-		namespace := strings.Split(*netpolACL.Name, "_")[0]
+		namespace := netpolACL.ExternalIDs[libovsdbops.ObjectNameKey.String()]
 		if _, ok := expectedPolicies[namespace]; !ok {
 			// no policies in that namespace are found, delete default deny port group
 			stalePGs.Insert(defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix))
@@ -335,80 +265,6 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 			return fmt.Errorf("error removing stale port groups %v: %v", stalePGs, err)
 		}
 		klog.Infof("Network policy sync cleaned up %d stale port groups", len(stalePGs))
-	}
-
-	// Update existing egress network policies to use the updated ACLs
-	// Note that the default multicast egress acls were created with the correct direction, but
-	// we'd still need to update its apply-after-lb=true option, so that the ACL priorities can apply properly;
-	// If acl's option["apply-after-lb"] is already set to true, then its direction should be also correct.
-	p = func(item *nbdb.ACL) bool {
-		return item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) &&
-			item.Options["apply-after-lb"] != "true"
-	}
-	egressACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
-	if err != nil {
-		return fmt.Errorf("cannot find NetworkPolicy Egress ACLs: %v", err)
-	}
-
-	if len(egressACLs) > 0 {
-		for _, acl := range egressACLs {
-			acl.Direction = nbdb.ACLDirectionFromLport
-			if acl.Options == nil {
-				acl.Options = map[string]string{"apply-after-lb": "true"}
-			} else {
-				acl.Options["apply-after-lb"] = "true"
-			}
-		}
-		ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressACLs...)
-		if err != nil {
-			return fmt.Errorf("cannot create ops to update old Egress NetworkPolicy ACLs: %v", err)
-		}
-		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-		if err != nil {
-			return fmt.Errorf("cannot update old Egress NetworkPolicy ACLs: %v", err)
-		}
-	}
-
-	// remove stale egress and ingress allow arp ACLs that were leftover as a result
-	// of ACL migration for "ARPallowPolicy" when the match changed from "arp" to "(arp || nd)"
-	p = func(item *nbdb.ACL) bool {
-		return strings.Contains(item.Match, " && "+staleArpAllowPolicyMatch) &&
-			// default-deny-policy-type:Egress or default-deny-policy-type:Ingress
-			(item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) ||
-				item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeIngress))
-	}
-	gressACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
-	if err != nil {
-		return fmt.Errorf("cannot find stale arp allow ACLs: %v", err)
-	}
-	// Remove these stale ACLs from port groups and then delete them
-	var ops []ovsdb.Operation
-	for _, gressACL := range gressACLs {
-		gressACL := gressACL
-		pgName := ""
-		if strings.Contains(gressACL.Match, "inport") {
-			// egress default ARP allow policy ("inport == @a16323395479447859119_egressDefaultDeny && arp")
-			pgName = strings.TrimPrefix(gressACL.Match, "inport == @")
-		} else if strings.Contains(gressACL.Match, "outport") {
-			// ingress default ARP allow policy ("outport == @a16323395479447859119_ingressDefaultDeny && arp")
-			pgName = strings.TrimPrefix(gressACL.Match, "outport == @")
-		}
-		pgName = strings.TrimSuffix(pgName, " && "+staleArpAllowPolicyMatch)
-		ops, err = libovsdbops.DeleteACLsFromPortGroupOps(oc.nbClient, ops, pgName, gressACL)
-		if err != nil {
-			return fmt.Errorf("failed getting delete acl ops: %v", err)
-		}
-	}
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("cannot delete stale arp allow ACLs: %v", err)
-	}
-
-	if err := oc.updateStaleDefaultDenyACLNames(knet.PolicyTypeEgress, egressDefaultDenySuffix); err != nil {
-		return fmt.Errorf("cannot clean up egress default deny ACL name: %v", err)
-	}
-	if err := oc.updateStaleDefaultDenyACLNames(knet.PolicyTypeIngress, ingressDefaultDenySuffix); err != nil {
-		return fmt.Errorf("cannot clean up ingress default deny ACL name: %v", err)
 	}
 
 	// add default hairpin allow acl
@@ -459,38 +315,32 @@ func (oc *DefaultNetworkController) addAllowACLFromNode(nodeName string, mgmtPor
 	return nil
 }
 
-func getDefaultDenyPolicyACLName(ns string, aclT aclPipelineType) string {
-	var defaultDenySuffix string
-	switch aclT {
-	case lportIngress:
-		defaultDenySuffix = ingressDefaultDenySuffix
-	case lportEgressAfterLB:
-		defaultDenySuffix = egressDefaultDenySuffix
-	default:
-		panic(fmt.Sprintf("Unknown acl type %s", aclT))
-	}
-	return joinACLName(ns, defaultDenySuffix)
-}
-
-func getDefaultDenyPolicyExternalIDs(aclT aclPipelineType) map[string]string {
-	return map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(aclTypeToPolicyType(aclT))}
-}
-
-func getARPAllowACLName(ns string) string {
-	return joinACLName(ns, arpAllowPolicySuffix)
+func (oc *DefaultNetworkController) getDefaultDenyPolicyACLIDs(ns string, aclDir aclDirection,
+	defaultACLType netpolDefaultDenyACLType) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNamespace, oc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: ns,
+			// in the same namespace there can be 2 default deny port groups, egress and ingress,
+			// every port group has default deny and arp allow acl.
+			libovsdbops.PolicyDirectionKey: string(aclDir),
+			libovsdbops.TypeKey:            string(defaultACLType),
+		})
 }
 
 func defaultDenyPortGroupName(namespace, gressSuffix string) string {
 	return hashedPortGroup(namespace) + "_" + gressSuffix
 }
 
-func buildDenyACLs(namespace, pg string, aclLogging *ACLLoggingLevels, aclT aclPipelineType) (denyACL, allowACL *nbdb.ACL) {
-	denyMatch := getACLMatch(pg, "", aclT)
-	allowMatch := getACLMatch(pg, arpAllowPolicyMatch, aclT)
-	denyACL = BuildACL(getDefaultDenyPolicyACLName(namespace, aclT), types.DefaultDenyPriority, denyMatch,
-		nbdb.ACLActionDrop, aclLogging, aclT, getDefaultDenyPolicyExternalIDs(aclT))
-	allowACL = BuildACL(getARPAllowACLName(namespace), types.DefaultAllowPriority, allowMatch,
-		nbdb.ACLActionAllow, nil, aclT, getDefaultDenyPolicyExternalIDs(aclT))
+func (oc *DefaultNetworkController) buildDenyACLs(namespace, pg string, aclLogging *ACLLoggingLevels,
+	aclDir aclDirection) (denyACL, allowACL *nbdb.ACL) {
+	denyMatch := getACLMatchFromACLDir(pg, "", aclDir)
+	allowMatch := getACLMatchFromACLDir(pg, arpAllowPolicyMatch, aclDir)
+	aclPipeline := aclDirectionToACLPipeline(aclDir)
+
+	denyACL = BuildACLFromDbIDs(oc.getDefaultDenyPolicyACLIDs(namespace, aclDir, defaultDenyACL),
+		types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, aclPipeline)
+	allowACL = BuildACLFromDbIDs(oc.getDefaultDenyPolicyACLIDs(namespace, aclDir, arpAllowACL),
+		types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, nil, aclPipeline)
 	return
 }
 
@@ -523,7 +373,7 @@ func (oc *DefaultNetworkController) delPolicyFromDefaultPortGroups(np *networkPo
 		delete(sharedPGs.policies, np.getKey())
 		if len(sharedPGs.policies) == 0 {
 			// last policy was deleted, delete port group
-			err := oc.deleteDefaultDenyPGAndACLs(np.namespace, np.name)
+			err := oc.deleteDefaultDenyPGAndACLs(np.namespace)
 			if err != nil {
 				return fmt.Errorf("failed to delete defaul deny port group: %v", err)
 			}
@@ -537,9 +387,9 @@ func (oc *DefaultNetworkController) delPolicyFromDefaultPortGroups(np *networkPo
 // must be called with defaultDenyPortGroups lock
 func (oc *DefaultNetworkController) createDefaultDenyPGAndACLs(namespace, policy string, aclLogging *ACLLoggingLevels) error {
 	ingressPGName := defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix)
-	ingressDenyACL, ingressAllowACL := buildDenyACLs(namespace, ingressPGName, aclLogging, lportIngress)
+	ingressDenyACL, ingressAllowACL := oc.buildDenyACLs(namespace, ingressPGName, aclLogging, aclIngress)
 	egressPGName := defaultDenyPortGroupName(namespace, egressDefaultDenySuffix)
-	egressDenyACL, egressAllowACL := buildDenyACLs(namespace, egressPGName, aclLogging, lportEgressAfterLB)
+	egressDenyACL, egressAllowACL := oc.buildDenyACLs(namespace, egressPGName, aclLogging, aclEgress)
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, ingressDenyACL, ingressAllowACL, egressDenyACL, egressAllowACL)
 	if err != nil {
 		return err
@@ -568,7 +418,7 @@ func (oc *DefaultNetworkController) createDefaultDenyPGAndACLs(namespace, policy
 
 // deleteDefaultDenyPGAndACLs deletes the default port groups and acls for a namespace
 // must be called with defaultDenyPortGroups lock
-func (oc *DefaultNetworkController) deleteDefaultDenyPGAndACLs(namespace, policy string) error {
+func (oc *DefaultNetworkController) deleteDefaultDenyPGAndACLs(namespace string) error {
 	ingressPGName := defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix)
 	egressPGName := defaultDenyPortGroupName(namespace, egressDefaultDenySuffix)
 
@@ -608,11 +458,17 @@ func (oc *DefaultNetworkController) updateACLLoggingForDefaultACLs(ns string, ns
 			// shared port group doesn't exist, nothing to update
 			return nil
 		}
-		denyEgressACL, _ := buildDenyACLs(ns, defaultDenyPortGroupName(ns, egressDefaultDenySuffix),
-			&nsInfo.aclLogging, lportEgressAfterLB)
-		denyIngressACL, _ := buildDenyACLs(ns, defaultDenyPortGroupName(ns, ingressDefaultDenySuffix),
-			&nsInfo.aclLogging, lportIngress)
-		if err := UpdateACLLogging(oc.nbClient, []*nbdb.ACL{denyIngressACL, denyEgressACL}, &nsInfo.aclLogging); err != nil {
+		predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNamespace, oc.controllerName,
+			map[libovsdbops.ExternalIDKey]string{
+				libovsdbops.ObjectNameKey: ns,
+				libovsdbops.TypeKey:       string(defaultDenyACL),
+			})
+		p := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
+		defaultDenyACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
+		if err != nil {
+			return fmt.Errorf("failed to find netpol default deny acls for namespace %s: %v", ns, err)
+		}
+		if err := UpdateACLLogging(oc.nbClient, defaultDenyACLs, &nsInfo.aclLogging); err != nil {
 			return fmt.Errorf("unable to update ACL logging for namespace %s: %w", ns, err)
 		}
 		return nil
@@ -1326,7 +1182,7 @@ func (oc *DefaultNetworkController) addNetworkPolicy(policy *knet.NetworkPolicy)
 	// network policy only reacts to namespace update ACL log level.
 	// Run handleNetPolNamespaceUpdate sequence, but only for 1 newly added policy.
 	if nsInfo.aclLogging.Deny != aclLogging.Deny {
-		if err := oc.updateACLLoggingForDefaultACLs(policy.Namespace, nsInfo); err != nil {
+		if err = oc.updateACLLoggingForDefaultACLs(policy.Namespace, nsInfo); err != nil {
 			return fmt.Errorf("network policy %s failed to be created: update default deny ACLs failed: %v", npKey, err)
 		} else {
 			klog.Infof("Policy %s: ACL logging setting updated to deny=%s allow=%s",
@@ -1334,7 +1190,7 @@ func (oc *DefaultNetworkController) addNetworkPolicy(policy *knet.NetworkPolicy)
 		}
 	}
 	if nsInfo.aclLogging.Allow != aclLogging.Allow {
-		if err := oc.updateACLLoggingForPolicy(np, &nsInfo.aclLogging); err != nil {
+		if err = oc.updateACLLoggingForPolicy(np, &nsInfo.aclLogging); err != nil {
 			return fmt.Errorf("network policy %s failed to be created: update policy ACLs failed: %v", npKey, err)
 		} else {
 			klog.Infof("Policy %s: ACL logging setting updated to deny=%s allow=%s",

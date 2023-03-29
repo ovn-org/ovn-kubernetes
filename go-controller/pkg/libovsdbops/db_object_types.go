@@ -21,6 +21,7 @@ const (
 	MulticastNamespaceOwnerType ownerType = "MulticastNS"
 	MulticastClusterOwnerType   ownerType = "MulticastCluster"
 	NetpolNodeOwnerType         ownerType = "NetpolNode"
+	NetpolNamespaceOwnerType    ownerType = "NetpolNamespace"
 
 	// owner extra IDs, make sure to define only 1 ExternalIDKey for every string value
 	PriorityKey           ExternalIDKey = "priority"
@@ -137,4 +138,13 @@ var ACLNetworkPolicy = newObjectIDsType(acl, NetworkPolicyOwnerType, []ExternalI
 	GressIdxKey,
 	PortPolicyIndexKey,
 	IpBlockIndexKey,
+})
+
+var ACLNetpolNamespace = newObjectIDsType(acl, NetpolNamespaceOwnerType, []ExternalIDKey{
+	// namespace
+	ObjectNameKey,
+	// in the same namespace there can be 2 default deny port groups, egress and ingress
+	PolicyDirectionKey,
+	// every port group has default deny and arp allow acl.
+	TypeKey,
 })
