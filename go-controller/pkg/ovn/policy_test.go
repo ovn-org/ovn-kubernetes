@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"net"
 	"sort"
 	"strconv"
 	"time"
@@ -2221,20 +2222,68 @@ func asMatch(hashedAddressSets []string) string {
 	return match
 }
 
-var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
+func getAllowFromNodeExpectedACL(nodeName, mgmtIP string, logicalSwitch *nbdb.LogicalSwitch, controllerName string) *nbdb.ACL {
+	var ipFamily = "ip4"
+	if utilnet.IsIPv6(ovntest.MustParseIP(mgmtIP)) {
+		ipFamily = "ip6"
+	}
+	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtIP)
+
+	dbIDs := getAllowFromNodeACLDbIDs(nodeName, mgmtIP, controllerName)
+	nodeACL := libovsdbops.BuildACL(
+		getACLName(dbIDs),
+		nbdb.ACLDirectionToLport,
+		types.DefaultAllowPriority,
+		match,
+		nbdb.ACLActionAllowRelated,
+		types.OvnACLLoggingMeter,
+		"",
+		false,
+		dbIDs.GetExternalIDs(),
+		nil)
+	nodeACL.UUID = dbIDs.String() + "-UUID"
+	if logicalSwitch != nil {
+		logicalSwitch.ACLs = []string{nodeACL.UUID}
+	}
+	return nodeACL
+}
+
+func getAllowFromNodeStaleACL(nodeName, mgmtIP string, logicalSwitch *nbdb.LogicalSwitch, controllerName string) *nbdb.ACL {
+	acl := getAllowFromNodeExpectedACL(nodeName, mgmtIP, logicalSwitch, controllerName)
+	newName := ""
+	acl.Name = &newName
+
+	return acl
+}
+
+// here only low-level operation are tested (directly calling updateStaleNetpolNodeACLs)
+var _ = ginkgo.Describe("OVN AllowFromNode ACL low-level operations", func() {
 	var (
-		asFactory *addressset.FakeAddressSetFactory
-		nbCleanup *libovsdbtest.Cleanup
+		nbCleanup     *libovsdbtest.Cleanup
+		logicalSwitch *nbdb.LogicalSwitch
 	)
 
 	const (
-		nodeName   = "node1"
-		ipv4MgmtIP = "192.168.10.10"
-		ipv6MgmtIP = "fd01::1234"
+		nodeName       = "node1"
+		ipv4MgmtIP     = "192.168.10.10"
+		ipv6MgmtIP     = "fd01::1234"
+		controllerName = DefaultNetworkControllerName
 	)
+
+	getFakeController := func(nbClient libovsdbclient.Client) *DefaultNetworkController {
+		controller := &DefaultNetworkController{
+			BaseNetworkController: BaseNetworkController{controllerName: controllerName},
+		}
+		controller.nbClient = nbClient
+		return controller
+	}
 
 	ginkgo.BeforeEach(func() {
 		nbCleanup = nil
+		logicalSwitch = &nbdb.LogicalSwitch{
+			Name: nodeName,
+			UUID: nodeName + "_UUID",
+		}
 	})
 
 	ginkgo.AfterEach(func() {
@@ -2242,6 +2291,99 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 			nbCleanup.Cleanup()
 		}
 	})
+
+	for _, ipMode := range []string{"ipv4", "ipv6"} {
+		var mgmtIP string
+		if ipMode == "ipv4" {
+			mgmtIP = ipv4MgmtIP
+		} else {
+			mgmtIP = ipv6MgmtIP
+		}
+		ginkgo.It(fmt.Sprintf("sync existing ACLs on startup, %s mode", ipMode), func() {
+			// mock existing management port
+			mgmtPortMAC := "0a:58:0a:01:01:02"
+			mgmtPort := &nbdb.LogicalSwitchPort{
+				Name:      types.K8sPrefix + nodeName,
+				UUID:      types.K8sPrefix + nodeName + "-UUID",
+				Type:      "",
+				Options:   nil,
+				Addresses: []string{mgmtPortMAC + " " + mgmtIP},
+			}
+			logicalSwitch.Ports = []string{mgmtPort.UUID}
+			initialNbdb := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					getAllowFromNodeStaleACL(nodeName, mgmtIP, logicalSwitch, controllerName),
+					logicalSwitch,
+					mgmtPort,
+				},
+			}
+			var err error
+			var nbClient libovsdbclient.Client
+			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			fakeController := getFakeController(nbClient)
+			err = fakeController.addAllowACLFromNode(nodeName, net.ParseIP(mgmtIP))
+
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedData := []libovsdb.TestData{
+				logicalSwitch,
+				mgmtPort,
+				getAllowFromNodeExpectedACL(nodeName, mgmtIP, logicalSwitch, controllerName),
+			}
+			gomega.Expect(nbClient).Should(libovsdb.HaveData(expectedData...))
+		})
+		ginkgo.It(fmt.Sprintf("adding an existing ACL to the node switch, %s mode", ipMode), func() {
+			initialNbdb := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					logicalSwitch,
+					getAllowFromNodeExpectedACL(nodeName, mgmtIP, nil, controllerName),
+				},
+			}
+			var err error
+			var nbClient libovsdbclient.Client
+			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			fakeController := getFakeController(nbClient)
+			err = fakeController.addAllowACLFromNode(nodeName, ovntest.MustParseIP(mgmtIP))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedData := []libovsdb.TestData{
+				logicalSwitch,
+				getAllowFromNodeExpectedACL(nodeName, mgmtIP, logicalSwitch, controllerName),
+			}
+			gomega.Expect(nbClient).Should(libovsdb.HaveData(expectedData...))
+		})
+
+		ginkgo.It(fmt.Sprintf("creating new ACL and adding it to node switch, %s mode", ipMode), func() {
+			initialNbdb := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					logicalSwitch,
+				},
+			}
+
+			var err error
+			var nbClient libovsdbclient.Client
+			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			fakeController := getFakeController(nbClient)
+			err = fakeController.addAllowACLFromNode(nodeName, ovntest.MustParseIP(mgmtIP))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedData := []libovsdb.TestData{
+				logicalSwitch,
+				getAllowFromNodeExpectedACL(nodeName, mgmtIP, logicalSwitch, controllerName),
+			}
+			gomega.Expect(nbClient).Should(libovsdb.HaveData(expectedData...))
+		})
+	}
+})
+
+var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
+	var asFactory *addressset.FakeAddressSetFactory
 
 	buildExpectedIngressPeerNSv4ACL := func(gp *gressPolicy, pgName string, asDbIDses []*libovsdbops.DbObjectIDs,
 		aclLogging *ACLLoggingLevels) *nbdb.ACL {
@@ -2385,106 +2527,4 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		// deleting again is no-op
 		gomega.Expect(gp.delNamespaceAddressSet(four.GetObjectID(libovsdbops.ObjectNameKey))).To(gomega.BeFalse())
 	})
-
-	ginkgo.It("Tests AddAllowACLFromNode", func() {
-		ginkgo.By("adding an existing ACL to the node switch", func() {
-			initialNbdb := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						Name: nodeName,
-					},
-					&nbdb.ACL{
-						Match:     "ip4.src==" + ipv4MgmtIP,
-						Priority:  types.DefaultAllowPriority,
-						Action:    "allow-related",
-						Direction: nbdb.ACLDirectionToLport,
-					},
-				},
-			}
-
-			var err error
-			var nbClient libovsdbclient.Client
-			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			err = addAllowACLFromNode(nodeName, ovntest.MustParseIP(ipv4MgmtIP), nbClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			testNode, nodeACL := generateAllowFromNodeData(nodeName, ipv4MgmtIP)
-			expectedData := []libovsdb.TestData{
-				testNode,
-				nodeACL,
-			}
-			gomega.Expect(nbClient).Should(libovsdb.HaveData(expectedData...))
-		})
-
-		ginkgo.By("creating an ipv4 ACL and adding it to node switch", func() {
-			initialNbdb := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						Name: nodeName,
-					},
-				},
-			}
-
-			var err error
-			var nbClient libovsdbclient.Client
-			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			err = addAllowACLFromNode(nodeName, ovntest.MustParseIP(ipv4MgmtIP), nbClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			testNode, nodeACL := generateAllowFromNodeData(nodeName, ipv4MgmtIP)
-			expectedData := []libovsdb.TestData{
-				testNode,
-				nodeACL,
-			}
-			gomega.Expect(nbClient).Should(libovsdb.HaveData(expectedData...))
-		})
-		ginkgo.By("creating an ipv6 ACL and adding it to node switch", func() {
-			initialNbdb := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						Name: nodeName,
-					},
-				},
-			}
-
-			var err error
-			var nbClient libovsdbclient.Client
-			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			err = addAllowACLFromNode(nodeName, ovntest.MustParseIP(ipv6MgmtIP), nbClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			testNode, nodeACL := generateAllowFromNodeData(nodeName, ipv6MgmtIP)
-			expectedData := []libovsdb.TestData{
-				testNode,
-				nodeACL,
-			}
-			gomega.Expect(nbClient).Should(libovsdb.HaveData(expectedData...))
-		})
-	})
 })
-
-func generateAllowFromNodeData(nodeName, mgmtIP string) (nodeSwitch *nbdb.LogicalSwitch, acl *nbdb.ACL) {
-	var ipFamily = "ip4"
-	if utilnet.IsIPv6(ovntest.MustParseIP(mgmtIP)) {
-		ipFamily = "ip6"
-	}
-
-	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtIP)
-
-	nodeACL := libovsdbops.BuildACL(getAllowFromNodeACLName(), nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match, "allow-related", types.OvnACLLoggingMeter, "", false, nil, nil)
-	nodeACL.UUID = "nodeACL-UUID"
-
-	testNode := &nbdb.LogicalSwitch{
-		UUID: nodeName + "-UUID",
-		Name: nodeName,
-		ACLs: []string{nodeACL.UUID},
-	}
-
-	return testNode, nodeACL
-}

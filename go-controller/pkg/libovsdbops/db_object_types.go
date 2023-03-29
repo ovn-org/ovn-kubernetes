@@ -19,6 +19,7 @@ const (
 	EgressServiceOwnerType      ownerType = "EgressService"
 	MulticastNamespaceOwnerType ownerType = "MulticastNS"
 	MulticastClusterOwnerType   ownerType = "MulticastCluster"
+	NetpolNodeOwnerType         ownerType = "NetpolNode"
 
 	// owner extra IDs, make sure to define only 1 ExternalIDKey for every string value
 	PriorityKey           ExternalIDKey = "priority"
@@ -26,6 +27,7 @@ const (
 	GressIdxKey           ExternalIDKey = "gress-index"
 	AddressSetIPFamilyKey ExternalIDKey = "ip-family"
 	TypeKey               ExternalIDKey = "type"
+	IpKey                 ExternalIDKey = "ip"
 )
 
 // ObjectIDsTypes should only be created here
@@ -105,4 +107,11 @@ var ACLMulticastCluster = newObjectIDsType(acl, MulticastClusterOwnerType, []Ext
 	TypeKey,
 	// egress or ingress
 	PolicyDirectionKey,
+})
+
+var ACLNetpolNode = newObjectIDsType(acl, NetpolNodeOwnerType, []ExternalIDKey{
+	// node name
+	ObjectNameKey,
+	// exact ip for management port, every node may have more than 1 management ip
+	IpKey,
 })

@@ -8,10 +8,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
 
+	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -39,7 +42,7 @@ func NewACLSyncer(nbClient libovsdbclient.Client, controllerName string) *aclSyn
 	}
 }
 
-func (syncer *aclSyncer) SyncACLs() error {
+func (syncer *aclSyncer) SyncACLs(existingNodes *v1.NodeList) error {
 	// stale acls don't have controller ID
 	legacyAclPred := libovsdbops.GetNoOwnerPredicate[*nbdb.ACL]()
 	legacyACLs, err := libovsdbops.FindACLsWithPredicate(syncer.nbClient, legacyAclPred)
@@ -50,8 +53,14 @@ func (syncer *aclSyncer) SyncACLs() error {
 		return nil
 	}
 
-	updatedACLs := syncer.updateStaleMulticastACLsDbIDs(legacyACLs)
-	klog.Infof("Found %d stale multicast ACLs", len(updatedACLs))
+	var updatedACLs []*nbdb.ACL
+	multicastACLs := syncer.updateStaleMulticastACLsDbIDs(legacyACLs)
+	klog.Infof("Found %d stale multicast ACLs", len(multicastACLs))
+	updatedACLs = append(updatedACLs, multicastACLs...)
+
+	allowFromNodeACLs := syncer.updateStaleNetpolNodeACLs(legacyACLs, existingNodes.Items)
+	klog.Infof("Found %d stale allow from node ACLs", len(allowFromNodeACLs))
+	updatedACLs = append(updatedACLs, allowFromNodeACLs...)
 
 	err = batching.Batch[*nbdb.ACL](syncer.txnBatchSize, updatedACLs, func(batchACLs []*nbdb.ACL) error {
 		return libovsdbops.CreateOrUpdateACLs(syncer.nbClient, batchACLs...)
@@ -133,6 +142,57 @@ func (syncer *aclSyncer) updateStaleMulticastACLsDbIDs(legacyACLs []*nbdb.ACL) [
 		// update externalIDs
 		acl.ExternalIDs = dbIDs.GetExternalIDs()
 		updatedACLs = append(updatedACLs, acl)
+	}
+	return updatedACLs
+}
+
+func (syncer *aclSyncer) getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNode, syncer.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: nodeName,
+			libovsdbops.IpKey:         mgmtPortIP,
+		})
+}
+
+// updateStaleNetpolNodeACLs updates allow from node ACLs, that don't have new ExternalIDs based
+// on DbObjectIDs set. Allow from node acls are applied on the node switch, therefore the cleanup for deleted is not needed,
+// since acl will be deleted toegther with the node switch.
+func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []v1.Node) []*nbdb.ACL {
+	// ACL to allow traffic from host via management port has no name or ExternalIDs
+	// The only way to find it is by exact match
+	type aclInfo struct {
+		nodeName string
+		ip       string
+	}
+	matchToNode := map[string]aclInfo{}
+	for _, node := range existingNodes {
+		hostSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
+		if err != nil {
+			klog.Warningf("Couldn't parse hostSubnet annotation for node %s: %v", node.Name, err)
+			continue
+		}
+		for _, hostSubnet := range hostSubnets {
+			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+			ipFamily := "ip4"
+			if utilnet.IsIPv6(mgmtIfAddr.IP) {
+				ipFamily = "ip6"
+			}
+			match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtIfAddr.IP.String())
+			matchToNode[match] = aclInfo{
+				nodeName: node.Name,
+				ip:       mgmtIfAddr.IP.String(),
+			}
+		}
+	}
+	updatedACLs := []*nbdb.ACL{}
+	for _, acl := range legacyACLs {
+		if _, ok := matchToNode[acl.Match]; ok {
+			aclInfo := matchToNode[acl.Match]
+			dbIDs := syncer.getAllowFromNodeACLDbIDs(aclInfo.nodeName, aclInfo.ip)
+			// Update ExternalIDs and Name based on new dbIndex
+			acl.ExternalIDs = dbIDs.GetExternalIDs()
+			updatedACLs = append(updatedACLs, acl)
+		}
 	}
 	return updatedACLs
 }

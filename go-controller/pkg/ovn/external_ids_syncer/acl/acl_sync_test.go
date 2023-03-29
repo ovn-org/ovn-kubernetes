@@ -1,12 +1,15 @@
 package acl
 
 import (
+	"encoding/json"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strings"
 )
 
@@ -15,18 +18,19 @@ type aclSync struct {
 	after  *libovsdbops.DbObjectIDs
 }
 
-func testSyncerWithData(data []aclSync, controllerName string) {
+func testSyncerWithData(data []aclSync, controllerName string, initialDbState []libovsdbtest.TestData,
+	existingNodes []v1.Node) {
 	// create initial db setup
-	dbSetup := libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{}}
+	dbSetup := libovsdbtest.TestSetup{NBData: initialDbState}
 	for _, asSync := range data {
-		asSync.before.UUID = *asSync.before.Name + "-UUID"
+		asSync.before.UUID = asSync.after.String() + "-UUID"
 		dbSetup.NBData = append(dbSetup.NBData, asSync.before)
 	}
 	libovsdbOvnNBClient, _, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
 	defer libovsdbCleanup.Cleanup()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	// create expected data using addressSetFactory
-	expectedDbState := []libovsdbtest.TestData{}
+	expectedDbState := initialDbState
 	for _, aclSync := range data {
 		acl := aclSync.before
 		acl.ExternalIDs = aclSync.after.GetExternalIDs()
@@ -34,7 +38,7 @@ func testSyncerWithData(data []aclSync, controllerName string) {
 	}
 	// run sync
 	syncer := NewACLSyncer(libovsdbOvnNBClient, controllerName)
-	err = syncer.SyncACLs()
+	err = syncer.SyncACLs(&v1.NodeList{Items: existingNodes})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	// check results
 	gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDbState))
@@ -164,6 +168,53 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 				after: syncerToBuildData.getNamespaceMcastACLDbIDs(namespace1, "Ingress"),
 			},
 		}
-		testSyncerWithData(testData, controllerName)
+		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil)
+	})
+	ginkgo.It("updates allow from node acls", func() {
+		nodeName := "node1"
+		ipv4MgmtIP := "10.244.0.2"
+		ipv6MgmtIP := "fd02:0:0:2::2"
+
+		testData := []aclSync{
+			// ipv4 acl
+			{
+				before: libovsdbops.BuildACL(
+					"",
+					nbdb.ACLDirectionToLport,
+					types.DefaultAllowPriority,
+					"ip4.src=="+ipv4MgmtIP,
+					nbdb.ACLActionAllowRelated,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					nil,
+					nil),
+				after: syncerToBuildData.getAllowFromNodeACLDbIDs(nodeName, ipv4MgmtIP),
+			},
+			// ipv6 acl
+			{
+				before: libovsdbops.BuildACL(
+					"",
+					nbdb.ACLDirectionToLport,
+					types.DefaultAllowPriority,
+					"ip6.src=="+ipv6MgmtIP,
+					nbdb.ACLActionAllowRelated,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					nil,
+					nil),
+				after: syncerToBuildData.getAllowFromNodeACLDbIDs(nodeName, ipv6MgmtIP),
+			},
+		}
+		hostSubnets := map[string][]string{types.DefaultNetworkName: {"10.244.0.0/24", "fd02:0:0:2::2895/64"}}
+		bytes, err := json.Marshal(hostSubnets)
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		existingNodes := []v1.Node{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        nodeName,
+				Annotations: map[string]string{"k8s.ovn.org/node-subnets": string(bytes)},
+			}}}
+		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, existingNodes)
 	})
 })

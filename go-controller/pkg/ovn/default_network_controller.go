@@ -282,8 +282,12 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to sync address sets on controller init: %v", err)
 	}
 
+	existingNodes, err := oc.kube.GetNodes()
+	if err != nil {
+		return fmt.Errorf("failed to get existing nodes: %w", err)
+	}
 	aclSyncer := aclsyncer.NewACLSyncer(oc.nbClient, DefaultNetworkControllerName)
-	err = aclSyncer.SyncACLs()
+	err = aclSyncer.SyncACLs(existingNodes)
 	if err != nil {
 		return fmt.Errorf("failed to sync acls on controller init: %v", err)
 	}

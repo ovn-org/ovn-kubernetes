@@ -262,7 +262,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 
-		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.nbClient); err != nil {
+		if err := oc.addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
 			return err
 		}
 

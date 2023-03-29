@@ -427,31 +427,38 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 	return nil
 }
 
-func getAllowFromNodeACLName() string {
-	return ""
+func getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNode, controller,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: nodeName,
+			libovsdbops.IpKey:         mgmtPortIP,
+		})
 }
 
-func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbclient.Client) error {
+// There is no delete function for this ACL type, because the ACL is applied on a node switch.
+// When the node is deleted, switch will be deleted by the node sync, and the dependent ACLs will be
+// garbage-collected.
+func (oc *DefaultNetworkController) addAllowACLFromNode(nodeName string, mgmtPortIP net.IP) error {
 	ipFamily := "ip4"
 	if utilnet.IsIPv6(mgmtPortIP) {
 		ipFamily = "ip6"
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
+	dbIDs := getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP.String(), oc.controllerName)
+	nodeACL := BuildACLFromDbIDs(dbIDs, types.DefaultAllowPriority, match,
+		nbdb.ACLActionAllowRelated, nil, lportIngress)
 
-	nodeACL := BuildACL(getAllowFromNodeACLName(), types.DefaultAllowPriority, match,
-		nbdb.ACLActionAllowRelated, nil, lportIngress, nil)
-
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(nbClient, nil, nodeACL)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, nodeACL)
 	if err != nil {
 		return fmt.Errorf("failed to create or update ACL %v: %v", nodeACL, err)
 	}
 
-	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(nbClient, ops, nodeName, nodeACL)
+	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(oc.nbClient, ops, nodeName, nodeACL)
 	if err != nil {
 		return fmt.Errorf("failed to add ACL %v to switch %s: %v", nodeACL, nodeName, err)
 	}
 
-	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return err
 	}
