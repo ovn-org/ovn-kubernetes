@@ -9,7 +9,8 @@ const (
 	// owner types
 	EgressFirewallDNSOwnerType ownerType = "EgressFirewallDNS"
 	EgressQoSOwnerType         ownerType = "EgressQoS"
-	// only used for cleanup now, as the stale owner of network policy address sets
+	// NetworkPolicyOwnerType is deprecated for address sets, should only be used for sync.
+	// New owner of network policy address sets, is PodSelectorOwnerType.
 	NetworkPolicyOwnerType      ownerType = "NetworkPolicy"
 	NetpolDefaultOwnerType      ownerType = "NetpolDefault"
 	PodSelectorOwnerType        ownerType = "PodSelector"
@@ -28,6 +29,8 @@ const (
 	AddressSetIPFamilyKey ExternalIDKey = "ip-family"
 	TypeKey               ExternalIDKey = "type"
 	IpKey                 ExternalIDKey = "ip"
+	PortPolicyIndexKey    ExternalIDKey = "port-policy-index"
+	IpBlockIndexKey       ExternalIDKey = "ip-block-index"
 )
 
 // ObjectIDsTypes should only be created here
@@ -114,4 +117,24 @@ var ACLNetpolNode = newObjectIDsType(acl, NetpolNodeOwnerType, []ExternalIDKey{
 	ObjectNameKey,
 	// exact ip for management port, every node may have more than 1 management ip
 	IpKey,
+})
+
+// ACLNetworkPolicy define a unique index for every network policy ACL.
+// ingress/egress + NetworkPolicy[In/E]gressRule idx - defines given gressPolicy.
+// ACLs are created for every gp.portPolicies:
+// - for empty policy (no selectors and no ip blocks) - empty ACL (see allIPsMatch)
+// OR
+// - all selector-based peers ACL
+// - for every IPBlock +1 ACL
+// Therefore unique id for a given gressPolicy is portPolicy idx + IPBlock idx
+// (empty policy and all selector-based peers ACLs will have idx=-1)
+var ACLNetworkPolicy = newObjectIDsType(acl, NetworkPolicyOwnerType, []ExternalIDKey{
+	// policy namespace+name
+	ObjectNameKey,
+	// egress or ingress
+	PolicyDirectionKey,
+	// gress rule index
+	GressIdxKey,
+	PortPolicyIndexKey,
+	IpBlockIndexKey,
 })

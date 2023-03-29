@@ -2,6 +2,7 @@ package acl
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -21,6 +22,14 @@ const (
 	defaultDenyPolicyTypeACLExtIdKey = "default-deny-policy-type"
 	mcastDefaultDenyID               = "DefaultDeny"
 	mcastAllowInterNodeID            = "AllowInterNode"
+	l4MatchACLExtIdKey               = "l4Match"
+	ipBlockCIDRACLExtIdKey           = "ipblock_cidr"
+	namespaceACLExtIdKey             = "namespace"
+	policyACLExtIdKey                = "policy"
+	policyTypeACLExtIdKey            = "policy_type"
+	policyTypeNumACLExtIdKey         = "%s_num"
+	noneMatch                        = "None"
+	emptyIdx                         = -1
 )
 
 type aclSyncer struct {
@@ -61,6 +70,13 @@ func (syncer *aclSyncer) SyncACLs(existingNodes *v1.NodeList) error {
 	allowFromNodeACLs := syncer.updateStaleNetpolNodeACLs(legacyACLs, existingNodes.Items)
 	klog.Infof("Found %d stale allow from node ACLs", len(allowFromNodeACLs))
 	updatedACLs = append(updatedACLs, allowFromNodeACLs...)
+
+	gressPolicyACLs, err := syncer.updateStaleGressPolicies(legacyACLs)
+	if err != nil {
+		return fmt.Errorf("failed to update gress policy ACLs: %w", err)
+	}
+	klog.Infof("Found %d stale gress ACLs", len(gressPolicyACLs))
+	updatedACLs = append(updatedACLs, gressPolicyACLs...)
 
 	err = batching.Batch[*nbdb.ACL](syncer.txnBatchSize, updatedACLs, func(batchACLs []*nbdb.ACL) error {
 		return libovsdbops.CreateOrUpdateACLs(syncer.nbClient, batchACLs...)
@@ -195,4 +211,87 @@ func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, exist
 		}
 	}
 	return updatedACLs
+}
+
+func (syncer *aclSyncer) getNetpolGressACLDbIDs(policyNamespace, policyName, policyType string,
+	gressIdx, portPolicyIdx, ipBlockIdx int) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, syncer.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			// policy namespace+name
+			libovsdbops.ObjectNameKey: policyNamespace + ":" + policyName,
+			// egress or ingress
+			libovsdbops.PolicyDirectionKey: policyType,
+			// gress rule index
+			libovsdbops.GressIdxKey: strconv.Itoa(gressIdx),
+			// acls are created for every gp.portPolicies:
+			// - for empty policy (no selectors and no ip blocks) - empty ACL
+			// OR
+			// - all selector-based peers ACL
+			// - for every IPBlock +1 ACL
+			// Therefore unique id for given gressPolicy is portPolicy idx + IPBlock idx
+			// (empty policy and all selector-based peers ACLs will have idx=-1)
+			libovsdbops.PortPolicyIndexKey: strconv.Itoa(portPolicyIdx),
+			libovsdbops.IpBlockIndexKey:    strconv.Itoa(ipBlockIdx),
+		})
+}
+
+func (syncer *aclSyncer) updateStaleGressPolicies(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL, err error) {
+	if len(legacyACLs) == 0 {
+		return
+	}
+	// for every gress policy build mapping to count port policies.
+	// l4MatchACLExtIdKey was previously assigned based on port policy,
+	// we can just assign idx to every port Policy and make sure there are no equal ACLs.
+	gressPolicyPortCount := map[string]map[string]int{}
+	for _, acl := range legacyACLs {
+		if acl.ExternalIDs[policyTypeACLExtIdKey] == "" {
+			// not gress ACL
+			continue
+		}
+		policyNamespace := acl.ExternalIDs[namespaceACLExtIdKey]
+		policyName := acl.ExternalIDs[policyACLExtIdKey]
+		policyType := acl.ExternalIDs[policyTypeACLExtIdKey]
+		idxKey := fmt.Sprintf(policyTypeNumACLExtIdKey, policyType)
+		idx, err := strconv.Atoi(acl.ExternalIDs[idxKey])
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse gress policy idx %s: %v",
+				acl.ExternalIDs[idxKey], err)
+		}
+		var ipBlockIdx int
+		// ipBlockCIDRACLExtIdKey is "false" for non-ipBlock ACLs.
+		// Then for the first ipBlock in a given gress policy it is "true",
+		// and for the rest of them is idx+1
+		if acl.ExternalIDs[ipBlockCIDRACLExtIdKey] == "true" {
+			ipBlockIdx = 0
+		} else if acl.ExternalIDs[ipBlockCIDRACLExtIdKey] == "false" {
+			ipBlockIdx = emptyIdx
+		} else {
+			ipBlockIdx, err = strconv.Atoi(acl.ExternalIDs[ipBlockCIDRACLExtIdKey])
+			if err != nil {
+				return nil, fmt.Errorf("unable to parse gress policy ipBlockCIDRACLExtIdKey %s: %v",
+					acl.ExternalIDs[ipBlockCIDRACLExtIdKey], err)
+			}
+			ipBlockIdx -= 1
+		}
+		gressACLID := strings.Join([]string{policyNamespace, policyName, policyType, fmt.Sprintf("%d", idx)}, "_")
+		if gressPolicyPortCount[gressACLID] == nil {
+			gressPolicyPortCount[gressACLID] = map[string]int{}
+		}
+		var portIdx int
+		l4Match := acl.ExternalIDs[l4MatchACLExtIdKey]
+		if l4Match == noneMatch {
+			portIdx = emptyIdx
+		} else {
+			if _, ok := gressPolicyPortCount[gressACLID][l4Match]; !ok {
+				// this l4MatchACLExtIdKey is new for given gressPolicy, assign the next idx to it
+				gressPolicyPortCount[gressACLID][l4Match] = len(gressPolicyPortCount[gressACLID])
+			}
+			portIdx = gressPolicyPortCount[gressACLID][l4Match]
+		}
+		dbIDs := syncer.getNetpolGressACLDbIDs(policyNamespace, policyName,
+			policyType, idx, portIdx, ipBlockIdx)
+		acl.ExternalIDs = dbIDs.GetExternalIDs()
+		updatedACLs = append(updatedACLs, acl)
+	}
+	return
 }

@@ -80,7 +80,13 @@ func hashedPortGroup(s string) string {
 // Therefore, "feature" as "EF" for EgressFirewall and "NP" for network policy goes first, then namespace,
 // then acl-related info.
 func getACLName(dbIDs *libovsdbops.DbObjectIDs) string {
+	t := dbIDs.GetIDsType()
 	aclName := ""
+	switch {
+	case t.IsSameType(libovsdbops.ACLNetworkPolicy):
+		aclName = "NP:" + dbIDs.GetObjectID(libovsdbops.ObjectNameKey) + ":" + dbIDs.GetObjectID(libovsdbops.PolicyDirectionKey) +
+			":" + dbIDs.GetObjectID(libovsdbops.GressIdxKey)
+	}
 	return fmt.Sprintf("%.63s", aclName)
 }
 

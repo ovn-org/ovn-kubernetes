@@ -29,18 +29,6 @@ import (
 const (
 	// defaultDenyPolicyTypeACLExtIdKey external ID key for default deny policy type
 	defaultDenyPolicyTypeACLExtIdKey = "default-deny-policy-type"
-	// l4MatchACLExtIdKey external ID key for L4 Match on 'gress policy ACLs
-	l4MatchACLExtIdKey = "l4Match"
-	// ipBlockCIDRACLExtIdKey external ID key for IP block CIDR on 'gress policy ACLs
-	ipBlockCIDRACLExtIdKey = "ipblock_cidr"
-	// namespaceACLExtIdKey external ID key for namespace on 'gress policy ACLs
-	namespaceACLExtIdKey = "namespace"
-	// policyACLExtIdKey external ID key for policy name on 'gress policy ACLs
-	policyACLExtIdKey = "policy"
-	// policyACLExtKey external ID key for policy type on 'gress policy ACLs
-	policyTypeACLExtIdKey = "policy_type"
-	// policyTypeNumACLExtIdKey external ID key for policy index by type on 'gress policy ACLs
-	policyTypeNumACLExtIdKey = "%s_num"
 	// ingressDefaultDenySuffix is the suffix used when creating the ingress port group for a namespace
 	ingressDefaultDenySuffix = "ingressDefaultDeny"
 	// egressDefaultDenySuffix is the suffix used when creating the ingress port group for a namespace
@@ -302,36 +290,42 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 	}
 
 	// cleanup port groups based on acl search
-	p := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs[policyACLExtIdKey] != "" || item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != ""
-	}
+	// netpol-owned acls
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, oc.controllerName, nil)
+	p := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
 	netpolACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
 	if err != nil {
 		return fmt.Errorf("cannot find NetworkPolicy ACLs: %v", err)
 	}
 	stalePGs := sets.Set[string]{}
-	if len(netpolACLs) > 0 {
-		for _, netpolACL := range netpolACLs {
-			if netpolACL.ExternalIDs[policyACLExtIdKey] != "" {
-				// policy-owned acl
-				namespace := netpolACL.ExternalIDs[namespaceACLExtIdKey]
-				policyName := netpolACL.ExternalIDs[policyACLExtIdKey]
-				if !expectedPolicies[namespace][policyName] {
-					// policy doesn't exist on k8s, cleanup
-					portGroupName, _ := getNetworkPolicyPGName(namespace, policyName)
-					stalePGs.Insert(portGroupName)
-				}
-			} else if netpolACL.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != "" {
-				// default deny acl
-				// parse the namespace.Name from the ACL name (if ACL name is 63 chars, then it will fully be namespace.Name)
-				namespace := strings.Split(*netpolACL.Name, "_")[0]
-				if _, ok := expectedPolicies[namespace]; !ok {
-					// no policies in that namespace are found, delete default deny port group
-					stalePGs.Insert(defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix))
-					stalePGs.Insert(defaultDenyPortGroupName(namespace, egressDefaultDenySuffix))
-				}
-			}
-
+	for _, netpolACL := range netpolACLs {
+		// policy-owned acl
+		namespace, policyName, err := parseACLPolicyKey(netpolACL.ExternalIDs[libovsdbops.ObjectNameKey.String()])
+		if err != nil {
+			return fmt.Errorf("failed to sync stale network policies: acl IDs parsing failed: %w", err)
+		}
+		if !expectedPolicies[namespace][policyName] {
+			// policy doesn't exist on k8s, cleanup
+			portGroupName, _ := getNetworkPolicyPGName(namespace, policyName)
+			stalePGs.Insert(portGroupName)
+		}
+	}
+	// default deny acls
+	p = func(item *nbdb.ACL) bool {
+		return item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != ""
+	}
+	netpolACLs, err = libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
+	if err != nil {
+		return fmt.Errorf("cannot find NetworkPolicy ACLs: %v", err)
+	}
+	for _, netpolACL := range netpolACLs {
+		// default deny acl
+		// parse the namespace.Name from the ACL name (if ACL name is 63 chars, then it will fully be namespace.Name)
+		namespace := strings.Split(*netpolACL.Name, "_")[0]
+		if _, ok := expectedPolicies[namespace]; !ok {
+			// no policies in that namespace are found, delete default deny port group
+			stalePGs.Insert(defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix))
+			stalePGs.Insert(defaultDenyPortGroupName(namespace, egressDefaultDenySuffix))
 		}
 	}
 	if len(stalePGs) > 0 {
@@ -348,8 +342,7 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 	// we'd still need to update its apply-after-lb=true option, so that the ACL priorities can apply properly;
 	// If acl's option["apply-after-lb"] is already set to true, then its direction should be also correct.
 	p = func(item *nbdb.ACL) bool {
-		return (item.ExternalIDs[policyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) ||
-			item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress)) &&
+		return item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) &&
 			item.Options["apply-after-lb"] != "true"
 	}
 	egressACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
@@ -601,9 +594,10 @@ func (oc *DefaultNetworkController) updateACLLoggingForPolicy(np *networkPolicy,
 	}
 
 	// Predicate for given network policy ACLs
-	p := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs[namespaceACLExtIdKey] == np.namespace && item.ExternalIDs[policyACLExtIdKey] == np.name
-	}
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, oc.controllerName, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: getACLPolicyKey(np.namespace, np.name),
+	})
+	p := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
 	return UpdateACLLoggingWithPredicate(oc.nbClient, p, aclLogging)
 }
 

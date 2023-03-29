@@ -2,6 +2,7 @@ package acl
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -9,6 +10,7 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	v1 "k8s.io/api/core/v1"
+	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strings"
 )
@@ -216,5 +218,127 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 				Annotations: map[string]string{"k8s.ovn.org/node-subnets": string(bytes)},
 			}}}
 		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, existingNodes)
+	})
+	ginkgo.It("updates gress policy acls", func() {
+		policyNamespace := "policyNamespace"
+		policyName := "policyName"
+		testData := []aclSync{
+			{
+				before: libovsdbops.BuildACL(
+					policyNamespace+"_"+policyName+"_0",
+					nbdb.ACLDirectionToLport,
+					types.DefaultAllowPriority,
+					"ip4.dst == 10.244.1.5/32 && inport == @a2653181086423119552",
+					nbdb.ACLActionAllowRelated,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{
+						l4MatchACLExtIdKey:     "tcp && 6380<=tcp.dst<=7000",
+						ipBlockCIDRACLExtIdKey: "true",
+						namespaceACLExtIdKey:   policyNamespace,
+						policyACLExtIdKey:      policyName,
+						policyTypeACLExtIdKey:  string(knet.PolicyTypeEgress),
+						fmt.Sprintf(policyTypeNumACLExtIdKey, knet.PolicyTypeEgress): "0",
+					},
+					nil,
+				),
+				after: syncerToBuildData.getNetpolGressACLDbIDs(policyNamespace, policyName, string(knet.PolicyTypeEgress),
+					0, 0, 0),
+			},
+			{
+				before: libovsdbops.BuildACL(
+					policyNamespace+"_"+policyName+"_0",
+					nbdb.ACLDirectionToLport,
+					types.DefaultAllowPriority,
+					"ip4.dst == 10.244.1.5/32 && inport == @a2653181086423119552",
+					nbdb.ACLActionAllowRelated,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{
+						l4MatchACLExtIdKey:     "tcp && 6380<=tcp.dst<=7000",
+						ipBlockCIDRACLExtIdKey: "2",
+						namespaceACLExtIdKey:   policyNamespace,
+						policyACLExtIdKey:      policyName,
+						policyTypeACLExtIdKey:  string(knet.PolicyTypeEgress),
+						fmt.Sprintf(policyTypeNumACLExtIdKey, knet.PolicyTypeEgress): "0",
+					},
+					nil,
+				),
+				after: syncerToBuildData.getNetpolGressACLDbIDs(policyNamespace, policyName, string(knet.PolicyTypeEgress),
+					0, 0, 1),
+			},
+			{
+				before: libovsdbops.BuildACL(
+					policyNamespace+"_"+policyName+"_0",
+					nbdb.ACLDirectionToLport,
+					types.DefaultAllowPriority,
+					"ip4.dst == 10.244.1.5/32 && inport == @a2653181086423119552",
+					nbdb.ACLActionAllowRelated,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{
+						l4MatchACLExtIdKey:     "tcp && 1<=tcp.dst<=3",
+						ipBlockCIDRACLExtIdKey: "true",
+						namespaceACLExtIdKey:   policyNamespace,
+						policyACLExtIdKey:      policyName,
+						policyTypeACLExtIdKey:  string(knet.PolicyTypeEgress),
+						fmt.Sprintf(policyTypeNumACLExtIdKey, knet.PolicyTypeEgress): "0",
+					},
+					nil,
+				),
+				after: syncerToBuildData.getNetpolGressACLDbIDs(policyNamespace, policyName, string(knet.PolicyTypeEgress),
+					0, 1, 0),
+			},
+			{
+				before: libovsdbops.BuildACL(
+					policyNamespace+"_"+policyName+"_0",
+					nbdb.ACLDirectionToLport,
+					types.DefaultAllowPriority,
+					"ip4.dst == 10.244.1.5/32 && inport == @a2653181086423119552",
+					nbdb.ACLActionAllowRelated,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{
+						l4MatchACLExtIdKey:     "tcp && 1<=tcp.dst<=3",
+						ipBlockCIDRACLExtIdKey: "2",
+						namespaceACLExtIdKey:   policyNamespace,
+						policyACLExtIdKey:      policyName,
+						policyTypeACLExtIdKey:  string(knet.PolicyTypeEgress),
+						fmt.Sprintf(policyTypeNumACLExtIdKey, knet.PolicyTypeEgress): "0",
+					},
+					nil,
+				),
+				after: syncerToBuildData.getNetpolGressACLDbIDs(policyNamespace, policyName, string(knet.PolicyTypeEgress),
+					0, 1, 1),
+			},
+			{
+				before: libovsdbops.BuildACL(
+					policyNamespace+"_"+policyName+"_0",
+					nbdb.ACLDirectionFromLport,
+					types.DefaultAllowPriority,
+					"(ip4.src == {$a3733136965153973077} || (ip4.src == 169.254.169.5 && ip4.dst == {$a3733136965153973077})) && outport == @a2653181086423119552",
+					nbdb.ACLActionAllowRelated,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{
+						l4MatchACLExtIdKey:     noneMatch,
+						ipBlockCIDRACLExtIdKey: "false",
+						namespaceACLExtIdKey:   policyNamespace,
+						policyACLExtIdKey:      policyName,
+						policyTypeACLExtIdKey:  string(knet.PolicyTypeIngress),
+						fmt.Sprintf(policyTypeNumACLExtIdKey, knet.PolicyTypeIngress): "0",
+					},
+					nil,
+				),
+				after: syncerToBuildData.getNetpolGressACLDbIDs(policyNamespace, policyName, string(knet.PolicyTypeIngress),
+					0, emptyIdx, emptyIdx),
+			},
+		}
+		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil)
 	})
 })

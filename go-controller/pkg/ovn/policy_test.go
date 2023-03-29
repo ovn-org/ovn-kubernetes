@@ -203,7 +203,6 @@ func getStaleDefaultACL(acls []*nbdb.ACL) []*nbdb.ACL {
 
 func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, tcpPeerPorts []int32,
 	peers []knet.NetworkPolicyPeer, logSeverity nbdb.ACLSeverity, policyType knet.PolicyType, stale, statlessNetPol bool) []*nbdb.ACL {
-	aclName := getGressPolicyACLName(namespace, policyName, i)
 	pgName, _ := getNetworkPolicyPGName(namespace, policyName)
 	shouldBeLogged := logSeverity != ""
 	var options map[string]string
@@ -239,6 +238,13 @@ func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, 
 			ipBlock = peer.IPBlock.CIDR
 		}
 	}
+	gp := gressPolicy{
+		policyNamespace: namespace,
+		policyName:      policyName,
+		policyType:      policyType,
+		idx:             i,
+		controllerName:  DefaultNetworkControllerName,
+	}
 	if len(hashedASNames) > 0 {
 		gressAsMatch := asMatch(hashedASNames)
 		match := fmt.Sprintf("ip4.%s == {%s} && %s == @%s", ipDir, gressAsMatch, portDir, pgName)
@@ -246,8 +252,9 @@ func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, 
 		if statlessNetPol {
 			action = nbdb.ACLActionAllowStateless
 		}
+		dbIDs := gp.getNetpolACLDbIDs(emptyIdx, emptyIdx)
 		acl := libovsdbops.BuildACL(
-			aclName,
+			getACLName(dbIDs),
 			direction,
 			types.DefaultAllowPriority,
 			match,
@@ -255,23 +262,17 @@ func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, 
 			types.OvnACLLoggingMeter,
 			logSeverity,
 			shouldBeLogged,
-			map[string]string{
-				l4MatchACLExtIdKey:          "None",
-				ipBlockCIDRACLExtIdKey:      "false",
-				namespaceACLExtIdKey:        namespace,
-				policyACLExtIdKey:           policyName,
-				policyTypeACLExtIdKey:       string(policyType),
-				string(policyType) + "_num": strconv.Itoa(i),
-			},
+			dbIDs.GetExternalIDs(),
 			options,
 		)
-		acl.UUID = aclName + string(policyType) + "-UUID"
+		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
 	}
 	if ipBlock != "" {
 		match := fmt.Sprintf("ip4.%s == %s && %s == @%s", ipDir, ipBlock, portDir, pgName)
+		dbIDs := gp.getNetpolACLDbIDs(emptyIdx, 0)
 		acl := libovsdbops.BuildACL(
-			aclName,
+			getACLName(dbIDs),
 			direction,
 			types.DefaultAllowPriority,
 			match,
@@ -279,22 +280,16 @@ func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, 
 			types.OvnACLLoggingMeter,
 			logSeverity,
 			shouldBeLogged,
-			map[string]string{
-				l4MatchACLExtIdKey:          "None",
-				ipBlockCIDRACLExtIdKey:      "true",
-				namespaceACLExtIdKey:        namespace,
-				policyACLExtIdKey:           policyName,
-				policyTypeACLExtIdKey:       string(policyType),
-				string(policyType) + "_num": strconv.Itoa(i),
-			},
+			dbIDs.GetExternalIDs(),
 			options,
 		)
-		acl.UUID = aclName + string(policyType) + "-UUID"
+		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
 	}
-	for _, v := range tcpPeerPorts {
+	for portPolicyIdx, v := range tcpPeerPorts {
+		dbIDs := gp.getNetpolACLDbIDs(portPolicyIdx, emptyIdx)
 		acl := libovsdbops.BuildACL(
-			aclName,
+			getACLName(dbIDs),
 			direction,
 			types.DefaultAllowPriority,
 			fmt.Sprintf("ip4 && tcp && tcp.dst==%d && %s == @%s", v, portDir, pgName),
@@ -302,29 +297,31 @@ func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, 
 			types.OvnACLLoggingMeter,
 			logSeverity,
 			shouldBeLogged,
-			map[string]string{
-				l4MatchACLExtIdKey:          fmt.Sprintf("tcp && tcp.dst==%d", v),
-				ipBlockCIDRACLExtIdKey:      "false",
-				namespaceACLExtIdKey:        namespace,
-				policyACLExtIdKey:           policyName,
-				policyTypeACLExtIdKey:       string(policyType),
-				string(policyType) + "_num": strconv.Itoa(i),
-			},
+			dbIDs.GetExternalIDs(),
 			options,
 		)
-		acl.UUID = fmt.Sprintf("%s-%s-port_%d-UUID", string(policyType), aclName, v)
+		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
 	}
 	if stale {
-		return getStalePolicyACL(acls)
+		return getStalePolicyACL(acls, namespace, policyName)
 	}
 	return acls
 }
 
-func getStalePolicyACL(acls []*nbdb.ACL) []*nbdb.ACL {
-	for _, acl := range acls {
+// getStalePolicyACL updated ACL to the most ancient version, which includes
+// - old name
+// - no options for Egress ACLs
+// - wrong direction for egress ACLs
+// - non-nil Severity when Log is false
+func getStalePolicyACL(acls []*nbdb.ACL, policyNamespace, policyName string) []*nbdb.ACL {
+	for i, acl := range acls {
+		staleName := policyNamespace + "_" + policyName + "_" + strconv.Itoa(i)
+		acl.Name = &staleName
 		acl.Options = nil
 		acl.Direction = nbdb.ACLDirectionToLport
+		sev := nbdb.ACLSeverityInfo
+		acl.Severity = &sev
 	}
 	return acls
 }
@@ -731,41 +728,15 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					"egress", "0", DefaultNetworkControllerName)
 				localASName, _ := addressset.GetHashNamesForAS(staleAddrSetIDs)
 				peerASName, _ := getNsAddrSetHashNames(namespace2.Name)
-				pgName, readableName := getNetworkPolicyPGName(networkPolicy.Namespace, networkPolicy.Name)
-				staleACL := libovsdbops.BuildACL(
-					"staleACL",
-					nbdb.ACLDirectionFromLport,
-					types.DefaultAllowPriority,
-					fmt.Sprintf("ip4.dst == {$%s, $%s} && inport == @%s", localASName, peerASName, pgName),
-					nbdb.ACLActionAllowRelated,
-					types.OvnACLLoggingMeter,
-					"",
-					false,
-					map[string]string{
-						l4MatchACLExtIdKey:     "None",
-						ipBlockCIDRACLExtIdKey: "false",
-						namespaceACLExtIdKey:   networkPolicy.Namespace,
-						policyACLExtIdKey:      networkPolicy.Name,
-						policyTypeACLExtIdKey:  "egress",
-						"egress_num":           "0",
-					},
-					map[string]string{
-						"apply-after-lb": "true",
-					},
-				)
-				staleACL.UUID = "staleACL-UUID"
-				pg := libovsdbops.BuildPortGroup(
-					pgName,
-					readableName,
-					nil,
-					[]*nbdb.ACL{staleACL},
-				)
-				pg.UUID = pg.Name + "-UUID"
+				pgName, _ := getNetworkPolicyPGName(networkPolicy.Namespace, networkPolicy.Name)
+				initialData := getPolicyData(networkPolicy, nil, []string{namespace2.Name}, nil,
+					"", false)
+				staleACL := initialData[0].(*nbdb.ACL)
+				staleACL.Match = fmt.Sprintf("ip4.dst == {$%s, $%s} && inport == @%s", localASName, peerASName, pgName)
 
 				defaultDenyInitialData := getDefaultDenyData(networkPolicy, nil, "", true)
-				initialData := initialDB.NBData
 				initialData = append(initialData, defaultDenyInitialData...)
-				initialData = append(initialData, staleACL, pg)
+				initialData = append(initialData, initialDB.NBData...)
 				_, err := fakeOvn.asf.NewAddressSet(staleAddrSetIDs, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -780,8 +751,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					"", false, false)
 				defaultDenyExpectedData := getDefaultDenyData(networkPolicy, nil, "", false)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
-				// stale acl will be de-refenced, but not garbage collected
-				expectedData = append(expectedData, staleACL)
 				expectedData = append(expectedData, initialDB.NBData...)
 				fakeOvn.asf.ExpectEmptyAddressSet(staleAddrSetIDs)
 
@@ -1154,10 +1123,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				defaultDenyExpectedData2 := getDefaultDenyData(networkPolicy2, []string{nPodTest.portUUID}, "", false)
 
 				expectedData = getUpdatedInitialDB([]testPod{nPodTest})
-				// FIXME(trozet): libovsdb server doesn't remove referenced ACLs to PG when deleting the PG
-				// https://github.com/ovn-org/libovsdb/issues/219
-				expectedPolicy1ACLs := gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]
-				expectedData = append(expectedData, expectedPolicy1ACLs...)
 				expectedData = append(expectedData, gressPolicy2ExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData2...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
@@ -2387,7 +2352,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 
 	buildExpectedIngressPeerNSv4ACL := func(gp *gressPolicy, pgName string, asDbIDses []*libovsdbops.DbObjectIDs,
 		aclLogging *ACLLoggingLevels) *nbdb.ACL {
-		name := getGressPolicyACLName(gp.policyNamespace, gp.policyName, gp.idx)
+		aclIDs := gp.getNetpolACLDbIDs(emptyIdx, emptyIdx)
 		hashedASNames := []string{}
 
 		for _, dbIdx := range asDbIDses {
@@ -2396,17 +2361,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		}
 		asMatch := asMatch(hashedASNames)
 		match := fmt.Sprintf("ip4.src == {%s} && outport == @%s", asMatch, pgName)
-		gpDirection := string(knet.PolicyTypeIngress)
-		externalIds := map[string]string{
-			l4MatchACLExtIdKey:     "None",
-			ipBlockCIDRACLExtIdKey: "false",
-			namespaceACLExtIdKey:   gp.policyNamespace,
-			policyACLExtIdKey:      gp.policyName,
-			policyTypeACLExtIdKey:  gpDirection,
-			gpDirection + "_num":   fmt.Sprintf("%d", gp.idx),
-		}
-		acl := libovsdbops.BuildACL(name, nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match,
-			nbdb.ACLActionAllowRelated, types.OvnACLLoggingMeter, aclLogging.Allow, true, externalIds, nil)
+		acl := libovsdbops.BuildACL(getACLName(aclIDs), nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match,
+			nbdb.ACLActionAllowRelated, types.OvnACLLoggingMeter, aclLogging.Allow, true, aclIDs.GetExternalIDs(), nil)
 		return acl
 	}
 
