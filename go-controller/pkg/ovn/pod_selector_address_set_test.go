@@ -46,9 +46,9 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 		fakeOvn = NewFakeOVN()
-
+		initialData := getHairpinningACLsV4AndPortGroup()
 		initialDB = libovsdbtest.TestSetup{
-			NBData: []libovsdbtest.TestData{},
+			NBData: initialData,
 		}
 	})
 

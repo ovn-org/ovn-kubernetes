@@ -768,6 +768,9 @@ func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode
 			}
 			modifiedRuleIDs = append(modifiedRuleIDs, rule.id)
 		}
+		if len(modifiedRuleIDs) == 0 {
+			return true
+		}
 		// update egress firewall rules
 		asIndex := getNamespaceAddrSetDbIDs(ef.namespace, oc.controllerName)
 		as, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
