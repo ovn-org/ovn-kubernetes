@@ -331,17 +331,16 @@ func TestSyncServices(t *testing.T) {
 					},
 					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
-				nodeSwitchTemplateLoadBalancer(nodePort, serviceName, ns),
-				nodeRouterTemplateLoadBalancer(nodePort, serviceName, ns),
+				nodeMergedTemplateLoadBalancer(nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
 				nodeLogicalSwitch(nodeA, initialLsGroups),
 				nodeLogicalSwitch(nodeB, initialLsGroups),
 				nodeLogicalRouter(nodeA, initialLrGroups),
 				nodeLogicalRouter(nodeB, initialLrGroups),
 				lbGroup(types.ClusterLBGroupName, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-				lbGroup(types.ClusterSwitchLBGroupName, nodeSwitchTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
-				lbGroup(types.ClusterRouterLBGroupName, nodeRouterTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
-				nodeTemplate(firstNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
-				nodeTemplate(secondNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
+				lbGroup(types.ClusterSwitchLBGroupName, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
+				lbGroup(types.ClusterRouterLBGroupName, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
+				nodeIPTemplate(firstNode),
+				nodeIPTemplate(secondNode),
 			},
 		},
 		{
@@ -414,17 +413,16 @@ func TestSyncServices(t *testing.T) {
 					},
 					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
-				nodeSwitchTemplateLoadBalancer(nodePort, serviceName, ns),
-				nodeRouterTemplateLoadBalancer(nodePort, serviceName, ns),
+				nodeMergedTemplateLoadBalancer(nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
 				nodeLogicalSwitch(nodeA, initialLsGroups),
 				nodeLogicalSwitch(nodeB, initialLsGroups),
 				nodeLogicalRouter(nodeA, initialLrGroups),
 				nodeLogicalRouter(nodeB, initialLrGroups),
 				lbGroup(types.ClusterLBGroupName, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-				lbGroup(types.ClusterSwitchLBGroupName, nodeSwitchTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
-				lbGroup(types.ClusterRouterLBGroupName, nodeRouterTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
-				nodeTemplate(firstNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
-				nodeTemplate(secondNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
+				lbGroup(types.ClusterSwitchLBGroupName, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
+				lbGroup(types.ClusterRouterLBGroupName, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
+				nodeIPTemplate(firstNode),
+				nodeIPTemplate(secondNode),
 			},
 			nodeToDelete: nodeConfig(nodeA, nodeAHostIP),
 			dbStateAfterDeleting: []libovsdbtest.TestData{
@@ -438,19 +436,16 @@ func TestSyncServices(t *testing.T) {
 					},
 					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
-				nodeSwitchTemplateLoadBalancer(nodePort, serviceName, ns),
-				nodeRouterTemplateLoadBalancer(nodePort, serviceName, ns),
+				nodeMergedTemplateLoadBalancer(nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
 				nodeLogicalSwitch(nodeA, initialLsGroups),
 				nodeLogicalSwitch(nodeB, initialLsGroups),
 				nodeLogicalRouter(nodeA, initialLrGroups),
 				nodeLogicalRouter(nodeB, initialLrGroups),
 				lbGroup(types.ClusterLBGroupName, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-				lbGroup(types.ClusterSwitchLBGroupName, nodeSwitchTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
-				lbGroup(types.ClusterRouterLBGroupName, nodeRouterTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
-				// node-A chassis template var is cleaned up by the DefaultNetworkController()
-				// deleteNodeEvent handler.  And that doesn't get run in this test.
-				nodeTemplate(firstNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
-				nodeTemplate(secondNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
+				lbGroup(types.ClusterSwitchLBGroupName, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
+				lbGroup(types.ClusterRouterLBGroupName, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
+				nodeIPTemplate(firstNode),
+				nodeIPTemplate(secondNode),
 			},
 		},
 	}
@@ -568,6 +563,14 @@ func nodeRouterTemplateLoadBalancerName(serviceNamespace string, serviceName str
 		addressFamily)
 }
 
+func nodeMergedTemplateLoadBalancerName(serviceNamespace string, serviceName string, addressFamily v1.IPFamily) string {
+	return fmt.Sprintf(
+		"Service_%s/%s_TCP_node_switch_template_%s_merged",
+		serviceNamespace,
+		serviceName,
+		addressFamily)
+}
+
 func servicesOptions() map[string]string {
 	return map[string]string{
 		"event":              "false",
@@ -637,12 +640,18 @@ func nodeIPTemplate(node *nodeInfo) *nbdb.ChassisTemplateVar {
 	}
 }
 
-func nodeTemplate(node *nodeInfo, nodePort int32, serviceName string, serviceNamespace string, outputPort int32, endpointIPs ...string) *nbdb.ChassisTemplateVar {
-	template := nodeIPTemplate(node)
-	template.Variables[makeLBNodeIPTemplateName(v1.IPv4Protocol)] = node.nodeIPs[0].String()
-	template.Variables[makeTarget(serviceName, serviceNamespace, "TCP", nodePort, "node_switch_template", v1.IPv4Protocol)] = computeEndpoints(outputPort, endpointIPs...)
-	template.Variables[makeTarget(serviceName, serviceNamespace, "TCP", nodePort, "node_router_template", v1.IPv4Protocol)] = computeEndpoints(outputPort, endpointIPs...)
-	return template
+func nodeMergedTemplateLoadBalancer(nodePort int32, serviceName string, serviceNamespace string, outputPort int32, endpointIPs ...string) *nbdb.LoadBalancer {
+	nodeTemplateIP := makeTemplate(makeLBNodeIPTemplateName(v1.IPv4Protocol))
+	return &nbdb.LoadBalancer{
+		UUID:     nodeMergedTemplateLoadBalancerName(serviceNamespace, serviceName, v1.IPv4Protocol),
+		Name:     nodeMergedTemplateLoadBalancerName(serviceNamespace, serviceName, v1.IPv4Protocol),
+		Options:  templateServicesOptions(),
+		Protocol: &nbdb.LoadBalancerProtocolTCP,
+		Vips: map[string]string{
+			endpoint(refTemplate(nodeTemplateIP.Name), nodePort): computeEndpoints(outputPort, endpointIPs...),
+		},
+		ExternalIDs: serviceExternalIDs(namespacedServiceName(serviceNamespace, serviceName)),
+	}
 }
 
 func refTemplate(template string) string {

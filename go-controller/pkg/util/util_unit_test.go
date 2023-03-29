@@ -110,6 +110,7 @@ func TestUpdateIPsSlice(t *testing.T) {
 		name              string
 		s, oldIPs, newIPs []string
 		want              []string
+		changed           bool
 	}{
 		{
 			"Tests no matching IPs to remove",
@@ -117,6 +118,7 @@ func TestUpdateIPsSlice(t *testing.T) {
 			[]string{"1.1.1.1"},
 			[]string{"9.9.9.9", "fe99::1"},
 			[]string{"192.168.1.1", "10.0.0.1", "127.0.0.2"},
+			false,
 		},
 		{
 			"Tests some matching IPs to replace",
@@ -124,6 +126,7 @@ func TestUpdateIPsSlice(t *testing.T) {
 			[]string{"10.0.0.1"},
 			[]string{"9.9.9.9", "fe99::1"},
 			[]string{"192.168.1.1", "9.9.9.9", "127.0.0.2"},
+			true,
 		},
 		{
 			"Tests matching IPv6 to replace",
@@ -131,6 +134,7 @@ func TestUpdateIPsSlice(t *testing.T) {
 			[]string{"3dfd::99ac"},
 			[]string{"9.9.9.9", "fe99::1"},
 			[]string{"fed9::5", "ab13::1e15", "fe99::1"},
+			true,
 		},
 		{
 			"Tests match but nothing to replace with",
@@ -138,6 +142,7 @@ func TestUpdateIPsSlice(t *testing.T) {
 			[]string{"3dfd::99ac"},
 			[]string{"9.9.9.9"},
 			[]string{"fed9::5", "ab13::1e15", "3dfd::99ac"},
+			false,
 		},
 		{
 			"Tests with no newIPs",
@@ -145,6 +150,7 @@ func TestUpdateIPsSlice(t *testing.T) {
 			[]string{"3dfd::99ac"},
 			[]string{},
 			[]string{"fed9::5", "ab13::1e15", "3dfd::99ac"},
+			false,
 		},
 		{
 			"Tests with no newIPs or oldIPs",
@@ -152,14 +158,19 @@ func TestUpdateIPsSlice(t *testing.T) {
 			[]string{},
 			[]string{},
 			[]string{"fed9::5", "ab13::1e15", "3dfd::99ac"},
+			false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ans := UpdateIPsSlice(tt.s, tt.oldIPs, tt.newIPs)
+			ans, changed := UpdateIPsSlice(tt.s, tt.oldIPs, tt.newIPs)
 			if !reflect.DeepEqual(ans, tt.want) {
 				t.Errorf("got %v, want %v", ans, tt.want)
+			}
+
+			if tt.changed != changed {
+				t.Errorf("got changed %t, want %t", changed, tt.changed)
 			}
 		})
 	}
