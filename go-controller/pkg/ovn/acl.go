@@ -88,6 +88,8 @@ func getACLName(dbIDs *libovsdbops.DbObjectIDs) string {
 			":" + dbIDs.GetObjectID(libovsdbops.GressIdxKey)
 	case t.IsSameType(libovsdbops.ACLNetpolNamespace):
 		aclName = "NP:" + dbIDs.GetObjectID(libovsdbops.ObjectNameKey) + ":" + dbIDs.GetObjectID(libovsdbops.PolicyDirectionKey)
+	case t.IsSameType(libovsdbops.ACLEgressFirewall):
+		aclName = "EF:" + dbIDs.GetObjectID(libovsdbops.ObjectNameKey) + ":" + dbIDs.GetObjectID(libovsdbops.RuleIndex)
 	}
 	return fmt.Sprintf("%.63s", aclName)
 }

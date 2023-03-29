@@ -672,4 +672,39 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 		}
 		testSyncerWithData(testData, controllerName, initialDb, finalDb, nil)
 	})
+	ginkgo.It("updates egress firewall acls", func() {
+		testData := []aclSync{
+			{
+				before: libovsdbops.BuildACL(
+					"random",
+					nbdb.ACLDirectionFromLport,
+					types.EgressFirewallStartPriority,
+					"any",
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{egressFirewallACLExtIdKey: namespace1},
+					nil,
+				),
+				after: syncerToBuildData.getEgressFirewallACLDbIDs(namespace1, 0),
+			},
+			{
+				before: libovsdbops.BuildACL(
+					"random2",
+					nbdb.ACLDirectionFromLport,
+					types.EgressFirewallStartPriority-1,
+					"any2",
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					map[string]string{egressFirewallACLExtIdKey: namespace1},
+					nil,
+				),
+				after: syncerToBuildData.getEgressFirewallACLDbIDs(namespace1, 1),
+			},
+		}
+		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil, nil)
+	})
 })

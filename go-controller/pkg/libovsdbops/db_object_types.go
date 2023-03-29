@@ -8,6 +8,7 @@ const (
 const (
 	// owner types
 	EgressFirewallDNSOwnerType ownerType = "EgressFirewallDNS"
+	EgressFirewallOwnerType    ownerType = "EgressFirewall"
 	EgressQoSOwnerType         ownerType = "EgressQoS"
 	// NetworkPolicyOwnerType is deprecated for address sets, should only be used for sync.
 	// New owner of network policy address sets, is PodSelectorOwnerType.
@@ -32,6 +33,7 @@ const (
 	IpKey                 ExternalIDKey = "ip"
 	PortPolicyIndexKey    ExternalIDKey = "port-policy-index"
 	IpBlockIndexKey       ExternalIDKey = "ip-block-index"
+	RuleIndex             ExternalIDKey = "rule-index"
 )
 
 // ObjectIDsTypes should only be created here
@@ -147,4 +149,12 @@ var ACLNetpolNamespace = newObjectIDsType(acl, NetpolNamespaceOwnerType, []Exter
 	PolicyDirectionKey,
 	// every port group has default deny and arp allow acl.
 	TypeKey,
+})
+
+var ACLEgressFirewall = newObjectIDsType(acl, EgressFirewallOwnerType, []ExternalIDKey{
+	// namespace
+	ObjectNameKey,
+	// there can only be 1 egress firewall object in every namespace, named "default"
+	// The only additional id we need is the index of the EgressFirewall.Spec.Egress rule.
+	RuleIndex,
 })

@@ -37,7 +37,8 @@ const (
 	// staleArpAllowPolicyMatch "was" the old match used when creating default allow ARP ACLs for a namespace
 	// NOTE: This is succeed by arpAllowPolicyMatch to allow support for IPV6. This is currently only
 	// used when removing stale ACLs from the syncNetworkPolicy function and should NOT be used in any main logic.
-	staleArpAllowPolicyMatch = "arp"
+	staleArpAllowPolicyMatch  = "arp"
+	egressFirewallACLExtIdKey = "egressFirewall"
 )
 
 type aclSyncer struct {
@@ -92,6 +93,10 @@ func (syncer *aclSyncer) SyncACLs(existingNodes *v1.NodeList) error {
 	}
 	klog.Infof("Found %d stale default deny netpol ACLs", len(gressPolicyACLs))
 	updatedACLs = append(updatedACLs, defaultDenyACLs...)
+
+	egressFirewallACLs := syncer.updateStaleEgressFirewallACLs(legacyACLs)
+	klog.Infof("Found %d stale egress firewall ACLs", len(gressPolicyACLs))
+	updatedACLs = append(updatedACLs, egressFirewallACLs...)
 
 	// delete stale duplicating acls first
 	_, err = libovsdbops.TransactAndCheck(syncer.nbClient, deleteACLs)
@@ -402,4 +407,34 @@ func (syncer *aclSyncer) updateStaleDefaultDenyNetpolACLs(legacyACLs []*nbdb.ACL
 		updatedACLs = append(updatedACLs, acl)
 	}
 	return
+}
+
+func (syncer *aclSyncer) getEgressFirewallACLDbIDs(namespace string, ruleIdx int) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLEgressFirewall, syncer.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: namespace,
+			libovsdbops.RuleIndex:     strconv.Itoa(ruleIdx),
+		})
+}
+
+func (syncer *aclSyncer) updateStaleEgressFirewallACLs(legacyACLs []*nbdb.ACL) []*nbdb.ACL {
+	updatedACLs := []*nbdb.ACL{}
+	for _, acl := range legacyACLs {
+		if acl.Priority < types.MinimumReservedEgressFirewallPriority || acl.Priority > types.EgressFirewallStartPriority {
+			// not egress firewall acl
+			continue
+		}
+		namespace, ok := acl.ExternalIDs[egressFirewallACLExtIdKey]
+		if !ok || namespace == "" {
+			klog.Errorf("Failed to sync stale egress firewall acl: expected non-empty %s key in ExternalIDs %+v",
+				egressFirewallACLExtIdKey, acl.ExternalIDs)
+			continue
+		}
+		// egress firewall ACL.priority = types.EgressFirewallStartPriority - rule.idx =>
+		// rule.idx = types.EgressFirewallStartPriority - ACL.priority
+		dbIDs := syncer.getEgressFirewallACLDbIDs(namespace, types.EgressFirewallStartPriority-acl.Priority)
+		acl.ExternalIDs = dbIDs.GetExternalIDs()
+		updatedACLs = append(updatedACLs, acl)
+	}
+	return updatedACLs
 }
