@@ -16,6 +16,7 @@ USER root
 ENV PYTHONDONTWRITEBYTECODE yes
 
 ARG ovnver=ovn-23.03.0-16.fc37
+ARG GITHUB_TOKEN
 # Automatically populated when using docker buildx
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
@@ -28,7 +29,7 @@ RUN INSTALL_PKGS=" \
 	libpcap hostname kubernetes-client util-linux \
         ovn ovn-central ovn-host python3-openvswitch tcpdump openvswitch-test python3-pyOpenSSL \
 	iptables iproute iputils strace socat koji \
-        libreswan openvswitch-ipsec \
+        libreswan openvswitch-ipsec unzip \
         " && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
@@ -36,8 +37,16 @@ RUN ln -s /usr/bin/python3 /usr/libexec/platform-python
 
 RUN mkdir -p /var/run/openvswitch
 
-RUN if [ "$TARGETPLATFORM" = "linux/amd64" ] || [ -z "$TARGETPLATFORM"] ; then koji download-build $ovnver --arch=x86_64  ; \
-    else koji download-build $ovnver --arch=aarch64 ; fi 
+RUN if [ "$GITHUB_TOKEN" != "" ] ; then curl -L \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  $(curl https://api.github.com/repos/ovn-org/ovn/actions/artifacts?name=rpm-packages |grep archive_download_url  |head -n 1 |sed "s/.*https/https/" |sed 's/",//') -o ovn.zip && \ 
+    unzip ovn.zip && rm RPMS/x86_64/*debuginfo* && cp RPMS/x86_64/*.rpm . ; \
+    else \
+        if [ "$TARGETPLATFORM" = "linux/amd64" ] || [ -z "$TARGETPLATFORM"] ; then koji download-build $ovnver --arch=x86_64  ; \
+        else koji download-build $ovnver --arch=aarch64 ; fi ;\
+    fi
 
 RUN rpm -Uhv --nodeps --force *.rpm
 

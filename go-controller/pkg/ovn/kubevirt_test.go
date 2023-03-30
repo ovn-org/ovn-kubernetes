@@ -144,7 +144,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			}
 
 			nodes := []string{}
-			for node, _ := range nodeSet {
+			for node := range nodeSet {
 				nodes = append(nodes, node)
 			}
 			data := getExpectedDataPodsAndSwitches(testPods, nodes)
@@ -380,6 +380,20 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						},
 						Spec: corev1.ServiceSpec{
 							ClusterIPs: t.dnsServiceIPs,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: node1,
+								},
+							},
+							{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: node2,
+								},
+							},
 						},
 					},
 				)

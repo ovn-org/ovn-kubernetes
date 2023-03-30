@@ -146,7 +146,8 @@ usage() {
     echo "                                    DEFAULT: Don't allow."
     echo "-gm  | --gateway-mode               Enable 'shared' or 'local' gateway mode."
     echo "                                    DEFAULT: shared."
-    echo "-ov  | --ovn-image            	    Use the specified docker image instead of building locally. DEFAULT: local build."
+    echo "-ov  | --ovn-image                  Use the specified docker image instead of building locally. DEFAULT: local build."
+    echo "-ovb | --ovn-branch                 Build ovn RPMs from specified branch, DEFAULT: empty, will use RPMs from distro"
     echo "-ml  | --master-loglevel            Log level for ovnkube (master), DEFAULT: 5."
     echo "-nl  | --node-loglevel              Log level for ovnkube (node), DEFAULT: 5"
     echo "-dbl | --dbchecker-loglevel         Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5."
@@ -189,6 +190,8 @@ parse_args() {
             -mlb | --install-metallb )          KIND_INSTALL_METALLB=true
                                                 ;;
             -pl | --install-cni-plugins )       KIND_INSTALL_PLUGINS=true
+                                                ;;
+            -ikv | --install-kubevirt)          KIND_INSTALL_KUBEVIRT=true
                                                 ;;
             -ha | --ha-enabled )                OVN_HA=true
                                                 ;;
@@ -274,6 +277,9 @@ parse_args() {
             -ov | --ovn-image )           	    shift
                                           	    OVN_IMAGE=$1
                                           	    ;;
+            -ovb | --ovn-branch )               shift
+                                                OVN_BRANCH=$1
+                                                ;;
             -ml  | --master-loglevel )          shift
                                                 if ! [[ "$1" =~ ^[0-9]$ ]]; then
                                                     echo "Invalid master-loglevel: $1"
@@ -368,6 +374,7 @@ print_params() {
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
      echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
      echo "KIND_INSTALL_PLUGINS = $KIND_INSTALL_PLUGINS"
+     echo "KIND_INSTALL_KUBEVIRT = $KIND_INSTALL_KUBEVIRT"
      echo "OVN_HA = $OVN_HA"
      echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
@@ -397,6 +404,7 @@ print_params() {
      echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
+     echo "OVN_BRANCH = $OVN_BRANCH"
      echo "MASTER_LOG_LEVEL = $MASTER_LOG_LEVEL"
      echo "NODE_LOG_LEVEL = $NODE_LOG_LEVEL"
      echo "DBCHECKER_LOG_LEVEL = $DBCHECKER_LOG_LEVEL"
@@ -511,11 +519,12 @@ set_default_params() {
   fi
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
-  K8S_VERSION=${K8S_VERSION:-v1.26.0}
+  K8S_VERSION=${K8S_VERSION:-v1.26.3}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
   KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
+  KIND_INSTALL_KUBEVIRT=${KIND_INSTALL_KUBEVIRT:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
   KIND_LOCAL_REGISTRY_NAME=${KIND_LOCAL_REGISTRY_NAME:-kind-registry}
@@ -534,6 +543,7 @@ set_default_params() {
   OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
   KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
   OVN_IMAGE=${OVN_IMAGE:-local}
+  OVN_BRANCH=${OVN_BRANCH:-""}
   MASTER_LOG_LEVEL=${MASTER_LOG_LEVEL:-5}
   NODE_LOG_LEVEL=${NODE_LOG_LEVEL:-5}
   DBCHECKER_LOG_LEVEL=${DBCHECKER_LOG_LEVEL:-5}
@@ -765,7 +775,9 @@ docker_disable_ipv6() {
 
 coredns_patch() {
   dns_server="8.8.8.8"
-  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+  # No need for ipv6 nameserver for dual stack, it will ask for 
+  # A and AAAA records
+  if [ "$IP_FAMILY" == "ipv6" ]; then
     dns_server="2001:4860:4860::8888"
   fi
 
@@ -814,7 +826,15 @@ build_ovn_image() {
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-    $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
+    if [ "${OVN_BRANCH}" != "" ]; then
+        if [ "${OVN_BRANCH}" == "main" ]; then
+            $OCI_BIN build --build-arg GITHUB_TOKEN="${GITHUB_TOKEN}" -t "${OVN_IMAGE}" -f Dockerfile.fedora .
+        else
+            $OCI_BIN build --build-arg OVN_BRANCH="${OVN_BRANCH}" --build-arg OVS_BRANCH=branch-3.1 -t "${OVN_IMAGE}" -f Dockerfile.fedora.dev .
+        fi
+    else
+        $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
+    fi
 
     # store in local registry
     if [ "$KIND_LOCAL_REGISTRY" == true ];then
@@ -822,6 +842,12 @@ build_ovn_image() {
       $OCI_BIN push "${OVN_IMAGE}"
     fi
     popd
+  # We should push to local registry if image is not remote
+  elif [ "${OVN_IMAGE}" != "" -a "${KIND_LOCAL_REGISTRY}" == true ] && (echo "$OVN_IMAGE" | grep / -vq); then 
+    local local_registry_ovn_image="localhost:5000/${OVN_IMAGE}"
+    $OCI_BIN tag "$OVN_IMAGE" $local_registry_ovn_image
+    OVN_IMAGE=$local_registry_ovn_image
+    $OCI_BIN push $OVN_IMAGE
   fi
 }
 
@@ -1248,6 +1274,46 @@ add_dns_hostnames() {
   done
 }
 
+function nested_virt_is_enabled() {
+    local kvm_nested="unknown"
+    if [ -f "/sys/module/kvm_intel/parameters/nested" ]; then
+        kvm_nested=$( cat /sys/module/kvm_intel/parameters/nested )
+    elif [ -f "/sys/module/kvm_amd/parameters/nested" ]; then
+        kvm_nested=$( cat /sys/module/kvm_amd/parameters/nested )
+    fi
+    [ "$kvm_nested" == "1" ] || [ "$kvm_nested" == "Y" ] || [ "$kvm_nested" == "y" ]
+}
+
+function install_kubevirt() {
+    for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
+        docker exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
+        docker exec -t $node bash -c "echo 'fs.inotify.max_user_instances=512' >> /etc/sysctl.conf"
+        docker exec -i $node bash -c "sysctl -p /etc/sysctl.conf"
+        if [[ "${node}" =~ worker ]]; then
+            kubectl label nodes $node node-role.kubernetes.io/worker="" --overwrite=true
+        fi
+    done
+    local nightly_build_base_url="https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt"
+    local latest=$(curl -sL "${nightly_build_base_url}/latest")
+
+    echo "Deploy latest nighly build Kubevirt"
+    if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
+      kubectl apply -f "${nightly_build_base_url}/${latest}/kubevirt-operator.yaml"
+      kubectl apply -f "${nightly_build_base_url}/${latest}/kubevirt-cr.yaml"
+      if ! nested_virt_is_enabled; then
+        kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
+      fi
+    fi
+    if ! kubectl wait -n kubevirt kv kubevirt --for condition=Available --timeout 5m; then
+        kubectl get pod -n kubevirt -l || true
+        kubectl describe pod -n kubevirt -l || true
+        for p in $(kubectl get pod -n kubevirt -l -o name |sed "s#pod/##"); do
+            kubectl logs -p --all-containers=true -n kubevirt $p || true
+            kubectl logs --all-containers=true -n kubevirt $p || true
+        done
+    fi
+}
+
 check_dependencies
 # In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info"
 # the original command <parse_args $*> was replaced by <parse_args "$@">
@@ -1309,4 +1375,7 @@ if [ "$KIND_INSTALL_METALLB" == true ]; then
 fi
 if [ "$KIND_INSTALL_PLUGINS" == true ]; then
   install_plugins
+fi
+if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
+  install_kubevirt
 fi
