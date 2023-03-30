@@ -41,8 +41,8 @@ func RunDBChecker(kclient kube.Interface, stopCh <-chan struct{}) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := upgradeNBDBSchema(); err != nil {
-			klog.Fatalf("NBDB Upgrade failed: %v", err)
+		if err := convertNBDBSchema(); err != nil {
+			klog.Fatalf("NBDB conversion failed: %v", err)
 		}
 		ensureOvnDBState(util.OvnNbdbLocation, kclient, stopCh)
 	}()
@@ -50,8 +50,8 @@ func RunDBChecker(kclient kube.Interface, stopCh <-chan struct{}) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := upgradeSBDBSchema(); err != nil {
-			klog.Fatalf("SBDB Upgrade failed: %v", err)
+		if err := convertSBDBSchema(); err != nil {
+			klog.Fatalf("SBDB conversion failed: %v", err)
 		}
 		ensureOvnDBState(util.OvnSbdbLocation, kclient, stopCh)
 	}()
@@ -338,59 +338,48 @@ func resetRaftDB(db *util.OvsDbProperties) error {
 	return nil
 }
 
-func upgradeNBDBSchema() error {
-	return upgradeDBSchemaWithRetries(nbdbSchema, nbdbServerSock, "OVN_Northbound")
+func convertNBDBSchema() error {
+	return convertDBSchemaWithRetries(nbdbSchema, nbdbServerSock, "OVN_Northbound")
 }
 
-func upgradeSBDBSchema() error {
-	return upgradeDBSchemaWithRetries(sbdbSchema, sbdbServerSock, "OVN_Southbound")
+func convertSBDBSchema() error {
+	return convertDBSchemaWithRetries(sbdbSchema, sbdbServerSock, "OVN_Southbound")
 }
 
-func upgradeDBSchemaWithRetries(schemaFile, serverSock, dbName string) error {
+func convertDBSchemaWithRetries(schemaFile, serverSock, dbName string) error {
 	var lastMigrationErr error
 	if err := wait.PollImmediate(5*time.Second, 5*time.Minute, func() (bool, error) {
-		lastMigrationErr = upgradeDBSchema(schemaFile, serverSock, dbName)
+		lastMigrationErr = convertDBSchema(schemaFile, serverSock, dbName)
 		if lastMigrationErr != nil {
-			klog.ErrorS(lastMigrationErr, dbName+" scheme upgrade failed")
+			klog.ErrorS(lastMigrationErr, dbName+" scheme conversion failed")
 			return false, nil
 		}
 		return true, nil
 	}); err != nil {
-		return fmt.Errorf("failed to upgrade db schema: %v. Error from last attempt: %w", err, lastMigrationErr)
+		return fmt.Errorf("failed to convert db schema: %v. Error from last attempt: %w", err, lastMigrationErr)
 	}
 
 	return nil
 }
 
-func upgradeDBSchema(schemaFile, serverSock, dbName string) error {
+func convertDBSchema(schemaFile, serverSock, dbName string) error {
 	if _, err := os.Stat(schemaFile); err != nil {
 		return err
 	}
 
-	stdout, stderr, err := util.RunOVSDBTool("schema-version", schemaFile)
+	// needs-conversion returns string (via stdout) 'yes' if a conversion is needed, and if not 'no'.
+	isConversionRequired, _, err := util.RunOVSDBClient("needs-conversion", serverSock, schemaFile)
 	if err != nil {
-		return fmt.Errorf("failed to get schema name: %s, %w", stderr, err)
-	}
-	schemaTarget := strings.TrimSpace(stdout)
-
-	stdout, stderr, err = util.RunOVSDBClient("-t", "10", "get-schema-version", serverSock, dbName)
-	if err != nil {
-		return fmt.Errorf("failed to get schema version for NBDB, stderr: %q, error: %w", stderr, err)
-	}
-	dbSchemaVersion := strings.TrimSpace(stdout)
-
-	_, _, err = util.RunOVSDBTool("compare-versions", dbSchemaVersion, "<", schemaTarget)
-	if err != nil {
-		klog.Infof("No %s DB schema upgrade is required. Current version: %s, target: %s",
-			dbName, dbSchemaVersion, schemaTarget)
-		return nil
+		return fmt.Errorf("failed to determine if cluster schema requires conversion: %w", err)
 	}
 
-	_, stderr, err = util.RunOVSDBClient("-t", "30", "convert", serverSock, schemaFile)
-	if err != nil {
-		return fmt.Errorf("failed to upgrade schema, stderr: %q, error: %w", stderr, err)
+	if isConversionRequired == "yes" {
+		_, stderr, err := util.RunOVSDBClient("-t", "30", "convert", serverSock, schemaFile)
+		if err != nil {
+			return fmt.Errorf("failed to convert schema, stderr: %q, error: %w", stderr, err)
+		}
+		klog.Infof("%s DB schema successfully converted", dbName)
 	}
 
-	klog.Infof("%s DB schema successfully upgraded from: %q, to %q", dbName, dbSchemaVersion, schemaTarget)
 	return nil
 }
