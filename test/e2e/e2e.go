@@ -1262,7 +1262,7 @@ spec:
 			return false, nil
 		})
 		if err != nil {
-			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, ovnContainer, serverNodeInfo.name, err)
+			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, srcPodName, serverNodeInfo.name, err)
 		}
 
 		// Verify the remote host/port as implicitly denied by the firewall policy is not reachable
@@ -1556,6 +1556,10 @@ spec:
 		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
 		testContainer := fmt.Sprintf("%s-container", efPodName)
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
+		denyCIDR := "0.0.0.0/0"
+		if IsIPv6Cluster(f.ClientSet) {
+			denyCIDR = "::/0"
+		}
 		// egress firewall crd yaml configuration
 		var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
 apiVersion: k8s.ovn.org/v1
@@ -1566,8 +1570,8 @@ spec:
   egress:
   - type: Deny
     to:
-      cidrSelector: 0.0.0.0/0
-`, f.Namespace.Name)
+      cidrSelector: %s
+`, f.Namespace.Name, denyCIDR)
 		// write the config to a file for application and defer the removal
 		if err := ioutil.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
@@ -1621,13 +1625,17 @@ spec:
 		framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 		nodeIP := serverNodeInfo.nodeIP
-		externalContainerIP, _ := createClusterExternalContainer(externalContainerName, agnhostImage,
+		externalContainerIPV4, externalContainerIPV6 := createClusterExternalContainer(externalContainerName, agnhostImage,
 			[]string{"--network", ciNetworkName, "-p", fmt.Sprintf("%d:%d", externalContainerPort, externalContainerPort)},
 			[]string{"netexec", fmt.Sprintf("--http-port=%d", externalContainerPort)})
 		defer deleteClusterExternalContainer(externalContainerName)
 
 		// 2. Check connectivity works both ways
 		// pod -> external container should work
+		externalContainerIP := externalContainerIPV4
+		if IsIPv6Cluster(f.ClientSet) {
+			externalContainerIP = externalContainerIPV6
+		}
 		ginkgo.By(fmt.Sprintf("Verifying connectivity from pod %s to external container [%s]:%d",
 			efPodName, externalContainerIP, externalContainerPort))
 		_, err = framework.RunKubectl(f.Namespace.Name, "exec", efPodName, testContainerFlag,
@@ -3029,77 +3037,4 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		framework.Logf("test simple connectivity from new pod to API server,after recovery")
 		singlePodConnectivityTest(f, "after-delete-db-pods")
 	})
-})
-
-var _ = ginkgo.Describe("e2e IGMP validation", func() {
-	const (
-		svcname              string = "igmp-test"
-		ovnNs                string = "ovn-kubernetes"
-		port                 string = "8080"
-		ovnWorkerNode        string = "ovn-worker"
-		ovnWorkerNode2       string = "ovn-worker2"
-		mcastGroup           string = "224.1.1.1"
-		multicastListenerPod string = "multicast-listener-test-pod"
-		multicastSourcePod   string = "multicast-source-test-pod"
-		tcpdumpFileName      string = "tcpdump.txt"
-		retryTimeout                = 5 * time.Minute // polling timeout
-	)
-	var (
-		tcpDumpCommand = []string{"bash", "-c",
-			fmt.Sprintf("apk update; apk add tcpdump ; tcpdump multicast > %s", tcpdumpFileName)}
-		// Multicast group (-c 224.1.1.1), UDP (-u), TTL (-T 2), during (-t 3000) seconds, report every (-i 5) seconds
-		multicastSourceCommand = []string{"bash", "-c",
-			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5", mcastGroup)}
-	)
-	f := newPrivelegedTestFramework(svcname)
-	ginkgo.It("can retrieve multicast IGMP query", func() {
-		// Enable multicast of the test namespace annotation
-		ginkgo.By(fmt.Sprintf("annotating namespace: %s to enable multicast", f.Namespace.Name))
-		annotateArgs := []string{
-			"annotate",
-			"namespace",
-			f.Namespace.Name,
-			fmt.Sprintf("k8s.ovn.org/multicast-enabled=%s", "true"),
-		}
-		framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
-
-		// Create a multicast source pod
-		ginkgo.By("creating a multicast source pod in node " + ovnWorkerNode)
-		createGenericPod(f, multicastSourcePod, ovnWorkerNode, f.Namespace.Name, multicastSourceCommand)
-
-		// Create a multicast listener pod
-		ginkgo.By("creating a multicast listener pod in node " + ovnWorkerNode2)
-		createGenericPod(f, multicastListenerPod, ovnWorkerNode2, f.Namespace.Name, tcpDumpCommand)
-
-		// Wait for tcpdump on listener pod to be ready
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			kubectlOut, err := framework.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", "ls")
-			if err != nil {
-				framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
-			}
-			if !strings.Contains(kubectlOut, tcpdumpFileName) {
-				return false, nil
-			}
-			return true, nil
-		})
-		if err != nil {
-			framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
-		}
-
-		// The multicast listener pod join multicast group (-B 224.1.1.1), UDP (-u), during (-t 30) seconds, report every (-i 5) seconds
-		ginkgo.By("multicast listener pod join multicast group")
-		framework.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("iperf -s -B %s -u -t 30 -i 5", mcastGroup))
-
-		ginkgo.By(fmt.Sprintf("verifying that the IGMP query has been received"))
-		kubectlOut, err := framework.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("cat %s | grep igmp", tcpdumpFileName))
-		if err != nil {
-			framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
-		}
-		framework.Logf("output:")
-		framework.Logf(kubectlOut)
-		if kubectlOut == "" {
-			framework.Failf("failed to retrieve multicast IGMP query: igmp messages on the tcpdump logfile not found")
-		}
-	})
-
 })

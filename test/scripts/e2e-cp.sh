@@ -8,10 +8,29 @@ export KUBECONFIG=${HOME}/ovn.conf
 
 # Skip tests which are not IPv6 ready yet (see description of https://github.com/ovn-org/ovn-kubernetes/pull/2276)
 # (Note that netflow v5 is IPv4 only)
+# NOTE: Some of these tests that check connectivity to internet cannot be run.
+#       See https://github.com/actions/runner-images/issues/668#issuecomment-1480921915 for details
+# There were some past efforts to re-enable some of these skipped tests, but that never happened and they are
+# still failing v6 lane: https://github.com/ovn-org/ovn-kubernetes/pull/2505,
+# https://github.com/ovn-org/ovn-kubernetes/pull/2524, https://github.com/ovn-org/ovn-kubernetes/pull/2287; so
+# going to skip them again.
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
+should provide Internet connection continuously when pod running master instance of ovnkube-master is killed|\
+should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-master|\
+should provide Internet connection continuously when all ovnkube-master pods are killed|\
+should provide Internet connection continuously when ovnkube-node pod is killed|\
+Should validate the egress firewall policy functionality against remote hosts|\
+Should validate the egress firewall policy functionality against cluster nodes by using node selector|\
+Should validate the egress IP functionality against remote hosts|\
+Should validate ICMP connectivity to multiple external gateways for an ECMP scenario|\
+Should validate ICMP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
+Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario|\
+Should validate TCP/UDP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
+Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes|\
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
-test tainting a node according to its defaults interface MTU size|\
+can retrieve multicast IGMP query|\
+test node readiness according to its defaults interface MTU size|\
 ipv4 pod"
 
 SKIPPED_TESTS=""
