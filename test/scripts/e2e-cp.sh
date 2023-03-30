@@ -8,10 +8,44 @@ export KUBECONFIG=${HOME}/ovn.conf
 
 # Skip tests which are not IPv6 ready yet (see description of https://github.com/ovn-org/ovn-kubernetes/pull/2276)
 # (Note that netflow v5 is IPv4 only)
+# NOTE: Some of these tests that check connectivity to internet cannot be run.
+#       See https://github.com/actions/runner-images/issues/668#issuecomment-1480921915 for details
+# There were some past efforts to re-enable some of these skipped tests, but that never happened and they are
+# still failing v6 lane: https://github.com/ovn-org/ovn-kubernetes/pull/2505,
+# https://github.com/ovn-org/ovn-kubernetes/pull/2524, https://github.com/ovn-org/ovn-kubernetes/pull/2287; so
+# going to skip them again.
+# TODO: Fix metalLB integration with KIND on IPV6 in LGW mode and enable those service tests. EgressServices
+# feature also uses MetalLB for the LB service, so we need to unskip them as well in the future. See
+# https://github.com/ovn-org/ovn-kubernetes/issues/4131 and https://github.com/ovn-org/ovn-kubernetes/issues/4132 for details.
+# TODO: Fix EIP tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4130 for details.
+# TODO: Fix EFW tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4133 for details.
+# TODO: Fix CPU Pinning tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4134 for details.
+# TODO: Fix MTU tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4160 for details.
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
+should provide Internet connection continuously when ovnkube-node pod is killed|\
+should provide Internet connection continuously when pod running master instance of ovnkube-control-plane is killed|\
+should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane|\
+should provide Internet connection continuously when all ovnkube-control-plane pods are killed|\
+Should validate the egress firewall policy functionality against remote hosts|\
+Should validate the egress firewall policy functionality against cluster nodes by using node selector|\
+Should validate ICMP connectivity to multiple external gateways for an ECMP scenario|\
+Should validate ICMP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
+Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario|\
+Should validate TCP/UDP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
+Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes|\
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
-test tainting a node according to its defaults interface MTU size|\
+can retrieve multicast IGMP query|\
+test node readiness according to its defaults interface MTU size|\
+Load Balancer Service Tests with MetalLB|\
+Egress Services|\
+egress IP validation|\
+e2e egress firewall policy validation|\
+OVS CPU affinity pinning|\
+should listen on each host addresses|\
+Pod to pod TCP with low MTU|\
+queries to the hostNetworked server pod on another node shall work for TCP|\
+queries to the hostNetworked server pod on another node shall work for UDP|\
 ipv4 pod"
 
 SKIPPED_TESTS=""
@@ -68,6 +102,30 @@ if [ "$OVN_GATEWAY_MODE" == "shared" ]; then
     SKIPPED_TESTS+="|"
   fi
   SKIPPED_TESTS+="Should ensure load balancer service|LGW"
+  # See https://github.com/ovn-org/ovn-kubernetes/issues/4138 for details
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    SKIPPED_TESTS+="|"
+    SKIPPED_TESTS+="queries to the nodePort service shall work for UDP"
+  fi
+fi
+
+if [ "$OVN_GATEWAY_MODE" == "local" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+    SKIPPED_TESTS+="|"
+  fi
+  # See https://github.com/ovn-org/ovn-kubernetes/labels/ci-ipv6 for details:
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    SKIPPED_TESTS+="Should be allowed to node local host-networked endpoints by nodeport services|\
+EgressQoS validation|\
+e2e br-int flow monitoring export validation|\
+Should be allowed by nodeport services|\
+Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|\
+Should successfully create then remove a static pod|\
+Status manager validation|\
+Should validate connectivity from a pod to a non-node host address on same node|\
+Should validate connectivity within a namespace of pods on separate nodes|\
+Services"
+  fi
 fi
 
 # skipping the egress ip legacy health check test because it requires two

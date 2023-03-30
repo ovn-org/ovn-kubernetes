@@ -313,10 +313,14 @@ var _ = ginkgo.Describe("Services", func() {
 				ginkgo.It("queries to the nodePort service shall work for TCP", func() {
 					for _, size := range []string{"small", "large"} {
 						for _, serviceNodeIP := range serviceNodeInternalIPs {
+							targetIP := serviceNodeIP
+							if IsIPv6Cluster(f.ClientSet) {
+								targetIP = fmt.Sprintf("[%s]", targetIP)
+							}
 							ginkgo.By(fmt.Sprintf("Sending TCP %s payload to service IP %s "+
 								"and expecting to receive the same payload", size, serviceNodeIP))
 							cmd := fmt.Sprintf("curl --max-time 10 -g -q -s http://%s:%d/echo?msg=%s",
-								serviceNodeIP,
+								targetIP,
 								servicePort,
 								echoPayloads[size],
 							)
@@ -406,6 +410,11 @@ var _ = ginkgo.Describe("Services", func() {
 								// Compare received payload vs sent payload.
 								if stdout != echoPayloads[size] {
 									return fmt.Errorf("stdout does not match payloads[%s], %s != %s", size, stdout, echoPayloads[size])
+								}
+								// fc00:f853:ccd:e793::3 from :: dev breth0 src fc00:f853:ccd:e793::4 metric 256 expires 537sec mtu 1400 pref medium
+								// for IPV6 the regex changes a bit
+								if IsIPv6Cluster(f.ClientSet) {
+									echoMtuRegex = regexp.MustCompile(`expires.*mtu.*`)
 								}
 
 								if size == "large" {

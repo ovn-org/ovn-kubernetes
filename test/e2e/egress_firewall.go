@@ -344,7 +344,7 @@ spec:
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
 		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
 		if err != nil {
-			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, ovnContainer, serverNodeInfo.name, err)
+			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, srcPodName, serverNodeInfo.name, err)
 		}
 		// Verify the remote host/port as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied host %s is not permitted as defined by the external firewall policy", exFWDenyTcpDnsDest))
@@ -524,6 +524,10 @@ spec:
 		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
 		testContainer := fmt.Sprintf("%s-container", efPodName)
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
+		denyCIDR := "0.0.0.0/0"
+		if IsIPv6Cluster(f.ClientSet) {
+			denyCIDR = "::/0"
+		}
 		// egress firewall crd yaml configuration
 		var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
 apiVersion: k8s.ovn.org/v1
@@ -534,8 +538,8 @@ spec:
   egress:
   - type: Deny
     to:
-      cidrSelector: 0.0.0.0/0
-`, f.Namespace.Name)
+      cidrSelector: %s
+`, f.Namespace.Name, denyCIDR)
 		// write the config to a file for application and defer the removal
 		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
@@ -571,13 +575,17 @@ spec:
 		framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 		nodeIP := serverNodeInfo.nodeIP
-		externalContainerIP, _ := createClusterExternalContainer(externalContainerName, agnhostImage,
+		externalContainerIPV4, externalContainerIPV6 := createClusterExternalContainer(externalContainerName, agnhostImage,
 			[]string{"--network", ciNetworkName, "-p", fmt.Sprintf("%d:%d", externalContainerPort, externalContainerPort)},
 			[]string{"netexec", fmt.Sprintf("--http-port=%d", externalContainerPort)})
 		defer deleteClusterExternalContainer(externalContainerName)
 
 		// 2. Check connectivity works both ways
 		// pod -> external container should work
+		externalContainerIP := externalContainerIPV4
+		if IsIPv6Cluster(f.ClientSet) {
+			externalContainerIP = externalContainerIPV6
+		}
 		ginkgo.By(fmt.Sprintf("Verifying connectivity from pod %s to external container [%s]:%d",
 			efPodName, externalContainerIP, externalContainerPort))
 		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", efPodName, testContainerFlag,
