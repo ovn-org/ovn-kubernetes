@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 
 set -ex
+ARCH=""
+case $(uname -m) in
+    x86_64)  ARCH="amd64" ;;
+    aarch64) ARCH="arm64"   ;;
+esac
 
 # from https://github.com/kubernetes-sigs/kind/releases
-KIND_URL=https://kind.sigs.k8s.io/dl/v0.14.0/kind-linux-amd64
-KIND_SHA=af5e8331f2165feab52ec2ae07c427c7b66f4ad044d09f253004a20252524c8b
+KIND_URL=https://kind.sigs.k8s.io/dl/v0.14.0/kind-linux-${ARCH}
+KIND_SHA_URL=$KIND_URL.sha256sum
+KIND_SHA="$( curl -L -s ${KIND_SHA_URL}| awk '{ print $1 }')"
 KIND_DOWNLOAD_RETRIES=5
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -43,16 +49,16 @@ K8S_VERSION="v1.26.0"
 
 # Install kubectl for K8S_VERSION in use
 # (to get latest stable version: $(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt )
-curl -LO https://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/bin/linux/amd64/kubectl
+curl -LO https://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/bin/linux/${ARCH}/kubectl
 chmod +x ./kubectl
 sudo mv ./kubectl /usr/local/bin/kubectl
 
 # Install e2e test binary and ginkgo
-curl -L https://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/kubernetes-test-linux-amd64.tar.gz -o kubernetes-test-linux-amd64.tar.gz
-tar xvzf kubernetes-test-linux-amd64.tar.gz
+curl -L https://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/kubernetes-test-linux-${ARCH}.tar.gz -o kubernetes-test-linux-${ARCH}.tar.gz
+tar xvzf kubernetes-test-linux-${ARCH}.tar.gz
 sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
 sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
-rm kubernetes-test-linux-amd64.tar.gz
+rm kubernetes-test-linux-${ARCH}.tar.gz
 
 install_kind
 popd # go out of $TMP_DIR

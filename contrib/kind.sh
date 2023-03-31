@@ -2,6 +2,11 @@
 
 # Returns the full directory name of the script
 DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+ARCH=""
+case $(uname -m) in
+    x86_64)  ARCH="amd64" ;;
+    aarch64) ARCH="arm64"   ;;
+esac
 
 function if_error_exit {
     ###########################################################################
@@ -43,7 +48,7 @@ function setup_kubectl_bin() {
 
     pushd ./bin
        if [ ! -f ./kubectl ]; then
-           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS_TYPE}/amd64/kubectl"
+           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS_TYPE}/${ARCH}/kubectl"
            if_error_exit "Failed to download kubectl failed!"
        fi
     popd
