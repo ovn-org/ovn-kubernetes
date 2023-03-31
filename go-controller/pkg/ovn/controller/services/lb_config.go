@@ -19,6 +19,7 @@ import (
 // magic string used in vips to indicate that the node's physical
 // ips should be substituted in
 const placeholderNodeIPs = "node"
+const localWithFallbackAnnotation = "traffic-policy.network.alpha.openshift.io/local-with-fallback"
 
 // lbConfig is the abstract desired load balancer configuration.
 // vips and endpoints are mixed families.
@@ -307,6 +308,28 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 					switchV4targetips = util.FilterIPsSlice(switchV4targetips, node.nodeSubnets(), true)
 					switchV6targetips = util.FilterIPsSlice(switchV6targetips, node.nodeSubnets(), true)
 				}
+				// OCP HACK BEGIN
+				zeroRouterV4LocalEndpoints := false
+				zeroRouterV6LocalEndpoints := false
+				if _, set := service.Annotations[localWithFallbackAnnotation]; set && config.externalTrafficLocal {
+					// if service is annotated and is ETP=local, fallback to ETP=cluster on nodes with no local endpoints:
+					// include endpoints from other nodes
+					if len(routerV4targetips) == 0 {
+						zeroRouterV4LocalEndpoints = true
+						routerV4targetips = config.eps.V4IPs
+					}
+					if len(routerV6targetips) == 0 {
+						zeroRouterV6LocalEndpoints = true
+						routerV6targetips = config.eps.V6IPs
+					}
+					if len(switchV4targetips) == 0 {
+						switchV4targetips = config.eps.V4IPs
+					}
+					if len(switchV6targetips) == 0 {
+						switchV6targetips = config.eps.V6IPs
+					}
+				}
+				// OCP HACK END
 				// at this point, the targets may be empty
 
 				// any targets local to the node need to have a special
@@ -397,10 +420,12 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 						Targets: targets,
 					}
 
+					localWithFallback := (isv6 && zeroRouterV6LocalEndpoints) || (!isv6 && zeroRouterV4LocalEndpoints)
+
 					// in other words, is this ExternalTrafficPolicy=local?
 					// if so, this gets a separate load balancer with SNAT disabled
 					// (but there's no need to do this if the list of targets is empty)
-					if config.externalTrafficLocal && len(targets) > 0 {
+					if config.externalTrafficLocal && len(targets) > 0 && !localWithFallback {
 						noSNATRouterRules = append(noSNATRouterRules, rule)
 					} else {
 						routerRules = append(routerRules, rule)
