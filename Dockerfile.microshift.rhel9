@@ -20,7 +20,7 @@ COPY . .
 # build the binaries
 RUN cd go-controller; CGO_ENABLED=0 make
 
-FROM registry.ci.openshift.org/ocp/4.14:ovn-kubernetes-base-rhel-9
+FROM registry.ci.openshift.org/ocp/4.14:ovn-kubernetes-base
 
 USER root
 
