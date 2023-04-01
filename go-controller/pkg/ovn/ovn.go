@@ -268,9 +268,6 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 		if err := oc.gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
-		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {
-			return err
-		}
 	} else if hostSubnets != nil {
 		var hostAddrs sets.Set[string]
 		if config.Gateway.Mode == config.GatewayModeShared {

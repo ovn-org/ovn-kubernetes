@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -115,8 +117,6 @@ type DefaultNetworkController struct {
 	// Is ACL logging enabled while configuring meters?
 	aclLoggingEnabled bool
 
-	joinSwIPManager *lsm.JoinSwitchIPManager
-
 	// retry framework for network policies
 	retryNetworkPolicies *retry.RetryFramework
 
@@ -152,6 +152,10 @@ type DefaultNetworkController struct {
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
 	allInitialPodsProcessed uint32
+
+	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
+	// connecting to the join switch
+	ovnClusterLRPToJoinIfAddrs []*net.IPNet
 }
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
@@ -215,11 +219,19 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		switchLoadBalancerGroupUUID:  "",
 		routerLoadBalancerGroupUUID:  "",
 		aclLoggingEnabled:            true,
-		joinSwIPManager:              nil,
 		svcController:                svcController,
 		svcFactory:                   svcFactory,
 		egressSvcController:          egressSvcController,
 	}
+
+	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
+	// allocate the first IPs in the join switch subnets.
+	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
+	}
+
+	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
 
 	oc.initRetryFramework()
 	return oc, nil

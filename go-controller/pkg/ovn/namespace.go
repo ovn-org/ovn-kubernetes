@@ -499,7 +499,7 @@ func (oc *DefaultNetworkController) createNamespaceAddrSetAllPods(ns string) (ad
 				}
 				// for shared gateway mode we will use LRP IPs to SNAT host network traffic
 				// so add these to the address set.
-				lrpIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
+				lrpIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
 				if err != nil {
 					klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
 				}

@@ -21,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -68,10 +67,14 @@ type tNode struct {
 	DnatSnatIP           string
 }
 
-func (n tNode) k8sNode() v1.Node {
+func (n tNode) k8sNode(nodeID string) v1.Node {
 	node := v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: n.Name,
+			Annotations: map[string]string{
+				"k8s.ovn.org/ovn-node-id":                    nodeID,
+				"k8s.ovn.org/node-gateway-router-lrp-ifaddr": "{\"ipv4\": \"100.64.0." + nodeID + "/16\"}",
+			},
 		},
 		Status: kapi.NodeStatus{
 			Addresses: []kapi.NodeAddress{{Type: kapi.NodeExternalIP, Address: n.NodeIP}},
@@ -966,7 +969,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				datapath,
 			},
 		}
-		testNode = node1.k8sNode()
+		testNode = node1.k8sNode("2")
 
 		kubeFakeClient = fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{testNode},
@@ -1031,10 +1034,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		}()
 
 		oc.SCTPSupport = true
-		oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		_, err = oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		expectedNBDatabaseState = addNodeLogicalFlows(nil, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 	})
@@ -1475,7 +1474,9 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "newNode",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":[\"%s\", \"fd02:0:0:2::2895/64\"]}", newNodeSubnet),
+						"k8s.ovn.org/node-subnets":                   fmt.Sprintf("{\"default\":[\"%s\", \"fd02:0:0:2::2895/64\"]}", newNodeSubnet),
+						"k8s.ovn.org/node-chassis-id":                "2",
+						"k8s.ovn.org/node-gateway-router-lrp-ifaddr": "{\"ipv4\":\"100.64.0.2/16\"}",
 					},
 				},
 			}
@@ -1655,11 +1656,6 @@ func TestController_syncNodes(t *testing.T) {
 				record.NewFakeRecorder(0),
 				wg)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
-			if err != nil {
-				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
-			}
-
 			err = controller.syncNodes([]interface{}{&testNode})
 			if err != nil {
 				t.Fatalf("%s: Error on syncNodes: %v", tt.name, err)
@@ -1748,10 +1744,6 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				record.NewFakeRecorder(0),
 				wg)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
-			if err != nil {
-				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
-			}
 
 			err = controller.deleteStaleNodeChassis(&tt.node)
 			if err != nil {
