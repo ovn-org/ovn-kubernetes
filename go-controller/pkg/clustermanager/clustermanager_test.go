@@ -26,6 +26,9 @@ import (
 const (
 	// ovnNodeIDAnnotaton is the node annotation name used to store the node id.
 	ovnNodeIDAnnotaton = "k8s.ovn.org/node-id"
+
+	// ovnNodeGRLRPAddrAnnotaton is the node annotation name used to store the node gateway router port ips.
+	ovnNodeGRLRPAddrAnnotaton = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
 )
 
 var _ = ginkgo.Describe("Cluster Manager", func() {
@@ -39,6 +42,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 	const (
 		clusterIPNet             string = "10.1.0.0"
 		clusterCIDR              string = clusterIPNet + "/16"
+		clusterv6CIDR            string = "aef0::/48"
 		hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
 	)
 
@@ -835,6 +839,313 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 			err := app.Run([]string{
 				app.Name,
 				"-cluster-subnets=" + clusterCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
+
+	ginkgo.Context("Node gateway router port IP allocations", func() {
+		ginkgo.It("verify the node annotations", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer clusterManager.Stop()
+
+				// Check that cluster manager has set the node-gateway-router-lrp-ifaddr annotation for each node.
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						gwLRPAddrs, err := util.ParseNodeGatewayRouterLRPAddrs(updatedNode)
+						if err != nil {
+							return err
+						}
+
+						gomega.Expect(gwLRPAddrs).NotTo(gomega.BeNil())
+						gomega.Expect(len(gwLRPAddrs)).To(gomega.Equal(2))
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR + "," + clusterv6CIDR,
+				"-k8s-service-cidr=10.96.0.0/16,fd00:10:96::/112",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("clear the node annotations for gateway router port ips and check", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer clusterManager.Stop()
+
+				nodeAddrs := make(map[string]string)
+				// Check that cluster manager has set the node-gateway-router-lrp-ifaddr annotation for each node.
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						gwLRPAddrs, err := util.ParseNodeGatewayRouterLRPAddrs(updatedNode)
+						if err != nil {
+							return err
+						}
+						gomega.Expect(gwLRPAddrs).NotTo(gomega.BeNil())
+						gomega.Expect(len(gwLRPAddrs)).To(gomega.Equal(2))
+						nodeAddrs[n.Name] = updatedNode.Annotations[ovnNodeGRLRPAddrAnnotaton]
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				// Clear the node-gateway-router-lrp-ifaddr annotation of nodes and make sure it is reset by cluster manager
+				// with the same addrs.
+				for _, n := range nodes {
+					nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient}, n.Name)
+
+					nodeAnnotations := n.Annotations
+					for k, v := range nodeAnnotations {
+						nodeAnnotator.Set(k, v)
+					}
+					nodeAnnotator.Delete(ovnNodeGRLRPAddrAnnotaton)
+					err = nodeAnnotator.Run()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						nodeGWRPIPs, ok := updatedNode.Annotations[ovnNodeGRLRPAddrAnnotaton]
+						if !ok {
+							return fmt.Errorf("expected node annotation for node %s to have node gateway-router-lrp-ifaddr allocated", n.Name)
+						}
+
+						gomega.Expect(nodeGWRPIPs).To(gomega.Equal(nodeAddrs[n.Name]))
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR + "," + clusterv6CIDR,
+				"-k8s-service-cidr=10.96.0.0/16,fd00:10:96::/112",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("Stop cluster manager, change id of a node and verify the gateway router port addr node annotation", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				wg1 := &sync.WaitGroup{}
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg1, nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				node3GWRPAnnotation := ""
+				// Check that cluster manager has set the node-gateway-router-lrp-ifaddr annotation for each node.
+				for _, n := range nodes {
+					gomega.Eventually(func() error {
+						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+						if err != nil {
+							return err
+						}
+
+						gwLRPAddrs, err := util.ParseNodeGatewayRouterLRPAddrs(updatedNode)
+						if err != nil {
+							return err
+						}
+						gomega.Expect(gwLRPAddrs).NotTo(gomega.BeNil())
+						gomega.Expect(len(gwLRPAddrs)).To(gomega.Equal(2))
+
+						// Store the node 3's gw router port addresses
+						if updatedNode.Name == "node3" {
+							node3GWRPAnnotation = updatedNode.Annotations[ovnNodeGRLRPAddrAnnotaton]
+						}
+						return nil
+					}).ShouldNot(gomega.HaveOccurred())
+				}
+
+				// stop the cluster manager.
+				clusterManager.Stop()
+				wg1.Wait()
+
+				updatedNodes := []v1.Node{}
+
+				for _, n := range nodes {
+					updatedNode, _ := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+					if updatedNode.Name == "node3" {
+						// Change the id of node3 duplicate.
+						updatedNode.Annotations[ovnNodeIDAnnotaton] = "50"
+					}
+					updatedNodes = append(updatedNodes, *updatedNode)
+				}
+
+				// Close the watch factory and create a new one
+				f.Shutdown()
+				kubeFakeClient = fake.NewSimpleClientset(&v1.NodeList{
+					Items: updatedNodes,
+				})
+				fakeClient = &util.OVNClusterManagerClientset{
+					KubeClient: kubeFakeClient,
+				}
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Start a new cluster manager
+				cm2, err := NewClusterManager(fakeClient, f, "cm2", wg, nil)
+				gomega.Expect(cm2).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = cm2.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer cm2.Stop()
+
+				gomega.Eventually(func() error {
+					updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node3", metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					node3UpdatedGWRPAnnotation := updatedNode.Annotations[ovnNodeGRLRPAddrAnnotaton]
+					gomega.Expect(node3UpdatedGWRPAnnotation).NotTo(gomega.Equal(node3GWRPAnnotation))
+
+					gwLRPAddrs, err := util.ParseNodeGatewayRouterLRPAddrs(updatedNode)
+					if err != nil {
+						return err
+					}
+					gomega.Expect(gwLRPAddrs).NotTo(gomega.BeNil())
+					gomega.Expect(len(gwLRPAddrs)).To(gomega.Equal(2))
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR + "," + clusterv6CIDR,
+				"-k8s-service-cidr=10.96.0.0/16,fd00:10:96::/112",
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})

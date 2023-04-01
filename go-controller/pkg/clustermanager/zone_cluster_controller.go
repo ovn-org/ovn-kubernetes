@@ -3,6 +3,7 @@ package clustermanager
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
 	"sync"
 
@@ -10,6 +11,7 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -36,6 +38,10 @@ type zoneClusterController struct {
 
 	// ID allocator for the nodes
 	nodeIDAllocator *idAllocator
+
+	// node gateway router port IP generators (connecting to the join switch)
+	nodeGWRouterLRPIPv4Generator *ipGenerator
+	nodeGWRouterLRPIPv6Generator *ipGenerator
 }
 
 func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) (*zoneClusterController, error) {
@@ -49,17 +55,39 @@ func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *fa
 	if err := nodeIDAllocator.reserveID("zero", 0); err != nil {
 		return nil, fmt.Errorf("idAllocator failed to reserve id 0")
 	}
+	if err := nodeIDAllocator.reserveID("one", 1); err != nil {
+		return nil, fmt.Errorf("idAllocator failed to reserve id 1")
+	}
 
 	kube := &kube.Kube{
 		KClient: ovnClient.KubeClient,
 	}
 	wg := &sync.WaitGroup{}
+
+	var nodeGWRouterLRPIPv4Generator, nodeGWRouterLRPIPv6Generator *ipGenerator
+
+	if config.IPv4Mode {
+		nodeGWRouterLRPIPv4Generator, err = newIPGenerator(config.Gateway.V4JoinSubnet)
+		if err != nil {
+			return nil, fmt.Errorf("error creating IP Generator for v4 join subnet %s: %w", config.Gateway.V4JoinSubnet, err)
+		}
+	}
+
+	if config.IPv6Mode {
+		nodeGWRouterLRPIPv6Generator, err = newIPGenerator(config.Gateway.V6JoinSubnet)
+		if err != nil {
+			return nil, fmt.Errorf("error creating IP Generator for v6 join subnet %s: %w", config.Gateway.V6JoinSubnet, err)
+		}
+	}
+
 	zcc := &zoneClusterController{
-		kube:            kube,
-		watchFactory:    wf,
-		stopChan:        make(chan struct{}),
-		wg:              wg,
-		nodeIDAllocator: nodeIDAllocator,
+		kube:                         kube,
+		watchFactory:                 wf,
+		stopChan:                     make(chan struct{}),
+		wg:                           wg,
+		nodeIDAllocator:              nodeIDAllocator,
+		nodeGWRouterLRPIPv4Generator: nodeGWRouterLRPIPv4Generator,
+		nodeGWRouterLRPIPv6Generator: nodeGWRouterLRPIPv6Generator,
 	}
 
 	zcc.initRetryFramework()
@@ -111,6 +139,29 @@ func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) er
 	}
 	klog.V(5).Infof("Allocated id %d to the node %s", allocatedNodeID, node.Name)
 	nodeAnnotations := util.UpdateNodeIDAnnotation(nil, allocatedNodeID)
+
+	// Allocate the IP address(es) for the node Gateway router port connecting
+	// to the Join switch
+	var v4Addr, v6Addr *net.IPNet
+	if config.IPv4Mode {
+		v4Addr, err = zcc.nodeGWRouterLRPIPv4Generator.GenerateIP(allocatedNodeID)
+		if err != nil {
+			return fmt.Errorf("failed to generate gateway router port IPv4 address for node %s : err - %w", node.Name, err)
+		}
+	}
+
+	if config.IPv6Mode {
+		v6Addr, err = zcc.nodeGWRouterLRPIPv6Generator.GenerateIP(allocatedNodeID)
+		if err != nil {
+			return fmt.Errorf("failed to generate gateway router port IPv6 address for node %s : err - %w", node.Name, err)
+		}
+	}
+
+	nodeAnnotations, err = util.CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotations, v4Addr, v6Addr)
+	if err != nil {
+		return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IPs, err : %v",
+			node.Name, err)
+	}
 
 	return zcc.kube.SetAnnotationsOnNode(node.Name, nodeAnnotations)
 }
@@ -289,7 +340,13 @@ func (h *zoneClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interfa
 		}
 
 		// Check if the annotations have changed.
-		return !util.NodeIDAnnotationChanged(node1, node2), nil
+		if util.NodeIDAnnotationChanged(node1, node2) {
+			return false, nil
+		}
+		if util.NodeGatewayRouterLRPAddrAnnotationChanged(node1, node2) {
+			return false, nil
+		}
+		return true, nil
 	}
 
 	return false, nil
