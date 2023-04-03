@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -18,10 +17,9 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string, gwIPs []*net.IPNet,
-	nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory) (*gateway, error) {
+func newLocalGateway(nc *DefaultNodeNetworkController, hostSubnets []*net.IPNet,
+	nodeAnnotator kube.Annotator, cfg *managementPortConfig) (*gateway, error) {
 	klog.Info("Creating new local gateway")
-	gw := &gateway{}
 
 	for _, hostSubnet := range hostSubnets {
 		// local gateway mode uses mp0 as default path for all ingress traffic into OVN
@@ -41,8 +39,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		}
 	}
 
-	gwBridge, exGwBridge, err := gatewayInitInternal(
-		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
+	gw, gwBridge, exGwBridge, err := gatewayInitInternal(nc, nodeAnnotator)
 	if err != nil {
 		return nil, err
 	}
@@ -78,13 +75,13 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			}
 		}
 
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
+		gw.nodeIPManager = newAddressManager(nc.name, nc.Kube, cfg, nc.watchFactory, gwBridge)
 
 		if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
 			return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
 		}
 
-		if err := addMasqueradeRoute(gwBridge.bridgeName, nodeName, gwIPs, watchFactory); err != nil {
+		if err := addMasqueradeRoute(gwBridge.bridgeName, nc.name, gwBridge.ips, nc.watchFactory); err != nil {
 			return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 		}
 
@@ -112,7 +109,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 					return err
 				}
 			}
-			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, nodeName, gw.openflowManager, gw.nodeIPManager, watchFactory)
+			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, nc.name, gw.openflowManager, gw.nodeIPManager, nc.watchFactory)
 			if err != nil {
 				return err
 			}
@@ -127,7 +124,6 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 
 		return nil
 	}
-	gw.watchFactory = watchFactory.(*factory.WatchFactory)
 	klog.Info("Local Gateway Creation Complete")
 	return gw, nil
 }

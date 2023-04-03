@@ -1137,6 +1137,11 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	ofPortPatch := bridge.ofPortPatch
 	ofPortHost := bridge.ofPortHost
 	bridgeIPs := bridge.ips
+	ofPortGW := ovsLocalPort
+
+	if bridge.bypassRep != "" {
+		ofPortGW = ofPortHost
+	}
 
 	var dftFlows []string
 
@@ -1155,7 +1160,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		// table0, Geneve packets coming from LOCAL. Skip conntrack and go directly to external
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
-				"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
+				"actions=output:%s", defaultOpenFlowCookie, ofPortGW, config.Default.EncapPort, ofPortPhys))
 
 		physicalIP, err := util.MatchFirstIPNetFamily(false, bridgeIPs)
 		if err != nil {
@@ -1211,7 +1216,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		// table0, Geneve packets coming from LOCAL. Skip conntrack and send to external
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
-				"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
+				"actions=output:%s", defaultOpenFlowCookie, ofPortGW, config.Default.EncapPort, ofPortPhys))
 
 		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
 		if err != nil {
@@ -1623,7 +1628,16 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 				hostRep, stderr, err)
 		}
 	} else {
-		bridge.ofPortHost = ovsLocalPort
+		if bridge.bypassRep == "" {
+			bridge.ofPortHost = ovsLocalPort
+		} else {
+			ofport, stderr, err := util.GetOVSOfPort("get", "interface", bridge.bypassRep, "ofport")
+			if err != nil {
+				return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
+					bridge.bypassRep, stderr, err)
+			}
+			bridge.ofPortHost = ofport
+		}
 	}
 
 	return nil
@@ -1685,13 +1699,10 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 	return nil
 }
 
-func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
-	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig, watchFactory factory.NodeWatchFactory) (*gateway, error) {
+func newSharedGateway(nc *DefaultNodeNetworkController, subnets []*net.IPNet,
+	nodeAnnotator kube.Annotator, cfg *managementPortConfig) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
-	gw := &gateway{}
-
-	gwBridge, exGwBridge, err := gatewayInitInternal(
-		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
+	gw, gwBridge, exGwBridge, err := gatewayInitInternal(nc, nodeAnnotator)
 	if err != nil {
 		return nil, err
 	}
@@ -1728,15 +1739,15 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				return err
 			}
 		}
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
+		gw.nodeIPManager = newAddressManager(nc.name, nc.Kube, cfg, nc.watchFactory, gwBridge)
 		nodeIPs := gw.nodeIPManager.ListAddresses()
 
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
-			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
-				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
+			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.gwIface); err != nil {
+				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.gwIface, err)
 			}
 
-			if err := addMasqueradeRoute(gwBridge.bridgeName, nodeName, gwIPs, watchFactory); err != nil {
+			if err := addMasqueradeRoute(gwBridge.gwIface, nc.name, gwBridge.ips, nc.watchFactory); err != nil {
 				return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 			}
 		}
@@ -1766,7 +1777,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				}
 			}
 			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, nodeName, gw.openflowManager, gw.nodeIPManager, watchFactory)
+			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, nc.name, gw.openflowManager, gw.nodeIPManager, nc.watchFactory)
 			if err != nil {
 				return err
 			}
@@ -1775,13 +1786,12 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			gw.openflowManager.requestFlowSync()
 		}
 
-		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
+		if err := addHostMACBindings(gwBridge.gwIface); err != nil {
 			return fmt.Errorf("failed to add MAC bindings for service routing")
 		}
 
 		return nil
 	}
-	gw.watchFactory = watchFactory.(*factory.WatchFactory)
 	klog.Info("Shared Gateway Creation Complete")
 	return gw, nil
 }

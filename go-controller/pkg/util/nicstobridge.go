@@ -94,11 +94,11 @@ func GetNicName(brName string) (string, error) {
 	return stdout, nil
 }
 
-func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr) error {
+func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr, moveMasqAddr bool) error {
 	for i := range addrs {
 		addr := addrs[i]
 
-		if addr.IP.IsGlobalUnicast() {
+		if addr.IP.IsGlobalUnicast() || (addr.IP.IsLinkLocalUnicast() && moveMasqAddr) {
 			// Remove from oldLink
 			if err := netLinkOps.AddrDel(oldLink, &addr); err != nil {
 				klog.Errorf("Remove addr from %q failed: %v", oldLink.Attrs().Name, err)
@@ -171,6 +171,27 @@ func saveRoute(oldLink, newLink netlink.Link, routes []netlink.Route) error {
 	return nil
 }
 
+func createOVSBridge(iface, hwaddr string) (string, error) {
+	bridge := GetBridgeName(iface)
+	args := []string{
+		"--", "--may-exist", "add-br", bridge,
+		"--", "br-set-external-id", bridge, "bridge-id", bridge,
+		"--", "br-set-external-id", bridge, "bridge-uplink", iface,
+		"--", "set", "bridge", bridge, "fail-mode=standalone",
+		fmt.Sprintf("other_config:hwaddr=%s", hwaddr),
+		"--", "--may-exist", "add-port", bridge, iface,
+		"--", "set", "port", iface, "other-config:transient=true",
+	}
+
+	stdout, stderr, err := RunOVSVsctl(args...)
+	if err != nil {
+		klog.Errorf("Failed to create OVS bridge, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return "", err
+	}
+	klog.Infof("Successfully created OVS bridge %q", bridge)
+	return bridge, nil
+}
+
 func setupDefaultFile() {
 	platform, err := runningPlatform()
 	if err != nil {
@@ -220,6 +241,30 @@ func setupDefaultFile() {
 	}
 }
 
+func saveIPConfig(srcLink, dstLink netlink.Link, moveMasqConf bool) error {
+	// Get ip addresses and routes before any real operations.
+	family := syscall.AF_UNSPEC
+	addrs, err := netLinkOps.AddrList(srcLink, family)
+	if err != nil {
+		return err
+	}
+	routes, err := netLinkOps.RouteList(srcLink, family)
+	if err != nil {
+		return err
+	}
+
+	// save ip addresses to the interface.
+	if err = saveIPAddress(srcLink, dstLink, addrs, moveMasqConf); err != nil {
+		return err
+	}
+
+	// save routes to the interface.
+	if err = saveRoute(srcLink, dstLink, routes); err != nil {
+		return err
+	}
+	return nil
+}
+
 // NicToBridge creates a OVS bridge for the 'iface' and also moves the IP
 // address and routes of 'iface' to OVS bridge.
 func NicToBridge(iface string) (string, error) {
@@ -228,46 +273,89 @@ func NicToBridge(iface string) (string, error) {
 		return "", err
 	}
 
-	bridge := GetBridgeName(iface)
-	stdout, stderr, err := RunOVSVsctl(
-		"--", "--may-exist", "add-br", bridge,
-		"--", "br-set-external-id", bridge, "bridge-id", bridge,
-		"--", "br-set-external-id", bridge, "bridge-uplink", iface,
-		"--", "set", "bridge", bridge, "fail-mode=standalone",
-		fmt.Sprintf("other_config:hwaddr=%s", ifaceLink.Attrs().HardwareAddr),
-		"--", "--may-exist", "add-port", bridge, iface,
-		"--", "set", "port", iface, "other-config:transient=true")
+	bridge, err := createOVSBridge(iface, ifaceLink.Attrs().HardwareAddr.String())
 	if err != nil {
-		klog.Errorf("Failed to create OVS bridge, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return "", err
 	}
-	klog.Infof("Successfully created OVS bridge %q", bridge)
-
 	setupDefaultFile()
-
-	// Get ip addresses and routes before any real operations.
-	family := syscall.AF_UNSPEC
-	addrs, err := netLinkOps.AddrList(ifaceLink, family)
-	if err != nil {
-		return "", err
-	}
-	routes, err := netLinkOps.RouteList(ifaceLink, family)
-	if err != nil {
-		return "", err
-	}
 
 	bridgeLink, err := netLinkOps.LinkByName(bridge)
 	if err != nil {
 		return "", err
 	}
 
-	// save ip addresses to bridge.
-	if err = saveIPAddress(ifaceLink, bridgeLink, addrs); err != nil {
+	if err := saveIPConfig(ifaceLink, bridgeLink, false); err != nil {
+		return "", err
+	}
+	return bridge, nil
+}
+
+// SyncBypassConfig adds bypass representor to the bridge and moves IP addresses and
+// IP routes to bypass interface from the iface link
+func SyncBypassConfig(bridge, iface, bypassIface, bypassRep string, moveMasqConf bool) error {
+	stdout, stderr, err := RunOVSVsctl(
+		"--", "--may-exist", "add-port", bridge, bypassRep,
+		"--", "set", "bridge", bridge, fmt.Sprintf("external_ids:ovn-bypass-cfg=%s,%s", bypassIface, bypassRep))
+	if err != nil {
+		klog.Errorf("Failed to add %s interface port to OVS bridge, stdout: %q, stderr: %q, error: %v",
+			bypassRep, stdout, stderr, err)
+		return err
+	}
+
+	// Set representor up
+	ifaceLink, err := netLinkOps.LinkByName(bypassRep)
+	if err != nil {
+		return err
+	}
+	if err := netLinkOps.LinkSetUp(ifaceLink); err != nil {
+		return err
+	}
+
+	bridgeLink, err := netLinkOps.LinkByName(bridge)
+	if err != nil {
+		return err
+	}
+	ifaceLink = bridgeLink
+	if bridge != iface {
+		ifaceLink, err = netLinkOps.LinkByName(iface)
+		if err != nil {
+			return err
+		}
+	}
+
+	bypassLink, err := netLinkOps.LinkByName(bypassIface)
+	if err != nil {
+		return err
+	}
+	if err := netLinkOps.LinkSetHardwareAddr(bypassLink, ifaceLink.Attrs().HardwareAddr); err != nil {
+		return err
+	}
+	if err := saveIPConfig(ifaceLink, bypassLink, moveMasqConf); err != nil {
+		return err
+	}
+
+	if err := netLinkOps.LinkSetDown(bridgeLink); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// BypassInterfaceToBridge creates OVS bridge, adds iface and bypass representor to the
+// bridge, and sync bypass configuration
+func BypassInterfaceToBridge(iface, bypassIface, bypassRep string) (string, error) {
+	ifaceLink, err := netLinkOps.LinkByName(iface)
+	if err != nil {
 		return "", err
 	}
 
-	// save routes to bridge.
-	if err = saveRoute(ifaceLink, bridgeLink, routes); err != nil {
+	bridge, err := createOVSBridge(iface, ifaceLink.Attrs().HardwareAddr.String())
+	if err != nil {
+		return "", err
+	}
+	setupDefaultFile()
+
+	if err := SyncBypassConfig(bridge, iface, bypassIface, bypassRep, false); err != nil {
 		return "", err
 	}
 
@@ -304,7 +392,7 @@ func BridgeToNic(bridge string) error {
 	}
 
 	// save ip addresses to iface.
-	if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil {
+	if err = saveIPAddress(bridgeLink, ifaceLink, addrs, false); err != nil {
 		return err
 	}
 

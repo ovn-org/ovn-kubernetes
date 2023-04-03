@@ -439,8 +439,10 @@ type OvnKubeNodeConfig struct {
 	DPResourceDeviceIdsMap map[string][]string
 	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
 	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
-	MgmtPortRepresentor    string
-	DisableOVNIfaceIdVer   bool `gcfg:"disable-ovn-iface-id-ver"`
+	// BypassPortDPResourceName is the device plugin resource name used to get the device for bypass port configuration
+	BypassPortDPResourceName string `gcfg:"bypass-port-dp-resource-name"`
+	MgmtPortRepresentor      string
+	DisableOVNIfaceIdVer     bool `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1152,7 +1154,12 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage: "The interface on nodes that will be the gateway interface. " +
 			"If none specified, then the node's interface on which the " +
 			"default gateway is configured will be used as the gateway " +
-			"interface. Only useful with \"init-gateways\"",
+			"interface." +
+			"If interface is a switchdev VF or SF, then ovnkube will find " +
+			"related representor and plug it to OVS bridge and bypass " +
+			"configuration will be applied, where IP and routes added to " +
+			"the gateway interface and not to the OVS bridge. " +
+			"Only useful with \"--gateway-mode=shared\"",
 		Destination: &cliConfig.Gateway.Interface,
 	},
 	&cli.StringFlag{
@@ -1167,7 +1174,7 @@ var OVNGatewayFlags = []cli.Flag{
 			"OVN gateway.  This is many times just the default gateway " +
 			"of the node in question. If not specified, the default gateway" +
 			"configured in the node is used. Only useful with " +
-			"\"init-gateways\"",
+			"\"--gateway-mode=shared\"",
 		Destination: &cliConfig.Gateway.NextHop,
 	},
 	&cli.UintFlag{
@@ -1322,6 +1329,13 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortDPResourceName,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortDPResourceName,
+	},
+	&cli.StringFlag{
+		Name: "ovnkube-node-bypass-port-dp-resource-name",
+		Usage: "When provided, use this device plugin resource name to find the allocated " +
+			"resource for bypass port gateway configuration.",
+		Value:       OvnKubeNode.BypassPortDPResourceName,
+		Destination: &cliConfig.OvnKubeNode.BypassPortDPResourceName,
 	},
 	&cli.BoolFlag{
 		Name: "disable-ovn-iface-id-ver",

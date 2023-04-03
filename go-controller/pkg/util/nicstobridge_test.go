@@ -231,7 +231,7 @@ func TestSaveIPAddress(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
-			err := saveIPAddress(tc.inpNewLink, tc.inpOldLink, tc.inpAddrs)
+			err := saveIPAddress(tc.inpNewLink, tc.inpOldLink, tc.inpAddrs, false)
 			t.Log(err)
 			if tc.errExp {
 				assert.Error(t, err)
@@ -448,12 +448,26 @@ func TestNicToBridge(t *testing.T) {
 			},
 		},
 		{
+			desc:                    "Retrieving link by bridge name fails",
+			errExp:                  true,
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodsArgsStrTypeAppendCount: 31, OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodsArgsStrTypeAppendCount: 32, OnCallMethodArgType: []string{}, RetArgList: []interface{}{mockCmd}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			},
+		},
+		{
 			desc:                    "IP address retrieval for link fails",
 			inpIface:                "eth0",
 			errExp:                  true,
 			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodsArgsStrTypeAppendCount: 31, OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil}},
 			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodsArgsStrTypeAppendCount: 32, OnCallMethodArgType: []string{}, RetArgList: []interface{}{mockCmd}},
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
 			},
@@ -469,23 +483,9 @@ func TestNicToBridge(t *testing.T) {
 			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodsArgsStrTypeAppendCount: 32, OnCallMethodArgType: []string{}, RetArgList: []interface{}{mockCmd}},
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
-				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{{IPNet: ovntest.MustParseIPNet("192.168.1.15/24")}}, nil}},
-				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
-			},
-			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
-			},
-		},
-		{
-			desc:                    "Retrieving link by bridge name fails",
-			errExp:                  true,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodsArgsStrTypeAppendCount: 31, OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodsArgsStrTypeAppendCount: 32, OnCallMethodArgType: []string{}, RetArgList: []interface{}{mockCmd}},
-			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{{IPNet: ovntest.MustParseIPNet("192.168.1.15/24")}}, nil}},
-				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Route{{Dst: ovntest.MustParseIPNet("10.168.1.0/24")}}, nil}},
-				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
+				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
@@ -498,9 +498,9 @@ func TestNicToBridge(t *testing.T) {
 			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodsArgsStrTypeAppendCount: 32, OnCallMethodArgType: []string{}, RetArgList: []interface{}{mockCmd}},
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{}, nil}},
 				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Route{}, nil}},
-				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
@@ -514,9 +514,9 @@ func TestNicToBridge(t *testing.T) {
 			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodsArgsStrTypeAppendCount: 32, OnCallMethodArgType: []string{}, RetArgList: []interface{}{mockCmd}},
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{}, nil}},
 				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Route{{Gw: ovntest.MustParseIP("10.10.10.1"), LinkIndex: 1}}, nil}},
-				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "RouteDel", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
@@ -531,9 +531,9 @@ func TestNicToBridge(t *testing.T) {
 			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodsArgsStrTypeAppendCount: 32, OnCallMethodArgType: []string{}, RetArgList: []interface{}{mockCmd}},
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{}, nil}},
 				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Route{{Gw: ovntest.MustParseIP("10.10.10.1"), LinkIndex: 1}}, nil}},
-				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "RouteDel", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
