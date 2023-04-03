@@ -16,6 +16,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 var ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
@@ -111,6 +112,7 @@ type NetConfInfo interface {
 	TopologyType() string
 	MTU() int
 	Subnets() []string
+	IPMode() (bool, bool)
 }
 
 // DefaultNetConfInfo is structure which holds specific default network information
@@ -140,6 +142,11 @@ func (defaultNetConfInfo *DefaultNetConfInfo) MTU() int {
 // Subnets returns the defaultNetConfInfo's Subnets value
 func (defaultNetConfInfo *DefaultNetConfInfo) Subnets() []string {
 	return []string{config.Default.RawClusterSubnets}
+}
+
+// IPMode returns the defaultNetConfInfo's ipv4/ipv6 mode
+func (defaultNetConfInfo *DefaultNetConfInfo) IPMode() (bool, bool) {
+	return config.IPv4Mode, config.IPv6Mode
 }
 
 func isSubnetsStringEqual(subnetsString, newSubnetsString string) bool {
@@ -247,8 +254,22 @@ func (layer3NetConfInfo *Layer3NetConfInfo) MTU() int {
 	return layer3NetConfInfo.mtu
 }
 
+// Subnets returns the layer3NetConfInfo's Subnets value
 func (layer3NetConfInfo *Layer3NetConfInfo) Subnets() []string {
 	return strings.Split(layer3NetConfInfo.subnets, ",")
+}
+
+// IPMode returns the layer3NetConfInfo's ipv4/ipv6 mode
+func (layer3NetConfInfo *Layer3NetConfInfo) IPMode() (bool, bool) {
+	var ipv6Mode, ipv4Mode bool
+	for _, cidr := range layer3NetConfInfo.ClusterSubnets {
+		if utilnet.IsIPv6CIDR(cidr.CIDR) {
+			ipv6Mode = true
+		} else {
+			ipv4Mode = true
+		}
+	}
+	return ipv4Mode, ipv6Mode
 }
 
 // Layer2NetConfInfo is structure which holds specific secondary layer2 network information
@@ -357,6 +378,19 @@ func (layer2NetConfInfo *Layer2NetConfInfo) Subnets() []string {
 	return subnets
 }
 
+// IPMode returns the layer2NetConfInfo's ipv4/ipv6 mode
+func (layer2NetConfInfo *Layer2NetConfInfo) IPMode() (bool, bool) {
+	var ipv6Mode, ipv4Mode bool
+	for _, subnet := range layer2NetConfInfo.ClusterSubnets {
+		if utilnet.IsIPv6CIDR(subnet) {
+			ipv6Mode = true
+		} else {
+			ipv4Mode = true
+		}
+	}
+	return ipv4Mode, ipv6Mode
+}
+
 // LocalnetNetConfInfo is structure which holds specific secondary localnet network information
 type LocalnetNetConfInfo struct {
 	subnets        string
@@ -442,6 +476,19 @@ func (localnetNetConfInfo *LocalnetNetConfInfo) Subnets() []string {
 		return nil
 	}
 	return subnets
+}
+
+// IPMode returns the localnetNetConfInfo's ipv4/ipv6 mode
+func (localnetNetConfInfo *LocalnetNetConfInfo) IPMode() (bool, bool) {
+	var ipv6Mode, ipv4Mode bool
+	for _, subnet := range localnetNetConfInfo.ClusterSubnets {
+		if utilnet.IsIPv6CIDR(subnet) {
+			ipv6Mode = true
+		} else {
+			ipv4Mode = true
+		}
+	}
+	return ipv4Mode, ipv6Mode
 }
 
 // GetNADName returns key of NetAttachDefInfo.NetAttachDefs map, also used as Pod annotation key

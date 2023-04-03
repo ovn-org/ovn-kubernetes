@@ -85,7 +85,7 @@ configuration options when deploying. Use `./kind.sh -h` to see the latest optio
 usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
                  [-ho |--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]
                  [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]
-                 [-dp |--disable-pkt-mtu-check]
+                 [-dp |--disable-pkt-mtu-check] [-df|--disable-forwarding]
                  [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>]
                  [-if |--ipfix-targets <targets>] [-ifs|--ipfix-sampling <num>]
                  [-ifm|--ipfix-cache-max-flows <num>] [-ifa|--ipfix-cache-active-timeout <num>]
@@ -107,6 +107,7 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 -ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled.
 -ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled.
 -dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled
+-df  | --disable-forwarding         Disable forwarding on OVNK controlled interfaces. Default: Enabled
 -nf  | --netflow-targets            Comma delimited list of ip:port or :port (using node IP) netflow collectors. DEFAULT: Disabled.
 -sf  | --sflow-targets              Comma delimited list of ip:port or :port (using node IP) sflow collectors. DEFAULT: Disabled.
 -if  | --ipfix-targets              Comma delimited list of ip:port or :port (using node IP) ipfix collectors. DEFAULT: Disabled.

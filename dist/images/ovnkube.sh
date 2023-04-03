@@ -82,6 +82,7 @@ fi
 # OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME - ovnkube node management port device plugin resource
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
+# OVN_DISABLE_FORWARDING - disable forwarding on OVNK controlled interfaces
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -195,6 +196,7 @@ ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
+ovn_disable_forwarding=${OVN_DISABLE_FORWARDING:-}
 ovn_disable_pkt_mtu_check=${OVN_DISABLE_PKT_MTU_CHECK:-}
 ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS:-}
 # OVN_V4_JOIN_SUBNET - v4 join subnet
@@ -230,6 +232,9 @@ ovn_ipfix_targets=${OVN_IPFIX_TARGETS:-}
 ovn_ipfix_sampling=${OVN_IPFIX_SAMPLING:-} \
 ovn_ipfix_cache_max_flows=${OVN_IPFIX_CACHE_MAX_FLOWS:-} \
 ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
+#OVN_STATELESS_NETPOL_ENABLE - enable stateless network policy for ovn-kubernetes
+ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE:-false}
+
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -914,6 +919,11 @@ ovn-master() {
       disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
   fi
 
+  disable_forwarding_flag=
+  if [[ ${ovn_disable_forwarding} == "true" ]]; then
+      disable_forwarding_flag="--disable-forwarding"
+  fi
+
   disable_pkt_mtu_check_flag=
   if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
       disable_pkt_mtu_check_flag="--disable-pkt-mtu-check"
@@ -1003,6 +1013,12 @@ ovn-master() {
     ovnkube_metrics_scale_enable_flag="--metrics-enable-scale"
   fi
   echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
+  
+  ovn_stateless_netpol_enable_flag=
+  if [[ ${ovn_stateless_netpol_enable} == "true" ]]; then
+          ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
+  fi
+  echo "ovn_stateless_netpol_enable_flag: ${ovn_stateless_netpol_enable_flag}"
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
@@ -1016,6 +1032,7 @@ ovn-master() {
     --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
     ${disable_snat_multiple_gws_flag} \
+    ${disable_forwarding_flag} \
     ${empty_lb_events_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
@@ -1032,6 +1049,7 @@ ovn-master() {
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
     ${multi_network_enabled_flag} \
+    ${ovn_stateless_netpol_enable_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
@@ -1370,6 +1388,11 @@ ovn-node() {
       disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
   fi
 
+  disable_forwarding_flag=
+  if [[ ${ovn_disable_forwarding} == "true" ]]; then
+      disable_forwarding_flag="--disable-forwarding"
+  fi
+
   disable_pkt_mtu_check_flag=
   if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
       disable_pkt_mtu_check_flag="--disable-pkt-mtu-check"
@@ -1536,6 +1559,7 @@ ovn-node() {
     --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
     ${disable_snat_multiple_gws_flag} \
+    ${disable_forwarding_flag} \
     ${disable_pkt_mtu_check_flag} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --gateway-router-subnet=${ovn_gateway_router_subnet} \

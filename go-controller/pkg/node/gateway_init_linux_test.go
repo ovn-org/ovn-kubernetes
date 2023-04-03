@@ -40,6 +40,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, gatewayVLANID uint, l netlink.Link, hwOffload, setNodeIP bool) {
 	const mtu string = "1234"
 	const clusterCIDR string = "10.1.0.0/16"
+	config.Gateway.DisableForwarding = false
 
 	var err error
 	if len(eth0GWIP) > 0 {
@@ -92,6 +93,18 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				})
 			},
 		})
+		if config.IPv4Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+				Output: "net.ipv4.conf.breth0.forwarding = 1",
+			})
+		}
+		if config.IPv6Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv6.conf.breth0.forwarding=1",
+				Output: "net.ipv6.conf.breth0.forwarding = 1",
+			})
+		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
@@ -422,6 +435,18 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 get interface p0 ofport",
 		})
+		if config.IPv4Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv4.conf.brp0.forwarding=1",
+				Output: "net.ipv4.conf.brp0.forwarding = 1",
+			})
+		}
+		if config.IPv6Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv6.conf.brp0.forwarding=1",
+				Output: "net.ipv6.conf.brp0.forwarding = 1",
+			})
+		}
 		// bridgedGatewayNodeSetup
 		// GetOVSPortMACAddress
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -735,6 +760,7 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, l netlink.Link) {
 	const mtu string = "1234"
 	const clusterCIDR string = "10.1.0.0/16"
+	config.Gateway.DisableForwarding = true
 
 	if len(eth0GWIP) > 0 {
 		// And a default route
@@ -786,6 +812,18 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				})
 			},
 		})
+		if config.IPv4Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+				Output: "net.ipv4.conf.breth0.forwarding = 1",
+			})
+		}
+		if config.IPv6Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv6.conf.breth0.forwarding=1",
+				Output: "net.ipv6.conf.breth0.forwarding = 1",
+			})
+		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
@@ -1044,8 +1082,14 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			},
 			"filter": {
 				"FORWARD": []string{
+					"-d 169.254.169.1 -j ACCEPT",
+					"-s 169.254.169.1 -j ACCEPT",
+					"-d 172.16.1.0/24 -j ACCEPT",
+					"-s 172.16.1.0/24 -j ACCEPT",
 					"-o ovn-k8s-mp0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
 					"-i ovn-k8s-mp0 -j ACCEPT",
+					"-i breth0 -j DROP",
+					"-o breth0 -j DROP",
 				},
 				"INPUT": []string{
 					"-i ovn-k8s-mp0 -m comment --comment from OVN to localhost -j ACCEPT",

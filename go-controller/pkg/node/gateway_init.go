@@ -20,6 +20,25 @@ import (
 // created from the bridge name and the node name
 func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetworkName string,
 	syncBridgeMAC bool) (string, net.HardwareAddr, error) {
+	// enable forwarding on bridge interface always
+	createForwardingRule := func(family string) error {
+		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.%s.conf.%s.forwarding=1", family, bridgeName))
+		if err != nil || stdout != fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, bridgeName) {
+			return fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+				bridgeName, stdout, stderr, err)
+		}
+		return nil
+	}
+	if config.IPv4Mode {
+		if err := createForwardingRule("ipv4"); err != nil {
+			return "", nil, fmt.Errorf("could not add IPv4 forwarding rule: %v", err)
+		}
+	}
+	if config.IPv6Mode {
+		if err := createForwardingRule("ipv6"); err != nil {
+			return "", nil, fmt.Errorf("could not add IPv6 forwarding rule: %v", err)
+		}
+	}
 	// A OVS bridge's mac address can change when ports are added to it.
 	// We cannot let that happen, so make the bridge mac address permanent.
 	macAddress, err := util.GetOVSPortMACAddress(bridgeInterface)
