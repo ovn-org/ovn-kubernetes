@@ -92,6 +92,18 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				})
 			},
 		})
+		if config.IPv4Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+				Output: "net.ipv4.conf.breth0.forwarding = 1",
+			})
+		}
+		if config.IPv6Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv6.conf.breth0.forwarding=1",
+				Output: "net.ipv6.conf.breth0.forwarding = 1",
+			})
+		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
@@ -414,6 +426,18 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 get interface p0 ofport",
 		})
+		if config.IPv4Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv4.conf.brp0.forwarding=1",
+				Output: "net.ipv4.conf.brp0.forwarding = 1",
+			})
+		}
+		if config.IPv6Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv6.conf.brp0.forwarding=1",
+				Output: "net.ipv6.conf.brp0.forwarding = 1",
+			})
+		}
 		// bridgedGatewayNodeSetup
 		// GetOVSPortMACAddress
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -778,6 +802,18 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				})
 			},
 		})
+		if config.IPv4Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+				Output: "net.ipv4.conf.breth0.forwarding = 1",
+			})
+		}
+		if config.IPv6Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv6.conf.breth0.forwarding=1",
+				Output: "net.ipv6.conf.breth0.forwarding = 1",
+			})
+		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
