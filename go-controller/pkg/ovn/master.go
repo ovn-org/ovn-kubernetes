@@ -34,6 +34,7 @@ const (
 	IdledServiceAnnotationSuffix   = "idled-at"
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
+	annotEventGracePeriod          = 60 * time.Second
 )
 
 // cleanup obsolete *gressDefaultDeny port groups
@@ -717,15 +718,23 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 	}
 
 	klog.Infof("Adding or Updating Node %q", node.Name)
+	// Due to a dependency on distributed components setting the required annotation, we emit events after
+	// a grace period.
+	allowAnnotEvent := node.CreationTimestamp.Add(annotEventGracePeriod).After(time.Now())
+
 	if nSyncs.syncNode {
-		if hostSubnets, err = oc.addNode(node); err != nil {
+		hostSubnets, err = oc.addNode(node)
+		// Annotations are set by distributed components. Emit event if it's not an annotation error
+		if err != nil && util.IsAnnotationNotSetError(err) && allowAnnotEvent {
+			err = fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
+			oc.recordNodeErrorEvent(node, err)
+		}
+		if err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
 			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.gatewaysFailed.Store(node.Name, true)
 			oc.hybridOverlayFailed.Store(node.Name, config.HybridOverlay.Enabled)
-			err = fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
-			oc.recordNodeErrorEvent(node, err)
 			return err
 		}
 		oc.addNodeFailed.Delete(node.Name)
@@ -742,7 +751,13 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 	}
 
 	if nSyncs.syncClusterRouterPort {
-		if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
+		err = oc.syncNodeClusterRouterPort(node, nil)
+		// Annotations are set by distributed components. Return immediately if an annotation we depend on
+		// is not set.
+		if err != nil && util.IsAnnotationNotSetError(err) && !allowAnnotEvent {
+			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
+			return err
+		} else if err != nil {
 			errs = append(errs, err)
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
 		} else {
@@ -751,8 +766,11 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 	}
 
 	if nSyncs.syncMgmtPort {
-		err := oc.syncNodeManagementPort(node, hostSubnets)
-		if err != nil {
+		err = oc.syncNodeManagementPort(node, hostSubnets)
+		if err != nil && util.IsAnnotationNotSetError(err) && !allowAnnotEvent {
+			oc.mgmtPortFailed.Store(node.Name, true)
+			return err
+		} else if err != nil {
 			errs = append(errs, err)
 			oc.mgmtPortFailed.Store(node.Name, true)
 		} else {
