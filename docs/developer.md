@@ -30,3 +30,11 @@ NOTE2: From time to time we always bump our fedora version of OVN used by KIND. 
 forget to update the `OVN_SCHEMA_VERSION` in our `Makefile` which is used to download the ovsdb schema.
 If that version seems to be outdated, probably best to update that as well and re-generate the schema
 bindings.
+
+## Generating CRD yamls using codegen
+
+In order to generate the latest yaml files for a given CRD or to add a new CRD, once
+the `types.go` has been created according to sig-apimachinery docs, the developer can run
+`make codegen` to be able to generate all the clientgen, listers and informers for the new
+CRD along with the deep-copy methods and actual yaml files which get created in `_output/crd`
+folder and are copied over to `dist/templates` to then be used when creating a KIND cluster.

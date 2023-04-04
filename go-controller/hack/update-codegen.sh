@@ -73,3 +73,11 @@ echo "Editing EgressQoS CRD"
 ## We desire that only EgressQoS with the name "default" are accepted by the apiserver.
 sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
 	_output/crds/k8s.ovn.org_egressqoses.yaml
+
+echo "Copying the CRDs to dist/templates as j2 files... Add them to your commit..."
+echo "Copying egressFirewall CRD"
+cp _output/crds/k8s.ovn.org_egressfirewalls.yaml ../dist/templates/k8s.ovn.org_egressfirewalls.yaml.j2
+echo "Copying egressIP CRD"
+cp _output/crds/k8s.ovn.org_egressips.yaml ../dist/templates/k8s.ovn.org_egressips.yaml.j2
+echo "Copying egressQoS CRD"
+cp _output/crds/k8s.ovn.org_egressqoses.yaml ../dist/templates/k8s.ovn.org_egressqoses.yaml.j2
