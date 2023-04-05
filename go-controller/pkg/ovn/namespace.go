@@ -67,12 +67,16 @@ func getNamespaceAddrSetDbIDs(namespaceName, controller string) *libovsdbops.DbO
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (oc *DefaultNetworkController) syncNamespaces(namespaces []interface{}) error {
 	expectedNs := make(map[string]bool)
+	nsWithMulticast := make(map[string]bool)
 	for _, nsInterface := range namespaces {
 		ns, ok := nsInterface.(*kapi.Namespace)
 		if !ok {
 			return fmt.Errorf("spurious object in syncNamespaces: %v", nsInterface)
 		}
 		expectedNs[ns.Name] = true
+		if isNamespaceMulticastEnabled(ns.Annotations) {
+			nsWithMulticast[ns.Name] = true
+		}
 	}
 
 	err := oc.addressSetFactory.ProcessEachAddressSet(oc.controllerName, libovsdbops.AddressSetNamespace,
@@ -88,6 +92,9 @@ func (oc *DefaultNetworkController) syncNamespaces(namespaces []interface{}) err
 		})
 	if err != nil {
 		return fmt.Errorf("error in syncing namespaces: %v", err)
+	}
+	if err = oc.syncNsMulticast(nsWithMulticast); err != nil {
+		return fmt.Errorf("error in syncing multicast for namespaces: %v", err)
 	}
 	return nil
 }

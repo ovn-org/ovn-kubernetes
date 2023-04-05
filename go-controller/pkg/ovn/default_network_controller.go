@@ -17,10 +17,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set_syncer"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
+	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
@@ -286,10 +287,20 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 
 	// sync address sets, only required for DefaultNetworkController, since any old objects in the db without
 	// Owner set are owned by the default network controller.
-	syncer := address_set_syncer.NewAddressSetSyncer(oc.nbClient, DefaultNetworkControllerName)
-	err := syncer.SyncAddressSets()
+	addrSetSyncer := addrsetsyncer.NewAddressSetSyncer(oc.nbClient, DefaultNetworkControllerName)
+	err := addrSetSyncer.SyncAddressSets()
 	if err != nil {
 		return fmt.Errorf("failed to sync address sets on controller init: %v", err)
+	}
+
+	existingNodes, err := oc.kube.GetNodes()
+	if err != nil {
+		return fmt.Errorf("failed to get existing nodes: %w", err)
+	}
+	aclSyncer := aclsyncer.NewACLSyncer(oc.nbClient, DefaultNetworkControllerName)
+	err = aclSyncer.SyncACLs(existingNodes)
+	if err != nil {
+		return fmt.Errorf("failed to sync acls on controller init: %v", err)
 	}
 
 	// sync shared resources

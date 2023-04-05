@@ -1,4 +1,4 @@
-package address_set_syncer
+package address_set
 
 import (
 	"fmt"

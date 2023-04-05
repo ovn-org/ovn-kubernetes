@@ -173,6 +173,10 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
 			return err
 		}
+	} else {
+		if err = oc.disableMulticast(); err != nil {
+			return fmt.Errorf("failed to delete default multicast policy, error: %v", err)
+		}
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
@@ -258,7 +262,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 
-		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.nbClient); err != nil {
+		if err := oc.addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
 			return err
 		}
 

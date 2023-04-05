@@ -37,35 +37,22 @@ virt-launcher-vmi-masquerade-thr9j   [map[ip:10.244.1.8]]
 ```
 
 The implementation of IPv4 multicast for ovn-kubernetes relies on:
-- an ACL dropping all egress multicast traffic - on all pods
-- an ACL dropping all ingress multicast traffic - on all pods
+- 2 ACLs (ingress/egress) dropping all multicast traffic - on all switches (via clusterPortGroup)
+- 2 ACLs (ingress/egress) allowing all multicast traffic - on clusterRouterPortGroup 
+(that allows multicast between pods that reside on different nodes, see 
+https://github.com/ovn-org/ovn-kubernetes/commit/3864f2b6463392ae2d80c18d06bd46ec44e639f9 for more details)
 
-These ACLs look like:
+
+These ACLs Matches look like:
 
 ```
-# ingress direction
-_uuid               : d5024a91-12c8-49ea-9f11-fb4bb3878613
-action              : drop
-direction           : to-lport
-external_ids        : {default-deny-policy-type=Ingress}
-log                 : false
-match               : "(ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))"
-meter               : acl-logging
-name                : "97faee09-ae44-4b4e-9bd3-6df88116b25a_DefaultDenyMulticastIngres"
-priority            : 1011
-severity            : info
+# deny all multicast match
+"(ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))"
 
-# egress direction
-_uuid               : 150b3f92-9cbc-482d-b5c6-1037be2ca255
-action              : drop
-direction           : from-lport
-external_ids        : {default-deny-policy-type=Egress}
-log                 : false
-match               : "(ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))"
-meter               : acl-logging
-name                : "97faee09-ae44-4b4e-9bd3-6df88116b25a_DefaultDenyMulticastEgress"
-priority            : 1011
-severity            : info
+# allow clusterPortGroup match ingress
+"outport == @clusterRtrPortGroup && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))"
+# allow clusterPortGroup match egress
+"inport == @clusterRtrPortGroup && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))"
 ```
 
 Then, for each annotated(`k8s.ovn.org/multicast-enabled=true`) namespace, two
@@ -74,28 +61,10 @@ that apply to the `default` namespace.
 
 ```
 # egress direction
-_uuid               : f086c9b7-fa61-4a91-b545-f228f6cf954b
-action              : allow
-direction           : from-lport
-external_ids        : {default-deny-policy-type=Egress}
-log                 : false
 match               : "inport == @a16982411286042166782 && ip4.mcast"
-meter               : acl-logging
-name                : default_MulticastAllowEgress
-priority            : 1012
-severity            : info
 
 # ingress direction
-_uuid               : b930b6ea-5b16-4eb1-b962-6b3e9273d0a0
-action              : allow
-direction           : to-lport
-external_ids        : {default-deny-policy-type=Ingress}
-log                 : false
 match               : "outport == @a16982411286042166782 && (igmp || (ip4.src == $a5154718082306775057 && ip4.mcast))"
-meter               : acl-logging
-name                : default_MulticastAllowIngress
-priority            : 1012
-severity            : info
 ```
 
 As can be seen in the match condition of the ACLs above, the former ACL allows

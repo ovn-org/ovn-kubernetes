@@ -17,36 +17,43 @@ func joinACLName(substrings ...string) string {
 	return strings.Join(substrings, "_")
 }
 
-// aclType defines when ACLs will be applied (direction and pipeline stage).
+// aclPipelineType defines when ACLs will be applied (direction and pipeline stage).
 // All acls of the same type will be sorted by priority, priorities for different types are independent.
-type aclType string
+type aclPipelineType string
 
 const (
 	// lportIngress will be converted to direction="to-lport" ACL
-	lportIngress aclType = "to-lport"
+	lportIngress aclPipelineType = "to-lport"
 	// lportEgressAfterLB will be converted to direction="from-lport", options={"apply-after-lb": "true"} ACL
-	lportEgressAfterLB aclType = "from-lport-after-lb"
+	lportEgressAfterLB aclPipelineType = "from-lport-after-lb"
 )
 
-func aclTypeToPolicyType(aclT aclType) knet.PolicyType {
-	switch aclT {
-	case lportEgressAfterLB:
-		return knet.PolicyTypeEgress
-	case lportIngress:
-		return knet.PolicyTypeIngress
-	default:
-		panic(fmt.Sprintf("Failed to convert aclType to PolicyType: unknown acl type %s", aclT))
-	}
-}
-
-func policyTypeToAclType(policyType knet.PolicyType) aclType {
+func policyTypeToAclPipeline(policyType knet.PolicyType) aclPipelineType {
 	switch policyType {
 	case knet.PolicyTypeEgress:
 		return lportEgressAfterLB
 	case knet.PolicyTypeIngress:
 		return lportIngress
 	default:
-		panic(fmt.Sprintf("Failed to convert PolicyType to aclType: unknown policyType type %s", policyType))
+		panic(fmt.Sprintf("Failed to convert PolicyType to aclPipelineType: unknown policyType type %s", policyType))
+	}
+}
+
+type aclDirection string
+
+const (
+	aclEgress  aclDirection = "Egress"
+	aclIngress aclDirection = "Ingress"
+)
+
+func aclDirectionToACLPipeline(aclDir aclDirection) aclPipelineType {
+	switch aclDir {
+	case aclEgress:
+		return lportEgressAfterLB
+	case aclIngress:
+		return lportIngress
+	default:
+		panic(fmt.Sprintf("Failed to convert aclDirection to aclPipelineType: unknown aclDirection type %s", aclDir))
 	}
 }
 
@@ -55,10 +62,32 @@ func hashedPortGroup(s string) string {
 	return util.HashForOVN(s)
 }
 
+// acl.Name is cropped to 64 symbols and is used for logging.
+// currently only egress firewall, gress network policy and default deny network policy ACLs are logged.
+// Other ACLs don't need a name.
+// Just a namespace name may be 63 symbols long, therefore some information may be cropped.
+// Therefore, "feature" as "EF" for EgressFirewall and "NP" for network policy goes first, then namespace,
+// then acl-related info.
+func getACLName(dbIDs *libovsdbops.DbObjectIDs) string {
+	t := dbIDs.GetIDsType()
+	aclName := ""
+	switch {
+	case t.IsSameType(libovsdbops.ACLNetworkPolicy):
+		aclName = "NP:" + dbIDs.GetObjectID(libovsdbops.ObjectNameKey) + ":" + dbIDs.GetObjectID(libovsdbops.PolicyDirectionKey) +
+			":" + dbIDs.GetObjectID(libovsdbops.GressIdxKey)
+	case t.IsSameType(libovsdbops.ACLNetpolNamespace):
+		aclName = "NP:" + dbIDs.GetObjectID(libovsdbops.ObjectNameKey) + ":" + dbIDs.GetObjectID(libovsdbops.PolicyDirectionKey)
+	case t.IsSameType(libovsdbops.ACLEgressFirewall):
+		aclName = "EF:" + dbIDs.GetObjectID(libovsdbops.ObjectNameKey) + ":" + dbIDs.GetObjectID(libovsdbops.RuleIndex)
+	}
+	return fmt.Sprintf("%.63s", aclName)
+}
+
 // BuildACL should be used to build ACL instead of directly calling libovsdbops.BuildACL.
-// It can properly set and reset log settings for ACL based on ACLLoggingLevels
-func BuildACL(aclName string, priority int, match, action string,
-	logLevels *ACLLoggingLevels, aclT aclType, externalIDs map[string]string) *nbdb.ACL {
+// It can properly set and reset log settings for ACL based on ACLLoggingLevels, and
+// set acl.Name and acl.ExternalIDs based on given DbIDs
+func BuildACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string, logLevels *ACLLoggingLevels,
+	aclT aclPipelineType) *nbdb.ACL {
 	var options map[string]string
 	var direction string
 	switch aclT {
@@ -72,6 +101,8 @@ func BuildACL(aclName string, priority int, match, action string,
 	default:
 		panic(fmt.Sprintf("Failed to build ACL: unknown acl type %s", aclT))
 	}
+	externalIDs := dbIDs.GetExternalIDs()
+	aclName := getACLName(dbIDs)
 	log, logSeverity := getLogSeverity(action, logLevels)
 	ACL := libovsdbops.BuildACL(
 		aclName,
@@ -88,15 +119,15 @@ func BuildACL(aclName string, priority int, match, action string,
 	return ACL
 }
 
-func getACLMatch(portGroupName, match string, aclT aclType) string {
+func getACLMatch(portGroupName, match string, aclDir aclDirection) string {
 	var aclMatch string
-	switch aclT {
-	case lportIngress:
+	switch aclDir {
+	case aclIngress:
 		aclMatch = "outport == @" + portGroupName
-	case lportEgressAfterLB:
+	case aclEgress:
 		aclMatch = "inport == @" + portGroupName
 	default:
-		panic(fmt.Sprintf("Unknown acl type %s", aclT))
+		panic(fmt.Sprintf("Unknown acl direction %s", aclDir))
 	}
 	if match != "" {
 		aclMatch += " && " + match

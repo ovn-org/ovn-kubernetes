@@ -140,6 +140,8 @@ that can be brought up locally and within a few minutes.
 
 [Debugging OVN](./docs/debugging.md)
 
+[Exposed metrics](./docs/metrics.md)
+
 The golang based [ovn kubernetes go-controller](./go-controller/README.md) is a reliable way to
 deploy the OVN SDN using kubernetes clients and watchers based on golang. Contains `ovnkube` and
 `ovn-k8s-cni-overlay` build and usage instructions.
@@ -206,6 +208,8 @@ cluster network.
 
 [ovnkube-trace](./docs/ovnkube-trace.md) a tool to trace packet simulations between points in an 
 ovn-kubernetes driven cluster.
+
+[ACLs used by ovn-k and their priorities](./docs/acls.md)
 
 # OVN Kubernetes Basics
 A good resource to get started with understanding `ovn-kubernetes` is the following recording and slides, which run through the basic architecture and functionality of the system.

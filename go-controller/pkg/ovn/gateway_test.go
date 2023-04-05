@@ -267,7 +267,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 	testData = append(testData, expectedOVNClusterRouter)
 
 	if len(nodeMgmtPortIP) != 0 {
-		_, nodeACL := generateAllowFromNodeData(nodeName, nodeMgmtPortIP)
+		nodeACL := getAllowFromNodeExpectedACL(nodeName, nodeMgmtPortIP, nil, DefaultNetworkControllerName)
 		testData = append(testData, nodeACL)
 
 		expectedNodeSwitch.ACLs = append(expectedNodeSwitch.ACLs, nodeACL.UUID)
