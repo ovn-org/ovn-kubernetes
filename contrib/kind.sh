@@ -911,8 +911,7 @@ destroy_metallb() {
 
 install_multus() {
   echo "Installing multus-cni daemonset ..."
-  multus_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml"
-  run_kubectl apply -f "$multus_manifest"
+  run_kubectl apply -f multus-daemonset.yml
 }
 
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
