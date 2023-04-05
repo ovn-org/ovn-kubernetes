@@ -86,6 +86,20 @@ func buildMutationsFromFields(fields []interface{}, mutator ovsdb.Mutator) ([]mo
 				}
 				continue
 			}
+			// RFC 7047, section 5.1: a MutateOperationDelete is generated
+			// automatically for every updated key.
+			removeKeys := make([]string, 0, len(*v))
+			for key := range *v {
+				removeKeys = append(removeKeys, key)
+			}
+			if len(removeKeys) > 0 {
+				mutation := model.Mutation{
+					Field:   field,
+					Mutator: ovsdb.MutateOperationDelete,
+					Value:   removeKeys,
+				}
+				mutations = append(mutations, mutation)
+			}
 			mutation := model.Mutation{
 				Field:   field,
 				Mutator: mutator,

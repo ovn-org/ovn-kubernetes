@@ -28,28 +28,37 @@ type nodeTracker struct {
 	nodes map[string]nodeInfo
 
 	// resyncFn is the function to call so that all service are resynced
-	resyncFn func()
+	resyncFn func(nodes []nodeInfo)
 }
 
 type nodeInfo struct {
 	// the node's Name
 	name string
 	// The list of physical IPs the node has, as reported by the gatewayconf annotation
-	nodeIPs []string
+	nodeIPs []net.IP
 	// The pod network subnet(s)
 	podSubnets []net.IPNet
 	// the name of the node's GatewayRouter, or "" of non-existent
 	gatewayRouterName string
 	// The name of the node's switch - never empty
 	switchName string
+	// The chassisID of the node (ovs.external-ids:system-id)
+	chassisID string
+}
+
+func (ni *nodeInfo) nodeIPsStr() []string {
+	out := make([]string, 0, len(ni.nodeIPs))
+	for _, nodeIP := range ni.nodeIPs {
+		out = append(out, nodeIP.String())
+	}
+	return out
 }
 
 // returns a list of all ip blocks "assigned" to this node
 // includes node IPs, still as a mask-1 net
 func (ni *nodeInfo) nodeSubnets() []net.IPNet {
 	out := append([]net.IPNet{}, ni.podSubnets...)
-	for _, ipStr := range ni.nodeIPs {
-		ip := net.ParseIP(ipStr)
+	for _, ip := range ni.nodeIPs {
 		if ipv4 := ip.To4(); ipv4 != nil {
 			out = append(out, net.IPNet{
 				IP:   ip,
@@ -96,7 +105,8 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, erro
 			// updateNode needs to be called only when hostSubnet annotation has changed or
 			// if L3Gateway annotation's ip addresses have changed or the name of the node (very rare)
 			// has changed. No need to trigger update for any other field change.
-			if util.NodeSubnetAnnotationChanged(oldObj, newObj) || util.NodeL3GatewayAnnotationChanged(oldObj, newObj) || oldObj.Name != newObj.Name {
+			if util.NodeSubnetAnnotationChanged(oldObj, newObj) || util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
+				util.NodeChassisIDAnnotationChanged(oldObj, newObj) || oldObj.Name != newObj.Name {
 				nt.updateNode(newObj)
 			}
 		},
@@ -126,39 +136,42 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, erro
 
 // updateNodeInfo updates the node info cache, and syncs all services
 // if it changed.
-func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, nodeIPs []string, podSubnets []*net.IPNet) {
+func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisID string, nodeIPs []net.IP, podSubnets []*net.IPNet) {
 	ni := nodeInfo{
 		name:              nodeName,
 		nodeIPs:           nodeIPs,
 		podSubnets:        make([]net.IPNet, 0, len(podSubnets)),
 		gatewayRouterName: routerName,
 		switchName:        switchName,
+		chassisID:         chassisID,
 	}
 	for i := range podSubnets {
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
 	}
 
+	klog.Infof("Node %s switch + router changed, syncing services", nodeName)
+
 	nt.Lock()
+	defer nt.Unlock()
 	if existing, ok := nt.nodes[nodeName]; ok {
 		if reflect.DeepEqual(existing, ni) {
-			nt.Unlock()
 			return
 		}
 	}
 
 	nt.nodes[nodeName] = ni
-	nt.Unlock()
 
-	klog.Infof("Node %s switch + router changed, syncing services", nodeName)
 	// Resync all services
-	nt.resyncFn()
+	nt.resyncFn(nt.allNodes())
 }
 
 // removeNodeWithServiceReSync removes a node from the LB -> node mapper
 // *and* forces full reconciliation of services.
 func (nt *nodeTracker) removeNodeWithServiceReSync(nodeName string) {
 	nt.removeNode(nodeName)
-	nt.resyncFn()
+	nt.Lock()
+	nt.resyncFn(nt.allNodes())
+	nt.Unlock()
 }
 
 // RemoveNode removes a node from the LB -> node mapper
@@ -186,7 +199,8 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 
 	switchName := node.Name
 	grName := ""
-	ips := []string{}
+	ips := []net.IP{}
+	chassisID := ""
 
 	// if the node has a gateway config, it will soon have a gateway router
 	// so, set the router name
@@ -197,15 +211,17 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		grName = util.GetGatewayRouterFromNode(node.Name)
 		if gwConf.NodePortEnable {
 			for _, ip := range gwConf.IPAddresses {
-				ips = append(ips, ip.IP.String())
+				ips = append(ips, ip.IP)
 			}
 		}
+		chassisID = gwConf.ChassisID
 	}
 
 	nt.updateNodeInfo(
 		node.Name,
 		switchName,
 		grName,
+		chassisID,
 		ips,
 		hsn,
 	)
@@ -213,9 +229,6 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 
 // allNodes returns a list of all nodes (and their relevant information)
 func (nt *nodeTracker) allNodes() []nodeInfo {
-	nt.Lock()
-	defer nt.Unlock()
-
 	out := make([]nodeInfo, 0, len(nt.nodes))
 	for _, node := range nt.nodes {
 		out = append(out, node)

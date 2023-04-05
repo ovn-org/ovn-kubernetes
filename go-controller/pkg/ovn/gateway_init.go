@@ -125,8 +125,8 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		Copp:        &oc.defaultCOPPUUID,
 	}
 
-	if oc.loadBalancerGroupUUID != "" {
-		logicalRouter.LoadBalancerGroup = []string{oc.loadBalancerGroupUUID}
+	if oc.clusterLoadBalancerGroupUUID != "" && oc.routerLoadBalancerGroupUUID != "" {
+		logicalRouter.LoadBalancerGroup = []string{oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID}
 	}
 
 	// If l3gatewayAnnotation.IPAddresses changed, we need to update the perPodSNATs,

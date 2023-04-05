@@ -168,9 +168,10 @@ func HashForOVN(s string) string {
 }
 
 // UpdateIPsSlice will search for values of oldIPs in the slice "s" and update it with newIPs values of same IP family
-func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
+func UpdateIPsSlice(s, oldIPs, newIPs []string) ([]string, bool) {
 	n := make([]string, len(s))
 	copy(n, s)
+	updated := false
 	for i, entry := range s {
 		for _, oldIP := range oldIPs {
 			if entry == oldIP {
@@ -178,11 +179,13 @@ func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
 					if utilnet.IsIPv6(net.ParseIP(oldIP)) {
 						if utilnet.IsIPv6(net.ParseIP(newIP)) {
 							n[i] = newIP
+							updated = true
 							break
 						}
 					} else {
 						if !utilnet.IsIPv6(net.ParseIP(newIP)) {
 							n[i] = newIP
+							updated = true
 							break
 						}
 					}
@@ -191,7 +194,7 @@ func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
 			}
 		}
 	}
-	return n
+	return n, updated
 }
 
 // FilterIPsSlice will filter a list of IPs by a list of CIDRs. By default,

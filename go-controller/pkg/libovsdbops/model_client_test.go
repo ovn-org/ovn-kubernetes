@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/onsi/ginkgo"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/onsi/gomega/types"
@@ -1460,6 +1461,11 @@ func TestBuildMutationsFromFields(t *testing.T) {
 			mutations: []model.Mutation{
 				{
 					Field:   &mapField,
+					Mutator: ovsdb.MutateOperationDelete,
+					Value:   []string{"", "key1", "key2"},
+				},
+				{
+					Field:   &mapField,
 					Mutator: ovsdb.MutateOperationInsert,
 					Value:   mapField,
 				},
@@ -1533,6 +1539,11 @@ func TestBuildMutationsFromFields(t *testing.T) {
 		mutations, err := buildMutationsFromFields(tCase.fields, tCase.mutator)
 		if err != nil && !tCase.err {
 			t.Fatalf("%s: got unexpected error: %v", tCase.name, err)
+		}
+		for _, m := range mutations {
+			if v, ok := m.Value.([]string); ok {
+				sort.Strings(v)
+			}
 		}
 		if !reflect.DeepEqual(mutations, tCase.mutations) {
 			t.Fatalf("%s: unexpected mutations, got: %+v expected: %+v", tCase.name, mutations, tCase.mutations)
