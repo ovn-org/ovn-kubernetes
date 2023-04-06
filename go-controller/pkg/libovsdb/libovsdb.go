@@ -148,6 +148,11 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 	enableMetricsOption := client.WithMetricsRegistryNamespaceSubsystem(promRegistry, "ovnkube",
 		"master_libovsdb")
 
+	// define client indexes for objects that are using dbIDs
+	dbModel.SetIndexes(map[string][]model.ClientIndex{
+		"ACL": {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
+	})
+
 	c, err := newClient(cfg, dbModel, stopCh, enableMetricsOption)
 	if err != nil {
 		return nil, err

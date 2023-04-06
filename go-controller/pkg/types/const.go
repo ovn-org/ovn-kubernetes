@@ -181,4 +181,8 @@ const (
 	Layer3Topology   = "layer3"
 	Layer2Topology   = "layer2"
 	LocalnetTopology = "localnet"
+
+	// db index keys
+	// PrimaryIDKey is used as a primary client index
+	PrimaryIDKey = OvnK8sPrefix + "/id"
 )
