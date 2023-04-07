@@ -662,9 +662,13 @@ func (oc *DefaultNetworkController) syncChassis(nodes []*kapi.Node) error {
 		return fmt.Errorf("failed to get chassis private list: %v", err)
 	}
 
-	templateVarList, err := libovsdbops.ListTemplateVar(oc.nbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get template var list: error: %v", err)
+	templateVarList := []*nbdb.ChassisTemplateVar{}
+
+	if oc.svcTemplateSupport {
+		templateVarList, err = libovsdbops.ListTemplateVar(oc.nbClient)
+		if err != nil {
+			return fmt.Errorf("failed to get template var list: error: %w", err)
+		}
 	}
 
 	chassisHostNameMap := map[string]*sbdb.Chassis{}
