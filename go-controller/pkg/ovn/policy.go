@@ -523,7 +523,6 @@ func getPolicyType(policy *knet.NetworkPolicy) (bool, bool) {
 func (oc *DefaultNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 	objs ...interface{}) (policyPortsToUUIDs map[string]string, policyPortUUIDs []string, errObjs []interface{}) {
 
-	klog.Infof("Processing NetworkPolicy %s/%s to have %d local pods...", np.namespace, np.name, len(objs))
 	policyPortUUIDs = make([]string, 0, len(objs))
 	policyPortsToUUIDs = map[string]string{}
 
