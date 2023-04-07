@@ -1155,7 +1155,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-ETP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ITP":        []string{},
 						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
@@ -2116,9 +2115,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-						},
+						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
 						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
 					},
@@ -2405,10 +2402,8 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP": []string{},
-						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-						},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
 					},
 					"filter": {},
