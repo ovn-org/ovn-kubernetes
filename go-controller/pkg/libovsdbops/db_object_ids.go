@@ -57,7 +57,7 @@ const (
 	ObjectNameKey ExternalIDKey = types.OvnK8sPrefix + "/name"
 	// PrimaryIDKey will be used as a primary index, that is unique for every db object,
 	// and can be built based on the combination of all the other ids.
-	PrimaryIDKey ExternalIDKey = types.OvnK8sPrefix + "/id"
+	PrimaryIDKey ExternalIDKey = types.PrimaryIDKey
 )
 
 // dbIDsMap is used to make sure the same ownerType is not defined twice for the same dbObjType to avoid conflicts.

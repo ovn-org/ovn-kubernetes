@@ -24,12 +24,6 @@ func getACLMutableFields(acl *nbdb.ACL) []interface{} {
 		&acl.Name, &acl.Options, &acl.Priority, &acl.Severity}
 }
 
-// checkACLPrimaryID is a temporary replacement for client indexes, matches on ExternalIDs[PrimaryIDKey].
-func checkACLPrimaryID(existing *nbdb.ACL, searched *nbdb.ACL) bool {
-	return searched.ExternalIDs != nil && existing.ExternalIDs != nil &&
-		existing.ExternalIDs[PrimaryIDKey.String()] == searched.ExternalIDs[PrimaryIDKey.String()]
-}
-
 type aclPredicate func(*nbdb.ACL) bool
 
 // FindACLsWithPredicate looks up ACLs from the cache based on a given predicate
@@ -50,7 +44,6 @@ func FindACLs(nbClient libovsdbclient.Client, acls []*nbdb.ACL) ([]*nbdb.ACL, er
 		found := []*nbdb.ACL{}
 		opModel := operationModel{
 			Model:          acl,
-			ModelPredicate: func(item *nbdb.ACL) bool { return checkACLPrimaryID(item, acl) },
 			ExistingResult: &found,
 			ErrNotFound:    false,
 			BulkOp:         false,
@@ -124,7 +117,6 @@ func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 		}
 		opModel := operationModel{
 			Model:          acl,
-			ModelPredicate: func(item *nbdb.ACL) bool { return checkACLPrimaryID(item, acl) },
 			OnModelUpdates: getACLMutableFields(acl),
 			ErrNotFound:    false,
 			BulkOp:         false,
@@ -143,7 +135,6 @@ func UpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acl
 		acl := acls[i]
 		opModel := operationModel{
 			Model:          acl,
-			ModelPredicate: func(item *nbdb.ACL) bool { return checkACLPrimaryID(item, acl) },
 			OnModelUpdates: getACLMutableFields(acl),
 			ErrNotFound:    true,
 			BulkOp:         false,
@@ -175,7 +166,6 @@ func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 		acl := acls[i]
 		opModel := operationModel{
 			Model:          acl,
-			ModelPredicate: func(item *nbdb.ACL) bool { return checkACLPrimaryID(item, acl) },
 			OnModelUpdates: []interface{}{&acl.Severity, &acl.Log},
 			ErrNotFound:    true,
 			BulkOp:         false,

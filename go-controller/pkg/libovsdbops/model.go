@@ -131,6 +131,9 @@ func copyIndexes(model model.Model) model.Model {
 	case *nbdb.ACL:
 		return &nbdb.ACL{
 			UUID: t.UUID,
+			ExternalIDs: map[string]string{
+				types.PrimaryIDKey: t.ExternalIDs[types.PrimaryIDKey],
+			},
 		}
 	case *nbdb.AddressSet:
 		return &nbdb.AddressSet{
