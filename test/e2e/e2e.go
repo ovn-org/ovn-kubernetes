@@ -266,8 +266,8 @@ func createGenericPod(f *framework.Framework, podName, nodeSelector, namespace s
 }
 
 // Create a pod on the specified node using the agnostic host image
-func createGenericPodWithLabel(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string) (*v1.Pod, error) {
-	return createPod(f, podName, nodeSelector, namespace, command, labels)
+func createGenericPodWithLabel(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string, options ...func(*v1.Pod)) (*v1.Pod, error) {
+	return createPod(f, podName, nodeSelector, namespace, command, labels, options...)
 }
 
 func createServiceForPodsWithLabel(f *framework.Framework, namespace string, servicePort int32, targetPort string, serviceType string, labels map[string]string) (string, error) {
@@ -328,6 +328,11 @@ func deleteClusterExternalContainer(containerName string) {
 	if err != nil {
 		framework.Failf("failed to delete external test container, err: %v", err)
 	}
+	gomega.Eventually(func() string {
+		output, err := runCommand(containerRuntime, "ps", "-f", fmt.Sprintf("name=%s", containerName), "-q")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		return output
+	}, 5).Should(gomega.HaveLen(0))
 }
 
 func updateNamespace(f *framework.Framework, namespace *v1.Namespace) {
@@ -341,7 +346,7 @@ func getNamespace(f *framework.Framework, name string) *v1.Namespace {
 }
 
 func updatePod(f *framework.Framework, pod *v1.Pod) {
-	_, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Update(context.Background(), pod, metav1.UpdateOptions{})
+	_, err := f.ClientSet.CoreV1().Pods(pod.Namespace).Update(context.Background(), pod, metav1.UpdateOptions{})
 	framework.ExpectNoError(err, fmt.Sprintf("unable to update pod: %s, err: %v", pod.Name, err))
 }
 func getPod(f *framework.Framework, podName string) *v1.Pod {

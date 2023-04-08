@@ -428,7 +428,6 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 			return fmt.Errorf("could not add label %s to conntrack filter: %v", labels, err)
 		}
 	}
-
 	if ipAddress.To4() != nil {
 		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
 			return err

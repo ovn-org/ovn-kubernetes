@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
+	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	factorymocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -105,8 +106,9 @@ var _ = Describe("Node DPU tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		kubeMock = kubemocks.Interface{}
+		apbExternalRouteClient := adminpolicybasedrouteclient.NewSimpleClientset()
 		factoryMock = factorymocks.NodeWatchFactory{}
-		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeMock, &factoryMock, nil, "")
+		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeMock, apbExternalRouteClient, &factoryMock, nil, "")
 		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil)
 
 		podNamespaceLister = v1mocks.PodNamespaceLister{}
