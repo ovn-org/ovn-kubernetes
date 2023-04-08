@@ -59,7 +59,8 @@ type WatchFactory struct {
 	efFactory        egressfirewallinformerfactory.SharedInformerFactory
 	cpipcFactory     ocpcloudnetworkinformerfactory.SharedInformerFactory
 	egressQoSFactory egressqosinformerfactory.SharedInformerFactory
-	informers        map[reflect.Type]*informer
+
+	informers map[reflect.Type]*informer
 
 	stopChan chan struct{}
 }
@@ -301,6 +302,13 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		stopChan:  make(chan struct{}),
 	}
 
+	var err error
+	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+		defaultNumEventQueues)
+	if err != nil {
+		return nil, err
+	}
+
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
 	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
@@ -341,7 +349,6 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			withServiceNameAndNoHeadlessServiceSelector())
 	})
 
-	var err error
 	wf.informers[NamespaceType], err = newInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
 	if err != nil {
 		return nil, err
@@ -876,8 +883,8 @@ func (wf *WatchFactory) PodCoreInformer() v1coreinformers.PodInformer {
 	return wf.iFactory.Core().V1().Pods()
 }
 
-func (wf *WatchFactory) NamespaceInformer() cache.SharedIndexInformer {
-	return wf.informers[NamespaceType].inf
+func (wf *WatchFactory) NamespaceInformer() v1coreinformers.NamespaceInformer {
+	return wf.iFactory.Core().V1().Namespaces()
 }
 
 func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {

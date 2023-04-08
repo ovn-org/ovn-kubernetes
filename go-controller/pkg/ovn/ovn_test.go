@@ -6,12 +6,15 @@ import (
 
 	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	adminpolicybasedroutefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+
+	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -76,23 +79,28 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	egressIPObjects := []runtime.Object{}
 	egressFirewallObjects := []runtime.Object{}
 	egressQoSObjects := []runtime.Object{}
+	apbExternalRouteObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
-		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
+		switch object.(type) {
+		case *egressip.EgressIPList:
 			egressIPObjects = append(egressIPObjects, object)
-		} else if _, isEgressFirewallObject := object.(*egressfirewall.EgressFirewallList); isEgressFirewallObject {
+		case *egressfirewall.EgressFirewallList:
 			egressFirewallObjects = append(egressFirewallObjects, object)
-		} else if _, isEgressQoSObject := object.(*egressqos.EgressQoSList); isEgressQoSObject {
+		case *egressqos.EgressQoSList:
 			egressQoSObjects = append(egressQoSObjects, object)
-		} else {
+		case *adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList:
+			apbExternalRouteObjects = append(apbExternalRouteObjects, object)
+		default:
 			v1Objects = append(v1Objects, object)
 		}
 	}
 	o.fakeClient = &util.OVNMasterClientset{
-		KubeClient:           fake.NewSimpleClientset(v1Objects...),
-		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
-		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
-		EgressQoSClient:      egressqosfake.NewSimpleClientset(egressQoSObjects...),
+		KubeClient:             fake.NewSimpleClientset(v1Objects...),
+		EgressIPClient:         egressipfake.NewSimpleClientset(egressIPObjects...),
+		EgressFirewallClient:   egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		EgressQoSClient:        egressqosfake.NewSimpleClientset(egressQoSObjects...),
+		AdminPolicyRouteClient: adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 	}
 	o.init()
 }
@@ -168,6 +176,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
+			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
 		},
 		wf,
 		recorder,

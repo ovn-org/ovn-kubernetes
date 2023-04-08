@@ -456,7 +456,6 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 			return fmt.Errorf("could not add label %s to conntrack filter: %v", labels, err)
 		}
 	}
-
 	if ipAddress.To4() != nil {
 		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
 			return err
@@ -467,6 +466,50 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 		}
 	}
 	return nil
+}
+
+func DeleteConntrackWithMatchingLabels(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType, labels [][]byte) (uint, error) {
+	ipAddress := net.ParseIP(ip)
+	if ipAddress == nil {
+		return 0, fmt.Errorf("value %q passed to DeleteConntrack is not an IP address", ipAddress)
+	}
+
+	filter := &netlink.ConntrackFilter{}
+	if protocol == kapi.ProtocolUDP {
+		// 17 = UDP protocol
+		if err := filter.AddProtocol(17); err != nil {
+			return 0, fmt.Errorf("could not add Protocol UDP to conntrack filter %v", err)
+		}
+	} else if protocol == kapi.ProtocolSCTP {
+		// 132 = SCTP protocol
+		if err := filter.AddProtocol(132); err != nil {
+			return 0, fmt.Errorf("could not add Protocol SCTP to conntrack filter %v", err)
+		}
+	} else if protocol == kapi.ProtocolTCP {
+		// 6 = TCP protocol
+		if err := filter.AddProtocol(6); err != nil {
+			return 0, fmt.Errorf("could not add Protocol TCP to conntrack filter %v", err)
+		}
+	}
+	if port > 0 {
+		if err := filter.AddPort(netlink.ConntrackOrigDstPort, uint16(port)); err != nil {
+			return 0, fmt.Errorf("could not add port %d to conntrack filter: %v", port, err)
+		}
+	}
+	if err := filter.AddIP(ipFilterType, ipAddress); err != nil {
+		return 0, fmt.Errorf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
+	}
+
+	if len(labels) > 0 {
+		// for now we only need unmatch label, we can add match label later if needed
+		if err := filter.AddLabels(netlink.ConntrackMatchLabels, labels); err != nil {
+			return 0, fmt.Errorf("could not add label %s to conntrack filter: %v", labels, err)
+		}
+	}
+	if ipAddress.To4() != nil {
+		return netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter)
+	}
+	return netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V6, filter)
 }
 
 // GetNetworkInterfaceIPs returns the IP addresses for the network interface 'iface'.
