@@ -86,7 +86,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		err := config.PrepareTestConfig()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		fakeOvn = NewFakeOVN()
+		fakeOvn = NewFakeOVN(true)
 		wg = &sync.WaitGroup{}
 	})
 

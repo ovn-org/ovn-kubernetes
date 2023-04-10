@@ -54,9 +54,14 @@ type FakeOVN struct {
 	egressSVCWg  *sync.WaitGroup
 }
 
-func NewFakeOVN() *FakeOVN {
+// NOTE: the FakeAddressSetFactory is no longer needed and should no longer be used. starting to phase out FakeAddressSetFactory
+func NewFakeOVN(useFakeAddressSet bool) *FakeOVN {
+	var asf *addressset.FakeAddressSetFactory
+	if useFakeAddressSet {
+		asf = addressset.NewFakeAddressSetFactory(DefaultNetworkControllerName)
+	}
 	return &FakeOVN{
-		asf:          addressset.NewFakeAddressSetFactory(DefaultNetworkControllerName),
+		asf:          asf,
 		fakeRecorder: record.NewFakeRecorder(10),
 		egressQoSWg:  &sync.WaitGroup{},
 		egressSVCWg:  &sync.WaitGroup{},
@@ -149,7 +154,9 @@ func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
 func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFactory, stopChan chan struct{},
 	addressSetFactory addressset.AddressSetFactory, libovsdbOvnNBClient libovsdbclient.Client,
 	libovsdbOvnSBClient libovsdbclient.Client, recorder record.EventRecorder, wg *sync.WaitGroup) (*DefaultNetworkController, error) {
-	if addressSetFactory == nil {
+
+	fakeAddr, ok := addressSetFactory.(*addressset.FakeAddressSetFactory)
+	if addressSetFactory == nil || (ok && fakeAddr == nil) {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
 

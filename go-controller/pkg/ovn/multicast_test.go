@@ -342,7 +342,7 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN()
+		fakeOvn = NewFakeOVN(true)
 		gomegaFormatMaxLength = format.MaxLength
 		format.MaxLength = 0
 	})

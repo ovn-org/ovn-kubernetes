@@ -342,7 +342,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 
-		fakeOvn = NewFakeOVN()
+		fakeOvn = NewFakeOVN(true)
 	})
 
 	ginkgo.AfterEach(func() {

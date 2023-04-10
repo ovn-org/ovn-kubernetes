@@ -88,7 +88,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOVN = NewFakeOVN()
+		fakeOVN = NewFakeOVN(true)
 		clusterPortGroup = newClusterPortGroup()
 		nodeSwitch = &nbdb.LogicalSwitch{
 			UUID: node1Name + "-UUID",
@@ -1121,7 +1121,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 		app.Flags = config.Flags
 
 		dbSetup := libovsdbtest.TestSetup{}
-		fakeOVN = NewFakeOVN()
+		fakeOVN = NewFakeOVN(true)
 		a := newObjectMeta(node1Name, "")
 		a.Labels = nodeLabel
 		node1 := v1.Node{
