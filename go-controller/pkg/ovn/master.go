@@ -398,16 +398,19 @@ func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, erro
 		return nil, err
 	}
 
-	// OVN can work in single-stack or dual-stack only.
-	currentHostSubnets := len(hostSubnets)
-	expectedHostSubnets := 1
-	// if dual-stack mode we expect one subnet per each IP family
-	if config.IPv4Mode && config.IPv6Mode {
-		expectedHostSubnets = 2
+	// We expect one subnet per configured ClusterNetwork IP family.
+	var haveV4, haveV6 bool
+	for _, net := range hostSubnets {
+		if !haveV4 {
+			haveV4 = net.IP.To4() != nil
+		}
+		if !haveV6 {
+			haveV6 = net.IP.To4() == nil
+		}
 	}
-
-	if expectedHostSubnets != currentHostSubnets {
-		return nil, fmt.Errorf("failed to get expected host subnets for node %s, expected %d subnet(s) but current number of subnet(s) is %d", node.Name, expectedHostSubnets, currentHostSubnets)
+	if haveV4 != config.IPv4Mode || haveV6 != config.IPv6Mode {
+		return nil, fmt.Errorf("failed to get expected host subnets for node %s; expected v4 %v have %v, expected v6 %v have %v",
+			node.Name, config.IPv4Mode, haveV4, config.IPv6Mode, haveV6)
 	}
 
 	gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
