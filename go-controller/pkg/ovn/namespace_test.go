@@ -2,10 +2,12 @@ package ovn
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -67,6 +69,14 @@ func newNamespace(namespace string) *v1.Namespace {
 
 func getNsAddrSetHashNames(ns string) (string, string) {
 	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, DefaultNetworkControllerName))
+}
+
+func buildNamespaceAddressSets(namespace string, ips []net.IP) (*nbdb.AddressSet, *nbdb.AddressSet) {
+	v4set, v6set := addressset.GetDbObjsForAS(getNamespaceAddrSetDbIDs(namespace, "default-network-controller"), ips)
+
+	v4set.UUID = fmt.Sprintf("%s-ipv4-addrSet", namespace)
+	v6set.UUID = fmt.Sprintf("%s-ipv6-addrSet", namespace)
+	return v4set, v6set
 }
 
 var _ = ginkgo.Describe("OVN Namespace Operations", func() {
