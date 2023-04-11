@@ -862,7 +862,7 @@ func startFakeController(oc *DefaultNetworkController, wg *sync.WaitGroup) []*ne
 	return clusterSubnets
 }
 
-var _ = ginkgo.Describe("Gateway Init Operations", func() {
+var _ = ginkgo.Describe("Default network controller operations", func() {
 	var (
 		app      *cli.App
 		f        *factory.WatchFactory

@@ -260,7 +260,7 @@ func (ncc *networkClusterController) syncNodes(nodes []interface{}) error {
 				} else if hostSubnet != nil {
 					klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnet)
 					if err := ncc.hybridOverlaySubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnet); err != nil {
-						klog.Errorf("Failed to mark the subnet %v as allocated in the hybrid subnet allocator for node %s: %w", hostSubnet, node.Name, err)
+						klog.Errorf("Failed to mark the subnet %v as allocated in the hybrid subnet allocator for node %s: %v", hostSubnet, node.Name, err)
 					}
 				}
 			}
@@ -269,7 +269,7 @@ func (ncc *networkClusterController) syncNodes(nodes []interface{}) error {
 			if len(hostSubnets) > 0 {
 				klog.V(5).Infof("Node %s contains subnets: %v for network : %s", node.Name, hostSubnets, ncc.networkName)
 				if err := ncc.clusterSubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnets...); err != nil {
-					klog.Errorf("Failed to mark the subnet %v as allocated in the cluster subnet allocator for node %s: %w", hostSubnets, node.Name, err)
+					klog.Errorf("Failed to mark the subnet %v as allocated in the cluster subnet allocator for node %s: %v", hostSubnets, node.Name, err)
 				}
 			} else {
 				klog.V(5).Infof("Node %s contains no subnets for network : %s", node.Name, ncc.networkName)
