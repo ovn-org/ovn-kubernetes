@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"time"
 
+	iputils "github.com/containernetworking/plugins/pkg/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -239,7 +239,7 @@ func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchNa
 
 	// FIXME: allocate IP ranges when https://github.com/ovn-org/ovn-kubernetes/issues/3369 is fixed
 	for _, excludeSubnet := range excludeSubnets {
-		for excludeIP := excludeSubnet.IP; excludeSubnet.Contains(excludeIP); excludeIP = util.NextIP(excludeIP) {
+		for excludeIP := excludeSubnet.IP; excludeSubnet.Contains(excludeIP); excludeIP = iputils.NextIP(excludeIP) {
 			var ipMask net.IPMask
 			if excludeIP.To4() != nil {
 				ipMask = net.CIDRMask(32, 32)

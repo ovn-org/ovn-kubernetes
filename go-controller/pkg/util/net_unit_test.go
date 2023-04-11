@@ -6,6 +6,7 @@ import (
 	"net"
 	"testing"
 
+	iputils "github.com/containernetworking/plugins/pkg/ip"
 	nbdb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
@@ -13,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNextIP(t *testing.T) {
+func TestNextSloppyIP(t *testing.T) {
 	tests := []struct {
 		desc      string
 		input     string
@@ -41,6 +42,11 @@ func TestNextIP(t *testing.T) {
 			expOutput: "255.0.0.0",
 		},
 		{
+			desc:      "IPv6: test increment of leading zeros",
+			input:     "10:100:200:2::",
+			expOutput: "10:100:200:2::1",
+		},
+		{
 			desc:      "IPv6: test increment of eight hextet",
 			input:     "2001:db8::ffff",
 			expOutput: "2001:db8::1:0",
@@ -53,7 +59,7 @@ func TestNextIP(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res := NextIP(ovntest.MustParseIP(tc.input))
+			res := iputils.NextIP(ovntest.MustParseIP(tc.input))
 			t.Log(res.String())
 			assert.Equal(t, tc.expOutput, res.String())
 		})

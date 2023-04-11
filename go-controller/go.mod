@@ -4,13 +4,13 @@ go 1.18
 
 require (
 	github.com/Mellanox/sriovnet v1.1.0
-	github.com/Microsoft/hcsshim v0.8.20
-	github.com/alexflint/go-filemutex v1.1.0
+	github.com/Microsoft/hcsshim v0.9.6
+	github.com/alexflint/go-filemutex v1.2.0
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
 	github.com/cenkalti/backoff/v4 v4.1.3
-	github.com/containernetworking/cni v1.0.1
-	github.com/containernetworking/plugins v1.1.1
+	github.com/containernetworking/cni v1.1.2
+	github.com/containernetworking/plugins v1.2.0
 	github.com/coreos/go-iptables v0.6.0
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/mux v1.8.0
@@ -20,14 +20,14 @@ require (
 	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/onsi/ginkgo v1.16.5
-	github.com/onsi/gomega v1.23.0
+	github.com/onsi/gomega v1.24.2
 	github.com/openshift/api v0.0.0-20230213202419-42edf4f1d905
 	github.com/openshift/client-go v0.0.0-20230120202327-72f107311084
 	github.com/ovn-org/libovsdb v0.6.1-0.20230203213244-a6a173993830
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/client_model v0.3.0
-	github.com/safchain/ethtool v0.0.0-20210803160452-9aa261dae9b1
+	github.com/safchain/ethtool v0.2.0
 	github.com/spf13/afero v1.6.0
 	github.com/stretchr/testify v1.8.0
 	github.com/urfave/cli/v2 v2.2.0
