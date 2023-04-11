@@ -929,6 +929,12 @@ install_multus() {
   run_kubectl apply -f "$multus_manifest"
 }
 
+install_mpolicy_crd() {
+  echo "Installing multi-network-policy CRD ..."
+  mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml"
+  run_kubectl apply -f "$mpolicy_manifest"
+}
+
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
 # DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
 # Next, it iterates over all pods with name=ovnkube-db and ovnkube-master and waits for them to post "Ready".
@@ -1130,6 +1136,7 @@ if [ "$KIND_INSTALL_INGRESS" == true ]; then
 fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
   install_multus
+  install_mpolicy_crd
 fi
 kubectl_wait_pods
 sleep_until_pods_settle

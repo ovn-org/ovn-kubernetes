@@ -20,10 +20,13 @@ type SecondaryLayer2NetworkController struct {
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
 func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
-	netconfInfo util.NetConfInfo) *SecondaryLayer2NetworkController {
+	netconfInfo util.NetConfInfo, addressSetFactory addressset.AddressSetFactory) *SecondaryLayer2NetworkController {
 	stopChan := make(chan struct{})
 
 	ipv4Mode, ipv6Mode := netconfInfo.IPMode()
+	if addressSetFactory == nil {
+		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
+	}
 	oc := &SecondaryLayer2NetworkController{
 		BaseSecondaryLayer2NetworkController{
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
@@ -36,7 +39,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					logicalPortCache:            newPortCache(stopChan),
 					namespaces:                  make(map[string]*namespaceInfo),
 					namespacesMutex:             sync.Mutex{},
-					addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode),
+					addressSetFactory:           addressSetFactory,
 					networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
 					sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
 					podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),

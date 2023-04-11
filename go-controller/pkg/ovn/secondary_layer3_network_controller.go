@@ -228,10 +228,13 @@ type SecondaryLayer3NetworkController struct {
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
 func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
-	netconfInfo util.NetConfInfo) *SecondaryLayer3NetworkController {
+	netconfInfo util.NetConfInfo, addressSetFactory addressset.AddressSetFactory) *SecondaryLayer3NetworkController {
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netconfInfo.IPMode()
 	// controllerName must be unique to identify db object owned by given controller
+	if addressSetFactory == nil {
+		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
+	}
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 			BaseNetworkController: BaseNetworkController{
@@ -243,7 +246,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				logicalPortCache:            newPortCache(stopChan),
 				namespaces:                  make(map[string]*namespaceInfo),
 				namespacesMutex:             sync.Mutex{},
-				addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode),
+				addressSetFactory:           addressSetFactory,
 				networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
 				sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
 				podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),

@@ -114,21 +114,39 @@ type testPod struct {
 	portName     string
 	routes       []util.PodRoute
 	noIfaceIdVer bool
+
+	secondaryPodInfos map[string]*secondaryPodInfo
+}
+
+type secondaryPodInfo struct {
+	nodeSubnet  string
+	nodeMgtIP   string
+	nodeGWIP    string
+	routes      []util.PodRoute
+	allportInfo map[string]portInfo
+}
+
+type portInfo struct {
+	portUUID string
+	podIP    string
+	podMAC   string
+	portName string
 }
 
 func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, namespace string) (to testPod) {
 	portName := util.GetLogicalPortName(namespace, podName)
 	to = testPod{
-		nodeName:   nodeName,
-		nodeSubnet: nodeSubnet,
-		nodeMgtIP:  nodeMgtIP,
-		nodeGWIP:   nodeGWIP,
-		podName:    podName,
-		podIP:      podIP,
-		podMAC:     podMAC,
-		namespace:  namespace,
-		portName:   portName,
-		portUUID:   portName + "-UUID",
+		portUUID:          portName + "-UUID",
+		nodeSubnet:        nodeSubnet,
+		nodeMgtIP:         nodeMgtIP,
+		nodeGWIP:          nodeGWIP,
+		podIP:             podIP,
+		podMAC:            podMAC,
+		portName:          portName,
+		nodeName:          nodeName,
+		podName:           podName,
+		namespace:         namespace,
+		secondaryPodInfos: map[string]*secondaryPodInfo{},
 	}
 	return
 }
