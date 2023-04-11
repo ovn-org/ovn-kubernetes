@@ -119,6 +119,7 @@ usage() {
     echo "-kt  | --keep-taint                 Do not remove taint components."
     echo "                                    DEFAULT: Remove taint components."
     echo "-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled."
+    echo "-scm | --separate-cluster-manager   Separate cluster manager from ovnkube-master and run as a separate container within ovnkube-master deployment."
     echo "-ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled."
     echo "-ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled."
     echo "-dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled"
