@@ -93,7 +93,7 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 func (c *addressManager) ListAddresses() []net.IP {
 	c.Lock()
 	defer c.Unlock()
-	addrs := c.addresses.UnsortedList()
+	addrs := sets.List(c.addresses)
 	out := make([]net.IP, 0, len(addrs))
 	for _, addr := range addrs {
 		ip := net.ParseIP(addr)
