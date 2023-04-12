@@ -324,7 +324,13 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		}
 		oldHostRepName := rep
 
-		// 5. rename the host VF representor
+		// 5. make sure it's not a port managed by OVS to avoid conflicts when renaming the VF representor
+		_, err = ovsExec("--if-exists", "del-port", oldHostRepName)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// 6. rename the host VF representor
 		hostIface.Name = containerID[:(15-len(ifnameSuffix))] + ifnameSuffix
 		if err = renameLink(oldHostRepName, hostIface.Name); err != nil {
 			return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostRepName, hostIface.Name, err)
@@ -336,7 +342,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		}
 		hostIface.Mac = link.Attrs().HardwareAddr.String()
 
-		// 6. set MTU on VF representor
+		// 7. set MTU on VF representor
 		if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
 			return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
 		}
