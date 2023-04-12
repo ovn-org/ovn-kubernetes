@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 
@@ -253,24 +252,22 @@ type SecondaryLayer3NetworkController struct {
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
-func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
-	netconfInfo util.NetConfInfo, addressSetFactory addressset.AddressSetFactory) *SecondaryLayer3NetworkController {
+func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) *SecondaryLayer3NetworkController {
+
 	stopChan := make(chan struct{})
-	ipv4Mode, ipv6Mode := netconfInfo.IPMode()
+	ipv4Mode, ipv6Mode := netInfo.IPMode()
 	var zoneICHandler *zoneic.ZoneInterconnectHandler
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		zoneICHandler = zoneic.NewZoneInterconnectHandler(netInfo, cnci.nbClient, cnci.sbClient)
 	}
-	// controllerName must be unique to identify db object owned by given controller
-	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
-	}
+
+	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
+
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 			BaseNetworkController: BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
 				controllerName:              netInfo.GetNetworkName() + "-network-controller",
-				NetConfInfo:                 netconfInfo,
 				NetInfo:                     netInfo,
 				lsManager:                   lsm.NewLogicalSwitchManager(),
 				logicalPortCache:            newPortCache(stopChan),
@@ -612,11 +609,7 @@ func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error
 		return fmt.Errorf("failed to get node logical switches which have other-config set for network %s: %v", oc.GetNetworkName(), err)
 	}
 	for _, nodeSwitch := range nodeSwitches {
-		if !strings.HasPrefix(nodeSwitch.Name, oc.GetPrefix()) {
-			klog.Errorf("Node switch name %s unexpected, expect prefixed with %s", nodeSwitch.Name, oc.GetPrefix())
-			continue
-		}
-		nodeName := strings.Trim(nodeSwitch.Name, oc.GetPrefix())
+		nodeName := oc.RemoveNetworkScopeFromName(nodeSwitch.Name)
 		if !foundNodes.Has(nodeName) {
 			if err := oc.deleteNode(nodeName); err != nil {
 				return fmt.Errorf("failed to delete node:%s, err:%v", nodeName, err)

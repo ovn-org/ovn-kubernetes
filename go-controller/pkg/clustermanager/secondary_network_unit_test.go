@@ -88,11 +88,9 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 
 				sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology})
-				blueNetSubnets, err := config.ParseClusterSubnetEntries("192.168.0.0/16/24")
+				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology, Subnets: "192.168.0.0/16/24"})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				layer3NetConfInfo := &util.Layer3NetConfInfo{ClusterSubnets: blueNetSubnets}
-				nc, err := sncm.NewNetworkController(netInfo, layer3NetConfInfo)
+				nc, err := sncm.NewNetworkController(netInfo)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(nc).NotTo(gomega.BeNil())
 				nc.Start(ctx.Context)
@@ -156,9 +154,9 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 
 				sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer2Topology})
-				layer2NetConfInfo := &util.Layer2NetConfInfo{}
-				nc, err := sncm.NewNetworkController(netInfo, layer2NetConfInfo)
+				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer2Topology})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				nc, err := sncm.NewNetworkController(netInfo)
 				gomega.Expect(err).To(gomega.Equal(nad.ErrNetworkControllerTopologyNotManaged))
 				gomega.Expect(nc).To(gomega.BeNil())
 
@@ -224,10 +222,9 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				// there could be a race in updating the node annotations with the fakeclient.
 				// fakeclient will not return an error in such cases to trigger retry by RetryOnConflict.
 				// So testing the cleanup one at a time.
-				netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology})
-				layer3NetConfInfo := &util.Layer3NetConfInfo{}
-				oc := newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, layer3NetConfInfo.ClusterSubnets,
-					sncm.ovnClient, sncm.watchFactory, false, netInfo, layer3NetConfInfo)
+				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				oc := newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, nil, sncm.ovnClient, sncm.watchFactory, false, netInfo)
 				nadControllers := []nad.NetworkController{oc}
 
 				err = sncm.CleanupDeletedNetworks(nadControllers)

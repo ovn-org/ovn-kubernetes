@@ -54,9 +54,9 @@ type CommonNodeNetworkControllerInfo struct {
 // BaseNodeNetworkController structure per-network fields and network specific configuration
 type BaseNodeNetworkController struct {
 	CommonNodeNetworkControllerInfo
-	// per controller nad/netconf name information
+
+	// network information
 	util.NetInfo
-	util.NetConfInfo
 
 	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
 	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*util.DPUConnectionDetails). Key of nadToDPUCDMap
@@ -115,7 +115,6 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 	return &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
-			NetConfInfo:                     &util.DefaultNetConfInfo{},
 			NetInfo:                         &util.DefaultNetInfo{},
 			stopChan:                        stopChan,
 			wg:                              wg,

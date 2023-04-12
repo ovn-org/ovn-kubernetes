@@ -19,7 +19,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -147,11 +146,11 @@ func (p testPod) populateSecondaryNetworkLogicalSwitchCache(fakeOvn *FakeOVN, oc
 	case ovntypes.Layer2Topology:
 		uuid := getLogicalSwitchUUID(fakeOvn.controller.nbClient, ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
 		subnet := ocInfo.bnc.Subnets()[0]
-		err = ocInfo.bnc.lsManager.AddSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), uuid, []*net.IPNet{ovntest.MustParseIPNet(subnet)})
+		err = ocInfo.bnc.lsManager.AddSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), uuid, []*net.IPNet{subnet.CIDR})
 	case ovntypes.LocalnetTopology:
 		uuid := getLogicalSwitchUUID(fakeOvn.controller.nbClient, ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
 		subnet := ocInfo.bnc.Subnets()[0]
-		err = ocInfo.bnc.lsManager.AddSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch), uuid, []*net.IPNet{ovntest.MustParseIPNet(subnet)})
+		err = ocInfo.bnc.lsManager.AddSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch), uuid, []*net.IPNet{subnet.CIDR})
 	}
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
@@ -219,12 +218,12 @@ func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []
 }
 
 func getMultiPolicyData(networkPolicy *knet.NetworkPolicy, localPortUUIDs []string, peerNamespaces []string,
-	tcpPeerPorts []int32, netInfo util.NetInfo) []libovsdbtest.TestData {
+	tcpPeerPorts []int32, netInfo util.NetInfo) []libovsdb.TestData {
 	return getPolicyDataHelper(networkPolicy, localPortUUIDs, peerNamespaces, tcpPeerPorts, "",
 		false, false, netInfo)
 }
 
-func getMultiDefaultDenyData(networkPolicy *knet.NetworkPolicy, ports []string, netInfo util.NetInfo) []libovsdbtest.TestData {
+func getMultiDefaultDenyData(networkPolicy *knet.NetworkPolicy, ports []string, netInfo util.NetInfo) []libovsdb.TestData {
 	policyTypeIngress, policyTypeEgress := getPolicyType(networkPolicy)
 	return getDefaultDenyDataHelper(networkPolicy.Namespace, policyTypeIngress, policyTypeEgress,
 		ports, "", "", netInfo)
@@ -297,7 +296,8 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		netconf, err := util.ParseNetConf(nad)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		netInfo = util.NewNetInfo(netconf)
+		netInfo, err = util.NewNetInfo(netconf)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	ginkgo.AfterEach(func() {
@@ -367,9 +367,11 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 			}
 			if namespaces != nil {
 				err = ocInfo.bnc.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 			if pods != nil {
 				err = ocInfo.bnc.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 			err = ocInfo.bnc.WatchMultiNetworkPolicy()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -405,7 +407,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					Get(context.TODO(), mpolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ocInfo, _ := fakeOvn.secondaryControllers[secondaryNetworkName]
+				ocInfo := fakeOvn.secondaryControllers[secondaryNetworkName]
 				ocInfo.asf.EventuallyExpectEmptyAddressSetExist(namespaceName1)
 				ocInfo.asf.EventuallyExpectEmptyAddressSetExist(namespaceName2)
 
@@ -428,7 +430,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespace1 := *newNamespace(namespaceName1)
 				nPodTest := getTestPod(namespace1.Name, nodeName)
-				nPodTest.addNetwork(secondaryNetworkName, util.GetNADName(nad.Namespace, nad.Name), "", "", "", "10.1.1.2", "0a:58:0a:01:01:02")
+				nPodTest.addNetwork(secondaryNetworkName, util.GetNADName(nad.Namespace, nad.Name), "", "", "", "10.1.1.1", "0a:58:0a:01:01:01")
 				networkPolicy := getPortNetworkPolicy(netPolicyName1, namespace1.Name, labelName, labelVal, portNum)
 				startOvn(initialDB, []v1.Namespace{namespace1}, nil, nil,
 					[]nettypes.NetworkAttachmentDefinition{*nad}, []testPod{nPodTest}, map[string]string{labelName: labelVal})
@@ -463,7 +465,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					Get(context.TODO(), mpolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ocInfo, _ := fakeOvn.secondaryControllers[secondaryNetworkName]
+				ocInfo := fakeOvn.secondaryControllers[secondaryNetworkName]
 				portInfo := nPodTest.getNetworkPortInfo(secondaryNetworkName, util.GetNADName(nad.Namespace, nad.Name))
 				gomega.Expect(portInfo).NotTo(gomega.Equal(nil))
 				ocInfo.asf.ExpectAddressSetWithIPs(namespaceName1, []string{portInfo.podIP})

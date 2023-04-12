@@ -60,26 +60,25 @@ type networkControllerManager struct {
 	nadController *nad.NetAttachDefinitionController
 }
 
-func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
-	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
+func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
-	topoType := netConfInfo.TopologyType()
+	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, netConfInfo, nil), nil
+		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo), nil
 	case ovntypes.Layer2Topology:
 		if config.OVNKubernetesFeature.EnableInterconnect {
 			return nil, fmt.Errorf("topology type %s not supported when Interconnect feature is enabled", topoType)
 		}
-		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, netConfInfo, nil), nil
+		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo), nil
 	case ovntypes.LocalnetTopology:
 		if config.OVNKubernetesFeature.EnableInterconnect {
 			return nil, fmt.Errorf("topology type %s not supported when Interconnect feature is enabled", topoType)
 		}
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, netConfInfo, nil), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -90,14 +89,14 @@ func (cm *networkControllerManager) newDummyNetworkController(topoType, netName 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
-	netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
+	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, &util.Layer3NetConfInfo{}, nil), nil
+		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo), nil
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, &util.Layer2NetConfInfo{}, nil), nil
+		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo), nil
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, &util.LocalnetNetConfInfo{}, nil), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }

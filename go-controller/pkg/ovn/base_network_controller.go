@@ -76,9 +76,8 @@ type BaseNetworkController struct {
 	// controllerName should be used to identify objects owned by given controller in the db
 	controllerName string
 
-	// per controller NAD/netconf name information
+	// network information
 	util.NetInfo
-	util.NetConfInfo
 
 	// retry framework for pods
 	retryPods *ovnretry.RetryFramework

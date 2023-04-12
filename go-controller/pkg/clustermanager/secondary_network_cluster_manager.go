@@ -92,18 +92,16 @@ func (sncm *secondaryNetworkClusterManager) Stop() {
 // NewNetworkController implements the networkAttachDefController.NetworkControllerManager
 // interface function.  This function is called by the net-attach-def controller when
 // a layer2 or layer3 secondary network is created.  Layer2 type is not handled here.
-func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo,
-	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
-	topoType := netConfInfo.TopologyType()
+func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
+	topoType := nInfo.TopologyType()
 	if topoType == ovntypes.Layer3Topology {
 		networkId, err := sncm.networkIDAllocator.allocateID(nInfo.GetNetworkName())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create NetworkController for secondary layer3 network %s : %w", nInfo.GetNetworkName(), err)
 		}
 
-		layer3NetConfInfo := netConfInfo.(*util.Layer3NetConfInfo)
-		sncc := newNetworkClusterController(nInfo.GetNetworkName(), networkId, layer3NetConfInfo.ClusterSubnets,
-			sncm.ovnClient, sncm.watchFactory, false, nInfo, netConfInfo)
+		sncc := newNetworkClusterController(nInfo.GetNetworkName(), networkId, nInfo.Subnets(),
+			sncm.ovnClient, sncm.watchFactory, false, nInfo)
 		return sncc, nil
 	}
 
@@ -164,8 +162,7 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(allController
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) nad.NetworkController {
-	netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
-	layer3NetConfInfo := &util.Layer3NetConfInfo{}
-	return newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, layer3NetConfInfo.ClusterSubnets,
-		sncm.ovnClient, sncm.watchFactory, false, netInfo, layer3NetConfInfo)
+	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
+	return newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, nil, sncm.ovnClient, sncm.watchFactory,
+		false, netInfo)
 }

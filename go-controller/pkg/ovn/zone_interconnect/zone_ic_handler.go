@@ -124,8 +124,8 @@ func NewZoneInterconnectHandler(nInfo util.NetInfo, nbClient, sbClient libovsdbc
 		sbClient: sbClient,
 	}
 
-	zic.networkClusterRouterName = zic.getNetworkScopedName(types.OVNClusterRouter)
-	zic.networkTransitSwitchName = zic.getNetworkScopedName(types.TransitSwitch)
+	zic.networkClusterRouterName = zic.GetNetworkScopedName(types.OVNClusterRouter)
+	zic.networkTransitSwitchName = zic.GetNetworkScopedName(types.TransitSwitch)
 
 	return zic
 }
@@ -284,7 +284,7 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 	}
 
 	// Connect transit switch to the cluster router by creating a pair of logical switch port - logical router port
-	logicalRouterPortName := zic.getNetworkScopedName(types.RouterToTransitSwitchPrefix + node.Name)
+	logicalRouterPortName := zic.GetNetworkScopedName(types.RouterToTransitSwitchPrefix + node.Name)
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     logicalRouterPortName,
 		MAC:      transitRouterPortMac.String(),
@@ -310,7 +310,7 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 	externalIDs := map[string]string{
 		"node": node.Name,
 	}
-	err = zic.addNodeLogicalSwitchPort(zic.networkTransitSwitchName, zic.getNetworkScopedName(types.TransitSwitchToRouterPrefix+node.Name),
+	err = zic.addNodeLogicalSwitchPort(zic.networkTransitSwitchName, zic.GetNetworkScopedName(types.TransitSwitchToRouterPrefix+node.Name),
 		lportTypeRouter, []string{lportTypeRouterAddr}, lspOptions, externalIDs)
 	if err != nil {
 		return err
@@ -374,7 +374,7 @@ func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.N
 		"node": node.Name,
 	}
 
-	remotePortName := zic.getNetworkScopedName(types.TransitSwitchToRouterPrefix + node.Name)
+	remotePortName := zic.GetNetworkScopedName(types.TransitSwitchToRouterPrefix + node.Name)
 	if err := zic.addNodeLogicalSwitchPort(zic.networkTransitSwitchName, remotePortName, lportTypeRemote, []string{remotePortAddr}, lspOptions, externalIDs); err != nil {
 		return err
 	}
@@ -439,7 +439,7 @@ func (zic *ZoneInterconnectHandler) cleanupNode(nodeName string) error {
 
 func (zic *ZoneInterconnectHandler) cleanupNodeClusterRouterPort(nodeName string) error {
 	lrp := nbdb.LogicalRouterPort{
-		Name: zic.getNetworkScopedName(types.RouterToTransitSwitchPrefix + nodeName),
+		Name: zic.GetNetworkScopedName(types.RouterToTransitSwitchPrefix + nodeName),
 	}
 	logicalRouterPort, err := libovsdbops.GetLogicalRouterPort(zic.nbClient, &lrp)
 	if err != nil {
@@ -463,7 +463,7 @@ func (zic *ZoneInterconnectHandler) cleanupNodeTransitSwitchPort(nodeName string
 		Name: zic.networkTransitSwitchName,
 	}
 	logicalSwitchPort := &nbdb.LogicalSwitchPort{
-		Name: zic.getNetworkScopedName(types.TransitSwitchToRouterPrefix + nodeName),
+		Name: zic.GetNetworkScopedName(types.TransitSwitchToRouterPrefix + nodeName),
 	}
 
 	if err := libovsdbops.DeleteLogicalSwitchPorts(zic.nbClient, logicalSwitch, logicalSwitchPort); err != nil {
@@ -598,13 +598,6 @@ func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Nod
 	}
 
 	return nil
-}
-
-// getNetworkScopedName returns the network scoped name.
-// Note: For default primary network, zic.GetPrefix() will return ""
-// and for secondary networks it will return "<network_name>_"
-func (zic *ZoneInterconnectHandler) getNetworkScopedName(name string) string {
-	return fmt.Sprintf("%s%s", zic.GetPrefix(), name)
 }
 
 // interconnectStaticRoute represents a static route
