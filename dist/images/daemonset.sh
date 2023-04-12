@@ -56,6 +56,7 @@ OVN_LFLOW_CACHE_LIMIT=""
 OVN_LFLOW_CACHE_LIMIT_KB=""
 OVN_HYBRID_OVERLAY_ENABLE=""
 OVN_DISABLE_SNAT_MULTIPLE_GWS=""
+OVN_DISABLE_FORWARDING=""
 OVN_DISABLE_PKT_MTU_CHECK=""
 OVN_EMPTY_LB_EVENTS=""
 OVN_MULTICAST_ENABLE=""
@@ -78,6 +79,7 @@ OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
 OVNKUBE_CONFIG_DURATION_ENABLE=
 OVNKUBE_METRICS_SCALE_ENABLE=
+OVN_STATELESS_NETPOL_ENABLE="false"
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -204,6 +206,9 @@ while [ "$1" != "" ]; do
   --disable-snat-multiple-gws)
     OVN_DISABLE_SNAT_MULTIPLE_GWS=$VALUE
     ;;
+  --disable-forwarding)
+    OVN_DISABLE_FORWARDING=$VALUE
+    ;;
   --disable-pkt-mtu-check)
     OVN_DISABLE_PKT_MTU_CHECK=$VALUE
     ;;
@@ -275,6 +280,9 @@ while [ "$1" != "" ]; do
     ;;
   --in-upgrade)
     IN_UPGRADE=true
+    ;;
+  --stateless-netpol-enable)
+    OVN_STATELESS_NETPOL_ENABLE=$VALUE
     ;;
 
   *)
@@ -360,6 +368,8 @@ ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
 echo "ovn_disable_snat_multiple_gws: ${ovn_disable_snat_multiple_gws}"
+ovn_disable_forwarding=${OVN_DISABLE_FORWARDING}
+echo "ovn_disable_forwarding: ${ovn_disable_forwarding}"
 ovn_disable_pkt_mtu_check=${OVN_DISABLE_PKT_MTU_CHECK}
 echo "ovn_disable_pkt_mtu_check: ${ovn_disable_pkt_mtu_check}"
 ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS}
@@ -420,6 +430,8 @@ ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
 echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE}
 echo "ovnkube_metrics_scale_enable: ${ovnkube_metrics_scale_enable}"
+ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE}
+echo "ovn_stateless_netpol_enable: ${ovn_stateless_netpol_enable}"
 
 ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -434,6 +446,7 @@ ovn_image=${ovnkube_image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
@@ -476,6 +489,7 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
@@ -506,6 +520,7 @@ ovn_image=${ovnkube_image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
@@ -520,6 +535,7 @@ ovn_image=${ovnkube_image} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_stateless_netpol_enable=${ovn_netpol_acl_enable} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${image} \

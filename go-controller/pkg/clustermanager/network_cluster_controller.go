@@ -203,7 +203,8 @@ func (ncc *networkClusterController) syncNodeClusterSubnet(node *corev1.Node) er
 		klog.Warningf("Failed to get node %s host subnets annotations for network %s : %v", node.Name, ncc.networkName, err)
 	}
 
-	hostSubnets, allocatedSubnets, err := ncc.clusterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, config.IPv4Mode, config.IPv6Mode)
+	ipv4Mode, ipv6Mode := ncc.IPMode()
+	hostSubnets, allocatedSubnets, err := ncc.clusterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, ipv4Mode, ipv6Mode)
 	if err != nil {
 		return err
 	}

@@ -2,12 +2,12 @@ package factory
 
 import (
 	"fmt"
-	"math/rand"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 
 	networkattachmentdefinitionlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
@@ -264,7 +264,7 @@ func (qm *queueMap) shutdown() {
 func (qm *queueMap) getNewQueueNum() uint32 {
 	var j, startIdx, queueIdx uint32
 	numEventQueues := uint32(len(qm.queues))
-	startIdx = uint32(rand.Intn(int(numEventQueues - 1)))
+	startIdx = uint32(cryptorand.Intn(int64(numEventQueues - 1)))
 	queueIdx = startIdx
 	lowestNum := len(qm.queues[startIdx])
 	for j = 0; j < numEventQueues; j++ {

@@ -2,8 +2,9 @@ package libovsdbops
 
 import (
 	"fmt"
-	"math/rand"
 	"sync/atomic"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
 )
 
 const (
@@ -11,7 +12,7 @@ const (
 )
 
 var (
-	namedUUIDCounter = rand.Uint32()
+	namedUUIDCounter = cryptorand.Uint32()
 )
 
 // isNamedUUID checks if the passed id is a named-uuid built with

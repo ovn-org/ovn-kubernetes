@@ -296,6 +296,16 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 			return err
 		}
 		defer pr.cancel()
+
+		if !response.PodIFInfo.IsDPUHostMode {
+			// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
+			if err := SetExec(kexec.New()); err != nil {
+				err = fmt.Errorf("failed to initialize OVS exec runner: %v", err)
+				klog.Error(err.Error())
+				return err
+			}
+		}
+
 		err = pr.UnconfigureInterface(response.PodIFInfo)
 	}
 	return err

@@ -1079,7 +1079,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 //
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, extraIPs []net.IP) (*openflowManager, error) {
+func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnets []*net.IPNet, extraIPs []net.IP) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
 		defaultBridge:         gwBridge,
@@ -1091,7 +1091,7 @@ func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, extraI
 		flowChan:              make(chan struct{}, 1),
 	}
 
-	if err := ofm.updateBridgeFlowCache(extraIPs); err != nil {
+	if err := ofm.updateBridgeFlowCache(subnets, extraIPs); err != nil {
 		return nil, err
 	}
 
@@ -1101,7 +1101,7 @@ func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, extraI
 
 // updateBridgeFlowCache generates the "static" per-bridge flows
 // note: this is shared between shared and local gateway modes
-func (ofm *openflowManager) updateBridgeFlowCache(extraIPs []net.IP) error {
+func (ofm *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs []net.IP) error {
 	// protect defaultBridge config from being updated by gw.nodeIPManager
 	ofm.defaultBridge.Lock()
 	defer ofm.defaultBridge.Unlock()
@@ -1110,7 +1110,7 @@ func (ofm *openflowManager) updateBridgeFlowCache(extraIPs []net.IP) error {
 	if err != nil {
 		return err
 	}
-	dftCommonFlows, err := commonFlows(ofm.defaultBridge)
+	dftCommonFlows, err := commonFlows(subnets, ofm.defaultBridge)
 	if err != nil {
 		return err
 	}
@@ -1122,7 +1122,7 @@ func (ofm *openflowManager) updateBridgeFlowCache(extraIPs []net.IP) error {
 	// we consume ex gw bridge flows only if that is enabled
 	if ofm.externalGatewayBridge != nil {
 		ofm.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-		exGWBridgeDftFlows, err := commonFlows(ofm.externalGatewayBridge)
+		exGWBridgeDftFlows, err := commonFlows(subnets, ofm.externalGatewayBridge)
 		if err != nil {
 			return err
 		}
@@ -1383,7 +1383,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	return dftFlows, nil
 }
 
-func commonFlows(bridge *bridgeConfiguration) ([]string, error) {
+func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, error) {
 	ofPortPhys := bridge.ofPortPhys
 	bridgeMacAddress := bridge.macAddress.String()
 	ofPortPatch := bridge.ofPortPatch
@@ -1507,6 +1507,36 @@ func commonFlows(bridge *bridgeConfiguration) ([]string, error) {
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ipv6, "+
 				"actions=ct(zone=%d, nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
+	}
+
+	// Egress IP is often configured on a node different from the one hosting the affected pod.
+	// Due to the fact that ovn-controllers on different nodes apply the changes independently,
+	// there is a chance that the pod traffic will reach the egress node before it configures the SNAT flows.
+	// Drop pod traffic that is not SNATed, excluding local pods(required for ICNIv2)
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		for _, clusterEntry := range config.Default.ClusterSubnets {
+			cidr := clusterEntry.CIDR
+			ipPrefix := "ip"
+			if utilnet.IsIPv6CIDR(cidr) {
+				ipPrefix = "ipv6"
+			}
+			// table 0, drop packets coming from pods headed externally that were not SNATed.
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=104, in_port=%s, %s, %s_src=%s, actions=drop",
+					defaultOpenFlowCookie, ofPortPatch, ipPrefix, ipPrefix, cidr))
+		}
+		for _, subnet := range subnets {
+			ipPrefix := "ip"
+			if utilnet.IsIPv6CIDR(subnet) {
+				ipPrefix = "ipv6"
+			}
+			// table 0, commit connections from local pods.
+			// ICNIv2 requires that local pod traffic can leave the node without SNAT.
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=109, in_port=%s, %s, %s_src=%s"+
+					"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+					defaultOpenFlowCookie, ofPortPatch, ipPrefix, ipPrefix, subnet, config.Default.ConntrackZone, ctMarkOVN, ofPortPhys))
+		}
 	}
 
 	actions := fmt.Sprintf("output:%s", ofPortPatch)
@@ -1703,6 +1733,11 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			if err != nil {
 				return err
 			}
+			if config.Gateway.DisableForwarding {
+				if err := initExternalBridgeDropForwardingRules(exGwBridge.bridgeName); err != nil {
+					return fmt.Errorf("failed to add forwarding block rules for bridge %s: err %v", exGwBridge.bridgeName, err)
+				}
+			}
 		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
 		nodeIPs := gw.nodeIPManager.ListAddresses()
@@ -1717,7 +1752,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs)
 		if err != nil {
 			return err
 		}
@@ -1725,7 +1760,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(gw.nodeIPManager.ListAddresses()); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses()); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
@@ -1795,6 +1830,17 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, nodeName string, ofm *ope
 			if err := initSharedGatewayIPTables(); err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	if config.Gateway.DisableForwarding {
+		for _, subnet := range config.Kubernetes.ServiceCIDRs {
+			if err := initExternalBridgeServiceForwardingRules(subnet); err != nil {
+				return nil, fmt.Errorf("failed to add forwarding rules for bridge %s: err %v", gwBridge.bridgeName, err)
+			}
+		}
+		if err := initExternalBridgeDropForwardingRules(gwBridge.bridgeName); err != nil {
+			return nil, fmt.Errorf("failed to add forwarding rules for bridge %s: err %v", gwBridge.bridgeName, err)
 		}
 	}
 

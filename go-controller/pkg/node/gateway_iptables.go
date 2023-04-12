@@ -352,6 +352,96 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svc
 	}
 }
 
+func getGatewayForwardRules(svcCIDR *net.IPNet) []iptRule {
+	protocol := getIPTablesProtocol(svcCIDR.IP.String())
+	masqueradeIP := types.V4OVNMasqueradeIP
+	if protocol == iptables.ProtocolIPv6 {
+		masqueradeIP = types.V6OVNMasqueradeIP
+	}
+	return []iptRule{
+		{
+			table: "filter",
+			chain: "FORWARD",
+			args: []string{
+				"-s", svcCIDR.String(),
+				"-j", "ACCEPT",
+			},
+			protocol: protocol,
+		},
+		{
+			table: "filter",
+			chain: "FORWARD",
+			args: []string{
+				"-d", svcCIDR.String(),
+				"-j", "ACCEPT",
+			},
+			protocol: protocol,
+		},
+		{
+			table: "filter",
+			chain: "FORWARD",
+			args: []string{
+				"-s", masqueradeIP,
+				"-j", "ACCEPT",
+			},
+			protocol: protocol,
+		},
+		{
+			table: "filter",
+			chain: "FORWARD",
+			args: []string{
+				"-d", masqueradeIP,
+				"-j", "ACCEPT",
+			},
+			protocol: protocol,
+		},
+	}
+}
+
+func getGatewayDropRules(ifName string) []iptRule {
+	var dropRules []iptRule
+	for _, protocol := range clusterIPTablesProtocols() {
+		dropRules = append(dropRules, []iptRule{
+			{
+				table: "filter",
+				chain: "FORWARD",
+				args: []string{
+					"-i", ifName,
+					"-j", "DROP",
+				},
+				protocol: protocol,
+			},
+			{
+				table: "filter",
+				chain: "FORWARD",
+				args: []string{
+					"-o", ifName,
+					"-j", "DROP",
+				},
+				protocol: protocol,
+			},
+		}...)
+	}
+	return dropRules
+}
+
+// initExternalBridgeForwardingRules sets up iptables rules for br-* interface svc traffic forwarding
+// -A FORWARD -s 10.96.0.0/16 -j ACCEPT
+// -A FORWARD -d 10.96.0.0/16 -j ACCEPT
+// -A FORWARD -s 169.254.169.1 -j ACCEPT
+// -A FORWARD -d 169.254.169.1 -j ACCEPT
+func initExternalBridgeServiceForwardingRules(cidr *net.IPNet) error {
+	return insertIptRules(getGatewayForwardRules(cidr))
+}
+
+// initExternalBridgeDropRules sets up iptables rules to block forwarding
+// in br-* interfaces (also for 2ndary bridge) - we block for v4 and v6 based on clusterStack
+// -A FORWARD -i breth1 -j DROP
+// -A FORWARD -o breth1 -j DROP
+func initExternalBridgeDropForwardingRules(ifName string) error {
+	return appendIptRules(getGatewayDropRules(ifName))
+}
+
 func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	protocol := getIPTablesProtocol(cidr.IP.String())
@@ -364,7 +454,8 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			table: "filter",
 			chain: "FORWARD",
 			args: []string{
-				"-i", ifname,
+				"-o", ifname,
+				"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED",
 				"-j", "ACCEPT",
 			},
 			protocol: protocol,
@@ -373,8 +464,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			table: "filter",
 			chain: "FORWARD",
 			args: []string{
-				"-o", ifname,
-				"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED",
+				"-i", ifname,
 				"-j", "ACCEPT",
 			},
 			protocol: protocol,
@@ -393,7 +483,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			table: "nat",
 			chain: "POSTROUTING",
 			args: []string{
-				"-s", cidr.String(),
+				"-s", masqueradeIP,
 				"-j", "MASQUERADE",
 			},
 			protocol: protocol,
@@ -402,7 +492,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			table: "nat",
 			chain: "POSTROUTING",
 			args: []string{
-				"-s", masqueradeIP,
+				"-s", cidr.String(),
 				"-j", "MASQUERADE",
 			},
 			protocol: protocol,
@@ -412,7 +502,8 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 
 // initLocalGatewayNATRules sets up iptables rules for interfaces
 func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
-	return insertIptRules(getLocalGatewayNATRules(ifname, cidr))
+	// Append and not insert as these rules should be evaluated last
+	return appendIptRules(getLocalGatewayNATRules(ifname, cidr))
 }
 
 func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {
