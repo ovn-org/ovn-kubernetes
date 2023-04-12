@@ -163,6 +163,9 @@ export FLAKE_ATTEMPTS=5
 export NUM_NODES=10  # number of parallel (ginkgo) test nodes to run
 # Kind clusters are three node clusters
 export NUM_WORKER_NODES=3
+if [ "$SINGLE_NODE_CLUSTER" == true ]; then
+	export NUM_WORKER_NODES=1
+fi
 ginkgo --nodes=${NUM_NODES} \
 	--focus=${FOCUS} \
 	--skip=${SKIPPED_TESTS} \

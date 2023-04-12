@@ -110,6 +110,7 @@ usage() {
     echo "                 [-cn | --cluster-name |"
     echo "                 [-ehp|--egress-ip-healthcheck-port <num>]"
     echo "                 [-is | --ipsec]"
+    echo "                 [-cm | --compact-mode]"
     echo "                 [--isolated]"
     echo "                 [-h]]"
     echo ""
@@ -118,6 +119,7 @@ usage() {
     echo "-kt  | --keep-taint                 Do not remove taint components."
     echo "                                    DEFAULT: Remove taint components."
     echo "-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled."
+    echo "-scm | --separate-cluster-manager   Separate cluster manager from ovnkube-master and run as a separate container within ovnkube-master deployment."
     echo "-ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled."
     echo "-ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled."
     echo "-dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled"
@@ -157,6 +159,7 @@ usage() {
     echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
     echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
     echo "-sm  | --scale-metrics              Enable scale metrics"
+    echo "-cm  | --compact-mode               Enable compact mode, ovnkube master and node run in the same process."
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
@@ -306,6 +309,8 @@ parse_args() {
                                                 OVN_EGRESSIP_HEALTHCHECK_PORT=$1
                                                 ;;
            -sm  | --scale-metrics )             OVN_METRICS_SCALE_ENABLE=true
+                                                ;;
+           -cm  | --compact-mode )              OVN_COMPACT_MODE=true
                                                 ;;
             --isolated )                        OVN_ISOLATED=true
                                                 ;;
@@ -537,6 +542,10 @@ set_default_params() {
   fi
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
   OVN_SEPARATE_CLUSTER_MANAGER=${OVN_SEPARATE_CLUSTER_MANAGER:-false}
+  OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
+  if [ "$OVN_COMPACT_MODE" == true ]; then
+    KIND_NUM_WORKER=0
+  fi
 }
 
 detect_apiserver_url() {
@@ -791,7 +800,8 @@ create_ovn_kube_manifests() {
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
     --multi-network-enable="${ENABLE_MULTI_NET}" \
-    --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}"
+    --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
+    --compact-mode="${OVN_COMPACT_MODE}"
   popd
 }
 
