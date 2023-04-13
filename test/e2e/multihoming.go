@@ -643,14 +643,6 @@ var _ = Describe("Multi Homing", func() {
 				)
 				Expect(err).NotTo(HaveOccurred())
 
-				By("provisioning the multi-network policy")
-				_, err = mnpClient.MultiNetworkPolicies(f.Namespace.Name).Create(
-					context.Background(),
-					policy,
-					metav1.CreateOptions{},
-				)
-				Expect(err).To(Succeed())
-
 				By("instantiating the server pod")
 				serverPod, err := cs.CoreV1().Pods(serverPodConfig.namespace).Create(
 					context.Background(),
@@ -710,6 +702,20 @@ var _ = Describe("Multi Homing", func() {
 				subnet, err := getNetCIDRSubnet(netConfig.cidr)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(inRange(subnet, serverIP)).To(Succeed())
+
+				if doesPolicyFeatAnIPBlock(policy) {
+					blockedIP, err := podIPForAttachment(cs, f.Namespace.Name, blockedClient.GetName(), netConfig.name, 0)
+					Expect(err).NotTo(HaveOccurred())
+					setBlockedClientIPInPolicyIPBlockExcludedRanges(policy, blockedIP)
+				}
+
+				By("provisioning the multi-network policy")
+				_, err = mnpClient.MultiNetworkPolicies(f.Namespace.Name).Create(
+					context.Background(),
+					policy,
+					metav1.CreateOptions{},
+				)
+				Expect(err).To(Succeed())
 
 				By("asserting the *allowed-client* pod can contact the server pod exposed endpoint")
 				Eventually(func() error {
@@ -830,9 +836,40 @@ var _ = Describe("Multi Homing", func() {
 					metav1.LabelSelector{
 						MatchLabels: map[string]string{"app": "stuff-doer"},
 					},
-					mnpapi.IPBlock{
-						CIDR:   secondaryFlatL2NetworkCIDR,
-						Except: []string{"10.128.0.3"}, // the blocked server the 3rd pod sequentially created; it'll have the 3rd address (round-robin)
+					mnpapi.IPBlock{ // the test will find out the IP address of the client and put it in the `exclude` list
+						CIDR: secondaryFlatL2NetworkCIDR,
+					},
+					port,
+				),
+			),
+			table.Entry(
+				"for a routed topology when the multi-net policy describes the allow-list using IPBlock",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "layer3",
+					cidr:     netCIDR(secondaryNetworkCIDR, netPrefixLengthPerNode),
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        allowedClient(clientPodName),
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        blockedClient(clientPodName),
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					labels:       map[string]string{"app": "stuff-doer"},
+				},
+				multiNetIngressLimitingIPBlockPolicy(
+					secondaryNetworkName,
+					metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "stuff-doer"},
+					},
+					mnpapi.IPBlock{ // the test will find out the IP address of the client and put it in the `exclude` list
+						CIDR: secondaryNetworkCIDR,
 					},
 					port,
 				),
@@ -1196,5 +1233,44 @@ func multiNetIngressLimitingIPBlockPolicy(
 			},
 			PolicyTypes: []mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
 		},
+	}
+}
+
+func doesPolicyFeatAnIPBlock(policy *mnpapi.MultiNetworkPolicy) bool {
+	for _, rule := range policy.Spec.Ingress {
+		for _, peer := range rule.From {
+			if peer.IPBlock != nil {
+				return true
+			}
+		}
+	}
+	for _, rule := range policy.Spec.Egress {
+		for _, peer := range rule.To {
+			if peer.IPBlock != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func setBlockedClientIPInPolicyIPBlockExcludedRanges(policy *mnpapi.MultiNetworkPolicy, blockedIP string) {
+	if policy.Spec.Ingress != nil {
+		for _, rule := range policy.Spec.Ingress {
+			for _, peer := range rule.From {
+				if peer.IPBlock != nil {
+					peer.IPBlock.Except = []string{blockedIP}
+				}
+			}
+		}
+	}
+	if policy.Spec.Egress != nil {
+		for _, rule := range policy.Spec.Egress {
+			for _, peer := range rule.To {
+				if peer.IPBlock != nil {
+					peer.IPBlock.Except = []string{blockedIP}
+				}
+			}
+		}
 	}
 }
