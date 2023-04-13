@@ -1836,7 +1836,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 								break
 							}
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node, responses, nodePort)
+						framework.ExpectEqual(valid, true,
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, nodesHostnames, responses))
 					}
 				}
 			}
@@ -1988,7 +1989,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 										break
 									}
 								}
-								framework.ExpectEqual(valid, true, "Validation failed for node", nodeName, responses, port)
+								framework.ExpectEqual(valid, true,
+									fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", nodeName, nodesHostnames, responses))
 							}
 						}
 					}
@@ -2058,7 +2060,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							}
 
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node.Name, responses, nodePort)
+						framework.ExpectEqual(valid, true,
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
 					}
 				}
 			}
@@ -2118,7 +2121,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							protocol,
 							externalPort))
 					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
-					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
 				}
 			}
 
@@ -2143,7 +2146,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							protocol,
 							externalPort))
 					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
-					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
 				}
 			}
 		})
@@ -2259,7 +2262,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							break
 						}
 					}
-					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
 				}
 			}
 		})
@@ -2397,7 +2400,8 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 							}
 
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node.Name, responses, nodePort)
+						framework.ExpectEqual(valid, true,
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
 					}
 				}
 			}
