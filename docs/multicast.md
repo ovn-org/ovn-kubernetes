@@ -13,6 +13,8 @@ The multicast group membership is implemented with IGMP. For details, check RFCs
 and [2236](https://datatracker.ietf.org/doc/html/rfc2236).
 
 ## Configuring multicast on the cluster
+The feature is gated by config flag. In order to create a KIND cluster with
+multicast feature enabled, use the `--multicast-enabled` option with KIND.
 
 ### Enabling multicast per namespace
 The multicast traffic between pods in the cluster is blocked by default; it can
