@@ -731,7 +731,7 @@ var _ = Describe("Multi Homing", func() {
 						MatchRegexp("Connection timeout after 200[0-1] ms")))
 			},
 			table.Entry(
-				"for a pure L2 overlay",
+				"for a pure L2 overlay when the multi-net policy describes the allow-list using pod selectors",
 				networkAttachmentConfig{
 					name:     secondaryNetworkName,
 					topology: "layer2",
@@ -768,7 +768,7 @@ var _ = Describe("Multi Homing", func() {
 				),
 			),
 			table.Entry(
-				"for a routed topology",
+				"for a routed topology when the multi-net policy describes the allow-list using pod selectors",
 				networkAttachmentConfig{
 					name:     secondaryNetworkName,
 					topology: "layer3",
@@ -800,6 +800,39 @@ var _ = Describe("Multi Homing", func() {
 					},
 					metav1.LabelSelector{
 						MatchLabels: map[string]string{"role": "trusted"},
+					},
+					port,
+				),
+			),
+			table.Entry(
+				"for a pure L2 overlay when the multi-net policy describes the allow-list using IPBlock",
+				networkAttachmentConfig{
+					name:     secondaryNetworkName,
+					topology: "layer2",
+					cidr:     secondaryFlatL2NetworkCIDR,
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        allowedClient(clientPodName),
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        blockedClient(clientPodName),
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					labels:       map[string]string{"app": "stuff-doer"},
+				},
+				multiNetIngressLimitingIPBlockPolicy(
+					secondaryNetworkName,
+					metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "stuff-doer"},
+					},
+					mnpapi.IPBlock{
+						CIDR:   secondaryFlatL2NetworkCIDR,
+						Except: []string{"10.128.0.3"}, // the blocked server the 3rd pod sequentially created; it'll have the 3rd address (round-robin)
 					},
 					port,
 				),
@@ -1116,6 +1149,47 @@ func multiNetIngressLimitingPolicy(policyFor string, appliesFor metav1.LabelSele
 					From: []mnpapi.MultiNetworkPolicyPeer{
 						{
 							PodSelector: &allowForSelector,
+						},
+					},
+				},
+			},
+			PolicyTypes: []mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
+		},
+	}
+}
+
+func multiNetIngressLimitingIPBlockPolicy(
+	policyFor string,
+	appliesFor metav1.LabelSelector,
+	allowForIPBlock mnpapi.IPBlock,
+	allowPorts ...int,
+) *mnpapi.MultiNetworkPolicy {
+	var (
+		portAllowlist []mnpapi.MultiNetworkPolicyPort
+	)
+	tcp := v1.ProtocolTCP
+	for _, port := range allowPorts {
+		p := intstr.FromInt(port)
+		portAllowlist = append(portAllowlist, mnpapi.MultiNetworkPolicyPort{
+			Protocol: &tcp,
+			Port:     &p,
+		})
+	}
+	return &mnpapi.MultiNetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			PolicyForAnnotation: policyFor,
+		},
+			Name: "allow-ports-ip-block",
+		},
+
+		Spec: mnpapi.MultiNetworkPolicySpec{
+			PodSelector: appliesFor,
+			Ingress: []mnpapi.MultiNetworkPolicyIngressRule{
+				{
+					Ports: portAllowlist,
+					From: []mnpapi.MultiNetworkPolicyPeer{
+						{
+							IPBlock: &allowForIPBlock,
 						},
 					},
 				},
