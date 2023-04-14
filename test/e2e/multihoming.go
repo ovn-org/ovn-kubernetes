@@ -786,6 +786,43 @@ var _ = Describe("Multi Homing", func() {
 					),
 				),
 				table.Entry(
+					"for a localnet topology when the multi-net policy describes the allow-list using pod selectors",
+					networkAttachmentConfig{
+						name:     secondaryNetworkName,
+						topology: "localnet",
+						cidr:     secondaryLocalnetNetworkCIDR,
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        allowedClient(clientPodName),
+						labels: map[string]string{
+							"app":  "client",
+							"role": "trusted",
+						},
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        blockedClient(clientPodName),
+						labels:      map[string]string{"app": "client"},
+					},
+					podConfiguration{
+						attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:         podName,
+						containerCmd: httpServerContainerCmd(port),
+						labels:       map[string]string{"app": "stuff-doer"},
+					},
+					multiNetIngressLimitingPolicy(
+						secondaryNetworkName,
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "stuff-doer"},
+						},
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"role": "trusted"},
+						},
+						port,
+					),
+				),
+				table.Entry(
 					"for a pure L2 overlay when the multi-net policy describes the allow-list using IPBlock",
 					networkAttachmentConfig{
 						name:     secondaryNetworkName,
@@ -850,6 +887,38 @@ var _ = Describe("Multi Homing", func() {
 					),
 				),
 				table.Entry(
+					"for a localnet topology when the multi-net policy describes the allow-list using IPBlock",
+					networkAttachmentConfig{
+						name:     secondaryNetworkName,
+						topology: "localnet",
+						cidr:     secondaryLocalnetNetworkCIDR,
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        allowedClient(clientPodName),
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        blockedClient(clientPodName),
+					},
+					podConfiguration{
+						attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:         podName,
+						containerCmd: httpServerContainerCmd(port),
+						labels:       map[string]string{"app": "stuff-doer"},
+					},
+					multiNetIngressLimitingIPBlockPolicy(
+						secondaryNetworkName,
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "stuff-doer"},
+						},
+						mnpapi.IPBlock{ // the test will find out the IP address of the client and put it in the `exclude` list
+							CIDR: secondaryLocalnetNetworkCIDR,
+						},
+						port,
+					),
+				),
+				table.Entry(
 					"for a pure L2 overlay when the multi-net policy describes the allow-list via namespace selectors",
 					networkAttachmentConfig{
 						name:        secondaryNetworkName,
@@ -889,6 +958,40 @@ var _ = Describe("Multi Homing", func() {
 						name:        secondaryNetworkName,
 						topology:    "layer3",
 						cidr:        netCIDR(secondaryNetworkCIDR, netPrefixLengthPerNode),
+						networkName: uniqueNadName("spans-multiple-namespaces"),
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        allowedClient(clientPodName),
+						namespace:   "pepe",
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        blockedClient(clientPodName),
+					},
+					podConfiguration{
+						attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:         podName,
+						containerCmd: httpServerContainerCmd(port),
+						labels:       map[string]string{"app": "stuff-doer"},
+					},
+					multiNetIngressLimitingPolicyAllowFromNamespace(
+						secondaryNetworkName,
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "stuff-doer"},
+						},
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"role": "trusted"},
+						},
+						port,
+					),
+				),
+				table.Entry(
+					"for a localnet topology when the multi-net policy describes the allow-list via namespace selectors",
+					networkAttachmentConfig{
+						name:        secondaryNetworkName,
+						topology:    "localnet",
+						cidr:        secondaryLocalnetNetworkCIDR,
 						networkName: uniqueNadName("spans-multiple-namespaces"),
 					},
 					podConfiguration{
