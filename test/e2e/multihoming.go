@@ -338,16 +338,7 @@ var _ = Describe("Multi Homing", func() {
 
 					By("asserting the *client* pod can contact the server pod exposed endpoint")
 					Eventually(func() error {
-						updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-						if err != nil {
-							return err
-						}
-
-						if updatedPod.Status.Phase == v1.PodRunning {
-							return connectToServer(f.Namespace.Name, clientPodName, serverIP, port)
-						}
-
-						return fmt.Errorf("pod not running. /me is sad")
+						return reachToServerPodFromClient(cs, serverPodConfig, clientPodConfig, serverIP, port)
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
 				}
 			},
@@ -716,9 +707,9 @@ var _ = Describe("Multi Homing", func() {
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
 
 					By("asserting the *blocked-client* pod **cannot** contact the server pod exposed endpoint")
-					Expect(
-						connectToServer(blockedClientPodConfig.namespace, blockedClientPodConfig.name, serverIP, port),
-					).To(MatchError(MatchRegexp("Connection timeout after 200[0-1] ms")))
+					Expect(connectToServer(blockedClientPodConfig, serverIP, port)).To(
+						MatchError(
+							MatchRegexp("Connection timeout after 200[0-1] ms")))
 				},
 				table.Entry(
 					"for a pure L2 overlay when the multi-net policy describes the allow-list using pod selectors",
@@ -994,7 +985,6 @@ var _ = Describe("Multi Homing", func() {
 			Expect(inRange(secondaryFlatL2NetworkCIDR, netStatus[1].IPs[0]))
 		})
 	})
-
 })
 
 func kickstartPod(cs clientset.Interface, configuration podConfiguration) *v1.Pod {

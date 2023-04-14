@@ -165,11 +165,11 @@ func inRange(cidr string, ip string) error {
 	return fmt.Errorf("ip [%s] is NOT in range %s", ip, cidr)
 }
 
-func connectToServer(clientPodNs string, clientPodName, serverIP string, port int) error {
+func connectToServer(clientPodConfig podConfiguration, serverIP string, port int) error {
 	_, err := framework.RunKubectl(
-		clientPodNs,
+		clientPodConfig.namespace,
 		"exec",
-		clientPodName,
+		clientPodConfig.name,
 		"--",
 		"curl",
 		"--connect-timeout",
@@ -399,7 +399,7 @@ func reachToServerPodFromClient(cs clientset.Interface, serverConfig podConfigur
 	}
 
 	if updatedPod.Status.Phase == v1.PodRunning {
-		return connectToServer(clientConfig.namespace, clientConfig.name, serverIP, serverPort)
+		return connectToServer(clientConfig, serverIP, serverPort)
 	}
 
 	return fmt.Errorf("pod not running. /me is sad")
