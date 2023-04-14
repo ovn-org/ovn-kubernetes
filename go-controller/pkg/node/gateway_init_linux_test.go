@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -1602,6 +1603,65 @@ var _ = Describe("Gateway unit tests", func() {
 
 			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
 			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("getGatewayNextHops", func() {
+
+		It("Finds correct gateway interface and nexthops without configuration", func() {
+			_, ipnet, err := net.ParseCIDR("0.0.0.0/0")
+			Expect(err).ToNot(HaveOccurred())
+			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
+			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
+			lnk := &linkMock.Link{}
+			lnkAttr := &netlink.LinkAttrs{
+				Name:  "ens1f0",
+				Index: 5,
+			}
+			defaultRoute := &netlink.Route{
+				Dst:       ipnet,
+				LinkIndex: 5,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Gw:        gwIPs[0],
+				MTU:       config.Default.MTU,
+			}
+			lnk.On("Attrs").Return(lnkAttr)
+			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("LinkByIndex", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*defaultRoute}, nil)
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(lnkAttr.Name))
+			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+		})
+
+		It("Finds correct gateway interface and nexthops with single stack configuration", func() {
+			ifName := "enf1f0"
+			nextHopCfg := "10.0.0.11"
+			gwIPs := []net.IP{net.ParseIP(nextHopCfg)}
+			config.Gateway.Interface = ifName
+			config.Gateway.NextHop = nextHopCfg
+
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(ifName))
+			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+		})
+
+		It("Finds correct gateway interface and nexthops with dual stack configuration", func() {
+			ifName := "enf1f0"
+			nextHopCfg := "10.0.0.11,fc00:f853:ccd:e793::1"
+			nextHops := strings.Split(nextHopCfg, ",")
+			gwIPs := []net.IP{net.ParseIP(nextHops[0]), net.ParseIP(nextHops[1])}
+			config.Gateway.Interface = ifName
+			config.Gateway.NextHop = nextHopCfg
+			config.IPv4Mode = true
+			config.IPv6Mode = true
+
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(ifName))
+			Expect(gatewayNextHops).To(Equal(gwIPs))
 		})
 	})
 })
