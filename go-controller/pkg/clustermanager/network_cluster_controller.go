@@ -203,32 +203,36 @@ func (ncc *networkClusterController) syncNodeClusterSubnet(node *corev1.Node) er
 		klog.Warningf("Failed to get node %s host subnets annotations for network %s : %v", node.Name, ncc.networkName, err)
 	}
 
+	// On return validExistingSubnets will contain any valid subnets that
+	// were already assigned to the node. allocatedSubnets will contain
+	// any newly allocated subnets required to ensure that the node has one subnet
+	// from each enabled IP family.
 	ipv4Mode, ipv6Mode := ncc.IPMode()
-	hostSubnets, allocatedSubnets, err := ncc.clusterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, ipv4Mode, ipv6Mode)
+	validExistingSubnets, allocatedSubnets, err := ncc.clusterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, ipv4Mode, ipv6Mode)
 	if err != nil {
 		return err
 	}
 
-	if len(allocatedSubnets) == 0 {
-		return nil
-	}
-
-	// Release the allocation on error
-	defer func() {
+	// If the existing subnets weren't OK, or new ones were allocated, update the node annotation.
+	// This happens in a couple cases:
+	// 1) new node: no existing subnets and one or more new subnets were allocated
+	// 2) dual-stack to single-stack conversion: two existing subnets but only one will be valid, and no allocated subnets
+	// 3) bad subnet annotation: one more existing subnets will be invalid and might have allocated a correct one
+	if len(existingSubnets) != len(validExistingSubnets) || len(allocatedSubnets) > 0 {
+		updatedSubnetsMap := map[string][]*net.IPNet{ncc.networkName: validExistingSubnets}
+		err = ncc.updateNodeSubnetAnnotationWithRetry(node.Name, updatedSubnetsMap)
 		if err != nil {
 			if errR := ncc.clusterSubnetAllocator.ReleaseNodeSubnets(node.Name, allocatedSubnets...); errR != nil {
 				klog.Warningf("Error releasing node %s subnets: %v", node.Name, errR)
 			}
+			return err
 		}
-	}()
+	}
 
-	hostSubnetsMap := map[string][]*net.IPNet{ncc.networkName: hostSubnets}
-
-	err = ncc.updateNodeSubnetAnnotationWithRetry(node.Name, hostSubnetsMap)
-	return err
+	return nil
 }
 
-// handleAddUpdateNodeEvent handles the delete node event
+// handleDeleteNode handles the delete node event
 func (ncc *networkClusterController) handleDeleteNode(node *corev1.Node) error {
 	if ncc.enableHybridOverlaySubnetAllocator {
 		ncc.releaseHybridOverlayNodeSubnet(node.Name)
@@ -260,7 +264,7 @@ func (ncc *networkClusterController) syncNodes(nodes []interface{}) error {
 				} else if hostSubnet != nil {
 					klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnet)
 					if err := ncc.hybridOverlaySubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnet); err != nil {
-						klog.Errorf("Failed to mark the subnet %v as allocated in the hybrid subnet allocator for node %s: %w", hostSubnet, node.Name, err)
+						klog.Errorf("Failed to mark the subnet %v as allocated in the hybrid subnet allocator for node %s: %v", hostSubnet, node.Name, err)
 					}
 				}
 			}
@@ -269,7 +273,7 @@ func (ncc *networkClusterController) syncNodes(nodes []interface{}) error {
 			if len(hostSubnets) > 0 {
 				klog.V(5).Infof("Node %s contains subnets: %v for network : %s", node.Name, hostSubnets, ncc.networkName)
 				if err := ncc.clusterSubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnets...); err != nil {
-					klog.Errorf("Failed to mark the subnet %v as allocated in the cluster subnet allocator for node %s: %w", hostSubnets, node.Name, err)
+					klog.Errorf("Failed to mark the subnet %v as allocated in the cluster subnet allocator for node %s: %v", hostSubnets, node.Name, err)
 				}
 			} else {
 				klog.V(5).Infof("Node %s contains no subnets for network : %s", node.Name, ncc.networkName)
