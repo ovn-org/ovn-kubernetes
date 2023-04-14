@@ -33,7 +33,7 @@ type ManagementPort interface {
 }
 
 // NewManagementPorts creates a new ManagementPorts
-func NewManagementPorts(nodeName string, hostSubnets []*net.IPNet) []ManagementPort {
+func NewManagementPorts(nodeName string, hostSubnets []*net.IPNet, netdevName, rep string) []ManagementPort {
 	// Kubernetes emits events when pods are created. The event will contain
 	// only lowercase letters of the hostname even though the kubelet is
 	// started with a hostname that contains lowercase and uppercase letters.
@@ -46,17 +46,17 @@ func NewManagementPorts(nodeName string, hostSubnets []*net.IPNet) []ManagementP
 
 	switch config.OvnKubeNode.Mode {
 	case types.NodeModeDPU:
-		return []ManagementPort{newManagementPortRepresentor(nodeName, hostSubnets)}
+		return []ManagementPort{newManagementPortRepresentor(nodeName, hostSubnets, rep)}
 	case types.NodeModeDPUHost:
-		return []ManagementPort{newManagementPortNetdev(hostSubnets)}
+		return []ManagementPort{newManagementPortNetdev(hostSubnets, netdevName)}
 	default:
 		// create OVS internal port or configure netdevice and its representor
 		if config.OvnKubeNode.MgmtPortNetdev == "" {
 			return []ManagementPort{newManagementPort(nodeName, hostSubnets)}
 		} else {
 			return []ManagementPort{
-				newManagementPortNetdev(hostSubnets),
-				newManagementPortRepresentor(nodeName, hostSubnets),
+				newManagementPortNetdev(hostSubnets, netdevName),
+				newManagementPortRepresentor(nodeName, hostSubnets, rep),
 			}
 		}
 	}

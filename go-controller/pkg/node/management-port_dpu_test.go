@@ -149,10 +149,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: "ovn-k8s-mp0", MTU: config.Default.MTU})
 
 			netlinkOpsMock.On("LinkByName", "enp3s0f0v0").Return(
-				nil, fmt.Errorf("failed to get link device"))
-			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(
 				linkMock, nil)
-			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddMgmtPortCmd(mgmtPortDpu.nodeName, mgmtPortDpu.repName),
@@ -245,16 +242,6 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			linkMock := &mocks.Link{}
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{
 				Name: "ovn-k8s-mp0", MTU: 1400, HardwareAddr: expectedMgmtPortMac})
-
-			netlinkOpsMock.On("LinkByName", "enp3s0f0v0").Return(
-				nil, fmt.Errorf("failed to get link")).Once()
-			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(
-				linkMock, nil).Once()
-			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil, nil).Once()
-			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
-			execMock.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external-ids:ovn-orig-mgmt-port-netdev-name=" + mgmtPortDpuHost.netdevName,
-			})
 
 			// mock createPlatformManagementPort, we fail it as it covers what we want to test without the
 			// need to mock the entire flow down to routes and iptable rules.
