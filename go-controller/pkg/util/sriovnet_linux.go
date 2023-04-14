@@ -17,6 +17,7 @@ type SriovnetOps interface {
 	GetUplinkRepresentor(vfPciAddress string) (string, error)
 	GetUplinkRepresentorFromAux(auxDev string) (string, error)
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
+	GetPfIndexByVfPciAddress(vfPciAddress string) (int, error)
 	GetSfIndexByAuxDev(auxDev string) (int, error)
 	GetVfRepresentor(uplink string, vfIndex int) (string, error)
 	GetSfRepresentor(uplink string, sfIndex int) (string, error)
@@ -60,6 +61,10 @@ func (defaultSriovnetOps) GetUplinkRepresentorFromAux(auxDev string) (string, er
 
 func (defaultSriovnetOps) GetVfIndexByPciAddress(vfPciAddress string) (int, error) {
 	return sriovnet.GetVfIndexByPciAddress(vfPciAddress)
+}
+
+func (defaultSriovnetOps) GetPfIndexByVfPciAddress(vfPciAddress string) (int, error) {
+	return sriovnet.GetPfIndexByVfPciAddress(vfPciAddress)
 }
 
 func (defaultSriovnetOps) GetSfIndexByAuxDev(auxDev string) (int, error) {
