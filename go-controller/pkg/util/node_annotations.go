@@ -537,7 +537,7 @@ func GetNodeEgressLabel() string {
 }
 
 func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.Set[string]) error {
-	return nodeAnnotator.Set(ovnNodeHostAddresses, addresses.UnsortedList())
+	return nodeAnnotator.Set(ovnNodeHostAddresses, sets.List(addresses))
 }
 
 // ParseNodeHostAddresses returns the parsed host addresses living on a node

@@ -613,7 +613,7 @@ func splitIPsByFamily(ips []net.IP) (v4 []net.IP, v6 []net.IP) {
 
 // Takes a slice of IPs and returns a slice with unique IPs
 func ipsToStringUnique(ips []net.IP) []string {
-	s := sets.NewString()
+	s := sets.New[string]()
 	for _, ip := range ips {
 		s.Insert(ip.String())
 	}
