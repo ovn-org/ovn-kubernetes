@@ -152,6 +152,8 @@ func copyIndexes(model model.Model) model.Model {
 	case *nbdb.LoadBalancer:
 		return &nbdb.LoadBalancer{
 			UUID: t.UUID,
+			// client index
+			Name: t.Name,
 		}
 	case *nbdb.LoadBalancerGroup:
 		return &nbdb.LoadBalancerGroup{
@@ -362,9 +364,6 @@ func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation,
 	var field interface{}
 	var value string
 	switch t := m.(type) {
-	case *nbdb.LoadBalancer:
-		field = &t.Name
-		value = t.Name
 	case *nbdb.LogicalRouter:
 		field = &t.Name
 		value = t.Name
