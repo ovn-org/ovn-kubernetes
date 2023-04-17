@@ -57,25 +57,6 @@ func BuildLoadBalancer(name string, protocol nbdb.LoadBalancerProtocol, vips, op
 	}
 }
 
-// CreateLoadBalancersOps creates the provided load balancers returning the
-// corresponding ops
-func CreateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
-	opModels := make([]operationModel, 0, len(lbs))
-	for i := range lbs {
-		lb := lbs[i]
-		opModel := operationModel{
-			Model:          lb,
-			OnModelUpdates: onModelUpdatesNone(),
-			ErrNotFound:    false,
-			BulkOp:         false,
-		}
-		opModels = append(opModels, opModel)
-	}
-
-	modelClient := newModelClient(nbClient)
-	return modelClient.CreateOrUpdateOps(ops, opModels...)
-}
-
 // CreateOrUpdateLoadBalancersOps creates or updates the provided load balancers
 // returning the corresponding ops
 func CreateOrUpdateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
@@ -85,7 +66,6 @@ func CreateOrUpdateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovs
 		lb := lbs[i]
 		opModel := operationModel{
 			Model:          lb,
-			ModelPredicate: func(item *nbdb.LoadBalancer) bool { return item.Name == lb.Name },
 			OnModelUpdates: getNonZeroLoadBalancerMutableFields(lb),
 			ErrNotFound:    false,
 			BulkOp:         false,
@@ -107,7 +87,6 @@ func RemoveLoadBalancerVipsOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 	}
 	opModel := operationModel{
 		Model:            lb,
-		ModelPredicate:   func(item *nbdb.LoadBalancer) bool { return item.Name == lb.Name },
 		OnModelMutations: []interface{}{&lb.Vips},
 		ErrNotFound:      true,
 		BulkOp:           false,
@@ -127,11 +106,9 @@ func DeleteLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Opera
 		// can't use i in the predicate, for loop replaces it in-memory
 		lb := lbs[i]
 		opModel := operationModel{
-			Model: lb,
-			// TODO: remove UUID match from predicate once model_client prioritizes indexed search over predicate
-			ModelPredicate: func(item *nbdb.LoadBalancer) bool { return item.UUID == lb.UUID || item.Name == lb.Name },
-			ErrNotFound:    false,
-			BulkOp:         false,
+			Model:       lb,
+			ErrNotFound: false,
+			BulkOp:      false,
 		}
 		opModels = append(opModels, opModel)
 	}
