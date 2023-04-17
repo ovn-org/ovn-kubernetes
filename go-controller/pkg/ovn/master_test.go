@@ -1342,7 +1342,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 					eventsCopy = append(eventsCopy, e)
 				}
 				return eventsCopy
-			}, 10).Should(gomega.ContainElement(gomega.ContainSubstring("Warning ErrorReconcilingNode error creating gateway for node node1")))
+			}, 10).Should(gomega.ContainElement(gomega.ContainSubstring("Warning ErrorUpdatingResource error creating gateway for node node1")))
 
 			connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 			defer cancel()
