@@ -139,7 +139,23 @@ func (m *externalPolicyManager) deleteProcessedPolicyInNamespace(namespaceName, 
 	if err != nil {
 		return err
 	}
-	coexistingIPs = coexistingIPs.Union(annotatedGWIPs)
+	policy, found := m.getRoutePolicyFromCache(policyName)
+	if !found {
+		return fmt.Errorf("policy %s not found", policyName)
+	}
+	pp, err := m.processExternalRoutePolicy(policy)
+	if err != nil {
+		return err
+	}
+	static := sets.New[string]()
+	for _, gatewayInfo := range pp.staticGateways {
+		static = static.Union(gatewayInfo.gws)
+	}
+	for _, gwInfo := range routePolicy.staticGateways {
+		static = static.Delete(gwInfo.gws.UnsortedList()...)
+	}
+	coexistingIPs = coexistingIPs.Union(annotatedGWIPs).Union(static)
+
 	klog.Infof("Coexisting %s", strings.Join(sets.List(coexistingIPs), ","))
 	for _, gwInfo := range routePolicy.staticGateways {
 		//Filter out the IPs that are not in coexisting. Those IPs are to be deleted.
@@ -166,7 +182,14 @@ func (m *externalPolicyManager) deleteProcessedPolicyInNamespace(namespaceName, 
 	if err != nil {
 		return err
 	}
-	coexistingIPs = coexistingIPs.Union(annotatedGWIPs)
+	dynamic := sets.New[string]()
+	for _, gatewayInfo := range pp.dynamicGateways {
+		dynamic = static.Union(gatewayInfo.gws)
+	}
+	for _, gwInfo := range routePolicy.dynamicGateways {
+		dynamic = dynamic.Delete(gwInfo.gws.UnsortedList()...)
+	}
+	coexistingIPs = coexistingIPs.Union(annotatedGWIPs).Union(dynamic)
 	for pod, gwInfo := range routePolicy.dynamicGateways {
 		//Filter out the IPs that are not in coexisting. Those IPs are to be deleted.
 		invalidGWIPs := gwInfo.gws.Difference(coexistingIPs)
