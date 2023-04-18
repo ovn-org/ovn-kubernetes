@@ -1371,7 +1371,7 @@ var _ = ginkgo.Describe("External Gateway test suite", func() {
 				deleteAPBExternalRouteCR(defaultPolicyName)
 			})
 
-			ginkgotable.FDescribeTable("Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string) {
+			ginkgotable.DescribeTable("Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string) {
 				if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 					skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 				}
@@ -1437,7 +1437,7 @@ var _ = ginkgo.Describe("External Gateway test suite", func() {
 
 				gomega.Expect(pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)).To(gomega.Equal(totalPodConnEntries))
 			},
-				ginkgotable.FEntry("IPV4 udp", &addressesv4, "udp"),
+				ginkgotable.Entry("IPV4 udp", &addressesv4, "udp"),
 				ginkgotable.Entry("IPV4 tcp", &addressesv4, "tcp"),
 				ginkgotable.Entry("IPV6 udp", &addressesv6, "udp"),
 				ginkgotable.Entry("IPV6 tcp", &addressesv6, "tcp"))

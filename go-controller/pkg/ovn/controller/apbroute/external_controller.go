@@ -48,12 +48,13 @@ func (g gatewayInfoList) Insert(items ...*gatewayInfo) gatewayInfoList {
 	return g
 }
 func (g gatewayInfoList) Delete(item *gatewayInfo) gatewayInfoList {
-	for index, i := range g {
-		if i.gws.Equal(item.gws) {
-			g = append(g[:index], g[index+1:]...)
+	newList := gatewayInfoList{}
+	for _, i := range g {
+		if !i.gws.Equal(item.gws) {
+			newList = newList.Insert(i)
 		}
 	}
-	return g
+	return newList
 }
 
 func (g gatewayInfoList) Len() int {

@@ -733,7 +733,7 @@ func (c *conntrackClient) deleteGatewayIPs(namespaceName string, _, toBeKept set
 				errors = append(errors, fmt.Errorf("failed to delete conntrack entry for pod with IP %s: %v", podIP.String(), err))
 				continue
 			}
-			klog.Infof("Deleted %d conntrack entries for pod IP %s/%s using gateway IPs %s", count, pod.Namespace, pod.Name)
+			klog.Infof("Deleted %d conntrack entries for pod IP %s/%s that don't match gateway IPs %+s", count, pod.Namespace, pod.Name, toBeKept.UnsortedList())
 			if count == 0 {
 				invalidMACString := []string{}
 				validMACs.Range(func(key interface{}, value interface{}) bool {

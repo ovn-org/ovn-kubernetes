@@ -549,7 +549,6 @@ var _ = Describe("OVN External Gateway policy", func() {
 								gws: sets.New(pod1.Status.PodIPs[0].IP),
 							},
 						}}))
-
 			p, err := fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), singlePodDynamicPolicy.Name, v1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			p.Spec.NextHops.DynamicHops[0].PodSelector = v1.LabelSelector{MatchLabels: map[string]string{"name": "pod2"}}
@@ -566,6 +565,90 @@ var _ = Describe("OVN External Gateway policy", func() {
 								gws: sets.New(pod2.Status.PodIPs[0].IP),
 							},
 						}}))
+		})
+		It("validates that removing one of the static hop IPs will be reflected in the route policy", func() {
+
+			staticMultiIPPolicy := newPolicy("multiIPPolicy",
+				&v1.LabelSelector{MatchLabels: map[string]string{"name": "test"}},
+				sets.New("10.10.10.1", "10.10.10.2", "10.10.10.3", "10.10.10.3", "10.10.10.4"),
+				nil, nil,
+				true,
+			)
+			initController([]runtime.Object{namespaceDefault, namespaceTest, pod1, pod2, pod3, pod4, pod5, pod6}, []runtime.Object{staticMultiIPPolicy})
+
+			Eventually(func() []*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
+			Eventually(listNamespaceInfo(), 5).Should(HaveLen(1))
+			Eventually(func() *namespaceInfo {
+				f := getNamespaceInfo(namespaceTest.Name)
+				sort.Sort(f.staticGateways)
+				return f
+			}, 5).
+				Should(BeEquivalentTo(
+					&namespaceInfo{
+						policies: sets.New(staticMultiIPPolicy.Name),
+						staticGateways: gatewayInfoList{
+							{
+								gws:        sets.New("10.10.10.1"),
+								bfdEnabled: true,
+							},
+							{
+								gws:        sets.New("10.10.10.2"),
+								bfdEnabled: true,
+							},
+							{
+								gws:        sets.New("10.10.10.3"),
+								bfdEnabled: true,
+							},
+							{
+								gws:        sets.New("10.10.10.4"),
+								bfdEnabled: true,
+							},
+						},
+						dynamicGateways: map[types.NamespacedName]*gatewayInfo{},
+					}))
+			p, err := fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), staticMultiIPPolicy.Name, v1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			p.Spec.NextHops.StaticHops = []*adminpolicybasedrouteapi.StaticHop{
+				{
+					IP:         "10.10.10.1",
+					BFDEnabled: true,
+				},
+				{
+					IP:         "10.10.10.2",
+					BFDEnabled: true,
+				},
+				{
+					IP:         "10.10.10.3",
+					BFDEnabled: true,
+				},
+			}
+			p.Generation++
+			_, err = fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Update(context.Background(), p, v1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			By("Validating the static refernces don't contain the last element")
+			Eventually(func() *namespaceInfo {
+				f := getNamespaceInfo(namespaceTest.Name)
+				sort.Sort(f.staticGateways)
+				return f
+			}, 5).
+				Should(BeEquivalentTo(
+					&namespaceInfo{
+						policies: sets.New(staticMultiIPPolicy.Name),
+						staticGateways: gatewayInfoList{
+							{
+								gws:        sets.New("10.10.10.1"),
+								bfdEnabled: true,
+							},
+							{
+								gws:        sets.New("10.10.10.2"),
+								bfdEnabled: true,
+							},
+							{
+								gws:        sets.New("10.10.10.3"),
+								bfdEnabled: true,
+							},
+						},
+						dynamicGateways: map[types.NamespacedName]*gatewayInfo{}}))
 		})
 	})
 })
