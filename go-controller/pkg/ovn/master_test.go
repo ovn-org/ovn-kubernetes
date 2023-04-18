@@ -862,7 +862,7 @@ func startFakeController(oc *DefaultNetworkController, wg *sync.WaitGroup) []*ne
 	return clusterSubnets
 }
 
-var _ = ginkgo.Describe("Gateway Init Operations", func() {
+var _ = ginkgo.Describe("Default network controller operations", func() {
 	var (
 		app      *cli.App
 		f        *factory.WatchFactory
@@ -1444,6 +1444,65 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			ginkgo.By("adding the node becomes possible")
 			gomega.Expect(oc.retryNodes.ResourceHandler.AddResource(&testNode, false)).To(gomega.Succeed())
+
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+			"--init-gateways",
+			"--nodeport",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	ginkgo.It("reconciles node host subnets after dual-stack to single-stack downgrade", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			newNodeSubnet := "10.1.1.0/24"
+			newNode := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "newNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":[\"%s\", \"fd02:0:0:2::2895/64\"]}", newNodeSubnet),
+					},
+				},
+			}
+
+			_, err = kubeFakeClient.CoreV1().Nodes().Create(context.TODO(), newNode, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			startFakeController(oc, wg)
+
+			// check that a node event complaining about the mismatch between
+			// node subnets and cluster subnets was posted
+			gomega.Eventually(func() []string {
+				eventsLock.Lock()
+				defer eventsLock.Unlock()
+				eventsCopy := make([]string, 0, len(events))
+				for _, e := range events {
+					eventsCopy = append(eventsCopy, e)
+				}
+				return eventsCopy
+			}, 10).Should(gomega.ContainElement(gomega.ContainSubstring("failed to get expected host subnets for node newNode; expected v4 true have true, expected v6 false have true")))
+
+			// Simulate the ClusterManager reconciling the node annotations to single-stack
+			newNode, err = kubeFakeClient.CoreV1().Nodes().Get(context.TODO(), newNode.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			newNode.Annotations["k8s.ovn.org/node-subnets"] = fmt.Sprintf("{\"default\":[\"%s\"]}", newNodeSubnet)
+			_, err = kubeFakeClient.CoreV1().Nodes().Update(context.TODO(), newNode, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Ensure that the node's switch is eventually created once the annotations
+			// are reconiled by the network cluster controller
+			newNodeLS := &nbdb.LogicalSwitch{Name: newNode.Name}
+			gomega.Eventually(func() error {
+				_, err := libovsdbops.GetLogicalSwitch(nbClient, newNodeLS)
+				return err
+			}, 10).ShouldNot(gomega.HaveOccurred())
 
 			return nil
 		}
