@@ -340,18 +340,18 @@ func parseRawData(data []byte) *ConntrackFlow {
 type ConntrackFilterType uint8
 
 const (
-	ConntrackOrigSrcIP   = iota                // -orig-src ip    Source address from original direction
-	ConntrackOrigDstIP                         // -orig-dst ip    Destination address from original direction
-	ConntrackReplySrcIP                        // --reply-src ip  Reply Source IP
-	ConntrackReplyDstIP                        // --reply-dst ip  Reply Destination IP
-	ConntrackReplyAnyIP                        // Match source or destination reply IP
-	ConntrackOrigSrcPort                       // --orig-port-src port    Source port in original direction
-	ConntrackOrigDstPort                       // --orig-port-dst port    Destination port in original direction
-	ConntrackMatchLabels                       // --label label1,label2   Labels used in entry
-	ConntrackUnmatchLabels                     // --label label1,label2   Labels not used in entry
-	ConntrackNatSrcIP    = ConntrackReplySrcIP // deprecated use instead ConntrackReplySrcIP
-	ConntrackNatDstIP    = ConntrackReplyDstIP // deprecated use instead ConntrackReplyDstIP
-	ConntrackNatAnyIP    = ConntrackReplyAnyIP // deprecated use instead ConntrackReplyAnyIP
+	ConntrackOrigSrcIP     = iota                // -orig-src ip    Source address from original direction
+	ConntrackOrigDstIP                           // -orig-dst ip    Destination address from original direction
+	ConntrackReplySrcIP                          // --reply-src ip  Reply Source IP
+	ConntrackReplyDstIP                          // --reply-dst ip  Reply Destination IP
+	ConntrackReplyAnyIP                          // Match source or destination reply IP
+	ConntrackOrigSrcPort                         // --orig-port-src port    Source port in original direction
+	ConntrackOrigDstPort                         // --orig-port-dst port    Destination port in original direction
+	ConntrackMatchLabels                         // --label label1,label2   Labels used in entry
+	ConntrackUnmatchLabels                       // --label label1,label2   Labels not used in entry
+	ConntrackNatSrcIP      = ConntrackReplySrcIP // deprecated use instead ConntrackReplySrcIP
+	ConntrackNatDstIP      = ConntrackReplyDstIP // deprecated use instead ConntrackReplyDstIP
+	ConntrackNatAnyIP      = ConntrackReplyAnyIP // deprecated use instead ConntrackReplyAnyIP
 )
 
 type CustomConntrackFilter interface {
@@ -420,14 +420,14 @@ func (f *ConntrackFilter) AddProtocol(proto uint8) error {
 
 // AddLabels adds the provided list (zero or more) of labels to the conntrack filter
 // ConntrackFilterType here can be either:
-// 1) ConntrackMatchLabels: This matches every flow that has a label value (len(flow.Labels) > 0)
-//    against the list of provided labels. If `flow.Labels` contains ALL the provided labels
-//    it is considered a match. This can be used when you want to match flows that contain
-//    one or more labels.
-// 2) ConntrackUnmatchLabels:  This matches every flow that has a label value (len(flow.Labels) > 0)
-//    against the list of provided labels. If `flow.Labels` does NOT contain ALL the provided labels
-//    it is considered a match. This can be used when you want to match flows that don't contain
-//    one or more labels.
+//  1. ConntrackMatchLabels: This matches every flow that has a label value (len(flow.Labels) > 0)
+//     against the list of provided labels. If `flow.Labels` contains ALL the provided labels
+//     it is considered a match. This can be used when you want to match flows that contain
+//     one or more labels.
+//  2. ConntrackUnmatchLabels:  This matches every flow that has a label value (len(flow.Labels) > 0)
+//     against the list of provided labels. If `flow.Labels` does NOT contain ALL the provided labels
+//     it is considered a match. This can be used when you want to match flows that don't contain
+//     one or more labels.
 func (f *ConntrackFilter) AddLabels(tp ConntrackFilterType, labels [][]byte) error {
 	if len(labels) == 0 {
 		return errors.New("Invalid length for provided labels")
@@ -507,6 +507,9 @@ func (f *ConntrackFilter) MatchConntrackFlow(flow *ConntrackFlow) bool {
 			if elem, found := f.labelFilter[ConntrackMatchLabels]; match && found {
 				for _, label := range elem {
 					match = match && (bytes.Contains(flow.Labels, label))
+					if bytes.Contains(flow.Labels, label) {
+						fmt.Printf("node_controller.go: label matches found\n")
+					}
 				}
 			}
 			// --label label1,label2 in conn entry;
@@ -521,7 +524,6 @@ func (f *ConntrackFilter) MatchConntrackFlow(flow *ConntrackFlow) bool {
 			match = false
 		}
 	}
-
 	return match
 }
 

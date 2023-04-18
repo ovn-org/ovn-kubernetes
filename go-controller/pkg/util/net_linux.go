@@ -468,7 +468,7 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 	return nil
 }
 
-func DeleteConntrackWithMatchingLabels(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType, labels [][]byte) (uint, error) {
+func DeleteConntrackWithUnmatchingLabels(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType, labels [][]byte) (uint, error) {
 	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
 		return 0, fmt.Errorf("value %q passed to DeleteConntrack is not an IP address", ipAddress)
@@ -501,8 +501,8 @@ func DeleteConntrackWithMatchingLabels(ip string, port int32, protocol kapi.Prot
 	}
 
 	if len(labels) > 0 {
-		// for now we only need unmatch label, we can add match label later if needed
-		if err := filter.AddLabels(netlink.ConntrackMatchLabels, labels); err != nil {
+		// for now we only need match label, we can add match label later if needed
+		if err := filter.AddLabels(netlink.ConntrackUnmatchLabels, labels); err != nil {
 			return 0, fmt.Errorf("could not add label %s to conntrack filter: %v", labels, err)
 		}
 	}

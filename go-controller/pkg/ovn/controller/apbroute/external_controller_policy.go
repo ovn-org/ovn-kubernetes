@@ -130,7 +130,7 @@ func (m *externalPolicyManager) calculateAnnotatedPodGatewayIPsForNamespace(targ
 }
 
 func (m *externalPolicyManager) deleteProcessedPolicyInNamespace(namespaceName, policyName string, routePolicy *routePolicy, cacheInfo *namespaceInfo) error {
-	coexistingPolicies := cacheInfo.policies.Clone().Delete(policyName)
+	coexistingPolicies := cacheInfo.policies.Difference(sets.New(policyName))
 	annotatedGWIPs, err := m.calculateAnnotatedNamespaceGatewayIPsForNamespace(namespaceName)
 	if err != nil {
 		return err
@@ -139,9 +139,15 @@ func (m *externalPolicyManager) deleteProcessedPolicyInNamespace(namespaceName, 
 	if err != nil {
 		return err
 	}
+	coexistingIPs = coexistingIPs.Union(annotatedGWIPs)
+	klog.Infof("Coexisting %s", strings.Join(sets.List(coexistingIPs), ","))
 	for _, gwInfo := range routePolicy.staticGateways {
-		invalidGWIPs := gwInfo.gws.Difference(annotatedGWIPs.Union(coexistingIPs))
-		err := m.netClient.deleteGatewayIPs(namespaceName, invalidGWIPs)
+		//Filter out the IPs that are not in coexisting. Those IPs are to be deleted.
+		invalidGWIPs := gwInfo.gws.Difference(coexistingIPs)
+		// Filter out the IPs from the coexisting list that are to be kept by calculating the difference between the coexising and those IPs that are to be deleted and not coexisting at the same time.
+		ipsToKeep := coexistingIPs.Difference(invalidGWIPs)
+		klog.Infof("Coexisting %s, invalid %s, ipsToKeep %s", strings.Join(sets.List(coexistingIPs), ","), strings.Join(sets.List(invalidGWIPs), ","), strings.Join(sets.List(ipsToKeep), ","))
+		err := m.netClient.deleteGatewayIPs(namespaceName, invalidGWIPs, ipsToKeep)
 		if err != nil {
 			return err
 		}
@@ -156,14 +162,18 @@ func (m *externalPolicyManager) deleteProcessedPolicyInNamespace(namespaceName, 
 	if err != nil {
 		return err
 	}
-
 	coexistingIPs, err = m.retrieveCoexistingDynamicGatewayIPsToPoliciesInNamespace(namespaceName, coexistingPolicies)
 	if err != nil {
 		return err
 	}
+	coexistingIPs = coexistingIPs.Union(annotatedGWIPs)
 	for pod, gwInfo := range routePolicy.dynamicGateways {
-		invalidGWIPs := gwInfo.gws.Difference(annotatedGWIPs.Union(coexistingIPs))
-		err := m.netClient.deleteGatewayIPs(namespaceName, invalidGWIPs)
+		//Filter out the IPs that are not in coexisting. Those IPs are to be deleted.
+		invalidGWIPs := gwInfo.gws.Difference(coexistingIPs)
+		// Filter out the IPs from the coexisting list that are to be kept by calculating the difference between the coexising and those IPs that are to be deleted and not coexisting at the same time.
+		ipsToKeep := coexistingIPs.Difference(invalidGWIPs)
+		klog.Infof("Coexisting %s, invalid %s, ipsToKeep %s", strings.Join(sets.List(coexistingIPs), ","), strings.Join(sets.List(invalidGWIPs), ","), strings.Join(sets.List(ipsToKeep), ","))
+		err := m.netClient.deleteGatewayIPs(namespaceName, invalidGWIPs, ipsToKeep)
 		if err != nil {
 			return err
 		}

@@ -30,7 +30,7 @@ import (
 )
 
 type networkClient interface {
-	deleteGatewayIPs(namespace string, ipsToBeRemoved sets.Set[string]) error
+	deleteGatewayIPs(namespace string, ipsToBeRemoved, ipsToKeep sets.Set[string]) error
 	addGatewayIPs(pod *v1.Pod, egress gatewayInfoList) error
 }
 
@@ -110,7 +110,7 @@ func (nb *northBoundClient) delAllLegacyHybridRoutePolicies() error {
 // deleteGatewayIPs handles deleting static routes for pods on a specific GR.
 // If a set of gateways is given, only routes for that gateway are deleted. If no gateways
 // are given, all routes for the namespace are deleted.
-func (nb *northBoundClient) deleteGatewayIPs(namespace string, toBeDeletedGWIPs sets.Set[string]) error {
+func (nb *northBoundClient) deleteGatewayIPs(namespace string, toBeDeletedGWIPs, _ sets.Set[string]) error {
 	for _, routeInfo := range nb.getRouteInfosForNamespace(namespace) {
 		routeInfo.Lock()
 		if routeInfo.Deleted {
@@ -671,13 +671,13 @@ func getHybridRouteAddrSetDbIDs(nodeName, controller string) *libovsdbops.DbObje
 		})
 }
 
-func (c *conntrackClient) deleteGatewayIPs(namespaceName string, toBeDeletedGWIPs sets.Set[string]) error {
+func (c *conntrackClient) deleteGatewayIPs(namespaceName string, _, toBeKept sets.Set[string]) error {
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
 	var wg sync.WaitGroup
-	wg.Add(len(toBeDeletedGWIPs))
-	invalidMACs := sync.Map{}
-	klog.Infof("Deleting conntrack entries in namespace %s with gateway IPs %s", strings.Join(sets.List(toBeDeletedGWIPs), ","))
-	for gwIP := range toBeDeletedGWIPs {
+	wg.Add(len(toBeKept))
+	validMACs := sync.Map{}
+	klog.Infof("Keeping conntrack entries in namespace %s with gateway IPs %s", namespaceName, strings.Join(sets.List(toBeKept), ","))
+	for gwIP := range toBeKept {
 		go func(gwIP string) {
 			defer wg.Done()
 			if len(gwIP) > 0 && !utilnet.IsIPv6String(gwIP) {
@@ -694,23 +694,23 @@ func (c *conntrackClient) deleteGatewayIPs(namespaceName string, toBeDeletedGWIP
 					for i, j := 0, len(hwAddr)-1; i < j; i, j = i+1, j-1 {
 						hwAddr[i], hwAddr[j] = hwAddr[j], hwAddr[i]
 					}
-					invalidMACs.Store(gwIP, []byte(hwAddr))
+					validMACs.Store(gwIP, []byte(hwAddr))
 				}
 			}
 		}(gwIP)
 	}
 	wg.Wait()
 
-	invalidNextHopMACs := [][]byte{}
-	invalidMACs.Range(func(key interface{}, value interface{}) bool {
-		invalidNextHopMACs = append(invalidNextHopMACs, value.([]byte))
+	validNextHopMACs := [][]byte{}
+	validMACs.Range(func(key interface{}, value interface{}) bool {
+		validNextHopMACs = append(validNextHopMACs, value.([]byte))
 		return true
 	})
 	// Handle corner case where there are 0 IPs on the annotations OR none of the ARPs were successful; i.e allowMACList={empty}.
 	// This means we *need to* pass a label > 128 bits that will not match on any conntrack entry labels for these pods.
 	// That way any remaining entries with labels having MACs set will get purged.
-	if len(invalidNextHopMACs) == 0 {
-		invalidNextHopMACs = append(invalidNextHopMACs, []byte("does-not-contain-anything"))
+	if len(validNextHopMACs) == 0 {
+		validNextHopMACs = append(validNextHopMACs, []byte("does-not-contain-anything"))
 	}
 
 	pods, err := c.podLister.List(labels.Everything())
@@ -728,14 +728,15 @@ func (c *conntrackClient) deleteGatewayIPs(namespaceName string, toBeDeletedGWIP
 		for _, podIP := range podIPs { // flush conntrack only for UDP
 			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
 			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
-			count, err := util.DeleteConntrackWithMatchingLabels(podIP.String(), 0, v1.ProtocolUDP, netlink.ConntrackOrigDstIP, invalidNextHopMACs)
+			count, err := util.DeleteConntrackWithUnmatchingLabels(podIP.String(), 0, v1.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
 			if err != nil {
 				errors = append(errors, fmt.Errorf("failed to delete conntrack entry for pod with IP %s: %v", podIP.String(), err))
 				continue
 			}
+			klog.Infof("Deleted %d conntrack entries for pod IP %s/%s using gateway IPs %s", count, pod.Namespace, pod.Name)
 			if count == 0 {
 				invalidMACString := []string{}
-				invalidMACs.Range(func(key interface{}, value interface{}) bool {
+				validMACs.Range(func(key interface{}, value interface{}) bool {
 					a := net.HardwareAddr(value.([]byte))
 					invalidMACString = append(invalidMACString, a.String())
 					return true

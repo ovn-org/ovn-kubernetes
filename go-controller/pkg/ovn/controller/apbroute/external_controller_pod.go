@@ -146,8 +146,13 @@ func (m *externalPolicyManager) processUpdatePod(updatedPod *v1.Pod, oldTargetNs
 		if err != nil {
 			return err
 		}
-		invalidGWIPs := gateways.gws.Difference(annotatedGWIPs.Union(coexistingIPs))
-		err = m.netClient.deleteGatewayIPs(ns, invalidGWIPs)
+		coexistingIPs = coexistingIPs.Union(annotatedGWIPs)
+		//Filter out the IPs that are not in coexisting. Those IPs are to be deleted.
+		invalidGWIPs := gateways.gws.Difference(coexistingIPs)
+		// Filter out the IPs from the coexisting list that are to be kept by calculating the difference between the coexising and those IPs that are to be deleted and not coexisting at the same time.
+		ipsToKeep := coexistingIPs.Difference(invalidGWIPs)
+		klog.Infof("Coexisting %s, invalid %s, ipsToKeep %s", strings.Join(sets.List(coexistingIPs), ","), strings.Join(sets.List(invalidGWIPs), ","), strings.Join(sets.List(ipsToKeep), ","))
+		err = m.netClient.deleteGatewayIPs(ns, invalidGWIPs, ipsToKeep)
 		if err != nil {
 			m.unlockNamespaceInfoCache(ns)
 			return err
@@ -265,8 +270,13 @@ func (m *externalPolicyManager) deletePodGatewayInNamespace(pod *v1.Pod, targetN
 	if err != nil {
 		return err
 	}
-	invalidGWIPs := gwInfo.gws.Difference(annotatedGWIPs.Union(coexistingIPs))
-	err = m.netClient.deleteGatewayIPs(targetNamespace, invalidGWIPs)
+	coexistingIPs = coexistingIPs.Union(annotatedGWIPs)
+	//Filter out the IPs that are not in coexisting. Those IPs are to be deleted.
+	invalidGWIPs := gwInfo.gws.Difference(coexistingIPs)
+	// Filter out the IPs from the coexisting list that are to be kept by calculating the difference between the coexising and those IPs that are to be deleted and not coexisting at the same time.
+	ipsToKeep := coexistingIPs.Difference(invalidGWIPs)
+	klog.Infof("Coexisting %s, invalid %s, ipsToKeep %s", strings.Join(sets.List(coexistingIPs), ","), strings.Join(sets.List(invalidGWIPs), ","), strings.Join(sets.List(ipsToKeep), ","))
+	err = m.netClient.deleteGatewayIPs(targetNamespace, invalidGWIPs, ipsToKeep)
 	if err != nil {
 		return err
 	}

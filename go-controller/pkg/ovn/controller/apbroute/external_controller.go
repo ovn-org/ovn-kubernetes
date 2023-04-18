@@ -60,10 +60,10 @@ func (g gatewayInfoList) Len() int {
 	return len(g)
 }
 
-func (g gatewayInfoList) Less(i, j int) bool { return lessGWSIP(g[i], g[j]) }
+func (g gatewayInfoList) Less(i, j int) bool { return lessGatewayIPs(g[i], g[j]) }
 func (g gatewayInfoList) Swap(i, j int)      { g[i], g[j] = g[j], g[i] }
 
-func lessGWSIP(l, r *gatewayInfo) bool {
+func lessGatewayIPs(l, r *gatewayInfo) bool {
 
 	for lip := range l.gws {
 		for rip := range r.gws {
@@ -90,6 +90,8 @@ type ExternalRouteInfo struct {
 	PodExternalRoutes map[string]map[string]string
 }
 
+// This structure contains the processed information of a policy.
+// This information is then used to update the network components (North Bound DB, conntrack) by applying the IPs here to each of the target namespaces defined in the from field.
 type routePolicy struct {
 	labelSelector   *metav1.LabelSelector
 	staticGateways  gatewayInfoList
