@@ -179,6 +179,13 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 		}
 	}
 	gatewayIntf := config.Gateway.Interface
+	if gatewayIntf != "" {
+		if bridgeName, _, err := util.RunOVSVsctl("port-to-br", gatewayIntf); err == nil {
+			// This is an OVS bridge's internal port
+			gatewayIntf = bridgeName
+		}
+	}
+
 	if needIPv4NextHop || needIPv6NextHop || gatewayIntf == "" {
 		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf)
 		if err != nil {

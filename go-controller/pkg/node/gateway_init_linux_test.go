@@ -71,6 +71,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Err: fmt.Errorf(""),
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
+			Err: fmt.Errorf(""),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 br-exists eth0",
 			Err: fmt.Errorf(""),
 		})
@@ -405,6 +409,11 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br " + brphys,
 			Err: fmt.Errorf(""),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 port-to-br " + brphys,
+			Err:    fmt.Errorf(""),
+			Output: brphys,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 br-exists " + brphys,
@@ -777,6 +786,10 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		)
 
 		fexec := ovntest.NewLooseCompareFakeExec()
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
+			Err: fmt.Errorf(""),
+		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
 			Err: fmt.Errorf(""),
@@ -1638,6 +1651,15 @@ var _ = Describe("Gateway unit tests", func() {
 		It("Finds correct gateway interface and nexthops with single stack configuration", func() {
 			ifName := "enf1f0"
 			nextHopCfg := "10.0.0.11"
+
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+				Err: fmt.Errorf(""),
+			})
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
 			gwIPs := []net.IP{net.ParseIP(nextHopCfg)}
 			config.Gateway.Interface = ifName
 			config.Gateway.NextHop = nextHopCfg
@@ -1651,6 +1673,15 @@ var _ = Describe("Gateway unit tests", func() {
 		It("Finds correct gateway interface and nexthops with dual stack configuration", func() {
 			ifName := "enf1f0"
 			nextHopCfg := "10.0.0.11,fc00:f853:ccd:e793::1"
+
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+				Err: fmt.Errorf(""),
+			})
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
 			nextHops := strings.Split(nextHopCfg, ",")
 			gwIPs := []net.IP{net.ParseIP(nextHops[0]), net.ParseIP(nextHops[1])}
 			config.Gateway.Interface = ifName
@@ -1662,6 +1693,29 @@ var _ = Describe("Gateway unit tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(gatewayIntf).To(Equal(ifName))
 			Expect(gatewayNextHops).To(Equal(gwIPs))
+		})
+
+		ovntest.OnSupportedPlatformsIt("Finds correct gateway interface and nexthops when gateway bridge is created", func() {
+			ifName := "enf1f0"
+			nextHopCfg := "10.0.0.11"
+
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+				Err:    fmt.Errorf(""),
+				Output: "br" + ifName,
+			})
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			gwIPs := []net.IP{net.ParseIP(nextHopCfg)}
+			config.Gateway.Interface = ifName
+			config.Gateway.NextHop = nextHopCfg
+
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(ifName))
+			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
 		})
 	})
 })
