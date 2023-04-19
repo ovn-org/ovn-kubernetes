@@ -325,6 +325,13 @@ An ip rule is also created for the ClusterIP of the service which is needed in o
 `lb ip -> node -> enter ovn with ClusterIP -> exit ovn with ClusterIP -> exit node with lb ip`
 
 If the routing table does not exist on the host these rules will not be created and an error will be logged.
+### TBD: Dealing with non SNATed traffic
+The host of an Egress Service is often in charge of pods (endpoints) that run in different nodes.  
+Due to the fact that ovn-controllers on different nodes apply the changes independently, there is
+a chance that some pod traffic will reach the host before it configures the relevant SNAT iptables rules.
+In that timeframe, the egress traffic from these pods will exit the host with their ip instead of the LB's ingress ip, and the it will not be able to return properly because an external client is not aware of a pod's inner ip.
+
+This is currently a known issue for EgressService because we can't leverage the same as [EgressIP](./egress-ip.md#Dealing-with-non-SNATed-traffic) currently does by setting a flow on breth0 - the flow won't be hit because the traffic "exits" OVN when using EgressService (= doesn't hit the host's breth0) as opposed to how EgressIP "keeps everything" inside OVN.
 
 ## Usage Example
 
