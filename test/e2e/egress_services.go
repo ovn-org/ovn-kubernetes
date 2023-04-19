@@ -27,6 +27,7 @@ var _ = ginkgo.Describe("Egress Services", func() {
 		externalContainerName = "external-container-for-egress-service"
 		podHTTPPort           = 8080
 		serviceName           = "test-egress-service"
+		customRoutingTable    = "100"
 	)
 
 	command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", podHTTPPort)}
@@ -55,10 +56,12 @@ var _ = ginkgo.Describe("Egress Services", func() {
 		ginkgo.By("Creating an external container to send the traffic to/from")
 		externalIPv4, externalIPv6 = createClusterExternalContainer(externalContainerName, agnhostImage,
 			[]string{"--privileged", "--network", "kind"}, []string{"netexec", fmt.Sprintf("--http-port=%d", podHTTPPort)})
+
 	})
 
 	ginkgo.AfterEach(func() {
 		deleteClusterExternalContainer(externalContainerName)
+		flushCustomRoutingTableOnNodes(nodes, customRoutingTable)
 	})
 
 	ginkgotable.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip without selectors",
@@ -126,6 +129,50 @@ metadata:
 			ginkgo.By("Verifying the external container can reach all of the service's backend pods")
 			// This is to be sure we did not break ingress traffic for the service
 			reachAllServiceBackendsFromExternalContainer(externalContainerName, svcIP, podHTTPPort, pods)
+
+			ginkgo.By("Creating the custom network")
+			setCustomRoutingTableOnNodes(nodes, customRoutingTable, externalIPv4, externalIPv6, protocol == v1.IPv4Protocol)
+
+			ginkgo.By("Updating the resource to contain a Network")
+			egressServiceConfig = fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: ` + serviceName + `
+  namespace: ` + f.Namespace.Name + `
+spec:
+  network: "100"
+`)
+			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			framework.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressServiceYAML)
+
+			ginkgo.By("Verifying the pods can't reach the external container due to the blackhole in the custom network")
+			gomega.Consistently(func() error {
+				for _, pod := range pods {
+					err := curlAgnHostClientIPFromPod(f.Namespace.Name, pod, svcIP, *dstIP, podHTTPPort)
+					if err != nil && !strings.Contains(err.Error(), "exit code 28") {
+						return fmt.Errorf("expected err to be a connection timed out due to blackhole, got: %w", err)
+					}
+
+					if err == nil {
+						return fmt.Errorf("pod %s managed to reach external client despite blackhole", pod)
+					}
+				}
+				return nil
+			}, 2*time.Second, 400*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "managed to reach external container despite blackhole")
+
+			ginkgo.By("Removing the blackhole to the external container the pods should be able to reach it with the loadbalancer's ingress ip")
+			delExternalClientBlackholeFromNodes(nodes, customRoutingTable, externalIPv4, externalIPv6, protocol == v1.IPv4Protocol)
+			gomega.Consistently(func() error {
+				for _, pod := range pods {
+					if err := curlAgnHostClientIPFromPod(f.Namespace.Name, pod, svcIP, *dstIP, podHTTPPort); err != nil {
+						return err
+					}
+				}
+				return nil
+			}, 2*time.Second, 400*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach external container with loadbalancer's ingress ip")
 
 			ginkgo.By("Deleting the EgressService the backend pods should exit with their node's IP")
 			framework.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressServiceYAML)
@@ -856,7 +903,7 @@ func setSVCRouteOnContainer(container, svcIP, v4Via, v6Via string) {
 // Returns an error if the expectedIP is different than the response.
 func curlAgnHostClientIPFromPod(namespace, pod, expectedIP, dstIP string, containerPort int) error {
 	dst := net.JoinHostPort(dstIP, fmt.Sprint(containerPort))
-	curlCmd := fmt.Sprintf("curl -s --retry-connrefused --retry 5 --max-time 1 http://%s/clientip", dst)
+	curlCmd := fmt.Sprintf("curl -s --retry-connrefused --retry 3 --max-time 0.5 http://%s/clientip", dst)
 	out, err := framework.RunHostCmd(namespace, pod, curlCmd)
 	if err != nil {
 		return fmt.Errorf("failed to curl agnhost on %s from %s, err: %w", dstIP, pod, err)
@@ -890,4 +937,71 @@ func reachAllServiceBackendsFromExternalContainer(container, svcIP string, svcPo
 	}
 
 	framework.ExpectEqual(len(backends), 0, fmt.Sprintf("did not reach all pods from outside, missed: %v", backends))
+}
+
+// Sets the "dummy" custom routing table on all of the nodes (this heavily relies on the environment to be a kind cluster)
+// We create a new routing table with 2 routes to the external container:
+// 1) The one from the default routing table.
+// 2) A blackhole with a higher priority
+// Then in the actual test we first verify that when the pods are using the custom routing table they can't reach the external container,
+// remove the blackhole route and verify that they can reach it now. This shows that they actually use a different routing table than the main one.
+func setCustomRoutingTableOnNodes(nodes []v1.Node, routingTable, externalV4, externalV6 string, useV4 bool) {
+	for _, node := range nodes {
+		if useV4 {
+			setRoutesOnCustomRoutingTable(node.Name, externalV4, routingTable)
+			continue
+		}
+		if externalV6 != "" {
+			setRoutesOnCustomRoutingTable(node.Name, externalV6, routingTable)
+		}
+	}
+}
+
+// Sets the regular+blackhole routes on the nodes to the external container.
+func setRoutesOnCustomRoutingTable(container, ip, table string) {
+	type route struct {
+		Dst string `json:"dst"`
+		Dev string `json:"dev"`
+	}
+	out, err := runCommand(containerRuntime, "exec", container, "ip", "--json", "route", "get", ip)
+	framework.ExpectNoError(err, fmt.Sprintf("failed to get default route to %s on node %s, out: %s", ip, container, out))
+
+	routes := []route{}
+	err = json.Unmarshal([]byte(out), &routes)
+	framework.ExpectNoError(err, fmt.Sprintf("failed to parse route to %s on node %s", ip, container))
+	gomega.Expect(routes).ToNot(gomega.HaveLen(0))
+
+	routeTo := routes[0]
+	out, err = runCommand(containerRuntime, "exec", container, "ip", "route", "add", ip, "dev", routeTo.Dev, "table", table, "prio", "100")
+	framework.ExpectNoError(err, fmt.Sprintf("failed to set route to %s on node %s table %s, out: %s", ip, container, table, out))
+
+	out, err = runCommand(containerRuntime, "exec", container, "ip", "route", "add", "blackhole", ip, "table", table, "prio", "50")
+	framework.ExpectNoError(err, fmt.Sprintf("failed to set blackhole route to %s on node %s table %s, out: %s", ip, container, table, out))
+}
+
+// Removes the blackhole route to the external container on the nodes.
+func delExternalClientBlackholeFromNodes(nodes []v1.Node, routingTable, externalV4, externalV6 string, useV4 bool) {
+	for _, node := range nodes {
+		if useV4 {
+			out, err := runCommand(containerRuntime, "exec", node.Name, "ip", "route", "del", "blackhole", externalV4, "table", routingTable)
+			framework.ExpectNoError(err, fmt.Sprintf("failed to delete blackhole route to %s on node %s table %s, out: %s", externalV4, node.Name, routingTable, out))
+			continue
+		}
+		out, err := runCommand(containerRuntime, "exec", node.Name, "ip", "route", "del", "blackhole", externalV6, "table", routingTable)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to delete blackhole route to %s on node %s table %s, out: %s", externalV6, node.Name, routingTable, out))
+	}
+}
+
+// Flush the custom routing table from all of the nodes.
+func flushCustomRoutingTableOnNodes(nodes []v1.Node, routingTable string) {
+	for _, node := range nodes {
+		out, err := runCommand(containerRuntime, "exec", node.Name, "ip", "route", "flush", "table", routingTable)
+		if err != nil && !strings.Contains(err.Error(), "FIB table does not exist") {
+			framework.Failf("Unable to flush table %s on node %s: out: %s, err: %v", routingTable, node.Name, out, err)
+		}
+		out, err = runCommand(containerRuntime, "exec", node.Name, "ip", "-6", "route", "flush", "table", routingTable)
+		if err != nil && !strings.Contains(err.Error(), "FIB table does not exist") {
+			framework.Failf("Unable to flush table %s on node %s: out: %s err: %v", routingTable, node.Name, out, err)
+		}
+	}
 }
