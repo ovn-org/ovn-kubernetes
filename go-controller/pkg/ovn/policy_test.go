@@ -262,7 +262,7 @@ func getMultinetNsAddrSetHashNames(ns, controllerName string) (string, string) {
 
 // getGressACLs can only handle tcpPeerPorts for policies built with getPortNetworkPolicy, i.e. peer should only
 // have `Ports` filled, but no `To`/`From`.
-func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, tcpPeerPorts []int32,
+func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []string, tcpPeerPorts []int32,
 	peers []knet.NetworkPolicyPeer, logSeverity nbdb.ACLSeverity, policyType knet.PolicyType, stale,
 	statelessNetPol bool, netInfo util.NetInfo) []*nbdb.ACL {
 	fakeController := getFakeBaseController(netInfo, nil)
@@ -291,7 +291,7 @@ func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, 
 		hashedASName, _ := getMultinetNsAddrSetHashNames(nsName, controllerName)
 		hashedASNames = append(hashedASNames, hashedASName)
 	}
-	ipBlock := ""
+	ipBlocks := []string{}
 	for _, peer := range peers {
 		// follow the algorithm from setupGressPolicy
 		podSel, _ := metav1.LabelSelectorAsSelector(peer.PodSelector)
@@ -302,14 +302,14 @@ func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, 
 			hashedASNames = append(hashedASNames, asv4)
 		}
 		if peer.IPBlock != nil {
-			ipBlock = peer.IPBlock.CIDR
+			ipBlocks = append(ipBlocks, peer.IPBlock.CIDR)
 		}
 	}
 	gp := gressPolicy{
 		policyNamespace: namespace,
 		policyName:      policyName,
 		policyType:      policyType,
-		idx:             i,
+		idx:             gressIdx,
 		controllerName:  controllerName,
 	}
 	if len(hashedASNames) > 0 {
@@ -335,9 +335,9 @@ func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, 
 		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
 	}
-	if ipBlock != "" {
+	for i, ipBlock := range ipBlocks {
 		match := fmt.Sprintf("ip4.%s == %s && %s == @%s", ipDir, ipBlock, portDir, pgName)
-		dbIDs := gp.getNetpolACLDbIDs(emptyIdx, 0)
+		dbIDs := gp.getNetpolACLDbIDs(emptyIdx, i)
 		acl := libovsdbops.BuildACL(
 			getACLName(dbIDs),
 			direction,
@@ -988,6 +988,59 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				return nil
 			}
 
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+
+		ginkgo.It("reconciles existing networkPolicies with equivalent rules", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace(namespaceName1)
+				peer := knet.NetworkPolicyPeer{
+					IPBlock: &knet.IPBlock{
+						CIDR: "1.1.1.1",
+					},
+				}
+				// equivalent rules in one peer
+				networkPolicy1 := newNetworkPolicy(netPolicyName1, namespace1.Name, metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{{
+						From: []knet.NetworkPolicyPeer{peer, peer},
+					}}, nil)
+				// equivalent rules in different peers
+				networkPolicy2 := newNetworkPolicy(netPolicyName2, namespace1.Name, metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{peer},
+						},
+						{
+							From: []knet.NetworkPolicyPeer{peer},
+						},
+					}, nil)
+				initialData := initialDB.NBData
+				gressPolicy1ExpectedData := getPolicyData(networkPolicy1, nil, []string{}, nil)
+				gressPolicy2ExpectedData := getPolicyData(networkPolicy2, nil, []string{}, nil)
+				defaultDenyExpectedData := getDefaultDenyDataMultiplePolicies([]*knet.NetworkPolicy{networkPolicy1, networkPolicy2}, nil)
+				initialData = append(initialData, gressPolicy1ExpectedData...)
+				initialData = append(initialData, gressPolicy2ExpectedData...)
+				initialData = append(initialData, defaultDenyExpectedData...)
+
+				// start with the updated network policy, but previous-version db
+				networkPolicy1Updated := newNetworkPolicy(netPolicyName1, namespace1.Name, metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{{
+						From: []knet.NetworkPolicyPeer{peer},
+					}}, nil)
+
+				startOvn(libovsdb.TestSetup{NBData: initialData}, []v1.Namespace{namespace1},
+					[]knet.NetworkPolicy{*networkPolicy1Updated, *networkPolicy2},
+					nil, nil)
+
+				// check the initial data is updated, one acl should be removed
+				// since test server doesn't cleanup de-referenced acls, acl for the deleted peer will stay in the db,
+				// but will be de-referenced from the port group
+				policy1PG := gressPolicy1ExpectedData[len(gressPolicy1ExpectedData)-1].(*nbdb.PortGroup)
+				policy1PG.ACLs = policy1PG.ACLs[:len(policy1PG.ACLs)-1]
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(initialData))
+
+				return nil
+			}
 			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 		})
 	})
@@ -1686,6 +1739,57 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.sharedNetpolPortGroups.Delete(networkPolicy1.Namespace)
 				err := fakeOvn.controller.addNetworkPolicy(networkPolicy1)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("can handle network policies with equivalent rules", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace(namespaceName1)
+				startOvn(initialDB, []v1.Namespace{namespace1}, nil, nil, nil)
+
+				peer := knet.NetworkPolicyPeer{
+					IPBlock: &knet.IPBlock{
+						CIDR: "1.1.1.1",
+					},
+				}
+				// equivalent rules in one peer
+				networkPolicy1 := newNetworkPolicy(netPolicyName1, namespace1.Name, metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{{
+						From: []knet.NetworkPolicyPeer{peer, peer},
+					}}, nil)
+				// equivalent rules in different peers
+				networkPolicy2 := newNetworkPolicy(netPolicyName2, namespace1.Name, metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{peer},
+						},
+						{
+							From: []knet.NetworkPolicyPeer{peer},
+						},
+					}, nil)
+
+				// create first netpol
+				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy1.Namespace).
+					Create(context.TODO(), networkPolicy1, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// check db
+				expectedData := getNamespaceWithMultiplePoliciesExpectedData(
+					[]*knet.NetworkPolicy{networkPolicy1}, nil, []string{}, nil,
+					initialDB.NBData)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+				// create second netpol
+				_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy2.Namespace).
+					Create(context.TODO(), networkPolicy2, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// check db
+				expectedData = getNamespaceWithMultiplePoliciesExpectedData(
+					[]*knet.NetworkPolicy{networkPolicy1, networkPolicy2}, nil, []string{}, nil,
+					initialDB.NBData)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+
 				return nil
 			}
 			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
