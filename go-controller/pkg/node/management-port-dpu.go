@@ -55,7 +55,7 @@ func (mp *managementPortRepresentor) Create(_ *routeManager, nodeAnnotator kube.
 		if err != nil {
 			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.repName, err)
 		}
-	} else if mp.repName != k8sMgmtIntfName {
+	} else if link.Attrs().Name != k8sMgmtIntfName {
 		if err := syncMgmtPortInterface(mp.hostSubnets, k8sMgmtIntfName, false); err != nil {
 			return nil, fmt.Errorf("failed to check existing management port: %v", err)
 		}
@@ -193,7 +193,7 @@ func (mp *managementPortNetdev) Create(routeManager *routeManager, nodeAnnotator
 		if err != nil {
 			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.netdevName, err)
 		}
-	} else if mp.netdevName != types.K8sMgmtIntfName {
+	} else if link.Attrs().Name != types.K8sMgmtIntfName {
 		err = syncMgmtPortInterface(mp.hostSubnets, types.K8sMgmtIntfName, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sync management port: %v", err)
