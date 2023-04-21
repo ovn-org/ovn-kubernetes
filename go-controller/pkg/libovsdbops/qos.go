@@ -77,7 +77,6 @@ func AddQoSesToLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 
 	opModels := operationModel{
 		Model:            sw,
-		ModelPredicate:   func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelMutations: []interface{}{&sw.QOSRules},
 		ErrNotFound:      true,
 		BulkOp:           false,
@@ -117,7 +116,6 @@ func RemoveQoSesFromLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libov
 
 	opModels := operationModel{
 		Model:            sw,
-		ModelPredicate:   func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelMutations: []interface{}{&sw.QOSRules},
 		ErrNotFound:      true,
 		BulkOp:           false,

@@ -393,9 +393,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			name: "Test create non-existing no-root by model predicate specification and parent model mutation",
 			op:   "CreateOrUpdate",
 			generateOp: func() []operationModel {
-				m := nbdb.LogicalSwitchPort{
-					Name: logicalSwitchPortTestName,
-				}
+				m := nbdb.LogicalSwitchPort{}
 				parentModel := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
@@ -408,8 +406,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelMutations: []interface{}{
 							&parentModel.Ports,
 						},
@@ -429,7 +426,6 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Ports: []string{logicalSwitchPortTestUUID},
 				},
 				&nbdb.LogicalSwitchPort{
-					Name: logicalSwitchPortTestName,
 					UUID: logicalSwitchPortTestUUID,
 				},
 			},
@@ -438,9 +434,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			name: "Test create non-existing no-root by model predicate specification and non-existing parent model mutation",
 			op:   "CreateOrUpdate",
 			generateOp: func() []operationModel {
-				m := nbdb.LogicalSwitchPort{
-					Name: logicalSwitchPortTestName,
-				}
+				m := nbdb.LogicalSwitchPort{}
 				parentModel := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
@@ -453,8 +447,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelMutations: []interface{}{
 							&parentModel.Ports,
 						},
@@ -469,7 +462,6 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Ports: []string{logicalSwitchPortTestUUID},
 				},
 				&nbdb.LogicalSwitchPort{
-					Name: logicalSwitchPortTestName,
 					UUID: logicalSwitchPortTestUUID,
 				},
 			},
@@ -484,14 +476,11 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 				}
 				return []operationModel{
 					{
-						Model: &nbdb.LogicalSwitchPort{
-							Name: logicalSwitchPortTestName,
-						},
+						Model:          &nbdb.LogicalSwitchPort{},
 						ModelPredicate: func(lsp *nbdb.LogicalSwitchPort) bool { return lsp.Name == logicalSwitchPortTestName },
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelUpdates: []interface{}{
 							&parentModel.Ports,
 						},
@@ -511,7 +500,6 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Ports: []string{logicalSwitchPortTestUUID},
 				},
 				&nbdb.LogicalSwitchPort{
-					Name: logicalSwitchPortTestName,
 					UUID: logicalSwitchPortTestUUID,
 				},
 			},
@@ -534,8 +522,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelMutations: []interface{}{
 							&parentModel.Ports,
 						},
@@ -575,8 +562,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelUpdates: []interface{}{
 							&parentModel.Ports,
 						},
@@ -621,8 +607,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelUpdates: []interface{}{
 							&parentModel.Ports,
 						},
@@ -673,8 +658,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &pm,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &pm,
 						OnModelUpdates: []interface{}{
 							&pm.Ports,
 						},
@@ -727,8 +711,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &pm,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &pm,
 						OnModelMutations: []interface{}{
 							&pm.Ports,
 						},
@@ -776,8 +759,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelMutations: []interface{}{
 							&parentModel.Ports,
 						},
@@ -827,8 +809,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelMutations: []interface{}{
 							&parentModel.Ports,
 						},
@@ -879,14 +860,11 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 				}
 				return []operationModel{
 					{
-						Model: &nbdb.LogicalSwitchPort{
-							Name: logicalSwitchPortTestName,
-						},
+						Model:          &nbdb.LogicalSwitchPort{},
 						ModelPredicate: func(lsp *nbdb.LogicalSwitchPort) bool { return lsp.Name == logicalSwitchPortTestName },
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelMutations: []interface{}{
 							&parentModel.Ports,
 						},
@@ -923,8 +901,7 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelMutations: []interface{}{
 							&parentModel.Ports,
 						},
@@ -967,8 +944,7 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelMutations: []interface{}{
 							&parentModel.Ports,
 						},
@@ -1053,8 +1029,7 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 						},
 					},
 					{
-						Model:          &parentModel,
-						ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchTestName },
+						Model: &parentModel,
 						OnModelMutations: []interface{}{
 							&parentModel.Ports,
 						},

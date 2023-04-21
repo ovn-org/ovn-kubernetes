@@ -150,8 +150,9 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 
 	// define client indexes for objects that are using dbIDs
 	dbModel.SetIndexes(map[string][]model.ClientIndex{
-		nbdb.ACLTable:          {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
-		nbdb.LoadBalancerTable: {{Columns: []model.ColumnKey{{Column: "name"}}}},
+		nbdb.ACLTable:           {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
+		nbdb.LoadBalancerTable:  {{Columns: []model.ColumnKey{{Column: "name"}}}},
+		nbdb.LogicalSwitchTable: {{Columns: []model.ColumnKey{{Column: "name"}}}},
 	})
 
 	c, err := newClient(cfg, dbModel, stopCh, enableMetricsOption)
