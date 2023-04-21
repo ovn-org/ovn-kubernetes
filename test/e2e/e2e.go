@@ -1836,7 +1836,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 								break
 							}
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node, responses, nodePort)
+						framework.ExpectEqual(valid, true,
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, nodesHostnames, responses))
 					}
 				}
 			}
@@ -1988,7 +1989,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 										break
 									}
 								}
-								framework.ExpectEqual(valid, true, "Validation failed for node", nodeName, responses, port)
+								framework.ExpectEqual(valid, true,
+									fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", nodeName, nodesHostnames, responses))
 							}
 						}
 					}
@@ -2058,7 +2060,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							}
 
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node.Name, responses, nodePort)
+						framework.ExpectEqual(valid, true,
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
 					}
 				}
 			}
@@ -2118,7 +2121,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							protocol,
 							externalPort))
 					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
-					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
 				}
 			}
 
@@ -2143,12 +2146,13 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							protocol,
 							externalPort))
 					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
-					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
 				}
 			}
 		})
 	})
-	ginkgo.Context("Validating ExternalIP ingress traffic to manually added node IPs", func() {
+
+	ginkgo.Context("Validating ingress traffic to manually added node IPs", func() {
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
 			nodesHostnames = sets.NewString()
@@ -2188,14 +2192,18 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			// addresses.
 			createClusterExternalContainer(clientContainerName, agnhostImage, []string{"--network", "kind", "-P"}, []string{"netexec", "--http-port=80"})
 
+			// If `kindexgw` exists, connect client container to it
+			runCommand(containerRuntime, "network", "connect", "kindexgw", clientContainerName)
+
 			ginkgo.By("Adding ip addresses to each node")
 			// add new secondary IP from node subnet to all nodes, if the cluster is v6 add an ipv6 address
 			var newIP string
+			newNodeAddresses = make([]string, 0)
 			for i, node := range nodes.Items {
 				if utilnet.IsIPv6String(e2enode.GetAddresses(&node, v1.NodeInternalIP)[0]) {
 					newIP = "fc00:f853:ccd:e794::" + strconv.Itoa(i)
 				} else {
-					newIP = "172.18.1." + strconv.Itoa(i)
+					newIP = "172.18.1." + strconv.Itoa(i+1)
 				}
 				// manually add the a secondary IP to each node
 				_, err := runCommand(containerRuntime, "exec", node.Name, "ip", "addr", "add", newIP, "dev", "breth0")
@@ -2218,6 +2226,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 				}
 			}
 		})
+
 		// This test validates ingress traffic to externalservices after a new node Ip is added.
 		// It creates a service on both udp and tcp and assigns the new node IPs as
 		// external Addresses. Then, creates a backend pod on each node.
@@ -2259,7 +2268,63 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							break
 						}
 					}
-					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
+				}
+			}
+		})
+
+		// This test verifies a NodePort service is reachable on manually added IP addresses.
+		ginkgo.It("for NodePort services", func() {
+			isIPv6Cluster := IsIPv6Cluster(f.ClientSet)
+			serviceName := "nodeportservice"
+
+			ginkgo.By("Creating NodePort service")
+			svcSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
+			svcSpec, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), svcSpec, metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the endpoints to pop up")
+			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
+
+			tcpNodePort, udpNodePort := nodePortsFromService(svcSpec)
+
+			toCheckNodesAddresses := sets.NewString()
+			for _, node := range nodes.Items {
+
+				addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-addresses"]
+				gomega.Expect(ok).To(gomega.BeTrue())
+
+				var addrs []string
+				err := json.Unmarshal([]byte(addrAnnotation), &addrs)
+				framework.ExpectNoError(err, "failed to parse node[%s] host-address annotation[%s]", node.Name, addrAnnotation)
+
+				toCheckNodesAddresses.Insert(addrs...)
+			}
+
+			// Ensure newly added IP address are in the host-addresses annotation
+			for _, newAddress := range newNodeAddresses {
+				if !toCheckNodesAddresses.Has(newAddress) {
+					toCheckNodesAddresses.Insert(newAddress)
+				}
+			}
+
+			for _, protocol := range []string{"http", "udp"} {
+				toCurlPort := int32(tcpNodePort)
+				if protocol == "udp" {
+					toCurlPort = int32(udpNodePort)
+				}
+
+				for _, address := range toCheckNodesAddresses.List() {
+					if !isIPv6Cluster && utilnet.IsIPv6String(address) {
+						continue
+					}
+					ginkgo.By("Hitting the service on " + address + " via " + protocol)
+					gomega.Eventually(func() bool {
+						epHostname := pokeEndpoint("", clientContainerName, protocol, address, toCurlPort, "hostname")
+						// Expect to receive a valid hostname
+						return nodesHostnames.Has(epHostname)
+					}, "20s", "1s").Should(gomega.BeTrue())
 				}
 			}
 		})
@@ -2397,7 +2462,8 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 							}
 
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node.Name, responses, nodePort)
+						framework.ExpectEqual(valid, true,
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
 					}
 				}
 			}

@@ -463,12 +463,12 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 		// Services are currently supported only on the node's first IP.
 		// Extract that one and populate the node's IP template value.
 		if globalconfig.IPv4Mode {
-			if ipv4, err := util.MatchFirstIPFamily(false, node.nodeIPs); err == nil {
+			if ipv4, err := util.MatchFirstIPFamily(false, node.l3gatewayAddresses); err == nil {
 				c.nodeIPv4Template.Value[node.chassisID] = ipv4.String()
 			}
 		}
 		if globalconfig.IPv6Mode {
-			if ipv6, err := util.MatchFirstIPFamily(true, node.nodeIPs); err == nil {
+			if ipv6, err := util.MatchFirstIPFamily(true, node.l3gatewayAddresses); err == nil {
 				c.nodeIPv6Template.Value[node.chassisID] = ipv6.String()
 			}
 		}
