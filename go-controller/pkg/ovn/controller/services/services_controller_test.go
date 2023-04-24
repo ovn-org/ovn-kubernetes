@@ -280,7 +280,7 @@ func TestSyncServices(t *testing.T) {
 				Endpoints: []discovery.Endpoint{
 					{
 						Conditions: discovery.EndpointConditions{
-							Ready: utilpointer.BoolPtr(true),
+							Ready: utilpointer.Bool(true),
 						},
 						Addresses: []string{"10.128.0.2", "10.128.1.2"},
 					},
@@ -361,7 +361,7 @@ func TestSyncServices(t *testing.T) {
 				Endpoints: []discovery.Endpoint{
 					{
 						Conditions: discovery.EndpointConditions{
-							Ready: utilpointer.BoolPtr(true),
+							Ready: utilpointer.Bool(true),
 						},
 						Addresses: []string{"10.128.0.2", "10.128.1.2"},
 					},

@@ -463,7 +463,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						Endpoints: []discovery.Endpoint{
 							{
 								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.BoolPtr(true),
+									Ready: utilpointer.Bool(true),
 								},
 								Addresses: []string{"10.0.0.2"},
 							},
@@ -499,7 +499,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						Endpoints: []discovery.Endpoint{
 							{
 								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.BoolPtr(true),
+									Ready: utilpointer.Bool(true),
 								},
 								Addresses: []string{"10.0.0.2"},
 							},
@@ -534,7 +534,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						Endpoints: []discovery.Endpoint{
 							{
 								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.BoolPtr(true),
+									Ready: utilpointer.Bool(true),
 								},
 								Addresses: []string{"10.0.0.2"},
 							},
@@ -569,7 +569,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						Endpoints: []discovery.Endpoint{
 							{
 								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.BoolPtr(true),
+									Ready: utilpointer.Bool(true),
 								},
 								Addresses: []string{"2001:db2::2"},
 							},
@@ -605,7 +605,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						Endpoints: []discovery.Endpoint{
 							{
 								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.BoolPtr(true),
+									Ready: utilpointer.Bool(true),
 								},
 								Addresses: []string{"10.0.0.2", "10.1.1.2"},
 							},
@@ -628,7 +628,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						Endpoints: []discovery.Endpoint{
 							{
 								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.BoolPtr(true),
+									Ready: utilpointer.Bool(true),
 								},
 								Addresses: []string{"10.0.0.2", "10.2.2.2"},
 							},
@@ -664,8 +664,8 @@ func Test_getLbEndpoints(t *testing.T) {
 						Endpoints: []discovery.Endpoint{
 							{
 								Conditions: discovery.EndpointConditions{
-									Ready:   utilpointer.BoolPtr(false),
-									Serving: utilpointer.BoolPtr(true),
+									Ready:   utilpointer.Bool(false),
+									Serving: utilpointer.Bool(true),
 								},
 								Addresses: []string{"2001:db2::2"},
 							},
@@ -701,8 +701,8 @@ func Test_getLbEndpoints(t *testing.T) {
 						Endpoints: []discovery.Endpoint{
 							{
 								Conditions: discovery.EndpointConditions{
-									Ready:   utilpointer.BoolPtr(false),
-									Serving: utilpointer.BoolPtr(false),
+									Ready:   utilpointer.Bool(false),
+									Serving: utilpointer.Bool(false),
 								},
 								Addresses: []string{"2001:db2::2"},
 							},
@@ -862,21 +862,21 @@ func getSampleEndpointSlice(service *kapi.Service) *discovery.EndpointSlice {
 }
 
 func setEndpointToReady(endpoint *discovery.Endpoint) {
-	endpoint.Conditions.Ready = utilpointer.BoolPtr(true)
-	endpoint.Conditions.Serving = utilpointer.BoolPtr(true)
-	endpoint.Conditions.Terminating = utilpointer.BoolPtr(false)
+	endpoint.Conditions.Ready = utilpointer.Bool(true)
+	endpoint.Conditions.Serving = utilpointer.Bool(true)
+	endpoint.Conditions.Terminating = utilpointer.Bool(false)
 }
 
 func setEndpointToTerminatingAndServing(endpoint *discovery.Endpoint) {
-	endpoint.Conditions.Ready = utilpointer.BoolPtr(false)
-	endpoint.Conditions.Serving = utilpointer.BoolPtr(true)
-	endpoint.Conditions.Terminating = utilpointer.BoolPtr(true)
+	endpoint.Conditions.Ready = utilpointer.Bool(false)
+	endpoint.Conditions.Serving = utilpointer.Bool(true)
+	endpoint.Conditions.Terminating = utilpointer.Bool(true)
 }
 
 func setEndpointToTerminatingAndNotServing(endpoint *discovery.Endpoint) {
-	endpoint.Conditions.Ready = utilpointer.BoolPtr(false)
-	endpoint.Conditions.Serving = utilpointer.BoolPtr(false)
-	endpoint.Conditions.Terminating = utilpointer.BoolPtr(true)
+	endpoint.Conditions.Ready = utilpointer.Bool(false)
+	endpoint.Conditions.Serving = utilpointer.Bool(false)
+	endpoint.Conditions.Terminating = utilpointer.Bool(true)
 }
 
 func setAllEndpointsToTerminatingAndServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
