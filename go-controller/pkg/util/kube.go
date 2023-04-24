@@ -324,6 +324,12 @@ func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 		kapi.NodeInternalIP, kapi.NodeExternalIP)
 }
 
+// PodNeedsSNAT returns true if the given pod is eligible to setup snat entry
+// in ovn for its egress traffic outside cluster, otherwise returns false.
+func PodNeedsSNAT(pod *kapi.Pod) bool {
+	return PodScheduled(pod) && !PodWantsHostNetwork(pod) && !PodCompleted(pod)
+}
+
 // PodWantsHostNetwork returns if the given pod is hostNetworked or not to determine if networking
 // needs to be setup
 func PodWantsHostNetwork(pod *kapi.Pod) bool {
