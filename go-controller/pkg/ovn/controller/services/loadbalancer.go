@@ -98,8 +98,6 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existing
 	}
 
 	lbs := make([]*nbdb.LoadBalancer, 0, len(LBs))
-	existinglbs := make([]*nbdb.LoadBalancer, 0, len(LBs))
-	newlbs := make([]*nbdb.LoadBalancer, 0, len(LBs))
 	addLBsToSwitch := map[string][]*nbdb.LoadBalancer{}
 	removeLBsFromSwitch := map[string][]*nbdb.LoadBalancer{}
 	addLBsToRouter := map[string][]*nbdb.LoadBalancer{}
@@ -117,13 +115,10 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existing
 		existingGroups := sets.Set[string]{}
 		if existingLB != nil {
 			blb.UUID = existingLB.UUID
-			existinglbs = append(existinglbs, blb)
 			toDelete.Delete(existingLB.UUID)
 			existingRouters = sets.New[string](existingLB.Routers...)
 			existingSwitches = sets.New[string](existingLB.Switches...)
 			existingGroups = sets.New[string](existingLB.Groups...)
-		} else {
-			newlbs = append(newlbs, blb)
 		}
 		wantRouters := sets.New(lb.Routers...)
 		wantSwitches := sets.New(lb.Switches...)
@@ -136,15 +131,9 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existing
 		mapLBDifferenceByKey(removeLBsFromGroups, existingGroups, wantGroups, blb)
 	}
 
-	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, existinglbs...)
+	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, lbs...)
 	if err != nil {
 		return fmt.Errorf("failed to create ops for ensuring update of service %s/%s load balancers: %w",
-			service.Namespace, service.Name, err)
-	}
-
-	ops, err = libovsdbops.CreateLoadBalancersOps(nbClient, ops, newlbs...)
-	if err != nil {
-		return fmt.Errorf("failed to create ops for ensuring creation of service %s/%s load balancers: %w",
 			service.Namespace, service.Name, err)
 	}
 
