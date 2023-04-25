@@ -308,35 +308,6 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 	return nil
 }
 
-// LinkRoutesApply applies routes for given subnets.
-// For each subnet it searches for an existing route by destination(subnet) on link:
-// * if found and gwIP, mtu or src changed the route will be updated
-// * if not found it adds a new route
-func LinkRoutesApply(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int, src net.IP) error {
-	for _, subnet := range subnets {
-		route, err := LinkRouteGetFilteredRoute(filterRouteByDst(link, subnet))
-		if err != nil {
-			return err
-		}
-		if route != nil {
-			if route.MTU != mtu || !src.Equal(route.Src) || !gwIP.Equal(route.Gw) {
-				route.MTU = mtu
-				route.Src = src
-				route.Gw = gwIP
-
-				err = netLinkOps.RouteReplace(route)
-				if err != nil {
-					return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v",
-						subnet.String(), gwIP.String(), mtu, err)
-				}
-			}
-		} else {
-			return LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, mtu, src)
-		}
-	}
-	return nil
-}
-
 // LinkRouteGetFilteredRoute gets a route for the given route filter.
 // returns nil if route is not found
 func LinkRouteGetFilteredRoute(routeFilter *netlink.Route, filterMask uint64) (*netlink.Route, error) {
@@ -569,14 +540,6 @@ func GetIFNameAndMTUForAddress(ifAddress net.IP) (string, int, error) {
 	}
 
 	return "", 0, fmt.Errorf("couldn't not find a link associated with the given OVN Encap IP (%s)", ifAddress)
-}
-
-func filterRouteByDst(link netlink.Link, subnet *net.IPNet) (*netlink.Route, uint64) {
-	return &netlink.Route{
-			Dst:       subnet,
-			LinkIndex: link.Attrs().Index,
-		},
-		netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF
 }
 
 func filterRouteByDstAndGw(link netlink.Link, subnet *net.IPNet, gw net.IP) (*netlink.Route, uint64) {

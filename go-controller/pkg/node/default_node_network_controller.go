@@ -100,6 +100,7 @@ type DefaultNodeNetworkController struct {
 
 	// Node healthcheck server for cloud load balancers
 	healthzServer *proxierHealthUpdater
+	routeManager  *routeManager
 
 	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
 	retryNamespaces *retry.RetryFramework
@@ -117,6 +118,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 			stopChan:                        stopChan,
 			wg:                              wg,
 		},
+		routeManager: newRouteManager(wg, true, 2*time.Minute),
 	}
 }
 
@@ -454,7 +456,7 @@ func handleNetdevResources(resourceName string) (string, error) {
 }
 
 func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter *startupWaiter,
-	subnets []*net.IPNet) ([]managementPortEntry, *managementPortConfig, error) {
+	subnets []*net.IPNet, routeManager *routeManager) ([]managementPortEntry, *managementPortConfig, error) {
 	// If netdevice name is not provided in the full mode then management port backed by OVS internal port.
 	// If it is provided then it is backed by VF or SF and need to determine its representor name to plug
 	// into OVS integrational bridge
@@ -479,7 +481,7 @@ func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter
 	var mgmtPortConfig *managementPortConfig
 	mgmtPorts := make([]managementPortEntry, 0)
 	for _, port := range ports {
-		config, err := port.Create(nodeAnnotator, waiter)
+		config, err := port.Create(routeManager, nodeAnnotator, waiter)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -525,6 +527,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := level.Set("5"); err != nil {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
+	go nc.routeManager.run(ctx.Done())
 
 	if node, err = nc.Kube.GetNode(nc.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
@@ -626,7 +629,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// Setup management ports
-	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(nc.name, nodeAnnotator, waiter, subnets)
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(nc.name, nodeAnnotator, waiter, subnets, nc.routeManager)
 	if err != nil {
 		return err
 	}
@@ -682,7 +685,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				(initialTopoVersion >= types.OvnRoutingViaHostTopoVersion) {
 				// Configure route for svc towards shared gw bridge
 				// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
-				if err := configureSvcRouteViaBridge(bridgeName); err != nil {
+				if err := configureSvcRouteViaBridge(nc.routeManager, bridgeName); err != nil {
 					return err
 				}
 				needLegacySvcRoute = false
@@ -698,17 +701,22 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 						return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
 					}
 					var gwIP net.IP
+					var routes []route
 					for _, subnet := range config.Kubernetes.ServiceCIDRs {
 						if utilnet.IsIPv4CIDR(subnet) {
 							gwIP = mgmtPortConfig.ipv4.gwIP
 						} else {
 							gwIP = mgmtPortConfig.ipv6.gwIP
 						}
-						err := util.LinkRoutesApply(link, gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU, nil)
-						if err != nil {
-							return fmt.Errorf("unable to add legacy route for services via mp0, error: %v", err)
-						}
+						subnet := *subnet
+						routes = append(routes, route{
+							gwIP:   gwIP,
+							subnet: &subnet,
+							mtu:    config.Default.RoutableMTU,
+							srcIP:  nil,
+						})
 					}
+					nc.routeManager.add(routesPerLink{link, routes})
 				}
 			}
 		}
@@ -723,7 +731,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				// migrate service route from ovn-k8s-mp0 to shared gw bridge
 				if (initialTopoVersion < types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
 					(initialTopoVersion < types.OvnRoutingViaHostTopoVersion) {
-					if err := upgradeServiceRoute(bridgeName); err != nil {
+					if err := upgradeServiceRoute(nc.routeManager, bridgeName); err != nil {
 						klog.Fatalf("Failed to upgrade service route for node, error: %v", err)
 					}
 				}
@@ -781,7 +789,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// start management ports health check
 	for _, mgmtPort := range mgmtPorts {
-		mgmtPort.port.CheckManagementPortHealth(mgmtPort.config, nc.stopChan)
+		mgmtPort.port.CheckManagementPortHealth(nc.routeManager, mgmtPort.config, nc.stopChan)
 		// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
 		if err := nc.startEgressIPHealthCheckingServer(mgmtPort); err != nil {
 			return err
@@ -1055,22 +1063,24 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 	return nil
 }
 
-func configureSvcRouteViaBridge(bridge string) error {
-	return configureSvcRouteViaInterface(bridge, DummyNextHopIPs())
+func configureSvcRouteViaBridge(routeManager *routeManager, bridge string) error {
+	return configureSvcRouteViaInterface(routeManager, bridge, DummyNextHopIPs())
 }
 
-func upgradeServiceRoute(bridgeName string) error {
+func upgradeServiceRoute(routeManager *routeManager, bridgeName string) error {
 	klog.Info("Updating K8S Service route")
 	// Flush old routes
 	link, err := util.LinkSetUp(types.K8sMgmtIntfName)
 	if err != nil {
 		return fmt.Errorf("unable to get link: %s, error: %v", types.K8sMgmtIntfName, err)
 	}
-	if err := util.LinkRoutesDel(link, config.Kubernetes.ServiceCIDRs); err != nil {
-		return fmt.Errorf("unable to delete routes on upgrade, error: %v", err)
+	for _, serviceCIDR := range config.Kubernetes.ServiceCIDRs {
+		serviceCIDR := *serviceCIDR
+		routeManager.add(routesPerLink{link, []route{{subnet: &serviceCIDR}}})
 	}
+
 	// add route via OVS bridge
-	if err := configureSvcRouteViaBridge(bridgeName); err != nil {
+	if err := configureSvcRouteViaBridge(routeManager, bridgeName); err != nil {
 		return fmt.Errorf("unable to add svc route via OVS bridge interface, error: %v", err)
 	}
 	klog.Info("Successfully updated Kubernetes service route towards OVS")

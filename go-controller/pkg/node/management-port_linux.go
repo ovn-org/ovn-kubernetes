@@ -174,7 +174,7 @@ func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
 	return tearDownInterfaceIPConfig(mpcfg.link, ipt4, ipt6)
 }
 
-func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managementPortIPFamilyConfig) ([]string, error) {
+func setupManagementPortIPFamilyConfig(routeManager *routeManager, mpcfg *managementPortConfig, cfg *managementPortIPFamilyConfig) ([]string, error) {
 	var warnings []string
 	var err error
 	var exists bool
@@ -190,20 +190,28 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 		return warnings, err
 	}
 
+	var routes []route
 	for _, subnet := range cfg.allSubnets {
-		if exists, err = util.LinkRouteExists(mpcfg.link, cfg.gwIP, subnet); err == nil && !exists {
-			// we need to warn so that it can be debugged as to why routes are disappearing
-			warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
-				subnet, cfg.gwIP, mpcfg.ifName))
-		}
+		exists, err = util.LinkRouteExists(mpcfg.link, cfg.gwIP, subnet)
 		if err != nil {
 			return warnings, err
 		}
-
-		err = util.LinkRoutesApply(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU, nil)
-		if err != nil {
-			return warnings, err
+		if exists {
+			continue
 		}
+		// we need to warn so that it can be debugged as to why routes are disappearing
+		warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
+			subnet, cfg.gwIP, mpcfg.ifName))
+		subnetCopy := *subnet
+		routes = append(routes, route{
+			gwIP:   cfg.gwIP,
+			subnet: &subnetCopy,
+			mtu:    config.Default.RoutableMTU,
+			srcIP:  nil,
+		})
+	}
+	if len(routes) > 0 {
+		routeManager.add(routesPerLink{mpcfg.link, routes})
 	}
 
 	// Add a neighbour entry on the K8s node to map routerIP with routerMAC. This is
@@ -275,16 +283,16 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 	return warnings, nil
 }
 
-func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
+func setupManagementPortConfig(routeManager *routeManager, cfg *managementPortConfig) ([]string, error) {
 	var warnings, allWarnings []string
 	var err error
 
 	if cfg.ipv4 != nil {
-		warnings, err = setupManagementPortIPFamilyConfig(cfg, cfg.ipv4)
+		warnings, err = setupManagementPortIPFamilyConfig(routeManager, cfg, cfg.ipv4)
 		allWarnings = append(allWarnings, warnings...)
 	}
 	if cfg.ipv6 != nil && err == nil {
-		warnings, err = setupManagementPortIPFamilyConfig(cfg, cfg.ipv6)
+		warnings, err = setupManagementPortIPFamilyConfig(routeManager, cfg, cfg.ipv6)
 		allWarnings = append(allWarnings, warnings...)
 	}
 
@@ -294,7 +302,7 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
+func createPlatformManagementPort(routeManager *routeManager, interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
 	var cfg *managementPortConfig
 	var err error
 
@@ -306,7 +314,7 @@ func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNe
 		return nil, err
 	}
 
-	if _, err = setupManagementPortConfig(cfg); err != nil {
+	if _, err = setupManagementPortConfig(routeManager, cfg); err != nil {
 		return nil, err
 	}
 
@@ -476,8 +484,8 @@ func DelMgtPortIptRules() {
 // 1. route entries to cluster CIDR and service CIDR through management port
 // 2. ARP entry for the node subnet's gateway ip
 // 3. IPtables chain and rule for SNATing packets entering the logical topology
-func checkManagementPortHealth(cfg *managementPortConfig) {
-	warnings, err := setupManagementPortConfig(cfg)
+func checkManagementPortHealth(routeManager *routeManager, cfg *managementPortConfig) {
+	warnings, err := setupManagementPortConfig(routeManager, cfg)
 	for _, warning := range warnings {
 		klog.Warningf(warning)
 	}
