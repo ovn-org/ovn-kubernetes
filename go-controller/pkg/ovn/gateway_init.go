@@ -59,9 +59,21 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 	podIPsOnNode := sets.NewString() // collects all podIPs on node
 	for _, pod := range pods.Items {
 		pod := pod
+		if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
+			continue
+		}
+		if util.PodCompleted(&pod) {
+			collidingPod, err := oc.findPodWithIPAddresses([]net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}) //even if a pod is completed we should still delete the nat if the ip is not in use anymore
+			if err != nil {
+				return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
+			}
+			if collidingPod != nil { //if the ip is in use we should not remove the nat
+				continue
+			}
+		}
 		podIPs, err := util.GetPodIPsOfNetwork(&pod, oc.NetInfo)
 		if err != nil {
-			return fmt.Errorf("unable to fetch podIPs for pod %s/%s", pod.Namespace, pod.Name)
+			return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 		for _, podIP := range podIPs {
 			podIPsOnNode.Insert(podIP.String())
@@ -82,7 +94,7 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 	if len(natsToDelete) > 0 {
 		err := libovsdbops.DeleteNATs(oc.nbClient, &gatewayRouter, natsToDelete...)
 		if err != nil {
-			return fmt.Errorf("unable to delete NATs %+v from node %s", natsToDelete, nodeName)
+			return fmt.Errorf("unable to delete NATs %+v from node %s: %w", natsToDelete, nodeName, err)
 		}
 	}
 	return nil
