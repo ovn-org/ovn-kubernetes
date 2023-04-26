@@ -887,7 +887,7 @@ func getOfprotoIPFamilyArgs(protocol string, ip net.IP) (string, string, string)
 func installOvnDetraceDependencies(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, podName, ovnNamespace string) error {
 	dependencies := map[string]string{
 		"ovs":       "if type -p ovn-detrace >/dev/null 2>&1; then echo 'true' ; fi",
-		"pyOpenSSL": "if rpm -qa | egrep -q python3-pyOpenSSL; then echo 'true'; fi",
+		"pyOpenSSL": "if python -c 'import ssl; print(ssl.OPENSSL_VERSION)' > /dev/null; then echo 'true'; fi",
 	}
 	for dependency, dependencyCmd := range dependencies {
 		depVerifyOut, depVerifyErr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", dependencyCmd, "")
