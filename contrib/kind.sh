@@ -94,6 +94,7 @@ usage() {
     echo "                 [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
     echo "                 [-dp |--disable-pkt-mtu-check]"
     echo "                 [-df |--disable-forwarding]"
+    echo "                 [-pl]|--install-cni-plugins ]"
     echo "                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>]"
     echo "                 [-if |--ipfix-targets <targets>]  [-ifs|--ipfix-sampling <num>]"
     echo "                 [-ifm|--ipfix-cache-max-flows <num>] [-ifa|--ipfix-cache-active-timeout <num>]"
@@ -125,6 +126,7 @@ usage() {
     echo "-ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled."
     echo "-dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled"
     echo "-df  | --disable-forwarding         Disable forwarding on OVNK managed interfaces. Default: Disabled"
+    echo "-pl  | --install-cni-plugins ]      Installs additional CNI network plugins. DEFAULT: Disabled"
     echo "-nf  | --netflow-targets            Comma delimited list of ip:port or :port (using node IP) netflow collectors. DEFAULT: Disabled."
     echo "-sf  | --sflow-targets              Comma delimited list of ip:port or :port (using node IP) sflow collectors. DEFAULT: Disabled."
     echo "-if  | --ipfix-targets              Comma delimited list of ip:port or :port (using node IP) ipfix collectors. DEFAULT: Disabled."
@@ -181,6 +183,8 @@ parse_args() {
             -ii | --install-ingress )           KIND_INSTALL_INGRESS=true
                                                 ;;
             -mlb | --install-metallb )          KIND_INSTALL_METALLB=true
+                                                ;;
+            -pl | --install-cni-plugins )       KIND_INSTALL_PLUGINS=true
                                                 ;;
             -ha | --ha-enabled )                OVN_HA=true
                                                 ;;
@@ -340,6 +344,7 @@ print_params() {
      echo "MANIFEST_OUTPUT_DIR = $MANIFEST_OUTPUT_DIR"
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
      echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
+     echo "KIND_INSTALL_PLUGINS = $KIND_INSTALL_PLUGINS"
      echo "OVN_HA = $OVN_HA"
      echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
@@ -481,6 +486,7 @@ set_default_params() {
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
+  KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
   KIND_LOCAL_REGISTRY_NAME=${KIND_LOCAL_REGISTRY_NAME:-kind-registry}
@@ -916,6 +922,21 @@ install_metallb() {
   sleep 30
 }
 
+install_plugins() {
+  git clone https://github.com/containernetworking/plugins.git
+  pushd plugins
+  ./build_linux.sh
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  # Opted for not overwritting the existing plugins
+  for node in $KIND_NODES; do
+    for plugin in bandwidth bridge dhcp dummy firewall host-device ipvlan macvlan sbr static tuning vlan vrf; do
+      $OCI_BIN cp ./bin/$plugin $node:/opt/cni/bin/
+    done
+  done
+  popd
+  rm -rf plugins
+}
+
 destroy_metallb() {
   docker stop lbclient || true # its possible the lbclient doesn't exist which is fine, ignore error
   docker stop frr || true # its possible the lbclient doesn't exist which is fine, ignore error
@@ -1148,4 +1169,7 @@ if [ "${ENABLE_IPSEC}" == true ]; then
 fi
 if [ "$KIND_INSTALL_METALLB" == true ]; then
   install_metallb
+fi
+if [ "$KIND_INSTALL_PLUGINS" == true ]; then
+  install_plugins
 fi
