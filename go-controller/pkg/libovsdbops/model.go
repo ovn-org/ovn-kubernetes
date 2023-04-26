@@ -170,6 +170,7 @@ func copyIndexes(model model.Model) model.Model {
 	case *nbdb.LogicalRouter:
 		return &nbdb.LogicalRouter{
 			UUID: t.UUID,
+			Name: t.Name,
 		}
 	case *nbdb.LogicalRouterPolicy:
 		return &nbdb.LogicalRouterPolicy{
@@ -187,6 +188,7 @@ func copyIndexes(model model.Model) model.Model {
 	case *nbdb.LogicalSwitch:
 		return &nbdb.LogicalSwitch{
 			UUID: t.UUID,
+			Name: t.Name,
 		}
 	case *nbdb.LogicalSwitchPort:
 		return &nbdb.LogicalSwitchPort{

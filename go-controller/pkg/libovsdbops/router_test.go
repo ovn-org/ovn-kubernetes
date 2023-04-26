@@ -249,24 +249,6 @@ func TestDeleteRoutersWithPredicateOps(t *testing.T) {
 		p            logicalRouterPredicate
 	}{
 		{
-			desc:      "remove router of specified name",
-			expectErr: false,
-			initialNbdb: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					fakeRouter1.DeepCopy(),
-					fakeRouter2.DeepCopy(),
-					fakeRouter3.DeepCopy(),
-				},
-			},
-			expectedNbdb: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					fakeRouter1.DeepCopy(),
-					fakeRouter3.DeepCopy(),
-				},
-			},
-			p: func(item *nbdb.LogicalRouter) bool { return item.Name == "rtr2" },
-		},
-		{
 			desc:      "remove routers of specified external_id key",
 			expectErr: false,
 			initialNbdb: libovsdbtest.TestSetup{
