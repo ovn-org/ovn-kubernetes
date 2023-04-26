@@ -1542,20 +1542,20 @@ func newClusterJoinSwitch() *nbdb.LogicalSwitch {
 
 func newClusterPortGroup() *nbdb.PortGroup {
 	return &nbdb.PortGroup{
-		UUID: types.ClusterPortGroupName + "-UUID",
-		Name: types.ClusterPortGroupName,
+		UUID: types.ClusterPortGroupNameBase + "-UUID",
+		Name: types.ClusterPortGroupNameBase,
 		ExternalIDs: map[string]string{
-			"name": types.ClusterPortGroupName,
+			"name": types.ClusterPortGroupNameBase,
 		},
 	}
 }
 
 func newRouterPortGroup() *nbdb.PortGroup {
 	return &nbdb.PortGroup{
-		UUID: types.ClusterRtrPortGroupName + "-UUID",
-		Name: types.ClusterRtrPortGroupName,
+		UUID: types.ClusterRtrPortGroupNameBase + "-UUID",
+		Name: types.ClusterRtrPortGroupNameBase,
 		ExternalIDs: map[string]string{
-			"name": types.ClusterRtrPortGroupName,
+			"name": types.ClusterRtrPortGroupNameBase,
 		},
 	}
 }

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	knet "k8s.io/api/networking/v1"
 	utilnet "k8s.io/utils/net"
@@ -50,6 +50,10 @@ type gressPolicy struct {
 
 	// set to true for stateless network policies (stateless acls), otherwise set to false
 	isNetPolStateless bool
+
+	// supported IP mode
+	ipv4Mode bool
+	ipv6Mode bool
 }
 
 type portPolicy struct {
@@ -79,7 +83,8 @@ func (pp *portPolicy) getL4Match() (string, error) {
 	return foundProtocol, nil
 }
 
-func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string, isNetPolStateless bool) *gressPolicy {
+func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string, isNetPolStateless bool, netConfInfo util.NetConfInfo) *gressPolicy {
+	ipv4Mode, ipv6Mode := netConfInfo.IPMode()
 	return &gressPolicy{
 		controllerName:    controllerName,
 		policyNamespace:   namespace,
@@ -91,6 +96,8 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, contro
 		peerV6AddressSets: &sync.Map{},
 		portPolicies:      make([]*portPolicy, 0),
 		isNetPolStateless: isNetPolStateless,
+		ipv4Mode:          ipv4Mode,
+		ipv6Mode:          ipv6Mode,
 	}
 }
 
@@ -111,10 +118,10 @@ func syncMapToSortedList(m *sync.Map) []string {
 }
 
 func (gp *gressPolicy) addPeerAddressSets(asHashNameV4, asHashNameV6 string) {
-	if config.IPv4Mode && asHashNameV4 != "" {
+	if gp.ipv4Mode && asHashNameV4 != "" {
 		gp.peerV4AddressSets.Store("$"+asHashNameV4, true)
 	}
-	if config.IPv6Mode && asHashNameV6 != "" {
+	if gp.ipv6Mode && asHashNameV6 != "" {
 		gp.peerV6AddressSets.Store("$"+asHashNameV6, true)
 	}
 }
@@ -156,28 +163,28 @@ func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 	//  At this point there will be address sets in one or both of them.
 	//  Contents in both address sets mean dual stack, else one will be empty because we will only populate
 	//  entries for enabled stacks
-	if config.IPv4Mode && len(v4AddressSets) > 0 {
+	if gp.ipv4Mode && len(v4AddressSets) > 0 {
 		v4AddressSetStr := strings.Join(v4AddressSets, ", ")
 		v4Match = fmt.Sprintf("%s.%s == {%s}", "ip4", direction, v4AddressSetStr)
 		match = v4Match
 	}
-	if config.IPv6Mode && len(v6AddressSets) > 0 {
+	if gp.ipv6Mode && len(v6AddressSets) > 0 {
 		v6AddressSetStr := strings.Join(v6AddressSets, ", ")
 		v6Match = fmt.Sprintf("%s.%s == {%s}", "ip6", direction, v6AddressSetStr)
 		match = v6Match
 	}
 	// if at least one match is empty in dualstack mode, the non-empty one will be assigned to match
-	if config.IPv4Mode && config.IPv6Mode && v4Match != "" && v6Match != "" {
+	if gp.ipv4Mode && gp.ipv6Mode && v4Match != "" && v6Match != "" {
 		match = fmt.Sprintf("(%s || %s)", v4Match, v6Match)
 	}
 	return match
 }
 
-func allIPsMatch() string {
+func (gp *gressPolicy) allIPsMatch() string {
 	switch {
-	case config.IPv4Mode && config.IPv6Mode:
+	case gp.ipv4Mode && gp.ipv6Mode:
 		return "(ip4 || ip6)"
-	case config.IPv6Mode:
+	case gp.ipv6Mode:
 		return "ip6"
 	default:
 		return "ip4"
@@ -232,10 +239,10 @@ func (gp *gressPolicy) addNamespaceAddressSet(name string, asf addressset.Addres
 	v4NoUpdate := true
 	v6NoUpdate := true
 	// only update vXNoUpdate if value was stored and not loaded
-	if config.IPv4Mode {
+	if gp.ipv4Mode {
 		_, v4NoUpdate = gp.peerV4AddressSets.LoadOrStore(v4HashName, true)
 	}
-	if config.IPv6Mode {
+	if gp.ipv6Mode {
 		_, v6NoUpdate = gp.peerV6AddressSets.LoadOrStore(v6HashName, true)
 	}
 	if v4NoUpdate && v6NoUpdate {
@@ -257,10 +264,10 @@ func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
 	v4Update := false
 	v6Update := false
 	// only update vXUpdate if value was loaded
-	if config.IPv4Mode {
+	if gp.ipv4Mode {
 		_, v4Update = gp.peerV4AddressSets.LoadAndDelete(v4HashName)
 	}
-	if config.IPv6Mode {
+	if gp.ipv6Mode {
 		_, v6Update = gp.peerV6AddressSets.LoadAndDelete(v6HashName)
 	}
 	if v4Update || v6Update {
@@ -329,7 +336,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 		if gp.hasPeerSelector || gp.isEmpty() {
 			var l3Match, addrSetMatch string
 			if gp.isEmpty() {
-				l3Match = allIPsMatch()
+				l3Match = gp.allIPsMatch()
 			} else {
 				l3Match = gp.getL3MatchFromAddressSet()
 			}

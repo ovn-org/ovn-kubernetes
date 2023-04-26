@@ -91,7 +91,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 
 	aclIDs = getDefaultMcastACLDbIDs(mcastAllowInterNodeID, aclEgress, DefaultNetworkControllerName)
 	aclName = getACLName(aclIDs)
-	egressMatch := getACLMatch(types.ClusterRtrPortGroupName, match, aclEgress)
+	egressMatch := getACLMatch(types.ClusterRtrPortGroupNameBase, match, aclEgress)
 	defaultAllowEgressACL := libovsdbops.BuildACL(
 		aclName,
 		nbdb.ACLDirectionFromLport,
@@ -110,7 +110,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 
 	aclIDs = getDefaultMcastACLDbIDs(mcastAllowInterNodeID, aclIngress, DefaultNetworkControllerName)
 	aclName = getACLName(aclIDs)
-	ingressMatch := getACLMatch(types.ClusterRtrPortGroupName, match, aclIngress)
+	ingressMatch := getACLMatch(types.ClusterRtrPortGroupNameBase, match, aclIngress)
 	defaultAllowIngressACL := libovsdbops.BuildACL(
 		aclName,
 		nbdb.ACLDirectionToLport,
@@ -138,22 +138,22 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 func getMulticastDefaultStaleData(clusterPortGroup, clusterRtrPortGroup *nbdb.PortGroup) []libovsdb.TestData {
 	testData := getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup)
 	defaultDenyIngressACL := testData[0].(*nbdb.ACL)
-	newName := joinACLName(types.ClusterPortGroupName, "DefaultDenyMulticastIngress")
+	newName := joinACLName(types.ClusterPortGroupNameBase, "DefaultDenyMulticastIngress")
 	defaultDenyIngressACL.Name = &newName
 	defaultDenyIngressACL.Options = nil
 
 	defaultDenyEgressACL := testData[1].(*nbdb.ACL)
-	newName1 := joinACLName(types.ClusterPortGroupName, "DefaultDenyMulticastEgress")
+	newName1 := joinACLName(types.ClusterPortGroupNameBase, "DefaultDenyMulticastEgress")
 	defaultDenyEgressACL.Name = &newName1
 	defaultDenyEgressACL.Options = nil
 
 	defaultAllowEgressACL := testData[2].(*nbdb.ACL)
-	newName2 := joinACLName(types.ClusterRtrPortGroupName, "DefaultAllowMulticastEgress")
+	newName2 := joinACLName(types.ClusterRtrPortGroupNameBase, "DefaultAllowMulticastEgress")
 	defaultAllowEgressACL.Name = &newName2
 	defaultAllowEgressACL.Options = nil
 
 	defaultAllowIngressACL := testData[3].(*nbdb.ACL)
-	newName3 := joinACLName(types.ClusterRtrPortGroupName, "DefaultAllowMulticastIngress")
+	newName3 := joinACLName(types.ClusterRtrPortGroupNameBase, "DefaultAllowMulticastIngress")
 	defaultAllowIngressACL.Name = &newName3
 	defaultAllowIngressACL.Options = nil
 
@@ -169,28 +169,29 @@ func getMulticastDefaultStaleData(clusterPortGroup, clusterRtrPortGroup *nbdb.Po
 
 func getDefaultPortGroups() (clusterPortGroup, clusterRtrPortGroup *nbdb.PortGroup) {
 	clusterPortGroup = &nbdb.PortGroup{
-		UUID: types.ClusterPortGroupName + "-UUID",
-		Name: types.ClusterPortGroupName,
+		UUID: types.ClusterPortGroupNameBase + "-UUID",
+		Name: types.ClusterPortGroupNameBase,
 		ExternalIDs: map[string]string{
-			"name": types.ClusterPortGroupName,
+			"name": types.ClusterPortGroupNameBase,
 		},
 	}
 	clusterRtrPortGroup = &nbdb.PortGroup{
-		UUID: types.ClusterRtrPortGroupName + "-UUID",
-		Name: types.ClusterRtrPortGroupName,
+		UUID: types.ClusterRtrPortGroupNameBase + "-UUID",
+		Name: types.ClusterRtrPortGroupNameBase,
 		ExternalIDs: map[string]string{
-			"name": types.ClusterRtrPortGroupName,
+			"name": types.ClusterRtrPortGroupNameBase,
 		},
 	}
 	return
 }
 
 func getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestData {
-	pg_hash := getMulticastPortGroupName(ns)
-	egressMatch := getACLMatch(pg_hash, getMulticastACLEgrMatch(), aclEgress)
+	fakeController := getFakeController(DefaultNetworkControllerName)
+	pg_hash := fakeController.getMulticastPortGroupName(ns)
+	egressMatch := getACLMatch(pg_hash, fakeController.getMulticastACLEgrMatch(), aclEgress)
 
 	ip4AddressSet, ip6AddressSet := getNsAddrSetHashNames(ns)
-	mcastMatch := getACLMatchAF(getMulticastACLIgrMatchV4(ip4AddressSet), getMulticastACLIgrMatchV6(ip6AddressSet))
+	mcastMatch := getACLMatchAF(getMulticastACLIgrMatchV4(ip4AddressSet), getMulticastACLIgrMatchV6(ip6AddressSet), config.IPv4Mode, config.IPv6Mode)
 	ingressMatch := getACLMatch(pg_hash, mcastMatch, aclIngress)
 
 	aclIDs := getNamespaceMcastACLDbIDs(ns, aclEgress, DefaultNetworkControllerName)
@@ -232,7 +233,7 @@ func getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestDa
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	pg := libovsdbops.BuildPortGroup(
+	pg := fakeController.buildPortGroup(
 		hashedPortGroup(ns),
 		ns,
 		lsps,

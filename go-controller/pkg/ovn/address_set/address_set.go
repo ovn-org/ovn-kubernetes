@@ -8,7 +8,6 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -65,13 +64,17 @@ type AddressSet interface {
 
 type ovnAddressSetFactory struct {
 	nbClient libovsdbclient.Client
+	ipv4Mode bool
+	ipv6Mode bool
 }
 
 // NewOvnAddressSetFactory creates a new AddressSetFactory backed by
 // address set objects that execute OVN commands
-func NewOvnAddressSetFactory(nbClient libovsdbclient.Client) AddressSetFactory {
+func NewOvnAddressSetFactory(nbClient libovsdbclient.Client, ipv4Mode, ipv6Mode bool) AddressSetFactory {
 	return &ovnAddressSetFactory{
 		nbClient: nbClient,
+		ipv4Mode: ipv4Mode,
+		ipv6Mode: ipv6Mode,
 	}
 }
 
@@ -204,13 +207,13 @@ func (asf *ovnAddressSetFactory) ensureOvnAddressSets(ips []net.IP, dbIDs *libov
 		v4IPs, v6IPs = splitIPsByFamily(ips)
 	}
 
-	if config.IPv4Mode {
+	if asf.ipv4Mode {
 		v4set, err = asf.ensureOvnAddressSet(v4IPs, dbIDs, ipv4InternalID, updateAS)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if config.IPv6Mode {
+	if asf.ipv6Mode {
 		v6set, err = asf.ensureOvnAddressSet(v6IPs, dbIDs, ipv6InternalID, updateAS)
 		if err != nil {
 			return nil, err

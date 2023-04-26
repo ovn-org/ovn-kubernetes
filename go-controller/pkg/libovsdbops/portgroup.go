@@ -22,10 +22,10 @@ func FindPortGroupsWithPredicate(nbClient libovsdbclient.Client, p portGroupPred
 }
 
 // BuildPortGroup builds a port group referencing the provided ports and ACLs
-func BuildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL) *nbdb.PortGroup {
+func BuildPortGroup(hashName string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL, externalIds map[string]string) *nbdb.PortGroup {
 	pg := nbdb.PortGroup{
 		Name:        hashName,
-		ExternalIDs: map[string]string{"name": name},
+		ExternalIDs: externalIds,
 	}
 
 	if len(acls) > 0 {
@@ -258,4 +258,19 @@ func DeletePortGroups(nbClient libovsdbclient.Client, names ...string) error {
 
 	_, err = TransactAndCheck(nbClient, ops)
 	return err
+}
+
+// DeletePortGroupsWithPredicateOps returns the corresponding ops to delete port groups based on
+// a given predicate
+func DeletePortGroupsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, p portGroupPredicate) ([]libovsdb.Operation, error) {
+	deleted := []*nbdb.PortGroup{}
+	opModel := operationModel{
+		ModelPredicate: p,
+		ExistingResult: &deleted,
+		ErrNotFound:    false,
+		BulkOp:         true,
+	}
+
+	m := newModelClient(nbClient)
+	return m.DeleteOps(ops, opModel)
 }
