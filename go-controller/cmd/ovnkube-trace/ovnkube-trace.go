@@ -890,24 +890,41 @@ func installOvnDetraceDependencies(coreclient *corev1client.CoreV1Client, restco
 		"pyOpenSSL": "if python -c 'import ssl; print(ssl.OPENSSL_VERSION)' > /dev/null; then echo 'true'; fi",
 	}
 	for dependency, dependencyCmd := range dependencies {
-		depVerifyOut, depVerifyErr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", dependencyCmd, "")
+		verifyOut, _, err := verifyDependency(coreclient, restconfig, podName, ovnNamespace, dependency, dependencyCmd)
 		if err != nil {
-			return fmt.Errorf("dependency verification error in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s",
-				podName, "ovnkube-node", err, depVerifyOut, depVerifyErr)
+			return err
 		}
-		trueFalse := strings.TrimSuffix(depVerifyOut, "\n")
-		klog.V(10).Infof("Dependency check '%s' in pod '%s', container '%s' yielded '%s'", dependencyCmd, podName, "ovnkube-node", trueFalse)
-		if trueFalse != "true" {
+		if verifyOut != "true" {
+			verifyOut, verifyErr, err := verifyDependency(coreclient, restconfig, podName, ovnNamespace, "pip3", "if type -p pip3 >/dev/null 2>&1; then echo 'true' ; fi")
+			if err != nil {
+				return err
+			}
+			if verifyOut != "true" {
+				return fmt.Errorf("ovn-detrace error while verifying dependency pip3 in pod %s, container %s. stdOut: '%s'\n stdErr: %s", podName,
+					"ovnkube-node", verifyOut, verifyErr)
+			}
 			installCmd := "pip3 install " + dependency
 			depInstallOut, depInstallErr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", installCmd, "")
 			if err != nil {
-				return fmt.Errorf("ovn-detrace error in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s",
-					podName, "ovnkube-node", err, depInstallOut, depInstallErr)
+				return fmt.Errorf("ovn-detrace error while installing dependency %s in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s",
+					dependency, podName, "ovnkube-node", err, depInstallOut, depInstallErr)
+
 			}
 			klog.V(1).Infof("Install ovn-detrace dependencies output: %s\n", depInstallOut)
 		}
 	}
 	return nil
+}
+
+func verifyDependency(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, podName, ovnNamespace, dependency, depCheckCommand string) (string, string, error) {
+	depVerifyOut, depVerifyErr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", depCheckCommand, "")
+	if err != nil {
+		return "", "", fmt.Errorf("ovn-detrace error while verifying dependency %s in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s",
+			dependency, podName, "ovnkube-node", err, depVerifyOut, depVerifyErr)
+	}
+	trueFalse := strings.TrimSuffix(depVerifyOut, "\n")
+	klog.V(10).Infof("Dependency %s check '%s' in pod '%s', container '%s' yielded '%s'", dependency, depCheckCommand, podName, "ovnkube-node", trueFalse)
+	return trueFalse, depVerifyErr, nil
 }
 
 // runOvnDetrace runs an ovn-detrace command for the given input.
