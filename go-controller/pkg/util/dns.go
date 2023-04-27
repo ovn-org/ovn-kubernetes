@@ -155,6 +155,20 @@ func (d *DNS) getIPsAndMinTTL(domain string) ([]net.IP, time.Duration, error) {
 				klog.Warningf("Failed to query nameserver: %s with address: %s for domain: %s, err: %v", server, dialServer, domain, err)
 				continue
 			}
+			if in.Truncated {
+				// if it was fall back on TCP
+				c.Net = "tcp"
+				// ensure that the old message is overwritten
+				msg = new(dns.Msg)
+				dnsOps.SetQuestion(msg, dnsOps.Fqdn(domain), recordType)
+				in_TCP, _, err := dnsOps.Exchange(c, msg, dialServer)
+				if err != nil {
+					klog.Warning("Failed to fall back to TCP to get untruncated DNS results: for domain %s, err: %v", domain, err)
+				} else {
+					in = in_TCP
+
+				}
+			}
 			if in != nil && in.Rcode != dns.RcodeSuccess {
 				klog.Warningf("Failed to get a valid answer: %v from nameserver: %s for domain: %s", in.Rcode, server, domain)
 				continue
