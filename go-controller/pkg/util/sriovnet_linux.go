@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/Mellanox/sriovnet"
 	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
+	"github.com/k8snetworkplumbingwg/sriovnet"
 )
 
 type SriovnetOps interface {

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/Mellanox/sriovnet"
+	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"

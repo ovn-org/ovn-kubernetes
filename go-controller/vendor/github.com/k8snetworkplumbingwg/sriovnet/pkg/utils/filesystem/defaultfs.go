@@ -1,7 +1,7 @@
 package filesystem
 
 import (
-	"io/ioutil"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -61,26 +61,39 @@ func (DefaultFs) Symlink(oldname, newname string) error {
 
 // ReadFile via ioutil.ReadFile
 func (DefaultFs) ReadFile(filename string) ([]byte, error) {
-	return ioutil.ReadFile(filename)
+	return os.ReadFile(filename)
 }
 
 // TempDir via ioutil.TempDir
 func (DefaultFs) TempDir(dir, prefix string) (string, error) {
-	return ioutil.TempDir(dir, prefix)
+	return os.MkdirTemp(dir, prefix)
 }
 
 // TempFile via ioutil.TempFile
 func (DefaultFs) TempFile(dir, prefix string) (File, error) {
-	file, err := ioutil.TempFile(dir, prefix)
+	file, err := os.CreateTemp(dir, prefix)
 	if err != nil {
 		return nil, err
 	}
 	return &defaultFile{file}, nil
 }
 
-// ReadDir via ioutil.ReadDir
+// ReadDir via os.ReadDir
 func (DefaultFs) ReadDir(dirname string) ([]os.FileInfo, error) {
-	return ioutil.ReadDir(dirname)
+	entries, err := os.ReadDir(dirname)
+	if err != nil {
+		return nil, err
+	}
+
+	infos := make([]fs.FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
 }
 
 // Walk via filepath.Walk
@@ -90,7 +103,7 @@ func (DefaultFs) Walk(root string, walkFn filepath.WalkFunc) error {
 
 // WriteFile via ioutil.Writefile
 func (DefaultFs) WriteFile(filename string, data []byte, perm os.FileMode) error {
-	return ioutil.WriteFile(filename, data, perm)
+	return os.WriteFile(filename, data, perm)
 }
 
 // defaultFile implements File using same-named functions from "os"
