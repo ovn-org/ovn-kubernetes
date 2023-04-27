@@ -114,7 +114,7 @@ func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) error {
 		for _, ep := range epSlice.Endpoints {
 			for _, ip := range ep.Addresses {
 				ipStr := utilnet.ParseIPSloppy(ip).String()
-				if !isHostEndpoint(ipStr) {
+				if !util.IsHostEndpoint(ipStr) {
 					epsToInsert.Insert(ipStr)
 				}
 			}
