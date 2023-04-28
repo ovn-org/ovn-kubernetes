@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
 	"sync"
 	"time"
@@ -23,8 +24,10 @@ import (
 	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -96,8 +99,6 @@ type DefaultNetworkController struct {
 
 	egressFirewallDNS *EgressDNS
 
-	joinSwIPManager *lsm.JoinSwitchIPManager
-
 	// retry framework for egress firewall
 	retryEgressFirewalls *retry.RetryFramework
 
@@ -120,6 +121,7 @@ type DefaultNetworkController struct {
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
 	hybridOverlayFailed         sync.Map
+	syncZoneICFailed            sync.Map
 
 	// retry framework for Cloud private IP config
 	retryCloudPrivateIPConfig *retry.RetryFramework
@@ -127,6 +129,18 @@ type DefaultNetworkController struct {
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
 	allInitialPodsProcessed uint32
+
+	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
+	// connecting to the join switch
+	ovnClusterLRPToJoinIfAddrs []*net.IPNet
+
+	// zoneICHandler creates the interconnect resources for local nodes and remote nodes.
+	// Interconnect resources are Transit switch and logical ports connecting this transit switch
+	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
+	zoneICHandler *zoneic.ZoneInterconnectHandler
+	// zoneChassisHandler handles the local node and remote nodes in creating or updating the chassis entries in the OVN Southbound DB.
+	// Please see zone_interconnect/chassis_handler.go for more details.
+	zoneChassisHandler *zoneic.ZoneChassisHandler
 }
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
@@ -153,6 +167,14 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new egress service controller while creating new default network controller: %w", err)
 	}
+
+	var zoneICHandler *zoneic.ZoneInterconnectHandler
+	var zoneChassisHandler *zoneic.ZoneChassisHandler
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		zoneICHandler = zoneic.NewZoneInterconnectHandler(&util.DefaultNetInfo{}, cnci.nbClient, cnci.sbClient)
+		zoneChassisHandler = zoneic.NewZoneChassisHandler(cnci.sbClient)
+	}
+
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
@@ -169,6 +191,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
 			stopChan:                    defaultStopChan,
 			wg:                          defaultWg,
+			localZoneNodes:              &sync.Map{},
 		},
 		externalGWCache: make(map[ktypes.NamespacedName]*externalRouteInfo),
 		exGWCacheMutex:  sync.RWMutex{},
@@ -189,11 +212,21 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		clusterLoadBalancerGroupUUID: "",
 		switchLoadBalancerGroupUUID:  "",
 		routerLoadBalancerGroupUUID:  "",
-		joinSwIPManager:              nil,
 		svcController:                svcController,
 		svcFactory:                   svcFactory,
 		egressSvcController:          egressSvcController,
+		zoneICHandler:                zoneICHandler,
+		zoneChassisHandler:           zoneChassisHandler,
 	}
+
+	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
+	// allocate the first IPs in the join switch subnets.
+	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
+	}
+
+	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
 
 	oc.initRetryFramework()
 	return oc, nil
@@ -675,27 +708,35 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
-		var nodeParams *nodeSyncs
-		if fromRetryLoop {
-			_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
-			_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
-			_, mgmtSync := h.oc.mgmtPortFailed.Load(node.Name)
-			_, gwSync := h.oc.gatewaysFailed.Load(node.Name)
-			_, hoSync := h.oc.hybridOverlayFailed.Load(node.Name)
-			nodeParams = &nodeSyncs{
-				nodeSync,
-				clusterRtrSync,
-				mgmtSync,
-				gwSync,
-				hoSync}
-		} else {
-			nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled}
-		}
+		if h.oc.isLocalZoneNode(node) {
+			var nodeParams *nodeSyncs
+			if fromRetryLoop {
+				_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
+				_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
+				_, mgmtSync := h.oc.mgmtPortFailed.Load(node.Name)
+				_, gwSync := h.oc.gatewaysFailed.Load(node.Name)
+				_, hoSync := h.oc.hybridOverlayFailed.Load(node.Name)
+				_, zoneICSync := h.oc.syncZoneICFailed.Load(node.Name)
+				nodeParams = &nodeSyncs{
+					nodeSync,
+					clusterRtrSync,
+					mgmtSync,
+					gwSync,
+					hoSync,
+					zoneICSync}
+			} else {
+				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect}
+			}
 
-		if err = h.oc.addUpdateNodeEvent(node, nodeParams); err != nil {
-			klog.Infof("Node add failed for %s, will try again later: %v",
-				node.Name, err)
-			return err
+			if err = h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
+				klog.Infof("Node add failed for %s, will try again later: %v",
+					node.Name, err)
+				return err
+			}
+		} else {
+			if err = h.oc.addUpdateRemoteNodeEvent(node, config.OVNKubernetesFeature.EnableInterconnect); err != nil {
+				return err
+			}
 		}
 
 	case factory.EgressFirewallType:
@@ -796,19 +837,62 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
-		// determine what actually changed in this update
-		_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
-		_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-		clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
-		_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
-		mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
-		_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
-		gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode) ||
-			nodeGatewayMTUSupportChanged(oldNode, newNode))
-		_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
 
-		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync, hoSync})
+		// +--------------------+-------------------+-------------------------------------------------+
+		// |    oldNode         |      newNode      |       Action                                    |
+		// |--------------------+-------------------+-------------------------------------------------+
+		// |                    |                   |     Node is remote.                             |
+		// |    local           |      remote       |     Call addUpdateRemoteNodeEvent()             |
+		// |                    |                   |                                                 |
+		// |--------------------+-------------------+-------------------------------------------------+
+		// |                    |                   |     Node is local                               |
+		// |    local           |      local        |     Call addUpdateLocalNodeEvent()              |
+		// |                    |                   |                                                 |
+		// |--------------------+-------------------+-------------------------------------------------+
+		// |                    |                   |     Node is local                               |
+		// |    remote          |      local        |     Call addUpdateLocalNodeEvent(full sync)     |
+		// |                    |                   |                                                 |
+		// |--------------------+-------------------+-------------------------------------------------+
+		// |                    |                   |     Node is remote                              |
+		// |    remote          |      remote       |     Call addUpdateRemoteNodeEvent()             |
+		// |                    |                   |                                                 |
+		// |--------------------+-------------------+-------------------------------------------------+
+		if h.oc.isLocalZoneNode(newNode) {
+			var nodeSyncsParam *nodeSyncs
+			if h.oc.isLocalZoneNode(oldNode) {
+				// determine what actually changed in this update
+				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
+				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
+				mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
+				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
+					nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode) ||
+					nodeGatewayMTUSupportChanged(oldNode, newNode))
+				_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
+				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
+				nodeSyncsParam = &nodeSyncs{
+					nodeSync,
+					clusterRtrSync,
+					mgmtSync,
+					gwSync,
+					hoSync,
+					syncZoneIC}
+			} else {
+				klog.Infof("Node %s moved from the remote zone %s to local zone.",
+					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
+				// The node is now a local zone node.  Trigger a full node sync.
+				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect}
+			}
+
+			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
+		} else {
+			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
+			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode)
+			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
+		}
 
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
@@ -931,7 +1015,6 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		if cachedObj != nil {
 			portInfo = cachedObj.(*lpInfo)
 		}
-		h.oc.logicalPortCache.remove(pod, ovntypes.DefaultNetworkName)
 		return h.oc.removePod(pod, portInfo)
 
 	case factory.PolicyType:

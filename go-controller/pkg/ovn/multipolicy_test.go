@@ -324,6 +324,11 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 			&v1.PodList{
 				Items: podsList,
 			},
+			&v1.NodeList{
+				Items: []v1.Node{
+					*newNode("node1", "192.168.126.202/24"),
+				},
+			},
 			&knet.NetworkPolicyList{
 				Items: networkPolicies,
 			},

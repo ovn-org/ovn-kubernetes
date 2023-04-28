@@ -290,6 +290,9 @@ func setupOVNNode(node *kapi.Node) error {
 		fmt.Sprintf("other_config:bundle-idle-timeout=%d",
 			config.Default.OpenFlowProbe),
 		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
+		// If Interconnect feature is enabled, we want to tell ovn-controller to
+		// make this node/chassis as an interconnect gateway.
+		fmt.Sprintf("external_ids:ovn-is-interconn=%s", strconv.FormatBool(config.OVNKubernetesFeature.EnableInterconnect)),
 		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
 		fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
 		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
@@ -491,6 +494,21 @@ func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter
 	return mgmtPorts, mgmtPortConfig, nil
 }
 
+// getOVNSBZone returns the zone name stored in the Southbound db.
+// It returns the default zone name if "options:name" is not set in the SB_Global row
+func getOVNSBZone() (string, error) {
+	dbZone, stderr, err := util.RunOVNSbctl("get", "SB_Global", ".", "options:name")
+	if err != nil {
+		if strings.Contains(stderr, "ovn-sbctl: no key \"name\" in SB_Global record") {
+			// If the options:name is not present, assume default zone
+			return types.OvnDefaultZone, nil
+		}
+		return "", err
+	}
+
+	return dbZone, nil
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
@@ -519,6 +537,25 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	nodeAddr := net.ParseIP(nodeAddrStr)
 	if nodeAddr == nil {
 		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
+	}
+
+	// Make sure that the node zone matches with the Southbound db zone.
+	// Wait for 300s before giving up
+	var sbZone string
+	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+		sbZone, err = getOVNSBZone()
+		if err != nil {
+			return false, fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+		}
+
+		if config.Default.Zone != sbZone {
+			return false, fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err : %w", config.Default.Zone, err)
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
@@ -607,8 +644,12 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
+	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
+		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
+	}
+
 	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("failed to set node %s annotations: %v", nc.name, err)
+		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
 	}
 
 	// Wait for management port and gateway resources to be created by the master

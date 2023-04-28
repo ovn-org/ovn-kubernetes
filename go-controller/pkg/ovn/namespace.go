@@ -7,6 +7,7 @@ import (
 
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -72,6 +73,18 @@ func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNe
 	}
 
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
+}
+
+func (oc *DefaultNetworkController) addRemotePodToNamespace(ns string, ips []*net.IPNet) error {
+	_, _, ops, err := oc.addPodToNamespace(ns, ips)
+
+	if err == nil {
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+		if err != nil {
+			return fmt.Errorf("could not add pod IPs to the namespace address set - %+v", err)
+		}
+	}
+	return err
 }
 
 func createIPAddressSlice(ips []*net.IPNet) []net.IP {
@@ -155,6 +168,10 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 					errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 				}
 				for _, pod := range existingPods {
+					if !oc.isPodScheduledinLocalZone(pod) {
+						continue
+					}
+
 					logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 					if util.PodWantsHostNetwork(pod) {
 						continue
@@ -199,6 +216,9 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 				errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 			}
 			for _, pod := range existingPods {
+				if !oc.isPodScheduledinLocalZone(pod) {
+					continue
+				}
 				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
 				if err != nil {
 					errors = append(errors, err)
@@ -290,7 +310,7 @@ func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 			}
 			// for shared gateway mode we will use LRP IPs to SNAT host network traffic
 			// so add these to the address set.
-			lrpIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
+			lrpIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
 			if err != nil {
 				klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
 			}

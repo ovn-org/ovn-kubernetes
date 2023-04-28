@@ -665,6 +665,11 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			&v1.NamespaceList{
 				Items: namespaces,
 			},
+			&v1.NodeList{
+				Items: []v1.Node{
+					*newNode(nodeName, "192.168.126.202/24"),
+				},
+			},
 			&v1.PodList{
 				Items: podsList,
 			},

@@ -31,6 +31,11 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		if !ok {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
+
+		if !oc.isPodScheduledinLocalZone(pod) {
+			continue
+		}
+
 		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 		if err != nil {
 			continue
@@ -71,7 +76,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		// allocate all previously annoted hybridOverlay Distributed Router IP addresses. Allocation needs to happen here
 		// before a Pod Add event can be processed and be allocated a previously assigned hybridOverlay Distributed Router IP address.
 		// we do not support manually setting the hybrid overlay DRIP address
-		nodes, err := oc.watchFactory.GetNodes()
+		nodes, err := oc.GetLocalZoneNodes()
 		if err != nil {
 			return fmt.Errorf("failed to get nodes: %v", err)
 		}
@@ -98,9 +103,6 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 		return fmt.Errorf("unable to delete external gateway routes for pod %s: %w", podDesc, err)
 	}
 	if pod.Spec.HostNetwork {
-		return nil
-	}
-	if !util.PodScheduled(pod) {
 		return nil
 	}
 

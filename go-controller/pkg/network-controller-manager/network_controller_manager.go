@@ -20,6 +20,7 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -70,8 +71,14 @@ func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
 	case ovntypes.Layer3Topology:
 		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, netConfInfo, nil), nil
 	case ovntypes.Layer2Topology:
+		if config.OVNKubernetesFeature.EnableInterconnect {
+			return nil, fmt.Errorf("topology type %s not supported when Interconnect feature is enabled", topoType)
+		}
 		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, netConfInfo, nil), nil
 	case ovntypes.LocalnetTopology:
+		if config.OVNKubernetesFeature.EnableInterconnect {
+			return nil, fmt.Errorf("topology type %s not supported when Interconnect feature is enabled", topoType)
+		}
 		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, netConfInfo, nil), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
@@ -327,9 +334,29 @@ func (cm *networkControllerManager) initDefaultNetworkController() error {
 // Start the network controller manager
 func (cm *networkControllerManager) Start(ctx context.Context) error {
 	klog.Info("Starting the network controller manager")
+
+	// Make sure that the NCM zone matches with the Noruthbound db zone.
+	// Wait for 300s before giving up
+	var zone string
+	err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+		zone, err := util.GetNBZone(cm.nbClient)
+		if err != nil {
+			return false, fmt.Errorf("error getting the zone name from the OVN Northbound db : %w", err)
+		}
+
+		if config.Default.Zone != zone {
+			return false, fmt.Errorf("network controller manager zone %s mismatch with the Northbound db zone %s", config.Default.Zone, zone)
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to start default network controller - OVN Nortboubd db zone %s doesn't match with the configured zone %s : err - %w", zone, config.Default.Zone, err)
+	}
+
 	cm.configureMetrics(cm.stopChan)
 
-	err := cm.configureSCTPSupport()
+	err = cm.configureSCTPSupport()
 	if err != nil {
 		return err
 	}

@@ -113,6 +113,8 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 			client.WithTable(&sbdb.MACBinding{}),
 			// used by node sync
 			client.WithTable(&sbdb.Chassis{}),
+			// used by zone interconnect
+			client.WithTable(&sbdb.Encap{}),
 			// used by node sync, only interested in names
 			client.WithTable(&chassisPrivate, &chassisPrivate.Name),
 			// used by node sync, only interested in Chassis reference

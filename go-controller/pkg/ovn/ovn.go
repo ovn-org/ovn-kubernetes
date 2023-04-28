@@ -126,6 +126,17 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 	if !util.PodScheduled(pod) {
 		return nil
 	}
+
+	if oc.isPodScheduledinLocalZone(pod) {
+		return oc.ensureLocalZonePod(oldPod, pod, addPort)
+	}
+
+	return oc.ensureRemoteZonePod(oldPod, pod, addPort)
+}
+
+// ensureLocalZonePod tries to set up a local zone pod. It returns nil on success and error on failure; failure
+// indicates the pod set up should be retried later.
+func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -163,9 +174,60 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 	return nil
 }
 
+// ensureRemoteZonePod tries to set up remote zone pod bits required to interconnect it.
+//   - Adds the remote pod ips to the pod namespace address set for network policy and egress gw
+//
+// It returns nil on success and error on failure; failur indicates the pod set up should be retried later.
+func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
+	if len(pod.Status.PodIPs) < 1 {
+		return nil
+	}
+	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+	if err != nil {
+		return fmt.Errorf("failed to get pod ips for the pod  %s/%s : %w", pod.Namespace, pod.Name, err)
+	}
+
+	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
+		if err := oc.addRemotePodToNamespace(pod.Namespace, podIfAddrs); err != nil {
+			return fmt.Errorf("failed to add remote pod %s/%s to namespace: %w", pod.Namespace, pod.Name, err)
+		}
+	}
+
+	//FIXME: Update comments & reduce code duplication.
+	// check if this remote pod is serving as an external GW.
+	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+		// Delete the routes in the namespace associated with this remote oldPod if its acting as an external GW
+		if err := oc.deletePodExternalGW(oldPod); err != nil {
+			return fmt.Errorf("deletePodExternalGW failed for remote pod %s/%s: %w", oldPod.Namespace, oldPod.Name, err)
+		}
+	}
+
+	// either pod is host-networked or its an update for a normal pod (addPort=false case)
+	if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
+		// check if this remote pod is serving as an external GW. If so add the routes in the namespace
+		// associated with this remote pod
+		if err := oc.addPodExternalGW(pod); err != nil {
+			return fmt.Errorf("addPodExternalGW failed for remote pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
+	}
+	return nil
+}
+
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
+	if oc.isPodScheduledinLocalZone(pod) {
+		return oc.removeLocalZonePod(pod, portInfo)
+	}
+
+	return oc.removeRemoteZonePod(pod)
+}
+
+// removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;
+// failure indicates the pod tear down should be retried later.
+func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *lpInfo) error {
+	oc.logicalPortCache.remove(pod, ovntypes.DefaultNetworkName)
+
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -184,6 +246,26 @@ func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) e
 		return fmt.Errorf("deleteLogicalPort failed for pod %s: %w",
 			getPodNamespacedName(pod), err)
 	}
+	return nil
+}
+
+// removeRemoteZonePod tries to tear down a remote zone pod bits. It returns nil on success and error on failure;
+// failure indicates the pod tear down should be retried later.
+// It removes the remote pod ips from the namespace address set and if its an external gw pod, removes
+// its routes.
+func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
+	if err := oc.removeRemoteZonePodFromNamespaceAddressSet(pod); err != nil {
+		return fmt.Errorf("failed to remove the remote zone pod : %w", err)
+	}
+
+	if util.PodWantsHostNetwork(pod) {
+		// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
+		if err := oc.deletePodExternalGW(pod); err != nil {
+			return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
+				getPodNamespacedName(pod), err)
+		}
+	}
+
 	return nil
 }
 
@@ -250,9 +332,6 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
 		if err := oc.gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
-		}
-		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {
-			return err
 		}
 	} else if hostSubnets != nil {
 		var hostAddrs sets.Set[string]

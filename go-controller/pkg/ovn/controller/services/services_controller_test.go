@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -9,10 +10,12 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -50,6 +53,17 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 
 	recorder := record.NewFakeRecorder(10)
 
+	nbZoneFailed := false
+	// Try to get the NBZone.  If there is an error, create NB_Global record.
+	// Otherwise NewController() will return error since it
+	// calls util.GetNBZone().
+	_, err = util.GetNBZone(nbClient)
+	if err != nil {
+		nbZoneFailed = true
+		err = createTestNBGlobal(nbClient, "global")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+
 	controller, err := NewController(client,
 		nbClient,
 		informerFactory.Core().V1().Services(),
@@ -59,11 +73,19 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 	)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
+	if nbZoneFailed {
+		// Delete the NBGlobal row as this function created it.  Otherwise many tests would fail while
+		// checking the expectedData in the NBDB.
+		err = deleteTestNBGlobal(nbClient, "global")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+
 	controller.servicesSynced = alwaysReady
 	controller.endpointSlicesSynced = alwaysReady
 	controller.initTopLevelCache()
 	controller.useLBGroups = true
 	controller.useTemplates = true
+
 	return &serviceController{
 		controller,
 		informerFactory.Core().V1().Services().Informer().GetStore(),
@@ -470,7 +492,7 @@ func TestSyncServices(t *testing.T) {
 			controller.serviceStore.Add(tt.service)
 
 			controller.nodeTracker.nodes = defaultNodes
-			controller.RequestFullSync(controller.nodeTracker.allNodes())
+			controller.RequestFullSync(controller.nodeTracker.getZoneNodes())
 
 			err = controller.syncService(ns + "/" + serviceName)
 			if err != nil {
@@ -685,6 +707,7 @@ func nodeConfig(nodeName string, nodeIP string) *nodeInfo {
 		gatewayRouterName:  nodeGWRouterName(nodeName),
 		switchName:         nodeSwitchName(nodeName),
 		chassisID:          nodeName,
+		zone:               types.OvnDefaultZone,
 	}
 }
 
@@ -694,4 +717,37 @@ func temporarilyEnableGomegaMaxLengthFormat() {
 
 func restoreGomegaMaxLengthFormat(originalLength int) {
 	format.MaxLength = originalLength
+}
+
+func createTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
+	nbGlobal := &nbdb.NBGlobal{Name: zone}
+	ops, err := nbClient.Create(nbGlobal)
+	if err != nil {
+		return err
+	}
+
+	_, err = nbClient.Transact(context.Background(), ops...)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func deleteTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
+	p := func(nbGlobal *nbdb.NBGlobal) bool {
+		return true
+	}
+
+	ops, err := nbClient.WhereCache(p).Delete()
+	if err != nil {
+		return err
+	}
+
+	_, err = nbClient.Transact(context.Background(), ops...)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

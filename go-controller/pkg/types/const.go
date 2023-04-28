@@ -55,6 +55,10 @@ const (
 	// Local Bridge used for localnet topology network access
 	LocalNetBridgeName = "br-localnet"
 
+	TransitSwitch               = "transit_switch"
+	TransitSwitchToRouterPrefix = "tstor-"
+	RouterToTransitSwitchPrefix = "rtots-"
+
 	// ACL Priorities
 
 	// Default routed multicast allow acl rule priority
@@ -185,4 +189,6 @@ const (
 	// db index keys
 	// PrimaryIDKey is used as a primary client index
 	PrimaryIDKey = OvnK8sPrefix + "/id"
+
+	OvnDefaultZone = "global"
 )
