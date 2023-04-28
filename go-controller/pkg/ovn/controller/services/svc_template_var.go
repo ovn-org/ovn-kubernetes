@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -29,12 +30,6 @@ type Template struct {
 
 type TemplateMap map[string]*Template
 type ChassisTemplateVarMap map[string]*nbdb.ChassisTemplateVar
-
-// len returns the number of chasis on which this Template variable is
-// instantiated (has a value).
-func (t *Template) len() int {
-	return len(t.Value)
-}
 
 // toReferenceString returns the textual representation of a template
 // reference, that is, '^<template-name>'.
@@ -179,16 +174,16 @@ func svcCreateOrUpdateTemplateVar(nbClient libovsdbclient.Client, templateVars [
 	return err
 }
 
-// makeLBNodeIPTemplateName creates a template name for the node IP (per family)
-func makeLBNodeIPTemplateName(family corev1.IPFamily) string {
-	return fmt.Sprintf("%s_%v", LBVipNodeTemplate, family)
+// makeLBNodeIPTemplateNamePrefix creates a template name prefix for the node IP (per family)
+func makeLBNodeIPTemplateNamePrefix(family corev1.IPFamily) string {
+	return fmt.Sprintf("%s_%v_", LBVipNodeTemplate, family)
 }
 
-// isLBNodeIPTemplateName returns true if 'name' is the node IP template name
-// for any IP family.
+// isLBNodeIPTemplateName returns true if 'name' is a node IP template name
+// for any IP family (i.e. in the form NODEIP_IPv4_X).
 func isLBNodeIPTemplateName(name string) bool {
-	return name == makeLBNodeIPTemplateName(corev1.IPv4Protocol) ||
-		name == makeLBNodeIPTemplateName(corev1.IPv6Protocol)
+	return strings.HasPrefix(name, makeLBNodeIPTemplateNamePrefix(corev1.IPv4Protocol)) ||
+		strings.HasPrefix(name, makeLBNodeIPTemplateNamePrefix(corev1.IPv6Protocol))
 }
 
 // makeLBTargetTemplateName builds a load balancer target template name.
@@ -214,4 +209,59 @@ func getTemplatesFromRulesTargets(rules []LBRule) TemplateMap {
 		// node-tracker.
 	}
 	return templates
+}
+
+// NodeIPTemplates maintains templates variables for many IP addresses per node,
+// creating them in the form NODEIP_IPv4_0, NODEIP_IPv4_1, NODEIP_IPv4_2, ...
+// if and when they are needed.
+type NodeIPsTemplates struct {
+	ipFamily  corev1.IPFamily
+	templates []*Template
+}
+
+func NewNodeIPsTemplates(ipFamily corev1.IPFamily) *NodeIPsTemplates {
+	return &NodeIPsTemplates{
+		ipFamily:  ipFamily,
+		templates: make([]*Template, 0),
+	}
+}
+
+// AddIP adds a template variable for the specified chassis and ip address.
+func (n *NodeIPsTemplates) AddIP(chassisID string, ip net.IP) {
+
+	for _, template := range n.templates {
+		_, ok := template.Value[chassisID]
+		if !ok {
+			template.Value[chassisID] = ip.String()
+			return
+		}
+	}
+
+	// NODEIP_IPvN_XXX is missing, creating it.
+	newTemplate := makeTemplate(
+		makeLBNodeIPTemplateNamePrefix(n.ipFamily) + fmt.Sprint(len(n.templates)),
+	)
+
+	// And initialize with chassisID value
+	newTemplate.Value[chassisID] = ip.String()
+
+	n.templates = append(n.templates, newTemplate)
+}
+
+func (n *NodeIPsTemplates) AsTemplateMap() TemplateMap {
+	var ret TemplateMap = TemplateMap{}
+
+	for _, t := range n.templates {
+		ret[t.Name] = t
+	}
+
+	return ret
+}
+
+func (n *NodeIPsTemplates) AsTemplates() []*Template {
+	return n.templates
+}
+
+func (n *NodeIPsTemplates) Len() int {
+	return len(n.templates)
 }

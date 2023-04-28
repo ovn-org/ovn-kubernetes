@@ -30,6 +30,11 @@ import (
 
 var alwaysReady = func() bool { return true }
 var FakeGRs = "GR_1 GR_2"
+var initialLsGroups []string = []string{types.ClusterLBGroupName, types.ClusterSwitchLBGroupName}
+var initialLrGroups []string = []string{types.ClusterLBGroupName, types.ClusterRouterLBGroupName}
+
+var outport int32 = int32(3456)
+var tcp v1.Protocol = v1.ProtocolTCP
 
 type serviceController struct {
 	*Controller
@@ -108,8 +113,6 @@ func TestSyncServices(t *testing.T) {
 
 	ns := "testns"
 	serviceName := "foo"
-	initialLsGroups := []string{types.ClusterLBGroupName, types.ClusterSwitchLBGroupName}
-	initialLrGroups := []string{types.ClusterLBGroupName, types.ClusterRouterLBGroupName}
 
 	oldGateway := globalconfig.Gateway.Mode
 	oldClusterSubnet := globalconfig.Default.ClusterSubnets
@@ -124,9 +127,6 @@ func TestSyncServices(t *testing.T) {
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 	_, cidr6, _ := net.ParseCIDR("fe00::/64")
 	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
-
-	outport := int32(3456)
-	tcp := v1.ProtocolTCP
 
 	const (
 		nodeA           = "node-a"
@@ -510,6 +510,120 @@ func TestSyncServices(t *testing.T) {
 	}
 }
 
+func Test_ETPCluster_NodePort_Service_WithMultipleIPAddresses(t *testing.T) {
+	g := gomega.NewGomegaWithT(t)
+	globalconfig.IPv4Mode = true
+
+	nodeA := nodeInfo{
+		name:               "node-a",
+		l3gatewayAddresses: []net.IP{net.ParseIP("10.1.1.1")},
+		hostAddresses: []net.IP{
+			net.ParseIP("10.1.1.1"),
+			net.ParseIP("10.2.2.2"),
+			net.ParseIP("10.3.3.3")},
+		gatewayRouterName: nodeGWRouterName("node-a"),
+		switchName:        nodeSwitchName("node-a"),
+		chassisID:         "node-a",
+		zone:              types.OvnDefaultZone,
+	}
+
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "svc-foo", Namespace: "namespace1"},
+		Spec: v1.ServiceSpec{
+			Type:                  v1.ServiceTypeNodePort,
+			ClusterIP:             "192.168.1.1",
+			ClusterIPs:            []string{"192.168.1.1"},
+			Selector:              map[string]string{"foo": "bar"},
+			ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster,
+			Ports: []v1.ServicePort{{
+				Port:       80,
+				Protocol:   v1.ProtocolTCP,
+				TargetPort: intstr.FromInt(3456),
+				NodePort:   30123,
+			}},
+		},
+	}
+
+	endPointSlice := &discovery.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      svc.Name + "ab23",
+			Namespace: svc.Namespace,
+			Labels:    map[string]string{discovery.LabelServiceName: svc.Name},
+		},
+		Ports: []discovery.EndpointPort{
+			{
+				Protocol: &tcp,
+				Port:     &outport,
+			},
+		},
+		AddressType: discovery.AddressTypeIPv4,
+		Endpoints: []discovery.Endpoint{
+			readyEndpointsWithAddresses("10.128.0.2", "10.128.1.2"),
+		},
+	}
+
+	controller, err := newControllerWithDBSetup(libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{
+		nodeLogicalSwitch(nodeA.name, initialLsGroups),
+		nodeLogicalRouter(nodeA.name, initialLrGroups),
+
+		lbGroup(types.ClusterLBGroupName),
+		lbGroup(types.ClusterSwitchLBGroupName),
+		lbGroup(types.ClusterRouterLBGroupName),
+	}})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	defer controller.close()
+
+	controller.endpointSliceStore.Add(endPointSlice)
+	controller.serviceStore.Add(svc)
+	controller.nodeTracker.nodes = map[string]nodeInfo{nodeA.name: nodeA}
+
+	controller.RequestFullSync(controller.nodeTracker.getZoneNodes())
+	err = controller.syncService(svc.Namespace + "/" + svc.Name)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	expectedDb := []libovsdbtest.TestData{
+		&nbdb.LoadBalancer{
+			UUID:     nodeSwitchRouterLoadBalancerName(nodeA.name, svc.Namespace, svc.Name),
+			Name:     nodeSwitchRouterLoadBalancerName(nodeA.name, svc.Namespace, svc.Name),
+			Options:  servicesOptions(),
+			Protocol: &nbdb.LoadBalancerProtocolTCP,
+			Vips: map[string]string{
+				"192.168.1.1:80": "10.128.0.2:3456,10.128.1.2:3456",
+			},
+			ExternalIDs: serviceExternalIDs(namespacedServiceName(svc.Namespace, svc.Name)),
+		},
+		&nbdb.LoadBalancer{
+			UUID:     "Service_namespace1/svc-foo_TCP_node_switch_template_IPv4_merged",
+			Name:     "Service_namespace1/svc-foo_TCP_node_switch_template_IPv4_merged",
+			Options:  templateServicesOptions(),
+			Protocol: &nbdb.LoadBalancerProtocolTCP,
+			Vips: map[string]string{
+				"^NODEIP_IPv4_1:30123": "10.128.0.2:3456,10.128.1.2:3456",
+				"^NODEIP_IPv4_2:30123": "10.128.0.2:3456,10.128.1.2:3456",
+				"^NODEIP_IPv4_0:30123": "10.128.0.2:3456,10.128.1.2:3456",
+			},
+			ExternalIDs: serviceExternalIDs(namespacedServiceName(svc.Namespace, svc.Name)),
+		},
+		nodeLogicalSwitch(nodeA.name, initialLsGroups, "Service_namespace1/svc-foo_TCP_node_router+switch_node-a"),
+		nodeLogicalRouter(nodeA.name, initialLrGroups, "Service_namespace1/svc-foo_TCP_node_router+switch_node-a"),
+		lbGroup(types.ClusterLBGroupName),
+		lbGroup(types.ClusterSwitchLBGroupName, nodeMergedTemplateLoadBalancerName(svc.Namespace, svc.Name, v1.IPv4Protocol)),
+		lbGroup(types.ClusterRouterLBGroupName, nodeMergedTemplateLoadBalancerName(svc.Namespace, svc.Name, v1.IPv4Protocol)),
+
+		&nbdb.ChassisTemplateVar{
+			UUID: nodeA.chassisID, Chassis: nodeA.chassisID,
+			Variables: map[string]string{
+				makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "0": nodeA.hostAddresses[0].String(),
+				makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "1": nodeA.hostAddresses[1].String(),
+				makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "2": nodeA.hostAddresses[2].String(),
+			},
+		},
+	}
+
+	g.Expect(controller.nbClient).To(libovsdbtest.HaveData(expectedDb))
+
+}
+
 func nodeLogicalSwitch(nodeName string, lbGroups []string, namespacedServiceNames ...string) *nbdb.LogicalSwitch {
 	ls := &nbdb.LogicalSwitch{
 		UUID:              nodeSwitchName(nodeName),
@@ -625,7 +739,7 @@ func serviceExternalIDs(namespacedServiceName string) map[string]string {
 }
 
 func nodeSwitchTemplateLoadBalancer(nodePort int32, serviceName string, serviceNamespace string) *nbdb.LoadBalancer {
-	nodeTemplateIP := makeTemplate(makeLBNodeIPTemplateName(v1.IPv4Protocol))
+	nodeTemplateIP := makeTemplate(makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "0")
 	return &nbdb.LoadBalancer{
 		UUID:     nodeSwitchTemplateLoadBalancerName(serviceNamespace, serviceName, v1.IPv4Protocol),
 		Name:     nodeSwitchTemplateLoadBalancerName(serviceNamespace, serviceName, v1.IPv4Protocol),
@@ -639,7 +753,7 @@ func nodeSwitchTemplateLoadBalancer(nodePort int32, serviceName string, serviceN
 }
 
 func nodeRouterTemplateLoadBalancer(nodePort int32, serviceName string, serviceNamespace string) *nbdb.LoadBalancer {
-	nodeTemplateIP := makeTemplate(makeLBNodeIPTemplateName(v1.IPv4Protocol))
+	nodeTemplateIP := makeTemplate(makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "0")
 	return &nbdb.LoadBalancer{
 		UUID:     nodeRouterTemplateLoadBalancerName(serviceNamespace, serviceName, v1.IPv4Protocol),
 		Name:     nodeRouterTemplateLoadBalancerName(serviceNamespace, serviceName, v1.IPv4Protocol),
@@ -657,13 +771,13 @@ func nodeIPTemplate(node *nodeInfo) *nbdb.ChassisTemplateVar {
 		UUID:    node.chassisID,
 		Chassis: node.chassisID,
 		Variables: map[string]string{
-			makeLBNodeIPTemplateName(v1.IPv4Protocol): node.hostAddresses[0].String(),
+			makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "0": node.hostAddresses[0].String(),
 		},
 	}
 }
 
 func nodeMergedTemplateLoadBalancer(nodePort int32, serviceName string, serviceNamespace string, outputPort int32, endpointIPs ...string) *nbdb.LoadBalancer {
-	nodeTemplateIP := makeTemplate(makeLBNodeIPTemplateName(v1.IPv4Protocol))
+	nodeTemplateIP := makeTemplate(makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "0")
 	return &nbdb.LoadBalancer{
 		UUID:     nodeMergedTemplateLoadBalancerName(serviceNamespace, serviceName, v1.IPv4Protocol),
 		Name:     nodeMergedTemplateLoadBalancerName(serviceNamespace, serviceName, v1.IPv4Protocol),
@@ -750,4 +864,13 @@ func deleteTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
 	}
 
 	return nil
+}
+
+func readyEndpointsWithAddresses(addresses ...string) discovery.Endpoint {
+	return discovery.Endpoint{
+		Conditions: discovery.EndpointConditions{
+			Ready: utilpointer.Bool(true),
+		},
+		Addresses: addresses,
+	}
 }

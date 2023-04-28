@@ -2273,18 +2273,26 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 		// This test verifies a NodePort service is reachable on manually added IP addresses.
 		ginkgo.It("for NodePort services", func() {
 			isIPv6Cluster := IsIPv6Cluster(f.ClientSet)
-			serviceName := "nodeportservice"
 
-			ginkgo.By("Creating NodePort service")
-			svcSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
-			svcSpec, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), svcSpec, metav1.CreateOptions{})
+			ginkgo.By("Creating NodePort services")
+
+			etpLocalServiceName := "etplocal-svc"
+			etpLocalSvc := nodePortServiceSpecFrom(etpLocalServiceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
+			etpLocalSvc, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), etpLocalSvc, metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+
+			etpClusterServiceName := "etpcluster-svc"
+			etpClusterSvc := nodePortServiceSpecFrom(etpClusterServiceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeCluster)
+			etpClusterSvc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), etpClusterSvc, metav1.CreateOptions{})
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
-			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
-			tcpNodePort, udpNodePort := nodePortsFromService(svcSpec)
+			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, etpLocalServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", etpLocalServiceName, f.Namespace.Name)
+
+			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, etpClusterServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", etpClusterServiceName, f.Namespace.Name)
 
 			toCheckNodesAddresses := sets.NewString()
 			for _, node := range nodes.Items {
@@ -2306,24 +2314,29 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 				}
 			}
 
-			for _, protocol := range []string{"http", "udp"} {
-				toCurlPort := int32(tcpNodePort)
-				if protocol == "udp" {
-					toCurlPort = int32(udpNodePort)
-				}
+			for _, serviceSpec := range []*v1.Service{etpLocalSvc, etpClusterSvc} {
+				tcpNodePort, udpNodePort := nodePortsFromService(serviceSpec)
 
-				for _, address := range toCheckNodesAddresses.List() {
-					if !isIPv6Cluster && utilnet.IsIPv6String(address) {
-						continue
+				for _, protocol := range []string{"http", "udp"} {
+					toCurlPort := int32(tcpNodePort)
+					if protocol == "udp" {
+						toCurlPort = int32(udpNodePort)
 					}
-					ginkgo.By("Hitting the service on " + address + " via " + protocol)
-					gomega.Eventually(func() bool {
-						epHostname := pokeEndpoint("", clientContainerName, protocol, address, toCurlPort, "hostname")
-						// Expect to receive a valid hostname
-						return nodesHostnames.Has(epHostname)
-					}, "20s", "1s").Should(gomega.BeTrue())
+
+					for _, address := range toCheckNodesAddresses.List() {
+						if !isIPv6Cluster && utilnet.IsIPv6String(address) {
+							continue
+						}
+						ginkgo.By("Hitting service " + serviceSpec.Name + " on " + address + " via " + protocol)
+						gomega.Eventually(func() bool {
+							epHostname := pokeEndpoint("", clientContainerName, protocol, address, toCurlPort, "hostname")
+							// Expect to receive a valid hostname
+							return nodesHostnames.Has(epHostname)
+						}, "20s", "1s").Should(gomega.BeTrue())
+					}
 				}
 			}
+
 		})
 	})
 })

@@ -58,13 +58,13 @@ func NewController(client clientset.Interface,
 	klog.V(4).Info("Creating event broadcaster")
 
 	c := &Controller{
-		client:           client,
-		nbClient:         nbClient,
-		queue:            workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
-		workerLoopPeriod: time.Second,
-		alreadyApplied:   map[string][]LB{},
-		nodeIPv4Template: makeTemplate(makeLBNodeIPTemplateName(v1.IPv4Protocol)),
-		nodeIPv6Template: makeTemplate(makeLBNodeIPTemplateName(v1.IPv6Protocol)),
+		client:            client,
+		nbClient:          nbClient,
+		queue:             workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
+		workerLoopPeriod:  time.Second,
+		alreadyApplied:    map[string][]LB{},
+		nodeIPv4Templates: NewNodeIPsTemplates(v1.IPv4Protocol),
+		nodeIPv6Templates: NewNodeIPsTemplates(v1.IPv6Protocol),
 	}
 
 	// services
@@ -158,10 +158,10 @@ type Controller struct {
 	// chassis' node IP (v4 and v6).
 	// Must be accessed only with the nodeInfo mutex taken.
 	// These are written in RequestFullSync().
-	nodeInfos        []nodeInfo
-	nodeIPv4Template *Template
-	nodeIPv6Template *Template
-	nodeInfoRWLock   sync.RWMutex
+	nodeInfos         []nodeInfo
+	nodeIPv4Templates *NodeIPsTemplates
+	nodeIPv6Templates *NodeIPsTemplates
+	nodeInfoRWLock    sync.RWMutex
 
 	// alreadyApplied is a map of service key -> already applied configuration, so we can short-circuit
 	// if a service's config hasn't changed
@@ -405,7 +405,7 @@ func (c *Controller) syncService(key string) error {
 	// Convert the LB configs in to load-balancer objects
 	clusterLBs := buildClusterLBs(service, clusterConfigs, c.nodeInfos, c.useLBGroups)
 	templateLBs := buildTemplateLBs(service, templateConfigs, c.nodeInfos,
-		c.nodeIPv4Template, c.nodeIPv6Template)
+		c.nodeIPv4Templates, c.nodeIPv6Templates)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, c.nodeInfos)
 	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
 	klog.V(5).Infof("Built service %s per-node LB %#v", key, perNodeLBs)
@@ -457,38 +457,45 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 	}
 
 	// Compute the nodeIP template values.
-	c.nodeIPv4Template = makeTemplate(makeLBNodeIPTemplateName(v1.IPv4Protocol))
-	c.nodeIPv6Template = makeTemplate(makeLBNodeIPTemplateName(v1.IPv6Protocol))
+	c.nodeIPv4Templates = NewNodeIPsTemplates(v1.IPv4Protocol)
+	c.nodeIPv6Templates = NewNodeIPsTemplates(v1.IPv6Protocol)
 
-	for _, node := range c.nodeInfos {
-		if node.chassisID == "" {
+	for _, nodeInfo := range c.nodeInfos {
+		if nodeInfo.chassisID == "" {
 			continue
 		}
-		// Services are currently supported only on the node's first IP.
-		// Extract that one and populate the node's IP template value.
+
 		if globalconfig.IPv4Mode {
-			if ipv4, err := util.MatchFirstIPFamily(false, node.l3gatewayAddresses); err == nil {
-				c.nodeIPv4Template.Value[node.chassisID] = ipv4.String()
+			ips, err := util.MatchIPFamily(false, nodeInfo.hostAddresses)
+			if err != nil {
+				klog.Warningf("Error while searching for IPv4 host addresses in %v for node[%s] : %v",
+					nodeInfo.hostAddresses, nodeInfo.name, err)
+				continue
+			}
+
+			for _, ip := range ips {
+				c.nodeIPv4Templates.AddIP(nodeInfo.chassisID, ip)
 			}
 		}
+
 		if globalconfig.IPv6Mode {
-			if ipv6, err := util.MatchFirstIPFamily(true, node.l3gatewayAddresses); err == nil {
-				c.nodeIPv6Template.Value[node.chassisID] = ipv6.String()
+			ips, err := util.MatchIPFamily(true, nodeInfo.hostAddresses)
+			if err != nil {
+				klog.Warningf("Error while searching for IPv6 host addresses in %v for node[%s] : %v",
+					nodeInfo.hostAddresses, nodeInfo.name, err)
+				continue
+			}
+
+			for _, ip := range ips {
+				c.nodeIPv6Templates.AddIP(nodeInfo.chassisID, ip)
 			}
 		}
 	}
 
 	// Sync the nodeIP template values to the DB.
-	nodeIPTemplateMap := TemplateMap{}
-	if c.nodeIPv4Template.len() > 0 {
-		nodeIPTemplateMap[c.nodeIPv4Template.Name] = c.nodeIPv4Template
-	}
-	if c.nodeIPv6Template.len() > 0 {
-		nodeIPTemplateMap[c.nodeIPv6Template.Name] = c.nodeIPv6Template
-	}
-
 	nodeIPTemplates := []TemplateMap{
-		nodeIPTemplateMap,
+		c.nodeIPv4Templates.AsTemplateMap(),
+		c.nodeIPv6Templates.AsTemplateMap(),
 	}
 	if err := svcCreateOrUpdateTemplateVar(c.nbClient, nodeIPTemplates); err != nil {
 		klog.Errorf("Could not sync node IP templates")
