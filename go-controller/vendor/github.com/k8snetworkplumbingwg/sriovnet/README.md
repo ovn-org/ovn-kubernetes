@@ -1,7 +1,8 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Mellanox/sriovnet)](https://goreportcard.com/report/github.com/Mellanox/sriovnet)
-[![Build Status](https://travis-ci.com/Mellanox/sriovnet.svg?branch=master)](https://travis-ci.com/Mellanox/sriovnet)
-[![Coverage Status](https://coveralls.io/repos/github/Mellanox/sriovnet/badge.svg)](https://coveralls.io/github/Mellanox/sriovnet)
+[![Go Report Card](https://goreportcard.com/badge/github.com/k8snetworkplumbingwg/sriovnet)](https://goreportcard.com/report/github.com/k8snetworkplumbingwg/sriovnet)
+[![Build](https://github.com/k8snetworkplumbingwg/sriovnet/actions/workflows/build.yaml/badge.svg)](https://github.com/k8snetworkplumbingwg/sriovnet/actions/workflows/build.yaml)
+[![Test](https://github.com/k8snetworkplumbingwg/sriovnet/actions/workflows/test.yaml/badge.svg)](https://github.com/k8snetworkplumbingwg/sriovnet/actions/workflows/test.yaml)
+[![Coverage Status](https://coveralls.io/repos/github/k8snetworkplumbingwg/sriovnet/badge.svg)](https://coveralls.io/k8snetworkplumbingwg/sriovnet)
 
 # sriovnet
 Go library to configure SRIOV networking devices
@@ -10,7 +11,7 @@ Local build and test
 
 You can use go get command:
 ```
-go get github.com/Mellanox/sriovnet
+go get github.com/k8snetworkplumbingwg/sriovnet
 ```
 
 Example:
@@ -21,7 +22,7 @@ package main
 import (
     "fmt"
 
-    "github.com/Mellanox/sriovnet"
+    "github.com/k8snetworkplumbingwg/sriovnet"
 )
 
 func main() {

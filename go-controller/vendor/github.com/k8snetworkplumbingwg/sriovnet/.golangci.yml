@@ -1,3 +1,20 @@
+run:
+  timeout: 10m
+
+  # If set we pass it to "go list -mod={option}". From "go help modules":
+  # If invoked with -mod=readonly, the go command is disallowed from the implicit
+  # automatic updating of go.mod described above. Instead, it fails when any changes
+  # to go.mod are needed. This setting is most useful to check that go.mod does
+  # not need updates, such as in a continuous integration and testing system.
+  # If invoked with -mod=vendor, the go command assumes that the vendor
+  # directory holds the correct copies of dependencies and ignores
+  # the dependency descriptions in go.mod.
+  #
+  # Allowed values: readonly|vendor|mod
+  # By default, it isn't set.
+  modules-download-mode: readonly
+  tests: false
+
 linters-settings:
   dupl:
     threshold: 150
@@ -24,7 +41,7 @@ linters-settings:
   gocognit:
     min-complexity: 30
   goimports:
-    local-prefixes: github.com/Mellanox/sriovnet
+    local-prefixes: github.com/k8snetworkplumbingwg/sriovnet
   golint:
     min-confidence: 0
   gomnd:
@@ -32,7 +49,7 @@ linters-settings:
       mnd:
         # don't include the "operation" and "assign"
         checks: argument,case,condition,return
-        ignored-numbers: 2
+        ignored-numbers: "1,2,10,32"
   govet:
     check-shadowing: true
     settings:
@@ -59,7 +76,6 @@ linters:
   disable-all: true
   enable:
     - bodyclose
-    - deadcode
     - depguard
     - dogsled
     - dupl
@@ -71,7 +87,6 @@ linters:
     - gocognit
     - gofmt
     - goimports
-    - golint 
     - gomnd
     - goprintffuncname
     - gosec
@@ -82,25 +97,20 @@ linters:
     - misspell
     - nakedret
     - prealloc
+    - revive
     - rowserrcheck
     - exportloopref
     - staticcheck
-    - structcheck
     - stylecheck
     - typecheck
     - unconvert
     - unparam
     - unused
-    - varcheck
     - whitespace
 
 issues:
   # Excluding configuration per-path, per-linter, per-text and per-source
   exclude-rules:
-    - path: _test\.go
-      linters:
-        - gomnd
-        - goconst
     - text: "Magic number: 1"
       linters:
         - gomnd

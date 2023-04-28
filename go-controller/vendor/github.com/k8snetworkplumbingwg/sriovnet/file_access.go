@@ -1,8 +1,8 @@
+//nolint:gomnd
 package sriovnet
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -56,7 +56,7 @@ func (attrib *fileObject) Read() (str string, err error) {
 	if err != nil {
 		return "", err
 	}
-	data, err := ioutil.ReadAll(attrib.File)
+	data, err := io.ReadAll(attrib.File)
 	if err != nil {
 		return "", err
 	}

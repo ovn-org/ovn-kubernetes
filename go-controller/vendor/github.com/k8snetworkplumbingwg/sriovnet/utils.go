@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"strings"
 
-	utilfs "github.com/Mellanox/sriovnet/pkg/utils/filesystem"
+	utilfs "github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/filesystem"
 )
 
 func getFileNamesFromPath(dir string) ([]string, error) {
