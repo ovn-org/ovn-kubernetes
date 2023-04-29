@@ -874,8 +874,13 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 	if present {
 		klog.Infof("Node %q moved from the local zone %s to a remote zone %s. Cleaning the node resources", node.Name, oc.zone, util.GetNodeZone(node))
 		if err := oc.cleanupNodeResources(node.Name); err != nil {
-			return fmt.Errorf("error cleaning up the local resources for the remote node %s, err : %w", node.Name, err)
+			// Don't return error if the cleanup fails. Instead log a warning
+			// Otherwise we will be in a retry loop trying to cleanup.
+			// cleanupNodeResources can fail when a node moves from a local zone to the remote zone before
+			// the node resources are created completely.
+			klog.Warningf("Error cleaning up the local resources for the remote node %s, err : %w", node.Name, err)
 		}
+		oc.localZoneNodes.Delete(node.Name)
 	}
 
 	var err error
