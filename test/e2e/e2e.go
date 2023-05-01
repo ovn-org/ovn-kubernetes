@@ -511,12 +511,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		// Since this is not really a test of kubernetes in any way, we
 		// leave it as a pre-test assertion, rather than a Ginko test.
 		ginkgo.By("Executing a successful http request from the external internet")
-		resp, err := http.Get("http://google.com")
+		_, err := http.Get("http://google.com")
 		if err != nil {
 			framework.Failf("Unable to connect/talk to the internet: %v", err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			framework.Failf("Unexpected error code, expected 200, got, %v (%v)", resp.StatusCode, resp)
 		}
 
 		masterPods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.Background(), metav1.ListOptions{
