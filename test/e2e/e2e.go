@@ -490,10 +490,21 @@ func findOvnKubeMasterNode() (string, error) {
 	ovnkubeMasterNode, err := framework.RunKubectl(ovnNs, "get", "leases", "ovn-kubernetes-master-global",
 		"-o", "jsonpath='{.spec.holderIdentity}'")
 
-	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (ovn-kubernetes-master-global)"+
+	if err != nil {
+		// If the deployment is single node zone, then this could fail. Try getting the lease
+		// "ovn-kubernetes-master-ovn-control-plane"
+		ovnkubeMasterNode, err = framework.RunKubectl(ovnNs, "get", "leases", "ovn-kubernetes-master-ovn-control-plane",
+			"-o", "jsonpath='{.spec.holderIdentity}'")
+	}
+	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (ovn-kubernetes-master-(global/ovn-control-plane))"+
 		"from %s %v", ovnNs, err))
 
 	framework.Logf(fmt.Sprintf("master instance of ovnkube-master is running on node %s", ovnkubeMasterNode))
+
+	// Strip leading
+	if ovnkubeMasterNode[0] == '\'' || ovnkubeMasterNode[0] == '"' {
+		ovnkubeMasterNode = ovnkubeMasterNode[1 : len(ovnkubeMasterNode)-1]
+	}
 	return ovnkubeMasterNode, nil
 }
 
