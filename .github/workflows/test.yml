@@ -486,16 +486,24 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      matrix:
+        include:
+          - {"ha": "HA", "interconnect": "interconnect-disabled"}
+          - {"ha": "noHA", "interconnect": "interconnect-single-node-zones", "num-zones": "3", "num-nodes-per-zone": "1"}
+          # - {"ha": "noHA", "interconnect": "interconnect-multi-node-zones", "num-zones": "2", "num-nodes-per-zone": "2"}
     needs: [ build-pr ]
     env:
-      JOB_NAME: "DualStack-conversion-shared"
-      OVN_HA: "true"
+      JOB_NAME: "DualStack-conversion-shared-${{ matrix.ha }}-${{ matrix.interconnect }}"
+      OVN_HA: "${{ matrix.ha == 'HA' }}"
       KIND_IPV4_SUPPORT: "true"
       KIND_IPV6_SUPPORT: "false"
       OVN_HYBRID_OVERLAY_ENABLE: "false"
       OVN_GATEWAY_MODE: "shared"
       OVN_MULTICAST_ENABLE:  "false"
       DUALSTACK_CONVERSION:  "true"
+      OVN_ENABLE_INTERCONNECT: "${{ matrix.interconnect == 'interconnect-single-node-zones' ||  matrix.interconnect == 'interconnect-multi-node-zones'}}"
+      KIND_NUM_ZONES: "${{ matrix.num-zones }}"
+      KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
     steps:
 
     - name: Set up Go
