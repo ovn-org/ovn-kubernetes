@@ -112,6 +112,7 @@ usage() {
     echo "                 [-ehp|--egress-ip-healthcheck-port <num>]"
     echo "                 [-is | --ipsec]"
     echo "                 [-cm | --compact-mode]"
+    echo "                 [-ic | --enable-interconnect]"
     echo "                 [--isolated]"
     echo "                 [-h]]"
     echo ""
@@ -163,6 +164,7 @@ usage() {
     echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
     echo "-sm  | --scale-metrics              Enable scale metrics"
     echo "-cm  | --compact-mode               Enable compact mode, ovnkube master and node run in the same process."
+    echo "-ic  | --enable-interconnect        Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
@@ -323,6 +325,8 @@ parse_args() {
                                                 ;;
             -mne | --multi-network-enable )     ENABLE_MULTI_NET=true
                                                 ;;
+            -ic | --enable-interconnect )       OVN_ENABLE_INTERCONNECT=true
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
@@ -393,6 +397,7 @@ print_params() {
      echo "OVN_ISOLATED = $OVN_ISOLATED"
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo "OVN_SEPARATE_CLUSTER_MANAGER = $OVN_SEPARATE_CLUSTER_MANAGER"
+     echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      echo ""
 }
 
@@ -533,12 +538,25 @@ set_default_params() {
   JOIN_SUBNET_IPV4=${JOIN_SUBNET_IPV4:-100.64.0.0/16}
   JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
   KIND_NUM_MASTER=1
+  OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
+
+  if [ "$OVN_HA" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
+     echo "HA mode cannot be used together with Interconnect"
+     exit 1
+  fi
+
+  if [ "$OVN_COMPACT_MODE" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
+     echo "Compact mode cannot be used together with Interconnect"
+     exit 1
+  fi
+
   if [ "$OVN_HA" == true ]; then
     KIND_NUM_MASTER=3
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-0}
   else
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
+
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
@@ -816,7 +834,8 @@ create_ovn_kube_manifests() {
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
     --multi-network-enable="${ENABLE_MULTI_NET}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
-    --compact-mode="${OVN_COMPACT_MODE}"
+    --compact-mode="${OVN_COMPACT_MODE}" \
+    --enable-interconnect="${OVN_ENABLE_INTERCONNECT}"
   popd
 }
 
@@ -834,6 +853,32 @@ install_ovn_image() {
       kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
     fi
   fi
+}
+
+install_ovn_global_zone() {
+  if [ "$OVN_HA" == true ]; then
+    run_kubectl apply -f ovnkube-db-raft.yaml
+  else
+    run_kubectl apply -f ovnkube-db.yaml
+  fi
+
+  if [ "$OVN_SEPARATE_CLUSTER_MANAGER" ==  true ]; then
+    run_kubectl apply -f ovnkube-cm-ncm.yaml
+  else
+    run_kubectl apply -f ovnkube-master.yaml
+  fi
+
+  run_kubectl apply -f ovnkube-node.yaml
+}
+
+install_ovn_single_node_zones() {
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
+  done
+
+  run_kubectl apply -f ovnkube-control-plane.yaml
+  run_kubectl apply -f ovnkube-single-node-zone.yaml
 }
 
 install_ovn() {
@@ -859,18 +904,14 @@ install_ovn() {
       kubectl taint node "$n" node-role.kubernetes.io/control-plane:NoSchedule- || true
     fi
   done
-  if [ "$OVN_HA" == true ]; then
-    run_kubectl apply -f ovnkube-db-raft.yaml
-  else
-    run_kubectl apply -f ovnkube-db.yaml
-  fi
+
   run_kubectl apply -f ovs-node.yaml
-  if [ "$OVN_SEPARATE_CLUSTER_MANAGER" ==  true ]; then
-    run_kubectl apply -f ovnkube-cm-ncm.yaml
+
+  if [ "$OVN_ENABLE_INTERCONNECT" == false ]; then
+    install_ovn_global_zone
   else
-    run_kubectl apply -f ovnkube-master.yaml
+    install_ovn_single_node_zones
   fi
-  run_kubectl apply -f ovnkube-node.yaml
 
   popd
 
@@ -986,7 +1027,13 @@ kubectl_wait_pods() {
     kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
   done
 
-  for name in ovnkube-db ovnkube-master; do
+  pods=""
+  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
+    pods="ovnkube-control-plane"
+  else
+    pods="ovnkube-master ovnkube-db"
+  fi
+  for name in ${pods}; do
     timeout=$(calculate_timeout ${endtime})
     echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."
     kubectl wait pods -n ovn-kubernetes -l name=${name} --for condition=Ready --timeout=${timeout}s
