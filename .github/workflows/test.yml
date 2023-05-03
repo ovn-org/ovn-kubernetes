@@ -177,6 +177,13 @@ jobs:
         pushd go-controller
            # exit early if there are gofmt issues
            make gofmt
+           # enforce CRDs generation
+           make codegen
+           res=$(git status --porcelain)
+           if [[ "${res}" != "" ]]; then
+             echo -e "#### Uncommited files found:\n${res}\nrun 'make codegen' locally and commit.\n"
+             exit 1
+           fi
            make
            make windows
            COVERALLS=1 CONTAINER_RUNNABLE=1 make check
