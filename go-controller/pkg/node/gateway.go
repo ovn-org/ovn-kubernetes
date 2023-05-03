@@ -373,14 +373,33 @@ type bridgeConfiguration struct {
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
-func (b *bridgeConfiguration) updateInterfaceIPAddresses() ([]*net.IPNet, error) {
+func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*net.IPNet, error) {
 	b.Lock()
 	defer b.Unlock()
 	ifAddrs, err := getNetworkInterfaceIPAddresses(b.bridgeName)
-	if err == nil {
-		b.ips = ifAddrs
+	if err != nil {
+		return nil, err
 	}
-	return ifAddrs, err
+
+	// For DPU, here we need to use the DPU host's IP address which is the tenant cluster's
+	// host internal IP address instead of the DPU's external bridge IP address.
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		nodeAddrStr, err := util.GetNodePrimaryIP(node)
+		if err != nil {
+			return nil, err
+		}
+		nodeAddr := net.ParseIP(nodeAddrStr)
+		if nodeAddr == nil {
+			return nil, fmt.Errorf("failed to parse node IP address. %v", nodeAddrStr)
+		}
+		ifAddrs, err = getDPUHostPrimaryIPAddresses(nodeAddr, ifAddrs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	b.ips = ifAddrs
+	return ifAddrs, nil
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {

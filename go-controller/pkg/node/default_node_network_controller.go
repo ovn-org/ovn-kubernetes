@@ -536,7 +536,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 	nodeAddr := net.ParseIP(nodeAddrStr)
 	if nodeAddr == nil {
-		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
+		return fmt.Errorf("failed to parse kubernetes node IP address. %v", nodeAddrStr)
 	}
 
 	// Make sure that the node zone matches with the Southbound db zone.
