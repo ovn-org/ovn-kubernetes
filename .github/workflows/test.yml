@@ -179,6 +179,8 @@ jobs:
            make gofmt
            # enforce CRDs generation
            make codegen
+           echo "WIP DIFF"
+           git --no-pager diff
            res=$(git status --porcelain)
            if [[ "${res}" != "" ]]; then
              echo -e "#### Uncommited files found:\n${res}\nrun 'make codegen' locally and commit.\n"
