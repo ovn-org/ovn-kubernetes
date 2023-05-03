@@ -237,7 +237,8 @@ ovn_ipfix_cache_max_flows=${OVN_IPFIX_CACHE_MAX_FLOWS:-} \
 ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
 #OVN_STATELESS_NETPOL_ENABLE - enable stateless network policy for ovn-kubernetes
 ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE:-false}
-
+#OVN_ENABLE_INTERCONNECT - enable interconnect with multiple zones
+ovn_enable_interconnect=${OVN_ENABLE_INTERCONNECT:-false}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -337,7 +338,14 @@ wait_for_event() {
 
 # The ovnkube-db kubernetes service must be populated with OVN DB service endpoints
 # before various OVN K8s containers can come up. This functions checks for that.
+# If OVN dbs are configured to listen only on unix sockets, then there will not be
+# OVN DB service endpoints.
 ready_to_start_node() {
+  get_ovn_db_vars
+  if [[ $ovn_nbdb == "local" ]]; then
+    return 0
+  fi
+
   # See if ep is available ...
   IFS=" " read -a ovn_db_hosts <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
@@ -718,6 +726,15 @@ function memory_trim_on_compaction_supported {
   fi
 }
 
+function get_node_zone() {
+  zone=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+     get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
+  if [ "$zone" == "" ]; then
+    zone="global"
+  fi
+  echo "$zone"
+}
+
 # v3 - run nb_ovsdb in a separate container
 nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
@@ -851,6 +868,53 @@ ovn-dbchecker() {
   exit 11
 }
 
+# v3 - run nb_ovsdb in a separate container listening only on
+# unix sockets
+local-nb-ovsdb() {
+  trap 'ovsdb_cleanup nb' TERM
+  check_ovn_daemonset_version "3"
+  rm -f ${OVN_RUNDIR}/ovnnb_db.pid
+
+  echo "=============== run nb-ovsdb (unix sockets only) =========="
+  run_as_ovs_user_if_needed \
+    ${OVNCTL_PATH} run_nb_ovsdb --no-monitor \
+    --ovn-nb-log="${ovn_loglevel_nb}" &
+
+  wait_for_event attempts=3 process_ready ovnnb_db
+  echo "=============== nb-ovsdb (unix sockets only) ========== RUNNING"
+
+  ovn-nbctl set NB_Global . name=${K8S_NODE}
+  ovn-nbctl set NB_Global . options:name=${K8S_NODE}
+
+  tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
+  ovn_tail_pid=$!
+
+  process_healthy ovnnb_db ${ovn_tail_pid}
+  echo "=============== run nb-ovsdb (unix sockets only) ========== terminated"
+}
+
+# v3 - run sb_ovsdb in a separate container listening only on
+# unix sockets
+local-sb-ovsdb() {
+  trap 'ovsdb_cleanup sb' TERM
+  check_ovn_daemonset_version "3"
+  rm -f ${OVN_RUNDIR}/ovnsb_db.pid
+
+  echo "=============== run sb-ovsdb (unix sockets only) ========== "
+  run_as_ovs_user_if_needed \
+    ${OVNCTL_PATH} run_sb_ovsdb --no-monitor \
+    --ovn-sb-log="${ovn_loglevel_sb}" &
+
+  wait_for_event attempts=3 process_ready ovnsb_db
+  echo "=============== sb-ovsdb (unix sockets only) ========== RUNNING"
+
+  tail --follow=name ${OVN_LOGDIR}/ovsdb-server-sb.log &
+  ovn_tail_pid=$!
+
+  process_healthy ovnsb_db ${ovn_tail_pid}
+  echo "=============== run sb-ovsdb (unix sockets only) ========== terminated"
+}
+
 # v3 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
 run-ovn-northd() {
   trap 'ovs-appctl -t ovn-northd exit >/dev/null 2>&1; exit 0' TERM
@@ -877,10 +941,18 @@ run-ovn-northd() {
      "
   }
 
+  ovn_dbs=""
+  if [[ $ovn_nbdb != "local" ]]; then
+      ovn_dbs="--ovn-northd-nb-db=${ovn_nbdb_conn}"
+  fi
+  if [[ $ovn_sbdb != "local" ]]; then
+      ovn_dbs="${ovn_dbs} --ovn-northd-sb-db=${ovn_sbdb_conn}"
+  fi
+
   run_as_ovs_user_if_needed \
     ${OVNCTL_PATH} start_northd \
     --no-monitor --ovn-manage-ovsdb=no \
-    --ovn-northd-nb-db=${ovn_nbdb_conn} --ovn-northd-sb-db=${ovn_sbdb_conn} \
+    ${ovn_dbs} \
     ${ovn_northd_ssl_opts} \
     --ovn-northd-log="${ovn_loglevel_northd}" \
     ${ovn_northd_opts}
@@ -1223,11 +1295,28 @@ ovn-network-controller-manager() {
   fi
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
 
+  ovn_zone=$(get_node_zone)
+  echo "ovn-network-controller-manager's configured zone is ${ovn_zone}"
+
+  ovn_dbs=""
+  if [[ $ovn_nbdb != "local" ]]; then
+      ovn_dbs="--nb-address=${ovn_nbdb}"
+  fi
+  if [[ $ovn_sbdb != "local" ]]; then
+      ovn_dbs="${ovn_dbs} --sb-address=${ovn_sbdb}"
+  fi
+
+  ovnkube_enable_interconnect_flag=
+  if [[ ${ovn_enable_interconnect} == "true" ]]; then
+    ovnkube_enable_interconnect_flag="--enable-interconnect"
+  fi
+  echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
+
   echo "=============== ovn-network-controller-manager ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-network-controller-manager ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
-    --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    ${ovn_dbs} \
     --gateway-mode=${ovn_gateway_mode} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
@@ -1251,6 +1340,8 @@ ovn-network-controller-manager() {
     ${egressservice_enabled_flag} \
     ${ovnkube_config_duration_enable_flag} \
     ${multi_network_enabled_flag} \
+    ${ovnkube_enable_interconnect_flag} \
+    --zone ${ovn_zone} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
@@ -1265,9 +1356,6 @@ ovn-network-controller-manager() {
 ovn-cluster-manager() {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
-
-  echo "=============== ovn-cluster-manager (wait for ready_to_start_node) ========== MASTER ONLY"
-  wait_for_event ready_to_start_node
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
@@ -1314,6 +1402,12 @@ ovn-cluster-manager() {
   fi
   echo "ovnkube_metrics_tls_opts: ${ovnkube_metrics_tls_opts}"
 
+  ovnkube_enable_interconnect_flag=
+  if [[ ${ovn_enable_interconnect} == "true" ]]; then
+    ovnkube_enable_interconnect_flag="--enable-interconnect"
+  fi
+  echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
+
   echo "=============== ovn-cluster-manager ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-cluster-manager ${K8S_NODE} \
@@ -1330,6 +1424,7 @@ ovn-cluster-manager() {
     ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
+    ${ovnkube_enable_interconnect_flag} \
     --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
@@ -1582,10 +1677,26 @@ ovn-node() {
       "
   fi
 
+  ovnkube_enable_interconnect_flag=
+  if [[ ${ovn_enable_interconnect} == "true" ]]; then
+    ovnkube_enable_interconnect_flag="--enable-interconnect"
+  fi
+  echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
+
+  ovn_zone=$(get_node_zone)
+  echo "ovnkube-node's configured zone is ${ovn_zone}"
+
+  if [[ $ovn_nbdb != "local" ]]; then
+      ovn_dbs="--nb-address=${ovn_nbdb}"
+  fi
+  if [[ $ovn_sbdb != "local" ]]; then
+      ovn_dbs="${ovn_dbs} --sb-address=${ovn_sbdb}"
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
-    --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    $ovn_dbs \
     ${ovn_unprivileged_flag} \
     --nodeport \
     --mtu=${mtu} \
@@ -1625,6 +1736,8 @@ ovn-node() {
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
      ${ovnkube_node_mode_flag} \
     ${egress_interface} \
+    ${ovnkube_enable_interconnect_flag} \
+    --zone ${ovn_zone} \
     --host-network-namespace ${ovn_host_network_namespace} \
      ${ovnkube_node_mgmt_port_netdev_flag} &
 
@@ -1710,6 +1823,12 @@ case ${cmd} in
   ;;
 "ovn-dbchecker") # pod ovnkube-db container ovn-dbchecker
   ovn-dbchecker
+  ;;
+"local-nb-ovsdb")
+  local-nb-ovsdb
+  ;;
+"local-sb-ovsdb")
+  local-sb-ovsdb
   ;;
 "run-ovn-northd") # pod ovnkube-master container run-ovn-northd
   run-ovn-northd
