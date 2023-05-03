@@ -79,7 +79,8 @@ func ovnNBDBReadiness(target string) error {
 		return fmt.Errorf("%s is not ready: (%v)", target, err)
 	}
 
-	if strings.HasPrefix(output, "ptcp") || strings.HasPrefix(output, "pssl") {
+	// If the OVN NB is listening only on unix sockets then the 'output' will be empty
+	if strings.HasPrefix(output, "ptcp") || strings.HasPrefix(output, "pssl") || output == "" {
 		return nil
 	}
 	return fmt.Errorf("%s is not setup for passive connection: %v", target, output)
@@ -101,7 +102,8 @@ func ovnSBDBReadiness(target string) error {
 		return fmt.Errorf("%s is not ready: (%v)", target, err)
 	}
 
-	if strings.HasPrefix(output, "ptcp") || strings.HasPrefix(output, "pssl") {
+	// If the OVN SB is listening only on unix sockets then the 'output' will be empty
+	if strings.HasPrefix(output, "ptcp") || strings.HasPrefix(output, "pssl") || output == "" {
 		return nil
 	}
 	return fmt.Errorf("%s is not setup for passive connection: %v", target, output)
