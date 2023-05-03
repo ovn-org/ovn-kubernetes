@@ -9,17 +9,27 @@ if [ -z "${crds}" ]; then
   exit
 fi
 
+controller_gen_version="v0.11.3"
 if  ! ( command -v controller-gen > /dev/null ); then
   echo "controller-gen not found, installing sigs.k8s.io/controller-tools"
   olddir="${PWD}"
   builddir="$(mktemp -d)"
   cd "${builddir}"
-  GO111MODULE=on go get -u sigs.k8s.io/controller-tools/cmd/controller-gen
+  GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@$controller_gen_version
   cd "${olddir}"
   if [[ "${builddir}" == /tmp/* ]]; then #paranoia
       rm -rf "${builddir}"
   fi
 fi
+
+gens_version="v0.27.1"
+gen_cmds=( "deepcopy-gen" "client-gen" "lister-gen" "informer-gen" )
+for cmd in "${gen_cmds[@]}"; do
+  if ! ( command -v $cmd > /dev/null ); then
+    echo "$cmd not found, installing k8s.io/code-generator/cmd/$cmd@$gens_version"
+    GO111MODULE=on go install k8s.io/code-generator/cmd/$cmd@$gens_version
+  fi
+done
 
 for crd in ${crds}; do
   echo "Generating deepcopy funcs for $crd"
@@ -74,10 +84,16 @@ echo "Editing EgressQoS CRD"
 sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
 	_output/crds/k8s.ovn.org_egressqoses.yaml
 
+echo "Copying generated code.. Add them to your commit..."
+for f in github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/*; do
+  crdname=$(basename $f)
+  echo "Copying $crdname generated code"
+  cp -rf github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crdname/v1/* pkg/crd/$crdname/v1/
+done
+rm -rf github.com
 echo "Copying the CRDs to dist/templates as j2 files... Add them to your commit..."
-echo "Copying egressFirewall CRD"
-cp _output/crds/k8s.ovn.org_egressfirewalls.yaml ../dist/templates/k8s.ovn.org_egressfirewalls.yaml.j2
-echo "Copying egressIP CRD"
-cp _output/crds/k8s.ovn.org_egressips.yaml ../dist/templates/k8s.ovn.org_egressips.yaml.j2
-echo "Copying egressQoS CRD"
-cp _output/crds/k8s.ovn.org_egressqoses.yaml ../dist/templates/k8s.ovn.org_egressqoses.yaml.j2
+for f in _output/crds/*.yaml; do
+  crdname=$(basename $f)
+  echo "Copying $crdname CRD"
+  cp -v "$f" "../dist/templates/$crdname.j2"
+done
