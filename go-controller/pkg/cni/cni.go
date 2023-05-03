@@ -179,6 +179,7 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 			if err != nil {
 				klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s NAD %s: %v", pr.PodNamespace,
 					pr.PodName, pr.nadName, err)
+				return response, nil
 			}
 
 			// check if this cmdDel is meant for the current sandbox, if not, directly return
