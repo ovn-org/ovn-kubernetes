@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
@@ -18,11 +17,11 @@ import (
 // which the default gateway (for route to 0.0.0.0) is configured.
 // optionally pass the pre-determined gateway interface
 // It also returns the default gateways themselves.
-func getDefaultGatewayInterfaceDetails(gwIface string) (string, []net.IP, error) {
+func getDefaultGatewayInterfaceDetails(gwIface string, ipV4Mode, ipV6Mode bool) (string, []net.IP, error) {
 	var intfName string
 	var gatewayIPs []net.IP
 
-	if config.IPv4Mode {
+	if ipV4Mode {
 		intfIPv4Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V4, gwIface)
 		if err != nil {
 			return "", gatewayIPs, err
@@ -35,7 +34,7 @@ func getDefaultGatewayInterfaceDetails(gwIface string) (string, []net.IP, error)
 		}
 	}
 
-	if config.IPv6Mode {
+	if ipV6Mode {
 		intfIPv6Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V6, gwIface)
 		if err != nil {
 			return "", gatewayIPs, err

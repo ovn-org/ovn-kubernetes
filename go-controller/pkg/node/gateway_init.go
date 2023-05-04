@@ -187,7 +187,7 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 	}
 
 	if needIPv4NextHop || needIPv6NextHop || gatewayIntf == "" {
-		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf)
+		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf, config.IPv4Mode, config.IPv6Mode)
 		if err != nil {
 			return nil, "", err
 		}
