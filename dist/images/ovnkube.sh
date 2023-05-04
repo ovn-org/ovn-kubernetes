@@ -346,9 +346,11 @@ ready_to_start_node() {
     return 0
   fi
 
+  ovnkube_db_ep=$(get_ovnkube_zone_db_ep)
+  echo "Getting the ${ovnkube_db_ep} ep"
   # See if ep is available ...
   IFS=" " read -a ovn_db_hosts <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
+    get ep -n ${ovn_kubernetes_namespace} ${ovnkube_db_ep} -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
   if [[ ${#ovn_db_hosts[@]} == 0 ]]; then
     return 1
   fi
@@ -688,13 +690,15 @@ cleanup-ovs-server() {
 set_ovnkube_db_ep() {
   ips=("$@")
 
-  echo "=============== setting ovnkube-db endpoints to ${ips[@]}"
+  ovn_zone=$(get_node_zone)
+  ovnkube_db_ep=$(get_ovnkube_zone_db_ep)
+  echo "=============== setting ${ovnkube_db_ep} endpoints to ${ips[@]}"
   # create a new endpoint for the headless onvkube-db service without selectors
   kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} apply -f - <<EOF
 apiVersion: v1
 kind: Endpoints
 metadata:
-  name: ovnkube-db
+  name: ${ovnkube_db_ep}
   namespace: ${ovn_kubernetes_namespace}
 subsets:
   - addresses:
@@ -708,7 +712,7 @@ $(for ip in ${ips[@]}; do printf "    - ip: ${ip}\n"; done)
       protocol: TCP
 EOF
   if [[ $? != 0 ]]; then
-    echo "Failed to create endpoint with host(s) ${ips[@]} for ovnkube-db service"
+    echo "Failed to create endpoint with host(s) ${ips[@]} for ${ovnkube_db_ep} service"
     exit 1
   fi
 }
@@ -735,6 +739,15 @@ function get_node_zone() {
   echo "$zone"
 }
 
+function get_ovnkube_zone_db_ep() {
+  zone=$(get_node_zone)
+  if [ "$zone" == "global" ]; then
+      echo "ovnkube-db"
+  else
+      echo "ovnkube-db-$zone"
+  fi
+}
+
 # v3 - run nb_ovsdb in a separate container
 nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
@@ -745,6 +758,9 @@ nb-ovsdb() {
     echo "The IP address of the host $(hostname) could not be determined. Exiting..."
     exit 1
   fi
+
+  ovn_zone=$(get_node_zone)
+  echo "Node ${K8S_NODE} zone is $ovn_zone"
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
@@ -764,6 +780,10 @@ nb-ovsdb() {
     ovn-nbctl set nb_global . ipsec=true
     echo "=============== nb-ovsdb ========== reconfigured for ipsec"
   }
+
+  ovn-nbctl set NB_Global . name=${ovn_zone}
+  ovn-nbctl set NB_Global . options:name=${ovn_zone}
+
   ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:$(bracketify ${ovn_db_host})
   if memory_trim_on_compaction_supported "nbdb"
   then
