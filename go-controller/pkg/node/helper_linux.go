@@ -37,14 +37,11 @@ func getDefaultGatewayInterfaceDetails(gwIface string) (string, []net.IP, error)
 			return "", gatewayIPs, err
 		}
 
-		// validate that both IP Families use the same interface for the gateway
-		// if we found a v4 default gw inf then we should expect v6 default gw inf also
-		if intfName != "" && intfIPv6Name == "" {
-			return "", nil, fmt.Errorf("failed to find IPV6 default gateway from interface %q", gwIface)
-		}
+		// if there is an interface specified for both IP families
+		// validate they use the same one
 		if intfName == "" {
 			intfName = intfIPv6Name
-		} else if intfName != intfIPv6Name {
+		} else if (len(intfName) > 0 && len(intfIPv6Name) > 0) && intfName != intfIPv6Name {
 			return "", nil, fmt.Errorf("multiple gateway interfaces detected: %s %s", intfName, intfIPv6Name)
 		}
 		gatewayIPs = append(gatewayIPs, gw)
