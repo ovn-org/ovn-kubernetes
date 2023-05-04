@@ -165,6 +165,7 @@ usage() {
     echo "-sm  | --scale-metrics              Enable scale metrics"
     echo "-cm  | --compact-mode               Enable compact mode, ovnkube master and node run in the same process."
     echo "-ic  | --enable-interconnect        Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
+    echo "-nnpz| --num-nodes-per-zone         If interconnect is enabled, number of nodes per zone (Default 1). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
@@ -238,6 +239,14 @@ parse_args() {
                                                     exit 1
                                                 fi
                                                 KIND_NUM_WORKER=$1
+                                                ;;
+            -nnpz | --num-nodes-per-zone )      shift
+                                                if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                                    echo "Invalid num-nodes-per-zone: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                KIND_NUM_NODES_PER_ZONE=$1
                                                 ;;
             -sw | --allow-system-writes )       KIND_ALLOW_SYSTEM_WRITES=true
                                                 ;;
@@ -362,7 +371,6 @@ print_params() {
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "ENABLE_IPSEC = $ENABLE_IPSEC"
-     echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "KIND_EXPERIMENTAL_PROVIDER = $KIND_EXPERIMENTAL_PROVIDER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
@@ -398,6 +406,10 @@ print_params() {
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo "OVN_SEPARATE_CLUSTER_MANAGER = $OVN_SEPARATE_CLUSTER_MANAGER"
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
+     if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
+       echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
+     fi
+     echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo ""
 }
 
@@ -555,6 +567,16 @@ set_default_params() {
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-0}
   else
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
+  fi
+
+  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
+    KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-1}
+
+    TOTAL_NODES=$((KIND_NUM_WORKER + 1))
+    if [[ ${KIND_NUM_NODES_PER_ZONE} -gt 1 ]] && [[ $((TOTAL_NODES % KIND_NUM_NODES_PER_ZONE)) -ne 0 ]]; then
+      echo "(Totak k8s nodes / number of nodez per zone) should be zero"
+      exit 1
+    fi
   fi
 
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
@@ -881,6 +903,32 @@ install_ovn_single_node_zones() {
   run_kubectl apply -f ovnkube-single-node-zone.yaml
 }
 
+
+install_ovn_multiple_nodes_zones() {
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort)
+  zone_idx=1
+  n=1
+  for node in $KIND_NODES; do
+    zone="zone-${zone_idx}"
+    kubectl label node "${node}" k8s.ovn.org/zone-name=${zone} --overwrite
+    if [ "${n}" == "1" ]; then
+      # Mark 1st node of each zone as zone control plane
+      kubectl label node "${node}" node-role.kubernetes.io/zone-controller="" --overwrite
+    fi
+
+    if [ "${n}" == "${KIND_NUM_NODES_PER_ZONE}" ]; then
+      n=1
+      zone_idx=$((zone_idx+1))
+    else
+      n=$((n+1))
+    fi
+  done
+
+  run_kubectl apply -f ovnkube-control-plane.yaml
+  run_kubectl apply -f ovnkube-zone-controller.yaml
+  run_kubectl apply -f ovnkube-node.yaml
+}
+
 install_ovn() {
   pushd ${MANIFEST_OUTPUT_DIR}
 
@@ -910,7 +958,11 @@ install_ovn() {
   if [ "$OVN_ENABLE_INTERCONNECT" == false ]; then
     install_ovn_global_zone
   else
-    install_ovn_single_node_zones
+    if [ "${KIND_NUM_NODES_PER_ZONE}" == "1" ]; then
+      install_ovn_single_node_zones
+    else
+      install_ovn_multiple_nodes_zones
+    fi
   fi
 
   popd
