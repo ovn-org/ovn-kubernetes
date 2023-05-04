@@ -28,7 +28,11 @@ func getDefaultGatewayInterfaceDetails(gwIface string) (string, []net.IP, error)
 			return "", gatewayIPs, err
 		}
 		intfName = intfIPv4Name
-		gatewayIPs = append(gatewayIPs, gw)
+
+		// only add the GW IP if it is specified
+		if len(gw) != 0 {
+			gatewayIPs = append(gatewayIPs, gw)
+		}
 	}
 
 	if config.IPv6Mode {
@@ -44,7 +48,11 @@ func getDefaultGatewayInterfaceDetails(gwIface string) (string, []net.IP, error)
 		} else if (len(intfName) > 0 && len(intfIPv6Name) > 0) && intfName != intfIPv6Name {
 			return "", nil, fmt.Errorf("multiple gateway interfaces detected: %s %s", intfName, intfIPv6Name)
 		}
-		gatewayIPs = append(gatewayIPs, gw)
+
+		// only add the GW IP if it is specified
+		if len(gw) != 0 {
+			gatewayIPs = append(gatewayIPs, gw)
+		}
 	}
 
 	return intfName, gatewayIPs, nil
