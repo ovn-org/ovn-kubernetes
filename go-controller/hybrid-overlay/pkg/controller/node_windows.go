@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 
+	ps "github.com/bhendo/go-powershell"
+	psBackend "github.com/bhendo/go-powershell/backend"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -129,22 +131,30 @@ func ensureBaseNetwork() error {
 		return fmt.Errorf("unable to generate a schema to create a base overlay network, error: %v", err)
 	}
 
+	shell, err := ps.New(&psBackend.Local{})
+	if err != nil {
+		return err
+	}
+	defer shell.Exit()
+
+	klog.Infof("Retrieving routes to cache prior network creation")
+	if _, stderr, err := shell.Execute("$routes = Get-NetRoute -AddressFamily IPv4 | select InterfaceIndex,DestinationPrefix,NextHop,RouteMetric"); err != nil {
+		return fmt.Errorf("unable to retrieve routes, this is fatal. %v: %v", stderr, err)
+	}
+
 	klog.Infof("Base network creation may take up to a minute to complete...")
 	// Create the base network from schema object
 	if _, err = baseNetworkSchema.Create(); err != nil {
 		return fmt.Errorf("unable to create the base overlay network, error: %v", err)
 	}
 
+	klog.Infof("Network created. Repopulating routes")
+
 	// Workaround for a limitation in the Windows HNS service. We need
 	// to manually duplicate persistent routes that used to be on the
 	// physical network interface to the newly created host vNIC
-	if err = DuplicatePersistentIPRoutes(); err != nil {
-		return fmt.Errorf("unable to refresh the persistent IP routes, error: %v", err)
-	}
-	// Duplicate link-local addresses to the newly created host vNIC
-	klog.Infof("Forwarding routes associated with link-local addresses in the physical interface to the vNIC")
-	if err = DuplicateLinkLocalIPRoutes(); err != nil {
-		return fmt.Errorf("unable to refresh the link-local IP routes, error: %v", err)
+	if err = DuplicateIPv4Routes(shell); err != nil {
+		return fmt.Errorf("unable to refresh the routes, error: %v", err)
 	}
 
 	return nil

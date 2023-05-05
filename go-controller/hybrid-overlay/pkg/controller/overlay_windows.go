@@ -9,7 +9,6 @@ import (
 	"k8s.io/klog/v2"
 
 	ps "github.com/bhendo/go-powershell"
-	psBackend "github.com/bhendo/go-powershell/backend"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
@@ -269,22 +268,7 @@ func EnsureExistingNetworkIsValid(networkName string, expectedAddressPrefix stri
 // duplicateIPv4Routes duplicates all the IPv4 network routes associated with the physical interface to the host vNIC,
 // where parameters policyStore and destinationPrefix are optional and could be used as filtering criteria.
 // Otherwise, all IPv4 routes will be forwarded from the physical interface to the host vNIC.
-func duplicateIPv4Routes(policyStore, destinationPrefix string) error {
-	shell, err := ps.New(&psBackend.Local{})
-	if err != nil {
-		return err
-	}
-	defer shell.Exit()
-
-	// build filter options for Get-NetRoute command. See https://docs.microsoft.com/en-us/powershell/module/nettcpip/get-netroute
-	var opts string
-	if policyStore != "" {
-		opts += fmt.Sprintf(" -PolicyStore %s", policyStore)
-	}
-	if destinationPrefix != "" {
-		opts += fmt.Sprintf(" -DestinationPrefix \"%s\"", destinationPrefix)
-	}
-
+func DuplicateIPv4Routes(shell ps.Shell) error {
 	script := `
 	# Find physical adapters whose interfaces are bound to a vswitch (i.e. the MAC addresses match)
 	$boundAdapters = (Get-NetAdapter -Physical | where { (Get-NetAdapter -Name "*vEthernet*").MacAddress -eq $_.MacAddress })
@@ -292,27 +276,16 @@ func duplicateIPv4Routes(policyStore, destinationPrefix string) error {
 	# Forward all the matching routes associated with the physical interface to the associated vNIC
 	foreach ($boundAdapter in $boundAdapters) {
 		$associatedVNic = Get-NetAdapter -Name "*vEthernet*" | where { $_.MacAddress -eq $boundAdapter.MacAddress }
-		$routes = Get-NetRoute` + opts + ` -AddressFamily IPv4 -InterfaceIndex $boundAdapter.IfIndex -ErrorAction SilentlyContinue
 		foreach ($route in $routes) {
-			netsh.exe int ipv4 add route interface=$($associatedVNic.ifIndex) prefix=$($route.DestinationPrefix) nexthop=$($route.NextHop) metric=$($route.RouteMetric) store=$($route.PolicyStore)
+			 if ($route.InterfaceIndex -eq $boundAdapter.IfIndex) {
+        		New-NetRoute -InterfaceIndex $associatedVNic.ifIndex -DestinationPrefix $route.DestinationPrefix -NextHop $route.NextHop -RouteMetric $route.RouteMetric -ErrorAction SilentlyContinue
+			 }
 		}
 	}
 	`
-
 	if _, stderr, err := shell.Execute(script + "\r\n\r\n"); err != nil {
-		return fmt.Errorf("falied to duplicate network routes to the associated vNIC, %v: %v", stderr, err)
+		return fmt.Errorf("failed to duplicate network routes to the associated vNIC, %v: %v", stderr, err)
 	}
 
 	return nil
-}
-
-func DuplicatePersistentIPRoutes() error {
-	return duplicateIPv4Routes("PersistentStore", "")
-}
-
-// DuplicateLinkLocalIPRoutes copies the routes for link-local addresses, that is 169.254.0.0/16 (169.254.0.0
-// through 169.254.255.255) for IPv4, that used to be on the physical network interface to the newly created host vNIC
-// See https://datatracker.ietf.org/doc/html/rfc3927
-func DuplicateLinkLocalIPRoutes() error {
-	return duplicateIPv4Routes("", "169.254.")
 }
