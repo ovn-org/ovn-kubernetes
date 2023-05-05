@@ -616,6 +616,7 @@ var _ = Describe("Multi Homing", func() {
 		Context("multi-network policies", func() {
 			const (
 				generatedNamespaceNamePrefix = "pepe"
+				blockedServerStaticIP        = "192.168.200.30"
 			)
 			var extraNamespace *v1.Namespace
 
@@ -684,10 +685,12 @@ var _ = Describe("Multi Homing", func() {
 					By("asserting the server pod has an IP from the configured range")
 					serverIP, err := podIPForAttachment(cs, serverPodConfig.namespace, serverPodConfig.name, netConfig.name, 0)
 					Expect(err).NotTo(HaveOccurred())
-					By(fmt.Sprintf("asserting the server pod IP %v is from the configured range %v/%v", serverIP, netConfig.cidr, netPrefixLengthPerNode))
-					subnet, err := getNetCIDRSubnet(netConfig.cidr)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(inRange(subnet, serverIP)).To(Succeed())
+					if netConfig.cidr != "" {
+						By(fmt.Sprintf("asserting the server pod IP %v is from the configured range %v/%v", serverIP, netConfig.cidr, netPrefixLengthPerNode))
+						subnet, err := getNetCIDRSubnet(netConfig.cidr)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(inRange(subnet, serverIP)).To(Succeed())
+					}
 
 					if doesPolicyFeatAnIPBlock(policy) {
 						blockedIP, err := podIPForAttachment(cs, f.Namespace.Name, blockedClientPodConfig.name, netConfig.name, 0)
@@ -1018,6 +1021,39 @@ var _ = Describe("Multi Homing", func() {
 						},
 						metav1.LabelSelector{
 							MatchLabels: map[string]string{"role": "trusted"},
+						},
+						port,
+					),
+				),
+
+				table.Entry(
+					"for an IPAMless pure L2 overlay when the multi-net policy describes the allow-list using IPBlock",
+					networkAttachmentConfig{
+						name:     secondaryNetworkName,
+						topology: "layer2",
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName, IPRequest: []string{clientIP}}},
+						name:        allowedClient(clientPodName),
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName, IPRequest: []string{blockedServerStaticIP + "/24"}}},
+						name:        blockedClient(clientPodName),
+					},
+					podConfiguration{
+						attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName, IPRequest: []string{staticServerIP}}},
+						name:         podName,
+						containerCmd: httpServerContainerCmd(port),
+						labels:       map[string]string{"app": "stuff-doer"},
+					},
+					multiNetIngressLimitingIPBlockPolicy(
+						secondaryNetworkName,
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "stuff-doer"},
+						},
+						mnpapi.IPBlock{
+							CIDR:   "192.168.200.0/24",
+							Except: []string{blockedServerStaticIP},
 						},
 						port,
 					),
