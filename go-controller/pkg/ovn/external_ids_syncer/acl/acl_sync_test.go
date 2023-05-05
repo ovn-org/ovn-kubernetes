@@ -79,7 +79,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 		controllerName = "fake-controller"
 		namespace1     = "namespace1"
 	)
-	var syncerToBuildData = aclSyncer{
+	var syncerToBuildData = ACLSyncer{
 		controllerName: controllerName,
 	}
 
