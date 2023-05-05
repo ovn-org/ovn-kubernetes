@@ -513,18 +513,22 @@ func TestSyncServices(t *testing.T) {
 func Test_ETPCluster_NodePort_Service_WithMultipleIPAddresses(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	globalconfig.IPv4Mode = true
+	globalconfig.IPv6Mode = true
+	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
+	_, cidr6, _ := net.ParseCIDR("fe00:0:0:0:5555::0/64")
+	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{CIDR: cidr4, HostSubnetLength: 16}, {CIDR: cidr6, HostSubnetLength: 64}}
+
+	nodeIPv4 := []net.IP{net.ParseIP("10.1.1.1"), net.ParseIP("10.2.2.2"), net.ParseIP("10.3.3.3")}
+	nodeIPv6 := []net.IP{net.ParseIP("fd00:0:0:0:1::1"), net.ParseIP("fd00:0:0:0:2::2")}
 
 	nodeA := nodeInfo{
 		name:               "node-a",
-		l3gatewayAddresses: []net.IP{net.ParseIP("10.1.1.1")},
-		hostAddresses: []net.IP{
-			net.ParseIP("10.1.1.1"),
-			net.ParseIP("10.2.2.2"),
-			net.ParseIP("10.3.3.3")},
-		gatewayRouterName: nodeGWRouterName("node-a"),
-		switchName:        nodeSwitchName("node-a"),
-		chassisID:         "node-a",
-		zone:              types.OvnDefaultZone,
+		l3gatewayAddresses: []net.IP{nodeIPv4[0], nodeIPv6[0]},
+		hostAddresses:      append(nodeIPv4, nodeIPv6...),
+		gatewayRouterName:  nodeGWRouterName("node-a"),
+		switchName:         nodeSwitchName("node-a"),
+		chassisID:          "node-a",
+		zone:               types.OvnDefaultZone,
 	}
 
 	svc := &v1.Service{
@@ -532,7 +536,8 @@ func Test_ETPCluster_NodePort_Service_WithMultipleIPAddresses(t *testing.T) {
 		Spec: v1.ServiceSpec{
 			Type:                  v1.ServiceTypeNodePort,
 			ClusterIP:             "192.168.1.1",
-			ClusterIPs:            []string{"192.168.1.1"},
+			ClusterIPs:            []string{"192.168.1.1", "fd00:0:0:0:7777::1"},
+			IPFamilies:            []v1.IPFamily{v1.IPv4Protocol, v1.IPv6Protocol},
 			Selector:              map[string]string{"foo": "bar"},
 			ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster,
 			Ports: []v1.ServicePort{{
@@ -544,21 +549,29 @@ func Test_ETPCluster_NodePort_Service_WithMultipleIPAddresses(t *testing.T) {
 		},
 	}
 
-	endPointSlice := &discovery.EndpointSlice{
+	endPointSliceV4 := &discovery.EndpointSlice{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      svc.Name + "ab23",
+			Name:      svc.Name + "ipv4",
 			Namespace: svc.Namespace,
 			Labels:    map[string]string{discovery.LabelServiceName: svc.Name},
 		},
-		Ports: []discovery.EndpointPort{
-			{
-				Protocol: &tcp,
-				Port:     &outport,
-			},
-		},
+		Ports:       []discovery.EndpointPort{{Protocol: &tcp, Port: &outport}},
 		AddressType: discovery.AddressTypeIPv4,
 		Endpoints: []discovery.Endpoint{
 			readyEndpointsWithAddresses("10.128.0.2", "10.128.1.2"),
+		},
+	}
+
+	endPointSliceV6 := &discovery.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      svc.Name + "ipv6",
+			Namespace: svc.Namespace,
+			Labels:    map[string]string{discovery.LabelServiceName: svc.Name},
+		},
+		Ports:       []discovery.EndpointPort{{Protocol: &tcp, Port: &outport}},
+		AddressType: discovery.AddressTypeIPv6,
+		Endpoints: []discovery.Endpoint{
+			readyEndpointsWithAddresses("fe00:0:0:0:5555::2", "fe00:0:0:0:5555::3"),
 		},
 	}
 
@@ -573,7 +586,8 @@ func Test_ETPCluster_NodePort_Service_WithMultipleIPAddresses(t *testing.T) {
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 	defer controller.close()
 
-	controller.endpointSliceStore.Add(endPointSlice)
+	controller.endpointSliceStore.Add(endPointSliceV4)
+	controller.endpointSliceStore.Add(endPointSliceV6)
 	controller.serviceStore.Add(svc)
 	controller.nodeTracker.nodes = map[string]nodeInfo{nodeA.name: nodeA}
 
@@ -583,12 +597,13 @@ func Test_ETPCluster_NodePort_Service_WithMultipleIPAddresses(t *testing.T) {
 
 	expectedDb := []libovsdbtest.TestData{
 		&nbdb.LoadBalancer{
-			UUID:     nodeSwitchRouterLoadBalancerName(nodeA.name, svc.Namespace, svc.Name),
-			Name:     nodeSwitchRouterLoadBalancerName(nodeA.name, svc.Namespace, svc.Name),
+			UUID:     loadBalancerClusterWideTCPServiceName(svc.Namespace, svc.Name),
+			Name:     loadBalancerClusterWideTCPServiceName(svc.Namespace, svc.Name),
 			Options:  servicesOptions(),
 			Protocol: &nbdb.LoadBalancerProtocolTCP,
 			Vips: map[string]string{
-				"192.168.1.1:80": "10.128.0.2:3456,10.128.1.2:3456",
+				"192.168.1.1:80":        "10.128.0.2:3456,10.128.1.2:3456",
+				"[fd00::7777:0:0:1]:80": "[fe00::5555:0:0:2]:3456,[fe00::5555:0:0:3]:3456",
 			},
 			ExternalIDs: serviceExternalIDs(namespacedServiceName(svc.Namespace, svc.Name)),
 		},
@@ -604,18 +619,36 @@ func Test_ETPCluster_NodePort_Service_WithMultipleIPAddresses(t *testing.T) {
 			},
 			ExternalIDs: serviceExternalIDs(namespacedServiceName(svc.Namespace, svc.Name)),
 		},
-		nodeLogicalSwitch(nodeA.name, initialLsGroups, "Service_namespace1/svc-foo_TCP_node_router+switch_node-a"),
-		nodeLogicalRouter(nodeA.name, initialLrGroups, "Service_namespace1/svc-foo_TCP_node_router+switch_node-a"),
-		lbGroup(types.ClusterLBGroupName),
-		lbGroup(types.ClusterSwitchLBGroupName, nodeMergedTemplateLoadBalancerName(svc.Namespace, svc.Name, v1.IPv4Protocol)),
-		lbGroup(types.ClusterRouterLBGroupName, nodeMergedTemplateLoadBalancerName(svc.Namespace, svc.Name, v1.IPv4Protocol)),
+		&nbdb.LoadBalancer{
+			UUID:     "Service_namespace1/svc-foo_TCP_node_switch_template_IPv6_merged",
+			Name:     "Service_namespace1/svc-foo_TCP_node_switch_template_IPv6_merged",
+			Options:  templateServicesOptionsV6(),
+			Protocol: &nbdb.LoadBalancerProtocolTCP,
+			Vips: map[string]string{
+				"^NODEIP_IPv6_1:30123": "[fe00::5555:0:0:2]:3456,[fe00::5555:0:0:3]:3456",
+				"^NODEIP_IPv6_0:30123": "[fe00::5555:0:0:2]:3456,[fe00::5555:0:0:3]:3456",
+			},
+			ExternalIDs: serviceExternalIDs(namespacedServiceName(svc.Namespace, svc.Name)),
+		},
+		nodeLogicalSwitch(nodeA.name, initialLsGroups),
+		nodeLogicalRouter(nodeA.name, initialLrGroups),
+		lbGroup(types.ClusterLBGroupName, loadBalancerClusterWideTCPServiceName(svc.Namespace, svc.Name)),
+		lbGroup(types.ClusterSwitchLBGroupName,
+			"Service_namespace1/svc-foo_TCP_node_switch_template_IPv4_merged",
+			"Service_namespace1/svc-foo_TCP_node_switch_template_IPv6_merged"),
+		lbGroup(types.ClusterRouterLBGroupName,
+			"Service_namespace1/svc-foo_TCP_node_switch_template_IPv4_merged",
+			"Service_namespace1/svc-foo_TCP_node_switch_template_IPv6_merged"),
 
 		&nbdb.ChassisTemplateVar{
 			UUID: nodeA.chassisID, Chassis: nodeA.chassisID,
 			Variables: map[string]string{
-				makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "0": nodeA.hostAddresses[0].String(),
-				makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "1": nodeA.hostAddresses[1].String(),
-				makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "2": nodeA.hostAddresses[2].String(),
+				makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "0": nodeIPv4[0].String(),
+				makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "1": nodeIPv4[1].String(),
+				makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "2": nodeIPv4[2].String(),
+
+				makeLBNodeIPTemplateNamePrefix(v1.IPv6Protocol) + "0": nodeIPv6[0].String(),
+				makeLBNodeIPTemplateNamePrefix(v1.IPv6Protocol) + "1": nodeIPv6[1].String(),
 			},
 		},
 	}
@@ -722,6 +755,14 @@ func templateServicesOptions() map[string]string {
 	opts := servicesOptions()
 	opts["template"] = "true"
 	opts["address-family"] = "ipv4"
+	return opts
+}
+
+func templateServicesOptionsV6() map[string]string {
+	// Template LBs need "options:template=true" and "options:address-family" set.
+	opts := servicesOptions()
+	opts["template"] = "true"
+	opts["address-family"] = "ipv6"
 	return opts
 }
 
