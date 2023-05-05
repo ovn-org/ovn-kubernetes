@@ -125,7 +125,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 		anotherControllerName = "another-controller"
 		qosPriority           = 1000
 	)
-	var syncerToBuildData = addressSetsSyncer{
+	var syncerToBuildData = AddressSetsSyncer{
 		controllerName: controllerName,
 	}
 
