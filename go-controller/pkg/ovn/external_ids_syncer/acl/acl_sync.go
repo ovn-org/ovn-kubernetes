@@ -9,6 +9,7 @@ import (
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/hash_primary_id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
@@ -61,6 +62,11 @@ func NewACLSyncer(nbClient libovsdbclient.Client, controllerName string) *aclSyn
 }
 
 func (syncer *aclSyncer) SyncACLs(existingNodes *v1.NodeList) error {
+	// first, update PrimaryID to the new format (hashed)
+	if err := hash_primary_id.HashPrimaryIDACL(syncer.nbClient, syncer.txnBatchSize); err != nil {
+		return fmt.Errorf("failed to hash primaryIDs for acls: %w", err)
+	}
+
 	// stale acls don't have controller ID
 	legacyAclPred := libovsdbops.GetNoOwnerPredicate[*nbdb.ACL]()
 	legacyACLs, err := libovsdbops.FindACLsWithPredicate(syncer.nbClient, legacyAclPred)

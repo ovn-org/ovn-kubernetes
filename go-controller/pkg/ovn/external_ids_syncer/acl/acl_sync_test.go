@@ -712,4 +712,44 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 		}
 		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil, nil)
 	})
+	ginkgo.It("updates unhashed PrimaryID, and ignores already hashed", func() {
+		staleIDs := syncerToBuildData.getEgressFirewallACLDbIDs(namespace1, 0)
+		staleExternalIDs := staleIDs.GetExternalIDs()
+		staleExternalIDs[libovsdbops.PrimaryIDKey.String()] = staleIDs.String()
+
+		alreadyUpdatedIDs := syncerToBuildData.getEgressFirewallACLDbIDs(namespace1, 1)
+		testData := []aclSync{
+			{
+				before: libovsdbops.BuildACL(
+					"random",
+					nbdb.ACLDirectionFromLport,
+					types.EgressFirewallStartPriority,
+					"any",
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					staleExternalIDs,
+					nil,
+				),
+				after: syncerToBuildData.getEgressFirewallACLDbIDs(namespace1, 0),
+			},
+			{
+				before: libovsdbops.BuildACL(
+					"random2",
+					nbdb.ACLDirectionFromLport,
+					types.EgressFirewallStartPriority-1,
+					"any2",
+					nbdb.ACLActionDrop,
+					types.OvnACLLoggingMeter,
+					"",
+					false,
+					alreadyUpdatedIDs.GetExternalIDs(),
+					nil,
+				),
+				after: alreadyUpdatedIDs,
+			},
+		}
+		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil, nil)
+	})
 })

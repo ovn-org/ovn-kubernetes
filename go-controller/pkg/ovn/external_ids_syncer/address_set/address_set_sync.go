@@ -9,8 +9,7 @@ import (
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/hash_primary_id"
 	"k8s.io/klog/v2"
 )
 
@@ -64,16 +63,19 @@ type addressSetsSyncer struct {
 	controllerName string
 	// txnBatchSize is used to control how many address sets will be updated with 1 db transaction.
 	// Set to 0 to disable batching
-	txnBatchSize       int
+	txnBatchSize int
+	// batchSize for HashPrimaryIDAddrSet, default value is same as for ACLs, since address set has fewer fields.
+	updateBatchSize    int
 	ignoredAddressSets int
 }
 
 // controllerName is the name of the new controller that should own all address sets without controller
 func NewAddressSetSyncer(nbClient libovsdbclient.Client, controllerName string) *addressSetsSyncer {
 	return &addressSetsSyncer{
-		nbClient:       nbClient,
-		controllerName: controllerName,
-		txnBatchSize:   50,
+		nbClient:        nbClient,
+		controllerName:  controllerName,
+		txnBatchSize:    50,
+		updateBatchSize: 20000,
 	}
 }
 
@@ -157,7 +159,7 @@ func buildNewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *nbdb.A
 	externalIDs := dbIDsWithIPFam.GetExternalIDs()
 	name := externalIDs[libovsdbops.PrimaryIDKey.String()]
 	as := &nbdb.AddressSet{
-		Name:        util.HashForOVN(name),
+		Name:        name,
 		ExternalIDs: externalIDs,
 	}
 	return as
@@ -364,6 +366,11 @@ func (syncer *addressSetsSyncer) getAddrSetUpdateInfo(as *nbdb.AddressSet) (*upd
 }
 
 func (syncer *addressSetsSyncer) SyncAddressSets() error {
+	// first, update PrimaryID to the new format (hashed)
+	if err := hash_primary_id.HashPrimaryIDAddrSet(syncer.nbClient, syncer.updateBatchSize); err != nil {
+		return fmt.Errorf("failed to hash primaryIDs for address sets: %w", err)
+	}
+
 	// stale address sets don't have controller ID
 	p := libovsdbops.GetNoOwnerPredicate[*nbdb.AddressSet]()
 	addrSetList, err := libovsdbops.FindAddressSetsWithPredicate(syncer.nbClient, p)

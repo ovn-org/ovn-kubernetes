@@ -227,7 +227,7 @@ func buildAddressSet(dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *nbdb.Addr
 	externalIDs := dbIDsWithIPFam.GetExternalIDs()
 	name := externalIDs[libovsdbops.PrimaryIDKey.String()]
 	as := &nbdb.AddressSet{
-		Name:        hashedAddressSet(name),
+		Name:        name,
 		ExternalIDs: externalIDs,
 	}
 	return as
@@ -236,7 +236,7 @@ func buildAddressSet(dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *nbdb.Addr
 func (asf *ovnAddressSetFactory) newOvnAddressSet(addrSet *nbdb.AddressSet) *ovnAddressSet {
 	return &ovnAddressSet{
 		nbClient: asf.nbClient,
-		name:     addrSet.ExternalIDs[libovsdbops.PrimaryIDKey.String()],
+		name:     fmt.Sprintf("%+v", addrSet.ExternalIDs),
 		hashName: addrSet.Name,
 		uuid:     addrSet.UUID,
 	}

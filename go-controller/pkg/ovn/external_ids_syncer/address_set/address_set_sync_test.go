@@ -651,7 +651,6 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 			},
 		}, controllerName, false)
 	})
-
 	ginkgo.It("updates referencing object if at least one address set was updated", func() {
 		// address set without ip family and ips, will be ignored
 		asName1 := egressIPServedPods
@@ -692,5 +691,28 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 			},
 		}
 		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+	})
+	ginkgo.It("updates unhashed PrimaryID, and ignores already hashed", func() {
+		dbIDs := syncerToBuildData.getEgressIPAddrSetDbIDs(nodeIPAddrSetName)
+		as := buildNewAddressSet(dbIDs, ipv4AddressSetFactoryID)
+		as.UUID = "as-UUID"
+		fullDbIDs, _ := libovsdbops.NewDbObjectIDsFromExternalIDs(libovsdbops.AddressSetEgressIP, as.ExternalIDs)
+		as.ExternalIDs[libovsdbops.PrimaryIDKey.String()] = fullDbIDs.String()
+
+		updatedDbIDs := syncerToBuildData.getEgressServiceAddrSetDbIDs()
+		updatedAddrSet := buildNewAddressSet(updatedDbIDs, ipv4AddressSetFactoryID)
+		updatedAddrSet.UUID = "updatedAddrSet-UUID"
+		testData := []asSync{
+			{
+				before:                as,
+				after:                 syncerToBuildData.getEgressIPAddrSetDbIDs(nodeIPAddrSetName),
+				addressSetFactoryIPID: ipv4AddressSetFactoryID,
+			},
+			{
+				before: updatedAddrSet,
+				leave:  true,
+			},
+		}
+		testSyncerWithData(testData, nil, nil, controllerName, false)
 	})
 })

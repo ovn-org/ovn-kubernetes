@@ -2,6 +2,8 @@ package libovsdbops
 
 import (
 	"fmt"
+	"hash/fnv"
+	"strconv"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
@@ -194,7 +196,7 @@ func (objectIDs *DbObjectIDs) GetObjectID(key ExternalIDKey) string {
 // - OwnerTypeKey
 // - PrimaryIDKey
 // and also all keys that are preset in objectIDs.objectIDs.
-// PrimaryIDKey value consists of the following values joined with ":"
+// PrimaryIDKey value is a hash, based on the string that consists of the following values joined with ":"
 // - objectIDs.ownerControllerName
 // - objectIDs.idsType.ownerObjectType
 // - values from DbObjectIDs.objectIDs are added in order set in ObjectIDsType.externalIDKeys
@@ -220,7 +222,12 @@ func (objectIDs *DbObjectIDs) getExternalIDs(allowEmptyKeys bool) map[string]str
 	return externalIDs
 }
 
-// String returns a string that is similar to PrimaryIDKey value, but if some required keys are not present
+// String returns a string that consists of the following values joined with ":"
+// - objectIDs.ownerControllerName
+// - objectIDs.idsType.ownerObjectType
+// - values from DbObjectIDs.objectIDs are added in order set in ObjectIDsType.externalIDKeys
+//
+// if some required keys are not present
 // in the DbObjectIDs.objectIDs, they will be replaced with empty strings.
 // String returns the representation of all the information set in DbObjectIDs.
 func (objectIDs *DbObjectIDs) String() string {
@@ -246,7 +253,11 @@ func (objectIDs *DbObjectIDs) getUniqueID() (string, error) {
 		}
 		id += ":" + value
 	}
-	return id, nil
+	hashedID, err := hashPrimaryID(id)
+	if err != nil {
+		return "", err
+	}
+	return hashedID, nil
 }
 
 // NewDbObjectIDsFromExternalIDs is used to parse object ExternalIDs, it sets DbObjectIDs.ownerControllerName based
@@ -309,4 +320,18 @@ func deepcopyMap(m map[ExternalIDKey]string) map[ExternalIDKey]string {
 		result[key] = value
 	}
 	return result
+}
+
+func hashPrimaryID(s string) (string, error) {
+	h := fnv.New64a()
+	_, err := h.Write([]byte(s))
+	if err != nil {
+		return "", fmt.Errorf("failed to hash %s", s)
+	}
+	hashString := strconv.FormatUint(h.Sum64(), 10)
+	return fmt.Sprintf("a%s", hashString), nil
+}
+
+func SyncPrimaryID(oldID string) (string, error) {
+	return hashPrimaryID(oldID)
 }
