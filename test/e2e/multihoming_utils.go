@@ -29,7 +29,7 @@ func getNetCIDRSubnet(netCIDR string) (string, error) {
 	} else if len(subStrings) == 2 {
 		return netCIDR, nil
 	}
-	return "", fmt.Errorf("invalid network cidr %s", netCIDR)
+	return "", fmt.Errorf("invalid network cidr: %q", netCIDR)
 }
 
 type networkAttachmentConfig struct {
