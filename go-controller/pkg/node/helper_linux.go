@@ -14,6 +14,20 @@ import (
 	"k8s.io/klog/v2"
 )
 
+type GatewayInterfaceMismatchError struct {
+	msg string
+}
+
+func (error *GatewayInterfaceMismatchError) Error() string {
+	return error.msg
+}
+
+func newGatewayInterfaceMismatchError(format string, args ...interface{}) *GatewayInterfaceMismatchError {
+	return &GatewayInterfaceMismatchError{
+		msg: fmt.Sprintf(format, args...),
+	}
+}
+
 // getDefaultGatewayInterfaceDetails returns the interface name on
 // which the default gateway (for route to 0.0.0.0) is configured.
 // optionally pass the pre-determined gateway interface
@@ -99,7 +113,7 @@ func getDefaultGatewayInterfaceByFamily(family int, gwIface string) (string, net
 			klog.Infof("Found default gateway interface %s %s", foundIfName, r.Gw.String())
 			if len(gwIface) > 0 && gwIface != foundIfName {
 				// this should not happen, but if it did, indicates something broken with our use of the netlink lib
-				return "", nil, fmt.Errorf("mistmaching provided gw interface: %s and gateway found: %s",
+				return "", nil, newGatewayInterfaceMismatchError("mismatching provided gw interface: %s and gateway found: %s",
 					gwIface, foundIfName)
 			}
 			return foundIfName, r.Gw, nil
@@ -125,7 +139,7 @@ func getDefaultGatewayInterfaceByFamily(family int, gwIface string) (string, net
 			klog.Infof("Found default gateway interface %s %s", foundIfName, nh.Gw.String())
 			if len(gwIface) > 0 && gwIface != foundIfName {
 				// this should not happen, but if it did, indicates something broken with our use of the netlink lib
-				return "", nil, fmt.Errorf("mistmaching provided gw interface: %q and gateway found: %q",
+				return "", nil, newGatewayInterfaceMismatchError("mismatching provided gw interface: %q and gateway found: %q",
 					gwIface, foundIfName)
 			}
 			return foundIfName, nh.Gw, nil
