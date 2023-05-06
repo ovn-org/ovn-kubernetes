@@ -1,6 +1,7 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -189,7 +190,32 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 	if needIPv4NextHop || needIPv6NextHop || gatewayIntf == "" {
 		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf, config.IPv4Mode, config.IPv6Mode)
 		if err != nil {
-			return nil, "", err
+			if !(errors.As(err, new(*GatewayInterfaceMismatchError)) && config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.AllowNoUplink) {
+				return nil, "", err
+			}
+		}
+		if gatewayIntf == "" {
+			if defaultGatewayIntf == "" {
+				return nil, "", fmt.Errorf("unable to find default gateway and none provided via config")
+			}
+			gatewayIntf = defaultGatewayIntf
+		} else {
+			if gatewayIntf != defaultGatewayIntf || len(defaultGatewayNextHops) == 0 {
+				if config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.AllowNoUplink {
+					// For local gw, if not default gateway is available or the provide gateway interface is not the host gateway interface
+					// use nexthop masquerade IP as GR default gw to steer traffic to the gateway bridge
+					if needIPv4NextHop {
+						nexthop := net.ParseIP(types.V4DummyNextHopMasqueradeIP)
+						gatewayNextHops = append(gatewayNextHops, nexthop)
+						needIPv4NextHop = false
+					}
+					if needIPv6NextHop {
+						nexthop := net.ParseIP(types.V6DummyNextHopMasqueradeIP)
+						gatewayNextHops = append(gatewayNextHops, nexthop)
+						needIPv6NextHop = false
+					}
+				}
+			}
 		}
 		if needIPv4NextHop || needIPv6NextHop {
 			for _, defaultGatewayNextHop := range defaultGatewayNextHops {
@@ -199,12 +225,6 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 					gatewayNextHops = append(gatewayNextHops, defaultGatewayNextHop)
 				}
 			}
-		}
-		if gatewayIntf == "" {
-			if defaultGatewayIntf == "" {
-				return nil, "", fmt.Errorf("unable to find default gateway and none provided via config")
-			}
-			gatewayIntf = defaultGatewayIntf
 		}
 	}
 	return gatewayNextHops, gatewayIntf, nil
