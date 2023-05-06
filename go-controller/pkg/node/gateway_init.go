@@ -178,6 +178,22 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 			}
 		}
 	}
+
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		// For local gw, packets will be processed by kernel before entering/leaving the host.
+		// Use the dummy nexthop masquerade IP as GR default gw to steer traffic to the gateway bridge
+		if needIPv4NextHop {
+			nexthop := net.ParseIP(types.V4DummyNextHopMasqueradeIP)
+			gatewayNextHops = append(gatewayNextHops, nexthop)
+			needIPv4NextHop = false
+		}
+		if needIPv6NextHop {
+			nexthop := net.ParseIP(types.V6DummyNextHopMasqueradeIP)
+			gatewayNextHops = append(gatewayNextHops, nexthop)
+			needIPv6NextHop = false
+		}
+	}
+
 	gatewayIntf := config.Gateway.Interface
 	if gatewayIntf != "" {
 		if bridgeName, _, err := util.RunOVSVsctl("port-to-br", gatewayIntf); err == nil {
