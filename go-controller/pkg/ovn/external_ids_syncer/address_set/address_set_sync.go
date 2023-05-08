@@ -393,5 +393,5 @@ func (syncer *AddressSetsSyncer) SyncAddressSets() error {
 	})
 	klog.Infof("SyncAddressSets found %d stale address sets, %d of them were ignored",
 		len(addrSetList), syncer.ignoredAddressSets)
-	return nil
+	return err
 }

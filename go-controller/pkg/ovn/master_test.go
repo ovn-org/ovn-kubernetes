@@ -23,6 +23,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
@@ -1795,23 +1796,19 @@ func newClusterJoinSwitch() *nbdb.LogicalSwitch {
 }
 
 func newClusterPortGroup() *nbdb.PortGroup {
-	return &nbdb.PortGroup{
-		UUID: types.ClusterPortGroupNameBase + "-UUID",
-		Name: types.ClusterPortGroupNameBase,
-		ExternalIDs: map[string]string{
-			"name": types.ClusterPortGroupNameBase,
-		},
-	}
+	fakeController := getFakeController(DefaultNetworkControllerName)
+	pgIDs := fakeController.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
+	pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+	pg.UUID = pgIDs.String()
+	return pg
 }
 
 func newRouterPortGroup() *nbdb.PortGroup {
-	return &nbdb.PortGroup{
-		UUID: types.ClusterRtrPortGroupNameBase + "-UUID",
-		Name: types.ClusterRtrPortGroupNameBase,
-		ExternalIDs: map[string]string{
-			"name": types.ClusterRtrPortGroupNameBase,
-		},
-	}
+	fakeController := getFakeController(DefaultNetworkControllerName)
+	pgIDs := fakeController.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
+	pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+	pg.UUID = pgIDs.String()
+	return pg
 }
 
 func newOVNClusterRouter() *nbdb.LogicalRouter {

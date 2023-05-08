@@ -70,7 +70,8 @@ func getEFExpectedDb(initialData []libovsdbtest.TestData, fakeOVN *FakeOVN, nsNa
 	acl.UUID = "acl-UUID"
 
 	// new ACL will be added to the port group
-	namespacePortGroup := libovsdbops.BuildPortGroup(pgName, nil, []*nbdb.ACL{acl}, map[string]string{"name": nsName})
+	pgIDs := getNamespacePortGroupDbIDs(nsName, DefaultNetworkControllerName)
+	namespacePortGroup := libovsdbutil.BuildPortGroup(pgIDs, nil, []*nbdb.ACL{acl})
 	namespacePortGroup.UUID = pgName + "-UUID"
 	return append(initialData, acl, namespacePortGroup)
 }
@@ -289,10 +290,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					// check severity was reset from default to nil
 					updateACL.Severity = nil
 					// match shouldn't have cluster exclusion
-					pgName := fakeController.getNamespacePortGroupName(namespace1.Name)
-					namespacePG := libovsdbops.BuildPortGroup(pgName, nil, []*nbdb.ACL{updateACL}, map[string]string{"name": namespace1.Name})
-					namespacePG.UUID = pgName + "-UUID"
-					updateACL.Match = "(ip4.dst == 1.2.3.4/23) && inport == @" + pgName
+					pgIDs := getNamespacePortGroupDbIDs(namespace1.Name, DefaultNetworkControllerName)
+					namespacePG := libovsdbutil.BuildPortGroup(pgIDs, nil, []*nbdb.ACL{updateACL})
+					namespacePG.UUID = namespacePG.Name + "-UUID"
+					updateACL.Match = "(ip4.dst == 1.2.3.4/23) && inport == @" + namespacePG.Name
 					updateACL.Tier = t.DefaultACLTier // ensure the tier of the ACL is updated from 0 to 2
 
 					expectedDatabaseState := []libovsdb.TestData{

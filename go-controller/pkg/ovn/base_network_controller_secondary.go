@@ -580,24 +580,23 @@ func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
 	return err
 }
 
-// cleanupPolicyLogicalEntities cleans up all the port groups and addressset belongs to the given network
-func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Operation, netName string) ([]ovsdb.Operation, error) {
+// cleanupPolicyLogicalEntities cleans up all the port groups and address sets that belong to the given controller
+func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Operation, controllerName string) ([]ovsdb.Operation, error) {
 	var err error
 	portGroupPredicate := func(item *nbdb.PortGroup) bool {
-		return item.ExternalIDs[types.NetworkExternalID] == netName
+		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == controllerName
 	}
 	ops, err = libovsdbops.DeletePortGroupsWithPredicateOps(nbClient, ops, portGroupPredicate)
 	if err != nil {
-		return ops, fmt.Errorf("failed to get ops to delete port group of network %s", netName)
+		return ops, fmt.Errorf("failed to get ops to delete port groups owned by controller %s", controllerName)
 	}
 
-	controllerName := netName + "-network-controller"
 	asPredicate := func(item *nbdb.AddressSet) bool {
 		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == controllerName
 	}
 	ops, err = libovsdbops.DeleteAddressSetsWithPredicateOps(nbClient, ops, asPredicate)
 	if err != nil {
-		return ops, fmt.Errorf("failed to get ops to delete address set of network %s", netName)
+		return ops, fmt.Errorf("failed to get ops to delete address sets owned by controller %s", controllerName)
 	}
 	return ops, nil
 }

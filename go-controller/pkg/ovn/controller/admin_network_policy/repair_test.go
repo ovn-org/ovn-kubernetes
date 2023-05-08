@@ -349,13 +349,9 @@ func TestBaselineAdminNetworkPolicyRepair(t *testing.T) {
 }
 
 func portGroup(name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL, banp bool) *nbdb.PortGroup {
-	portGroupName, readableGroupName := getAdminNetworkPolicyPGName(name, banp)
-	ExternalIDs := map[string]string{ANPExternalIDKey: name, "name": readableGroupName}
-	if banp {
-		ExternalIDs = map[string]string{BANPExternalIDKey: name, "name": readableGroupName}
-	}
-	pg := libovsdbops.BuildPortGroup(portGroupName, ports, acls, ExternalIDs)
-	pg.UUID = readableGroupName + "-UUID"
+	pgDbIDs := GetANPPortGroupDbIDs(name, banp, "default-network-controller")
+	pg := libovsdbutil.BuildPortGroup(pgDbIDs, ports, acls)
+	pg.UUID = pgDbIDs.String() + "-UUID"
 	return pg
 }
 

@@ -179,12 +179,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName, []string{tP.podIP})
 
 			// port group is empty, because it will be filled by pod add logic
-			pg := fakeOvn.controller.buildPortGroup(
-				libovsdbutil.HashedPortGroup(namespaceName),
-				namespaceName,
-				nil,
-				nil,
-			)
+			pgIDs := getNamespacePortGroupDbIDs(namespaceName, DefaultNetworkControllerName)
+			pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 			pg.UUID = pg.Name + "-UUID"
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData([]libovsdb.TestData{pg}))
 		})
@@ -205,12 +201,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
 
-			pg := fakeOvn.controller.buildPortGroup(
-				libovsdbutil.HashedPortGroup(namespaceName),
-				namespaceName,
-				nil,
-				nil,
-			)
+			pgIDs := getNamespacePortGroupDbIDs(namespaceName, DefaultNetworkControllerName)
+			pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 			pg.UUID = pg.Name + "-UUID"
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData([]libovsdb.TestData{pg}))
 		})
@@ -352,10 +344,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			// this flag will create namespaced port group
 			config.OVNKubernetesFeature.EnableEgressFirewall = true
 			namespaceT := *newNamespace(namespaceName)
-			pg := &nbdb.PortGroup{
-				Name:        libovsdbutil.HashedPortGroup(namespaceName),
-				ExternalIDs: map[string]string{"name": namespaceName},
-			}
+			pgIDs := getNamespacePortGroupDbIDs(namespaceName, DefaultNetworkControllerName)
+			pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 			pg.UUID = pg.Name + "-UUID"
 			initialData := []libovsdb.TestData{pg}
 
@@ -380,10 +370,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		})
 		ginkgo.It("deletes an existing namespace port group when egress firewall and multicast are disabled", func() {
 			namespaceT := *newNamespace(namespaceName)
-			pg := &nbdb.PortGroup{
-				Name:        libovsdbutil.HashedPortGroup(namespaceName),
-				ExternalIDs: nil,
-			}
+			pgIDs := getNamespacePortGroupDbIDs(namespaceName, DefaultNetworkControllerName)
+			pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 			pg.UUID = pg.Name + "-UUID"
 			initialData := []libovsdb.TestData{pg}
 
@@ -407,10 +395,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		ginkgo.It("deletes an existing namespace port group when there are no namespaces", func() {
 			// this flag will create namespaced port group
 			config.OVNKubernetesFeature.EnableEgressFirewall = true
-			pg := &nbdb.PortGroup{
-				Name:        libovsdbutil.HashedPortGroup(namespaceName),
-				ExternalIDs: nil,
-			}
+			pgIDs := getNamespacePortGroupDbIDs(namespaceName, DefaultNetworkControllerName)
+			pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 			pg.UUID = pg.Name + "-UUID"
 			initialData := []libovsdb.TestData{pg}
 

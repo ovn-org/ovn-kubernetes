@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
@@ -59,6 +60,25 @@ const (
 	// and can be built based on the combination of all the other ids.
 	PrimaryIDKey ExternalIDKey = types.PrimaryIDKey
 )
+
+// ObjectNameKey may be used as a secondary ID in the future. To ensure easy filtering for namespaced
+// objects, you can combine namespace and name in that key. To unify this process (and potential parsing of the key)
+// the following 2 functions exist:
+// - BuildNamespaceNameKey to combine namespace and name into one key
+// - ParseNamespaceNameKey to split the key back into namespace and name
+
+func BuildNamespaceNameKey(namespace, name string) string {
+	return namespace + ":" + name
+}
+
+func ParseNamespaceNameKey(key string) (namespace, name string, err error) {
+	s := strings.Split(key, ":")
+	if len(s) != 2 {
+		err = fmt.Errorf("failed to parse namespaced name key %v, expected format <namespace>:<name>", key)
+		return
+	}
+	return s[0], s[1], nil
+}
 
 // dbIDsMap is used to make sure the same ownerType is not defined twice for the same dbObjType to avoid conflicts.
 // It is filled in newObjectIDsType when registering new ObjectIDsType
