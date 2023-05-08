@@ -1541,23 +1541,19 @@ func newClusterJoinSwitch() *nbdb.LogicalSwitch {
 }
 
 func newClusterPortGroup() *nbdb.PortGroup {
-	return &nbdb.PortGroup{
-		UUID: types.ClusterPortGroupNameBase + "-UUID",
-		Name: types.ClusterPortGroupNameBase,
-		ExternalIDs: map[string]string{
-			"name": types.ClusterPortGroupNameBase,
-		},
-	}
+	fakeController := getFakeController(DefaultNetworkControllerName)
+	pgIDs := fakeController.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
+	pg := libovsdbops.BuildPortGroup(pgIDs, nil, nil)
+	pg.UUID = pgIDs.String()
+	return pg
 }
 
 func newRouterPortGroup() *nbdb.PortGroup {
-	return &nbdb.PortGroup{
-		UUID: types.ClusterRtrPortGroupNameBase + "-UUID",
-		Name: types.ClusterRtrPortGroupNameBase,
-		ExternalIDs: map[string]string{
-			"name": types.ClusterRtrPortGroupNameBase,
-		},
-	}
+	fakeController := getFakeController(DefaultNetworkControllerName)
+	pgIDs := fakeController.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
+	pg := libovsdbops.BuildPortGroup(pgIDs, nil, nil)
+	pg.UUID = pgIDs.String()
+	return pg
 }
 
 func newOVNClusterRouter() *nbdb.LogicalRouter {

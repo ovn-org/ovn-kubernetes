@@ -3,6 +3,7 @@ package libovsdbops
 const (
 	addressSet dbObjType = iota
 	acl
+	portGroup
 )
 
 const (
@@ -23,6 +24,7 @@ const (
 	MulticastClusterOwnerType   ownerType = "MulticastCluster"
 	NetpolNodeOwnerType         ownerType = "NetpolNode"
 	NetpolNamespaceOwnerType    ownerType = "NetpolNamespace"
+	GlobalOwnerType             ownerType = "Global"
 
 	// owner extra IDs, make sure to define only 1 ExternalIDKey for every string value
 	PriorityKey           ExternalIDKey = "priority"
@@ -157,4 +159,27 @@ var ACLEgressFirewall = newObjectIDsType(acl, EgressFirewallOwnerType, []Externa
 	// there can only be 1 egress firewall object in every namespace, named "default"
 	// The only additional id we need is the index of the EgressFirewall.Spec.Egress rule.
 	RuleIndex,
+})
+
+var PortGroupMulticast = newObjectIDsType(portGroup, MulticastNamespaceOwnerType, []ExternalIDKey{
+	// namespace
+	ObjectNameKey,
+})
+
+var PortGroupNetpolNamespace = newObjectIDsType(portGroup, NetpolNamespaceOwnerType, []ExternalIDKey{
+	// namespace
+	ObjectNameKey,
+	// in the same namespace there can be 2 default deny port groups, egress and ingress
+	PolicyDirectionKey,
+})
+
+var PortGroupNetworkPolicy = newObjectIDsType(portGroup, NetworkPolicyOwnerType, []ExternalIDKey{
+	// policy namespace+name
+	ObjectNameKey,
+})
+
+var PortGroupCluster = newObjectIDsType(portGroup, GlobalOwnerType, []ExternalIDKey{
+	// name of a global port group
+	// currently ClusterPortGroup and ClusterRtrPortGroup are present
+	ObjectNameKey,
 })

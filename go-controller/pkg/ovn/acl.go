@@ -8,8 +8,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	knet "k8s.io/api/networking/v1"
 )
 
@@ -55,11 +53,6 @@ func aclDirectionToACLPipeline(aclDir aclDirection) aclPipelineType {
 	default:
 		panic(fmt.Sprintf("Failed to convert aclDirection to aclPipelineType: unknown aclDirection type %s", aclDir))
 	}
-}
-
-// hash the provided input to make it a valid portGroup name.
-func hashedPortGroup(s string) string {
-	return util.HashForOVN(s)
 }
 
 // acl.Name is cropped to 64 symbols and is used for logging.

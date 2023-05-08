@@ -91,7 +91,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 
 	aclIDs = getDefaultMcastACLDbIDs(mcastAllowInterNodeID, aclEgress, DefaultNetworkControllerName)
 	aclName = getACLName(aclIDs)
-	egressMatch := getACLMatch(types.ClusterRtrPortGroupNameBase, match, aclEgress)
+	egressMatch := getACLMatch(clusterRtrPortGroup.Name, match, aclEgress)
 	defaultAllowEgressACL := libovsdbops.BuildACL(
 		aclName,
 		nbdb.ACLDirectionFromLport,
@@ -110,7 +110,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 
 	aclIDs = getDefaultMcastACLDbIDs(mcastAllowInterNodeID, aclIngress, DefaultNetworkControllerName)
 	aclName = getACLName(aclIDs)
-	ingressMatch := getACLMatch(types.ClusterRtrPortGroupNameBase, match, aclIngress)
+	ingressMatch := getACLMatch(clusterRtrPortGroup.Name, match, aclIngress)
 	defaultAllowIngressACL := libovsdbops.BuildACL(
 		aclName,
 		nbdb.ACLDirectionToLport,
@@ -168,20 +168,8 @@ func getMulticastDefaultStaleData(clusterPortGroup, clusterRtrPortGroup *nbdb.Po
 }
 
 func getDefaultPortGroups() (clusterPortGroup, clusterRtrPortGroup *nbdb.PortGroup) {
-	clusterPortGroup = &nbdb.PortGroup{
-		UUID: types.ClusterPortGroupNameBase + "-UUID",
-		Name: types.ClusterPortGroupNameBase,
-		ExternalIDs: map[string]string{
-			"name": types.ClusterPortGroupNameBase,
-		},
-	}
-	clusterRtrPortGroup = &nbdb.PortGroup{
-		UUID: types.ClusterRtrPortGroupNameBase + "-UUID",
-		Name: types.ClusterRtrPortGroupNameBase,
-		ExternalIDs: map[string]string{
-			"name": types.ClusterRtrPortGroupNameBase,
-		},
-	}
+	clusterPortGroup = newClusterPortGroup()
+	clusterRtrPortGroup = newRouterPortGroup()
 	return
 }
 
@@ -233,9 +221,9 @@ func getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestDa
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	pg := fakeController.buildPortGroup(
-		hashedPortGroup(ns),
-		ns,
+	pgDbIDs := getNamespaceMcastPortGroupDbIDs(ns, fakeController.controllerName)
+	pg := libovsdbops.BuildPortGroup(
+		pgDbIDs,
 		lsps,
 		[]*nbdb.ACL{egressACL, ingressACL},
 	)

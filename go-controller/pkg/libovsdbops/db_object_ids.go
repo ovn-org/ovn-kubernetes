@@ -2,8 +2,12 @@ package libovsdbops
 
 import (
 	"fmt"
+	"hash/fnv"
+	"strconv"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	"k8s.io/klog/v2"
 )
 
 type dbObjType int
@@ -309,4 +313,15 @@ func deepcopyMap(m map[ExternalIDKey]string) map[ExternalIDKey]string {
 		result[key] = value
 	}
 	return result
+}
+
+func hashPrimaryID(s string) string {
+	h := fnv.New64a()
+	_, err := h.Write([]byte(s))
+	if err != nil {
+		klog.Errorf("Failed to hash %s", s)
+		return ""
+	}
+	hashString := strconv.FormatUint(h.Sum64(), 10)
+	return fmt.Sprintf("a%s", hashString)
 }

@@ -187,7 +187,7 @@ func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interfa
 		}
 	}
 
-	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{types.ClusterPortGroupNameBase}, deleteACLs...)
+	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{oc.getClusterPortGroupName(types.ClusterPortGroupNameBase)}, deleteACLs...)
 	if err != nil {
 		return err
 	}
@@ -384,10 +384,10 @@ func (oc *DefaultNetworkController) createEgressFirewallRules(ruleIdx int, match
 
 	// Applying ACLs on types.ClusterPortGroupName is equivalent to applying on every node switch, since
 	// types.ClusterPortGroupName contains management port from every switch.
-	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, types.ClusterPortGroupNameBase, egressFirewallACL)
+	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, oc.getClusterPortGroupName(types.ClusterPortGroupNameBase), egressFirewallACL)
 	if err != nil {
 		return fmt.Errorf("failed to add egressFirewall ACL %v to port group %s: %v",
-			egressFirewallACL, types.ClusterPortGroupNameBase, err)
+			egressFirewallACL, oc.getClusterPortGroupName(types.ClusterPortGroupNameBase), err)
 	}
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
@@ -414,7 +414,8 @@ func (oc *DefaultNetworkController) deleteEgressFirewallRule(namespace string, r
 		klog.Errorf("Duplicate ACL found for egress firewall %s, ruleIdx: %d", namespace, ruleIdx)
 	}
 
-	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{types.ClusterPortGroupNameBase}, egressFirewallACLs...)
+	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{oc.getClusterPortGroupName(types.ClusterPortGroupNameBase)},
+		egressFirewallACLs...)
 	return err
 }
 
@@ -436,7 +437,8 @@ func (oc *DefaultNetworkController) deleteEgressFirewallRules(namespace string) 
 		return nil
 	}
 
-	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{types.ClusterPortGroupNameBase}, egressFirewallACLs...)
+	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{oc.getClusterPortGroupName(types.ClusterPortGroupNameBase)},
+		egressFirewallACLs...)
 	if err != nil {
 		return err
 	}

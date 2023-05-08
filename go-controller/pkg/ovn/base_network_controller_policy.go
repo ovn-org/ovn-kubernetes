@@ -30,11 +30,7 @@ const (
 	// netpolDefaultDenyACLType is used to distinguish default deny and arp allow acls create for the same port group
 	defaultDenyACL netpolDefaultDenyACLType = "defaultDeny"
 	arpAllowACL    netpolDefaultDenyACLType = "arpAllow"
-	// port groups suffixes
-	// ingressDefaultDenySuffix is the suffix used when creating the ingress port group for a namespace
-	ingressDefaultDenySuffix = "ingressDefaultDeny"
-	// egressDefaultDenySuffix is the suffix used when creating the ingress port group for a namespace
-	egressDefaultDenySuffix = "egressDefaultDeny"
+
 	// arpAllowPolicyMatch is the match used when creating default allow ARP ACLs for a namespace
 	arpAllowPolicyMatch   = "(arp || nd)"
 	allowHairpinningACLID = "allow-hairpinning"
@@ -224,7 +220,7 @@ func (bnc *BaseNetworkController) syncNetworkPoliciesCommon(expectedPolicies map
 		}
 		if !expectedPolicies[namespace][policyName] {
 			// policy doesn't exist on k8s, cleanup
-			portGroupName, _ := bnc.getNetworkPolicyPGName(namespace, policyName)
+			portGroupName := bnc.getNetworkPolicyPGName(namespace, policyName)
 			stalePGs.Insert(portGroupName)
 		}
 	}
@@ -240,8 +236,8 @@ func (bnc *BaseNetworkController) syncNetworkPoliciesCommon(expectedPolicies map
 		namespace := netpolACL.ExternalIDs[libovsdbops.ObjectNameKey.String()]
 		if _, ok := expectedPolicies[namespace]; !ok {
 			// no policies in that namespace are found, delete default deny port group
-			stalePGs.Insert(bnc.defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix))
-			stalePGs.Insert(bnc.defaultDenyPortGroupName(namespace, egressDefaultDenySuffix))
+			stalePGs.Insert(bnc.defaultDenyPortGroupName(namespace, aclIngress))
+			stalePGs.Insert(bnc.defaultDenyPortGroupName(namespace, aclEgress))
 		}
 	}
 	if len(stalePGs) > 0 {
@@ -307,14 +303,24 @@ func (bnc *BaseNetworkController) getDefaultDenyPolicyACLIDs(ns string, aclDir a
 		})
 }
 
-func (bnc *BaseNetworkController) defaultDenyPortGroupName(namespace, gressSuffix string) string {
-	return hashedPortGroup(bnc.GetNetworkScopedName(namespace)) + "_" + gressSuffix
+func (bnc *BaseNetworkController) getDefaultDenyPolicyPortGroupIDs(ns string, aclDir aclDirection) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetpolNamespace, bnc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: ns,
+			// in the same namespace there can be 2 default deny port groups, egress and ingress,
+			// every port group has default deny and arp allow acl.
+			libovsdbops.PolicyDirectionKey: string(aclDir),
+		})
 }
 
-func (bnc *BaseNetworkController) buildDenyACLs(namespace, pg string, aclLogging *ACLLoggingLevels,
+func (bnc *BaseNetworkController) defaultDenyPortGroupName(namespace string, aclDir aclDirection) string {
+	return libovsdbops.GetPortGroupName(bnc.getDefaultDenyPolicyPortGroupIDs(namespace, aclDir))
+}
+
+func (bnc *BaseNetworkController) buildDenyACLs(namespace, pgName string, aclLogging *ACLLoggingLevels,
 	aclDir aclDirection) (denyACL, allowACL *nbdb.ACL) {
-	denyMatch := getACLMatch(pg, "", aclDir)
-	allowMatch := getACLMatch(pg, arpAllowPolicyMatch, aclDir)
+	denyMatch := getACLMatch(pgName, "", aclDir)
+	allowMatch := getACLMatch(pgName, arpAllowPolicyMatch, aclDir)
 	aclPipeline := aclDirectionToACLPipeline(aclDir)
 
 	denyACL = BuildACL(bnc.getDefaultDenyPolicyACLIDs(namespace, aclDir, defaultDenyACL),
@@ -366,17 +372,19 @@ func (bnc *BaseNetworkController) delPolicyFromDefaultPortGroups(np *networkPoli
 // createDefaultDenyPGAndACLs creates the default port groups and acls for a namespace
 // must be called with defaultDenyPortGroups lock
 func (bnc *BaseNetworkController) createDefaultDenyPGAndACLs(namespace, policy string, aclLogging *ACLLoggingLevels) error {
-	ingressPGName := bnc.defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix)
+	ingressPGIDs := bnc.getDefaultDenyPolicyPortGroupIDs(namespace, aclIngress)
+	ingressPGName := libovsdbops.GetPortGroupName(ingressPGIDs)
 	ingressDenyACL, ingressAllowACL := bnc.buildDenyACLs(namespace, ingressPGName, aclLogging, aclIngress)
-	egressPGName := bnc.defaultDenyPortGroupName(namespace, egressDefaultDenySuffix)
+	egressPGIDs := bnc.getDefaultDenyPolicyPortGroupIDs(namespace, aclEgress)
+	egressPGName := libovsdbops.GetPortGroupName(egressPGIDs)
 	egressDenyACL, egressAllowACL := bnc.buildDenyACLs(namespace, egressPGName, aclLogging, aclEgress)
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, ingressDenyACL, ingressAllowACL, egressDenyACL, egressAllowACL)
 	if err != nil {
 		return err
 	}
 
-	ingressPG := bnc.buildPortGroup(ingressPGName, ingressPGName, nil, []*nbdb.ACL{ingressDenyACL, ingressAllowACL})
-	egressPG := bnc.buildPortGroup(egressPGName, egressPGName, nil, []*nbdb.ACL{egressDenyACL, egressAllowACL})
+	ingressPG := libovsdbops.BuildPortGroup(ingressPGIDs, nil, []*nbdb.ACL{ingressDenyACL, ingressAllowACL})
+	egressPG := libovsdbops.BuildPortGroup(egressPGIDs, nil, []*nbdb.ACL{egressDenyACL, egressAllowACL})
 	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(bnc.nbClient, ops, ingressPG, egressPG)
 	if err != nil {
 		return err
@@ -399,8 +407,8 @@ func (bnc *BaseNetworkController) createDefaultDenyPGAndACLs(namespace, policy s
 // deleteDefaultDenyPGAndACLs deletes the default port groups and acls for a namespace
 // must be called with defaultDenyPortGroups lock
 func (bnc *BaseNetworkController) deleteDefaultDenyPGAndACLs(namespace string) error {
-	ingressPGName := bnc.defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix)
-	egressPGName := bnc.defaultDenyPortGroupName(namespace, egressDefaultDenySuffix)
+	ingressPGName := bnc.defaultDenyPortGroupName(namespace, aclIngress)
+	egressPGName := bnc.defaultDenyPortGroupName(namespace, aclEgress)
 
 	ops, err := libovsdbops.DeletePortGroupsOps(bnc.nbClient, nil, ingressPGName, egressPGName)
 	if err != nil {
@@ -595,8 +603,8 @@ func (bnc *BaseNetworkController) getExistingLocalPolicyPorts(np *networkPolicy,
 // It only adds new ports that do not already exist in the deny port groups.
 func (bnc *BaseNetworkController) denyPGAddPorts(np *networkPolicy, portNamesToUUIDs map[string]string, ops []ovsdb.Operation) error {
 	var err error
-	ingressDenyPGName := bnc.defaultDenyPortGroupName(np.namespace, ingressDefaultDenySuffix)
-	egressDenyPGName := bnc.defaultDenyPortGroupName(np.namespace, egressDefaultDenySuffix)
+	ingressDenyPGName := bnc.defaultDenyPortGroupName(np.namespace, aclIngress)
+	egressDenyPGName := bnc.defaultDenyPortGroupName(np.namespace, aclEgress)
 
 	pgKey := np.namespace
 	// this lock guarantees that sharedPortGroup counters will be updated atomically
@@ -659,8 +667,8 @@ func (bnc *BaseNetworkController) denyPGDeletePorts(np *networkPolicy, portNames
 		})
 	}
 	if len(portNamesToUUIDs) != 0 {
-		ingressDenyPGName := bnc.defaultDenyPortGroupName(np.namespace, ingressDefaultDenySuffix)
-		egressDenyPGName := bnc.defaultDenyPortGroupName(np.namespace, egressDefaultDenySuffix)
+		ingressDenyPGName := bnc.defaultDenyPortGroupName(np.namespace, aclIngress)
+		egressDenyPGName := bnc.defaultDenyPortGroupName(np.namespace, aclEgress)
 
 		pgKey := np.namespace
 		// this lock guarantees that sharedPortGroup counters will be updated atomically
@@ -830,9 +838,15 @@ func (bnc *BaseNetworkController) addLocalPodHandler(policy *knet.NetworkPolicy,
 	return nil
 }
 
-func (bnc *BaseNetworkController) getNetworkPolicyPGName(namespace, name string) (pgName, readablePGName string) {
-	readableGroupName := fmt.Sprintf("%s_%s", namespace, name)
-	return hashedPortGroup(bnc.GetNetworkScopedName(readableGroupName)), readableGroupName
+func (bnc *BaseNetworkController) getNetworkPolicyPortGroupDbIDs(namespace, name string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetworkPolicy, bnc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: fmt.Sprintf("%s_%s", namespace, name),
+		})
+}
+
+func (bnc *BaseNetworkController) getNetworkPolicyPGName(namespace, name string) string {
+	return libovsdbops.GetPortGroupName(bnc.getNetworkPolicyPortGroupDbIDs(namespace, name))
 }
 
 type policyHandler struct {
@@ -979,8 +993,9 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 
 		// 4. Build policy ACLs and port group. All the local pods that this policy
 		// selects will be eventually added to this port group.
-		portGroupName, readableGroupName := bnc.getNetworkPolicyPGName(policy.Namespace, policy.Name)
-		np.portGroupName = portGroupName
+
+		pgDbIDs := bnc.getNetworkPolicyPortGroupDbIDs(policy.Namespace, policy.Name)
+		np.portGroupName = libovsdbops.GetPortGroupName(pgDbIDs)
 		ops := []ovsdb.Operation{}
 
 		acls := bnc.buildNetworkPolicyACLs(np, aclLogging)
@@ -989,7 +1004,7 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 			return fmt.Errorf("failed to create ACL ops: %v", err)
 		}
 
-		pg := bnc.buildPortGroup(np.portGroupName, readableGroupName, nil, acls)
+		pg := libovsdbops.BuildPortGroup(pgDbIDs, nil, acls)
 		ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(bnc.nbClient, ops, pg)
 		if err != nil {
 			return fmt.Errorf("failed to create ops to add port to a port group: %v", err)
