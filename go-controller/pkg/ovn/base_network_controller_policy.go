@@ -203,50 +203,49 @@ func (bnc *BaseNetworkController) syncNetworkPoliciesCommon(expectedPolicies map
 	// Delete port groups with acls first, since address sets may be referenced in these acls, and
 	// cause SyntaxError in ovn-controller, if address sets deleted first, but acls still reference them.
 
-	// cleanup port groups based on acl search
+	// cleanup port groups
 	// netpol-owned port groups first
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, bnc.controllerName, nil)
-	p := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
-	netpolACLs, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, p)
-	if err != nil {
-		return fmt.Errorf("cannot find NetworkPolicy ACLs: %v", err)
-	}
-	stalePGs := sets.Set[string]{}
-	for _, netpolACL := range netpolACLs {
-		// policy-owned acl
-		namespace, policyName, err := parseACLPolicyKey(netpolACL.ExternalIDs[libovsdbops.ObjectNameKey.String()])
+	stalePGNames := sets.Set[string]{}
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetworkPolicy, bnc.controllerName, nil)
+	p := libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
+		namespace, policyName, err := parsePGPolicyKey(item.ExternalIDs[libovsdbops.ObjectNameKey.String()])
 		if err != nil {
-			return fmt.Errorf("failed to sync stale network policies: acl IDs parsing failed: %w", err)
+			klog.Errorf("Failed to sync stale network policy %v: port group IDs parsing failed: %w",
+				item.ExternalIDs[libovsdbops.ObjectNameKey.String()], err)
+			return false
 		}
 		if !expectedPolicies[namespace][policyName] {
 			// policy doesn't exist on k8s, cleanup
-			portGroupName := bnc.getNetworkPolicyPGName(namespace, policyName)
-			stalePGs.Insert(portGroupName)
+			stalePGNames.Insert(item.Name)
 		}
-	}
-	// default deny port groups
-	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNamespace, bnc.controllerName, nil)
-	p = libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
-	netpolACLs, err = libovsdbops.FindACLsWithPredicate(bnc.nbClient, p)
+		return false
+	})
+	_, err := libovsdbops.FindPortGroupsWithPredicate(bnc.nbClient, p)
 	if err != nil {
-		return fmt.Errorf("cannot find default deny NetworkPolicy ACLs: %v", err)
+		return fmt.Errorf("cannot find NetworkPolicy port groups: %v", err)
 	}
-	for _, netpolACL := range netpolACLs {
-		// default deny acl
-		namespace := netpolACL.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+
+	// default deny port groups
+	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetpolNamespace, bnc.controllerName, nil)
+	p = libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
+		namespace := item.ExternalIDs[libovsdbops.ObjectNameKey.String()]
 		if _, ok := expectedPolicies[namespace]; !ok {
 			// no policies in that namespace are found, delete default deny port group
-			stalePGs.Insert(bnc.defaultDenyPortGroupName(namespace, aclIngress))
-			stalePGs.Insert(bnc.defaultDenyPortGroupName(namespace, aclEgress))
+			stalePGNames.Insert(item.Name)
 		}
+		return false
+	})
+	_, err = libovsdbops.FindPortGroupsWithPredicate(bnc.nbClient, p)
+	if err != nil {
+		return fmt.Errorf("cannot find default deny NetworkPolicy port groups: %v", err)
 	}
-	if len(stalePGs) > 0 {
-		sets.List[string](stalePGs)
-		err = libovsdbops.DeletePortGroups(bnc.nbClient, sets.List[string](stalePGs)...)
+
+	if len(stalePGNames) > 0 {
+		err = libovsdbops.DeletePortGroups(bnc.nbClient, sets.List[string](stalePGNames)...)
 		if err != nil {
-			return fmt.Errorf("error removing stale port groups %v: %v", stalePGs, err)
+			return fmt.Errorf("error removing stale port groups %v: %v", stalePGNames, err)
 		}
-		klog.Infof("Network policy sync cleaned up %d stale port groups", len(stalePGs))
+		klog.Infof("Network policy sync cleaned up %d stale port groups", len(stalePGNames))
 	}
 
 	return nil
@@ -843,6 +842,15 @@ func (bnc *BaseNetworkController) getNetworkPolicyPortGroupDbIDs(namespace, name
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: fmt.Sprintf("%s_%s", namespace, name),
 		})
+}
+
+func parsePGPolicyKey(pgPolicyKey string) (string, string, error) {
+	s := strings.Split(pgPolicyKey, "_")
+	if len(s) != 2 {
+		return "", "", fmt.Errorf("failed to parse network policy port group key %s, "+
+			"expected format <policyNamespace>_<policyName>", pgPolicyKey)
+	}
+	return s[0], s[1], nil
 }
 
 func (bnc *BaseNetworkController) getNetworkPolicyPGName(namespace, name string) string {
