@@ -20,10 +20,10 @@ import (
 type ManagementPort interface {
 	// Create Management port, use annotator to update node annotation with management port details
 	// and waiter to set up condition to wait on for management port creation
-	Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error)
+	Create(routeManager *routeManager, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error)
 	// CheckManagementPortHealth checks periodically for management port health until stopChan is posted
 	// or closed and reports any warnings/errors to log
-	CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{})
+	CheckManagementPortHealth(routeManager *routeManager, cfg *managementPortConfig, stopChan chan struct{})
 	// Currently, the management port(s) that doesn't have an assignable IP address are the following cases:
 	//   - Full mode with HW backed device (e.g. Virtual Function Representor).
 	//   - DPU mode with Virtual Function Representor.
@@ -75,7 +75,7 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 	}
 }
 
-func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPort) Create(routeManager *routeManager, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
 		if err := syncMgmtPortInterface(mp.hostSubnets, mgmtPortName, true); err != nil {
 			return nil, fmt.Errorf("failed to sync management port: %v", err)
@@ -108,7 +108,7 @@ func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWa
 		return nil, err
 	}
 
-	cfg, err := createPlatformManagementPort(types.K8sMgmtIntfName, mp.hostSubnets)
+	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -121,10 +121,10 @@ func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWa
 	return cfg, nil
 }
 
-func (mp *managementPort) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPort) CheckManagementPortHealth(routeManager *routeManager, cfg *managementPortConfig, stopChan chan struct{}) {
 	go wait.Until(
 		func() {
-			checkManagementPortHealth(cfg)
+			checkManagementPortHealth(routeManager, cfg)
 		},
 		30*time.Second,
 		stopChan)
