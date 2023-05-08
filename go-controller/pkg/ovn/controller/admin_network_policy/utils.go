@@ -19,13 +19,19 @@ import (
 var ErrorANPPriorityUnsupported = errors.New("OVNK only supports priority ranges 0-99")
 var ErrorANPWithDuplicatePriority = errors.New("exists with the same priority")
 
-// getAdminNetworkPolicyPGName will return the hashed name and provided anp name as the port group name
-func getAdminNetworkPolicyPGName(name string, isBanp bool) (hashedPGName, readablePGName string) {
-	readablePortGroupName := fmt.Sprintf("ANP:%s", name)
+func GetANPPortGroupDbIDs(anpName string, isBanp bool, controller string) *libovsdbops.DbObjectIDs {
+	idsType := libovsdbops.PortGroupAdminNetworkPolicy
 	if isBanp {
-		readablePortGroupName = fmt.Sprintf("BANP:%s", name)
+		idsType = libovsdbops.PortGroupBaselineAdminNetworkPolicy
 	}
-	return util.HashForOVN(readablePortGroupName), readablePortGroupName
+	return libovsdbops.NewDbObjectIDs(idsType, controller,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: anpName,
+		})
+}
+
+func (c *Controller) getANPPortGroupName(anpName string, isBanp bool) string {
+	return libovsdbutil.GetPortGroupName(GetANPPortGroupDbIDs(anpName, isBanp, c.controllerName))
 }
 
 // getANPRuleACLDbIDs will return the dbObjectIDs for a given rule's ACLs

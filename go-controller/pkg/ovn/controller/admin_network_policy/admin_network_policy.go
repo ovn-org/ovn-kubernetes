@@ -123,7 +123,8 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	// 1) Construct Port Group name using ANP name and ports of pods in ANP subject
 	// 2) Construct Address-sets with IPs of the peers in the rules
 	// 3) Construct ACLs using AS-es and PGs
-	portGroupName, _ := getAdminNetworkPolicyPGName(desiredANPState.name, false)
+	portGroupName := c.getANPPortGroupName(desiredANPState.name, false)
+
 	desiredPorts, err := c.convertANPSubjectToLSPs(desiredANPState.subject)
 	if err != nil {
 		return fmt.Errorf("unable to fetch ports for anp %s: %v", desiredANPState.name, err)
@@ -392,11 +393,11 @@ func (c *Controller) clearAdminNetworkPolicy(anpName string) error {
 	// clear NBDB objects for the given ANP (PG, ACLs on that PG, AddrSets used by the ACLs)
 	var err error
 	// remove PG for Subject (ACLs will get cleaned up automatically)
-	portGroupName, readableGroupName := getAdminNetworkPolicyPGName(anp.name, false)
+	portGroupName := c.getANPPortGroupName(anp.name, false)
 	// no need to batch this with address-set deletes since this itself will contain a bunch of ACLs that need to be deleted which is heavy enough.
 	err = libovsdbops.DeletePortGroups(c.nbClient, portGroupName)
 	if err != nil {
-		return fmt.Errorf("unable to delete PG %s for ANP %s: %w", readableGroupName, anp.name, err)
+		return fmt.Errorf("unable to delete PG %s for ANP %s: %w", portGroupName, anp.name, err)
 	}
 	// remove address-sets that were created for the peers of each rule fpr the whole ANP
 	// do this after ACLs are gone so that there is no lingering references
@@ -430,12 +431,7 @@ func (c *Controller) clearASForPeers(anpName string, idType *libovsdbops.ObjectI
 func (c *Controller) createNewANP(desiredANPState *adminNetworkPolicyState, desiredACLs []*nbdb.ACL,
 	desiredPorts []*nbdb.LogicalSwitchPort, isBanp bool) error {
 	ops := []ovsdb.Operation{}
-	var err error
-	portGroupName, readableGroupName := getAdminNetworkPolicyPGName(desiredANPState.name, isBanp)
-	pgExternalIDs := map[string]string{ANPExternalIDKey: desiredANPState.name, "name": readableGroupName}
-	if isBanp {
-		pgExternalIDs = map[string]string{BANPExternalIDKey: desiredANPState.name, "name": readableGroupName}
-	}
+
 	// now CreateOrUpdate the address-sets; add the right IPs - we treat the rest of the address-set cases as a fresh add or update
 	addrSetOps, err := c.constructOpsForRuleChanges(desiredANPState, isBanp)
 	if err != nil {
@@ -446,7 +442,8 @@ func (c *Controller) createNewANP(desiredANPState *adminNetworkPolicyState, desi
 	if err != nil {
 		return fmt.Errorf("failed to create ACL ops: %v", err)
 	}
-	pg := libovsdbops.BuildPortGroup(portGroupName, desiredPorts, desiredACLs, pgExternalIDs)
+	pgDbIDs := GetANPPortGroupDbIDs(desiredANPState.name, isBanp, c.controllerName)
+	pg := libovsdbutil.BuildPortGroup(pgDbIDs, desiredPorts, desiredACLs)
 	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(c.nbClient, ops, pg)
 	if err != nil {
 		return fmt.Errorf("failed to create ops to add port to a port group: %v", err)
@@ -462,7 +459,7 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	hasPriorityChanged, isBanp bool, desiredACLs []*nbdb.ACL) error {
 	var ops []ovsdb.Operation
 	var err error
-	portGroupName, _ := getAdminNetworkPolicyPGName(desiredANPState.name, isBanp)
+	portGroupName := c.getANPPortGroupName(desiredANPState.name, isBanp)
 	// Did ANP.Spec.Ingress Change (rule inserts/deletes)? && || Did ANP.Spec.Egress Change (rule inserts/deletes)? && ||
 	// If yes we need to fully recompute the acls present in our ANP's port group; Let's do a full recompute and return.
 	// Reason behind a full recompute: Each rule has precedence based on its position and priority of ANP; if any of that changes

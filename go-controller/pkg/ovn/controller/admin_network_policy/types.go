@@ -18,10 +18,8 @@ import (
 const (
 	ANPFlowStartPriority            = 30000
 	ANPMaxRulesPerObject            = 100
-	ANPExternalIDKey                = "AdminNetworkPolicy"         // key set on port-groups to identify which ANP it belongs to
-	ovnkSupportedPriorityUpperBound = 99                           // corresponds to 20100 ACL priority
-	BANPFlowPriority                = 1750                         // down to 1651 (both inclusive, note that these ACLs will be in tier3)
-	BANPExternalIDKey               = "BaselineAdminNetworkPolicy" // key set on port-groups to identify which BANP it belongs to
+	ovnkSupportedPriorityUpperBound = 99   // corresponds to 20100 ACL priority
+	BANPFlowPriority                = 1750 // down to 1651 (both inclusive, note that these ACLs will be in tier3)
 )
 
 type adminNetworkPolicySubject struct {

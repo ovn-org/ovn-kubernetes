@@ -79,17 +79,12 @@ func getDefaultPGForANPSubject(anpName string, portUUIDs []string, acls []*nbdb.
 	for _, uuid := range portUUIDs {
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
-	prefix := "ANP:"
-	pgExternalIDs := map[string]string{anpovn.ANPExternalIDKey: anpName, "name": prefix + anpName}
-	if banp {
-		prefix = "BANP:"
-		pgExternalIDs = map[string]string{anpovn.BANPExternalIDKey: anpName, "name": prefix + anpName}
-	}
-	pg := libovsdbops.BuildPortGroup(
-		util.HashForOVN(prefix+anpName),
+	pgDbIDs := anpovn.GetANPPortGroupDbIDs(anpName, banp, DefaultNetworkControllerName)
+
+	pg := libovsdbutil.BuildPortGroup(
+		pgDbIDs,
 		lsps,
 		acls,
-		pgExternalIDs,
 	)
 	pg.UUID = pg.Name + "-UUID"
 	return pg
@@ -126,21 +121,18 @@ func getANPGressACL(action, anpName, direction string, rulePriority int32,
 	}
 	acl.UUID = fmt.Sprintf("%s_%s_%d-%f-UUID", anpName, direction, ruleIndex, rand.Float64())
 	// determine ACL match
-	pgHashName := util.HashForOVN("ANP:" + anpName)
-	if banp {
-		pgHashName = util.HashForOVN("BANP:" + anpName)
-	}
+	pgName := libovsdbutil.GetPortGroupName(anpovn.GetANPPortGroupDbIDs(anpName, banp, DefaultNetworkControllerName))
 	var l3PortMatch, matchDirection string
 	if direction == string(libovsdbutil.ACLIngress) {
 		acl.Direction = nbdb.ACLDirectionToLport
-		l3PortMatch = fmt.Sprintf("outport == @%s", pgHashName)
+		l3PortMatch = fmt.Sprintf("outport == @%s", pgName)
 		matchDirection = "src"
 	} else {
 		acl.Direction = nbdb.ACLDirectionFromLport
 		acl.Options = map[string]string{
 			"apply-after-lb": "true",
 		}
-		l3PortMatch = fmt.Sprintf("inport == @%s", pgHashName)
+		l3PortMatch = fmt.Sprintf("inport == @%s", pgName)
 		matchDirection = "dst"
 	}
 	asIndex := anpovn.GetANPPeerAddrSetDbIDs(anpName, direction, fmt.Sprintf("%d", ruleIndex),

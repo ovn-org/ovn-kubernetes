@@ -247,7 +247,8 @@ func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
 	}
 
-	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, netName)
+	controllerName := netName + "-network-controller"
+	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, controllerName)
 	if err != nil {
 		return err
 	}

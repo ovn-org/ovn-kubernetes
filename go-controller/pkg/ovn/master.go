@@ -44,8 +44,9 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	}
 	oc.defaultCOPPUUID = *(logicalRouter.Copp)
 
+	pgIDs := oc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
 	pg := &nbdb.PortGroup{
-		Name: types.ClusterPortGroupNameBase,
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
 	}
 	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
@@ -54,7 +55,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	if pg == nil {
 		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
 		// Create a cluster-wide port group that all logical switch ports are part of
-		pg := oc.buildPortGroup(types.ClusterPortGroupNameBase, types.ClusterPortGroupNameBase, nil, nil)
+		pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
 		if err != nil {
 			klog.Errorf("Failed to create cluster port group: %v", err)
@@ -62,8 +63,9 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		}
 	}
 
+	pgIDs = oc.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
 	pg = &nbdb.PortGroup{
-		Name: types.ClusterRtrPortGroupNameBase,
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
 	}
 	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
@@ -74,7 +76,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		// Create a cluster-wide port group with all node-to-cluster router
 		// logical switch ports. Currently the only user is multicast but it might
 		// be used for other features in the future.
-		pg = oc.buildPortGroup(types.ClusterRtrPortGroupNameBase, types.ClusterRtrPortGroupNameBase, nil, nil)
+		pg = libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
 		if err != nil {
 			klog.Errorf("Failed to create cluster port group: %v", err)
@@ -208,7 +210,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		return err
 	}
 
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterPortGroupNameBase, logicalSwitchPort.UUID)
+	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, oc.getClusterPortGroupName(types.ClusterPortGroupNameBase), logicalSwitchPort.UUID)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return err

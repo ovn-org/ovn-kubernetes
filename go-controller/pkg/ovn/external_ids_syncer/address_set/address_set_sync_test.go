@@ -376,11 +376,11 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				ExternalIDs: map[string]string{"EgressQoS": "namespace"},
 				UUID:        "qos5-UUID",
 			},
-		&nbdb.LogicalSwitch{
-					UUID:     "node1-UUID",
-					Name:     "node1",
-					QOSRules: []string{"qos1-UUID", "qos2-UUID", "qos3-UUID", "qos4-UUID", "qos5-UUID"},
-				},}
+			&nbdb.LogicalSwitch{
+				UUID:     "node1-UUID",
+				Name:     "node1",
+				QOSRules: []string{"qos1-UUID", "qos2-UUID", "qos3-UUID", "qos4-UUID", "qos5-UUID"},
+			}}
 		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
 	ginkgo.It("updates address set owned by EgressFirewallDNSOwnerType and its references", func() {
