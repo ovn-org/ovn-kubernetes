@@ -382,3 +382,19 @@ func GetDPUHostInterface(bridgeName string) (string, error) {
 	// No host interface found in provided bridge
 	return "", fmt.Errorf("dpu host interface was not found for bridge %q", bridgeName)
 }
+
+func CreateLocalGatewayBridge() (string, error) {
+	bridge := "br-localgw"
+	bridgeMac := "f2:00:00:00:00:00"
+	stdout, stderr, err := RunOVSVsctl(
+		"--", "--may-exist", "add-br", bridge,
+		"--", "br-set-external-id", bridge, "bridge-id", bridge,
+		"--", "set", "bridge", bridge, "fail-mode=standalone",
+		fmt.Sprintf("other_config:hwaddr=%s", bridgeMac))
+	if err != nil {
+		klog.Errorf("Failed to create OVS bridge, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return "", err
+	}
+	klog.Infof("Successfully created OVS bridge %q", bridge)
+	return bridge, nil
+}

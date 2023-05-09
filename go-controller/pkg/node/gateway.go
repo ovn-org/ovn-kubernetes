@@ -376,7 +376,18 @@ type bridgeConfiguration struct {
 func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*net.IPNet, error) {
 	b.Lock()
 	defer b.Unlock()
-	ifAddrs, err := getNetworkInterfaceIPAddresses(b.bridgeName)
+	var err error
+	defaultIntf := ""
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		defaultIntf, _, err = getDefaultGatewayInterfaceDetails("")
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		defaultIntf = b.bridgeName
+	}
+
+	ifAddrs, err := getNetworkInterfaceIPAddresses(defaultIntf)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +418,15 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 	gwIntf := intfName
 	bridgeCreated := false
 
-	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
+	if intfName == "" && config.Gateway.Mode == config.GatewayModeLocal {
+		bridgeName, err := util.CreateLocalGatewayBridge()
+		if err != nil {
+			return nil, errors.Wrapf(err, "CreateLocalGatewayBridge failed")
+		}
+		res.bridgeName = bridgeName
+		gwIntf = bridgeName
+		bridgeCreated = true
+	} else if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
 		// This is an OVS bridge's internal port
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {

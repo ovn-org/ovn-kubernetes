@@ -347,7 +347,16 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 		egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
 	}
 
-	ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf)
+	defaultIntf := ""
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		defaultIntf, _, err = getDefaultGatewayInterfaceDetails("")
+		if err != nil {
+			return err
+		}
+	} else {
+		defaultIntf = gatewayIntf
+	}
+	ifAddrs, err = getNetworkInterfaceIPAddresses(defaultIntf)
 	if err != nil {
 		return err
 	}
