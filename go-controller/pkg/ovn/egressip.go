@@ -19,7 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
+	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -58,15 +58,18 @@ func getEgressIPAddrSetDbIDs(name egressIpAddrSetName, controller string) *libov
 // CASE 1: if old == nil && new != nil {add event, we do a full setup for all statuses}
 // CASE 2: if old != nil && new == nil {delete event, we do a full teardown for all statuses}
 // CASE 3: if old != nil && new != nil {update event,
-//   CASE 3.1: we calculate based on difference between old and new statuses
-//             which ones need teardown and which ones need setup
-//             this ensures there is no disruption for things that did not change
-//   CASE 3.2: Only Namespace selectors on Spec changed
-//   CASE 3.3: Only Pod Selectors on Spec changed
-//   CASE 3.4: Both Namespace && Pod Selectors on Spec changed
-// }
-// NOTE: `Spec.EgressIPs`` updates for EIP object are not processed here, that is the job of cluster manager
-//       We only care about `Spec.NamespaceSelector`, `Spec.PodSelector` and `Status` field
+//
+//	  CASE 3.1: we calculate based on difference between old and new statuses
+//	            which ones need teardown and which ones need setup
+//	            this ensures there is no disruption for things that did not change
+//	  CASE 3.2: Only Namespace selectors on Spec changed
+//	  CASE 3.3: Only Pod Selectors on Spec changed
+//	  CASE 3.4: Both Namespace && Pod Selectors on Spec changed
+//	}
+//
+// NOTE: `Spec.EgressIPs“ updates for EIP object are not processed here, that is the job of cluster manager
+//
+//	We only care about `Spec.NamespaceSelector`, `Spec.PodSelector` and `Status` field
 func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.EgressIP) (err error) {
 	// CASE 1: EIP object deletion, we need to teardown database configuration for all the statuses
 	if old != nil && new == nil {

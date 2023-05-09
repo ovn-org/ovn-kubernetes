@@ -1,4 +1,4 @@
-package egress_services
+package egressservice
 
 import (
 	"fmt"
