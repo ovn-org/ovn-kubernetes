@@ -1,4 +1,4 @@
-package egressservice
+package egressservice_node
 
 import (
 	"encoding/json"

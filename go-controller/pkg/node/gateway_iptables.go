@@ -9,7 +9,7 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice_node"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -67,7 +67,7 @@ func appendIptRules(rules []nodeipt.Rule) error {
 
 func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
 	iptRules := []nodeipt.Rule{}
-	if chain == egressservice.Chain {
+	if chain == egressservice_node.Chain {
 		return []nodeipt.Rule{
 			{
 				Table:    "nat",
@@ -443,7 +443,7 @@ func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {
 func handleGatewayIPTables(iptCallback func(rules []nodeipt.Rule) error, genGatewayChainRules func(chain string, proto iptables.Protocol) []nodeipt.Rule) error {
 	rules := make([]nodeipt.Rule, 0)
 	// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
-	for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
+	for _, chain := range []string{iptableITPChain, egressservice_node.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
 		for _, proto := range clusterIPTablesProtocols() {
 			ipt, err := util.GetIPTablesHelper(proto)
 			if err != nil {

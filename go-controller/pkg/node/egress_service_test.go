@@ -9,7 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice_node"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -204,7 +204,7 @@ var _ = Describe("Egress Service Operations", func() {
 				)
 
 				wf := fakeOvnNode.watcher.(*factory.WatchFactory)
-				c, err := egressservice.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
+				c, err := egressservice_node.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
 					wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
 				Expect(err).ToNot(HaveOccurred())
 				fakeOvnNode.wg.Add(1)
@@ -316,7 +316,7 @@ var _ = Describe("Egress Service Operations", func() {
 				)
 
 				wf := fakeOvnNode.watcher.(*factory.WatchFactory)
-				c, err := egressservice.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
+				c, err := egressservice_node.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
 					wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
 				Expect(err).ToNot(HaveOccurred())
 				fakeOvnNode.wg.Add(1)
@@ -463,7 +463,7 @@ var _ = Describe("Egress Service Operations", func() {
 				)
 
 				wf := fakeOvnNode.watcher.(*factory.WatchFactory)
-				c, err := egressservice.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
+				c, err := egressservice_node.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
 					wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
 				Expect(err).ToNot(HaveOccurred())
 				fakeOvnNode.wg.Add(1)
