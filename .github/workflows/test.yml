@@ -28,7 +28,7 @@ jobs:
   # separate job for parallelism
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
     - name: Check out code
       uses: actions/checkout@v3
@@ -49,7 +49,7 @@ jobs:
 
   build-master:
     name: Build-master
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
     # Create a cache for the built master image
     - name: Restore master image cache
@@ -136,7 +136,7 @@ jobs:
 
   build-pr:
     name: Build-PR
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
     # Create a cache for the build PR image
     - name: Restore PR image cache
@@ -236,7 +236,7 @@ jobs:
   ovn-upgrade-e2e:
     name: Upgrade OVN from Master to PR branch based image
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 120
     needs:
       - build-master
@@ -350,7 +350,7 @@ jobs:
   e2e:
     name: e2e
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
     timeout-minutes: 220
     strategy:
@@ -472,7 +472,7 @@ jobs:
   e2e-dual-conversion:
     name: e2e-dual-conversion
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 60
     strategy:
       fail-fast: false
