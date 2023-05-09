@@ -21,6 +21,8 @@ import (
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
+	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -97,6 +99,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	egressFirewallObjects := []runtime.Object{}
 	egressQoSObjects := []runtime.Object{}
 	multiNetworkPolicyObjects := []runtime.Object{}
+	egressServiceObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []*nettypes.NetworkAttachmentDefinition{}
 	for _, object := range objects {
@@ -112,6 +115,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			for i := range nadList.Items {
 				nads = append(nads, &nadList.Items[i])
 			}
+		} else if _, isEgressServiceObject := object.(*egressservice.EgressServiceList); isEgressServiceObject {
+			egressServiceObjects = append(egressServiceObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
@@ -122,6 +127,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressFirewallClient:     egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
 		EgressQoSClient:          egressqosfake.NewSimpleClientset(egressQoSObjects...),
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
+		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 	}
 	o.init(nads)
 }
@@ -220,6 +226,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
+			EgressServiceClient:  ovnClient.EgressServiceClient,
 		},
 		wf,
 		recorder,

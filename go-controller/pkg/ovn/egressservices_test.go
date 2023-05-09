@@ -11,13 +11,13 @@ import (
 	"github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/urfave/cli/v2"
 
@@ -33,17 +33,18 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 		fakeOVN *FakeOVN
 	)
 	const (
-		node1Name       string = "node1"
-		node1IPv4       string = "100.100.100.0"
-		node1IPv6       string = "fc00:f853:ccd:e793::1"
-		node1IPv4Subnet string = "10.128.1.0/24"
-		node1IPv6Subnet string = "fe00:10:128:1::/64"
-		node2Name       string = "node2"
-		node2IPv4       string = "200.200.200.0"
-		node2IPv6       string = "fc00:f853:ccd:e793::2"
-		node2IPv4Subnet string = "10.128.2.0/24"
-		node2IPv6Subnet string = "fe00:10:128:2::/64"
-		controllerName         = DefaultNetworkControllerName
+		node1Name            string = "node1"
+		node1IPv4            string = "100.100.100.0"
+		node1IPv6            string = "fc00:f853:ccd:e793::1"
+		node1IPv4Subnet      string = "10.128.1.0/24"
+		node1IPv6Subnet      string = "fe00:10:128:1::/64"
+		node2Name            string = "node2"
+		node2IPv4            string = "200.200.200.0"
+		node2IPv6            string = "fc00:f853:ccd:e793::2"
+		node2IPv4Subnet      string = "10.128.2.0/24"
+		node2IPv6Subnet      string = "fe00:10:128:2::/64"
+		controllerName              = DefaultNetworkControllerName
+		egressSVCLabelPrefix string = "egress-service.k8s.ovn.org"
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -51,6 +52,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 		config.PrepareTestConfig()
 		// disabling EgressIP to be sure we're creating the no reroute policies ourselves
 		config.OVNKubernetesFeature.EnableEgressIP = false
+		config.OVNKubernetesFeature.EnableEgressService = true
 		_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 		_, cidr6, _ := net.ParseCIDR("fe00::/16")
 		config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{cidr4, 24}, {cidr6, 64}}
@@ -78,18 +80,45 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "nolongeregresssvc", Namespace: "testns"},
 				}
 
-				svc1 := svcFor("testns", "svc1", map[string]string{
-					util.EgressSVCAnnotation:     "{}",
-					util.EgressSVCHostAnnotation: node1Name,
-				})
-				svc2 := svcFor("testns", "svc2", map[string]string{
-					util.EgressSVCAnnotation:     "{}",
-					util.EgressSVCHostAnnotation: node2Name,
-				})
-				svc3 := svcFor("testns", "svc3", map[string]string{
-					util.EgressSVCAnnotation:     "{\"nodeSelector\":{\"matchLabels\":{\"kubernetes.io/hostname\": \"node2\"}}}",
-					util.EgressSVCHostAnnotation: node2Name,
-				})
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: node1Name,
+					},
+				}
+				svc1 := lbSvcFor("testns", "svc1")
+
+				esvc2 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc2",
+						Namespace: "testns",
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: node2Name,
+					},
+				}
+				svc2 := lbSvcFor("testns", "svc2")
+
+				esvc3 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc3",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						NodeSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"kubernetes.io/hostname": node2.Name,
+							},
+						},
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: node2Name,
+					},
+				}
+				svc3 := lbSvcFor("testns", "svc3")
 				svc3.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
 
 				svc1EpSlice := discovery.EndpointSlice{
@@ -147,7 +176,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				staleLRP2 := &nbdb.LogicalRouterPolicy{
-					ExternalIDs: map[string]string{"EgressSVC": "testns/nolongeregresssvc"}, // configuration annotation removed
+					ExternalIDs: map[string]string{"EgressSVC": "testns/nolongeregresssvc"}, // corresponding EgressService removed
 					Priority:    types.EgressSVCReroutePriority,
 					UUID:        "staleLRP2-UUID",
 					Match:       "ip4.src == 10.10.10.10",
@@ -245,10 +274,16 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 							svc3EpSlice,
 						},
 					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
+							esvc2,
+							esvc3,
+						},
+					},
 				)
 
 				fakeOVN.InitAndRunEgressSVCController()
-
 				clusterRouter.Policies = []string{"toKeepLRP1-UUID", "toKeepLRP2-UUID"}
 				expectedDatabaseState := []libovsdbtest.TestData{
 					toKeepLRP1,
@@ -276,28 +311,41 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 				node1.Labels = map[string]string{
 					"unrelated-label": "",
-					fmt.Sprintf("%s/deleted-service1", util.EgressSVCLabelPrefix): "",
-					fmt.Sprintf("%s/deleted-service2", util.EgressSVCLabelPrefix): "",
-					fmt.Sprintf("%s/testns-svc1", util.EgressSVCLabelPrefix):      "",
-					fmt.Sprintf("%s/testns-svc2", util.EgressSVCLabelPrefix):      "",
+					fmt.Sprintf("%s/deleted-service1", egressSVCLabelPrefix): "",
+					fmt.Sprintf("%s/deleted-service2", egressSVCLabelPrefix): "",
+					fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix):      "",
+					fmt.Sprintf("%s/testns-svc2", egressSVCLabelPrefix):      "",
 				}
 
 				node2.Labels = map[string]string{
 					"unrelated-label": "",
-					fmt.Sprintf("%s/deleted-service3", util.EgressSVCLabelPrefix): "",
-					fmt.Sprintf("%s/deleted-service4", util.EgressSVCLabelPrefix): "",
-					fmt.Sprintf("%s/testns-svc1", util.EgressSVCLabelPrefix):      "",
-					fmt.Sprintf("%s/testns-svc2", util.EgressSVCLabelPrefix):      "",
+					fmt.Sprintf("%s/deleted-service3", egressSVCLabelPrefix): "",
+					fmt.Sprintf("%s/deleted-service4", egressSVCLabelPrefix): "",
+					fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix):      "",
+					fmt.Sprintf("%s/testns-svc2", egressSVCLabelPrefix):      "",
 				}
 
-				svc1 := svcFor("testns", "svc1", map[string]string{
-					util.EgressSVCAnnotation:     "{}",
-					util.EgressSVCHostAnnotation: node1Name,
-				})
-				svc2 := svcFor("testns", "svc2", map[string]string{
-					util.EgressSVCAnnotation:     "{}",
-					util.EgressSVCHostAnnotation: node2Name,
-				})
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: node1Name,
+					},
+				}
+				svc1 := lbSvcFor("testns", "svc1")
+
+				esvc2 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc2",
+						Namespace: "testns",
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: node2Name,
+					},
+				}
+				svc2 := lbSvcFor("testns", "svc2")
 
 				svc1EpSlice := discovery.EndpointSlice{
 					ObjectMeta: metav1.ObjectMeta{
@@ -362,6 +410,12 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 							svc2EpSlice,
 						},
 					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
+							esvc2,
+						},
+					},
 				)
 
 				fakeOVN.InitAndRunEgressSVCController()
@@ -369,7 +423,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				gomega.Eventually(func() error {
 					expectedLabels := map[string]string{
 						"unrelated-label": "",
-						fmt.Sprintf("%s/testns-svc1", util.EgressSVCLabelPrefix): "",
+						fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix): "",
 					}
 
 					node1, err := fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
@@ -387,7 +441,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				gomega.Eventually(func() error {
 					expectedLabels := map[string]string{
 						"unrelated-label": "",
-						fmt.Sprintf("%s/testns-svc2", util.EgressSVCLabelPrefix): "",
+						fmt.Sprintf("%s/testns-svc2", egressSVCLabelPrefix): "",
 					}
 
 					node2, err := fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node2Name, metav1.GetOptions{})
@@ -408,10 +462,75 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
+
+		ginkgo.It("should delete stale status from EgressServices", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("testns")
+				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet)
+
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: node1Name,
+					},
+				}
+
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalRouter{
+							Name: types.OVNClusterRouter,
+							UUID: types.OVNClusterRouter + "-UUID",
+						},
+					},
+				}
+
+				fakeOVN.startWithDBSetup(dbSetup,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*node1,
+						},
+					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
+						},
+					},
+				)
+
+				fakeOVN.InitAndRunEgressSVCController()
+
+				gomega.Eventually(func() error {
+					es, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc1.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if es.Status.Host != "" {
+						return fmt.Errorf("expected svc1's host value %s to be empty", es.Status.Host)
+					}
+
+					return nil
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
 	})
 
 	ginkgo.Context("on services changes", func() {
-		ginkgo.It("should create/update/delete service host annotations", func() {
+		ginkgo.It("should create/update/delete EgressService host", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
 				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet)
@@ -431,9 +550,20 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				ginkgo.By("creating a service that will be allocated on the first node")
-				svc1 := svcFor("testns", "svc1", map[string]string{
-					util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"firstName\": \"Albus\"}}}",
-				})
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						NodeSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"firstName": "Albus",
+							},
+						},
+					},
+				}
+				svc1 := lbSvcFor("testns", "svc1")
 				svc1EpSlice := discovery.EndpointSlice{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "svc1-epslice",
@@ -487,112 +617,87 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 							svc2EpSlice,
 						},
 					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
+						},
+					},
 				)
 
 				fakeOVN.InitAndRunEgressSVCController()
 
 				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					es, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					svcHost, err := util.GetEgressSVCHost(svc)
-					if err != nil {
-						return err
-					}
-
-					if svcHost != node1.Name {
-						return fmt.Errorf("expected svc1's host annotation value %s to be node1", svcHost)
+					if es.Status.Host != node1.Name {
+						return fmt.Errorf("expected svc1's host value %s to be node1", es.Status.Host)
 					}
 
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
-				ginkgo.By("creating a second service without any egress service config annotation")
-				s2 := svcFor("testns", "svc2", map[string]string{})
+				ginkgo.By("creating a second service without any EgressService")
+				s2 := lbSvcFor("testns", "svc2")
 				svc2 := &s2
 
 				svc2, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Create(context.TODO(), svc2, metav1.CreateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc2.Name, metav1.GetOptions{})
-					if err != nil {
-						return err
-					}
 
-					val, ok := svc.Annotations[util.EgressSVCHostAnnotation]
-					if ok {
-						return fmt.Errorf("expected svc2's egress host annotation to be empty, got: %s", val)
-					}
-
-					return nil
-				}).ShouldNot(gomega.HaveOccurred())
-
-				ginkgo.By("updating the second service with a config that matches the second node the host annotation will be created")
-				svc2.Annotations = map[string]string{util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"firstName\": \"Severus\"}}}"}
-				svc2.ResourceVersion = "2"
-				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Update(context.TODO(), svc2, metav1.UpdateOptions{})
+				ginkgo.By("creating an EgressService for the second service with a config that matches the second node its status will be updated")
+				esvc2 := &egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc2",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						NodeSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"firstName": "Severus",
+							},
+						},
+					},
+				}
+				_, err = fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Create(context.TODO(), esvc2, metav1.CreateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc2.Name, metav1.GetOptions{})
+					es, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc2.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					svcHost, err := util.GetEgressSVCHost(svc)
-					if err != nil {
-						return err
-					}
-
-					if svcHost != node2.Name {
-						return fmt.Errorf("expected svc2's host annotation value %s to be node2", svcHost)
+					if es.Status.Host != node2.Name {
+						return fmt.Errorf("expected svc2's host value %s to be node2", es.Status.Host)
 					}
 
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
-				ginkgo.By("updating the second service's config to match the first node instead of the second its host annotation will be updated")
-				svc2.Annotations = map[string]string{util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"firstName\": \"Albus\"}}}"}
-				svc2.ResourceVersion = "3"
-				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Update(context.TODO(), svc2, metav1.UpdateOptions{})
+				ginkgo.By("updating the second service's config to match the first node instead of the second its status will be updated")
+				esvc2.Spec.NodeSelector = metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"firstName": "Albus",
+					},
+				}
+				esvc2.ResourceVersion = "2"
+				_, err = fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Update(context.TODO(), esvc2, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
 				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc2.Name, metav1.GetOptions{})
+					es, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc2.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					svcHost, err := util.GetEgressSVCHost(svc)
-					if err != nil {
-						return err
-					}
-
-					if svcHost != node1.Name {
-						return fmt.Errorf("expected svc2's host annotation value %s to be node1", svcHost)
+					if es.Status.Host != node1.Name {
+						return fmt.Errorf("expected svc2's host value %s to be node1", es.Status.Host)
 					}
 
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
-				ginkgo.By("removing the config annotation from the second service its host annotation will be deleted")
-				delete(svc2.Annotations, util.EgressSVCAnnotation)
-				svc2.ResourceVersion = "4"
-				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Update(context.TODO(), svc2, metav1.UpdateOptions{})
-				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc2.Name, metav1.GetOptions{})
-					if err != nil {
-						return err
-					}
-
-					val, ok := svc.Annotations[util.EgressSVCHostAnnotation]
-					if ok {
-						return fmt.Errorf("expected svc2's egress host annotation to be empty, got: %s", val)
-					}
-
-					return nil
-				}).ShouldNot(gomega.HaveOccurred())
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -620,9 +725,20 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				ginkgo.By("creating a service with v4 and v6 endpoints it will be allocated on the first node")
-				svc1 := svcFor("testns", "svc1", map[string]string{
-					util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"house\": \"Gryffindor\"}}}",
-				})
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						NodeSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"house": "Gryffindor",
+							},
+						},
+					},
+				}
+				svc1 := lbSvcFor("testns", "svc1")
 
 				v4EpSlice := discovery.EndpointSlice{
 					ObjectMeta: metav1.ObjectMeta{
@@ -685,6 +801,11 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 							v6EpSlice,
 						},
 					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
+						},
+					},
 				)
 
 				fakeOVN.InitAndRunEgressSVCController()
@@ -708,11 +829,14 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				ginkgo.By("updating the service's config to match the second node instead of the first its lrps' nexthop will be updated")
-
-				svc1.Annotations = map[string]string{util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"house\": \"Slytherin\"}}}"}
-				svc1.ResourceVersion = "2"
-				_, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Update(context.TODO(), &svc1, metav1.UpdateOptions{})
+				ginkgo.By("updating the EgressService's config to match the second node instead of the first its lrps' nexthop will be updated")
+				esvc1.Spec.NodeSelector = metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"house": "Slytherin",
+					},
+				}
+				esvc1.ResourceVersion = "2"
+				_, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Update(context.TODO(), &esvc1, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 				v4lrp1.Nexthops[0] = "10.128.2.2"
@@ -735,11 +859,10 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				ginkgo.By("removing the config annotation from the service it lrps will be removed")
-				delete(svc1.Annotations, util.EgressSVCAnnotation)
-				svc1.ResourceVersion = "3"
-				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Update(context.TODO(), &svc1, metav1.UpdateOptions{})
+				ginkgo.By("removing the EgressService its lrps will be removed")
+				err = fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Delete(context.TODO(), esvc1.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
 				clusterRouter.Policies = []string{}
 				expectedDatabaseState = []libovsdbtest.TestData{clusterRouter}
 				for _, lrp := range getDefaultNoReroutePolicies(controllerName) {
@@ -773,10 +896,21 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					},
 				}
 
-				ginkgo.By("creating a service that will be allocated on the first node it will be labeled")
-				svc1 := svcFor("testns", "svc1", map[string]string{
-					util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"animal\": \"FlyingBison\"}}}",
-				})
+				ginkgo.By("creating an egress service that will be allocated on the first node it will be labeled")
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						NodeSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"animal": "FlyingBison",
+							},
+						},
+					},
+				}
+				svc1 := lbSvcFor("testns", "svc1")
 				svc1EpSlice := discovery.EndpointSlice{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "svc1-epslice",
@@ -814,6 +948,11 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 							svc1EpSlice,
 						},
 					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
+						},
+					},
 				)
 
 				fakeOVN.InitAndRunEgressSVCController()
@@ -821,7 +960,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				gomega.Eventually(func() error {
 					node1ExpectedLabels := map[string]string{
 						"animal": "FlyingBison",
-						fmt.Sprintf("%s/testns-svc1", util.EgressSVCLabelPrefix): "",
+						fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix): "",
 					}
 
 					node1, err := fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
@@ -850,9 +989,13 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}).ShouldNot(gomega.HaveOccurred())
 
 				ginkgo.By("updating the service to be allocated on the second node its label will move to the second node")
-				svc1.Annotations = map[string]string{util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"animal\": \"Lemur\"}}}"}
-				svc1.ResourceVersion = "2"
-				_, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Update(context.TODO(), &svc1, metav1.UpdateOptions{})
+				esvc1.Spec.NodeSelector = metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"animal": "Lemur",
+					},
+				}
+				esvc1.ResourceVersion = "2"
+				_, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Update(context.TODO(), &esvc1, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 				gomega.Eventually(func() error {
@@ -871,7 +1014,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 					node2ExpectedLabels := map[string]string{
 						"animal": "Lemur",
-						fmt.Sprintf("%s/testns-svc1", util.EgressSVCLabelPrefix): "",
+						fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix): "",
 					}
 
 					node2, err := fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node2Name, metav1.GetOptions{})
@@ -886,8 +1029,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
-				ginkgo.By("deleting the service both nodes will not have the label")
-				err = fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Delete(context.TODO(), svc1.Name, metav1.DeleteOptions{})
+				ginkgo.By("deleting the EgressService both nodes will not have the label")
+				err = fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Delete(context.TODO(), esvc1.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 				gomega.Eventually(func() error {
@@ -942,10 +1085,21 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					},
 				}
 
-				svc1 := svcFor("testns", "svc1", map[string]string{
-					// ":", "&" not allowed in labels
-					util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"a:b\": \"c&\"}}}",
-				})
+				// ":", "&" not allowed in labels
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						NodeSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"a:b": "c&",
+							},
+						},
+					},
+				}
+				svc1 := lbSvcFor("testns", "svc1")
 				svc1EpSlice := discovery.EndpointSlice{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "svc1-epslice",
@@ -982,19 +1136,23 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 							svc1EpSlice,
 						},
 					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
+						},
+					},
 				)
 
 				fakeOVN.InitAndRunEgressSVCController()
 
 				gomega.Consistently(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					es, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					val, ok := svc.Annotations[util.EgressSVCHostAnnotation]
-					if ok {
-						return fmt.Errorf("expected svc1 to not have a host annotation, got a value of %v", val)
+					if es.Status.Host != "" {
+						return fmt.Errorf("expected svc1 to not have a host, got a value of %v", es.Status.Host)
 					}
 
 					node1, err := fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
@@ -1002,7 +1160,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 						return err
 					}
 
-					_, ok = node1.Labels[fmt.Sprintf("%s/testns-svc1", util.EgressSVCLabelPrefix)]
+					_, ok := node1.Labels[fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix)]
 
 					if ok {
 						return fmt.Errorf("expected node1 to not have the egress service label, got %v", node1.Labels)
@@ -1037,9 +1195,13 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				ginkgo.By("creating a service with v4 endpoints that will be allocated on the node")
-				svc1 := svcFor("testns", "svc1", map[string]string{
-					util.EgressSVCAnnotation: "{}",
-				})
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+				}
+				svc1 := lbSvcFor("testns", "svc1")
 
 				v4EpSlice := &discovery.EndpointSlice{
 					ObjectMeta: metav1.ObjectMeta{
@@ -1100,6 +1262,11 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					&discovery.EndpointSliceList{
 						Items: []discovery.EndpointSlice{
 							*v4EpSlice,
+						},
+					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
 						},
 					},
 				)
@@ -1224,9 +1391,20 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				ginkgo.By("creating a service with a selector matching a node without local eps lrps should not be created")
-				svc1 := svcFor("testns", "svc1", map[string]string{
-					util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"square\": \"pants\"}}}",
-				})
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						NodeSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"square": "pants",
+							},
+						},
+					},
+				}
+				svc1 := lbSvcFor("testns", "svc1")
 				svc1.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
 
 				v4EpSlice := &discovery.EndpointSlice{
@@ -1266,6 +1444,11 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					&discovery.EndpointSliceList{
 						Items: []discovery.EndpointSlice{
 							*v4EpSlice,
+						},
+					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
 						},
 					},
 				)
@@ -1319,7 +1502,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					},
 				}
 				v4EpSlice.ResourceVersion = "3"
-				v4EpSlice, err = fakeOVN.fakeClient.KubeClient.DiscoveryV1().EndpointSlices("testns").Update(context.TODO(), v4EpSlice, metav1.UpdateOptions{})
+				_, err = fakeOVN.fakeClient.KubeClient.DiscoveryV1().EndpointSlices("testns").Update(context.TODO(), v4EpSlice, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 				clusterRouter.Policies = []string{}
@@ -1341,7 +1524,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 	})
 
 	ginkgo.Context("on nodes changes", func() {
-		ginkgo.It("should create/update/delete logical router policies, labels and annotations", func() {
+		ginkgo.It("should create/update/delete logical router policies, labels and status", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
 				config.IPv6Mode = true
@@ -1362,12 +1545,35 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				ginkgo.By("creating two services with different selectors")
-				svc1 := svcFor("testns", "svc1", map[string]string{
-					util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"home\": \"pineapple\"}}}",
-				})
-				svc2 := svcFor("testns", "svc2", map[string]string{
-					util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"home\": \"moai\"}}}",
-				})
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						NodeSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"home": "pineapple",
+							},
+						},
+					},
+				}
+				svc1 := lbSvcFor("testns", "svc1")
+
+				esvc2 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc2",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						NodeSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"home": "moai",
+							},
+						},
+					},
+				}
+				svc2 := lbSvcFor("testns", "svc2")
 
 				svc1V4EpSlice := discovery.EndpointSlice{
 					ObjectMeta: metav1.ObjectMeta{
@@ -1459,23 +1665,28 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 							svc2V6EpSlice,
 						},
 					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
+							esvc2,
+						},
+					},
 				)
 
 				fakeOVN.InitAndRunEgressSVCController()
 				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					es, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					val := svc.Annotations[util.EgressSVCHostAnnotation]
-					if val != node1Name {
-						return fmt.Errorf("expected svc1's host annotation value %s to be node1", val)
+					if es.Status.Host != node1.Name {
+						return fmt.Errorf("expected svc1's host value %s to be node1", es.Status.Host)
 					}
 
 					node1ExpectedLabels := map[string]string{
 						"home": "pineapple",
-						fmt.Sprintf("%s/testns-svc1", util.EgressSVCLabelPrefix): "",
+						fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix): "",
 					}
 
 					node1, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
@@ -1487,17 +1698,13 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 						return fmt.Errorf("expected node1's labels %v to be equal %v", node1.Labels, node1ExpectedLabels)
 					}
 
-					return nil
-				}).ShouldNot(gomega.HaveOccurred())
-				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc2.Name, metav1.GetOptions{})
+					es, err = fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc2.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					val, ok := svc.Annotations[util.EgressSVCHostAnnotation]
-					if ok {
-						return fmt.Errorf("expected svc2's egress host annotation to be empty, got: %s", val)
+					if es.Status.Host != "" {
+						return fmt.Errorf("expected svc2's host value %s to be empty", es.Status.Host)
 					}
 
 					node2ExpectedLabels := map[string]string{
@@ -1549,14 +1756,13 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					es, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					val, ok := svc.Annotations[util.EgressSVCHostAnnotation]
-					if ok {
-						return fmt.Errorf("expected svc1's egress host annotation to be empty, got: %s", val)
+					if es.Status.Host != "" {
+						return fmt.Errorf("expected svc1's host value %s to be empty", es.Status.Host)
 					}
 
 					node1ExpectedLabels := map[string]string{
@@ -1572,23 +1778,18 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 						return fmt.Errorf("expected node1's labels %v to be equal %v", node1.Labels, node1ExpectedLabels)
 					}
 
-					return nil
-				}).ShouldNot(gomega.HaveOccurred())
-
-				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc2.Name, metav1.GetOptions{})
+					es, err = fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc2.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					val := svc.Annotations[util.EgressSVCHostAnnotation]
-					if val != node2Name {
-						return fmt.Errorf("expected svc2's host annotation value %s to be node2", val)
+					if es.Status.Host != node2.Name {
+						return fmt.Errorf("expected svc1's host value %s to be node2", es.Status.Host)
 					}
 
 					node2ExpectedLabels := map[string]string{
 						"home": "moai",
-						fmt.Sprintf("%s/testns-svc2", util.EgressSVCLabelPrefix): "",
+						fmt.Sprintf("%s/testns-svc2", egressSVCLabelPrefix): "",
 					}
 
 					node2, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node2Name, metav1.GetOptions{})
@@ -1637,7 +1838,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("should update logical router policies, labels and annotations on reachability failure", func() {
+		ginkgo.It("should update logical router policies, labels and status on reachability failure", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
 				config.IPv6Mode = true
@@ -1655,9 +1856,20 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				ginkgo.By("creating a service selecting the node")
-				svc1 := svcFor("testns", "svc1", map[string]string{
-					util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"kubernetes.io/hostname\": \"node1\"}}}",
-				})
+				esvc1 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						NodeSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"kubernetes.io/hostname": node1.Name,
+							},
+						},
+					},
+				}
+				svc1 := lbSvcFor("testns", "svc1")
 
 				svc1V4EpSlice := discovery.EndpointSlice{
 					ObjectMeta: metav1.ObjectMeta{
@@ -1713,29 +1925,34 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 							svc1V6EpSlice,
 						},
 					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							esvc1,
+						},
+					},
 				)
 
 				ginkgo.By("modifying the controller's IsReachable func to return false on the first call and true for the second")
 				count := 0
-				fakeOVN.controller.egressSvcController.IsReachable = func(nodeName string, _ []net.IP, _ healthcheck.EgressIPHealthClient) bool {
-					count++
-					return count == 2
-				}
-				fakeOVN.InitAndRunEgressSVCController()
+				fakeOVN.InitAndRunEgressSVCController(func(c *DefaultNetworkController) {
+					c.egressSvcController.IsReachable = func(nodeName string, _ []net.IP, _ healthcheck.EgressIPHealthClient) bool {
+						count++
+						return count == 2
+					}
+				})
 				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					es, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					val := svc.Annotations[util.EgressSVCHostAnnotation]
-					if val != node1Name {
-						return fmt.Errorf("expected svc1's host annotation value %s to be node1", val)
+					if es.Status.Host != node1.Name {
+						return fmt.Errorf("expected svc1's host value %s to be node1", es.Status.Host)
 					}
 
 					node1ExpectedLabels := map[string]string{
-						"kubernetes.io/hostname":                                 "node1",
-						fmt.Sprintf("%s/testns-svc1", util.EgressSVCLabelPrefix): "",
+						"kubernetes.io/hostname":                            "node1",
+						fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix): "",
 					}
 
 					node1, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
@@ -1768,14 +1985,13 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				ginkgo.By("calling the reachability check which will return that the node is unreachable it will be drained")
 				fakeOVN.controller.egressSvcController.CheckNodesReachabilityIterate()
 				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					es, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					val, ok := svc.Annotations[util.EgressSVCHostAnnotation]
-					if ok {
-						return fmt.Errorf("expected svc1's egress host annotation to be empty, got: %s", val)
+					if es.Status.Host != "" {
+						return fmt.Errorf("expected svc1's host value %s to be empty", es.Status.Host)
 					}
 
 					node1ExpectedLabels := map[string]string{
@@ -1804,19 +2020,18 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				ginkgo.By("calling the reachability check which will return that the node is reachable the service will be reallocated")
 				fakeOVN.controller.egressSvcController.CheckNodesReachabilityIterate()
 				gomega.Eventually(func() error {
-					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					es, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					val := svc.Annotations[util.EgressSVCHostAnnotation]
-					if val != node1Name {
-						return fmt.Errorf("expected svc1's host annotation value %s to be node1", val)
+					if es.Status.Host != node1.Name {
+						return fmt.Errorf("expected svc1's host value %s to be node1", es.Status.Host)
 					}
 
 					node1ExpectedLabels := map[string]string{
-						"kubernetes.io/hostname":                                 "node1",
-						fmt.Sprintf("%s/testns-svc1", util.EgressSVCLabelPrefix): "",
+						"kubernetes.io/hostname":                            "node1",
+						fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix): "",
 					}
 
 					node1, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
@@ -1852,8 +2067,14 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 })
 
-func (o *FakeOVN) InitAndRunEgressSVCController() {
+func (o *FakeOVN) InitAndRunEgressSVCController(tweak ...func(*DefaultNetworkController)) {
 	o.controller.svcFactory.Start(o.stopChan)
+	c, err := o.controller.InitEgressServiceController()
+	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	o.controller.egressSvcController = c
+	for _, t := range tweak {
+		t(o.controller)
+	}
 	o.egressSVCWg.Add(1)
 	go func() {
 		defer o.egressSVCWg.Done()
@@ -1930,12 +2151,11 @@ func getDefaultNoReroutePolicies(controllerName string) []*nbdb.LogicalRouterPol
 	return allLRPS
 }
 
-func svcFor(namespace, name string, annotations map[string]string) v1.Service {
+func lbSvcFor(namespace, name string) v1.Service {
 	return v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            name,
 			Namespace:       namespace,
-			Annotations:     annotations,
 			ResourceVersion: "1",
 		},
 		Spec: v1.ServiceSpec{

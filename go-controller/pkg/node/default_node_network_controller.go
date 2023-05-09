@@ -29,7 +29,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
+	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	retry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -832,6 +834,20 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableEgressService {
+		wf := nc.watchFactory.(*factory.WatchFactory)
+		c, err := egressservice.NewController(nc.stopChan, ovnKubeNodeSNATMark, nc.name,
+			wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
+		if err != nil {
+			return err
+		}
+		nc.wg.Add(1)
+		go func() {
+			defer nc.wg.Done()
+			c.Run(1)
+		}()
+	}
+
 	klog.Infof("Default node network controller initialized and ready.")
 	return nil
 }
@@ -1095,7 +1111,7 @@ func upgradeServiceRoute(routeManager *routeManager, bridgeName string) error {
 			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
 		}
 		rules := getLocalGatewayNATRules(types.LocalnetGatewayNextHopPort, IPNet)
-		if err := delIptRules(rules); err != nil {
+		if err := nodeipt.DelRules(rules); err != nil {
 			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
 		}
 	}

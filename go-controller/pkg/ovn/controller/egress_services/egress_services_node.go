@@ -192,7 +192,7 @@ func (c *Controller) syncNode(key string) error {
 			// Services can't be assigned to a node while it is in draining status.
 			state.draining = true
 			for svcKey, svcState := range state.allocations {
-				if err := c.clearServiceResources(svcKey, svcState); err != nil {
+				if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
 					return err
 				}
 			}
@@ -223,7 +223,7 @@ func (c *Controller) syncNode(key string) error {
 			// the node's labels can be allocated to it.
 			for svcKey, selector := range c.unallocatedServices {
 				if selector.Matches(labels.Set(nodeLabels)) {
-					c.servicesQueue.Add(svcKey)
+					c.egressServiceQueue.Add(svcKey)
 				}
 			}
 		}
@@ -237,7 +237,7 @@ func (c *Controller) syncNode(key string) error {
 		// because we don't care about its reachability status until it becomes ready.
 		state.draining = true
 		for svcKey, svcState := range state.allocations {
-			if err := c.clearServiceResources(svcKey, svcState); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
 				return err
 			}
 		}
@@ -252,7 +252,7 @@ func (c *Controller) syncNode(key string) error {
 		// When it is fully drained and reachable again it will be requeued.
 		state.draining = true
 		for svcKey, svcState := range state.allocations {
-			if err := c.clearServiceResources(svcKey, svcState); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
 				return err
 			}
 		}
@@ -265,7 +265,7 @@ func (c *Controller) syncNode(key string) error {
 	// If a service's selector no longer matches this node we attempt to reallocate it.
 	for svcKey, svcState := range state.allocations {
 		if !svcState.selector.Matches(labels.Set(n.Labels)) || svcState.stale {
-			if err := c.clearServiceResources(svcKey, svcState); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
 				return err
 			}
 		}
@@ -285,7 +285,7 @@ func (c *Controller) syncNode(key string) error {
 	// If it does, we queue that service to attempt allocating it to this node.
 	for svcKey, selector := range c.unallocatedServices {
 		if selector.Matches(labels.Set(nodeLabels)) {
-			c.servicesQueue.Add(svcKey)
+			c.egressServiceQueue.Add(svcKey)
 		}
 	}
 
@@ -365,7 +365,7 @@ func (c *Controller) removeNodeServiceLabel(namespace, name, node string) error 
 
 // Returns the 'egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>' key for the given namespace and name of a service.
 func (c *Controller) nodeLabelForService(namespace, name string) string {
-	return fmt.Sprintf("%s/%s-%s", util.EgressSVCLabelPrefix, namespace, name)
+	return fmt.Sprintf("%s/%s-%s", egressSVCLabelPrefix, namespace, name)
 }
 
 // Patches the node's metadata.labels with the given labels.
