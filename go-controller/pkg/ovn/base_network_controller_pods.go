@@ -395,8 +395,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 					return err
 				}
 				gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
-				layer3NetConfInfo := bnc.NetConfInfo.(*util.Layer3NetConfInfo)
-				for _, clusterSubnet := range layer3NetConfInfo.ClusterSubnets {
+				for _, clusterSubnet := range bnc.Subnets() {
 					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 						podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
 							Dest:    clusterSubnet.CIDR,

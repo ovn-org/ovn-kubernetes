@@ -63,8 +63,7 @@ var _ = Describe("Node", func() {
 						name: nodeName,
 						Kube: kubeMock,
 					},
-					NetConfInfo: &util.DefaultNetConfInfo{},
-					NetInfo:     &util.DefaultNetInfo{},
+					NetInfo: &util.DefaultNetInfo{},
 				},
 			}
 

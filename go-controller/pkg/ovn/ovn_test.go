@@ -306,12 +306,12 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 	var ok bool
 
 	nadName := util.GetNADName(netattachdef.Namespace, netattachdef.Name)
-	nInfo, netConfInfo, err := util.ParseNADInfo(netattachdef)
+	nInfo, err := util.ParseNADInfo(netattachdef)
 	if err != nil {
 		return err
 	}
 	netName := nInfo.GetNetworkName()
-	topoType := netConfInfo.TopologyType()
+	topoType := nInfo.TopologyType()
 	ocInfo, ok = o.secondaryControllers[netName]
 	if !ok {
 		nbZoneFailed := false
@@ -351,13 +351,16 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 
 		switch topoType {
 		case types.Layer3Topology:
-			l3Controller := NewSecondaryLayer3NetworkController(cnci, nInfo, netConfInfo, asf)
+			l3Controller := NewSecondaryLayer3NetworkController(cnci, nInfo)
+			l3Controller.addressSetFactory = asf
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
-			l2Controller := NewSecondaryLayer2NetworkController(cnci, nInfo, netConfInfo, asf)
+			l2Controller := NewSecondaryLayer2NetworkController(cnci, nInfo)
+			l2Controller.addressSetFactory = asf
 			secondaryController = &l2Controller.BaseSecondaryNetworkController
 		case types.LocalnetTopology:
-			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo, netConfInfo, asf)
+			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo)
+			localnetController.addressSetFactory = asf
 			secondaryController = &localnetController.BaseSecondaryNetworkController
 		default:
 			return fmt.Errorf("topoloty type %s not supported", topoType)

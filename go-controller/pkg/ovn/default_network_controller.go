@@ -174,7 +174,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
 			controllerName:              DefaultNetworkControllerName,
-			NetConfInfo:                 &util.DefaultNetConfInfo{},
 			NetInfo:                     &util.DefaultNetInfo{},
 			lsManager:                   lsm.NewLogicalSwitchManager(),
 			logicalPortCache:            newPortCache(defaultStopChan),

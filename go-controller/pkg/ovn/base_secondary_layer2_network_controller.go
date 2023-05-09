@@ -9,6 +9,7 @@ import (
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -266,7 +267,7 @@ func (oc *BaseSecondaryLayer2NetworkController) Run() error {
 	return nil
 }
 
-func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchName string, clusterSubnets []*net.IPNet,
+func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchName string, clusterSubnets []config.CIDRNetworkEntry,
 	excludeSubnets []*net.IPNet) (*nbdb.LogicalSwitch, error) {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name:        switchName,
@@ -277,7 +278,8 @@ func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchNa
 	logicalSwitch.ExternalIDs[types.TopologyVersionExternalID] = strconv.Itoa(oc.topologyVersion)
 
 	hostSubnets := make([]*net.IPNet, 0, len(clusterSubnets))
-	for _, subnet := range clusterSubnets {
+	for _, clusterSubnet := range clusterSubnets {
+		subnet := clusterSubnet.CIDR
 		hostSubnets = append(hostSubnets, subnet)
 		if utilnet.IsIPv6CIDR(subnet) {
 			logicalSwitch.OtherConfig = map[string]string{"ipv6_prefix": subnet.IP.String()}

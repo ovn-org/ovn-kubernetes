@@ -9,10 +9,13 @@ import (
 
 func TestParseClusterSubnetEntries(t *testing.T) {
 	tests := []struct {
-		name            string
-		cmdLineArg      string
-		clusterNetworks []CIDRNetworkEntry
-		expectedErr     bool
+		name                        string
+		cmdLineArg                  string
+		clusterNetworks             []CIDRNetworkEntry
+		withDefaultHostSubnetLength bool
+		defaultIPv4HostSubnetLength int
+		defaultIPv6HostSubnetLength int
+		expectedErr                 bool
 	}{
 		{
 			name:            "Single CIDR correctly formatted",
@@ -107,11 +110,85 @@ func TestParseClusterSubnetEntries(t *testing.T) {
 			clusterNetworks: nil,
 			expectedErr:     true,
 		},
+		{
+			name:       "Two CIDRs correctly formatted with spaces",
+			cmdLineArg: "10.132.0.0/26/28, 10.133.0.0/26/28",
+			clusterNetworks: []CIDRNetworkEntry{
+				{CIDR: ovntest.MustParseIPNet("10.132.0.0/26"), HostSubnetLength: 28},
+				{CIDR: ovntest.MustParseIPNet("10.133.0.0/26"), HostSubnetLength: 28},
+			},
+			expectedErr: false,
+		},
+		{
+			name:                        "Single IPv4 CIDR with default host subnet length",
+			cmdLineArg:                  "10.132.0.0/26",
+			withDefaultHostSubnetLength: true,
+			defaultIPv4HostSubnetLength: 28,
+			clusterNetworks:             []CIDRNetworkEntry{{CIDR: ovntest.MustParseIPNet("10.132.0.0/26"), HostSubnetLength: 28}},
+			expectedErr:                 false,
+		},
+		{
+			name:                        "Single IPv4 CIDR with invalid default host subnet length",
+			cmdLineArg:                  "10.132.0.0/26",
+			withDefaultHostSubnetLength: true,
+			defaultIPv4HostSubnetLength: 26,
+			expectedErr:                 true,
+		},
+		{
+			name:                        "Single IPv4 CIDR no host subnet length allowed or validated",
+			cmdLineArg:                  "10.132.0.1/32",
+			withDefaultHostSubnetLength: true,
+			defaultIPv4HostSubnetLength: 0,
+			clusterNetworks:             []CIDRNetworkEntry{{CIDR: ovntest.MustParseIPNet("10.132.0.1/32")}},
+			expectedErr:                 false,
+		},
+		{
+			name:                        "Single IPv4 CIDR no host subnet length allowed",
+			cmdLineArg:                  "10.132.0.0/26/28",
+			withDefaultHostSubnetLength: true,
+			defaultIPv4HostSubnetLength: 0,
+			expectedErr:                 true,
+		},
+		{
+			name:                        "Single IPv6 CIDR with default host subnet length",
+			cmdLineArg:                  "fda6::/48",
+			withDefaultHostSubnetLength: true,
+			defaultIPv6HostSubnetLength: 64,
+			clusterNetworks:             []CIDRNetworkEntry{{CIDR: ovntest.MustParseIPNet("fda6::/48"), HostSubnetLength: 64}},
+			expectedErr:                 false,
+		},
+		{
+			name:                        "Single IPv6 CIDR with invalid default host subnet length",
+			cmdLineArg:                  "fda6::/64",
+			withDefaultHostSubnetLength: true,
+			defaultIPv6HostSubnetLength: 48,
+			expectedErr:                 true,
+		},
+		{
+			name:                        "Single IPv6 CIDR no host subnet length allowed or validated",
+			cmdLineArg:                  "fda6::1/128",
+			withDefaultHostSubnetLength: true,
+			defaultIPv6HostSubnetLength: 0,
+			clusterNetworks:             []CIDRNetworkEntry{{CIDR: ovntest.MustParseIPNet("fda6::1/128")}},
+			expectedErr:                 false,
+		},
+		{
+			name:                        "Single IPv6 CIDR no host subnet length allowed",
+			cmdLineArg:                  "fda6::/48/64",
+			withDefaultHostSubnetLength: true,
+			defaultIPv6HostSubnetLength: 0,
+			expectedErr:                 true,
+		},
 	}
 
 	for _, tc := range tests {
-
-		parsedList, err := ParseClusterSubnetEntries(tc.cmdLineArg)
+		var err error
+		var parsedList []CIDRNetworkEntry
+		if tc.withDefaultHostSubnetLength {
+			parsedList, err = ParseClusterSubnetEntriesWithDefaults(tc.cmdLineArg, tc.defaultIPv4HostSubnetLength, tc.defaultIPv6HostSubnetLength)
+		} else {
+			parsedList, err = ParseClusterSubnetEntries(tc.cmdLineArg)
+		}
 		if err != nil && !tc.expectedErr {
 			t.Errorf("Test case \"%s\" expected no errors, got %v", tc.name, err)
 		}
