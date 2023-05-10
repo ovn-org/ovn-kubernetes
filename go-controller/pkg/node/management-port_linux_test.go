@@ -403,6 +403,11 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		mtu        int    = 1400
 	)
 
+	// OVS cmd setup
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgtPort,
+	})
+
 	for _, cfg := range configs {
 		if cfg.family == netlink.FAMILY_V4 {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
