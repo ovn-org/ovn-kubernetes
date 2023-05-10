@@ -18,7 +18,8 @@ TEST_REPORT_DIR=${TEST_REPORT_DIR:="./_artifacts"}
 function testrun {
     local idx="${1}"
     local pkg="${2}"
-    local go_test="go test -mod=vendor"
+    local go_test="go test -mod=vendor -timeout 30m"
+    local orig_go_test="${go_test}"
     local otherargs="${@:3} "
     local args=""
     local ginkgoargs=
@@ -54,7 +55,7 @@ function testrun {
         ginkgoargs="-ginkgo.v ${ginkgo_focus} -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
     fi
     args="${args}${otherargs}"
-    if [ "$go_test" == "go test -mod=vendor" ]; then
+    if [ "$go_test" == "$orig_go_test" ]; then
         args=${args}${pkg}
     fi
     echo "${go_test} -test.v ${args} ${ginkgoargs}"
