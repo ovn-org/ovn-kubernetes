@@ -266,9 +266,6 @@ jobs:
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
 
-    - name: Free up disk space
-      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
-
     - name: Download test-image-master
       uses: actions/download-artifact@v3
       with:
