@@ -43,6 +43,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 		node2IPv6            string = "fc00:f853:ccd:e793::2"
 		node2IPv4Subnet      string = "10.128.2.0/24"
 		node2IPv6Subnet      string = "fe00:10:128:2::/64"
+		vipIPv4              string = "192.168.126.10"
+		vipIPv6              string = "fc00:f853:ccd:e793::10"
 		controllerName              = DefaultNetworkControllerName
 		egressSVCLabelPrefix string = "egress-service.k8s.ovn.org"
 	)
@@ -1524,7 +1526,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 	})
 
 	ginkgo.Context("on nodes changes", func() {
-		ginkgo.It("should create/update/delete logical router policies, labels and status", func() {
+		ginkgo.It("should create/update/delete logical router policies, address sets, labels and status", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
 				config.IPv6Mode = true
@@ -1818,6 +1820,33 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
+				ginkgo.By("updating the second node host addresses the node ip no re-route address set will be updated")
+				nodeIPsASdbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName)
+				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6})
+
+				node2.ObjectMeta.Annotations["k8s.ovn.org/host-addresses"] = fmt.Sprintf("[\"%s\", \"%s\", \"%s\", \"%s\"]", node2IPv4, node2IPv6, vipIPv4, vipIPv6)
+				node2.ResourceVersion = "3"
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6, vipIPv4, vipIPv6})
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				node2.ObjectMeta.Annotations["k8s.ovn.org/host-addresses"] = fmt.Sprintf("[\"%s\", \"%s\"]", node2IPv4, node2IPv6)
+				node2.ResourceVersion = "4"
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6})
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("deleting the first node, the node ip no re-route address set will be updated")
+				err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node2IPv4, node2IPv6})
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
 				ginkgo.By("deleting the second node the second service's resources will be deleted")
 				err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node2.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -1831,6 +1860,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				fakeOVN.asf.EventuallyExpectEmptyAddressSetExist(nodeIPsASdbIDs)
 
 				return nil
 			}
@@ -2179,6 +2209,7 @@ func nodeFor(name, ipv4, ipv6, v4subnet, v6subnet string) *v1.Node {
 			Name: name,
 			Annotations: map[string]string{
 				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", ipv4, ipv6),
+				"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\", \"%s\"]", ipv4, ipv6),
 				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\",\"%s\"]}", v4subnet, v6subnet),
 			},
 			Labels: map[string]string{
