@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -164,7 +165,11 @@ type BaseSecondaryLayer2NetworkController struct {
 
 func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.doesNetworkRequireIPAM() {
+
+	// For secondary networks, we don't have to watch namespace events if
+	// multi-network policy support is not enabled. We don't support
+	// multi-network policy for IPAM-less secondary networks either.
+	if util.IsMultiNetworkPoliciesSupportEnabled() && oc.doesNetworkRequireIPAM() {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
 		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}
