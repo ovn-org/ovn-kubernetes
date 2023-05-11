@@ -70,7 +70,10 @@ func (bsnc *BaseSecondaryNetworkController) AddSecondaryNetworkResourceCommon(ob
 			return nil
 		}
 
-		np := convertMultiNetPolicyToNetPolicy(mp)
+		np, err := bsnc.convertMultiNetPolicyToNetPolicy(mp)
+		if err != nil {
+			return err
+		}
 		if err := bsnc.addNetworkPolicy(np); err != nil {
 			klog.Infof("MultiNetworkPolicy add failed for %s/%s, will try again later: %v",
 				mp.Namespace, mp.Name, err)
@@ -114,7 +117,10 @@ func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon
 		newShouldApply := bsnc.shouldApplyMultiPolicy(newMp)
 		if oldShouldApply {
 			// this multi-netpol no longer applies to this network controller, delete it
-			np := convertMultiNetPolicyToNetPolicy(oldMp)
+			np, err := bsnc.convertMultiNetPolicyToNetPolicy(oldMp)
+			if err != nil {
+				return err
+			}
 			if err := bsnc.deleteNetworkPolicy(np); err != nil {
 				klog.Infof("MultiNetworkPolicy delete failed for %s/%s, will try again later: %v",
 					oldMp.Namespace, oldMp.Name, err)
@@ -123,7 +129,10 @@ func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon
 		}
 		if newShouldApply {
 			// now this multi-netpol applies to this network controller
-			np := convertMultiNetPolicyToNetPolicy(newMp)
+			np, err := bsnc.convertMultiNetPolicyToNetPolicy(newMp)
+			if err != nil {
+				return err
+			}
 			if err := bsnc.addNetworkPolicy(np); err != nil {
 				klog.Infof("MultiNetworkPolicy add failed for %s/%s, will try again later: %v",
 					newMp.Namespace, newMp.Name, err)
@@ -161,7 +170,10 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *multinetworkpolicyapi.MultiNetworkPolicy", obj)
 		}
-		np := convertMultiNetPolicyToNetPolicy(mp)
+		np, err := bsnc.convertMultiNetPolicyToNetPolicy(mp)
+		if err != nil {
+			return err
+		}
 		// delete this policy regardless it applies to this network controller, in case of missing update event
 		if err := bsnc.deleteNetworkPolicy(np); err != nil {
 			klog.Infof("MultiNetworkPolicy delete failed for %s/%s, will try again later: %v",
