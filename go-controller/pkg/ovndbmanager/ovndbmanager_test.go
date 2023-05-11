@@ -665,11 +665,7 @@ func TestEnsureElectionTimeout(t *testing.T) {
 	}
 }
 
-func TestResetRaftDB(t *testing.T) {
-	// resetRaftDB expects a file named ovnnb or ovnsb. The file name is actually taken from the
-	// db.dbAlias. We will prepend the dbAlias with this tmpDir a bit later.
-	tmpDir := t.TempDir()
-
+func TestBackupRaftDB(t *testing.T) {
 	var mockCalls map[string]*mockRes
 	unexpectedKeys := make([]string, 0)
 	mock := func(timeout int, args ...string) (string, string, error) {
@@ -699,7 +695,7 @@ func TestResetRaftDB(t *testing.T) {
 			dbAlias:     "ovnnb",
 			dbName:      "OVN_Northbound",
 			mockCalls:   map[string]*mockRes{},
-			errorString: "failed to back up the db to backupFile",
+			errorString: "failed to open db file",
 		},
 		{
 			desc:         "Failed to restart the database",
@@ -731,6 +727,13 @@ func TestResetRaftDB(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			// backupRaftDB expects a file named ovnnb or ovnsb. The file name is actually taken from the
+			// db.dbAlias. We will prepend the dbAlias with this tmpDir a bit later.
+			tmpDir := t.TempDir()
+			t.Cleanup(func() {
+				os.RemoveAll(tmpDir)
+			})
+
 			// default mockCalls which may be supplemented or overwritten by
 			// more specific tc mockCalls from the above maps
 			// TBD - remove if not needed
@@ -742,13 +745,13 @@ func TestResetRaftDB(t *testing.T) {
 			db.DbName = tc.dbName
 			db.DbAlias = filepath.Join(tmpDir, tc.dbAlias)
 
-			// resetRaftDb expects a file with the db alias' name. This can be an
+			// backupRaftDb expects a file with the db alias' name. This can be an
 			// absolute path as well. Create it.
 			if tc.createDbFile {
 				createDbFile(t, db.DbAlias)
 			}
-			// test resetRaftDb
-			err := resetRaftDB(db)
+			// test backupRaftDb
+			err := backupRaftDB(db)
 
 			// fail either if an error is seen but not expected
 			// or if an error is expected but when the substring does not match the error

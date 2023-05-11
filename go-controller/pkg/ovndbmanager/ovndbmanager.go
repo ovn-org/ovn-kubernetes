@@ -3,6 +3,7 @@ package ovndbmanager
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,9 +127,9 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 
 func updateDBRetryCounter(retryCounter *int32, db *util.OvsDbProperties) {
 	if *retryCounter > maxDBRetry {
-		//delete the db file and start master
-		err := resetRaftDB(db)
-		if err != nil {
+		klog.Warningf("Reached maximum database retries for %s; backing up DB file for analysis", db)
+		// back up the db file
+		if err := backupRaftDB(db); err != nil {
 			klog.Warningf(err.Error())
 		}
 		*retryCounter = 0
@@ -315,21 +316,36 @@ func ensureElectionTimeout(db *util.OvsDbProperties) error {
 	return nil
 }
 
-// resetRaftDB backs up the db by renaming it and then stops the nb/sb ovsdb process.
-// Returns an error if anything goes wrong.
-func resetRaftDB(db *util.OvsDbProperties) error {
+// backupRaftDB backs up the db by copying it for later debugging.
+func backupRaftDB(db *util.OvsDbProperties) error {
 	dbFile := filepath.Base(db.DbAlias)
 	backupFile := strings.TrimSuffix(dbFile, filepath.Ext(dbFile)) +
 		time.Now().UTC().Format("2006-01-02_150405") + "db_bak"
 	backupDB := filepath.Join(filepath.Dir(db.DbAlias), backupFile)
-	err := os.Rename(db.DbAlias, backupDB)
+
+	srcFile, err := os.OpenFile(db.DbAlias, os.O_RDONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("failed to back up the db to backupFile: %s, error: %s", backupDB, err)
+		return fmt.Errorf("failed to open db file %q for backup: %v", db.DbAlias, err)
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.OpenFile(backupDB, os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		return fmt.Errorf("failed to open db backup file %q: %v", backupDB, err)
+	}
+	defer dstFile.Close()
+
+	if _, err = io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("failed to backup DB %q to %q: %v", db.DbAlias, backupDB, err)
+	}
+
+	if err = dstFile.Sync(); err != nil {
+		klog.Warningf("Failed to sync DB backup %q: %v", backupDB, err)
 	}
 
 	klog.Infof("Backed up the db to backupFile: %s", backupFile)
-	_, stderr, err := db.AppCtl(5, "exit")
-	if err != nil {
+
+	if _, stderr, err := db.AppCtl(5, "exit"); err != nil {
 		return fmt.Errorf("unable to restart the ovn db: %s ,"+
 			"stderr: %v, err: %v", db.DbName, stderr, err)
 	}
