@@ -128,7 +128,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 }
 
 // Returns all of the non-host endpoints for the given service grouped by IPv4/IPv6.
-func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.Set[string], sets.Set[string], []string, error) {
+func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.Set[string], sets.Set[string], error) {
 	// Get the endpoint slices associated to the Service
 	esLabelSelector := labels.Set(map[string]string{
 		discovery.LabelServiceName: svc.Name,
@@ -136,12 +136,11 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.Set[string], set
 
 	endpointSlices, err := c.endpointSliceLister.EndpointSlices(svc.Namespace).List(esLabelSelector)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	v4Endpoints := sets.New[string]()
 	v6Endpoints := sets.New[string]()
-	nodes := sets.New[string]()
 	for _, eps := range endpointSlices {
 		if eps.AddressType == discovery.AddressTypeFQDN {
 			continue
@@ -159,13 +158,10 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.Set[string], set
 					epsToInsert.Insert(ipStr)
 				}
 			}
-			if ep.NodeName != nil {
-				nodes.Insert(*ep.NodeName)
-			}
 		}
 	}
 
-	return v4Endpoints, v6Endpoints, nodes.UnsortedList(), nil
+	return v4Endpoints, v6Endpoints, nil
 }
 
 func createIPAddressNetSlice(v4ips, v6ips []string) []net.IP {

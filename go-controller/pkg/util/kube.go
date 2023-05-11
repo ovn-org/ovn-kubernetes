@@ -74,6 +74,7 @@ type OVNClusterManagerClientset struct {
 	EgressIPClient        egressipclientset.Interface
 	CloudNetworkClient    ocpcloudnetworkclientset.Interface
 	NetworkAttchDefClient networkattchmentdefclientset.Interface
+	EgressServiceClient   egressserviceclientset.Interface
 }
 
 func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
@@ -94,6 +95,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		EgressIPClient:        cs.EgressIPClient,
 		CloudNetworkClient:    cs.CloudNetworkClient,
 		NetworkAttchDefClient: cs.NetworkAttchDefClient,
+		EgressServiceClient:   cs.EgressServiceClient,
 	}
 }
 

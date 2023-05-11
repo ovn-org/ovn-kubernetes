@@ -500,7 +500,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
-		c, err := oc.InitEgressServiceController()
+		c, err := oc.InitEgressServiceZoneController()
 		if err != nil {
 			return fmt.Errorf("unable to create new egress service controller while creating new default network controller: %w", err)
 		}
