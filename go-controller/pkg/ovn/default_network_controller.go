@@ -162,11 +162,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)
 	}
-	egressSvcController, err := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory,
-		defaultStopChan, DefaultNetworkControllerName)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create new egress service controller while creating new default network controller: %w", err)
-	}
 
 	var zoneICHandler *zoneic.ZoneInterconnectHandler
 	var zoneChassisHandler *zoneic.ZoneChassisHandler
@@ -179,7 +174,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
 			controllerName:              DefaultNetworkControllerName,
-			NetConfInfo:                 &util.DefaultNetConfInfo{},
 			NetInfo:                     &util.DefaultNetInfo{},
 			lsManager:                   lsm.NewLogicalSwitchManager(),
 			logicalPortCache:            newPortCache(defaultStopChan),
@@ -214,7 +208,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		routerLoadBalancerGroupUUID:  "",
 		svcController:                svcController,
 		svcFactory:                   svcFactory,
-		egressSvcController:          egressSvcController,
 		zoneICHandler:                zoneICHandler,
 		zoneChassisHandler:           zoneChassisHandler,
 	}
@@ -508,11 +501,18 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}()
 	}
 
-	oc.wg.Add(1)
-	go func() {
-		defer oc.wg.Done()
-		oc.egressSvcController.Run(1)
-	}()
+	if config.OVNKubernetesFeature.EnableEgressService {
+		c, err := oc.InitEgressServiceController()
+		if err != nil {
+			return fmt.Errorf("unable to create new egress service controller while creating new default network controller: %w", err)
+		}
+		oc.egressSvcController = c
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			oc.egressSvcController.Run(1)
+		}()
+	}
 
 	end := time.Since(start)
 	klog.Infof("Completing all the Watchers took %v", end)

@@ -45,7 +45,6 @@ func getFakeController(controllerName string) *DefaultNetworkController {
 		BaseNetworkController: BaseNetworkController{
 			controllerName: controllerName,
 			NetInfo:        &util.DefaultNetInfo{},
-			NetConfInfo:    &util.DefaultNetConfInfo{},
 		},
 	}
 	return controller
@@ -80,11 +79,10 @@ func newNetworkPolicy(name, namespace string, podSelector metav1.LabelSelector, 
 	return policy
 }
 
-func getFakeBaseController(netInfo util.NetInfo, netConfInfo util.NetConfInfo) *BaseNetworkController {
+func getFakeBaseController(netInfo util.NetInfo) *BaseNetworkController {
 	return &BaseNetworkController{
 		controllerName: netInfo.GetNetworkName() + "-network-controller",
 		NetInfo:        netInfo,
-		NetConfInfo:    netConfInfo,
 	}
 }
 
@@ -92,7 +90,7 @@ func getFakeBaseController(netInfo util.NetInfo, netConfInfo util.NetConfInfo) *
 // and egress
 func getDefaultDenyDataHelper(namespace string, policyTypeIngress, policyTypeEgress bool, ports []string,
 	denyLogSeverity nbdb.ACLSeverity, staleNetpolName string, netInfo util.NetInfo) []libovsdb.TestData {
-	fakeController := getFakeBaseController(netInfo, nil)
+	fakeController := getFakeBaseController(netInfo)
 	egressPGName := fakeController.defaultDenyPortGroupName(namespace, egressDefaultDenySuffix)
 	shouldBeLogged := denyLogSeverity != ""
 	aclIDs := fakeController.getDefaultDenyPolicyACLIDs(namespace, aclEgress, defaultDenyACL)
@@ -265,7 +263,7 @@ func getMultinetNsAddrSetHashNames(ns, controllerName string) (string, string) {
 func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []string, tcpPeerPorts []int32,
 	peers []knet.NetworkPolicyPeer, logSeverity nbdb.ACLSeverity, policyType knet.PolicyType, stale,
 	statelessNetPol bool, netInfo util.NetInfo) []*nbdb.ACL {
-	fakeController := getFakeBaseController(netInfo, nil)
+	fakeController := getFakeBaseController(netInfo)
 	pgName, _ := fakeController.getNetworkPolicyPGName(namespace, policyName)
 	controllerName := netInfo.GetNetworkName() + "-network-controller"
 	shouldBeLogged := logSeverity != ""
@@ -411,7 +409,7 @@ func getPolicyDataHelper(networkPolicy *knet.NetworkPolicy, localPortUUIDs []str
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	fakeController := getFakeBaseController(netInfo, nil)
+	fakeController := getFakeBaseController(netInfo)
 	pgName, readableName := fakeController.getNetworkPolicyPGName(networkPolicy.Namespace, networkPolicy.Name)
 	pg := fakeController.buildPortGroup(
 		pgName,
@@ -2139,7 +2137,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		config.IPv6Mode = false
 		asIDs := getPodSelectorAddrSetDbIDs("test_name", DefaultNetworkControllerName)
 		gp := newGressPolicy(knet.PolicyTypeIngress, 0, "testing", "policy", controllerName,
-			false, &util.DefaultNetConfInfo{})
+			false, &util.DefaultNetInfo{})
 		gp.hasPeerSelector = true
 		gp.addPeerAddressSets(addressset.GetHashNamesForAS(asIDs))
 

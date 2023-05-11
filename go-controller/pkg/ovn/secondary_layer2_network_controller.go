@@ -2,12 +2,13 @@ package ovn
 
 import (
 	"context"
+	"sync"
+
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"sync"
 
 	"k8s.io/klog/v2"
 )
@@ -19,21 +20,18 @@ type SecondaryLayer2NetworkController struct {
 }
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
-func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
-	netconfInfo util.NetConfInfo, addressSetFactory addressset.AddressSetFactory) *SecondaryLayer2NetworkController {
+func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) *SecondaryLayer2NetworkController {
+
 	stopChan := make(chan struct{})
 
-	ipv4Mode, ipv6Mode := netconfInfo.IPMode()
-	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
-	}
+	ipv4Mode, ipv6Mode := netInfo.IPMode()
+	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
 	oc := &SecondaryLayer2NetworkController{
 		BaseSecondaryLayer2NetworkController{
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
 					controllerName:              netInfo.GetNetworkName() + "-network-controller",
-					NetConfInfo:                 netconfInfo,
 					NetInfo:                     netInfo,
 					lsManager:                   lsm.NewL2SwitchManager(),
 					logicalPortCache:            newPortCache(stopChan),
@@ -76,8 +74,7 @@ func (oc *SecondaryLayer2NetworkController) Cleanup(netName string) error {
 
 func (oc *SecondaryLayer2NetworkController) Init() error {
 	switchName := oc.GetNetworkScopedName(types.OVNLayer2Switch)
-	layer2NetConfInfo := oc.NetConfInfo.(*util.Layer2NetConfInfo)
 
-	_, err := oc.InitializeLogicalSwitch(switchName, layer2NetConfInfo.ClusterSubnets, layer2NetConfInfo.ExcludeSubnets)
+	_, err := oc.InitializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
 	return err
 }

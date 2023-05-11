@@ -54,12 +54,11 @@ type networkClusterController struct {
 	hybridOverlaySubnetAllocator       *subnetallocator.HostSubnetAllocator
 
 	util.NetInfo
-	util.NetConfInfo
 }
 
 func newNetworkClusterController(networkName string, networkID int, clusterSubnets []config.CIDRNetworkEntry,
 	ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
-	enableHybridOverlaySubnetAllocator bool, netInfo util.NetInfo, netConfInfo util.NetConfInfo) *networkClusterController {
+	enableHybridOverlaySubnetAllocator bool, netInfo util.NetInfo) *networkClusterController {
 
 	kube := &kube.Kube{
 		KClient: ovnClient.KubeClient,
@@ -83,7 +82,6 @@ func newNetworkClusterController(networkName string, networkID int, clusterSubne
 		hybridOverlaySubnetAllocator:       hybridOverlaySubnetAllocator,
 		enableHybridOverlaySubnetAllocator: enableHybridOverlaySubnetAllocator,
 		NetInfo:                            netInfo,
-		NetConfInfo:                        netConfInfo,
 	}
 
 	ncc.initRetryFramework()

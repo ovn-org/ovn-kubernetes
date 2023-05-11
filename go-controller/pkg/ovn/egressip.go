@@ -1089,6 +1089,12 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignmentsWithLock(name strin
 // work on ovnkube-master restarts when all egress IP handlers will most likely
 // match and perform the setup for the same pod and status multiple times over.
 func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
+	podKey := getPodKey(pod)
+	// If pod is already in succeeded or failed state, return it without proceeding further.
+	if util.PodCompleted(pod) {
+		klog.Infof("Pod %s is already in completed state, skipping egress ip assignment", podKey)
+		return nil
+	}
 	// If statusAssignments is empty just return, not doing this will delete the
 	// external GW set up, even though there might be no egress IP set up to
 	// perform.
@@ -1096,7 +1102,6 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 		return nil
 	}
 	var remainingAssignments []egressipv1.EgressIPStatusItem
-	podKey := getPodKey(pod)
 	// Retrieve the pod's networking configuration from the
 	// logicalPortCache. The reason for doing this: a) only normal network
 	// pods are placed in this cache, b) once the pod is placed here we know
@@ -2374,7 +2379,7 @@ func (e *egressIPController) addExternalGWPodSNAT(podNamespace, podName string, 
 // external GW setup in those cases.
 func (e *egressIPController) addExternalGWPodSNATOps(ops []ovsdb.Operation, podNamespace, podName string, status egressipv1.EgressIPStatusItem) ([]ovsdb.Operation, error) {
 	if config.Gateway.DisableSNATMultipleGWs {
-		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node {
+		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node && util.PodNeedsSNAT(pod) {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
 			// NOTE: This needs to be done only if the pod was on the same node as egressNode
 			extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)

@@ -43,7 +43,7 @@ type ClusterManager struct {
 func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
 	identity string, wg *sync.WaitGroup, recorder record.EventRecorder) (*ClusterManager, error) {
 	defaultNetClusterController := newNetworkClusterController(ovntypes.DefaultNetworkName, defaultNetworkID, config.Default.ClusterSubnets,
-		ovnClient, wf, config.HybridOverlay.Enabled, &util.DefaultNetInfo{}, &util.DefaultNetConfInfo{})
+		ovnClient, wf, config.HybridOverlay.Enabled, &util.DefaultNetInfo{})
 
 	zoneClusterController, err := newZoneClusterController(ovnClient, wf)
 	if err != nil {

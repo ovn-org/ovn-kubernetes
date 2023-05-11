@@ -76,6 +76,7 @@ fi
 # OVN_EGRESSIP_HEALTHCHECK_PORT - egress IP node check to use grpc on this port (0 ==> dial to port 9 instead)
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
+# OVN_EGRESSSERVICE_ENABLE - enable egress Service for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
@@ -221,6 +222,8 @@ ovn_egress_ip_healthcheck_port=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
 ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
 #OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
 ovn_egressqos_enable=${OVN_EGRESSQOS_ENABLE:-false}
+#OVN_EGRESSSERVICE_ENABLE - enable egress Service for ovn-kubernetes
+ovn_egressservice_enable=${OVN_EGRESSSERVICE_ENABLE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple network support for ovn-kubernetes
@@ -997,6 +1000,12 @@ ovn-master() {
   fi
   echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
 
+  egressservice_enabled_flag=
+  if [[ ${ovn_egressservice_enable} == "true" ]]; then
+	  egressservice_enabled_flag="--enable-egress-service"
+  fi
+  echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
+
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
   local ovnkube_metrics_tls_opts=""
   if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
@@ -1059,6 +1068,7 @@ ovn-master() {
     ${egressip_healthcheck_port_flag} \
     ${egressfirewall_enabled_flag} \
     ${egressqos_enabled_flag} \
+    ${egressservice_enabled_flag} \
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
     ${multi_network_enabled_flag} \
@@ -1189,6 +1199,12 @@ ovn-network-controller-manager() {
   fi
   echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
 
+  egressservice_enabled_flag=
+  if [[ ${ovn_egressservice_enable} == "true" ]]; then
+	  egressservice_enabled_flag="--enable-egress-service"
+  fi
+  echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
+
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
   echo "ovnkube_master_metrics_bind_address=${ovnkube_master_metrics_bind_address}"
 
@@ -1232,6 +1248,7 @@ ovn-network-controller-manager() {
     ${egressip_healthcheck_port_flag} \
     ${egressfirewall_enabled_flag} \
     ${egressqos_enabled_flag} \
+    ${egressservice_enabled_flag} \
     ${ovnkube_config_duration_enable_flag} \
     ${multi_network_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
@@ -1429,6 +1446,11 @@ ovn-node() {
       egressip_healthcheck_port_flag="--egressip-node-healthcheck-port=${ovn_egress_ip_healthcheck_port}"
   fi
 
+  egressservice_enabled_flag=
+  if [[ ${ovn_egressservice_enable} == "true" ]]; then
+	  egressservice_enabled_flag="--enable-egress-service"
+  fi
+
   disable_ovn_iface_id_ver_flag=
   if [[ ${ovn_disable_ovn_iface_id_ver} == "true" ]]; then
       disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
@@ -1592,6 +1614,7 @@ ovn-node() {
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
+    ${egressservice_enabled_flag} \
     ${disable_ovn_iface_id_ver_flag} \
     ${multi_network_enabled_flag} \
     ${netflow_targets} \

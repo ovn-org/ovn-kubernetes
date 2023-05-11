@@ -29,7 +29,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
+	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	retry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -52,9 +54,9 @@ type CommonNodeNetworkControllerInfo struct {
 // BaseNodeNetworkController structure per-network fields and network specific configuration
 type BaseNodeNetworkController struct {
 	CommonNodeNetworkControllerInfo
-	// per controller nad/netconf name information
+
+	// network information
 	util.NetInfo
-	util.NetConfInfo
 
 	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
 	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*util.DPUConnectionDetails). Key of nadToDPUCDMap
@@ -113,7 +115,6 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 	return &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
-			NetConfInfo:                     &util.DefaultNetConfInfo{},
 			NetInfo:                         &util.DefaultNetInfo{},
 			stopChan:                        stopChan,
 			wg:                              wg,
@@ -832,6 +833,20 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableEgressService {
+		wf := nc.watchFactory.(*factory.WatchFactory)
+		c, err := egressservice.NewController(nc.stopChan, ovnKubeNodeSNATMark, nc.name,
+			wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
+		if err != nil {
+			return err
+		}
+		nc.wg.Add(1)
+		go func() {
+			defer nc.wg.Done()
+			c.Run(1)
+		}()
+	}
+
 	klog.Infof("Default node network controller initialized and ready.")
 	return nil
 }
@@ -1095,7 +1110,7 @@ func upgradeServiceRoute(routeManager *routeManager, bridgeName string) error {
 			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
 		}
 		rules := getLocalGatewayNATRules(types.LocalnetGatewayNextHopPort, IPNet)
-		if err := delIptRules(rules); err != nil {
+		if err := nodeipt.DelRules(rules); err != nil {
 			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
 		}
 	}

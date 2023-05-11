@@ -39,13 +39,12 @@ type nodeNetworkControllerManager struct {
 	nadController *nad.NetAttachDefinitionController
 }
 
-// NewNetworkController create secondary node network controllers for the given NetInfo and NetConfInfo
-func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo,
-	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
-	topoType := netConfInfo.TopologyType()
+// NewNetworkController create secondary node network controllers for the given NetInfo
+func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
+	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, netConfInfo), nil
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }

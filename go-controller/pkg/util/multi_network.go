@@ -4,30 +4,45 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sort"
 	"strings"
 	"sync"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+
+	kapi "k8s.io/api/core/v1"
+	knet "k8s.io/utils/net"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
-	kapi "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 var ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
 
-// NetInfo is interface which holds network name information
-// for default network, this is set to nil
-type NetInfo interface {
+// BasicNetInfo is interface which holds basic network information
+type BasicNetInfo interface {
+	// basic network information
 	GetNetworkName() string
 	IsSecondary() bool
-	GetPrefix() string
-	GetNetworkScopedName(string) string
+	TopologyType() string
+	MTU() int
+	IPMode() (bool, bool)
+	Subnets() []config.CIDRNetworkEntry
+	ExcludeSubnets() []*net.IPNet
+	Vlan() uint
+
+	// utility methods
+	CompareNetInfo(BasicNetInfo) bool
+	GetNetworkScopedName(name string) string
+	RemoveNetworkScopeFromName(name string) string
+}
+
+// NetInfo correlates which NADs refer to a network in addition to the basic
+// network information
+type NetInfo interface {
+	BasicNetInfo
 	AddNAD(nadName string)
 	DeleteNAD(nadName string)
 	HasNAD(nadName string) bool
@@ -45,13 +60,15 @@ func (nInfo *DefaultNetInfo) IsSecondary() bool {
 	return false
 }
 
-// GetPrefix returns if the logical entities prefix for this network
-func (nInfo *DefaultNetInfo) GetPrefix() string {
-	return ""
+// GetNetworkScopedName returns a network scoped name form the provided one
+// appropriate to use globally.
+func (nInfo *DefaultNetInfo) GetNetworkScopedName(name string) string {
+	// for the default network, names are not scoped
+	return name
 }
 
-// GetNetworkScopedName returns network scope name in this network for the give name
-func (nInfo *DefaultNetInfo) GetNetworkScopedName(name string) string {
+func (nInfo *DefaultNetInfo) RemoveNetworkScopeFromName(name string) string {
+	// for the default network, names are not scoped
 	return name
 }
 
@@ -71,429 +88,262 @@ func (nInfo *DefaultNetInfo) HasNAD(nadName string) bool {
 	panic("unexpected call for default network")
 }
 
+func (nInfo *DefaultNetInfo) CompareNetInfo(netBasicInfo BasicNetInfo) bool {
+	_, ok := netBasicInfo.(*DefaultNetInfo)
+	return ok
+}
+
+// TopologyType returns the defaultNetConfInfo's topology type which is empty
+func (nInfo *DefaultNetInfo) TopologyType() string {
+	return ""
+}
+
+// MTU returns the defaultNetConfInfo's MTU value
+func (nInfo *DefaultNetInfo) MTU() int {
+	return config.Default.MTU
+}
+
+// IPMode returns the defaultNetConfInfo's ipv4/ipv6 mode
+func (nInfo *DefaultNetInfo) IPMode() (bool, bool) {
+	return config.IPv4Mode, config.IPv6Mode
+}
+
+// Subnets returns the defaultNetConfInfo's Subnets value
+func (nInfo *DefaultNetInfo) Subnets() []config.CIDRNetworkEntry {
+	return config.Default.ClusterSubnets
+}
+
+// ExcludeSubnets returns the defaultNetConfInfo's ExcludeSubnets value
+func (nInfo *DefaultNetInfo) ExcludeSubnets() []*net.IPNet {
+	return nil
+}
+
+// Vlan returns the defaultNetConfInfo's Vlan value
+func (nInfo *DefaultNetInfo) Vlan() uint {
+	return config.Gateway.VLANID
+}
+
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
-type SecondaryNetInfo struct {
-	// network name
-	netName string
+type secondaryNetInfo struct {
+	netName  string
+	topology string
+	mtu      int
+	vlan     uint
+
+	ipv4mode, ipv6mode bool
+	subnets            []config.CIDRNetworkEntry
+	excludeSubnets     []*net.IPNet
+
 	// all net-attach-def NAD names for this network, used to determine if a pod needs
 	// to be plumbed for this network
-	nadNames *sync.Map
+	nadNames sync.Map
 }
 
 // GetNetworkName returns the network name
-func (nInfo *SecondaryNetInfo) GetNetworkName() string {
+func (nInfo *secondaryNetInfo) GetNetworkName() string {
 	return nInfo.netName
 }
 
 // IsSecondary returns if this network is secondary
-func (nInfo *SecondaryNetInfo) IsSecondary() bool {
+func (nInfo *secondaryNetInfo) IsSecondary() bool {
 	return true
 }
 
-// GetPrefix returns if the logical entities prefix for this network
-func (nInfo *SecondaryNetInfo) GetPrefix() string {
+// GetNetworkScopedName returns a network scoped name from the provided one
+// appropriate to use globally.
+func (nInfo *secondaryNetInfo) GetNetworkScopedName(name string) string {
+	return fmt.Sprintf("%s%s", nInfo.getPrefix(), name)
+}
+
+// RemoveNetworkScopeFromName removes the name without the network scope added
+// by a previous call to GetNetworkScopedName
+func (nInfo *secondaryNetInfo) RemoveNetworkScopeFromName(name string) string {
+	// for the default network, names are not scoped
+	return strings.Trim(name, nInfo.getPrefix())
+}
+
+// getPrefix returns if the logical entities prefix for this network
+func (nInfo *secondaryNetInfo) getPrefix() string {
 	return GetSecondaryNetworkPrefix(nInfo.netName)
 }
 
-// GetNetworkScopedName returns network scope name in this network for the give name
-func (nInfo *SecondaryNetInfo) GetNetworkScopedName(name string) string {
-	return fmt.Sprintf("%s%s", nInfo.GetPrefix(), name)
-}
-
 // AddNAD adds the specified NAD
-func (nInfo *SecondaryNetInfo) AddNAD(nadName string) {
+func (nInfo *secondaryNetInfo) AddNAD(nadName string) {
 	nInfo.nadNames.Store(nadName, true)
 }
 
 // DeleteNAD deletes the specified NAD
-func (nInfo *SecondaryNetInfo) DeleteNAD(nadName string) {
+func (nInfo *secondaryNetInfo) DeleteNAD(nadName string) {
 	nInfo.nadNames.Delete(nadName)
 }
 
 // HasNAD returns true if the given NAD exists, used
 // to check if the network needs to be plumbed over
-func (nInfo *SecondaryNetInfo) HasNAD(nadName string) bool {
+func (nInfo *secondaryNetInfo) HasNAD(nadName string) bool {
 	_, ok := nInfo.nadNames.Load(nadName)
 	return ok
 }
 
-// NetConfInfo is structure which holds specific per-network configuration
-type NetConfInfo interface {
-	CompareNetConf(NetConfInfo) bool
-	TopologyType() string
-	MTU() int
-	Subnets() []string
-	IPMode() (bool, bool)
-}
-
-// DefaultNetConfInfo is structure which holds specific default network information
-type DefaultNetConfInfo struct{}
-
-// CompareNetConf compares the defaultNetConfInfo with the given newNetConfInfo and returns true
-// unless the given newNetConfInfo is not the type of DefaultNetConfInfo
-func (defaultNetConfInfo *DefaultNetConfInfo) CompareNetConf(newNetConfInfo NetConfInfo) bool {
-	_, ok := newNetConfInfo.(*DefaultNetConfInfo)
-	if !ok {
-		klog.V(5).Infof("New netconf is different, expect default network netconf")
-		return false
-	}
-	return true
-}
-
-// TopologyType returns the defaultNetConfInfo's topology type which is empty
-func (defaultNetConfInfo *DefaultNetConfInfo) TopologyType() string {
-	return ""
-}
-
-// MTU returns the defaultNetConfInfo's MTU value
-func (defaultNetConfInfo *DefaultNetConfInfo) MTU() int {
-	return config.Default.MTU
-}
-
-// Subnets returns the defaultNetConfInfo's Subnets value
-func (defaultNetConfInfo *DefaultNetConfInfo) Subnets() []string {
-	return []string{config.Default.RawClusterSubnets}
-}
-
-// IPMode returns the defaultNetConfInfo's ipv4/ipv6 mode
-func (defaultNetConfInfo *DefaultNetConfInfo) IPMode() (bool, bool) {
-	return config.IPv4Mode, config.IPv6Mode
-}
-
-func isSubnetsStringEqual(subnetsString, newSubnetsString string) bool {
-	subnetsStringList := strings.Split(subnetsString, ",")
-	newSubnetsStringList := strings.Split(newSubnetsString, ",")
-	if len(subnetsStringList) != len(newSubnetsStringList) {
-		return false
-	}
-	for index := range subnetsStringList {
-		subnetsStringList[index] = strings.TrimSpace(subnetsStringList[index])
-	}
-	for index := range newSubnetsStringList {
-		newSubnetsStringList[index] = strings.TrimSpace(newSubnetsStringList[index])
-	}
-	sort.Strings(subnetsStringList)
-	sort.Strings(newSubnetsStringList)
-	for i, subnetString := range subnetsStringList {
-		if subnetString != newSubnetsStringList[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// parseSubnetsString parses comma-seperated subnet string and returns the list of subnets
-func parseSubnetsString(clusterSubnetString string) ([]*net.IPNet, error) {
-	var subnetList []*net.IPNet
-
-	if strings.TrimSpace(clusterSubnetString) == "" {
-		return subnetList, nil
-	}
-
-	subnetStringList := strings.Split(clusterSubnetString, ",")
-	for _, subnetString := range subnetStringList {
-		subnetString = strings.TrimSpace(subnetString)
-		_, subnet, err := net.ParseCIDR(subnetString)
-		if err != nil {
-			return nil, err
-		}
-
-		subnetList = append(subnetList, subnet)
-	}
-	return subnetList, nil
-}
-
-// Layer3NetConfInfo is structure which holds specific secondary layer3 network information
-type Layer3NetConfInfo struct {
-	subnets        string
-	mtu            int
-	ClusterSubnets []config.CIDRNetworkEntry
-}
-
-// CompareNetConf compares the layer3NetConfInfo with the given newNetConfInfo and returns true
-// if they share the same netconf information
-func (layer3NetConfInfo *Layer3NetConfInfo) CompareNetConf(newNetConfInfo NetConfInfo) bool {
-	var errs []error
-	var err error
-
-	newLayer3NetConfInfo, ok := newNetConfInfo.(*Layer3NetConfInfo)
-	if !ok {
-		klog.V(5).Infof("New netconf topology type is different, expect %s",
-			layer3NetConfInfo.TopologyType())
-		return false
-	}
-
-	if !isSubnetsStringEqual(layer3NetConfInfo.subnets, newLayer3NetConfInfo.subnets) {
-		err = fmt.Errorf("new %s netconf subnets %v has changed, expect %v",
-			types.Layer3Topology, newLayer3NetConfInfo.subnets, layer3NetConfInfo.subnets)
-		errs = append(errs, err)
-	}
-
-	if layer3NetConfInfo.mtu != newLayer3NetConfInfo.mtu {
-		err = fmt.Errorf("new %s netconf mtu %v has changed, expect %v",
-			types.Layer3Topology, newLayer3NetConfInfo.mtu, layer3NetConfInfo.mtu)
-		errs = append(errs, err)
-	}
-	if len(errs) != 0 {
-		err = kerrors.NewAggregate(errs)
-		klog.V(5).Infof(err.Error())
-		return false
-	}
-	return true
-}
-
-func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (*Layer3NetConfInfo, error) {
-	clusterSubnets, err := config.ParseClusterSubnetEntries(netconf.Subnets)
-	if err != nil {
-		return nil, fmt.Errorf("cluster subnet %s is invalid: %v", netconf.Subnets, err)
-	}
-
-	return &Layer3NetConfInfo{
-		subnets:        netconf.Subnets,
-		mtu:            netconf.MTU,
-		ClusterSubnets: clusterSubnets,
-	}, nil
-}
-
-// TopologyType returns the layer3NetConfInfo's topology type which is layer3 topology
-func (layer3NetConfInfo *Layer3NetConfInfo) TopologyType() string {
-	return types.Layer3Topology
+// TopologyType returns the topology type
+func (nInfo *secondaryNetInfo) TopologyType() string {
+	return nInfo.topology
 }
 
 // MTU returns the layer3NetConfInfo's MTU value
-func (layer3NetConfInfo *Layer3NetConfInfo) MTU() int {
-	return layer3NetConfInfo.mtu
+func (nInfo *secondaryNetInfo) MTU() int {
+	return nInfo.mtu
 }
 
-// Subnets returns the layer3NetConfInfo's Subnets value
-func (layer3NetConfInfo *Layer3NetConfInfo) Subnets() []string {
-	return strings.Split(layer3NetConfInfo.subnets, ",")
+// Vlan returns the Vlan value
+func (nInfo *secondaryNetInfo) Vlan() uint {
+	return nInfo.vlan
 }
 
-// IPMode returns the layer3NetConfInfo's ipv4/ipv6 mode
-func (layer3NetConfInfo *Layer3NetConfInfo) IPMode() (bool, bool) {
-	var ipv6Mode, ipv4Mode bool
-	for _, cidr := range layer3NetConfInfo.ClusterSubnets {
-		if utilnet.IsIPv6CIDR(cidr.CIDR) {
-			ipv6Mode = true
-		} else {
-			ipv4Mode = true
-		}
-	}
-	return ipv4Mode, ipv6Mode
+// IPMode returns the ipv4/ipv6 mode
+func (nInfo *secondaryNetInfo) IPMode() (bool, bool) {
+	return nInfo.ipv4mode, nInfo.ipv6mode
 }
 
-// Layer2NetConfInfo is structure which holds specific secondary layer2 network information
-type Layer2NetConfInfo struct {
-	subnets        string
-	mtu            int
-	excludeSubnets string
-
-	ClusterSubnets []*net.IPNet
-	ExcludeSubnets []*net.IPNet
+// Subnets returns the Subnets value
+func (nInfo *secondaryNetInfo) Subnets() []config.CIDRNetworkEntry {
+	return nInfo.subnets
 }
 
-// CompareNetConf compares the layer2NetConfInfo with the given newNetConfInfo and returns true
-// if they share the same configuration
-func (layer2NetConfInfo *Layer2NetConfInfo) CompareNetConf(newNetConfInfo NetConfInfo) bool {
-	var errs []error
-	var err error
-	newLayer2NetConfInfo, ok := newNetConfInfo.(*Layer2NetConfInfo)
-	if !ok {
-		klog.V(5).Infof("New netconf topology type is different, expect %s",
-			layer2NetConfInfo.TopologyType())
+// ExcludeSubnets returns the ExcludeSubnets value
+func (nInfo *secondaryNetInfo) ExcludeSubnets() []*net.IPNet {
+	return nInfo.excludeSubnets
+}
+
+// CompareNetInfo compares for equality this network information with the other
+func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
+	if nInfo.netName != other.GetNetworkName() {
 		return false
 	}
-	if !isSubnetsStringEqual(layer2NetConfInfo.subnets, newLayer2NetConfInfo.subnets) {
-		err = fmt.Errorf("new %s netconf subnets %v has changed, expect %v",
-			types.Layer2Topology, newLayer2NetConfInfo.subnets, layer2NetConfInfo.subnets)
-		errs = append(errs, err)
-	}
-	if layer2NetConfInfo.mtu != newLayer2NetConfInfo.mtu {
-		err = fmt.Errorf("new %s netconf mtu %v has changed, expect %v",
-			types.Layer2Topology, newLayer2NetConfInfo.mtu, layer2NetConfInfo.mtu)
-		errs = append(errs, err)
-	}
-	if !isSubnetsStringEqual(layer2NetConfInfo.excludeSubnets, newLayer2NetConfInfo.excludeSubnets) {
-		err = fmt.Errorf("new %s netconf excludeSubnets %v has changed, expect %v",
-			types.Layer2Topology, newLayer2NetConfInfo.excludeSubnets, layer2NetConfInfo.excludeSubnets)
-		errs = append(errs, err)
-	}
-	if len(errs) != 0 {
-		err = kerrors.NewAggregate(errs)
-		klog.V(5).Infof(err.Error())
+	if nInfo.topology != other.TopologyType() {
 		return false
 	}
-	return true
+	if nInfo.mtu != other.MTU() {
+		return false
+	}
+	if nInfo.vlan != other.Vlan() {
+		return false
+	}
+
+	lessCIDRNetworkEntry := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
+	if !cmp.Equal(nInfo.subnets, other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
+		return false
+	}
+
+	lessIPNet := func(a, b net.IPNet) bool { return a.String() < b.String() }
+	return cmp.Equal(nInfo.excludeSubnets, other.ExcludeSubnets(), cmpopts.SortSlices(lessIPNet))
 }
 
-func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (*Layer2NetConfInfo, error) {
-	clusterSubnets, excludeSubnets, err := verifyExcludeIPs(netconf.Subnets, netconf.ExcludeSubnets)
+func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
+	subnets, _, err := parseSubnets(netconf.Subnets, "", types.Layer3Topology)
+	if err != nil {
+		return nil, err
+	}
+
+	ni := &secondaryNetInfo{
+		netName:  netconf.Name,
+		topology: types.Layer3Topology,
+		subnets:  subnets,
+		mtu:      netconf.MTU,
+	}
+	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
+	return ni, nil
+}
+
+func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
+	subnets, excludes, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, types.Layer2Topology)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
 	}
 
-	return &Layer2NetConfInfo{
-		subnets:        netconf.Subnets,
+	ni := &secondaryNetInfo{
+		netName:        netconf.Name,
+		topology:       types.Layer2Topology,
+		subnets:        subnets,
+		excludeSubnets: excludes,
 		mtu:            netconf.MTU,
-		excludeSubnets: netconf.ExcludeSubnets,
-		ClusterSubnets: clusterSubnets,
-		ExcludeSubnets: excludeSubnets,
-	}, nil
+	}
+	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
+	return ni, nil
 }
 
-func verifyExcludeIPs(subnetsString string, excludeSubnetsString string) ([]*net.IPNet, []*net.IPNet, error) {
-	clusterSubnets, err := parseSubnetsString(subnetsString)
+func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
+	subnets, excludes, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, types.Layer2Topology)
 	if err != nil {
-		return nil, nil, fmt.Errorf("subnets %s is invalid: %v", subnetsString, err)
+		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
 	}
 
-	excludeSubnets, err := parseSubnetsString(excludeSubnetsString)
-	if err != nil {
-		return nil, nil, fmt.Errorf("excludeSubnets %s is invalid: %v", excludeSubnetsString, err)
+	ni := &secondaryNetInfo{
+		netName:        netconf.Name,
+		topology:       types.Layer2Topology,
+		subnets:        subnets,
+		excludeSubnets: excludes,
+		mtu:            netconf.MTU,
+		vlan:           uint(netconf.VLANID),
+	}
+	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
+	return ni, nil
+}
+
+func parseSubnets(subnetsString, excludeSubnetsString, topology string) ([]config.CIDRNetworkEntry, []*net.IPNet, error) {
+	var parseSubnets func(clusterSubnetCmd string) ([]config.CIDRNetworkEntry, error)
+	switch topology {
+	case types.Layer3Topology:
+		// For L3 topology, subnet is validated
+		parseSubnets = config.ParseClusterSubnetEntries
+	case types.LocalnetTopology, types.Layer2Topology:
+		// For L2 topologies, host specific prefix length is ignored (using 0 as
+		// prefix length)
+		parseSubnets = func(clusterSubnetCmd string) ([]config.CIDRNetworkEntry, error) {
+			return config.ParseClusterSubnetEntriesWithDefaults(clusterSubnetCmd, 0, 0)
+		}
 	}
 
-	for _, excludeSubnet := range excludeSubnets {
-		found := false
-		for _, subnet := range clusterSubnets {
-			if ContainsCIDR(subnet, excludeSubnet) {
-				found = true
-				break
+	var subnets []config.CIDRNetworkEntry
+	if strings.TrimSpace(subnetsString) != "" {
+		var err error
+		subnets, err = parseSubnets(subnetsString)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	var excludeIPNets []*net.IPNet
+	if strings.TrimSpace(excludeSubnetsString) != "" {
+		// For L2 topologies, host specific prefix length is ignored (using 0 as
+		// prefix length)
+		excludeSubnets, err := config.ParseClusterSubnetEntriesWithDefaults(excludeSubnetsString, 0, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		excludeIPNets = make([]*net.IPNet, 0, len(excludeSubnets))
+		for _, excludeSubnet := range excludeSubnets {
+			found := false
+			for _, subnet := range subnets {
+				if ContainsCIDR(subnet.CIDR, excludeSubnet.CIDR) {
+					found = true
+					break
+				}
 			}
-		}
-		if !found {
-			return nil, nil, fmt.Errorf("the provided network subnets %v does not contain exluded subnets %v",
-				clusterSubnets, excludeSubnet)
+			if !found {
+				return nil, nil, fmt.Errorf("the provided network subnets %v do not contain exluded subnets %v",
+					subnets, excludeSubnet.CIDR)
+			}
+			excludeIPNets = append(excludeIPNets, excludeSubnet.CIDR)
 		}
 	}
 
-	return clusterSubnets, excludeSubnets, nil
+	return subnets, excludeIPNets, nil
 }
 
-// TopologyType returns layer2NetConfInfo's topology type
-func (layer2NetConfInfo *Layer2NetConfInfo) TopologyType() string {
-	return types.Layer2Topology
-}
-
-// MTU returns layer2NetConfInfo's MTU value
-func (layer2NetConfInfo *Layer2NetConfInfo) MTU() int {
-	return layer2NetConfInfo.mtu
-}
-
-// Subnets returns layer2NetConfInfo's subnets information
-func (layer2NetConfInfo *Layer2NetConfInfo) Subnets() []string {
-	subnets := strings.Split(layer2NetConfInfo.subnets, ",")
-	if len(subnets) == 1 && strings.TrimSpace(subnets[0]) == "" {
-		return nil
-	}
-	return subnets
-}
-
-// IPMode returns the layer2NetConfInfo's ipv4/ipv6 mode
-func (layer2NetConfInfo *Layer2NetConfInfo) IPMode() (bool, bool) {
+func getIPMode(subnets []config.CIDRNetworkEntry) (bool, bool) {
 	var ipv6Mode, ipv4Mode bool
-	for _, subnet := range layer2NetConfInfo.ClusterSubnets {
-		if utilnet.IsIPv6CIDR(subnet) {
-			ipv6Mode = true
-		} else {
-			ipv4Mode = true
-		}
-	}
-	return ipv4Mode, ipv6Mode
-}
-
-// LocalnetNetConfInfo is structure which holds specific secondary localnet network information
-type LocalnetNetConfInfo struct {
-	subnets        string
-	mtu            int
-	excludeSubnets string
-
-	VLANID         int
-	ClusterSubnets []*net.IPNet
-	ExcludeSubnets []*net.IPNet
-}
-
-// CompareNetConf compares the localnetNetConfInfo with the given newNetConfInfo and returns true
-// if they share the same configuration
-func (localnetNetConfInfo *LocalnetNetConfInfo) CompareNetConf(newNetConfInfo NetConfInfo) bool {
-	var errs []error
-	var err error
-
-	newLocalnetNetConfInfo, ok := newNetConfInfo.(*LocalnetNetConfInfo)
-	if !ok {
-		klog.V(5).Infof("New netconf topology type is different, expect %s",
-			localnetNetConfInfo.TopologyType())
-		return false
-	}
-	if !isSubnetsStringEqual(localnetNetConfInfo.subnets, newLocalnetNetConfInfo.subnets) {
-		err = fmt.Errorf("new %s netconf subnets %v has changed, expect %v",
-			types.LocalnetTopology, newLocalnetNetConfInfo.subnets, localnetNetConfInfo.subnets)
-		errs = append(errs, err)
-	}
-	if localnetNetConfInfo.mtu != newLocalnetNetConfInfo.mtu {
-		err = fmt.Errorf("new %s netconf mtu %v has changed, expect %v",
-			types.LocalnetTopology, newLocalnetNetConfInfo.mtu, localnetNetConfInfo.mtu)
-		errs = append(errs, err)
-	}
-	if !isSubnetsStringEqual(localnetNetConfInfo.excludeSubnets, newLocalnetNetConfInfo.excludeSubnets) {
-		err = fmt.Errorf("new %s netconf excludeSubnets %v has changed, expect %v",
-			types.LocalnetTopology, newLocalnetNetConfInfo.excludeSubnets, localnetNetConfInfo.excludeSubnets)
-		errs = append(errs, err)
-	}
-	if localnetNetConfInfo.VLANID != newLocalnetNetConfInfo.VLANID {
-		err = fmt.Errorf("new %s netconf VLAN ID %v has changed, expect %v",
-			types.LocalnetTopology, newLocalnetNetConfInfo.VLANID, localnetNetConfInfo.VLANID)
-		errs = append(errs, err)
-	}
-
-	if len(errs) != 0 {
-		err = kerrors.NewAggregate(errs)
-		klog.V(5).Infof(err.Error())
-		return false
-	}
-	return true
-}
-
-func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (*LocalnetNetConfInfo, error) {
-	clusterSubnets, excludeSubnets, err := verifyExcludeIPs(netconf.Subnets, netconf.ExcludeSubnets)
-	if err != nil {
-		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
-	}
-
-	return &LocalnetNetConfInfo{
-		subnets:        netconf.Subnets,
-		mtu:            netconf.MTU,
-		VLANID:         netconf.VLANID,
-		excludeSubnets: netconf.ExcludeSubnets,
-		ClusterSubnets: clusterSubnets,
-		ExcludeSubnets: excludeSubnets,
-	}, nil
-}
-
-// TopologyType returns LocalnetNetConfInfo's topology type
-func (localnetNetConfInfo *LocalnetNetConfInfo) TopologyType() string {
-	return types.LocalnetTopology
-}
-
-// MTU returns LocalnetNetConfInfo's MTU value
-func (localnetNetConfInfo *LocalnetNetConfInfo) MTU() int {
-	return localnetNetConfInfo.mtu
-}
-
-// Subnets returns localnetNetConfInfo's subnets information
-func (localnetNetConfInfo *LocalnetNetConfInfo) Subnets() []string {
-	subnets := strings.Split(localnetNetConfInfo.subnets, ",")
-	if len(subnets) == 1 && strings.TrimSpace(subnets[0]) == "" {
-		return nil
-	}
-	return subnets
-}
-
-// IPMode returns the localnetNetConfInfo's ipv4/ipv6 mode
-func (localnetNetConfInfo *LocalnetNetConfInfo) IPMode() (bool, bool) {
-	var ipv6Mode, ipv4Mode bool
-	for _, subnet := range localnetNetConfInfo.ClusterSubnets {
-		if utilnet.IsIPv6CIDR(subnet) {
+	for _, subnet := range subnets {
+		if knet.IsIPv6CIDR(subnet.CIDR) {
 			ipv6Mode = true
 		} else {
 			ipv4Mode = true
@@ -518,9 +368,9 @@ func GetSecondaryNetworkPrefix(netName string) string {
 	return name + "_"
 }
 
-func newNetConfInfo(netconf *ovncnitypes.NetConf) (NetConfInfo, error) {
+func NewNetInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	if netconf.Name == types.DefaultNetworkName {
-		return &DefaultNetConfInfo{}, nil
+		return &DefaultNetInfo{}, nil
 	}
 	switch netconf.Topology {
 	case types.Layer3Topology:
@@ -536,31 +386,18 @@ func newNetConfInfo(netconf *ovncnitypes.NetConf) (NetConfInfo, error) {
 }
 
 // ParseNADInfo parses config in NAD spec and return a NetAttachDefInfo object for secondary networks
-func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (NetInfo, NetConfInfo, error) {
+func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
 	netconf, err := ParseNetConf(netattachdef)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	netconfInfo, err := newNetConfInfo(netconf)
+	ni, err := NewNetInfo(netconf)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return NewNetInfo(netconf), netconfInfo, nil
-}
 
-// ParseNetConf returns NetInfo for the given netconf
-func NewNetInfo(netconf *ovncnitypes.NetConf) NetInfo {
-	var nInfo NetInfo
-	if netconf.Name == types.DefaultNetworkName {
-		nInfo = &DefaultNetInfo{}
-	} else {
-		nInfo = &SecondaryNetInfo{
-			netName:  netconf.Name,
-			nadNames: &sync.Map{},
-		}
-	}
-	return nInfo
+	return ni, nil
 }
 
 // ParseNetConf parses config in NAD spec for secondary networks

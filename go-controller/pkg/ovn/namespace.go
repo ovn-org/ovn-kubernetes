@@ -216,7 +216,7 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 				errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 			}
 			for _, pod := range existingPods {
-				if !oc.isPodScheduledinLocalZone(pod) {
+				if !oc.isPodScheduledinLocalZone(pod) && !util.PodNeedsSNAT(pod) {
 					continue
 				}
 				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)

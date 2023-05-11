@@ -354,6 +354,7 @@ type OVNKubernetesFeatureConfig struct {
 	EgressIPReachabiltyTotalTimeout int  `gcfg:"egressip-reachability-total-timeout"`
 	EnableEgressFirewall            bool `gcfg:"enable-egress-firewall"`
 	EnableEgressQoS                 bool `gcfg:"enable-egress-qos"`
+	EnableEgressService             bool `gcfg:"enable-egress-service"`
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
@@ -962,6 +963,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to enable interconnecting multiple zones.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableInterconnect,
 		Value:       OVNKubernetesFeature.EnableInterconnect,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-egress-service",
+		Usage:       "Configure to use EgressService CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressService,
+		Value:       OVNKubernetesFeature.EnableEgressService,
 	},
 }
 

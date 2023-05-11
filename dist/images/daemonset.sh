@@ -64,6 +64,7 @@ OVN_EGRESSIP_ENABLE=
 OVN_EGRESSIP_HEALTHCHECK_PORT=
 OVN_EGRESSFIREWALL_ENABLE=
 OVN_EGRESSQOS_ENABLE=
+OVN_EGRESSSERVICE_ENABLE=
 OVN_DISABLE_OVN_IFACE_ID_VER="false"
 OVN_MULTI_NETWORK_ENABLE=
 OVN_V4_JOIN_SUBNET=""
@@ -236,6 +237,9 @@ while [ "$1" != "" ]; do
   --multi-network-enable)
     OVN_MULTI_NETWORK_ENABLE=$VALUE
     ;;
+  --egress-service-enable)
+    OVN_EGRESSSERVICE_ENABLE=$VALUE
+    ;;
   --v4-join-subnet)
     OVN_V4_JOIN_SUBNET=$VALUE
     ;;
@@ -363,6 +367,8 @@ ovn_egress_firewall_enable=${OVN_EGRESSFIREWALL_ENABLE}
 echo "ovn_egress_firewall_enable: ${ovn_egress_firewall_enable}"
 ovn_egress_qos_enable=${OVN_EGRESSQOS_ENABLE}
 echo "ovn_egress_qos_enable: ${ovn_egress_qos_enable}"
+ovn_egress_service_enable=${OVN_EGRESSSERVICE_ENABLE}
+echo "ovn_egress_service_enable: ${ovn_egress_service_enable}"
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
 echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
@@ -460,6 +466,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_monitor_all=${ovn_monitor_all} \
@@ -503,6 +510,7 @@ ovn_image=${image} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
@@ -538,6 +546,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -569,6 +578,7 @@ ovn_image=${image} \
   ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -638,5 +648,6 @@ cp ../templates/ovnkube-monitor.yaml.j2 ${output_dir}/ovnkube-monitor.yaml
 cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ${output_dir}/k8s.ovn.org_egressfirewalls.yaml
 cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressips.yaml
 cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egressqoses.yaml
+cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml
 
 exit 0

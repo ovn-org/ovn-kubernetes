@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/j-keck/arping"
@@ -441,6 +442,7 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 }
 
 // GetNetworkInterfaceIPs returns the IP addresses for the network interface 'iface'.
+// We filter out addresses that are link local, reserved for internal use or added by keepalived.
 func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 	link, err := netLinkOps.LinkByName(iface)
 	if err != nil {
@@ -454,7 +456,7 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 
 	var ips []*net.IPNet
 	for _, addr := range addrs {
-		if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) {
+		if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) || IsAddressAddedByKeepAlived(addr) {
 			continue
 		}
 		// Ignore addresses marked as secondary or deprecated since they may
@@ -483,6 +485,13 @@ func IsAddressReservedForInternalUse(addr net.IP) bool {
 		return false
 	}
 	return subnet.Contains(addr)
+}
+
+// IsAddressAddedByKeepAlived returns true if the input interface address obtained
+// through netlink has a label that ends with ":vip", which is how keepalived
+// marks the IP addresses it adds (https://github.com/openshift/machine-config-operator/pull/3683)
+func IsAddressAddedByKeepAlived(addr netlink.Addr) bool {
+	return strings.HasSuffix(addr.Label, ":vip")
 }
 
 // GetIPv6OnSubnet when given an IPv6 address with a 128 prefix for an interface,

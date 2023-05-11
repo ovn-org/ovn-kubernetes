@@ -194,12 +194,7 @@ func (mp *managementPortNetdev) Create(routeManager *routeManager, nodeAnnotator
 			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.netdevName, err)
 		}
 	} else if mp.netdevName != types.K8sMgmtIntfName {
-		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-			// We do not expect OVS running here so just check if no old mgmt port netdevice exists and unconfigure it
-			err = unconfigureMgmtNetdevicePort(mp.hostSubnets, types.K8sMgmtIntfName)
-		} else {
-			err = syncMgmtPortInterface(mp.hostSubnets, types.K8sMgmtIntfName, false)
-		}
+		err = syncMgmtPortInterface(mp.hostSubnets, types.K8sMgmtIntfName, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sync management port: %v", err)
 		}
