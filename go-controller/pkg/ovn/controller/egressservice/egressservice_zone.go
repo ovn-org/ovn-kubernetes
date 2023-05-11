@@ -16,13 +16,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -40,9 +38,8 @@ import (
 )
 
 const (
-	maxRetries           = 10
-	svcExternalIDKey     = "EgressSVC" // key set on lrps to identify to which egress service it belongs
-	egressSVCLabelPrefix = "egress-service.k8s.ovn.org"
+	maxRetries       = 10
+	svcExternalIDKey = "EgressSVC" // key set on lrps to identify to which egress service it belongs
 )
 
 type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
@@ -61,18 +58,9 @@ type Controller struct {
 	initClusterEgressPolicies                InitClusterEgressPoliciesFunc
 	ensureNoRerouteNodePolicies              EnsureNoRerouteNodePoliciesFunc
 	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc
-	IsReachable                              func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool // TODO: make a universal cache instead
-	setEgressServiceStatus                   func(ns, name, host string) error
 
 	services map[string]*svcState  // svc key -> state
-	nodes    map[string]*nodeState // node name -> state
-
-	// A map of the services we attempted to allocate but could not.
-	// When a node is updated we check this map to see if a service can
-	// be allocated on it - if it does we queue the service again.
-	// We also check this cache when an ep is added, as the service might
-	// got to this cache by having no eps.
-	unallocatedServices map[string]labels.Selector // svc key -> its node selector
+	nodes    map[string]*nodeState // node name -> state, contains nodes that host an egress service
 
 	egressServiceLister egressservicelisters.EgressServiceLister
 	egressServiceSynced cache.InformerSynced
@@ -94,22 +82,16 @@ type Controller struct {
 
 type svcState struct {
 	node        string
-	selector    labels.Selector
 	v4Endpoints sets.Set[string]
 	v6Endpoints sets.Set[string]
 	stale       bool
 }
 
 type nodeState struct {
-	name         string
-	labels       map[string]string
-	mgmtIPs      []net.IP
-	v4MgmtIP     net.IP
-	v6MgmtIP     net.IP
-	healthClient healthcheck.EgressIPHealthClient
-	allocations  map[string]*svcState // svc key -> state
-	reachable    bool
-	draining     bool
+	name     string
+	draining bool
+	v4MgmtIP net.IP
+	v6MgmtIP net.IP
 }
 
 func NewController(
@@ -120,8 +102,6 @@ func NewController(
 	initClusterEgressPolicies InitClusterEgressPoliciesFunc,
 	ensureNoRerouteNodePolicies EnsureNoRerouteNodePoliciesFunc,
 	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc,
-	setEgressServiceStatus func(ns, name, host string) error,
-	isReachable func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool,
 	stopCh <-chan struct{},
 	esInformer egressserviceinformer.EgressServiceInformer,
 	serviceInformer coreinformers.ServiceInformer,
@@ -137,12 +117,9 @@ func NewController(
 		initClusterEgressPolicies:                initClusterEgressPolicies,
 		ensureNoRerouteNodePolicies:              ensureNoRerouteNodePolicies,
 		deleteLegacyDefaultNoRerouteNodePolicies: deleteLegacyDefaultNoRerouteNodePolicies,
-		IsReachable:                              isReachable,
-		setEgressServiceStatus:                   setEgressServiceStatus,
 		stopCh:                                   stopCh,
 		services:                                 map[string]*svcState{},
 		nodes:                                    map[string]*nodeState{},
-		unallocatedServices:                      map[string]labels.Selector{},
 	}
 
 	c.egressServiceLister = esInformer.Lister()
@@ -261,8 +238,6 @@ func (c *Controller) Run(threadiness int) {
 		}()
 	}
 
-	go c.checkNodesReachability()
-
 	// wait until we're told to stop
 	<-c.stopCh
 
@@ -277,7 +252,6 @@ func (c *Controller) Run(threadiness int) {
 // there's no ovnkube-master running for a while.
 // It deletes all logical router policies from OVN that belong to services which are no longer
 // egress services, and the policies of endpoints that do not belong to an egress service.
-// In addition, it removes the egress service labels of deleted services from the nodes.
 func (c *Controller) repair() error {
 	c.Lock()
 	defer c.Unlock()
@@ -323,9 +297,7 @@ func (c *Controller) repair() error {
 			continue
 		}
 
-		nodeSelector := &es.Spec.NodeSelector
 		svcHost := es.Status.Host
-
 		if svcHost == "" {
 			continue
 		}
@@ -340,37 +312,15 @@ func (c *Controller) repair() error {
 			continue
 		}
 
-		v4, v6, epsNodes, err := c.allEndpointsFor(svc)
+		v4, v6, err := c.allEndpointsFor(svc)
 		if err != nil {
-			klog.Errorf("Can't fetch all endpoints for egress service %s, err: %v", key, err)
+			klog.Errorf("Can't fetch all local endpoints for egress service %s, err: %v", key, err)
 			continue
 		}
 
 		totalEps := len(v4) + len(v6)
 		if totalEps == 0 {
 			klog.Infof("Egress service %s has no endpoints", key)
-			continue
-		}
-
-		if len(epsNodes) != 0 && svc.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeLocal {
-			// If the service is ETP=Local only a node with local eps can be used.
-			// We want to verify that the current selected node has a local ep.
-			matchEpsNodes := metav1.LabelSelectorRequirement{
-				Key:      "kubernetes.io/hostname",
-				Operator: metav1.LabelSelectorOpIn,
-				Values:   epsNodes,
-			}
-			nodeSelector.MatchExpressions = append(nodeSelector.MatchExpressions, matchEpsNodes)
-		}
-
-		selector, err := metav1.LabelSelectorAsSelector(nodeSelector)
-		if err != nil {
-			klog.Errorf("Selector %s is invalid for EgressService %s, err: %v", selector.String(), key, err)
-			continue
-		}
-
-		if !selector.Matches(labels.Set(node.Labels)) {
-			klog.Infof("Node %s does no longer match service %s selectors %s", svcHost, key, selector.String())
 			continue
 		}
 
@@ -382,13 +332,11 @@ func (c *Controller) repair() error {
 				continue
 			}
 		}
-
 		svcKeyToAllV4Endpoints[key] = v4
 		svcKeyToAllV6Endpoints[key] = v6
 		svcKeyToConfiguredV4Endpoints[key] = []string{}
 		svcKeyToConfiguredV6Endpoints[key] = []string{}
-		svcState := &svcState{node: svcHost, selector: selector, v4Endpoints: sets.New[string](), v6Endpoints: sets.New[string](), stale: false}
-		nodeState.allocations[key] = svcState
+		svcState := &svcState{node: svcHost, v4Endpoints: sets.New[string](), v6Endpoints: sets.New[string](), stale: false}
 		c.nodes[svcHost] = nodeState
 		c.services[key] = svcState
 	}
@@ -455,45 +403,6 @@ func (c *Controller) repair() error {
 
 	for key, v6ToAdd := range svcKeyToConfiguredV6Endpoints {
 		c.services[key].v6Endpoints.Insert(v6ToAdd...)
-	}
-
-	// remove stale host entries from EgressServices without a valid service
-	for _, es := range egressServices {
-		key, err := cache.MetaNamespaceKeyFunc(es)
-		if err != nil {
-			klog.Errorf("Failed to read EgressService key: %v", err)
-			continue
-		}
-		_, found := c.services[key]
-		if !found {
-			err := c.setEgressServiceHost(es.Namespace, es.Name, "")
-			if err != nil {
-				errorList = append(errorList,
-					fmt.Errorf("failed to remove stale host entry from EgressService %s, err: %v", key, err))
-			}
-		}
-	}
-
-	// now remove any stale egress service labels on nodes
-	nodes, _ := c.nodeLister.List(labels.Everything())
-	svcLabelToNode := map[string]string{}
-	for key, state := range c.services {
-		namespace, name, _ := cache.SplitMetaNamespaceKey(key)
-		svcLabelToNode[c.nodeLabelForService(namespace, name)] = state.node
-	}
-
-	for _, node := range nodes {
-		labelsToRemove := map[string]any{}
-		for labelKey := range node.Labels {
-			if strings.HasPrefix(labelKey, egressSVCLabelPrefix) && svcLabelToNode[labelKey] != node.Name {
-				labelsToRemove[labelKey] = nil // Patching with a nil value results in the delete of the key
-			}
-		}
-		err := c.patchNodeLabels(node.Name, labelsToRemove)
-		if err != nil {
-			errorList = append(errorList,
-				fmt.Errorf("failed to remove stale labels %v from node %s, err: %v", labelsToRemove, node.Name, err))
-		}
 	}
 
 	return errors.NewAggregate(errorList)
@@ -594,114 +503,85 @@ func (c *Controller) syncEgressService(key string) error {
 	}
 
 	state := c.services[key]
-	if es == nil {
+
+	// Clean up the service if it is not assigned to any host or was removed
+	if es == nil || len(es.Status.Host) == 0 {
+		klog.V(5).Infof("Egress service %s was removed or is not assigned to any host", key)
 		if state == nil {
-			// The EgressService was deleted and wasn't configured before.
-			// We delete it from the unallocated service cache just in case.
-			delete(c.unallocatedServices, key)
+			// The egress service was not configured, nothing to do
 			return nil
 		}
-		// The service is configured but does no longer have the egress service resource,
+		// The egress service is configured, but it no longer exists/is assigned to a node,
 		// meaning we should clear all of its resources.
 		return c.clearServiceResourcesAndRequeue(key, state)
 	}
 
 	if svc == nil {
+		klog.V(5).Infof("Service %s doesn't exist", key)
 		if state == nil {
-			// The service object was deleted and was not an allocated egress service.
-			// We delete it from the unallocated service cache just in case.
-			delete(c.unallocatedServices, key)
-			return c.setEgressServiceHost(namespace, name, "")
+			// The service object was deleted, and the egress service was not configured, nothing to do.
+			return nil
 		}
-		// The service was deleted and was an egress service.
-		// We delete all of its relevant resources to avoid leaving stale configuration.
+		// The egress service is configured, but the service object was deleted,
+		// meaning we should clear all of its resources.
 		return c.clearServiceResourcesAndRequeue(key, state)
 	}
 
-	// At this point both the EgressService resource and the Service != nil
+	// At this point both the EgressService is assigned and the Service != nil
 
 	if state != nil && state.stale {
 		// The service is marked stale because something failed when trying to delete it.
 		// We try to delete it again before doing anything else.
+		klog.Warningf("Cleaning up stale egress service %s", key)
 		return c.clearServiceResourcesAndRequeue(key, state)
 	}
 
-	if state == nil && len(svc.Status.LoadBalancer.Ingress) == 0 {
-		// The service wasn't configured before and does not have an ingress ip.
-		// we don't need to configure it and make sure it does not have a stale host value or unallocated entry.
-		klog.V(4).Infof("EgressService %s/%s does not have an ingress ip, will not attempt configuring it", namespace, name)
-		delete(c.unallocatedServices, key)
-		return c.setEgressServiceHost(namespace, name, "")
-	}
-
-	if state != nil && len(svc.Status.LoadBalancer.Ingress) == 0 {
-		// The service has no ingress ips so it is not considered valid anymore.
-		klog.V(4).Infof("EgressService %s/%s does not have an ingress ip anymore, removing its existing configuration", namespace, name)
-		return c.clearServiceResourcesAndRequeue(key, state)
-	}
-
-	nodeSelector := es.Spec.NodeSelector
-	v4Endpoints, v6Endpoints, epsNodes, err := c.allEndpointsFor(svc)
-	if err != nil {
-		return err
-	}
-
-	// If the service is ETP=Local we'd like to add an additional constraint to the selector
-	// that only a node with local eps can be selected. Otherwise new ingress traffic will break.
-	if len(epsNodes) != 0 && svc.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeLocal {
-		matchEpsNodes := metav1.LabelSelectorRequirement{
-			Key:      "kubernetes.io/hostname",
-			Operator: metav1.LabelSelectorOpIn,
-			Values:   epsNodes,
+	if len(svc.Status.LoadBalancer.Ingress) == 0 {
+		klog.Infof("EgressService %s/%s does not have an ingress IP")
+		if state == nil {
+			// The service object doesn't have an ingress IP, and the egress service was not configured, nothing to do.
+			return nil
 		}
-		nodeSelector.MatchExpressions = append(nodeSelector.MatchExpressions, matchEpsNodes)
+		// The egress service is configured, but the service object doesn't have an ingress IP,
+		// meaning we should clear all of its resources.
+		return c.clearServiceResourcesAndRequeue(key, state)
 	}
-	selector, err := metav1.LabelSelectorAsSelector(&nodeSelector)
+
+	v4Endpoints, v6Endpoints, err := c.allEndpointsFor(svc)
 	if err != nil {
 		return err
 	}
+
 	totalEps := len(v4Endpoints) + len(v6Endpoints)
 
-	// We don't want to select a node for a service without endpoints to not "waste" an
-	// allocation on a node.
-	if totalEps == 0 && state == nil {
-		klog.V(4).Infof("EgressService %s/%s does not have any endpoints, will not attempt configuring it", namespace, name)
-		c.unallocatedServices[key] = selector
-		return c.setEgressServiceHost(namespace, name, "")
-	}
-
 	if totalEps == 0 && state != nil {
-		klog.V(4).Infof("EgressService %s/%s does not have any endpoints, removing its existing configuration", namespace, name)
-		c.unallocatedServices[key] = selector
+		klog.V(4).Infof("EgressService %s/%s does not have any local endpoints, removing any existing configuration", namespace, name)
 		return c.clearServiceResourcesAndRequeue(key, state)
 	}
 
 	if state == nil {
 		// The service has a valid EgressService and wasn't configured before.
-		// This means we need to select a node for it that matches its selector.
-		c.unallocatedServices[key] = selector
-
-		node, err := c.selectNodeFor(selector)
-		if err != nil {
-			return err
-		}
-
-		// We found a node - update the caches with the new objects.
-		delete(c.unallocatedServices, key)
-		newState := &svcState{node: node.name, selector: selector, v4Endpoints: sets.New[string](), v6Endpoints: sets.New[string](), stale: false}
+		nodeName := es.Status.Host
+		newState := &svcState{node: nodeName, v4Endpoints: sets.New[string](), v6Endpoints: sets.New[string](), stale: false}
 		c.services[key] = newState
-		node.allocations[key] = newState
-		c.nodes[node.name] = node
+		if _, exists := c.nodes[nodeName]; !exists {
+			nodeState, err := c.nodeStateFor(nodeName)
+			if err != nil {
+				return err
+			}
+			c.nodes[nodeName] = nodeState
+		}
 		state = newState
 	}
 
-	state.selector = selector
-	node := c.nodes[state.node]
+	if state.node != es.Status.Host {
+		klog.Errorf("EgressService %s/%s is configured for %s instead of %s, removing any existing configuration", namespace, name, state.node, es.Status.Host)
+		return c.clearServiceResourcesAndRequeue(key, state)
+	}
 
-	if !state.selector.Matches(labels.Set(node.labels)) {
-		// The node no longer matches the selector.
-		// We clear its configured resources and requeue it to attempt
-		// selecting a new node for it.
+	node, ok := c.nodes[state.node]
+	if !ok || node.draining {
+		klog.Warningf("EgressService %s/%s is configured on non-existing or not ready node %s, removing", namespace, name, state.node)
 		return c.clearServiceResourcesAndRequeue(key, state)
 	}
 
@@ -724,6 +604,9 @@ func (c *Controller) syncEgressService(key string) error {
 	}
 	allOps = append(allOps, createOps...)
 
+	// update egresssvc-served-pods address set used to ensure egress service
+	// does not affect pod -> node ip traffic
+	// https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/egress-ip.md#pod-to-node-ip-traffic
 	createOps, err = c.addPodIPsToAddressSetOps(createIPAddressNetSlice(v4ToAdd, v6ToAdd))
 	if err != nil {
 		return err
@@ -751,29 +634,14 @@ func (c *Controller) syncEgressService(key string) error {
 	state.v6Endpoints.Insert(v6ToAdd...)
 	state.v6Endpoints.Delete(v6ToRemove...)
 
-	// We configured OVN - the last step is to label the node and set the status
-	// to mark it as the node holding the service.
-
-	err = c.setEgressServiceHost(namespace, name, state.node) // set the EgressService status, will also override manual changes
-	if err != nil {
-		return err
-	}
-
-	return c.labelNodeForService(namespace, name, node.name)
+	return nil
 }
 
-// Removes all of the resources that belong to the egress service.
-// This includes removing the host status value, the logical router policies,
-// the label from the node and updating the caches.
+// Removes all the logical router policies that belong to the egress service.
 // This also requeues the service after cleaning up to be sure we are not
 // missing an event after marking it as stale that should be handled.
 // This should only be called with the controller locked.
 func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcState) error {
-	namespace, name, err := cache.SplitMetaNamespaceKey(key)
-	if err != nil {
-		return err
-	}
-
 	svcState.stale = true
 
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
@@ -781,7 +649,7 @@ func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcSt
 	}
 
 	deleteOps := []libovsdb.Operation{}
-	deleteOps, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, deleteOps, ovntypes.OVNClusterRouter, p)
+	deleteOps, err := libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, deleteOps, ovntypes.OVNClusterRouter, p)
 	if err != nil {
 		return err
 	}
@@ -790,37 +658,7 @@ func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcSt
 		return fmt.Errorf("failed to clean router policies for %s, err: %v", key, err)
 	}
 
-	if err := c.setEgressServiceHost(namespace, name, ""); err != nil {
-		return err
-	}
-
-	nodeState, found := c.nodes[svcState.node]
-	if found {
-		if err := c.removeNodeServiceLabel(namespace, name, svcState.node); err != nil {
-			return fmt.Errorf("failed to remove svc node label for %s, err: %v", svcState.node, err)
-		}
-		delete(nodeState.allocations, key)
-	}
-
 	delete(c.services, key)
 	c.egressServiceQueue.Add(key)
-	return nil
-}
-
-func (c *Controller) setEgressServiceHost(namespace, name, host string) error {
-	err := c.setEgressServiceStatus(namespace, name, host)
-	if err != nil {
-		if host != "" {
-			return err
-		}
-
-		if !apierrors.IsNotFound(err) {
-			return err
-		}
-	}
-
-	// We return nil if either we got no error or the host="" and we got a "resource missing err".
-	// This makes stuff easier when cleaning the resources of the service as EgressService deleted
-	// and EgressService having an empty host means the same in that context.
 	return nil
 }

@@ -443,17 +443,55 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 // mode process.
 func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:     informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:   egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		cpipcFactory: ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
-		informers:    make(map[reflect.Type]*informer),
-		stopChan:     make(chan struct{}),
+		iFactory:             informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		cpipcFactory:         ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
+		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.EgressServiceClient, resyncInterval),
+		informers:            make(map[reflect.Type]*informer),
+		stopChan:             make(chan struct{}),
 	}
-
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
 		return nil, err
 	}
+
+	if err := egressserviceapi.AddToScheme(egressservicescheme.Scheme); err != nil {
+		return nil, err
+	}
+
+	// For Services and Endpoints, pre-populate the shared Informer with one that
+	// has a label selector excluding headless services.
+	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredServiceInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noAlternateProxySelector())
+	})
+
+	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return discoveryinformers.NewFilteredEndpointSliceInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			withServiceNameAndNoHeadlessServiceSelector())
+	})
+
 	var err error
+	// Create our informer-wrapper informer (and underlying shared informer) for types we need
+	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
+	if err != nil {
+		return nil, err
+	}
+
+	wf.informers[EndpointSliceType], err = newInformer(
+		EndpointSliceType,
+		wf.iFactory.Discovery().V1().EndpointSlices().Informer())
+	if err != nil {
+		return nil, err
+	}
+
 	wf.informers[NodeType], err = newInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer())
 	if err != nil {
 		return nil, err
@@ -470,6 +508,14 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			return nil, err
 		}
 	}
+
+	if config.OVNKubernetesFeature.EnableEgressService {
+		wf.informers[EgressServiceType], err = newInformer(EgressServiceType, wf.egressServiceFactory.K8s().V1().EgressServices().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -883,12 +929,17 @@ func (wf *WatchFactory) GetNode(name string) (*kapi.Node, error) {
 	return nodeLister.Get(name)
 }
 
-// GetNodesBySelector returns all the nodes selected by the label selector
-func (wf *WatchFactory) GetNodesBySelector(labelSelector metav1.LabelSelector) ([]*kapi.Node, error) {
+// GetNodesByLabelSelector returns all the nodes selected by the label selector
+func (wf *WatchFactory) GetNodesByLabelSelector(labelSelector metav1.LabelSelector) ([]*kapi.Node, error) {
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
 		return nil, err
 	}
+	return wf.GetNodesBySelector(selector)
+}
+
+// GetNodesBySelector returns all the nodes selected by the selector
+func (wf *WatchFactory) GetNodesBySelector(selector labels.Selector) ([]*kapi.Node, error) {
 	return wf.ListNodes(selector)
 }
 
@@ -896,6 +947,12 @@ func (wf *WatchFactory) GetNodesBySelector(labelSelector metav1.LabelSelector) (
 func (wf *WatchFactory) GetService(namespace, name string) (*kapi.Service, error) {
 	serviceLister := wf.informers[ServiceType].lister.(listers.ServiceLister)
 	return serviceLister.Services(namespace).Get(name)
+}
+
+// GetServices returns all services
+func (wf *WatchFactory) GetServices() ([]*kapi.Service, error) {
+	serviceLister := wf.informers[ServiceType].lister.(listers.ServiceLister)
+	return serviceLister.List(labels.Everything())
 }
 
 func (wf *WatchFactory) GetCloudPrivateIPConfig(name string) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {

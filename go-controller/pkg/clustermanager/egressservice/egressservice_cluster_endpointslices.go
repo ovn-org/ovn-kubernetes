@@ -76,7 +76,8 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 	c.Lock()
 	defer c.Unlock()
 	_, cached := c.services[key]
-	if !cached {
+	_, unallocated := c.unallocatedServices[key]
+	if !cached && !unallocated {
 		klog.V(5).Infof("Ignoring updating %s for endpointslice %s/%s as it is not a known egress service",
 			key, endpointSlice.Namespace, endpointSlice.Name)
 		return // we queue a service only if it's in the local caches
