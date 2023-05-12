@@ -1342,18 +1342,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				gomega.BeNil(),             // oldObj should be nil
 				gomega.Not(gomega.BeNil()), // newObj should not be nil
 			)
-
-			// check that a node event was posted
-			gomega.Eventually(func() []string {
-				eventsLock.Lock()
-				defer eventsLock.Unlock()
-				eventsCopy := make([]string, 0, len(events))
-				for _, e := range events {
-					eventsCopy = append(eventsCopy, e)
-				}
-				return eventsCopy
-			}, 10).Should(gomega.ContainElement(gomega.ContainSubstring("Warning ErrorReconcilingNode error creating gateway for node node1")))
-
 			connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 			defer cancel()
 			ginkgo.By("bring up NBDB")

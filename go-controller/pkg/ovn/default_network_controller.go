@@ -668,6 +668,10 @@ func (h *defaultNetworkControllerEventHandler) RecordErrorEvent(obj interface{},
 		pod := obj.(*kapi.Pod)
 		klog.V(5).Infof("Recording error event on pod %s/%s", pod.Namespace, pod.Name)
 		h.oc.recordPodEvent(reason, err, pod)
+	case factory.NodeType:
+		node := obj.(*kapi.Node)
+		klog.V(5).Infof("Recording error event for node %s", node.Name)
+		h.oc.recordNodeEvent(reason, err, node)
 	}
 }
 
