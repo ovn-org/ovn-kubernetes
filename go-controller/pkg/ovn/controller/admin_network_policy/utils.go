@@ -57,8 +57,8 @@ func getANPRuleACLDbIDs(name, gressPrefix, gressIndex, protocol, controller stri
 	})
 }
 
-// getACLActionForANPRule returns the corresponding OVN ACL action for a given ANP rule action
-func getACLActionForANPRule(action anpapi.AdminNetworkPolicyRuleAction) string {
+// GetACLActionForANPRule returns the corresponding OVN ACL action for a given ANP rule action
+func GetACLActionForANPRule(action anpapi.AdminNetworkPolicyRuleAction) string {
 	var ovnACLAction string
 	switch action {
 	case anpapi.AdminNetworkPolicyRuleActionAllow:
@@ -73,8 +73,8 @@ func getACLActionForANPRule(action anpapi.AdminNetworkPolicyRuleAction) string {
 	return ovnACLAction
 }
 
-// getACLActionForBANPRule returns the corresponding OVN ACL action for a given BANP rule action
-func getACLActionForBANPRule(action anpapi.BaselineAdminNetworkPolicyRuleAction) string {
+// GetACLActionForBANPRule returns the corresponding OVN ACL action for a given BANP rule action
+func GetACLActionForBANPRule(action anpapi.BaselineAdminNetworkPolicyRuleAction) string {
 	var ovnACLAction string
 	switch action {
 	case anpapi.BaselineAdminNetworkPolicyRuleActionAllow:
