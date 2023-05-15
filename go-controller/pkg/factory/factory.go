@@ -1140,7 +1140,7 @@ func noAlternateProxySelector() func(options *metav1.ListOptions) {
 func WithUpdateHandlingForObjReplace(funcs cache.ResourceEventHandler) cache.ResourceEventHandlerFuncs {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			funcs.OnAdd(obj)
+			funcs.OnAdd(obj, true)
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldObj := old.(metav1.Object)
@@ -1152,7 +1152,7 @@ func WithUpdateHandlingForObjReplace(funcs cache.ResourceEventHandler) cache.Res
 			// This occurs not so often, so log this occurance.
 			klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", newObj.GetNamespace(), newObj.GetName())
 			funcs.OnDelete(old)
-			funcs.OnAdd(new)
+			funcs.OnAdd(new, false)
 		},
 		DeleteFunc: func(obj interface{}) {
 			funcs.OnDelete(obj)
