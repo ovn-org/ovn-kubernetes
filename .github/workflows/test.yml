@@ -271,12 +271,6 @@ jobs:
       with:
         name: test-image-master
 
-    - name: Disable ufw
-      # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
-      # Not needed for KIND deployments, so just disable all the time.
-      run: |
-        sudo ufw disable
-
     - name: Load docker image
       run: |
         docker load --input ${CI_IMAGE_MASTER_TAR}
@@ -417,11 +411,6 @@ jobs:
           echo OVN_ENABLE_EX_GW_NETWORK_BRIDGE=true >> $GITHUB_ENV
         fi
 
-    - name: Disable ufw
-      # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
-      # Not needed for KIND deployments, so just disable all the time.
-      run: |
-        sudo ufw disable
 
     - name: Download test-image-pr
       uses: actions/download-artifact@v3
@@ -499,12 +488,6 @@ jobs:
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
-
-    - name: Disable ufw
-      # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
-      # Not needed for KIND deployments, so just disable all the time.
-      run: |
-        sudo ufw disable
 
     - name: Download test-image-pr
       uses: actions/download-artifact@v3
@@ -584,11 +567,6 @@ jobs:
           export GOPATH=$(go env GOPATH)
           echo "GOPATH=$GOPATH" >> $GITHUB_ENV
           echo "$GOPATH/bin" >> $GITHUB_PATH
-      - name: Disable ufw
-        # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
-        # Not needed for KIND deployments, so just disable all the time.
-        run: |
-          sudo ufw disable
       - uses: actions/download-artifact@v3
         with:
           name: test-image-pr
