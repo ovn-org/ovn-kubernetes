@@ -46,7 +46,20 @@ func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) error {
 		defer l.Unlock()
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		l.services[name] = uint16(svc.Spec.HealthCheckNodePort)
-		return l.server.SyncServices(l.services)
+		if err := l.server.SyncServices(l.services); err != nil {
+			return fmt.Errorf("unable to sync service %v; err: %v", name, err)
+		}
+		epSlices, err := l.watchFactory.GetEndpointSlices(svc.Namespace, svc.Name)
+		if err != nil {
+			return fmt.Errorf("could not fetch endpointslices "+
+				"for service %s/%s during health check update service: %v",
+				svc.Namespace, svc.Name, err)
+		}
+		namespacedName := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+		l.endpoints[namespacedName] = l.CountLocalEndpointAddresses(epSlices)
+		if err = l.server.SyncEndpoints(l.endpoints); err != nil {
+			return fmt.Errorf("unable to sync endpoint slice %v; err: %v", name, err)
+		}
 	}
 	return nil
 }
@@ -62,20 +75,6 @@ func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) error 
 		if err = l.AddService(new); err != nil {
 			errors = append(errors, err)
 		}
-		epSlices, err := l.watchFactory.GetEndpointSlices(new.Namespace, new.Name)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("could not fetch endpointslices "+
-				"for service %s/%s during health check update service: %v",
-				new.Namespace, new.Name, err))
-			return apierrors.NewAggregate(errors)
-		}
-		namespacedName := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
-		l.Lock()
-		l.endpoints[namespacedName] = l.CountLocalEndpointAddresses(epSlices)
-		if err = l.server.SyncEndpoints(l.endpoints); err != nil {
-			errors = append(errors, err)
-		}
-		l.Unlock()
 	}
 	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal &&
 		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster {
