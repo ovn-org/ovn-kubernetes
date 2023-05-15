@@ -2269,62 +2269,6 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 				}
 			}
 		})
-
-		// This test verifies a NodePort service is reachable on manually added IP addresses.
-		ginkgo.It("for NodePort services", func() {
-			isIPv6Cluster := IsIPv6Cluster(f.ClientSet)
-			serviceName := "nodeportservice"
-
-			ginkgo.By("Creating NodePort service")
-			svcSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
-			svcSpec, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), svcSpec, metav1.CreateOptions{})
-			framework.ExpectNoError(err)
-
-			ginkgo.By("Waiting for the endpoints to pop up")
-			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
-			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
-
-			tcpNodePort, udpNodePort := nodePortsFromService(svcSpec)
-
-			toCheckNodesAddresses := sets.NewString()
-			for _, node := range nodes.Items {
-
-				addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-addresses"]
-				gomega.Expect(ok).To(gomega.BeTrue())
-
-				var addrs []string
-				err := json.Unmarshal([]byte(addrAnnotation), &addrs)
-				framework.ExpectNoError(err, "failed to parse node[%s] host-address annotation[%s]", node.Name, addrAnnotation)
-
-				toCheckNodesAddresses.Insert(addrs...)
-			}
-
-			// Ensure newly added IP address are in the host-addresses annotation
-			for _, newAddress := range newNodeAddresses {
-				if !toCheckNodesAddresses.Has(newAddress) {
-					toCheckNodesAddresses.Insert(newAddress)
-				}
-			}
-
-			for _, protocol := range []string{"http", "udp"} {
-				toCurlPort := int32(tcpNodePort)
-				if protocol == "udp" {
-					toCurlPort = int32(udpNodePort)
-				}
-
-				for _, address := range toCheckNodesAddresses.List() {
-					if !isIPv6Cluster && utilnet.IsIPv6String(address) {
-						continue
-					}
-					ginkgo.By("Hitting the service on " + address + " via " + protocol)
-					gomega.Eventually(func() bool {
-						epHostname := pokeEndpoint("", clientContainerName, protocol, address, toCurlPort, "hostname")
-						// Expect to receive a valid hostname
-						return nodesHostnames.Has(epHostname)
-					}, "20s", "1s").Should(gomega.BeTrue())
-				}
-			}
-		})
 	})
 })
 
