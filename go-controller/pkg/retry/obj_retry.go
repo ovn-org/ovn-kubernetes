@@ -233,6 +233,10 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 				r.ResourceHandler.ObjType, objKey)
 			r.DeleteRetryObj(key)
 			metrics.MetricResourceRetryFailuresCount.Inc()
+			if entry.newObj != nil {
+				r.ResourceHandler.RecordErrorEvent(entry.newObj, "RetryFailed",
+					fmt.Errorf("failed to reconcile and retried %d times for object: %v", MaxFailedAttempts, entry.newObj))
+			}
 			return
 		}
 		forceRetry := false

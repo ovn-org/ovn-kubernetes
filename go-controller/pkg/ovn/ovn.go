@@ -109,6 +109,16 @@ func (oc *DefaultNetworkController) recordPodEvent(reason string, addErr error, 
 	}
 }
 
+func (oc *DefaultNetworkController) recordNodeEvent(reason string, addErr error, node *kapi.Node) {
+	nodeRef, err := ref.GetReference(scheme.Scheme, node)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to node %s to post an event: '%v'", node.Name, err)
+	} else {
+		klog.V(5).Infof("Posting a %s event for node %s", kapi.EventTypeWarning, node.Name)
+		oc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, reason, addErr.Error())
+	}
+}
+
 func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 	return oldPod.Annotations[util.RoutingNamespaceAnnotation] != newPod.Annotations[util.RoutingNamespaceAnnotation] ||
 		oldPod.Annotations[util.RoutingNetworkAnnotation] != newPod.Annotations[util.RoutingNetworkAnnotation] ||

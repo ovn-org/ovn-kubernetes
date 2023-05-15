@@ -758,9 +758,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			if nSyncs.syncZoneIC {
 				oc.syncZoneICFailed.Store(node.Name, true)
 			}
-			err = fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
-			oc.recordNodeErrorEvent(node, err)
-			return err
+			return fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
 		}
 		oc.addNodeFailed.Delete(node.Name)
 	}
@@ -856,13 +854,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			}
 		}
 	}
-
-	err = kerrors.NewAggregate(errs)
-	if err != nil {
-		oc.recordNodeErrorEvent(node, err)
-	}
-
-	return err
+	return kerrors.NewAggregate(errs)
 }
 
 func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIC bool) error {
@@ -897,7 +889,6 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 			}
 		}
 	}
-
 	return err
 }
 
