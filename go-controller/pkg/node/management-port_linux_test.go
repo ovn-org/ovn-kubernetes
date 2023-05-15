@@ -266,7 +266,6 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}, existingNode.Name)
 	waiter := newStartupWaiter()
-	mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs)
 	wg := &sync.WaitGroup{}
 	rm := newRouteManager(wg, true, 10*time.Second)
 	stopCh := make(chan struct{})
@@ -283,6 +282,11 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	})
 
 	err = testNS.Do(func(ns.NetNS) error {
+		defer GinkgoRecover()
+
+		netdevName, rep := "", ""
+
+		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
 		_, err = mgmtPorts[0].Create(rm, nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
@@ -367,7 +371,10 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
-		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs)
+
+		netdevName, rep := "pf0vf0", "pf0vf0"
+
+		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
 		_, err = mgmtPorts[0].Create(rm, nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		// make sure interface was renamed and mtu was set
@@ -454,8 +461,9 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs)
+		netdevName, rep := "pf0vf0", ""
 
+		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
 		_, err = mgmtPorts[0].Create(rm, nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
@@ -916,7 +924,6 @@ var _ = Describe("Management Port Operations", func() {
 					"--cluster-subnets=" + v4clusterCIDR,
 					"--k8s-service-cidr=" + v4serviceCIDR,
 					"--ovnkube-node-mode=" + types.NodeModeDPU,
-					"--ovnkube-node-mgmt-port-netdev=" + mgmtPortNetdev,
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})

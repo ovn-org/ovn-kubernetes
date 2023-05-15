@@ -2454,11 +2454,14 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 			OvnKubeNode.MgmtPortNetdev, OvnKubeNode.MgmtPortDPResourceName)
 	}
 
-	// when DPU is used, management port is backed by a VF. get management port VF information
-	if OvnKubeNode.Mode == types.NodeModeDPU || OvnKubeNode.Mode == types.NodeModeDPUHost {
-		if OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
-			return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided")
-		}
+	// when DPU is used, management port is always backed by a representor. On the
+	// host side, it needs to be provided through --ovnkube-node-mgmt-port-netdev.
+	// On the DPU, it is derrived from the annotation exposed on the host side.
+	if OvnKubeNode.Mode == types.NodeModeDPU && !(OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "") {
+		return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must not be provided")
+	}
+	if OvnKubeNode.Mode == types.NodeModeDPUHost && OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
+		return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided")
 	}
 	return nil
 }

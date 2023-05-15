@@ -1691,29 +1691,25 @@ foo=bar
 			}
 			file := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                   types.NodeModeDPU,
-					MgmtPortNetdev:         "enp1s0f0v0",
-					MgmtPortDPResourceName: "openshift.io/mgmtvf",
+					Mode: types.NodeModeDPU,
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
-			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
-			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal("openshift.io/mgmtvf"))
 		})
 
 		It("Overrides value from CLI", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                   types.NodeModeDPU,
+					Mode:                   types.NodeModeDPUHost,
 					MgmtPortNetdev:         "enp1s0f0v0",
 					MgmtPortDPResourceName: "openshift.io/mgmtvf",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPUHost))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
 			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal("openshift.io/mgmtvf"))
 		})
@@ -1742,15 +1738,16 @@ foo=bar
 				"hybrid overlay is not supported with ovnkube-node mode"))
 		})
 
-		It("Fails if management port is not provided and ovnkube node mode is dpu", func() {
+		It("Fails if management port is provided and ovnkube node mode is dpu", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeDPU,
+					Mode:           types.NodeModeDPU,
+					MgmtPortNetdev: "enp1s0f0v0",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided"))
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must not be provided"))
 		})
 
 		It("Fails if management port is not provided and ovnkube node mode is dpu-host", func() {

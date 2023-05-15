@@ -456,28 +456,123 @@ func handleNetdevResources(resourceName string) (string, error) {
 	return netdevice, nil
 }
 
-func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter *startupWaiter,
-	subnets []*net.IPNet, routeManager *routeManager) ([]managementPortEntry, *managementPortConfig, error) {
-	// If netdevice name is not provided in the full mode then management port backed by OVS internal port.
-	// If it is provided then it is backed by VF or SF and need to determine its representor name to plug
-	// into OVS integrational bridge
-	if config.OvnKubeNode.Mode == types.NodeModeFull && config.OvnKubeNode.MgmtPortNetdev != "" {
-		deviceID, err := util.GetDeviceIDFromNetdevice(config.OvnKubeNode.MgmtPortNetdev)
-		if err != nil {
-			// Device might had been already renamed to types.K8sMgmtIntfName
-			config.OvnKubeNode.MgmtPortNetdev = types.K8sMgmtIntfName
-			if deviceID, err = util.GetDeviceIDFromNetdevice(config.OvnKubeNode.MgmtPortNetdev); err != nil {
-				return nil, nil, fmt.Errorf("failed to get device id for %s or %s: %v",
-					config.OvnKubeNode.MgmtPortNetdev, types.K8sMgmtIntfName, err)
-			}
+func exportManagementPortAnnotation(netdevName string, nodeAnnotator kube.Annotator) error {
+	klog.Infof("Exporting management port annotation for netdev '%v'", netdevName)
+	deviceID, err := util.GetDeviceIDFromNetdevice(netdevName)
+	if err != nil {
+		return err
+	}
+	vfindex, err := util.GetSriovnetOps().GetVfIndexByPciAddress(deviceID)
+	if err != nil {
+		return err
+	}
+	pfindex, err := util.GetSriovnetOps().GetPfIndexByVfPciAddress(deviceID)
+	if err != nil {
+		return err
+	}
+
+	return util.SetNodeManagementPortAnnotation(nodeAnnotator, pfindex, vfindex)
+}
+
+func importManagementPortAnnotation(node *kapi.Node) (string, error) {
+	klog.Infof("Import management port annotation on node '%v'", node.Name)
+	pfId, vfId, err := util.ParseNodeManagementPortAnnotation(node)
+
+	if err != nil {
+		return "", err
+	}
+	klog.Infof("Imported pfId '%v' and FuncId '%v' for node '%v'", pfId, vfId, node.Name)
+
+	return util.GetSriovnetOps().GetVfRepresentorDPU(fmt.Sprintf("%d", pfId), fmt.Sprintf("%d", vfId))
+}
+
+// Take care of alternative names for the netdevName by making sure we
+// use the link attribute name as well as handle the case when netdevName
+// was renamed to types.K8sMgmtIntfName
+func getManagementPortNetDev(netdevName string) (string, error) {
+	link, err := util.GetNetLinkOps().LinkByName(netdevName)
+	if err != nil {
+		if !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return "", fmt.Errorf("failed to lookup %s link: %v", netdevName, err)
 		}
-		rep, err := util.GetFunctionRepresentorName(deviceID)
+		// this may not the first time invoked on the node after reboot
+		// netdev may have already been renamed to ovn-k8s-mp0.
+		link, err = util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
+		if err != nil {
+			return "", fmt.Errorf("failed to get link device for %s. %v", netdevName, err)
+		}
+	}
+
+	if link.Attrs().Name != netdevName {
+		klog.Infof("'%v' != '%v' (link.Attrs().Name != netdevName)", link.Attrs().Name, netdevName)
+	}
+	return link.Attrs().Name, err
+}
+
+func getMgmtPortAndRepNameModeFull() (string, string, error) {
+	if config.OvnKubeNode.MgmtPortNetdev == "" {
+		return "", "", nil
+	}
+	netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
+	if err != nil {
+		return "", "", err
+	}
+	deviceID, err := util.GetDeviceIDFromNetdevice(netdevName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get device id for %s: %v", netdevName, err)
+	}
+	rep, err := util.GetFunctionRepresentorName(deviceID)
+	if err != nil {
+		return "", "", err
+	}
+	return netdevName, rep, err
+}
+
+// In DPU mode, read the annotation from the host side which should have been
+// exported by ovn-k running in DPU host mode.
+func getMgmtPortAndRepNameModeDPU(node *kapi.Node) (string, string, error) {
+	rep, err := importManagementPortAnnotation(node)
+	if err != nil {
+		return "", "", err
+	}
+	return "", rep, err
+}
+
+func getMgmtPortAndRepNameModeDPUHost() (string, string, error) {
+	netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
+	if err != nil {
+		return "", "", err
+	}
+	return netdevName, "", nil
+}
+
+func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
+	switch config.OvnKubeNode.Mode {
+	case types.NodeModeFull:
+		return getMgmtPortAndRepNameModeFull()
+	case types.NodeModeDPU:
+		return getMgmtPortAndRepNameModeDPU(node)
+	case types.NodeModeDPUHost:
+		return getMgmtPortAndRepNameModeDPUHost()
+	default:
+		return "", "", fmt.Errorf("unexpected config.OvnKubeNode.Mode '%v'", config.OvnKubeNode.Mode)
+	}
+}
+
+func createNodeManagementPorts(node *kapi.Node, nodeAnnotator kube.Annotator, waiter *startupWaiter,
+	subnets []*net.IPNet, routeManager *routeManager) ([]managementPortEntry, *managementPortConfig, error) {
+	netdevName, rep, err := getMgmtPortAndRepName(node)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		err := exportManagementPortAnnotation(netdevName, nodeAnnotator)
 		if err != nil {
 			return nil, nil, err
 		}
-		config.OvnKubeNode.MgmtPortRepresentor = rep
 	}
-	ports := NewManagementPorts(name, subnets)
+	ports := NewManagementPorts(node.Name, subnets, netdevName, rep)
 
 	var mgmtPortConfig *managementPortConfig
 	mgmtPorts := make([]managementPortEntry, 0)
@@ -630,7 +725,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// Setup management ports
-	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(nc.name, nodeAnnotator, waiter, subnets, nc.routeManager)
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nodeAnnotator, waiter, subnets, nc.routeManager)
 	if err != nil {
 		return err
 	}
