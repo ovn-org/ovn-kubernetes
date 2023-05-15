@@ -996,7 +996,7 @@ ovn-master() {
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network"
+	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
   echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
 
@@ -1195,7 +1195,7 @@ ovn-network-controller-manager() {
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network"
+	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
   echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
 
@@ -1298,7 +1298,7 @@ ovn-cluster-manager() {
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network"
+	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
   echo "multi_network_enabled_flag: ${multi_network_enabled_flag}"
 
@@ -1458,7 +1458,7 @@ ovn-node() {
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network"
+	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
 
   netflow_targets=

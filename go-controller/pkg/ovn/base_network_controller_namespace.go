@@ -64,9 +64,13 @@ func getNamespaceAddrSetDbIDs(namespaceName, controller string) *libovsdbops.DbO
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (bnc *BaseNetworkController) WatchNamespaces() error {
-	// if this network does not have ipam, network policy is not supported, and we don't need to handle namespace events.
-	if bnc.IsSecondary() && !bnc.doesNetworkRequireIPAM() {
-		return nil
+	if bnc.IsSecondary() {
+		// For secondary networks, we don't have to watch namespace events if
+		// multi-network policy support is not enabled. We don't support
+		// multi-network policy for IPAM-less secondary networks either.
+		if !util.IsMultiNetworkPoliciesSupportEnabled() || !bnc.doesNetworkRequireIPAM() {
+			return nil
+		}
 	}
 
 	if bnc.namespaceHandler != nil {
