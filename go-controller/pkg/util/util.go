@@ -21,6 +21,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -109,6 +110,33 @@ func GetNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 		}
 	}
 	return v4Addr, v6Addr
+}
+
+// GetNodeAddresses returns all of the node's IPv4 and/or IPv6 annotated
+// addresses as requested. Note that nodes not annotated will be ignored.
+func GetNodeAddresses(ipv4, ipv6 bool, nodes ...*v1.Node) (ipsv4 []net.IP, ipsv6 []net.IP, err error) {
+	allips := sets.Set[string]{}
+	for _, node := range nodes {
+		ips, err := ParseNodeHostAddresses(node)
+		if IsAnnotationNotSetError(err) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		allips = allips.Insert(ips.UnsortedList()...)
+	}
+
+	for _, ip := range allips.UnsortedList() {
+		ip := utilnet.ParseIPSloppy(ip)
+		if ipv4 && utilnet.IsIPv4(ip) {
+			ipsv4 = append(ipsv4, ip)
+		} else if ipv6 && utilnet.IsIPv6(ip) {
+			ipsv6 = append(ipsv6, ip)
+		}
+	}
+
+	return
 }
 
 // GetNodeChassisID returns the machine's OVN chassis ID

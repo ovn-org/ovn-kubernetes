@@ -104,9 +104,11 @@ func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
 	oldNodeReady := nodeIsReady(oldNode)
 	newNodeReady := nodeIsReady(newNode)
 
-	// We only care about node updates that relate to readiness or label changes
+	// We only care about node updates that relate to readiness, labels or
+	// addresses
 	if labels.Equals(oldNodeLabels, newNodeLabels) &&
-		oldNodeReady == newNodeReady {
+		oldNodeReady == newNodeReady &&
+		!util.NodeHostAddressesAnnotationChanged(oldNode, newNode) {
 		return
 	}
 
@@ -177,6 +179,13 @@ func (c *Controller) syncNode(key string) error {
 		return err
 	}
 
+	// We ensure node no re-route policies contemplating possible node IP
+	// address changes regardless of allocated services.
+	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, c.controllerName, c.nodeLister)
+	if err != nil {
+		return err
+	}
+
 	n, err := c.nodeLister.Get(nodeName)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
@@ -198,21 +207,10 @@ func (c *Controller) syncNode(key string) error {
 			}
 			delete(c.nodes, nodeName)
 			state.healthClient.Disconnect()
-		} else {
-			// we don't have a node at this point (node deleted?) and we don't have its cache
-			// entry (state==nil) as well. Maybe state was deleted when node became nodeReady or unreachable
-			// nothing to sync here
-			return nil
 		}
 
-		return c.deleteNoRerouteNodePolicies(c.addressSetFactory, nodeName, state.v4InternalNodeIP,
-			state.v6InternalNodeIP, c.controllerName)
-	}
-
-	// We create the per-node reroute policies as long as it has a resource (n != nil at this point),
-	// regardless if it was allocated services or not.
-	if err := c.createNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, n, c.controllerName); err != nil {
-		return err
+		// nothing to sync here
+		return nil
 	}
 
 	nodeReady := nodeIsReady(n)
@@ -318,9 +316,7 @@ func (c *Controller) nodeStateFor(name string) (*nodeState, error) {
 		v6IP = ip
 	}
 
-	v4NodeAddr, v6NodeAddr := util.GetNodeInternalAddrs(node)
-
-	return &nodeState{name: name, mgmtIPs: mgmtIPs, v4MgmtIP: v4IP, v6MgmtIP: v6IP, v4InternalNodeIP: v4NodeAddr, v6InternalNodeIP: v6NodeAddr,
+	return &nodeState{name: name, mgmtIPs: mgmtIPs, v4MgmtIP: v4IP, v6MgmtIP: v6IP,
 		healthClient: healthcheck.NewEgressIPHealthClient(name), allocations: map[string]*svcState{}, labels: node.Labels,
 		reachable: true, draining: false}, nil
 }

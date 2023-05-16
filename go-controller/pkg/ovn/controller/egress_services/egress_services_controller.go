@@ -47,10 +47,8 @@ const (
 
 type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 	controllerName string) error
-type CreateNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	node *corev1.Node, controllerName string) error
-type DeleteNoRerouteNodePoliciesFunc func(addressSetFactory addressset.AddressSetFactory, nodeName string,
-	v4NodeAddr, v6NodeAddr net.IP, controllerName string) error
+type EnsureNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
+	controllerName string, nodeLister corelisters.NodeLister) error
 type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(libovsdbclient.Client, string) error
 
 type Controller struct {
@@ -61,8 +59,7 @@ type Controller struct {
 	sync.Mutex
 
 	initClusterEgressPolicies                InitClusterEgressPoliciesFunc
-	createNoRerouteNodePolicies              CreateNoRerouteNodePoliciesFunc
-	deleteNoRerouteNodePolicies              DeleteNoRerouteNodePoliciesFunc
+	ensureNoRerouteNodePolicies              EnsureNoRerouteNodePoliciesFunc
 	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc
 	IsReachable                              func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool // TODO: make a universal cache instead
 	setEgressServiceStatus                   func(ns, name, host string) error
@@ -104,17 +101,15 @@ type svcState struct {
 }
 
 type nodeState struct {
-	name             string
-	labels           map[string]string
-	mgmtIPs          []net.IP
-	v4MgmtIP         net.IP
-	v6MgmtIP         net.IP
-	v4InternalNodeIP net.IP
-	v6InternalNodeIP net.IP
-	healthClient     healthcheck.EgressIPHealthClient
-	allocations      map[string]*svcState // svc key -> state
-	reachable        bool
-	draining         bool
+	name         string
+	labels       map[string]string
+	mgmtIPs      []net.IP
+	v4MgmtIP     net.IP
+	v6MgmtIP     net.IP
+	healthClient healthcheck.EgressIPHealthClient
+	allocations  map[string]*svcState // svc key -> state
+	reachable    bool
+	draining     bool
 }
 
 func NewController(
@@ -123,8 +118,7 @@ func NewController(
 	nbClient libovsdbclient.Client,
 	addressSetFactory addressset.AddressSetFactory,
 	initClusterEgressPolicies InitClusterEgressPoliciesFunc,
-	createNoRerouteNodePolicies CreateNoRerouteNodePoliciesFunc,
-	deleteNoRerouteNodePolicies DeleteNoRerouteNodePoliciesFunc,
+	ensureNoRerouteNodePolicies EnsureNoRerouteNodePoliciesFunc,
 	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc,
 	setEgressServiceStatus func(ns, name, host string) error,
 	isReachable func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool,
@@ -141,8 +135,7 @@ func NewController(
 		nbClient:                                 nbClient,
 		addressSetFactory:                        addressSetFactory,
 		initClusterEgressPolicies:                initClusterEgressPolicies,
-		createNoRerouteNodePolicies:              createNoRerouteNodePolicies,
-		deleteNoRerouteNodePolicies:              deleteNoRerouteNodePolicies,
+		ensureNoRerouteNodePolicies:              ensureNoRerouteNodePolicies,
 		deleteLegacyDefaultNoRerouteNodePolicies: deleteLegacyDefaultNoRerouteNodePolicies,
 		IsReachable:                              isReachable,
 		setEgressServiceStatus:                   setEgressServiceStatus,

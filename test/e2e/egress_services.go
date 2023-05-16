@@ -249,7 +249,24 @@ metadata:
 					break
 				}
 			}
-			ginkgo.By("Creating host-networked pod, on non-egress node to act as \"another node\"")
+			ginkgo.By("By setting a secondary IP on non-egress node acting as \"another node\"")
+			var otherDstIP string
+			if protocol == v1.IPv6Protocol {
+				otherDstIP = "fc00:f853:ccd:e793:ffff::1"
+			} else {
+				otherDstIP = "172.18.1.1"
+			}
+			_, err = runCommand(containerRuntime, "exec", dstNode.Name, "ip", "addr", "add", otherDstIP, "dev", "breth0")
+			if err != nil {
+				framework.Failf("failed to add address to node %s: %v", dstNode.Name, err)
+			}
+			defer func() {
+				_, err = runCommand(containerRuntime, "exec", dstNode.Name, "ip", "addr", "delete", otherDstIP, "dev", "breth0")
+				if err != nil {
+					framework.Failf("failed to remove address from node %s: %v", dstNode.Name, err)
+				}
+			}()
+			ginkgo.By("Creating host-networked pod on non-egress node acting as \"another node\"")
 			_, err = createPod(f, hostNetPod, dstNode.Name, f.Namespace.Name, []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", podHTTPPort)}, map[string]string{}, func(p *v1.Pod) {
 				p.Spec.HostNetwork = true
 			})
@@ -275,7 +292,10 @@ metadata:
 				}
 				gomega.Consistently(func() error {
 					return curlAgnHostClientIPFromPod(f.Namespace.Name, pod, expectedsrcIP, dstIP, podHTTPPort)
-				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach other node with node's ip")
+				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach other node with node's primary ip")
+				gomega.Consistently(func() error {
+					return curlAgnHostClientIPFromPod(f.Namespace.Name, pod, expectedsrcIP, otherDstIP, podHTTPPort)
+				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach other node with node's secondary ip")
 			}
 		},
 		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol),
