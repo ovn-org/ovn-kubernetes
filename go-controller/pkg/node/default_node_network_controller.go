@@ -651,7 +651,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// Make sure that the node zone matches with the Southbound db zone.
 	// Wait for 300s before giving up
 	var sbZone string
-	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+	err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		sbZone, err = getOVNSBZone()
 		if err != nil {
 			return false, fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
@@ -681,7 +681,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
-	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+	err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		if node, err = nc.Kube.GetNode(nc.name); err != nil {
 			klog.Infof("Waiting to retrieve node %s: %v", nc.name, err)
 			return false, nil

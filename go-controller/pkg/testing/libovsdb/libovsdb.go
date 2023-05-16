@@ -1,6 +1,7 @@
 package libovsdb
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -342,7 +343,7 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 		os.RemoveAll(sockPath)
 	}()
 
-	err = wait.Poll(100*time.Millisecond, 500*time.Millisecond, func() (bool, error) { return s.Ready(), nil })
+	err = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 500*time.Millisecond, true, func(ctx context.Context) (bool, error) { return s.Ready(), nil })
 	if err != nil {
 		s.Close()
 		return nil, err

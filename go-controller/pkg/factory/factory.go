@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync/atomic"
@@ -741,7 +742,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		// Process existing items as a set so the caller can clean up
 		// after a restart or whatever. We will wrap it with retries to ensure it succeeds.
 		// Being so, processExisting is expected to be idem-potent!
-		err := utilwait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+		err := utilwait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 			if err := processExisting(items); err != nil {
 				klog.Errorf("Failed (will retry) in processExisting %v: %v", items, err)
 				return false, nil

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net"
@@ -323,7 +324,7 @@ func getLocalNodeSubnet(nodeName string) (*net.IPNet, error) {
 	var err error
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
-	if err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+	if err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config:subnet"); err != nil {
 			return false, nil
 		}

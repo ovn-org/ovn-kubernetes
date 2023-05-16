@@ -319,7 +319,7 @@ func (bnnc *BaseNodeNetworkController) delRepPort(pod *kapi.Pod, dpuCD *util.DPU
 	}
 
 	// remove from br-int
-	return wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		_, _, err := util.RunOVSVsctl("--if-exists", "del-port", "br-int", vfRepName)
 		if err != nil {
 			return false, nil
