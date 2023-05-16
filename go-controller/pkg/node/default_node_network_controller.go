@@ -23,7 +23,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/ip"
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	config "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -1400,10 +1400,10 @@ func upgradeServiceRoute(routeManager *routeManager, bridgeName string) error {
 func DummyNextHopIPs() []net.IP {
 	var nextHops []net.IP
 	if config.IPv4Mode {
-		nextHops = append(nextHops, net.ParseIP(types.V4DummyNextHopMasqueradeIP))
+		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP)
 	}
 	if config.IPv6Mode {
-		nextHops = append(nextHops, net.ParseIP(types.V6DummyNextHopMasqueradeIP))
+		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP)
 	}
 	return nextHops
 }

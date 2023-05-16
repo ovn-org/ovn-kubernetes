@@ -210,6 +210,10 @@ ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS:-}
 ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET:-}
 # OVN_V6_JOIN_SUBNET - v6 join subnet
 ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
+# OVN_V4_MASQUERADE_SUBNET - v4 masquerade subnet
+ovn_v4_masquerade_subnet=${OVN_V4_MASQUERADE_SUBNET:-}
+# OVN_V6_MASQUERADE_SUBNET - v6 masquerade subnet
+ovn_v6_masquerade_subnet=${OVN_V6_MASQUERADE_SUBNET:-}
 #OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 #OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
@@ -1049,6 +1053,16 @@ ovn-master() {
       ovn_v6_join_subnet_opt="--gateway-v6-join-subnet=${ovn_v6_join_subnet}"
   fi
 
+  ovn_v4_masquerade_subnet_opt=
+  if [[ -n ${ovn_v4_masquerade_subnet} ]]; then 
+      ovn_v4_masquerade_subnet_opt="--gateway-v4-masquerade-subnet=${ovn_v4_masquerade_subnet}"
+  fi
+
+  ovn_v6_masquerade_subnet_opt=
+  if [[ -n ${ovn_v6_masquerade_subnet} ]]; then 
+      ovn_v6_masquerade_subnet_opt="--gateway-v6-masquerade-subnet=${ovn_v6_masquerade_subnet}"
+  fi
+
   local ovn_master_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     ovn_master_ssl_opts="
@@ -1169,6 +1183,8 @@ ovn-master() {
     ${empty_lb_events_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
+    ${ovn_v4_masquerade_subnet_opt} \
+    ${ovn_v6_masquerade_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${libovsdb_client_logfile_flag} \
@@ -1254,6 +1270,18 @@ ovnkube-controller() {
       ovn_v6_join_subnet_opt="--gateway-v6-join-subnet=${ovn_v6_join_subnet}"
   fi
   echo "ovn_v6_join_subnet_opt=${ovn_v6_join_subnet_opt}"
+
+  ovn_v4_masquerade_subnet_opt=
+  if [[ -n ${ovn_v4_masquerade_subnet} ]]; then 
+      ovn_v4_masquerade_subnet_opt="--gateway-v4-masquerade-subnet=${ovn_v4_masquerade_subnet}"
+  fi
+  echo "ovn_v4_masquerade_subnet_opt=${ovn_v4_masquerade_subnet_opt}"
+
+  ovn_v6_masquerade_subnet_opt=
+  if [[ -n ${ovn_v6_masquerade_subnet} ]]; then 
+      ovn_v6_masquerade_subnet_opt="--gateway-v6-masquerade-subnet=${ovn_v6_masquerade_subnet}"
+  fi
+  echo "ovn_v6_masquerade_subnet_opt=${ovn_v6_masquerade_subnet_opt}"
 
   local ovn_master_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
@@ -1379,6 +1407,8 @@ ovnkube-controller() {
     ${empty_lb_events_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
+    ${ovn_v4_masquerade_subnet_opt} \
+    ${ovn_v6_masquerade_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-controller.log \
     ${libovsdb_client_logfile_flag} \
@@ -1449,6 +1479,18 @@ ovn-cluster-manager() {
   fi
   echo "ovn_v6_join_subnet_opt: ${ovn_v6_join_subnet_opt}"
 
+   ovn_v4_masquerade_subnet_opt=
+  if [[ -n ${ovn_v4_masquerade_subnet} ]]; then 
+      ovn_v4_masquerade_subnet_opt="--gateway-v4-masquerade-subnet=${ovn_v4_masquerade_subnet}"
+  fi
+  echo "ovn_v4_masquerade_subnet_opt=${ovn_v4_masquerade_subnet_opt}"
+
+  ovn_v6_masquerade_subnet_opt=
+  if [[ -n ${ovn_v6_masquerade_subnet} ]]; then 
+      ovn_v6_masquerade_subnet_opt="--gateway-v6-masquerade-subnet=${ovn_v6_masquerade_subnet}"
+  fi
+  echo "ovn_v6_masquerade_subnet_opt=${ovn_v6_masquerade_subnet_opt}"
+
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
@@ -1496,6 +1538,8 @@ ovn-cluster-manager() {
     ${hybrid_overlay_flags} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
+    ${ovn_v4_masquerade_subnet_opt} \
+    ${ovn_v6_masquerade_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-cluster-manager.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-cluster-manager.log \
     ${ovnkube_metrics_tls_opts} \

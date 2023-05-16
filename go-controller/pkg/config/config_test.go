@@ -203,6 +203,8 @@ vlan-id=10
 nodeport=false
 v4-join-subnet=100.65.0.0/16
 v6-join-subnet=fd90::/64
+v4-masquerade-subnet=169.254.169.0/29
+v6-masquerade-subnet=fd69::/125
 router-subnet=10.50.0.0/16
 single-node=false
 disable-forwarding=true
@@ -633,6 +635,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.NodeportEnable).To(gomega.BeFalse())
 			gomega.Expect(Gateway.V4JoinSubnet).To(gomega.Equal("100.65.0.0/16"))
 			gomega.Expect(Gateway.V6JoinSubnet).To(gomega.Equal("fd90::/64"))
+			gomega.Expect(Gateway.V4MasqueradeSubnet).To(gomega.Equal("169.254.169.0/29"))
+			gomega.Expect(Gateway.V6MasqueradeSubnet).To(gomega.Equal("fd69::/125"))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.50.0.0/16"))
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeTrue())
@@ -725,6 +729,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.NodeportEnable).To(gomega.BeTrue())
 			gomega.Expect(Gateway.V4JoinSubnet).To(gomega.Equal("100.63.0.0/16"))
 			gomega.Expect(Gateway.V6JoinSubnet).To(gomega.Equal("fd99::/48"))
+			gomega.Expect(Gateway.V4MasqueradeSubnet).To(gomega.Equal("169.253.169.0/29"))
+			gomega.Expect(Gateway.V6MasqueradeSubnet).To(gomega.Equal("fd68::/125"))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.55.0.0/16"))
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeTrue())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeTrue())
@@ -781,6 +787,8 @@ var _ = Describe("Config Operations", func() {
 			"-nodeport",
 			"-gateway-v4-join-subnet=100.63.0.0/16",
 			"-gateway-v6-join-subnet=fd99::/48",
+			"-gateway-v4-masquerade-subnet=169.253.169.0/29",
+			"-gateway-v6-masquerade-subnet=fd68::/125",
 			"-gateway-router-subnet=10.55.0.0/16",
 			"-single-node",
 			"-disable-forwarding",
@@ -1081,6 +1089,51 @@ enable-pprof=true
 		}
 		err := app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+	It("returns an error when the v4 masquerade subnet specified is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).To(gomega.MatchError("invalid gateway v4 masquerade subnet specified, subnet: foobar: error: invalid CIDR address: foobar"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-v4-masquerade-subnet=foobar",
+		}
+		err := app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+	It("returns an error when the v6 masquerade subnet specified is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).To(gomega.MatchError("invalid gateway v6 masquerade subnet specified, subnet: 192.168.0.0/16: error: <nil>"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-v6-masquerade-subnet=192.168.0.0/16",
+		}
+		err := app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+	It("successfully overrides the default masquerade subnets", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-v4-masquerade-subnet=169.254.168.0/29",
+			"-gateway-v6-masquerade-subnet=fd68::/125",
+		}
+		err := app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(Gateway.V4MasqueradeSubnet).To(gomega.Equal("169.254.168.0/29"))
+		gomega.Expect(Gateway.V6MasqueradeSubnet).To(gomega.Equal("fd68::/125"))
+		gomega.Expect(Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String()).To(gomega.Equal("169.254.168.1"))
+		gomega.Expect(Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String()).To(gomega.Equal("fd68::1"))
+
 	})
 	It("overrides config file and defaults with CLI options (multi-master)", func() {
 		kubeconfigFile, _, err := createTempFile("kubeconfig")
