@@ -98,7 +98,7 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *kapi.Pod) error {
 	return nil
 }
 
-func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, useOVSExternalIDs bool) (*Response, error) {
+func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Response, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -137,7 +137,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, useOVS
 		return nil, err
 	}
 
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, podNADAnnotation, useOVSExternalIDs, pr.PodUID, netdevName,
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, podNADAnnotation, pr.PodUID, netdevName,
 		pr.nadName, pr.netName, pr.CNIConf.MTU)
 	if err != nil {
 		return nil, err
@@ -247,7 +247,7 @@ func (pr *PodRequest) cmdCheck() error {
 // Argument '*PodRequest' encapsulates all the necessary information
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
-func HandlePodRequest(request *PodRequest, clientset *ClientSet, useOVSExternalIDs bool, kubeAuth *KubeAPIAuth) ([]byte, error) {
+func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth) ([]byte, error) {
 	var result, resultForLogging []byte
 	var response *Response
 	var err, err1 error
@@ -255,7 +255,7 @@ func HandlePodRequest(request *PodRequest, clientset *ClientSet, useOVSExternalI
 	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
 	switch request.Command {
 	case CNIAdd:
-		response, err = request.cmdAdd(kubeAuth, clientset, useOVSExternalIDs)
+		response, err = request.cmdAdd(kubeAuth, clientset)
 	case CNIDel:
 		response, err = request.cmdDel(clientset)
 	case CNICheck:

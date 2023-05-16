@@ -453,7 +453,6 @@ type OvnKubeNodeConfig struct {
 	DPResourceDeviceIdsMap map[string][]string
 	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
 	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
-	DisableOVNIfaceIdVer   bool   `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -522,6 +521,8 @@ var (
 	initGateways bool
 	// legacy gateway-local CLI option
 	gatewayLocal bool
+	// legacy disable-ovn-iface-id-ver CLI option
+	disableOVNIfaceIDVer bool
 )
 
 func init() {
@@ -1379,11 +1380,9 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Destination: &cliConfig.OvnKubeNode.MgmtPortDPResourceName,
 	},
 	&cli.BoolFlag{
-		Name: "disable-ovn-iface-id-ver",
-		Usage: "if iface-id-ver option is not enabled in ovn, set this flag to True " +
-			"(depends on ovn version, minimal required is 21.09)",
-		Value:       OvnKubeNode.DisableOVNIfaceIdVer,
-		Destination: &cliConfig.OvnKubeNode.DisableOVNIfaceIdVer,
+		Name:        "disable-ovn-iface-id-ver",
+		Usage:       "Deprecated; iface-id-ver is always enabled",
+		Destination: &disableOVNIfaceIDVer,
 	},
 }
 

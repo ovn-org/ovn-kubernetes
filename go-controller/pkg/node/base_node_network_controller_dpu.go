@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -44,11 +43,11 @@ func (bnnc *BaseNodeNetworkController) podReadyToAddDPU(pod *kapi.Pod, nadName s
 	return dpuCD
 }
 
-func (bnnc *BaseNodeNetworkController) addDPUPodForNAD(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, isOvnUpEnabled bool,
+func (bnnc *BaseNodeNetworkController) addDPUPodForNAD(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails,
 	netName, nadName string, getter cni.PodInfoGetter) error {
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
 	klog.Infof("Adding %s on DPU", podDesc)
-	podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, nil, isOvnUpEnabled,
+	podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, nil,
 		string(pod.UID), "", nadName, netName, config.Default.MTU)
 	if err != nil {
 		return fmt.Errorf("failed to get pod interface information of %s: %v. retrying", podDesc, err)
@@ -134,11 +133,10 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 				nadToDPUCDMap = map[string]*util.DPUConnectionDetails{types.DefaultNetworkName: nil}
 			}
 
-			isOvnUpEnabled := atomic.LoadInt32(&bnnc.atomicOvnUpEnabled) > 0
 			for nadName := range nadToDPUCDMap {
 				dpuCD := bnnc.podReadyToAddDPU(pod, nadName)
 				if dpuCD != nil {
-					err := bnnc.addDPUPodForNAD(pod, dpuCD, isOvnUpEnabled, netName, nadName, clientSet)
+					err := bnnc.addDPUPodForNAD(pod, dpuCD, netName, nadName, clientSet)
 					if err != nil {
 						klog.Errorf(err.Error())
 					} else {
@@ -177,11 +175,10 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 					nadToDPUCDMap[nadName] = nil
 				}
 				if newDPUCD != nil {
-					isOvnUpEnabled := atomic.LoadInt32(&bnnc.atomicOvnUpEnabled) > 0
 					klog.Infof("Adding VF during update because either during Pod Add we failed to add VF or "+
 						"connection details weren't present or the VF ID has changed. Old connection details (%v), "+
 						"New connection details (%v)", oldDPUCD, newDPUCD)
-					err := bnnc.addDPUPodForNAD(newPod, newDPUCD, isOvnUpEnabled, netName, nadName, clientSet)
+					err := bnnc.addDPUPodForNAD(newPod, newDPUCD, netName, nadName, clientSet)
 					if err != nil {
 						klog.Errorf(err.Error())
 					} else {
