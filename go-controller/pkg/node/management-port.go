@@ -137,7 +137,7 @@ func (mp *managementPort) HasIpAddr() bool {
 
 func managementPortReady() (bool, error) {
 	k8sMgmtIntfName := types.K8sMgmtIntfName
-	if config.OvnKubeNode.MgmtPortRepresentor != "" {
+	if config.OvnKubeNode.MgmtPortNetdev != "" {
 		k8sMgmtIntfName += "_0"
 	}
 	// Get the OVS interface name for the Management Port
