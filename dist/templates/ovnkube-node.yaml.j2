@@ -85,7 +85,7 @@ spec:
           name: host-ovn-cert
           readOnly: true
         - mountPath: /etc/openvswitch/
-          name: host-var-lib-ovs
+          name: host-etc-ovs
           readOnly: true
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
@@ -381,6 +381,9 @@ spec:
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
+      - name: host-etc-ovs
+        hostPath:
+          path: /etc/openvswitch
       {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}
       - name: var-run-ovn
         emptyDir: {}
