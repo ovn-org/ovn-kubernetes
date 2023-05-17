@@ -201,8 +201,9 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 		sbClient:     libovsdbOvnSBClient,
 		podRecorder:  &podRecorder,
 
-		wg:       wg,
-		identity: identity,
+		wg:               wg,
+		identity:         identity,
+		multicastSupport: config.EnableMulticast,
 	}
 
 	var err error
@@ -228,17 +229,6 @@ func (cm *networkControllerManager) configureSCTPSupport() error {
 	}
 	cm.SCTPSupport = hasSCTPSupport
 	return nil
-}
-
-func (cm *networkControllerManager) configureMulticastSupport() {
-	cm.multicastSupport = config.EnableMulticast
-	if cm.multicastSupport {
-		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
-			klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
-				"Disabling Multicast Support")
-			cm.multicastSupport = false
-		}
-	}
 }
 
 func (cm *networkControllerManager) configureSvcTemplateSupport() {
@@ -361,7 +351,6 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	cm.configureMulticastSupport()
 	cm.configureSvcTemplateSupport()
 	cm.enableACLLoggingSupport()
 
