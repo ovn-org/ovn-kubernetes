@@ -16,12 +16,16 @@ ARG ovsver=3.1.0-10.el9fdp
 ARG ovnver=23.03.0-7.el9fdp
 
 RUN INSTALL_PKGS="iptables" && \
+	ovsver_short=$(echo "$ovsver" | cut -d'.' -f1,2) && \
+	ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
-	dnf install -y --nodocs "openvswitch3.1 = $ovsver" "python3-openvswitch3.1 = $ovsver" && \
-	dnf install -y --nodocs "ovn23.03 = $ovnver" "ovn23.03-central = $ovnver" "ovn23.03-host = $ovnver" && \
+	dnf install -y --nodocs "openvswitch$ovsver_short = $ovsver" "python3-openvswitch$ovsver_short = $ovsver" && \
+	dnf install -y --nodocs "ovn$ovnver_short = $ovnver" "ovn$ovnver_short-central = $ovnver" "ovn$ovnver_short-host = $ovnver" && \
 	dnf clean all && rm -rf /var/cache/*
 
-RUN sed 's/%/"/g' <<<"%openvswitch3.1-devel = $ovsver% %openvswitch3.1-ipsec = $ovsver% %ovn23.03-vtep = $ovnver%" > /more-pkgs
+RUN ovsver_short=$(echo "$ovsver" | cut -d'.' -f1,2) && \
+	ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
+	sed 's/%/"/g' <<<"%openvswitch$ovsver_short-devel = $ovsver% %openvswitch$ovsver_short-ipsec = $ovsver% %ovn$ovnver_short-vtep = $ovnver%" > /more-pkgs
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
