@@ -31,7 +31,7 @@ func newManagementPortRepresentor(nodeName string, hostSubnets []*net.IPNet, rep
 
 func (mp *managementPortRepresentor) Create(_ *routeManager, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	k8sMgmtIntfName := types.K8sMgmtIntfName
-	if config.OvnKubeNode.MgmtPortRepresentor != "" {
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		k8sMgmtIntfName += "_0"
 	}
 

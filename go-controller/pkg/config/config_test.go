@@ -307,7 +307,6 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
 			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal(""))
-			gomega.Expect(OvnKubeNode.MgmtPortRepresentor).To(gomega.Equal(""))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeFalse())

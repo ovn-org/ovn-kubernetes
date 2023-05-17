@@ -453,8 +453,7 @@ type OvnKubeNodeConfig struct {
 	DPResourceDeviceIdsMap map[string][]string
 	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
 	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
-	MgmtPortRepresentor    string
-	DisableOVNIfaceIdVer   bool `gcfg:"disable-ovn-iface-id-ver"`
+	DisableOVNIfaceIdVer   bool   `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
