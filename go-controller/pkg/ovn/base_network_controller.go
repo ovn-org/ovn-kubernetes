@@ -61,8 +61,6 @@ type CommonNetworkControllerInfo struct {
 
 	// Supports OVN Template Load Balancers?
 	svcTemplateSupport bool
-	// Is ACL logging enabled while configuring meters?
-	aclLoggingEnabled bool
 
 	// Northbound database zone name to which this Controller is connected to - aka local zone
 	zone string
@@ -153,7 +151,7 @@ type BaseSecondaryNetworkController struct {
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
-	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport, svcTemplateSupport, aclLoggingEnabled bool) (*CommonNetworkControllerInfo, error) {
+	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport, svcTemplateSupport bool) (*CommonNetworkControllerInfo, error) {
 	zone, err := util.GetNBZone(nbClient)
 	if err != nil {
 		return nil, fmt.Errorf("error getting NB zone name : err - %w", err)
@@ -169,7 +167,6 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 		SCTPSupport:        SCTPSupport,
 		multicastSupport:   multicastSupport,
 		svcTemplateSupport: svcTemplateSupport,
-		aclLoggingEnabled:  aclLoggingEnabled,
 		zone:               zone,
 	}, nil
 }

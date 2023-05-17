@@ -44,8 +44,6 @@ type networkControllerManager struct {
 	multicastSupport bool
 	// Supports OVN Template Load Balancers?
 	svcTemplateSupport bool
-	// Is ACL logging enabled while configuring meters?
-	aclLoggingEnabled bool
 
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
@@ -303,19 +301,10 @@ func (cm *networkControllerManager) createACLLoggingMeter() error {
 	return nil
 }
 
-func (cm *networkControllerManager) enableACLLoggingSupport() {
-	cm.aclLoggingEnabled = true
-	if err := cm.createACLLoggingMeter(); err != nil {
-		klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
-			"Disabling ACL logging support", err)
-		cm.aclLoggingEnabled = false
-	}
-}
-
 // newCommonNetworkControllerInfo creates and returns the common networkController info
 func (cm *networkControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
 	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
-		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport, cm.aclLoggingEnabled)
+		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport)
 }
 
 // initDefaultNetworkController creates the controller for default network
@@ -363,7 +352,11 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 
 	cm.configureMulticastSupport()
 	cm.configureSvcTemplateSupport()
-	cm.enableACLLoggingSupport()
+
+	err = cm.createACLLoggingMeter()
+	if err != nil {
+		return nil
+	}
 
 	err = cm.enableOVNLogicalDataPathGroups()
 	if err != nil {

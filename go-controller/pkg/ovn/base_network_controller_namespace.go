@@ -105,8 +105,8 @@ func (bnc *BaseNetworkController) aclLoggingUpdateNsInfo(annotation string, nsIn
 	var aclLevels ACLLoggingLevels
 	var errors []error
 
-	// If logging is disabled or if the annotation is "" or "{}", use empty strings. Otherwise, parse the annotation.
-	if bnc.aclLoggingEnabled && annotation != "" && annotation != "{}" {
+	// If the annotation is "" or "{}", use empty strings. Otherwise, parse the annotation.
+	if annotation != "" && annotation != "{}" {
 		err := json.Unmarshal([]byte(annotation), &aclLevels)
 		if err != nil {
 			// Disable Allow and Deny logging to ensure idempotency.
