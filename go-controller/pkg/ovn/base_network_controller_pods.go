@@ -479,7 +479,10 @@ func (bnc *BaseNetworkController) podExpectedInLogicalCache(pod *kapi.Pod) bool 
 	if err != nil {
 		return false
 	}
-	return !util.PodWantsHostNetwork(pod) && !bnc.lsManager.IsNonHostSubnetSwitch(switchName) && !util.PodCompleted(pod)
+	return !util.PodWantsHostNetwork(pod) &&
+		!(bnc.lsManager.IsNonHostSubnetSwitch(switchName) &&
+			bnc.doesNetworkRequireIPAM()) &&
+		!util.PodCompleted(pod)
 }
 
 func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, error) {

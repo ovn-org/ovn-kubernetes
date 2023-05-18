@@ -169,7 +169,7 @@ func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
 	// For secondary networks, we don't have to watch namespace events if
 	// multi-network policy support is not enabled. We don't support
 	// multi-network policy for IPAM-less secondary networks either.
-	if util.IsMultiNetworkPoliciesSupportEnabled() && oc.doesNetworkRequireIPAM() {
+	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
 		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}

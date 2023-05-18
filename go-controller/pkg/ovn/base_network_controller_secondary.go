@@ -533,12 +533,6 @@ func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
 		return nil
 	}
 
-	// if this network does not have ipam, network policy is not supported.
-	if !bsnc.doesNetworkRequireIPAM() {
-		klog.Infof("Network policy is not supported on network %s", bsnc.GetNetworkName())
-		return nil
-	}
-
 	if bsnc.policyHandler != nil {
 		return nil
 	}
