@@ -474,5 +474,5 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.svcFactory.Core().V1().Services(),
 		oc.svcFactory.Discovery().V1().EndpointSlices(),
-		oc.svcFactory.Core().V1().Nodes())
+		oc.svcFactory.Core().V1().Nodes(), oc.zone)
 }
