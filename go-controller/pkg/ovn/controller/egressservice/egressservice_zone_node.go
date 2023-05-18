@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
@@ -111,6 +112,16 @@ func (c *Controller) syncNode(key string) error {
 		klog.V(4).Infof("Finished syncing Egress Service node %s: %v", nodeName, time.Since(startTime))
 	}()
 
+	n, err := c.nodeLister.Get(nodeName)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	if n != nil {
+		c.nodesZoneState[nodeName] = c.isNodeInLocalZone(n)
+	} else {
+		delete(c.nodesZoneState, nodeName)
+	}
+
 	if err := c.deleteLegacyDefaultNoRerouteNodePolicies(c.nbClient, nodeName); err != nil {
 		return err
 	}
@@ -119,11 +130,6 @@ func (c *Controller) syncNode(key string) error {
 	// address changes regardless of allocated services.
 	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, c.controllerName, c.nodeLister)
 	if err != nil {
-		return err
-	}
-
-	n, err := c.nodeLister.Get(nodeName)
-	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
 
@@ -212,5 +218,25 @@ func (c *Controller) nodeStateFor(name string) (*nodeState, error) {
 		v6IP = ip
 	}
 
-	return &nodeState{name: name, v4MgmtIP: v4IP, v6MgmtIP: v6IP}, nil
+	var transitIPV4, transitIPV6 net.IP
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		transitSwitchIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
+		if err != nil {
+			return nil, fmt.Errorf("unable to fetch router transit IP for node %s: %w", node, err)
+		}
+		for _, ip := range transitSwitchIPs {
+			if utilnet.IsIPv4(ip.IP) {
+				transitIPV4 = ip.IP
+			} else if utilnet.IsIPv6(ip.IP) {
+				transitIPV6 = ip.IP
+			}
+		}
+	}
+
+	return &nodeState{name: name, v4MgmtIP: v4IP, v6MgmtIP: v6IP, transitIPV4: transitIPV4, transitIPV6: transitIPV6}, nil
+}
+
+// isNodeInLocalZone returns whether the provided node is in a zone local to the zone controller
+func (c *Controller) isNodeInLocalZone(node *corev1.Node) bool {
+	return util.GetNodeZone(node) == c.zone
 }
