@@ -272,14 +272,14 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 }
 
 func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
-	subnets, excludes, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, types.Layer2Topology)
+	subnets, excludes, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, types.LocalnetTopology)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
 	}
 
 	ni := &secondaryNetInfo{
 		netName:        netconf.Name,
-		topology:       types.Layer2Topology,
+		topology:       types.LocalnetTopology,
 		subnets:        subnets,
 		excludeSubnets: excludes,
 		mtu:            netconf.MTU,
