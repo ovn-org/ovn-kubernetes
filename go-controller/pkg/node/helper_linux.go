@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
@@ -18,36 +17,41 @@ import (
 // which the default gateway (for route to 0.0.0.0) is configured.
 // optionally pass the pre-determined gateway interface
 // It also returns the default gateways themselves.
-func getDefaultGatewayInterfaceDetails(gwIface string) (string, []net.IP, error) {
+func getDefaultGatewayInterfaceDetails(gwIface string, ipV4Mode, ipV6Mode bool) (string, []net.IP, error) {
 	var intfName string
 	var gatewayIPs []net.IP
 
-	if config.IPv4Mode {
+	if ipV4Mode {
 		intfIPv4Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V4, gwIface)
 		if err != nil {
 			return "", gatewayIPs, err
 		}
 		intfName = intfIPv4Name
-		gatewayIPs = append(gatewayIPs, gw)
+
+		// only add the GW IP if it is specified
+		if len(gw) != 0 {
+			gatewayIPs = append(gatewayIPs, gw)
+		}
 	}
 
-	if config.IPv6Mode {
+	if ipV6Mode {
 		intfIPv6Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V6, gwIface)
 		if err != nil {
 			return "", gatewayIPs, err
 		}
 
-		// validate that both IP Families use the same interface for the gateway
-		// if we found a v4 default gw inf then we should expect v6 default gw inf also
-		if intfName != "" && intfIPv6Name == "" {
-			return "", nil, fmt.Errorf("failed to find IPV6 default gateway from interface %q", gwIface)
-		}
+		// if there is an interface specified for both IP families
+		// validate they use the same one
 		if intfName == "" {
 			intfName = intfIPv6Name
-		} else if intfName != intfIPv6Name {
+		} else if (len(intfName) > 0 && len(intfIPv6Name) > 0) && intfName != intfIPv6Name {
 			return "", nil, fmt.Errorf("multiple gateway interfaces detected: %s %s", intfName, intfIPv6Name)
 		}
-		gatewayIPs = append(gatewayIPs, gw)
+
+		// only add the GW IP if it is specified
+		if len(gw) != 0 {
+			gatewayIPs = append(gatewayIPs, gw)
+		}
 	}
 
 	return intfName, gatewayIPs, nil
