@@ -310,6 +310,8 @@ spec:
           value: "{{ ovn_hybrid_overlay_enable }}"
         - name: OVN_EGRESSIP_ENABLE
           value: "{{ ovn_egress_ip_enable }}"
+        - name: OVN_EGRESSSERVICE_ENABLE
+          value: "{{ ovn_egress_service_enable }}"
         - name: OVN_EGRESSIP_HEALTHCHECK_PORT
           value: "{{ ovn_egress_ip_healthcheck_port }}"
         - name: OVN_EGRESSFIREWALL_ENABLE
@@ -407,6 +409,8 @@ spec:
             cpu: 100m
             memory: 300Mi
         env:
+        - name: OVN_EGRESSSERVICE_ENABLE
+          value: "{{ ovn_egress_service_enable }}"
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVNKUBE_LOGLEVEL
