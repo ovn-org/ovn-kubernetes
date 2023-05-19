@@ -100,6 +100,39 @@ func TestIsFileNotEmpty(t *testing.T) {
 	assert.False(t, result)
 }
 
+func TestPrintCPUSetAll(t *testing.T) {
+	var x unix.CPUSet
+	for i := 0; i < 16; i++ {
+		x.Set(i)
+	}
+
+	assert.Equal(t,
+		"0-15",
+		printCPUSet(x),
+	)
+
+	assert.Equal(t,
+		"",
+		printCPUSet(unix.CPUSet{}),
+	)
+}
+
+func TestPrintCPUSetRanges(t *testing.T) {
+	var x unix.CPUSet
+
+	x.Set(2)
+	x.Set(3)
+	x.Set(6)
+	x.Set(7)
+	x.Set(8)
+	x.Set(14)
+
+	assert.Equal(t,
+		"2-3,6-8,14",
+		printCPUSet(x),
+	)
+}
+
 func mockOvsdbProcess(t *testing.T) (int, func()) {
 	ctx, stopCmd := context.WithCancel(context.Background())
 	defer stopCmd()

@@ -4,9 +4,11 @@
 package ovspinning
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -176,16 +178,62 @@ func setProcessCPUAffinity(targetPIDStr string) error {
 	}
 
 	if currentProcessCPUs == targetProcessCPUs {
-		klog.V(5).Info("Process[%d] CPU affinity already match current process's affinity %x", targetPID, currentProcessCPUs)
+		klog.V(5).Info("Process[%d] CPU affinity already match current process's affinity %s", targetPID, printCPUSet(currentProcessCPUs))
 		return nil
 	}
 
-	klog.Infof("Setting CPU affinity of PID(%d) to %x, was %x", targetPID, currentProcessCPUs, targetProcessCPUs)
+	klog.Infof("Setting CPU affinity of PID(%d) to %s, was %s", targetPID, printCPUSet(currentProcessCPUs), printCPUSet(targetProcessCPUs))
 
 	err = unix.SchedSetaffinity(targetPID, &currentProcessCPUs)
 	if err != nil {
-		return fmt.Errorf("can't set CPU affinity of PID(%d) to %x: %w", targetPID, currentProcessCPUs, err)
+		return fmt.Errorf("can't set CPU affinity of PID(%d) to %s: %w", targetPID, printCPUSet(currentProcessCPUs), err)
 	}
 
 	return nil
+}
+
+// printCPUSet takes a unix.CPUSet and returns a string representation in canonical linux CPU list format.
+// e.g. 0-5,8,10,12-3
+//
+// See http://man7.org/linux/man-pages/man7/cpuset.7.html#FORMATS
+func printCPUSet(cpus unix.CPUSet) string {
+
+	type rng struct {
+		start int
+		end   int
+	}
+
+	// Start with a fake range to avoid going out of range while looping
+	ranges := []rng{{-2, -2}}
+
+	// There is no public API to know the length of unix.CPUSet, so this counter is the
+	// stopping condition for the loop
+	remainingSetsCpus := cpus.Count()
+
+	for i := 0; remainingSetsCpus > 0; i++ {
+		if !cpus.IsSet(i) {
+			continue
+		}
+
+		remainingSetsCpus--
+
+		lastRange := ranges[len(ranges)-1]
+		if lastRange.end == i-1 {
+			ranges[len(ranges)-1].end++
+		} else {
+			ranges = append(ranges, rng{start: i, end: i})
+		}
+	}
+
+	var result bytes.Buffer
+	// discard the fake range with [1:]
+	for _, r := range ranges[1:] {
+		if r.start == r.end {
+			result.WriteString(strconv.Itoa(r.start))
+		} else {
+			result.WriteString(fmt.Sprintf("%d-%d", r.start, r.end))
+		}
+		result.WriteString(",")
+	}
+	return strings.TrimRight(result.String(), ",")
 }
