@@ -236,7 +236,6 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		false, // sctp support
 		false, // multicast support
 		true,  // templates support
-		true,  // acl logging enabled
 	)
 	if err != nil {
 		return nil, err
@@ -342,7 +341,6 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 			false, // sctp support
 			false, // multicast support
 			true,  // templates support
-			true,  // acl logging enabled
 		)
 		if err != nil {
 			return err
