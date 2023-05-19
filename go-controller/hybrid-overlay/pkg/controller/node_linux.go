@@ -41,13 +41,12 @@ type flowCacheEntry struct {
 
 // NodeController is the node hybrid overlay controller
 type NodeController struct {
-	nodeName string
-	// an atomic uint32 for testing purposes 0 = uninitialized and 1 = initialized
-	initialized uint32
-	drMAC       net.HardwareAddr
-	drIP        net.IP
-	gwLRPIP     net.IP
-	vxlanPort   uint16
+	nodeName  string
+	initState hotypes.HybridInitState
+	drMAC     net.HardwareAddr
+	drIP      net.IP
+	gwLRPIP   net.IP
+	vxlanPort uint16
 	// contains a map of pods to corresponding tunnels
 	flowCache map[string]*flowCacheEntry
 	flowMutex sync.Mutex
@@ -55,6 +54,7 @@ type NodeController struct {
 	flowChan chan struct{}
 
 	nodeLister listers.NodeLister
+	podLister  listers.PodLister
 }
 
 // newNodeController returns a node handler that listens for node events
@@ -66,16 +66,20 @@ func newNodeController(
 	_ kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
+	podLister listers.PodLister,
 ) (nodeController, error) {
 
 	node := &NodeController{
 		nodeName:   nodeName,
+		initState:  new(uint32),
 		vxlanPort:  uint16(config.HybridOverlay.VXLANPort),
 		flowCache:  make(map[string]*flowCacheEntry),
 		flowMutex:  sync.Mutex{},
 		flowChan:   make(chan struct{}, 1),
 		nodeLister: nodeLister,
+		podLister:  podLister,
 	}
+	atomic.StoreUint32(node.initState, hotypes.InitialStartup)
 	return node, nil
 }
 
@@ -108,7 +112,7 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	// if the IP/MAC or Annotations have changed
 	ignoreLearn := true
 
-	if atomic.LoadUint32(&n.initialized) == 0 {
+	if atomic.LoadUint32(n.initState) == hotypes.InitialStartup {
 		node, err := n.nodeLister.Get(n.nodeName)
 		if err != nil {
 			return fmt.Errorf("hybrid overlay not initialized on %s, and failed to get node data: %v",
@@ -268,6 +272,20 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 	} else {
 		klog.Infof("Add hybridOverlay Node %s", node.Name)
 		err = n.hybridOverlayNodeUpdate(node)
+	}
+	if atomic.LoadUint32(n.initState) == hotypes.DistributedRouterInitialized {
+		pods, err := n.podLister.List(labels.Everything())
+		if err != nil {
+			return fmt.Errorf("cannot fully initialize node %s for hybrid overlay, cannot list pods: %v", n.nodeName, err)
+		}
+
+		for _, pod := range pods {
+			err := n.AddPod(pod)
+			if err != nil {
+				klog.Errorf("Cannot wire pod %s for hybrid overlay, %v", pod.Name, err)
+			}
+		}
+		atomic.StoreUint32(n.initState, hotypes.PodsInitialized)
 	}
 	return err
 }
@@ -476,7 +494,7 @@ func (n *NodeController) handleHybridOverlayMACIPChange(node *kapi.Node) error {
 
 // EnsureHybridOverlayBridge sets up the hybrid overlay bridge
 func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
-	if atomic.LoadUint32(&n.initialized) == 1 {
+	if atomic.LoadUint32(n.initState) >= hotypes.DistributedRouterInitialized {
 		if node.Annotations[hotypes.HybridOverlayDRIP] != n.drIP.String() ||
 			node.Annotations[hotypes.HybridOverlayDRMAC] != n.drMAC.String() {
 			if err := n.handleHybridOverlayMACIPChange(node); err != nil {
@@ -647,7 +665,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 
 	n.updateFlowCacheEntry("0x0", flows, false)
 	n.requestFlowSync()
-	atomic.StoreUint32(&n.initialized, 1)
+	atomic.StoreUint32(n.initState, hotypes.DistributedRouterInitialized)
 	klog.Infof("Hybrid overlay setup complete for node %s", node.Name)
 	return nil
 }

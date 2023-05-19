@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
@@ -426,7 +427,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			linuxNode, okay := n.controller.(*NodeController)
 			Expect(okay).To(BeTrue())
 			Eventually(func() bool {
-				return atomic.LoadUint32(&linuxNode.initialized) == 1
+				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
 			}, 2).Should(BeTrue())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -484,7 +485,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			linuxNode, okay := n.controller.(*NodeController)
 			Expect(okay).To(BeTrue())
 			Eventually(func() bool {
-				return atomic.LoadUint32(&linuxNode.initialized) == 1
+				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
 			}, 2).Should(BeTrue())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -502,6 +503,87 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			// flowSync after add pods
 			addSyncFlows(fexec)
+
+			initialFlowCache[podIPToCookie(net.ParseIP(pod1IP))] = &flowCacheEntry{
+				flows:       []string{"table=10,cookie=0x" + podIPToCookie(net.ParseIP(pod1IP)) + ",priority=100,ip,nw_dst=" + pod1IP + ",actions=set_field:" + thisNodeDRMAC + "->eth_src,set_field:" + pod1MAC + "->eth_dst,output:ext"},
+				ignoreLearn: true,
+			}
+			Eventually(func() error {
+				linuxNode.flowMutex.Lock()
+				defer linuxNode.flowMutex.Unlock()
+				return compareFlowCache(linuxNode.flowCache, initialFlowCache)
+			}, 2).Should(BeNil())
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			return nil
+		}
+		appRun(app)
+	})
+	ovntest.OnSupportedPlatformsIt("on startup will add a local linux pod that times out on the initial addPod event", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				pod1IP   string = "1.2.3.5"
+				pod1CIDR string = pod1IP + "/24"
+				pod1MAC  string = "aa:bb:cc:dd:ee:ff"
+			)
+
+			annotations := createNodeAnnotationsForSubnet(thisNodeSubnet)
+			annotations[hotypes.HybridOverlayDRMAC] = thisNodeDRMAC
+			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
+			node := createNode(thisNode, "linux", thisNodeIP, annotations)
+			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
+			fakeClient := fake.NewSimpleClientset(
+				//&v1.NodeList{
+				//	Items: []v1.Node{*node},
+				//},
+				&v1.PodList{
+					Items: []v1.Pod{*testPod},
+				},
+			)
+
+			// Node setup from initial node sync
+			addNodeSetupCmds(fexec, thisNode)
+			_, err := config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+				informer.NewTestEventHandler,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			addEnsureHybridOverlayBridgeMocks(nlMock, thisNodeDRIP, "")
+			// initial flowSync
+			addSyncFlows(fexec)
+			// flowsync after EnsureHybridOverlayBridge()
+			addSyncFlows(fexec)
+			addSyncFlows(fexec)
+
+			f.Start(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				n.Run(stopChan)
+			}()
+
+			linuxNode, okay := n.controller.(*NodeController)
+			Expect(okay).To(BeTrue())
+			time.Sleep(2 * time.Second)
+			_, err = fakeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() bool {
+				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
+			}, 2).Should(BeTrue())
+
+			initialFlowCache := map[string]*flowCacheEntry{
+				"0x0": generateInitialFlowCacheEntry(mgmtIfAddr.IP.String(), thisNodeDRIP, thisNodeDRMAC),
+			}
 
 			initialFlowCache[podIPToCookie(net.ParseIP(pod1IP))] = &flowCacheEntry{
 				flows:       []string{"table=10,cookie=0x" + podIPToCookie(net.ParseIP(pod1IP)) + ",priority=100,ip,nw_dst=" + pod1IP + ",actions=set_field:" + thisNodeDRMAC + "->eth_src,set_field:" + pod1MAC + "->eth_dst,output:ext"},
@@ -570,7 +652,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			linuxNode, okay := n.controller.(*NodeController)
 			Expect(okay).To(BeTrue())
 			Eventually(func() bool {
-				return atomic.LoadUint32(&linuxNode.initialized) == 1
+				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
 			}, 2).Should(BeTrue())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -669,7 +751,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			linuxNode, okay := n.controller.(*NodeController)
 			Expect(okay).To(BeTrue())
 			Eventually(func() bool {
-				return atomic.LoadUint32(&linuxNode.initialized) == 1
+				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
 			}, 2).Should(BeTrue())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -804,7 +886,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			linuxNode, okay := n.controller.(*NodeController)
 			Expect(okay).To(BeTrue())
 			Eventually(func() bool {
-				return atomic.LoadUint32(&linuxNode.initialized) == 1
+				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
 			}, 2).Should(BeTrue())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
