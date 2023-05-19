@@ -249,21 +249,6 @@ func (cm *networkControllerManager) configureSvcTemplateSupport() {
 	}
 }
 
-// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
-// groups on OVN 20.12 and later. The option is ignored if OVN doesn't
-// understand it. Logical datapath groups reduce the size of the southbound
-// database in large clusters. ovn-controllers should be upgraded to a version
-// that supports them before the option is turned on by the master.
-func (cm *networkControllerManager) enableOVNLogicalDataPathGroups() error {
-	nbGlobal := nbdb.NBGlobal{
-		Options: map[string]string{"use_logical_dp_groups": "true"},
-	}
-	if err := libovsdbops.UpdateNBGlobalSetOptions(cm.nbClient, &nbGlobal); err != nil {
-		return fmt.Errorf("failed to set NB global option to enable logical datapath groups: %v", err)
-	}
-	return nil
-}
-
 func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
 	metrics.RegisterMasterPerformance(cm.nbClient)
 	metrics.RegisterMasterFunctional()
@@ -356,11 +341,6 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 	err = cm.createACLLoggingMeter()
 	if err != nil {
 		return nil
-	}
-
-	err = cm.enableOVNLogicalDataPathGroups()
-	if err != nil {
-		return err
 	}
 
 	if config.Metrics.EnableConfigDuration {
