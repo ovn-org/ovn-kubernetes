@@ -4,6 +4,9 @@ on:
   push:
     branches: [ master ]
 
+permissions:
+  contents: read
+
 env:
   GO_VERSION: 1.18.4
   REGISTRY: ghcr.io 
