@@ -721,7 +721,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		cnnci := NewCommonNodeNetworkControllerInfo(nil, wf, nil, nodeName, false)
+		cnnci := NewCommonNodeNetworkControllerInfo(nil, wf, nil, nodeName)
 		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)

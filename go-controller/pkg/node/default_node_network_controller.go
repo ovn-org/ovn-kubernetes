@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -46,9 +45,6 @@ type CommonNodeNetworkControllerInfo struct {
 	watchFactory factory.NodeWatchFactory
 	recorder     record.EventRecorder
 	name         string
-
-	// atomic integer value to indicate if PortBinding.up is supported
-	atomicOvnUpEnabled int32
 }
 
 // BaseNodeNetworkController structure per-network fields and network specific configuration
@@ -71,27 +67,21 @@ type BaseNodeNetworkController struct {
 }
 
 func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.Interface,
-	wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name string,
-	isOvnUpEnabled bool) *CommonNodeNetworkControllerInfo {
-	var atomicOvnUpEnabled int32
-	if isOvnUpEnabled {
-		atomicOvnUpEnabled = 1
-	}
+	wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name string) *CommonNodeNetworkControllerInfo {
 
 	return &CommonNodeNetworkControllerInfo{
-		client:             kubeClient,
-		Kube:               kube,
-		watchFactory:       wf,
-		name:               name,
-		recorder:           eventRecorder,
-		atomicOvnUpEnabled: atomicOvnUpEnabled,
+		client:       kubeClient,
+		Kube:         kube,
+		watchFactory: wf,
+		name:         name,
+		recorder:     eventRecorder,
 	}
 }
 
 // NewCommonNodeNetworkControllerInfo creates and returns the base node network controller info
 func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, wf factory.NodeWatchFactory,
-	eventRecorder record.EventRecorder, name string, isOvnUpEnabled bool) *CommonNodeNetworkControllerInfo {
-	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, wf, eventRecorder, name, isOvnUpEnabled)
+	eventRecorder record.EventRecorder, name string) *CommonNodeNetworkControllerInfo {
+	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, wf, eventRecorder, name)
 }
 
 // DefaultNodeNetworkController is the object holder for utilities meant for node management of default network
@@ -689,13 +679,12 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", nc.name, util.JoinIPNets(subnets, ","))
 
 	// Create CNI Server
-	isOvnUpEnabled := atomic.LoadInt32(&nc.atomicOvnUpEnabled) > 0
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		kclient, ok := nc.Kube.(*kube.Kube)
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(isOvnUpEnabled, nc.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient)
 		if err != nil {
 			return err
 		}
@@ -830,20 +819,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 					if err := upgradeServiceRoute(nc.routeManager, bridgeName); err != nil {
 						klog.Fatalf("Failed to upgrade service route for node, error: %v", err)
 					}
-				}
-			}
-
-			// ensure CNI support for port binding built into OVN, as masters have been upgraded
-			if initialTopoVersion < types.OvnPortBindingTopoVersion && !isOvnUpEnabled && !config.OvnKubeNode.DisableOVNIfaceIdVer {
-				isOvnUpEnabled, err := util.GetOVNIfUpCheckMode()
-				if err != nil {
-					klog.Errorf("%v", err)
-				} else if isOvnUpEnabled {
-					klog.Infof("Detected support for port binding with external IDs")
-					if cniServer != nil {
-						cniServer.EnableOVNPortUpSupport()
-					}
-					atomic.StoreInt32(&nc.atomicOvnUpEnabled, 1)
 				}
 			}
 		}()
