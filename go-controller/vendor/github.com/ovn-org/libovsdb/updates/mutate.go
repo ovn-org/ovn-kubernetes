@@ -1,4 +1,4 @@
-package database
+package updates
 
 import (
 	"reflect"

@@ -30,7 +30,7 @@ const (
 // Operation represents an operation according to RFC7047 section 5.2
 type Operation struct {
 	Op        string      `json:"op"`
-	Table     string      `json:"table"`
+	Table     string      `json:"table,omitempty"`
 	Row       Row         `json:"row,omitempty"`
 	Rows      []Row       `json:"rows,omitempty"`
 	Columns   []string    `json:"columns,omitempty"`
@@ -41,6 +41,7 @@ type Operation struct {
 	Durable   *bool       `json:"durable,omitempty"`
 	Comment   *string     `json:"comment,omitempty"`
 	Lock      *string     `json:"lock,omitempty"`
+	UUID      string      `json:"uuid,omitempty"`
 	UUIDName  string      `json:"uuid-name,omitempty"`
 }
 

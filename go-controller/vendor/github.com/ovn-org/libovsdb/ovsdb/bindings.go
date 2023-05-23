@@ -52,12 +52,13 @@ func NativeTypeFromAtomic(basicType string) reflect.Type {
 	}
 }
 
-//NativeType returns the reflect.Type that can hold the value of a column
-//OVS Type to Native Type convertions:
-// OVS sets -> go slices, arrays or a go native type depending on the key
-// OVS uuid -> go strings
-// OVS map  -> go map
-// OVS enum -> go native type depending on the type of the enum key
+// NativeType returns the reflect.Type that can hold the value of a column
+// OVS Type to Native Type convertions:
+//
+//	OVS sets -> go slices or a go native type depending on the key
+//	OVS uuid -> go strings
+//	OVS map  -> go map
+//	OVS enum -> go native type depending on the type of the enum key
 func NativeType(column *ColumnSchema) reflect.Type {
 	switch column.Type {
 	case TypeInteger, TypeReal, TypeBoolean, TypeUUID, TypeString:
@@ -77,10 +78,6 @@ func NativeType(column *ColumnSchema) reflect.Type {
 		// non-optional type with max 1
 		if column.TypeObj.Min() == 1 && column.TypeObj.Max() == 1 {
 			return keyType
-		}
-		// max is > 1, use an array
-		if column.TypeObj.Max() > 1 {
-			return reflect.ArrayOf(column.TypeObj.Max(), keyType)
 		}
 		return reflect.SliceOf(keyType)
 	default:
@@ -178,29 +175,10 @@ func OvsToNative(column *ColumnSchema, ovsElem interface{}) (interface{}, error)
 				pv.Elem().Set(reflect.ValueOf(native))
 				return pv.Interface(), nil
 			}
-		case reflect.Array:
-			array := reflect.New(reflect.ArrayOf(column.TypeObj.Max(), naType.Elem())).Elem()
-			switch ovsSet := ovsElem.(type) {
-			case OvsSet:
-				for i, v := range ovsSet.GoSet {
-					nv, err := OvsToNativeAtomic(column.TypeObj.Key.Type, v)
-					if err != nil {
-						return nil, err
-					}
-					array.Index(i).Set(reflect.ValueOf(nv))
-				}
-			default:
-				nv, err := OvsToNativeAtomic(column.TypeObj.Key.Type, ovsElem)
-				if err != nil {
-					return nil, err
-				}
-				array.Index(0).Set(reflect.ValueOf(nv))
-			}
-			return array.Interface(), nil
 		case reflect.Slice:
 			return OvsToNativeSlice(column.TypeObj.Key.Type, ovsElem)
 		default:
-			return nil, fmt.Errorf("native type was not slice, array or pointer. got %d", naType.Kind())
+			return nil, fmt.Errorf("native type was not slice or pointer. got %d", naType.Kind())
 		}
 	case TypeMap:
 		naType := NativeType(column)
@@ -431,7 +409,7 @@ func isDefaultBaseValue(elem interface{}, etype ExtendedType) bool {
 	}
 	switch etype {
 	case TypeUUID:
-		return elem.(string) == "00000000-0000-0000-0000-000000000000" || elem.(string) == "" || isNamed(elem.(string))
+		return elem.(string) == "00000000-0000-0000-0000-000000000000" || elem.(string) == ""
 	case TypeMap, TypeSet:
 		if value.Kind() == reflect.Array {
 			return value.Len() == 0
