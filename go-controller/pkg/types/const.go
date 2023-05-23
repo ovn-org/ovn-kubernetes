@@ -52,8 +52,6 @@ const (
 	OVNLocalnetSwitch = "ovn_localnet_switch"
 	// types.OVNLocalnetPort is the name of localnet topology localnet port
 	OVNLocalnetPort = "ovn_localnet_port"
-	// Local Bridge used for localnet topology network access
-	LocalNetBridgeName = "br-localnet"
 
 	TransitSwitch               = "transit_switch"
 	TransitSwitchToRouterPrefix = "tstor-"
