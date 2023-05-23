@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +26,7 @@ import (
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -483,6 +486,55 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 	})
 
 	return nil
+}
+
+// restartOVNKubeNodePodsInParallel restarts multiple ovnkube-node pods in parallel. See `restartOVNKubeNodePod`
+func restartOVNKubeNodePodsInParallel(clientset kubernetes.Interface, namespace string, nodeNames ...string) error {
+	framework.Logf("restarting ovnkube-node for %v", nodeNames)
+
+	restartFuncs := make([]func() error, 0, len(nodeNames))
+	for _, n := range nodeNames {
+		nodeName := n
+		restartFuncs = append(restartFuncs, func() error {
+			return restartOVNKubeNodePod(clientset, ovnNamespace, nodeName)
+		})
+	}
+
+	return utilerrors.AggregateGoroutines(restartFuncs...)
+}
+
+// getOVNKubePodLogsFiltered retrieves logs from ovnkube-node pods and filters logs lines according to filteringRegexp
+func getOVNKubePodLogsFiltered(clientset kubernetes.Interface, namespace, nodeName, filteringRegexp string) (string, error) {
+	ovnKubeNodePods, err := clientset.CoreV1().Pods(ovnNamespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: "name=ovnkube-node",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node pods: %w", err)
+	}
+
+	logs, err := e2epod.GetPodLogs(clientset, ovnNamespace, ovnKubeNodePods.Items[0].Name, "ovnkube-node")
+	if err != nil {
+		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node [%s/%s] logs: %w",
+			ovnNamespace, ovnKubeNodePods.Items[0].Name, err)
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(logs))
+	filteredLogs := ""
+	re := regexp.MustCompile(filteringRegexp)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if re.MatchString(line) {
+			filteredLogs += line + "\n"
+		}
+	}
+
+	err = scanner.Err()
+	if err != nil {
+		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while scanning ovnkube-node logs: %w", err)
+	}
+
+	return filteredLogs, nil
 }
 
 func findOvnKubeMasterNode() (string, error) {

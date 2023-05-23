@@ -31,6 +31,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	retry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -916,6 +917,12 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			c.Run(1)
 		}()
 	}
+
+	nc.wg.Add(1)
+	go func() {
+		defer nc.wg.Done()
+		ovspinning.Run(nc.stopChan)
+	}()
 
 	klog.Infof("Default node network controller initialized and ready.")
 	return nil
