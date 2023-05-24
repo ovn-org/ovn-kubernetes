@@ -54,6 +54,30 @@ var metricV6AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The total number of v6 host subnets currently allocated",
 })
 
+/** EgressIP metrics recorded from cluster-manager begins**/
+var metricEgressIPCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Name:      "num_egress_ips",
+	Help:      "The number of defined egress IP addresses",
+})
+
+var metricEgressIPNodeUnreacheableCount = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Name:      "egress_ips_node_unreachable_total",
+	Help:      "The total number of times assigned egress IP(s) were unreachable"},
+)
+
+var metricEgressIPRebalanceCount = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Name:      "egress_ips_rebalance_total",
+	Help:      "The total number of times assigned egress IP(s) needed to be moved to a different node"},
+)
+
+/** EgressIP metrics recorded from cluster-manager ends**/
+
 // RegisterClusterManagerBase registers ovnkube cluster manager base metrics with the Prometheus registry.
 // This function should only be called once.
 func RegisterClusterManagerBase() {
@@ -88,6 +112,11 @@ func RegisterClusterManagerFunctional() {
 	prometheus.MustRegister(metricV6HostSubnetCount)
 	prometheus.MustRegister(metricV4AllocatedHostSubnetCount)
 	prometheus.MustRegister(metricV6AllocatedHostSubnetCount)
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		prometheus.MustRegister(metricEgressIPNodeUnreacheableCount)
+		prometheus.MustRegister(metricEgressIPRebalanceCount)
+		prometheus.MustRegister(metricEgressIPCount)
+	}
 }
 
 func UnregisterClusterManagerFunctional() {
@@ -95,6 +124,11 @@ func UnregisterClusterManagerFunctional() {
 	prometheus.Unregister(metricV6HostSubnetCount)
 	prometheus.Unregister(metricV4AllocatedHostSubnetCount)
 	prometheus.Unregister(metricV6AllocatedHostSubnetCount)
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		prometheus.Unregister(metricEgressIPNodeUnreacheableCount)
+		prometheus.Unregister(metricEgressIPRebalanceCount)
+		prometheus.Unregister(metricEgressIPCount)
+	}
 }
 
 // RecordSubnetUsage records the number of subnets allocated for nodes
@@ -108,4 +142,20 @@ func RecordSubnetUsage(v4SubnetsAllocated, v6SubnetsAllocated float64) {
 func RecordSubnetCount(v4SubnetCount, v6SubnetCount float64) {
 	metricV4HostSubnetCount.Set(v4SubnetCount)
 	metricV6HostSubnetCount.Set(v6SubnetCount)
+}
+
+// RecordEgressIPReachableNode records how many times EgressIP detected an unuseable node.
+func RecordEgressIPUnreachableNode() {
+	metricEgressIPNodeUnreacheableCount.Inc()
+}
+
+// RecordEgressIPRebalance records how many EgressIPs had to move to a different egress node.
+func RecordEgressIPRebalance(count int) {
+	metricEgressIPRebalanceCount.Add(float64(count))
+}
+
+// RecordEgressIPCount records the total number of Egress IPs.
+// This total may include multiple Egress IPs per EgressIP CR.
+func RecordEgressIPCount(count float64) {
+	metricEgressIPCount.Set(count)
 }
