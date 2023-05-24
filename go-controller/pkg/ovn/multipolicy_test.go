@@ -141,16 +141,13 @@ func (p testPod) populateSecondaryNetworkLogicalSwitchCache(fakeOvn *FakeOVN, oc
 	switch ocInfo.bnc.TopologyType() {
 	case ovntypes.Layer3Topology:
 		podInfo := p.secondaryPodInfos[ocInfo.bnc.GetNetworkName()]
-		uuid := getLogicalSwitchUUID(fakeOvn.controller.nbClient, ocInfo.bnc.GetNetworkScopedName(p.nodeName))
-		err = ocInfo.bnc.lsManager.AddSwitch(ocInfo.bnc.GetNetworkScopedName(p.nodeName), uuid, []*net.IPNet{ovntest.MustParseIPNet(podInfo.nodeSubnet)})
+		err = ocInfo.bnc.lsManager.AddSwitch(ocInfo.bnc.GetNetworkScopedName(p.nodeName), []*net.IPNet{ovntest.MustParseIPNet(podInfo.nodeSubnet)})
 	case ovntypes.Layer2Topology:
-		uuid := getLogicalSwitchUUID(fakeOvn.controller.nbClient, ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
 		subnet := ocInfo.bnc.Subnets()[0]
-		err = ocInfo.bnc.lsManager.AddSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), uuid, []*net.IPNet{subnet.CIDR})
+		err = ocInfo.bnc.lsManager.AddSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR})
 	case ovntypes.LocalnetTopology:
-		uuid := getLogicalSwitchUUID(fakeOvn.controller.nbClient, ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
 		subnet := ocInfo.bnc.Subnets()[0]
-		err = ocInfo.bnc.lsManager.AddSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch), uuid, []*net.IPNet{subnet.CIDR})
+		err = ocInfo.bnc.lsManager.AddSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch), []*net.IPNet{subnet.CIDR})
 	}
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
@@ -344,7 +341,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		gomega.Expect(ok).To(gomega.Equal(true))
 
 		for _, testPod := range pods {
-			testPod.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, nodeName))
+			testPod.populateLogicalSwitchCache(fakeOvn)
 		}
 		var err error
 		if namespaces != nil {

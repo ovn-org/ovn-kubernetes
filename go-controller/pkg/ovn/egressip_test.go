@@ -3508,9 +3508,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []v1.Pod{egressPod1},
 					},
 				)
-				// we don't know the real switch UUID in the db, but it can be found by name
-				swUUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, node1.Name)
-				fakeOvn.controller.lsManager.AddSwitch(node1.Name, swUUID, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+				fakeOvn.controller.lsManager.AddSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3780,9 +3778,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				// we don't know the real switch UUID in the db, but it can be found by name
-				swUUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, node1.Name)
-				fakeOvn.controller.lsManager.AddSwitch(node1.Name, swUUID, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+				fakeOvn.controller.lsManager.AddSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchEgressIPNamespaces()
 				fakeOvn.controller.WatchEgressIPPods()
@@ -4142,11 +4138,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					)
 
-					// we don't know the real switch UUID in the db, but it can be found by name
-					sw1UUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, node1.Name)
-					sw2UUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, node2.Name)
-					fakeOvn.controller.lsManager.AddSwitch(node1.Name, sw1UUID, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
-					fakeOvn.controller.lsManager.AddSwitch(node2.Name, sw2UUID, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+					fakeOvn.controller.lsManager.AddSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+					fakeOvn.controller.lsManager.AddSwitch(node2.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 					err := fakeOvn.controller.WatchPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIPNamespaces()

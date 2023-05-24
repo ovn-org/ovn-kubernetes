@@ -118,7 +118,6 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPortsOnSwitches(switch
 		sw := nbdb.LogicalSwitch{
 			Name: switchName,
 		}
-		sw.UUID, _ = bnc.lsManager.GetUUID(switchName)
 
 		ops, err = libovsdbops.DeleteLogicalSwitchPortsWithPredicateOps(bnc.nbClient, ops, &sw, p)
 		if err != nil {
@@ -350,12 +349,10 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitch(switchName string) (*
 	// is created by the node watch
 	ls := &nbdb.LogicalSwitch{Name: switchName}
 	if err := wait.PollUntilContextTimeout(context.Background(), 30*time.Millisecond, 30*time.Second, true, func(ctx context.Context) (bool, error) {
-		if lsUUID, ok := bnc.lsManager.GetUUID(switchName); !ok {
+		if subnets := bnc.lsManager.GetSwitchSubnets(switchName); subnets == nil {
 			return false, fmt.Errorf("error getting logical switch %s: %s", switchName, "switch not in logical switch cache")
-		} else {
-			ls.UUID = lsUUID
-			return true, nil
 		}
+		return true, nil
 	}); err != nil {
 		return nil, fmt.Errorf("timed out waiting for logical switch in logical switch cache %q subnet: %v", switchName, err)
 	}
@@ -851,9 +848,7 @@ func (bnc *BaseNetworkController) getPortAddresses(switchName string, existingLS
 // delLSPOps returns the ovsdb operations required to delete the given logical switch port (LSP)
 func (bnc *BaseNetworkController) delLSPOps(logicalPort, switchName,
 	lspUUID string) ([]ovsdb.Operation, error) {
-	lsUUID, _ := bnc.lsManager.GetUUID(switchName)
 	lsw := nbdb.LogicalSwitch{
-		UUID: lsUUID,
 		Name: switchName,
 	}
 	lsp := nbdb.LogicalSwitchPort{

@@ -26,8 +26,6 @@ type logicalSwitchInfo struct {
 	hostSubnets  []*net.IPNet
 	ipams        []ipam.Interface
 	noHostSubnet bool
-	// the uuid of the logicalSwitch described by this struct
-	uuid string
 }
 
 type ipamFactoryFunc func(*net.IPNet) (ipam.Interface, error)
@@ -38,16 +36,6 @@ type LogicalSwitchManager struct {
 	// A RW mutex for LogicalSwitchManager which holds logicalSwitch information
 	sync.RWMutex
 	ipamFunc ipamFactoryFunc
-}
-
-// GetUUID returns the UUID for the given logical switch name if
-func (manager *LogicalSwitchManager) GetUUID(switchName string) (string, bool) {
-	manager.RLock()
-	defer manager.RUnlock()
-	if _, ok := manager.cache[switchName]; !ok {
-		return "", ok
-	}
-	return manager.cache[switchName].uuid, true
 }
 
 // NewIPAMAllocator provides an ipam interface which can be used for IPAM
@@ -97,7 +85,7 @@ func NewLogicalSwitchManager() *LogicalSwitchManager {
 
 // AddSwitch adds/updates a switch to the logical switch manager for subnet
 // and IPAM management.
-func (manager *LogicalSwitchManager) AddSwitch(switchName, uuid string, hostSubnets []*net.IPNet) error {
+func (manager *LogicalSwitchManager) AddSwitch(switchName string, hostSubnets []*net.IPNet) error {
 	manager.Lock()
 	defer manager.Unlock()
 	if lsi, ok := manager.cache[switchName]; ok && !reflect.DeepEqual(lsi.hostSubnets, hostSubnets) {
@@ -117,7 +105,6 @@ func (manager *LogicalSwitchManager) AddSwitch(switchName, uuid string, hostSubn
 		hostSubnets:  hostSubnets,
 		ipams:        ipams,
 		noHostSubnet: len(hostSubnets) == 0,
-		uuid:         uuid,
 	}
 
 	return nil
@@ -129,7 +116,7 @@ func (manager *LogicalSwitchManager) AddNoHostSubnetSwitch(switchName string) er
 	// setting the hostSubnets slice argument to nil in the cache means an object
 	// exists for the switch but it was not assigned a hostSubnet by ovn-kubernetes
 	// this will be true for switches created on nodes that are marked as host-subnet only.
-	return manager.AddSwitch(switchName, "", nil)
+	return manager.AddSwitch(switchName, nil)
 }
 
 // Remove a switch from the the logical switch manager

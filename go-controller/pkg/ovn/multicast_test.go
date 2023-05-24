@@ -595,7 +595,7 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 					setIpMode(m)
 
 					for _, tPod := range tPods {
-						tPod.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, nodeName))
+						tPod.populateLogicalSwitchCache(fakeOvn)
 					}
 
 					err := fakeOvn.controller.WatchNamespaces()
@@ -716,7 +716,7 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 
 					// Create pods
 					for _, tPod := range tPods {
-						tPod.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, nodeName))
+						tPod.populateLogicalSwitchCache(fakeOvn)
 						_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(tPod.namespace).Create(context.TODO(), newPod(
 							tPod.namespace, tPod.podName, tPod.nodeName, tPod.podIP), metav1.CreateOptions{})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())

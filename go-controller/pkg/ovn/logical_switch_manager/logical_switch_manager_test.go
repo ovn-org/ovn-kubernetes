@@ -92,7 +92,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 
 				expectedIPs := []string{"10.1.1.3", "2000::3"}
 
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ips, err := lsManager.AllocateNextIPs(testNode.switchName)
@@ -118,7 +118,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 						"2000::/64",
 					},
 				}
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.switchName, []string{"10.1.1.53"})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -143,7 +143,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 					},
 				}
 
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.switchName, []string{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -170,9 +170,10 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 					},
 				}
 
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = lsManager.AllocateIPs(testNode.switchName, []*net.IPNet{
-					{net.ParseIP("10.1.1.3").To4(), net.CIDRMask(32, 32)},
+					{IP: net.ParseIP("10.1.1.3").To4(), Mask: net.CIDRMask(32, 32)},
 				})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.switchName, []string{})
@@ -198,7 +199,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 					subnets:    []string{},
 				}
 
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				noHostSubnet := lsManager.IsNonHostSubnetSwitch(testNode.switchName)
 				gomega.Expect(noHostSubnet).To(gomega.BeTrue())
@@ -222,16 +223,17 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 
 				expectedIPs := []string{"10.1.1.3", "2000::3"}
 
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ips, err := lsManager.AllocateNextIPs(testNode.switchName)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				for i, ip := range ips {
 					gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 				}
 				testNode.subnets = []string{"10.1.2.0/24"}
 				expectedIPs = []string{"10.1.2.3"}
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ips, err = lsManager.AllocateNextIPs(testNode.switchName)
@@ -265,7 +267,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 					{"10.1.1.4", "2000::4"},
 				}
 
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				for _, expectedIPs := range expectedIPAllocations {
 					ips, err := lsManager.AllocateNextIPs(testNode.switchName)
@@ -296,7 +298,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 					{"10.1.1.4"},
 				}
 
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				for _, expectedIPs := range expectedIPAllocations {
 					ips, err := lsManager.AllocateNextIPs(testNode.switchName)
@@ -333,7 +335,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 					{"10.1.1.5", "10.1.2.5"},
 				}
 
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// exhaust valid ips in second subnet
 				for _, expectedIPs := range expectedIPAllocations {
@@ -381,7 +383,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 					"2000::2/64",
 				}
 				allocatedIPNets := ovntest.MustParseIPNets(allocatedIPs...)
-				err = lsManager.AddSwitch(testNode.switchName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddSwitch(testNode.switchName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = lsManager.AllocateIPs(testNode.switchName, allocatedIPNets)
 				klog.Errorf("Error: %v", err)

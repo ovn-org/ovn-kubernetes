@@ -298,7 +298,7 @@ func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchNa
 		return nil, fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
 	}
 
-	if err = oc.lsManager.AddSwitch(switchName, logicalSwitch.UUID, hostSubnets); err != nil {
+	if err = oc.lsManager.AddSwitch(switchName, hostSubnets); err != nil {
 		return nil, err
 	}
 
