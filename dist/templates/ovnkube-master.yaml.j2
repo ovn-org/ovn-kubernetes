@@ -138,6 +138,18 @@ spec:
             add:
             - NET_ADMIN
           {% endif %}
+        {% if ovn_dummy_gateway_bridge=="true" %}
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - |
+                #!/bin/bash
+                ovs-vsctl --may-exist add-br br-ex
+                ip a a dev br-ex 10.44.0.1/32 || /bin/true
+        {% endif %}
         {% else %}
         command: ["/root/ovnkube.sh", "ovn-master"]
         securityContext:
@@ -257,6 +269,8 @@ spec:
           value: "{{ ovn_ssl_en }}"
         - name: OVN_GATEWAY_MODE
           value: "{{ ovn_gateway_mode }}"
+        - name: OVN_GATEWAY_OPTS
+          value: "{{ ovn_gateway_opts }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
         - name: OVN_ACL_LOGGING_RATE_LIMIT

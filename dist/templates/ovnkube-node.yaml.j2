@@ -39,7 +39,18 @@ spec:
       - name: ovnkube-node
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-
+        {% if ovn_dummy_gateway_bridge=="true" %}
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - |
+                #!/bin/bash
+                ovs-vsctl --may-exist add-br br-ex
+                ip a a dev br-ex 10.44.0.1/32 || /bin/true
+        {% endif %}
         command: ["/root/ovnkube.sh", "ovn-node"]
 
         securityContext:

@@ -249,6 +249,8 @@ parse_args() {
                                                 fi
                                                 OVN_GATEWAY_MODE=$1
                                                 ;;
+            -dgb | --dummy-gateway-bridge)      OVN_DUMMY_GATEWAY_BRIDGE=true
+                                                ;;
             -ov | --ovn-image )           	    shift
                                           	    OVN_IMAGE=$1
                                           	    ;;
@@ -361,6 +363,7 @@ print_params() {
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "KIND_EXPERIMENTAL_PROVIDER = $KIND_EXPERIMENTAL_PROVIDER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
+     echo "OVN_DUMMY_GATEWAY_BRIDGE = $OVN_DUMMY_GATEWAY_BRIDGE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
      echo "OVN_DISABLE_FORWARDING = $OVN_DISABLE_FORWARDING"
@@ -543,9 +546,13 @@ set_default_params() {
   OVN_DEPLOY_PODS=${OVN_DEPLOY_PODS:-"ovnkube-master ovnkube-node"}
   OVN_METRICS_SCALE_ENABLE=${OVN_METRICS_SCALE_ENABLE:-false}
   OVN_ISOLATED=${OVN_ISOLATED:-false}
-  OVN_GATEWAY_OPTS=""
+  OVN_GATEWAY_OPTS=${OVN_GATEWAY_OPTS:-""}
   if [ "$OVN_ISOLATED" == true ]; then
     OVN_GATEWAY_OPTS="--gateway-interface=eth0"
+  fi
+  OVN_DUMMY_GATEWAY_BRIDGE=${OVN_DUMMY_GATEWAY_BRIDGE:-false}
+  if [ "$OVN_DUMMY_GATEWAY_BRIDGE" == true ]; then
+    OVN_GATEWAY_OPTS="--allow-no-uplink --gateway-interface=br-ex"
   fi
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
   OVN_SEPARATE_CLUSTER_MANAGER=${OVN_SEPARATE_CLUSTER_MANAGER:-false}
@@ -780,6 +787,7 @@ create_ovn_kube_manifests() {
     --net-cidr="${NET_CIDR}" \
     --svc-cidr="${SVC_CIDR}" \
     --gateway-mode="${OVN_GATEWAY_MODE}" \
+    --dummy-gateway-bridge="${OVN_DUMMY_GATEWAY_BRIDGE}" \
     --gateway-options="${OVN_GATEWAY_OPTS}" \
     --enable-ipsec="${ENABLE_IPSEC}" \
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
