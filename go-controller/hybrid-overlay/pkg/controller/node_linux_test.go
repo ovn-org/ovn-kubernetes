@@ -144,10 +144,12 @@ func createNode(name, os, ip string, annotations map[string]string) *v1.Node {
 }
 
 func addSyncFlows(fexec *ovntest.FakeExec) {
-	fexec.AddFakeCmdsNoOutputNoError([]string{
+	// Note: due to the async nature of when syncFlows are invoked,
+	// the fake commands here are added with allowDuplicates set to true
+	fexec.AddFakeCmdsNoOutputNoErrorMayDuplicate([]string{
 		"ovs-ofctl dump-flows --no-stats br-ext table=20",
 		"ovs-ofctl -O OpenFlow13 --bundle replace-flows br-ext -",
-	})
+	}, true)
 }
 
 func createPod(namespace, name, node, podIP, podMAC string) *v1.Pod {
