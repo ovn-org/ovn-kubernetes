@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 	fakeexec "k8s.io/utils/exec/testing"
@@ -124,7 +125,35 @@ func (f *FakeExec) CalledMatchesExpected() bool {
 	if f.receivedUnexpected {
 		return false
 	}
-	return len(f.executedCommands) == len(f.expectedCommands)
+	expectedLen := len(f.expectedCommands)
+	executedLen := len(f.executedCommands)
+	if executedLen == expectedLen {
+		return true
+	}
+	// Factor in cases when there were executed commands expected to happen more than once
+	if executedLen > expectedLen {
+		visitedExecuted := sets.Set[string]{}
+		expectedDuplicates := 0
+		for i := 0; i < executedLen; i++ {
+			for _, candidate := range f.expectedCommands {
+				if candidate.called && candidate.AllowDuplicates && candidate.compare(f.executedCommands[i]) {
+					// If we made it here, we know that executed command can be duplicated.
+					// If this is the first time, add it to visitedExecuted set.
+					// Any additional time should be incremented to expectedLen.
+					if visitedExecuted.Has(f.executedCommands[i]) {
+						expectedDuplicates++
+						if executedLen == expectedLen+expectedDuplicates {
+							return true
+						}
+					} else {
+						// First time we had the executed command. Keep track of it should it happen again.
+						visitedExecuted.Insert(f.executedCommands[i])
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // ExpectedCmd contains properties that the testcase expects a called command
@@ -135,6 +164,9 @@ type ExpectedCmd struct {
 	// LooseBatchCompare should be set if the command-line string is a batched
 	// ovn-nbctl where the ordering does not matter
 	LooseBatchCompare bool
+	// AllowDuplicates should be set if the specified expected command may happen more than once. As such, this
+	// expected command can happen at any time, so there must be no expectations in the ordering of when it happens
+	AllowDuplicates bool
 	// Output is any stdout output which Cmd should produce
 	Output string
 	// Stderr is any stderr output which Cmd should produce
@@ -237,7 +269,7 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 
 	var expected *ExpectedCmd
 	for _, candidate := range f.expectedCommands {
-		if !candidate.called {
+		if !candidate.called || candidate.AllowDuplicates {
 			if candidate.compare(executed) {
 				expected = candidate
 				expected.called = true
@@ -295,13 +327,27 @@ func (f *FakeExec) AddFakeCmd(expected *ExpectedCmd) {
 	expected.Cmd = fakeBinPrefix + expected.Cmd
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// If command allows for duplicates, look for matches in existing expected commands,
+	// and skip adding it again.
+	for _, candidate := range f.expectedCommands {
+		if expected.AllowDuplicates && candidate.compare(expected.Cmd) {
+			candidate.AllowDuplicates = true
+			return
+		}
+	}
 	f.expectedCommands = append(f.expectedCommands, expected)
 }
 
 // AddFakeCmdsNoOutputNoError appends a list of commands to the expected
 // command set. The command cannot return any output or error.
 func (f *FakeExec) AddFakeCmdsNoOutputNoError(commands []string) {
+	f.AddFakeCmdsNoOutputNoErrorMayDuplicate(commands, false)
+}
+
+// AddFakeCmdsNoOutputNoErrorMayDuplicate appends a list of commands to the expected
+// command set. The command cannot return any output or error and check if it may happen more than once.
+func (f *FakeExec) AddFakeCmdsNoOutputNoErrorMayDuplicate(commands []string, allowDuplicates bool) {
 	for _, cmd := range commands {
-		f.AddFakeCmd(&ExpectedCmd{Cmd: cmd})
+		f.AddFakeCmd(&ExpectedCmd{Cmd: cmd, AllowDuplicates: allowDuplicates})
 	}
 }
