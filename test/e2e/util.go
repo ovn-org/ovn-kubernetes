@@ -1061,3 +1061,8 @@ func randStr(n int) string {
 	}
 	return string(b)
 }
+
+func isInterconnectEnabled() bool {
+	val, present := os.LookupEnv("OVN_INTERCONNECT_ENABLE")
+	return present && val == "true"
+}

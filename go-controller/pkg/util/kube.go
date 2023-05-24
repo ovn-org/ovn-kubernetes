@@ -55,7 +55,6 @@ type OVNMasterClientset struct {
 	KubeClient               kubernetes.Interface
 	EgressIPClient           egressipclientset.Interface
 	EgressFirewallClient     egressfirewallclientset.Interface
-	CloudNetworkClient       ocpcloudnetworkclientset.Interface
 	EgressQoSClient          egressqosclientset.Interface
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 	EgressServiceClient      egressserviceclientset.Interface
@@ -68,6 +67,8 @@ type OVNNodeClientset struct {
 
 type OVNClusterManagerClientset struct {
 	KubeClient            kubernetes.Interface
+	EgressIPClient        egressipclientset.Interface
+	CloudNetworkClient    ocpcloudnetworkclientset.Interface
 	NetworkAttchDefClient networkattchmentdefclientset.Interface
 }
 
@@ -76,7 +77,6 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		KubeClient:               cs.KubeClient,
 		EgressIPClient:           cs.EgressIPClient,
 		EgressFirewallClient:     cs.EgressFirewallClient,
-		CloudNetworkClient:       cs.CloudNetworkClient,
 		EgressQoSClient:          cs.EgressQoSClient,
 		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
 		EgressServiceClient:      cs.EgressServiceClient,
@@ -86,6 +86,8 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset {
 	return &OVNClusterManagerClientset{
 		KubeClient:            cs.KubeClient,
+		EgressIPClient:        cs.EgressIPClient,
+		CloudNetworkClient:    cs.CloudNetworkClient,
 		NetworkAttchDefClient: cs.NetworkAttchDefClient,
 	}
 }

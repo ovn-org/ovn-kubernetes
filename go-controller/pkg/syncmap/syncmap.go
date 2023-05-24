@@ -140,6 +140,14 @@ func (c *SyncMap[T]) LoadOrStore(lockedKey string, newEntry T) (value T, loaded 
 	}
 }
 
+// Store sets the value for a key.
+// If key-value was already present, it will be over-written
+func (c *SyncMap[T]) Store(lockedKey string, newEntry T) {
+	c.entriesMutex.Lock()
+	defer c.entriesMutex.Unlock()
+	c.entries[lockedKey] = newEntry
+}
+
 // Delete deletes object from the entries map
 func (c *SyncMap[T]) Delete(lockedKey string) {
 	c.entriesMutex.Lock()

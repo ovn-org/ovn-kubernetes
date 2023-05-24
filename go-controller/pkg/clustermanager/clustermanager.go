@@ -31,6 +31,9 @@ type ClusterManager struct {
 	wf                          *factory.WatchFactory
 	wg                          *sync.WaitGroup
 	secondaryNetClusterManager  *secondaryNetworkClusterManager
+	// Controller used for programming node allocation for egress IP
+	// The OVN DB setup is handled by egressIPZoneController that runs in ovnkube-controller
+	eIPC *egressIPClusterController
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
@@ -66,6 +69,9 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 			return nil, err
 		}
 	}
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		cm.eIPC = newEgressIPController(ovnClient, wf, recorder)
+	}
 	return cm, nil
 }
 
@@ -93,6 +99,12 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		if err := cm.eIPC.Start(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -103,6 +115,9 @@ func (cm *ClusterManager) Stop() {
 	cm.zoneClusterController.Stop()
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		cm.secondaryNetClusterManager.Stop()
+	}
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		cm.eIPC.Stop()
 	}
 	metrics.UnregisterClusterManagerFunctional()
 }

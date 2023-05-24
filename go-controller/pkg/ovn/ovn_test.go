@@ -18,6 +18,7 @@ import (
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
@@ -225,7 +226,6 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
-			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 			EgressServiceClient:  ovnClient.EgressServiceClient,
 		},
 		wf,
@@ -331,7 +331,6 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 				Kube:                 kube.Kube{KClient: o.fakeClient.KubeClient},
 				EIPClient:            o.fakeClient.EgressIPClient,
 				EgressFirewallClient: o.fakeClient.EgressFirewallClient,
-				CloudNetworkClient:   o.fakeClient.CloudNetworkClient,
 			},
 			o.watcher,
 			o.fakeRecorder,
@@ -379,4 +378,18 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 	ginkgo.By(fmt.Sprintf("OVN test init: add NAD %s to secondary network controller of %s network %s", nadName, topoType, netName))
 	secondaryController.AddNAD(nadName)
 	return nil
+}
+
+func (o *FakeOVN) patchEgressIPObj(nodeName, egressIP string) {
+	// NOTE: Cluster manager is the one who patches the egressIP object.
+	// For the sake of unit testing egressip zone controller we need to patch egressIP object manually
+	// There are tests in cluster-manager package covering the patch logic.
+	status := []egressipv1.EgressIPStatusItem{
+		{
+			Node:     nodeName,
+			EgressIP: egressIP,
+		},
+	}
+	err := o.controller.patchReplaceEgressIPStatus(egressIPName, status)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }

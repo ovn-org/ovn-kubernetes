@@ -34,10 +34,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const (
-	egressFirewallDNSDefaultDuration  = 30 * time.Minute
-	egressIPReachabilityCheckInterval = 5 * time.Second
-)
+const egressFirewallDNSDefaultDuration = 30 * time.Minute
 
 // ACL logging severity levels
 type ACLLoggingLevels struct {
@@ -301,13 +298,6 @@ func (oc *DefaultNetworkController) WatchEgressFwNodes() error {
 	return err
 }
 
-// WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
-// resource and calls back the appropriate handler logic.
-func (oc *DefaultNetworkController) WatchCloudPrivateIPConfig() error {
-	_, err := oc.retryCloudPrivateIPConfig.WatchResource()
-	return err
-}
-
 // WatchEgressIP starts the watching of egressip resource and calls back the
 // appropriate handler logic. It also initiates the other dedicated resource
 // handlers for egress IP setup: namespaces, pods.
@@ -494,10 +484,10 @@ func (oc *DefaultNetworkController) InitEgressServiceController() (*egresssvc.Co
 		}
 
 		if hcPort == 0 {
-			return isReachableLegacy(nodeName, mgmtIPs, timeout)
+			return egresssvc.IsReachableLegacy(nodeName, mgmtIPs, timeout)
 		}
 
-		return isReachableViaGRPC(mgmtIPs, healthClient, hcPort, timeout)
+		return egresssvc.IsReachableViaGRPC(mgmtIPs, healthClient, hcPort, timeout)
 	}
 
 	return egresssvc.NewController(DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
