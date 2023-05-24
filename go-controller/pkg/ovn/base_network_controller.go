@@ -709,22 +709,8 @@ func (bnc *BaseNetworkController) getPodNADNames(pod *kapi.Pod) []string {
 	if !bnc.IsSecondary() {
 		return []string{types.DefaultNetworkName}
 	}
-	on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bnc.NetInfo)
-	// skip pods that are not on this network
-	if err != nil || !on {
-		if err != nil {
-			// if we are not able to determine if this pod is on this network continue processing the
-			// remaining pods anyway, hopefully the pod will be handled in a future pod update event.
-			klog.Warningf("Failed to determine if pod %s/%s is on network %s: %v",
-				pod.Namespace, pod.Name, bnc.GetNetworkName(), err)
-		}
-		return []string{}
-	}
-	nadNames := make([]string, 0, len(networkMap))
-	for nadName := range networkMap {
-		nadNames = append(nadNames, nadName)
-	}
-	return nadNames
+	podNadNames, _ := util.PodNadNames(pod, bnc.NetInfo)
+	return podNadNames
 }
 
 // getClusterPortGroupName gets network scoped port group hash name; base is either

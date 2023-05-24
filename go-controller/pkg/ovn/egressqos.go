@@ -154,6 +154,10 @@ func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.
 			if err != nil {
 				return nil, nil, err
 			}
+			if len(podIPs) == 0 {
+				klog.Warningf("No pod IPs for default network")
+				continue
+			}
 			podsCache.Store(pod.Name, podIPs)
 			podsIps = append(podsIps, podIPs...)
 		}

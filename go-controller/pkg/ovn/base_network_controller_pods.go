@@ -298,6 +298,9 @@ func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP) (*k
 		haystackPodAddrs, err := util.GetPodIPsOfNetwork(p, bnc.NetInfo)
 		if err != nil {
 			continue
+		} else if len(haystackPodAddrs) == 0 && bnc.doesNetworkRequireIPAM() {
+			klog.Warningf("No pod IP addresses for pod %s/%s on secondary network %s", p.Namespace, p.Name, bnc.GetNetworkName())
+			continue
 		}
 
 		for _, haystackPodAddr := range haystackPodAddrs {

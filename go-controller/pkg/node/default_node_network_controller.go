@@ -1131,6 +1131,8 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 		podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
 		if err != nil {
 			errors = append(errors, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
+		} else if len(podIPs) == 0 {
+			errors = append(errors, fmt.Errorf("no IP addresses for default network for pod %s/%s", pod.Namespace, pod.Name))
 		}
 		for _, podIP := range podIPs { // flush conntrack only for UDP
 			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs

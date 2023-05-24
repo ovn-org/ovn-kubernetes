@@ -353,7 +353,6 @@ func (bnc *BaseNetworkController) getAllNamespacePodAddresses(ns string) []net.I
 	if !bnc.doesNetworkRequireIPAM() {
 		return nil
 	}
-
 	var ips []net.IP
 	// Get all the pods in the namespace and append their IP to the address_set
 	existingPods, err := bnc.watchFactory.GetPods(ns)
