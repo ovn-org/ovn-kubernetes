@@ -22,7 +22,7 @@ import (
 	"math/big"
 	"net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ipallocator/allocator"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -35,6 +35,7 @@ type Interface interface {
 	ForEach(func(net.IP))
 	CIDR() net.IPNet
 	Has(ip net.IP) bool
+	Reserved(ip net.IP) bool
 }
 
 var (
@@ -197,6 +198,17 @@ func (r *Range) Has(ip net.IP) bool {
 	}
 
 	return r.alloc.Has(offset)
+}
+
+// Reserved returns true if the provided IP can't be allocated. This is *only*
+// true for the network and broadcast addresses.
+func (r *Range) Reserved(ip net.IP) bool {
+	if !r.net.Contains(ip) {
+		return false
+	}
+
+	offset := calculateIPOffset(r.base, ip)
+	return offset == -1 || offset == r.max
 }
 
 // contains returns true and the offset if the ip is in the range, and false

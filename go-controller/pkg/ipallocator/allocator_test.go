@@ -258,3 +258,30 @@ func TestForEach(t *testing.T) {
 		}
 	}
 }
+
+func TestReserved(t *testing.T) {
+	_, cidr, err := net.ParseCIDR("192.168.1.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewCIDRRange(cidr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !r.Reserved(net.ParseIP("192.168.1.0")) {
+		t.Errorf("should be a reserved address: %s", "192.168.1.0")
+	}
+
+	if !r.Reserved(net.ParseIP("192.168.1.255")) {
+		t.Errorf("should be a reserved address: %s", "192.168.1.255")
+	}
+
+	if r.Reserved(net.ParseIP("192.168.1.1")) {
+		t.Errorf("should not be a reserved address: %s", "192.168.1.1")
+	}
+
+	if r.Reserved(net.ParseIP("192.168.1.254")) {
+		t.Errorf("should not be a reserved address: %s", "192.168.1.254")
+	}
+}

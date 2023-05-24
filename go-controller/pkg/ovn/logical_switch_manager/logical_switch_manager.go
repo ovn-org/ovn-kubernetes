@@ -8,9 +8,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
-	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
+	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ipallocator/allocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -281,7 +280,7 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(switchName string, hy
 		// attempt to allocate the IP address that is annotated on the node. The only way there would be a collision is if the annotations of podIP or hybridOverlayDRIP
 		// where manually edited and we do not support that
 		err := manager.AllocateIPs(switchName, allocateAddresses)
-		if err != nil && err != ipallocator.ErrAllocated {
+		if err != nil && err != ipam.ErrAllocated {
 			return nil, err
 		}
 		return allocateAddresses, nil
