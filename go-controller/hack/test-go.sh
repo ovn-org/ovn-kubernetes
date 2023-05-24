@@ -59,7 +59,7 @@ function testrun {
         echo "Increasing timeout to 20m for package ${pkg}"
         args="${args} -test.timeout=20m"
     fi
-    if grep -q -r "ginkgo" ."${path}"; then
+    if grep -q "ginkgo" ."${path}"/*_test.go; then
 	    prefix=$(echo "${path}" | cut -c 2- | sed 's,/,_,g')
         ginkgoargs="-ginkgo.v ${ginkgo_focus} -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
     fi

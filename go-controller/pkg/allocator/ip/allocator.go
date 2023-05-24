@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ipallocator
+package ip
 
 import (
 	"errors"
@@ -22,7 +22,7 @@ import (
 	"math/big"
 	"net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ipallocator/allocator"
+	allocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/bitmap"
 	utilnet "k8s.io/utils/net"
 )
 

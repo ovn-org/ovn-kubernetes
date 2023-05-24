@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"sync"
 
-	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ipallocator"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ipallocator/allocator"
+	allocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/bitmap"
+	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
