@@ -217,11 +217,12 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 
 func TestGetPodIPsOfNetwork(t *testing.T) {
 	tests := []struct {
-		desc      string
-		inpPod    *v1.Pod
-		errAssert bool
-		errMatch  error
-		outExp    []net.IP
+		desc        string
+		inpPod      *v1.Pod
+		networkInfo NetInfo
+		errAssert   bool
+		errMatch    error
+		outExp      []net.IP
 	}{
 		// TODO: The function body may need to check that pod input is non-nil to avoid panic ?
 		/*{
@@ -236,12 +237,14 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 					Annotations: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.1/24"],"mac_address":"0a:58:fd:98:00:01"}}`},
 				},
 			},
-			outExp: []net.IP{ovntest.MustParseIP("192.168.0.1")},
+			networkInfo: &DefaultNetInfo{},
+			outExp:      []net.IP{ovntest.MustParseIP("192.168.0.1")},
 		},
 		{
-			desc:     "test when pod.status.PodIP is empty",
-			inpPod:   &v1.Pod{},
-			errMatch: ErrNoPodIPFound,
+			desc:        "test when pod.status.PodIP is empty",
+			inpPod:      &v1.Pod{},
+			networkInfo: &DefaultNetInfo{},
+			errMatch:    ErrNoPodIPFound,
 		},
 		{
 			desc: "test when pod.status.PodIP is non-empty",
@@ -250,7 +253,8 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 					PodIP: "192.168.1.15",
 				},
 			},
-			outExp: []net.IP{ovntest.MustParseIP("192.168.1.15")},
+			networkInfo: &DefaultNetInfo{},
+			outExp:      []net.IP{ovntest.MustParseIP("192.168.1.15")},
 		},
 		{
 			desc: "test when pod.status.PodIPs is non-empty",
@@ -261,7 +265,8 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 					},
 				},
 			},
-			outExp: []net.IP{ovntest.MustParseIP("192.168.1.15")},
+			networkInfo: &DefaultNetInfo{},
+			outExp:      []net.IP{ovntest.MustParseIP("192.168.1.15")},
 		},
 		{
 			desc: "test path when an entry in pod.status.PodIPs is malformed",
@@ -272,12 +277,13 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 					},
 				},
 			},
-			errMatch: ErrNoPodIPFound,
+			networkInfo: &DefaultNetInfo{},
+			errMatch:    ErrNoPodIPFound,
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res1, e := GetPodIPsOfNetwork(tc.inpPod, &DefaultNetInfo{})
+			res1, e := GetPodIPsOfNetwork(tc.inpPod, tc.networkInfo)
 			t.Log(res1, e)
 			if tc.errAssert {
 				assert.Error(t, e)
@@ -290,7 +296,7 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 			} else {
 				assert.Equal(t, tc.outExp, res1)
 			}
-			res2, e := GetPodCIDRsWithFullMask(tc.inpPod, &DefaultNetInfo{})
+			res2, e := GetPodCIDRsWithFullMask(tc.inpPod, tc.networkInfo)
 			t.Log(res2, e)
 			if tc.errAssert {
 				assert.Error(t, e)
