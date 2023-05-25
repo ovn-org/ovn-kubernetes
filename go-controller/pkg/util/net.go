@@ -317,3 +317,15 @@ func GenerateRandMAC() (net.HardwareAddr, error) {
 
 	return buf, nil
 }
+
+// IPsToNetworkIPs returns the network CIDRs of the provided IP CIDRs
+func IPsToNetworkIPs(ips ...*net.IPNet) []*net.IPNet {
+	nets := make([]*net.IPNet, len(ips))
+	for i := range ips {
+		nets[i] = &net.IPNet{
+			IP:   ips[i].IP.Mask(ips[i].Mask),
+			Mask: ips[i].Mask,
+		}
+	}
+	return nets
+}

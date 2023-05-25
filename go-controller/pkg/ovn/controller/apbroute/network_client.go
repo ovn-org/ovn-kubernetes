@@ -194,12 +194,12 @@ func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress gatewayInfoList) e
 	}
 	podIPs := make([]*net.IPNet, 0)
 	for _, podIP := range pod.Status.PodIPs {
-		podIPStr := utilnet.ParseIPSloppy(podIP.IP).String()
-		cidr := podIPStr + util.GetIPFullMask(podIPStr)
-		_, ipNet, err := net.ParseCIDR(cidr)
-		if err != nil {
-			return fmt.Errorf("failed to parse CIDR: %s, error: %v", cidr, err)
+		ip := utilnet.ParseIPSloppy(podIP.IP)
+		ipNet := &net.IPNet{
+			IP:   ip,
+			Mask: util.GetIPFullMask(ip),
 		}
+		ipNet = util.IPsToNetworkIPs(ipNet)[0]
 		podIPs = append(podIPs, ipNet)
 	}
 	if len(podIPs) == 0 {
@@ -289,7 +289,7 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddr
 					routesAdded++
 					continue
 				}
-				mask := util.GetIPFullMask(podIP)
+				mask := util.GetIPFullMaskString(podIP)
 				if err := nb.createOrUpdateBFDStaticRoute(gateway.BFDEnabled, gw, podIP, gr, port, mask); err != nil {
 					return err
 				}
@@ -445,7 +445,7 @@ func (nb *northBoundClient) updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP
 	if foundGR, ok := routeInfo.PodExternalRoutes[podIP][gwIP]; ok && foundGR == gr {
 		return nil
 	}
-	mask := util.GetIPFullMask(podIP)
+	mask := util.GetIPFullMaskString(podIP)
 
 	portPrefix, err := nb.extSwitchPrefix(nodeName)
 	if err != nil {
@@ -519,7 +519,7 @@ func (nb *northBoundClient) deletePodGWRoute(routeInfo *ExternalRouteInfo, podIP
 		return nil
 	}
 
-	mask := util.GetIPFullMask(podIP)
+	mask := util.GetIPFullMaskString(podIP)
 	if err := nb.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
 		return fmt.Errorf("unable to delete pod %s ECMP route to GR %s, GW: %s: %w",
 			routeInfo.PodName, gr, gw, err)
@@ -699,18 +699,12 @@ func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
 	var nat *nbdb.NAT
 
 	for _, podIPNet := range podIPNets {
-		podIP := podIPNet.IP.String()
-		mask := util.GetIPFullMask(podIP)
-		_, fullMaskPodNet, err := net.ParseCIDR(podIP + mask)
-		if err != nil {
-			return nil, fmt.Errorf("invalid IP: %s and mask: %s combination, error: %v", podIP, mask, err)
-		}
+		fullMaskPodNet := util.IPsToNetworkIPs(podIPNet)[0]
 		if len(extIPs) == 0 {
 			nat = libovsdbops.BuildSNAT(nil, fullMaskPodNet, "", nil)
 		} else {
 			for _, gwIPNet := range extIPs {
-				gwIP := gwIPNet.IP.String()
-				if utilnet.IsIPv6String(gwIP) != utilnet.IsIPv6String(podIP) {
+				if utilnet.IsIPv6CIDR(gwIPNet) != utilnet.IsIPv6CIDR(podIPNet) {
 					continue
 				}
 				nat = libovsdbops.BuildSNAT(&gwIPNet.IP, fullMaskPodNet, "", nil)

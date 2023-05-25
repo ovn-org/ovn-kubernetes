@@ -59,8 +59,8 @@ func StringArg(context *cli.Context, name string) (string, error) {
 	return val, nil
 }
 
-// GetIPFullMask returns /32 if ip is IPV4 family and /128 if ip is IPV6 family
-func GetIPFullMask(ip string) string {
+// GetIPFullMaskString returns /32 if ip is IPV4 family and /128 if ip is IPV6 family
+func GetIPFullMaskString(ip string) string {
 	const (
 		// IPv4FullMask is the maximum prefix mask for an IPv4 address
 		IPv4FullMask = "/32"
@@ -74,19 +74,13 @@ func GetIPFullMask(ip string) string {
 	return IPv4FullMask
 }
 
-// GetFullNetMask returns a 32 bit netmask for IPv4 addresses and a 128 bit netmask for IPv6 addresses
-func GetFullNetMask(ip net.IP) net.IPMask {
-	const (
-		// IPv4FullMask is the maximum prefix mask for an IPv4 address
-		IPv4FullMask = 32
-		// IPv6FullMask is the maximum prefix mask for an IPv6 address
-		IPv6FullMask = 128
-	)
-
+// GetIPFullMask returns a full IPv4 IPMask if ip is IPV4 family or a full IPv6
+// IPMask otherwise
+func GetIPFullMask(ip net.IP) net.IPMask {
 	if utilnet.IsIPv6(ip) {
-		return net.CIDRMask(IPv6FullMask, IPv6FullMask)
+		return net.CIDRMask(128, 128)
 	}
-	return net.CIDRMask(IPv4FullMask, IPv4FullMask)
+	return net.CIDRMask(32, 32)
 }
 
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name

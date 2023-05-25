@@ -259,7 +259,7 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod, nInfo NetInfo) ([]*net.IPNet, error) {
 	for _, podIP := range podIPs {
 		ipNet := net.IPNet{
 			IP:   podIP,
-			Mask: GetFullNetMask(podIP),
+			Mask: GetIPFullMask(podIP),
 		}
 		ips = append(ips, &ipNet)
 	}

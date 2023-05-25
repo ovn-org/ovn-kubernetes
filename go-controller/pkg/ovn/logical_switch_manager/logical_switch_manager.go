@@ -31,27 +31,23 @@ func NewL2SwitchManager() *LogicalSwitchManager {
 	}
 }
 
-// AddOrUpdateSwitch adds/updates a switch to the logical switch manager for
-// subnet and IPAM management.
-func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSubnets []*net.IPNet) error {
+// AddOrUpdateSwitch adds/updates a switch to the logical switch manager for subnet
+// and IPAM management.
+func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSubnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {
 	err := manager.allocator.AddOrUpdateSubnet(switchName, hostSubnets)
 	if err != nil {
 		return err
 	}
 	if manager.reserveIPs {
 		for _, hostSubnet := range hostSubnets {
-			err = manager.allocator.AllocateIPs(switchName, []*net.IPNet{util.GetNodeGatewayIfAddr(hostSubnet)})
-			if err != nil {
-				return err
-			}
-			err = manager.allocator.AllocateIPs(switchName, []*net.IPNet{util.GetNodeManagementIfAddr(hostSubnet)})
-			if err != nil {
-				return err
+			for _, ip := range []*net.IPNet{util.GetNodeGatewayIfAddr(hostSubnet), util.GetNodeManagementIfAddr(hostSubnet)} {
+				excludeSubnets = append(excludeSubnets,
+					&net.IPNet{IP: ip.IP, Mask: util.GetIPFullMask(ip.IP)},
+				)
 			}
 		}
 	}
-
-	return nil
+	return manager.allocator.AddOrUpdateSubnet(switchName, hostSubnets, excludeSubnets...)
 }
 
 // AddNoHostSubnetSwitch adds/updates a switch without any host subnets

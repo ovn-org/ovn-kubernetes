@@ -67,6 +67,28 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 				gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 			}
 		})
+
+		ginkgo.It("excludes subnets correctly", func() {
+			subnetName := "subnet1"
+			subnets := []string{
+				"10.1.1.0/24",
+			}
+			excludes := []string{
+				"10.1.1.0/29",
+			}
+
+			expectedIPs := []string{"10.1.1.8"}
+
+			err := allocator.AddOrUpdateSubnet(subnetName, ovntest.MustParseIPNets(subnets...), ovntest.MustParseIPNets(excludes...)...)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ips, err := allocator.AllocateNextIPs(subnetName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			for i, ip := range ips {
+				gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
+			}
+		})
+
 	})
 
 	ginkgo.Context("when allocating IP addresses", func() {

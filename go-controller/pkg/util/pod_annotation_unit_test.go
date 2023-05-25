@@ -345,7 +345,7 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 					expectedIP := tc.outExp[0]
 					ipNet := net.IPNet{
 						IP:   expectedIP,
-						Mask: GetFullNetMask(expectedIP),
+						Mask: GetIPFullMask(expectedIP),
 					}
 					assert.Equal(t, []*net.IPNet{&ipNet}, res2)
 				}

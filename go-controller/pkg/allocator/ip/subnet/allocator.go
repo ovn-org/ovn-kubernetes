@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sync"
 
+	iputils "github.com/containernetworking/plugins/pkg/ip"
 	bitmapallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/bitmap"
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -16,7 +17,7 @@ import (
 // Allocator manages the allocation of IP within specific set of subnets
 // identified by a name. Allocator should be threadsafe.
 type Allocator interface {
-	AddOrUpdateSubnet(name string, subnets []*net.IPNet) error
+	AddOrUpdateSubnet(name string, subnets []*net.IPNet, excludeSubnets ...*net.IPNet) error
 	DeleteSubnet(name string)
 	GetSubnets(name string) ([]*net.IPNet, error)
 	AllocateUntilFull(name string) error
@@ -68,7 +69,7 @@ func NewAllocator() *allocator {
 }
 
 // AddOrUpdateSubnet set to the allocator for IPAM management, or update it.
-func (allocator *allocator) AddOrUpdateSubnet(name string, subnets []*net.IPNet) error {
+func (allocator *allocator) AddOrUpdateSubnet(name string, subnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {
 	allocator.Lock()
 	defer allocator.Unlock()
 	if subnetInfo, ok := allocator.cache[name]; ok && !reflect.DeepEqual(subnetInfo.subnets, subnets) {
@@ -85,6 +86,22 @@ func (allocator *allocator) AddOrUpdateSubnet(name string, subnets []*net.IPNet)
 	allocator.cache[name] = subnetInfo{
 		subnets: subnets,
 		ipams:   ipams,
+	}
+
+	for _, excludeSubnet := range excludeSubnets {
+		var excluded bool
+		for i, subnet := range subnets {
+			if util.ContainsCIDR(subnet, excludeSubnet) {
+				err := reserveSubnets(excludeSubnet, ipams[i])
+				if err != nil {
+					return fmt.Errorf("failed to exclude subnet %s for %s: %w", excludeSubnet, name, err)
+				}
+			}
+			excluded = true
+		}
+		if !excluded {
+			return fmt.Errorf("failed to exclude subnet %s for %s: not contained in any of the subnets", excludeSubnet, name)
+		}
 	}
 
 	return nil
@@ -178,6 +195,21 @@ func (allocator *allocator) AllocateIPs(name string, ips []*net.IPNet) error {
 				allocated[idx] = ipnet
 				break
 			}
+		}
+	}
+	return nil
+}
+
+// reserveSubnets reserves subnet IPs
+func reserveSubnets(subnet *net.IPNet, ipam ipallocator.Interface) error {
+	// FIXME: allocate IP ranges when https://github.com/ovn-org/ovn-kubernetes/issues/3369 is fixed
+	for ip := subnet.IP; subnet.Contains(ip); ip = iputils.NextIP(ip) {
+		if ipam.Reserved(ip) {
+			continue
+		}
+		err := ipam.Allocate(ip)
+		if err != nil {
+			return fmt.Errorf("failed to reserve IP %s: %w", ip, err)
 		}
 	}
 	return nil
