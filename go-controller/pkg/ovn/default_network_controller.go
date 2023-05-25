@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
@@ -51,8 +52,8 @@ type DefaultNetworkController struct {
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[kapi.Protocol]string
 
-	externalGWCache map[ktypes.NamespacedName]*externalRouteInfo
-	exGWCacheMutex  sync.RWMutex
+	externalGWCache map[ktypes.NamespacedName]*apbroutecontroller.ExternalRouteInfo
+	exGWCacheMutex  *sync.RWMutex
 
 	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
 	egressFirewalls sync.Map
@@ -93,6 +94,9 @@ type DefaultNetworkController struct {
 	svcController *svccontroller.Controller
 	// Controller used to handle egress services
 	egressSvcController *egresssvc.Controller
+
+	// Controller used to handle the admin policy based external route resources
+	apbExternalRouteController *apbroutecontroller.ExternalGatewayMasterController
 	// svcFactory used to handle service related events
 	svcFactory informers.SharedInformerFactory
 
@@ -163,6 +167,20 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		zoneICHandler = zoneic.NewZoneInterconnectHandler(&util.DefaultNetInfo{}, cnci.nbClient, cnci.sbClient)
 		zoneChassisHandler = zoneic.NewZoneChassisHandler(cnci.sbClient)
 	}
+	apbExternalRouteController, err := apbroutecontroller.NewExternalMasterController(
+		DefaultNetworkControllerName,
+		cnci.client,
+		cnci.kube.APBRouteClient,
+		defaultStopChan,
+		cnci.watchFactory.PodCoreInformer(),
+		cnci.watchFactory.NamespaceInformer(),
+		cnci.watchFactory.NodeCoreInformer().Lister(),
+		cnci.nbClient,
+		addressSetFactory,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create new admin policy based external route controller while creating new default network controller :%w", err)
+	}
 
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
@@ -181,8 +199,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			wg:                          defaultWg,
 			localZoneNodes:              &sync.Map{},
 		},
-		externalGWCache: make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:  sync.RWMutex{},
+		externalGWCache: apbExternalRouteController.ExternalGWCache,
+		exGWCacheMutex:  apbExternalRouteController.ExGWCacheMutex,
 		eIPC: egressIPZoneController{
 			nodeIPUpdateMutex:  &sync.Mutex{},
 			podAssignmentMutex: &sync.Mutex{},
@@ -199,6 +217,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		svcFactory:                   svcFactory,
 		zoneICHandler:                zoneICHandler,
 		zoneChassisHandler:           zoneChassisHandler,
+		apbExternalRouteController:   apbExternalRouteController,
 	}
 
 	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
@@ -383,10 +402,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
 
-	// Sync external gateway routes. External gateway may be set in namespaces
-	// or via pods. So execute an individual sync method at startup
-	WithSyncDurationMetricNoError("external gateway routes", oc.cleanExGwECMPRoutes)
-
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
 	if err := WithSyncDurationMetric("namespace", oc.WatchNamespaces); err != nil {
@@ -496,6 +511,12 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 			oc.egressSvcController.Run(1)
 		}()
 	}
+
+	oc.wg.Add(1)
+	go func() {
+		defer oc.wg.Done()
+		oc.apbExternalRouteController.Run(1)
+	}()
 
 	end := time.Since(start)
 	klog.Infof("Completing all the Watchers took %v", end)

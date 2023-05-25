@@ -787,6 +787,24 @@ func DeleteBFDs(nbClient libovsdbclient.Client, bfds ...*nbdb.BFD) error {
 	return m.Delete(opModels...)
 }
 
+func LookupBFD(nbClient libovsdbclient.Client, bfd *nbdb.BFD) (*nbdb.BFD, error) {
+	found := []*nbdb.BFD{}
+	opModel := operationModel{
+		Model:          bfd,
+		ModelPredicate: func(item *nbdb.BFD) bool { return item.DstIP == bfd.DstIP && item.LogicalPort == bfd.LogicalPort },
+		ExistingResult: &found,
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+
+	m := newModelClient(nbClient)
+	err := m.Lookup(opModel)
+	if err != nil {
+		return nil, err
+	}
+	return found[0], nil
+}
+
 // LB OPs
 
 // AddLoadBalancersToLogicalRouterOps adds the provided load balancers to the

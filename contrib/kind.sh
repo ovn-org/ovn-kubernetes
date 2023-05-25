@@ -836,6 +836,7 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressips.yaml
   run_kubectl apply -f k8s.ovn.org_egressqoses.yaml
   run_kubectl apply -f k8s.ovn.org_egressservices.yaml
+  run_kubectl apply -f k8s.ovn.org_adminpolicybasedexternalroutes.yaml
   run_kubectl apply -f ovn-setup.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA

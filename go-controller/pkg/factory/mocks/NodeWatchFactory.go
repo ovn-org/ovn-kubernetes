@@ -8,6 +8,8 @@ import (
 
 	factory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 
+	informerscorev1 "k8s.io/client-go/informers/core/v1"
+
 	labels "k8s.io/apimachinery/pkg/labels"
 
 	mock "github.com/stretchr/testify/mock"
@@ -381,6 +383,22 @@ func (_m *NodeWatchFactory) LocalPodInformer() cache.SharedIndexInformer {
 	return r0
 }
 
+// NamespaceInformer provides a mock function with given fields:
+func (_m *NodeWatchFactory) NamespaceInformer() informerscorev1.NamespaceInformer {
+	ret := _m.Called()
+
+	var r0 informerscorev1.NamespaceInformer
+	if rf, ok := ret.Get(0).(func() informerscorev1.NamespaceInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(informerscorev1.NamespaceInformer)
+		}
+	}
+
+	return r0
+}
+
 // NodeInformer provides a mock function with given fields:
 func (_m *NodeWatchFactory) NodeInformer() cache.SharedIndexInformer {
 	ret := _m.Called()
@@ -391,6 +409,22 @@ func (_m *NodeWatchFactory) NodeInformer() cache.SharedIndexInformer {
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(cache.SharedIndexInformer)
+		}
+	}
+
+	return r0
+}
+
+// PodCoreInformer provides a mock function with given fields:
+func (_m *NodeWatchFactory) PodCoreInformer() informerscorev1.PodInformer {
+	ret := _m.Called()
+
+	var r0 informerscorev1.PodInformer
+	if rf, ok := ret.Get(0).(func() informerscorev1.PodInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(informerscorev1.PodInformer)
 		}
 	}
 

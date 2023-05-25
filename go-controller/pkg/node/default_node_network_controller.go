@@ -25,6 +25,7 @@ import (
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -32,6 +33,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	retry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -41,11 +43,12 @@ import (
 )
 
 type CommonNodeNetworkControllerInfo struct {
-	client       clientset.Interface
-	Kube         kube.Interface
-	watchFactory factory.NodeWatchFactory
-	recorder     record.EventRecorder
-	name         string
+	client                 clientset.Interface
+	Kube                   kube.Interface
+	watchFactory           factory.NodeWatchFactory
+	recorder               record.EventRecorder
+	name                   string
+	apbExternalRouteClient adminpolicybasedrouteclientset.Interface
 }
 
 // BaseNodeNetworkController structure per-network fields and network specific configuration
@@ -67,22 +70,23 @@ type BaseNodeNetworkController struct {
 	wg       *sync.WaitGroup
 }
 
-func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.Interface,
+func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface,
 	wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name string) *CommonNodeNetworkControllerInfo {
 
 	return &CommonNodeNetworkControllerInfo{
-		client:       kubeClient,
-		Kube:         kube,
-		watchFactory: wf,
-		name:         name,
-		recorder:     eventRecorder,
+		client:                 kubeClient,
+		Kube:                   kube,
+		apbExternalRouteClient: apbExternalRouteClient,
+		watchFactory:           wf,
+		name:                   name,
+		recorder:               eventRecorder,
 	}
 }
 
 // NewCommonNodeNetworkControllerInfo creates and returns the base node network controller info
-func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, wf factory.NodeWatchFactory,
+func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface, wf factory.NodeWatchFactory,
 	eventRecorder record.EventRecorder, name string) *CommonNodeNetworkControllerInfo {
-	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, wf, eventRecorder, name)
+	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, apbExternalRouteClient, wf, eventRecorder, name)
 }
 
 // DefaultNodeNetworkController is the object holder for utilities meant for node management of default network
@@ -99,10 +103,13 @@ type DefaultNodeNetworkController struct {
 	retryNamespaces *retry.RetryFramework
 	// retry framework for endpoint slices, used for the removal of stale conntrack entries for services
 	retryEndpointSlices *retry.RetryFramework
+
+	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
 	wg *sync.WaitGroup) *DefaultNodeNetworkController {
+
 	return &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
@@ -116,13 +123,13 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
 func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*DefaultNodeNetworkController, error) {
+	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
-		var err error
 		nc.healthzServer, err = newNodeProxyHealthzServer(
 			nc.name, config.Kubernetes.HealthzBindAddress, nc.recorder, nc.watchFactory)
 		if err != nil {
@@ -130,7 +137,17 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*D
 		}
 	}
 
+	nc.apbExternalRouteNodeController, err = apbroute.NewExternalNodeController(
+		cnnci.apbExternalRouteClient,
+		nc.watchFactory.PodCoreInformer(),
+		nc.watchFactory.NamespaceInformer(),
+		stopChan)
+	if err != nil {
+		return nil, err
+	}
+
 	nc.initRetryFrameworkForNode()
+
 	return nc, nil
 }
 
@@ -917,6 +934,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			c.Run(1)
 		}()
 	}
+	nc.wg.Add(1)
+	go func() {
+		defer nc.wg.Done()
+		nc.apbExternalRouteNodeController.Run(1)
+	}()
 
 	nc.wg.Add(1)
 	go func() {
@@ -1049,13 +1071,17 @@ func (nc *DefaultNodeNetworkController) checkAndDeleteStaleConntrackEntries() {
 }
 
 func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *kapi.Namespace) error {
+	gatewayIPs, err := nc.apbExternalRouteNodeController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(newNs.Name)
+	if err != nil {
+		klog.Errorf("Unable to retrieve Admin Policy Based External Route objects:%v", err)
+	}
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
-	gatewayIPs := strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")
-	gatewayIPs = append(gatewayIPs, strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
+	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")...)
+	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
 	var wg sync.WaitGroup
 	wg.Add(len(gatewayIPs))
 	validMACs := sync.Map{}
-	for _, gwIP := range gatewayIPs {
+	for gwIP := range gatewayIPs {
 		go func(gwIP string) {
 			defer wg.Done()
 			if len(gwIP) > 0 && !utilnet.IsIPv6String(gwIP) {
