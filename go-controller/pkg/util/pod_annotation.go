@@ -11,7 +11,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -258,14 +257,11 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod, nInfo NetInfo) ([]*net.IPNet, error) {
 	}
 	ips := make([]*net.IPNet, 0, len(podIPs))
 	for _, podIP := range podIPs {
-		podIPStr := podIP.String()
-		mask := GetIPFullMask(podIPStr)
-		_, ipnet, err := net.ParseCIDR(podIPStr + mask)
-		if err != nil {
-			// this should not happen;
-			return nil, fmt.Errorf("failed to parse pod IP %v err: %w", podIP, err)
+		ipNet := net.IPNet{
+			IP:   podIP,
+			Mask: GetFullNetMask(podIP),
 		}
-		ips = append(ips, ipnet)
+		ips = append(ips, &ipNet)
 	}
 	return ips, nil
 }
@@ -327,10 +323,6 @@ func PodNadNames(pod *v1.Pod, netinfo NetInfo) ([]string, error) {
 	if err != nil {
 		return nil, err
 	} else if !on {
-		// if we are not able to determine if this pod is on this network continue processing the
-		// remaining pods anyway, hopefully the pod will be handled in a future pod update event.
-		klog.Warningf("Failed to determine if pod %s/%s is on network %s: %v",
-			pod.Namespace, pod.Name, netinfo.GetNetworkName(), err)
 		return []string{}, nil
 	}
 	nadNames := make([]string, 0, len(networkMap))

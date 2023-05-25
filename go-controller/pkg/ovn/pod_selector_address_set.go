@@ -363,7 +363,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) deletePod(pod *v1.Pod) error {
 	if err != nil {
 		// if pod ips can't be fetched on delete, we don't expect that information about ips will ever be updated,
 		// therefore just log the error and return.
-		klog.Warningf("Failed to get pod IPs %s/%s to delete from pod selector address set: %w", pod.Namespace, pod.Name, err)
+		klog.Warningf("Could not find pod %s/%s IPs to delete from pod selector address set: %w", pod.Namespace, pod.Name, err)
 		return nil
 	}
 	return handlerInfo.addressSet.DeleteIPs(ips)
