@@ -85,7 +85,16 @@ type DefaultNetworkController struct {
 	podSelectorAddressSets *syncmap.SyncMap[*PodSelectorAddressSet]
 
 	// Cluster wide Load_Balancer_Group UUID.
-	loadBalancerGroupUUID string
+	// Includes all node switches and node gateway routers.
+	clusterLoadBalancerGroupUUID string
+
+	// Cluster wide switch Load_Balancer_Group UUID.
+	// Includes all node switches.
+	switchLoadBalancerGroupUUID string
+
+	// Cluster wide router Load_Balancer_Group UUID.
+	// Includes all node gateway routers.
+	routerLoadBalancerGroupUUID string
 
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
@@ -200,13 +209,15 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			reachabilityCheckInterval:         egressIPReachabilityCheckInterval,
 			egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
 		},
-		loadbalancerClusterCache: make(map[kapi.Protocol]string),
-		loadBalancerGroupUUID:    "",
-		aclLoggingEnabled:        true,
-		joinSwIPManager:          nil,
-		svcController:            svcController,
-		svcFactory:               svcFactory,
-		egressSvcController:      egressSvcController,
+		loadbalancerClusterCache:     make(map[kapi.Protocol]string),
+		clusterLoadBalancerGroupUUID: "",
+		switchLoadBalancerGroupUUID:  "",
+		routerLoadBalancerGroupUUID:  "",
+		aclLoggingEnabled:            true,
+		joinSwIPManager:              nil,
+		svcController:                svcController,
+		svcFactory:                   svcFactory,
+		egressSvcController:          egressSvcController,
 	}
 
 	oc.initRetryFramework()
@@ -343,7 +354,27 @@ func (oc *DefaultNetworkController) Init() error {
 			klog.Errorf("Error creating cluster-wide load balancer group %s: %v", ovntypes.ClusterLBGroupName, err)
 			return err
 		}
-		oc.loadBalancerGroupUUID = loadBalancerGroup.UUID
+		oc.clusterLoadBalancerGroupUUID = loadBalancerGroup.UUID
+
+		loadBalancerGroup = nbdb.LoadBalancerGroup{
+			Name: ovntypes.ClusterSwitchLBGroupName,
+		}
+		err = libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
+		if err != nil {
+			klog.Errorf("Error creating cluster-wide switch load balancer group %s: %v", ovntypes.ClusterSwitchLBGroupName, err)
+			return err
+		}
+		oc.switchLoadBalancerGroupUUID = loadBalancerGroup.UUID
+
+		loadBalancerGroup = nbdb.LoadBalancerGroup{
+			Name: ovntypes.ClusterRouterLBGroupName,
+		}
+		err = libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
+		if err != nil {
+			klog.Errorf("Error creating cluster-wide router load balancer group %s: %v", ovntypes.ClusterRouterLBGroupName, err)
+			return err
+		}
+		oc.routerLoadBalancerGroupUUID = loadBalancerGroup.UUID
 	}
 
 	nodeNames := []string{}

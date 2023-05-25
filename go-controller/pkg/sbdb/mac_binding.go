@@ -14,6 +14,7 @@ type MACBinding struct {
 	IP          string `ovsdb:"ip"`
 	LogicalPort string `ovsdb:"logical_port"`
 	MAC         string `ovsdb:"mac"`
+	Timestamp   int    `ovsdb:"timestamp"`
 }
 
 func (a *MACBinding) GetUUID() string {
@@ -34,6 +35,10 @@ func (a *MACBinding) GetLogicalPort() string {
 
 func (a *MACBinding) GetMAC() string {
 	return a.MAC
+}
+
+func (a *MACBinding) GetTimestamp() int {
+	return a.Timestamp
 }
 
 func (a *MACBinding) DeepCopyInto(b *MACBinding) {
@@ -60,7 +65,8 @@ func (a *MACBinding) Equals(b *MACBinding) bool {
 		a.Datapath == b.Datapath &&
 		a.IP == b.IP &&
 		a.LogicalPort == b.LogicalPort &&
-		a.MAC == b.MAC
+		a.MAC == b.MAC &&
+		a.Timestamp == b.Timestamp
 }
 
 func (a *MACBinding) EqualsModel(b model.Model) bool {
