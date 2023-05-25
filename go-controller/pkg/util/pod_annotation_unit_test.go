@@ -342,10 +342,12 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 						assert.Contains(t, e.Error(), tc.errMatch.Error())
 					}
 				} else {
-					podIPStr := tc.outExp[0].String()
-					mask := GetIPFullMask(podIPStr)
-					_, ipnet, _ := net.ParseCIDR(podIPStr + mask)
-					assert.Equal(t, []*net.IPNet{ipnet}, res2)
+					expectedIP := tc.outExp[0]
+					ipNet := net.IPNet{
+						IP:   expectedIP,
+						Mask: GetFullNetMask(expectedIP),
+					}
+					assert.Equal(t, []*net.IPNet{&ipNet}, res2)
 				}
 			}
 		})
