@@ -204,7 +204,7 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 
 func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
 	gomega.Expect(p.nodeName).NotTo(gomega.Equal(""))
-	err := fakeOvn.controller.lsManager.AddSwitch(p.nodeName, []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)})
+	err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(p.nodeName, []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
@@ -1731,7 +1731,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 				)
 
-				fakeOvn.controller.lsManager.AddSwitch(testNode.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch(testNode.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
@@ -1962,7 +1962,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						Items: []v1.Pod{},
 					},
 				)
-				fakeOvn.controller.lsManager.AddSwitch(testNodeWithLS.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch(testNodeWithLS.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// expect stale logical switch port removed if reconciliation is successful

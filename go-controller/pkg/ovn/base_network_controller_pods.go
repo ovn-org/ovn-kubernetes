@@ -800,7 +800,7 @@ func (bnc *BaseNetworkController) assignPodAddresses(switchName string) (net.Har
 
 	if !bnc.doesNetworkRequireIPAM() {
 		klog.V(5).Infof("layer2 topology without subnet; will only generate the MAC address for the pod NIC")
-		mac, err := logicalswitchmanager.GenerateRandMAC()
+		mac, err := util.GenerateRandMAC()
 		if err != nil {
 			return nil, nil, err
 		}

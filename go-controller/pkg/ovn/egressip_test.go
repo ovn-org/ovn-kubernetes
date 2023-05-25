@@ -3508,7 +3508,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []v1.Pod{egressPod1},
 					},
 				)
-				fakeOvn.controller.lsManager.AddSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3778,7 +3778,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				fakeOvn.controller.lsManager.AddSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchEgressIPNamespaces()
 				fakeOvn.controller.WatchEgressIPPods()
@@ -4138,8 +4138,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					)
 
-					fakeOvn.controller.lsManager.AddSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
-					fakeOvn.controller.lsManager.AddSwitch(node2.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+					fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+					fakeOvn.controller.lsManager.AddOrUpdateSwitch(node2.Name, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 					err := fakeOvn.controller.WatchPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIPNamespaces()

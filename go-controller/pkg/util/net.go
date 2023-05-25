@@ -1,6 +1,7 @@
 package util
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -301,4 +302,18 @@ func ContainsCIDR(ipnet1, ipnet2 *net.IPNet) bool {
 	mask1, _ := ipnet1.Mask.Size()
 	mask2, _ := ipnet2.Mask.Size()
 	return mask1 <= mask2 && ipnet1.Contains(ipnet2.IP)
+}
+
+// GenerateRandMAC generates a random unicast and locally administered MAC address.
+// LOOTED FROM https://github.com/cilium/cilium/blob/v1.12.6/pkg/mac/mac.go#L106
+func GenerateRandMAC() (net.HardwareAddr, error) {
+	buf := make([]byte, 6)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, fmt.Errorf("unable to retrieve 6 rnd bytes: %s", err)
+	}
+
+	// Set locally administered addresses bit and reset multicast bit
+	buf[0] = (buf[0] | 0x02) & 0xfe
+
+	return buf, nil
 }
