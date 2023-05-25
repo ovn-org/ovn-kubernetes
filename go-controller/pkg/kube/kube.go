@@ -396,6 +396,13 @@ func (k *KubeOVN) GetEgressIPs() (*egressipv1.EgressIPList, error) {
 	})
 }
 
+// GetCloudPrivateIPConfigs returns the list of all CloudPrivateIPConfig objects from kubernetes
+func (k *KubeOVN) GetCloudPrivateIPConfigs() (*ocpcloudnetworkapi.CloudPrivateIPConfigList, error) {
+	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().List(context.TODO(), metav1.ListOptions{
+		ResourceVersion: "0",
+	})
+}
+
 // GetEgressFirewalls returns the list of all EgressFirewall objects from kubernetes
 func (k *KubeOVN) GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error) {
 	return k.EgressFirewallClient.K8sV1().EgressFirewalls(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{

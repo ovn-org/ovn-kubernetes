@@ -4,6 +4,8 @@ import (
 	"net"
 
 	"github.com/onsi/gomega"
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	cloudservicefake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -40,11 +42,14 @@ func (o *FakeClusterManager) start(objects ...runtime.Object) {
 	egressIPObjects := []runtime.Object{}
 	egressSvcObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
+	cloudObjects := []runtime.Object{}
 	for _, object := range objects {
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
 			egressIPObjects = append(egressIPObjects, object)
 		} else if _, isEgressSVCObj := object.(*egresssvc.EgressServiceList); isEgressSVCObj {
 			egressSvcObjects = append(egressSvcObjects, object)
+		} else if _, isCloudPrivateIPConfig := object.(*ocpcloudnetworkapi.CloudPrivateIPConfigList); isCloudPrivateIPConfig {
+			cloudObjects = append(cloudObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
@@ -53,6 +58,7 @@ func (o *FakeClusterManager) start(objects ...runtime.Object) {
 		KubeClient:          fake.NewSimpleClientset(v1Objects...),
 		EgressIPClient:      egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressServiceClient: egresssvcfake.NewSimpleClientset(egressSvcObjects...),
+		CloudNetworkClient:  cloudservicefake.NewSimpleClientset(cloudObjects...),
 	}
 	o.init()
 }
