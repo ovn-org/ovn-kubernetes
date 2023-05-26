@@ -122,3 +122,25 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy) *knet.
 	}
 	return &policy
 }
+
+func (bnc *BaseNetworkController) convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy) (*knet.NetworkPolicy, error) {
+	if !bnc.doesNetworkRequireIPAM() {
+		var peers []mnpapi.MultiNetworkPolicyPeer
+		for _, rule := range mpolicy.Spec.Ingress {
+			peers = append(peers, rule.From...)
+		}
+		for _, rule := range mpolicy.Spec.Egress {
+			peers = append(peers, rule.To...)
+		}
+		for _, peer := range peers {
+			if doesPeerRequireNetworkIPAM(peer) {
+				return nil, fmt.Errorf("invalid peer %v in multi-network policy %s; IPAM-less networks can only have `ipBlock` peers", peer, mpolicy.Name)
+			}
+		}
+	}
+	return convertMultiNetPolicyToNetPolicy(mpolicy), nil
+}
+
+func doesPeerRequireNetworkIPAM(peer mnpapi.MultiNetworkPolicyPeer) bool {
+	return peer.PodSelector != nil || peer.NamespaceSelector != nil
+}

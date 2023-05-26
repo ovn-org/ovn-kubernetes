@@ -1,8 +1,6 @@
 package clustermanager
 
 import (
-	"sync"
-
 	"github.com/onsi/gomega"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
@@ -17,8 +15,6 @@ type FakeClusterManager struct {
 	fakeClient   *util.OVNClusterManagerClientset
 	watcher      *factory.WatchFactory
 	eIPC         *egressIPClusterController
-	stopChan     chan struct{}
-	wg           *sync.WaitGroup
 	fakeRecorder *record.FakeRecorder
 }
 
@@ -52,14 +48,11 @@ func (o *FakeClusterManager) init() {
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-	o.stopChan = make(chan struct{})
-	o.wg = &sync.WaitGroup{}
 	o.eIPC = newEgressIPController(o.fakeClient, o.watcher, o.fakeRecorder)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
 func (o *FakeClusterManager) shutdown() {
 	o.watcher.Shutdown()
-	close(o.stopChan)
-	o.wg.Wait()
+	o.eIPC.Stop()
 }
