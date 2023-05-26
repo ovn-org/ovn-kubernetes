@@ -293,9 +293,10 @@ Please note the `MultiNetworkPolicy` has the **exact same** API of the native
 `networking.k8s.io/v1` `NetworkPolicy`object; check its documentation for more
 information.
 
-**Note:** It is currently **required** for the `net-attach-def`s referred to by
-the `k8s.v1.cni.cncf.io/policy-for` annotation to have the `subnets` attribute
-in its `spec.config` defined.
+**Note:** `net-attach-def`s referred to by the `k8s.v1.cni.cncf.io/policy-for`
+annotation without the subnet attribute defined are possible if the policy
+**only features** `ipBlock` peers. If the `net-attach-def` features the
+`subnet` attribute, it can also feature `namespaceSelectors` and `podSelectors`.
 
 ## Limitations
 OVN-K currently does **not** support:
