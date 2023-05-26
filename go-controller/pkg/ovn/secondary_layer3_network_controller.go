@@ -289,11 +289,13 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		zoneICHandler:               zoneICHandler,
 	}
 
-	podAnnotationAllocator := pod.NewPodAnnotationAllocator(
-		netInfo,
-		cnci.watchFactory.PodCoreInformer().Lister(),
-		cnci.kube)
-	oc.podAnnotationAllocator = podAnnotationAllocator
+	if oc.handlesPodIPAllocation() {
+		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
+			netInfo,
+			cnci.watchFactory.PodCoreInformer().Lister(),
+			cnci.kube)
+		oc.podAnnotationAllocator = podAnnotationAllocator
+	}
 
 	// disable multicast support for secondary networks
 	// TBD: changes needs to be made to support multicast in secondary networks

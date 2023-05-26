@@ -10,6 +10,7 @@ import (
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	subnetipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -312,6 +313,12 @@ func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP) (*k
 
 // canReleasePodIPs checks if the podIPs can be released or not.
 func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet) (bool, error) {
+	// in certain configurations IP allocation is handled by cluster manager so
+	// we can locally release the IPs without checking
+	if !bnc.handlesPodIPAllocation() {
+		return true, nil
+	}
+
 	var needleIPs []net.IP
 	for _, podIPNet := range podIfAddrs {
 		needleIPs = append(needleIPs, podIPNet.IP)
@@ -851,6 +858,18 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 		return nil, false, err
 	}
 
+	// In certain configurations, pod IP allocation is handled from cluster
+	// manager so wait for it to allocate the IPs
+	if !bnc.handlesPodIPAllocation() {
+		podAnnotation, _ := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+		if !util.IsValidPodAnnotation(podAnnotation) {
+			return nil, false, fmt.Errorf("failed to get PodAnnotation for %s/%s/%s, cluster manager might have not allocated it yet",
+				nadName, pod.Namespace, pod.Name)
+		}
+
+		return podAnnotation, false, nil
+	}
+
 	if network == nil {
 		network = &nadapi.NetworkSelectionElement{}
 	}
@@ -899,4 +918,14 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 	}
 
 	return podAnnotation, false, nil
+}
+
+func (bnc *BaseNetworkController) handlesPodIPAllocation() bool {
+	// the controller is in charge of pod IP allocation except L2 topologies
+	// with IPAM on interconnect
+	switch bnc.NetInfo.TopologyType() {
+	case ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
+		return !config.OVNKubernetesFeature.EnableInterconnect || !bnc.doesNetworkRequireIPAM()
+	}
+	return true
 }

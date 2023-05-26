@@ -10,7 +10,9 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/subnetallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -33,9 +35,14 @@ type networkClusterController struct {
 	// retry framework for nodes
 	retryNodes *objretry.RetryFramework
 
+	// retry framework for L2 pod ip allocation
+	podHandler *factory.Handler
+	retryPods  *objretry.RetryFramework
+
 	// unique id of the network
 	networkID int
 
+	podIPAllocator      *pod.PodIPAllocator
 	hostSubnetAllocator *subnetallocator.HostSubnetAllocator
 
 	util.NetInfo
@@ -60,8 +67,21 @@ func newNetworkClusterController(networkID int, netInfo util.NetInfo, ovnClient 
 		ncc.hostSubnetAllocator = subnetallocator.NewHostSubnetAllocator(networkID, netInfo, wf.NodeCoreInformer().Lister(), kube)
 	}
 
+	if ncc.hasPodIPAllocation() {
+		ncc.podIPAllocator = pod.NewPodIPAllocator(netInfo, wf.PodCoreInformer().Lister(), kube)
+	}
+
 	ncc.initRetryFramework()
 	return ncc
+}
+
+func (ncc *networkClusterController) hasPodIPAllocation() bool {
+	// we only do pod IP allocation on L2 topologies with IPAM on interconnect
+	switch ncc.TopologyType() {
+	case types.Layer2Topology, types.LocalnetTopology:
+		return config.OVNKubernetesFeature.EnableInterconnect && len(ncc.Subnets()) > 0
+	}
+	return false
 }
 
 func (ncc *networkClusterController) hasNodeSubnetAllocation() bool {
@@ -73,11 +93,16 @@ func (ncc *networkClusterController) initRetryFramework() {
 	if ncc.hasNodeSubnetAllocation() {
 		ncc.retryNodes = ncc.newRetryFramework(factory.NodeType, true)
 	}
+
+	if ncc.hasPodIPAllocation() {
+		ncc.retryPods = ncc.newRetryFramework(factory.PodType, true)
+	}
 }
 
 // Start the network cluster controller. Depending on the cluster configuration
 // and type of network, it does the following:
 //   - initializes the host subnet allocator and starts listening to node events
+//   - initializes the pod ip allocator and starts listening to pod events
 func (ncc *networkClusterController) Start(ctx context.Context) error {
 	if ncc.hasNodeSubnetAllocation() {
 		err := ncc.hostSubnetAllocator.InitRanges()
@@ -92,6 +117,19 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 		ncc.nodeHandler = nodeHandler
 	}
 
+	if ncc.hasPodIPAllocation() {
+		err := ncc.podIPAllocator.InitRanges()
+		if err != nil {
+			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
+		}
+
+		podHandler, err := ncc.retryPods.WatchResource()
+		if err != nil {
+			return fmt.Errorf("unable to watch pods: %w", err)
+		}
+		ncc.podHandler = podHandler
+	}
+
 	return nil
 }
 
@@ -101,6 +139,10 @@ func (ncc *networkClusterController) Stop() {
 
 	if ncc.nodeHandler != nil {
 		ncc.watchFactory.RemoveNodeHandler(ncc.nodeHandler)
+	}
+
+	if ncc.podHandler != nil {
+		ncc.watchFactory.RemovePodHandler(ncc.podHandler)
 	}
 }
 
@@ -149,6 +191,16 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 	var err error
 
 	switch h.objType {
+	case factory.PodType:
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
+		}
+		err := h.ncc.podIPAllocator.Reconcile(nil, pod)
+		if err != nil {
+			klog.Infof("Pod add failed for %s/%s, will try again later: %v",
+				pod.Namespace, pod.Name, err)
+		}
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
 		if !ok {
@@ -172,6 +224,20 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 	var err error
 
 	switch h.objType {
+	case factory.PodType:
+		old, ok := oldObj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T old object to *corev1.Pod", oldObj)
+		}
+		new, ok := newObj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T new object to *corev1.Pod", newObj)
+		}
+		err := h.ncc.podIPAllocator.Reconcile(old, new)
+		if err != nil {
+			klog.Infof("Pod update failed for %s/%s, will try again later: %v",
+				new.Namespace, new.Name, err)
+		}
 	case factory.NodeType:
 		node, ok := newObj.(*corev1.Node)
 		if !ok {
@@ -192,6 +258,16 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 // cachedObj is the internal cache entry for this object, used for now for pods and network policies.
 func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 	switch h.objType {
+	case factory.PodType:
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
+		}
+		err := h.ncc.podIPAllocator.Reconcile(pod, nil)
+		if err != nil {
+			klog.Infof("Pod delete failed for %s/%s, will try again later: %v",
+				pod.Namespace, pod.Name, err)
+		}
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
 		if !ok {
@@ -210,6 +286,8 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 		syncFunc = h.syncFunc
 	} else {
 		switch h.objType {
+		case factory.PodType:
+			syncFunc = h.ncc.podIPAllocator.Sync
 		case factory.NodeType:
 			syncFunc = h.ncc.hostSubnetAllocator.Sync
 
@@ -247,8 +325,9 @@ func (h *networkClusterControllerEventHandler) IsResourceScheduled(obj interface
 	return true
 }
 
-// IsObjectInTerminalState returns true if the object is a in terminal state.  Always returns true.
+// IsObjectInTerminalState returns true if the object is a in terminal state.  Always returns false.
 func (h *networkClusterControllerEventHandler) IsObjectInTerminalState(obj interface{}) bool {
+	// Note: the pod IP allocator needs to be aware when pods are deleted
 	return false
 }
 
@@ -281,10 +360,10 @@ func (h *networkClusterControllerEventHandler) GetInternalCacheEntry(obj interfa
 // given an object key and its type
 func (h *networkClusterControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
 	var obj interface{}
-	var name string
+	var namespace, name string
 	var err error
 
-	_, name, err = cache.SplitMetaNamespaceKey(key)
+	namespace, name, err = cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to split key %s: %v", key, err)
 	}
@@ -292,7 +371,8 @@ func (h *networkClusterControllerEventHandler) GetResourceFromInformerCache(key 
 	switch h.objType {
 	case factory.NodeType:
 		obj, err = h.ncc.watchFactory.GetNode(name)
-
+	case factory.PodType:
+		obj, err = h.ncc.watchFactory.GetPod(namespace, name)
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
 			h.objType)
