@@ -100,8 +100,7 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 			return nil, fmt.Errorf("failed to create NetworkController for secondary layer3 network %s : %w", nInfo.GetNetworkName(), err)
 		}
 
-		sncc := newNetworkClusterController(nInfo.GetNetworkName(), networkId, nInfo.Subnets(),
-			sncm.ovnClient, sncm.watchFactory, false, nInfo)
+		sncc := newNetworkClusterController(networkId, nInfo, sncm.ovnClient, sncm.watchFactory)
 		return sncc, nil
 	}
 
@@ -163,6 +162,5 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(allController
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) nad.NetworkController {
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
-	return newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, nil, sncm.ovnClient, sncm.watchFactory,
-		false, netInfo)
+	return newNetworkClusterController(util.InvalidNetworkID, netInfo, sncm.ovnClient, sncm.watchFactory)
 }
