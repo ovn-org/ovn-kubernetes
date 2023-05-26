@@ -244,7 +244,7 @@ func (bsnc *BaseSecondaryNetworkController) ensureLocalZonePodForSecondaryNetwor
 			continue
 		}
 		if err = bsnc.addLogicalPortToNetworkForNAD(pod, nadName, switchName, network); err != nil {
-			errs = append(errs, fmt.Errorf("failed to add logical port of Pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName))
+			errs = append(errs, fmt.Errorf("failed to add logical port of Pod %s/%s for NAD %s: %w", pod.Namespace, pod.Name, nadName, err))
 		}
 	}
 	if len(errs) != 0 {
