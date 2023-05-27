@@ -218,6 +218,8 @@ $ make shard-network
 $ make shard-conformance
 # or
 $ GITHUB_WORKSPACE="$REPO" make control-plane
+# or
+$ make conformance
 $ popd
 ```
 
@@ -354,3 +356,12 @@ skipped. To run those tests locally, comment out the following line from
 # Github CI doesn´t offer IPv6 connectivity, so always skip IPv6 only tests.
 SKIPPED_TESTS=$SKIPPED_TESTS$IPV6_ONLY_TESTS
 ```
+
+# Conformance Tests
+
+We have a conformance test suit that can be invoked using the `make conformance` command.
+Currently we run the `TestNetworkPolicyV2Conformance` tests there. The actual tests are
+defined in https://github.com/kubernetes-sigs/network-policy-api/tree/master/conformance
+and then invoked from this repo. Any changes to the tests first have to be submitted
+upstream to `network-policy-api` repo and then brought downstream into the ovn-kubernetes repo
+through version bump.
