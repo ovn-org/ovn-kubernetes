@@ -10,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -216,26 +215,18 @@ func (bnnc *BaseNodeNetworkController) updatePodDPUConnStatusWithRetry(origPod *
 	dpuConnStatus *util.DPUConnectionStatus, nadName string) error {
 	podDesc := fmt.Sprintf("pod %s/%s", origPod.Namespace, origPod.Name)
 	klog.Infof("Updating pod %s with connection status (%+v) for NAD %s", podDesc, dpuConnStatus, nadName)
-	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		pod, err := bnnc.watchFactory.GetPod(origPod.Namespace, origPod.Name)
-		if err != nil {
-			return err
-		}
-		// Informer cache should not be mutated, so get a copy of the object
-		cpod := pod.DeepCopy()
-		cpod.Annotations, err = util.MarshalPodDPUConnStatus(cpod.Annotations, dpuConnStatus, nadName)
-		if err != nil {
-			if util.IsAnnotationAlreadySetError(err) {
-				return nil
-			}
-			return err
-		}
-		return bnnc.Kube.UpdatePod(cpod)
-	})
-	if resultErr != nil {
-		return fmt.Errorf("failed to update %s annotation for %s: %v", util.DPUConnetionStatusAnnot, podDesc, resultErr)
+	err := util.UpdatePodDPUConnStatusWithRetry(
+		bnnc.watchFactory.PodCoreInformer().Lister(),
+		bnnc.Kube,
+		origPod,
+		dpuConnStatus,
+		nadName,
+	)
+	if util.IsAnnotationAlreadySetError(err) {
+		return nil
 	}
-	return nil
+
+	return err
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge

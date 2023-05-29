@@ -3,7 +3,12 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	v1 "k8s.io/api/core/v1"
+	listers "k8s.io/client-go/listers/core/v1"
 )
 
 /*
@@ -200,4 +205,44 @@ func UnmarshalPodDPUConnStatus(annotations map[string]string, nadName string) (*
 			DPUConnetionStatusAnnot, nadName, ovnAnnotation)
 	}
 	return &scs, nil
+}
+
+// UpdatePodDPUConnStatusWithRetry updates the DPU connection status annotation
+// on the pod retrying on conflict
+func UpdatePodDPUConnStatusWithRetry(podLister listers.PodLister, kube kube.Interface, pod *v1.Pod, dpuConnStatus *DPUConnectionStatus, nadName string) error {
+	updatePodAnnotationNoRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
+		var err error
+		pod.Annotations, err = MarshalPodDPUConnStatus(pod.Annotations, dpuConnStatus, nadName)
+		if err != nil {
+			return nil, nil, err
+		}
+		return pod, nil, nil
+	}
+
+	return UpdatePodWithRetryOrRollback(
+		podLister,
+		kube,
+		pod,
+		updatePodAnnotationNoRollback,
+	)
+}
+
+// UpdatePodDPUConnDetailsWithRetry updates the DPU connection details
+// annotation on the pod retrying on conflict
+func UpdatePodDPUConnDetailsWithRetry(podLister listers.PodLister, kube kube.Interface, pod *v1.Pod, dpuConnDetails *DPUConnectionDetails, nadName string) error {
+	updatePodAnnotationNoRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
+		var err error
+		pod.Annotations, err = MarshalPodDPUConnDetails(pod.Annotations, dpuConnDetails, nadName)
+		if err != nil {
+			return nil, nil, err
+		}
+		return pod, nil, nil
+	}
+
+	return UpdatePodWithRetryOrRollback(
+		podLister,
+		kube,
+		pod,
+		updatePodAnnotationNoRollback,
+	)
 }
