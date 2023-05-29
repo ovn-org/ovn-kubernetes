@@ -1074,6 +1074,20 @@ docker_create_second_interface() {
   done
 }
 
+docker_create_second_disconnected_interface() {
+  echo "adding second interfaces to nodes"
+  local bridge_name="${1:-kindexgw}"
+  echo "bridge: $bridge_name"
+
+  # Create the network without subnets; ignore if already exists.
+  "$OCI_BIN" network create --internal --driver=bridge "$bridge_name" || true
+
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    "$OCI_BIN" network connect "$bridge_name" "$n"
+  done
+}
+
 sleep_until_pods_settle() {
   echo "Pods are all up, allowing things settle for 30 seconds..."
   sleep 30
@@ -1169,6 +1183,7 @@ fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
   install_multus
   install_mpolicy_crd
+  docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
 fi
 kubectl_wait_pods
 sleep_until_pods_settle
