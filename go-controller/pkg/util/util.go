@@ -1,6 +1,7 @@
 package util
 
 import (
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -174,38 +175,38 @@ type annotationNotSetError struct {
 	msg string
 }
 
-func (anse annotationNotSetError) Error() string {
+func (anse *annotationNotSetError) Error() string {
 	return anse.msg
 }
 
 // newAnnotationNotSetError returns an error for an annotation that is not set
 func newAnnotationNotSetError(format string, args ...interface{}) error {
-	return annotationNotSetError{msg: fmt.Sprintf(format, args...)}
+	return &annotationNotSetError{msg: fmt.Sprintf(format, args...)}
 }
 
 // IsAnnotationNotSetError returns true if the error indicates that an annotation is not set
 func IsAnnotationNotSetError(err error) bool {
-	_, ok := err.(annotationNotSetError)
-	return ok
+	var annotationNotSetError *annotationNotSetError
+	return errors.As(err, &annotationNotSetError)
 }
 
 type annotationAlreadySetError struct {
 	msg string
 }
 
-func (aase annotationAlreadySetError) Error() string {
+func (aase *annotationAlreadySetError) Error() string {
 	return aase.msg
 }
 
 // newAnnotationAlreadySetError returns an error for an annotation that is not set
 func newAnnotationAlreadySetError(format string, args ...interface{}) error {
-	return annotationAlreadySetError{msg: fmt.Sprintf(format, args...)}
+	return &annotationAlreadySetError{msg: fmt.Sprintf(format, args...)}
 }
 
 // IsAnnotationAlreadySetError returns true if the error indicates that an annotation is already set
 func IsAnnotationAlreadySetError(err error) bool {
-	_, ok := err.(annotationAlreadySetError)
-	return ok
+	var annotationAlreadySetError *annotationAlreadySetError
+	return errors.As(err, &annotationAlreadySetError)
 }
 
 // HashforOVN hashes the provided input to make it a valid addressSet or portGroup name.
