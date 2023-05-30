@@ -321,8 +321,7 @@ parse_args() {
                                                 ;;
             --isolated )                        OVN_ISOLATED=true
                                                 ;;
-            -mne | --multi-network-enable )     shift
-                                                ENABLE_MULTI_NET=true
+            -mne | --multi-network-enable )     ENABLE_MULTI_NET=true
                                                 ;;
             --delete )                          delete
                                                 exit
