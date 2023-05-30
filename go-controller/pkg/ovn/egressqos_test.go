@@ -493,7 +493,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 
 			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 
-			node3Switch, err := createNodeAndLS(fakeOVN, "node3")
+			_, node3Switch, err := createNodeAndLS(fakeOVN, "node3", "global")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			node3Switch.QOSRules = []string{qos1.UUID, qos2.UUID}
@@ -530,6 +530,129 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
+	ginkgo.It("should respond to node zone update events correctly", func() {
+		app.Action = func(ctx *cli.Context) error {
+			namespaceT := *newNamespace("namespace1")
+
+			node1Switch := &nbdb.LogicalSwitch{
+				UUID: "node1-UUID",
+				Name: node1Name,
+			}
+
+			node2Switch := &nbdb.LogicalSwitch{
+				UUID: "node2-UUID",
+				Name: node2Name,
+			}
+
+			joinSwitch := &nbdb.LogicalSwitch{
+				UUID: "join-UUID",
+				Name: types.OVNJoinSwitch,
+			}
+
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					node1Switch,
+					node2Switch,
+					joinSwitch,
+				},
+			}
+
+			fakeOVN.startWithDBSetup(dbSetup,
+				&v1.NamespaceList{
+					Items: []v1.Namespace{
+						namespaceT,
+					},
+				},
+			)
+
+			// Create one EgressQoS
+			eq := newEgressQoSObject("default", namespaceT.Name, []egressqosapi.EgressQoSRule{
+				{
+					DstCIDR: pointer.String("1.2.3.4/32"),
+					DSCP:    50,
+				},
+				{
+					DstCIDR: pointer.String("5.6.7.8/32"),
+					DSCP:    60,
+				},
+			})
+			_, err := fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Create(context.TODO(), eq, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			fakeOVN.InitAndRunEgressQoSController()
+
+			qos1 := &nbdb.QoS{
+				Direction:   nbdb.QoSDirectionToLport,
+				Match:       fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", asv4),
+				Priority:    EgressQoSFlowStartPriority,
+				Action:      map[string]int{nbdb.QoSActionDSCP: 50},
+				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				UUID:        "qos1-UUID",
+			}
+			qos2 := &nbdb.QoS{
+				Direction:   nbdb.QoSDirectionToLport,
+				Match:       fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", asv4),
+				Priority:    EgressQoSFlowStartPriority - 1,
+				Action:      map[string]int{nbdb.QoSActionDSCP: 60},
+				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				UUID:        "qos2-UUID",
+			}
+			node1Switch.QOSRules = append(node1Switch.QOSRules, qos1.UUID, qos2.UUID)
+			node2Switch.QOSRules = append(node2Switch.QOSRules, qos1.UUID, qos2.UUID)
+			expectedDatabaseState := []libovsdbtest.TestData{
+				qos1,
+				qos2,
+				node1Switch,
+				node2Switch,
+				joinSwitch,
+			}
+
+			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+			kapiNode, node3Switch, err := createNodeAndLS(fakeOVN, "node3", "non-global")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			expectedDatabaseState = []libovsdbtest.TestData{
+				qos1,
+				qos2,
+				node1Switch,
+				node2Switch,
+				node3Switch,
+				joinSwitch,
+			}
+			// we won't add any qos objects because node is not local
+			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+			// update the node's zone to be local
+			kapiNode.Annotations["k8s.ovn.org/zone-name"] = "global"
+			kapiNode.ResourceVersion = "100"
+			_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), kapiNode, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			// we will now add qos objects because node became local
+			node3Switch.QOSRules = []string{qos1.UUID, qos2.UUID}
+			gomega.Eventually(fakeOVN.nbClient, 3).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+			// Delete the EgressQoS
+			err = fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Delete(context.TODO(), eq.Name, metav1.DeleteOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			node1Switch.QOSRules = []string{}
+			node2Switch.QOSRules = []string{}
+			node3Switch.QOSRules = []string{}
+			expectedDatabaseState = []libovsdbtest.TestData{
+				node1Switch,
+				node2Switch,
+				node3Switch,
+				joinSwitch,
+			}
+
+			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+			return nil
+		}
+
+		err := app.Run([]string{app.Name})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
 	ginkgo.It("should respond to pod events correctly", func() {
 		app.Action = func(ctx *cli.Context) error {
 			namespaceT := *newNamespace("namespace1")
@@ -539,12 +662,19 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				Name: node1Name,
 			}
 
-			podT := newPodWithLabels(
+			podLocalT := newPodWithLabels(
 				namespaceT.Name,
 				"myPod",
 				node1Name,
 				"10.128.1.3",
 				map[string]string{"rule1": "1"},
+			)
+			podRemoteT := newPodWithLabels(
+				namespaceT.Name,
+				"myPod2",
+				node2Name,
+				"10.128.2.3",
+				map[string]string{"rule2": "2"},
 			)
 
 			dbSetup := libovsdbtest.TestSetup{
@@ -561,14 +691,17 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				},
 				&v1.PodList{
 					Items: []v1.Pod{
-						*podT,
+						*podLocalT,
+						*podRemoteT,
 					},
 				},
 			)
 
 			i, n, _ := net.ParseCIDR("10.128.1.3" + "/23")
 			n.IP = i
-			fakeOVN.controller.logicalPortCache.add(podT, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+			fakeOVN.controller.logicalPortCache.add(podLocalT, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+			// add pod to local zone (isPodScheduledinLocalZone logic depends on cache entry)
+			fakeOVN.controller.localZoneNodes.Store(podLocalT.Spec.NodeName, true)
 
 			eq := newEgressQoSObject("default", namespaceT.Name, []egressqosapi.EgressQoSRule{
 				{
@@ -641,26 +774,36 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 
 			ginkgo.By("Creating pod that matches the first rule only should add its ips to the first address set")
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos2AS, []string{"10.128.1.3"})
-			fakeOVN.asf.ExpectAddressSetWithIPs(qos3AS, []string{})
+			fakeOVN.asf.ExpectAddressSetWithIPs(qos3AS, []string{}) // podRemoteT is not local to this zone, so we won't handle it
 
-			ginkgo.By("Updating pod to match both rules should add its ips to both address sets")
-			podT.Labels = map[string]string{"rule1": "1", "rule2": "2"}
-			podT.ResourceVersion = "100"
-			_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podT.Namespace).Update(context.TODO(), podT, metav1.UpdateOptions{})
+			ginkgo.By("Updating local pod to match both rules should add its ips to both address sets")
+			podLocalT.Labels = map[string]string{"rule1": "1", "rule2": "2"}
+			podLocalT.ResourceVersion = "100"
+			_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podLocalT.Namespace).Update(context.TODO(), podLocalT, metav1.UpdateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos2AS, []string{"10.128.1.3"})
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos3AS, []string{"10.128.1.3"})
 
-			ginkgo.By("Updating pod to match the second rule only should remove its ips from the first's address set")
-			podT.Labels = map[string]string{"rule2": "2"}
-			podT.ResourceVersion = "200"
-			_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podT.Namespace).Update(context.TODO(), podT, metav1.UpdateOptions{})
+			ginkgo.By("Updating local pod to match the second rule only should remove its ips from the first's address set")
+			podLocalT.Labels = map[string]string{"rule2": "2"}
+			podLocalT.ResourceVersion = "200"
+			_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podLocalT.Namespace).Update(context.TODO(), podLocalT, metav1.UpdateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos2AS, []string{})
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos3AS, []string{"10.128.1.3"})
 
-			ginkgo.By("Deleting the pod should be remove its ips from the address sets")
-			err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podT.Namespace).Delete(context.TODO(), podT.Name, metav1.DeleteOptions{})
+			ginkgo.By("Updating remote pod to now become local; we should see it's IP in the address-set")
+			podRemoteT.Spec.NodeName = node1Name // hacking the zone transfer of a pod
+			podRemoteT.ResourceVersion = "200"
+			_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podRemoteT.Namespace).Update(context.TODO(), podRemoteT, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos2AS, []string{})
+			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos3AS, []string{"10.128.1.3", "10.128.2.3"})
+
+			ginkgo.By("Deleting the local pods should be remove its ips from the address sets")
+			err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podLocalT.Namespace).Delete(context.TODO(), podLocalT.Name, metav1.DeleteOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podRemoteT.Namespace).Delete(context.TODO(), podRemoteT.Name, metav1.DeleteOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos2AS, []string{})
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos3AS, []string{})
@@ -684,7 +827,7 @@ func (o *FakeOVN) InitAndRunEgressQoSController() {
 	}()
 }
 
-func createNodeAndLS(fakeOVN *FakeOVN, name string) (*nbdb.LogicalSwitch, error) {
+func createNodeAndLS(fakeOVN *FakeOVN, name, zone string) (*v1.Node, *nbdb.LogicalSwitch, error) {
 	node := v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -698,9 +841,12 @@ func createNodeAndLS(fakeOVN *FakeOVN, name string) (*nbdb.LogicalSwitch, error)
 			},
 		},
 	}
-	_, err := fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node, metav1.CreateOptions{})
+	node.Annotations = map[string]string{
+		"k8s.ovn.org/zone-name": zone,
+	}
+	kapiNode, err := fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node, metav1.CreateOptions{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	logicalSwitch := &nbdb.LogicalSwitch{
@@ -709,9 +855,9 @@ func createNodeAndLS(fakeOVN *FakeOVN, name string) (*nbdb.LogicalSwitch, error)
 	}
 
 	if err := libovsdbops.CreateOrUpdateLogicalSwitch(fakeOVN.nbClient, logicalSwitch); err != nil {
-		return nil, fmt.Errorf("failed to create logical switch %s, error: %v", name, err)
+		return nil, nil, fmt.Errorf("failed to create logical switch %s, error: %v", name, err)
 
 	}
 
-	return logicalSwitch, nil
+	return kapiNode, logicalSwitch, nil
 }
