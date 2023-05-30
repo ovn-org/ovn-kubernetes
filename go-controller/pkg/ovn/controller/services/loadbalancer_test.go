@@ -40,8 +40,8 @@ func TestEnsureLBs(t *testing.T) {
 			Protocol:    "TCP",
 			Rules: []LBRule{
 				{
-					Source:  Addr{"1.2.3.4", 80},
-					Targets: []Addr{{"169.254.169.2", 8080}},
+					Source:  Addr{IP: "1.2.3.4", Port: 80},
+					Targets: []Addr{{IP: "169.254.169.2", Port: 8080}},
 				},
 			},
 			UUID: "test-UUID",
@@ -55,8 +55,8 @@ func TestEnsureLBs(t *testing.T) {
 			Protocol:    "TCP",
 			Rules: []LBRule{
 				{
-					Source:  Addr{"4.5.6.7", 80},
-					Targets: []Addr{{"169.254.169.2", 8080}},
+					Source:  Addr{IP: "4.5.6.7", Port: 80},
+					Targets: []Addr{{IP: "169.254.169.2", Port: 8080}},
 				},
 			},
 			UUID: "test-UUID2",
@@ -73,8 +73,8 @@ func TestEnsureLBs(t *testing.T) {
 			Protocol:    "TCP",
 			Rules: []LBRule{
 				{
-					Source:  Addr{"1.2.3.4", 80},
-					Targets: []Addr{{"169.254.169.2", 8080}},
+					Source:  Addr{IP: "1.2.3.4", Port: 80},
+					Targets: []Addr{{IP: "169.254.169.2", Port: 8080}},
 				},
 			},
 			UUID: "", // intentionally left empty to make sure EnsureLBs sets it properly

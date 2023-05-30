@@ -19,17 +19,40 @@ var (
 
 // LoadBalancer defines an object in Load_Balancer table
 type LoadBalancer struct {
-	UUID        string                `ovsdb:"_uuid"`
-	Datapaths   []string              `ovsdb:"datapaths"`
-	ExternalIDs map[string]string     `ovsdb:"external_ids"`
-	Name        string                `ovsdb:"name"`
-	Options     map[string]string     `ovsdb:"options"`
-	Protocol    *LoadBalancerProtocol `ovsdb:"protocol"`
-	Vips        map[string]string     `ovsdb:"vips"`
+	UUID          string                `ovsdb:"_uuid"`
+	DatapathGroup *string               `ovsdb:"datapath_group"`
+	Datapaths     []string              `ovsdb:"datapaths"`
+	ExternalIDs   map[string]string     `ovsdb:"external_ids"`
+	Name          string                `ovsdb:"name"`
+	Options       map[string]string     `ovsdb:"options"`
+	Protocol      *LoadBalancerProtocol `ovsdb:"protocol"`
+	Vips          map[string]string     `ovsdb:"vips"`
 }
 
 func (a *LoadBalancer) GetUUID() string {
 	return a.UUID
+}
+
+func (a *LoadBalancer) GetDatapathGroup() *string {
+	return a.DatapathGroup
+}
+
+func copyLoadBalancerDatapathGroup(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLoadBalancerDatapathGroup(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
 }
 
 func (a *LoadBalancer) GetDatapaths() []string {
@@ -178,6 +201,7 @@ func equalLoadBalancerVips(a, b map[string]string) bool {
 
 func (a *LoadBalancer) DeepCopyInto(b *LoadBalancer) {
 	*b = *a
+	b.DatapathGroup = copyLoadBalancerDatapathGroup(a.DatapathGroup)
 	b.Datapaths = copyLoadBalancerDatapaths(a.Datapaths)
 	b.ExternalIDs = copyLoadBalancerExternalIDs(a.ExternalIDs)
 	b.Options = copyLoadBalancerOptions(a.Options)
@@ -202,6 +226,7 @@ func (a *LoadBalancer) CloneModel() model.Model {
 
 func (a *LoadBalancer) Equals(b *LoadBalancer) bool {
 	return a.UUID == b.UUID &&
+		equalLoadBalancerDatapathGroup(a.DatapathGroup, b.DatapathGroup) &&
 		equalLoadBalancerDatapaths(a.Datapaths, b.Datapaths) &&
 		equalLoadBalancerExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
 		a.Name == b.Name &&

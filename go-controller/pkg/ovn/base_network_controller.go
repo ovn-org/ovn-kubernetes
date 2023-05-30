@@ -56,6 +56,9 @@ type CommonNetworkControllerInfo struct {
 
 	// Supports multicast?
 	multicastSupport bool
+
+	// Supports OVN Template Load Balancers?
+	svcTemplateSupport bool
 }
 
 // BaseNetworkController structure holds per-network fields and network specific configuration
@@ -116,17 +119,18 @@ type BaseSecondaryNetworkController struct {
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
-	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport bool) (*CommonNetworkControllerInfo, error) {
+	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport, svcTemplateSupport bool) (*CommonNetworkControllerInfo, error) {
 	return &CommonNetworkControllerInfo{
-		client:           client,
-		kube:             kube,
-		watchFactory:     wf,
-		recorder:         recorder,
-		nbClient:         nbClient,
-		sbClient:         sbClient,
-		podRecorder:      podRecorder,
-		SCTPSupport:      SCTPSupport,
-		multicastSupport: multicastSupport,
+		client:             client,
+		kube:               kube,
+		watchFactory:       wf,
+		recorder:           recorder,
+		nbClient:           nbClient,
+		sbClient:           sbClient,
+		podRecorder:        podRecorder,
+		SCTPSupport:        SCTPSupport,
+		multicastSupport:   multicastSupport,
+		svcTemplateSupport: svcTemplateSupport,
 	}, nil
 }
 
@@ -252,7 +256,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 }
 
 func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostSubnets []*net.IPNet,
-	loadBalancerGroupUUID string) error {
+	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
 	switchName := bnc.GetNetworkScopedName(nodeName)
@@ -297,8 +301,8 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		}
 	}
 
-	if loadBalancerGroupUUID != "" {
-		logicalSwitch.LoadBalancerGroup = []string{loadBalancerGroupUUID}
+	if clusterLoadBalancerGroupUUID != "" && switchLoadBalancerGroupUUID != "" {
+		logicalSwitch.LoadBalancerGroup = []string{clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID}
 	}
 
 	// If supported, enable IGMP/MLD snooping and querier on the node.

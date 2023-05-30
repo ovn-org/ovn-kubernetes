@@ -308,6 +308,10 @@ func ParseNodeChassisIDAnnotation(node *kapi.Node) (string, error) {
 	return chassisID, nil
 }
 
+func NodeChassisIDAnnotationChanged(oldNode, newNode *kapi.Node) bool {
+	return oldNode.Annotations[ovnNodeChassisID] != newNode.Annotations[ovnNodeChassisID]
+}
+
 func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress net.HardwareAddr) error {
 	return nodeAnnotator.Set(ovnNodeManagementPortMacAddress, macAddress.String())
 }

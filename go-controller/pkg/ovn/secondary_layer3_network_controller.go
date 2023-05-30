@@ -409,7 +409,7 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPN
 		return nil, fmt.Errorf("subnet annotation in the node %q for the layer3 secondary network %s is missing : %w", node.Name, oc.GetNetworkName(), err)
 	}
 
-	err = oc.createNodeLogicalSwitch(node.Name, hostSubnets, "")
+	err = oc.createNodeLogicalSwitch(node.Name, hostSubnets, "", "")
 	if err != nil {
 		return nil, err
 	}
