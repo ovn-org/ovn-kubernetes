@@ -1047,7 +1047,7 @@ ovn-master() {
     ${init_node_flags} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-    --gateway-mode=${ovn_gateway_mode} \
+    --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
