@@ -54,7 +54,7 @@ spec:
         # (or in /etc/ovn if OVN from new repository is used)
         # and on the host in /var/lib/openvswitch/
         - mountPath: /etc/openvswitch/
-          name: host-var-lib-ovs
+          name: host-etc-ovs
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
@@ -122,7 +122,7 @@ spec:
         # (or in /etc/ovn if OVN from new repository is used)
         # and on the host in /var/lib/openvswitch/
         - mountPath: /etc/openvswitch/
-          name: host-var-lib-ovs
+          name: host-etc-ovs
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
@@ -396,7 +396,7 @@ spec:
           name: host-ovn-cert
           readOnly: true
         - mountPath: /etc/openvswitch/
-          name: host-var-lib-ovs
+          name: host-etc-ovs
           readOnly: true
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
@@ -674,6 +674,9 @@ spec:
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate
+      - name: host-etc-ovs
+        hostPath:
+          path: /etc/openvswitch
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
