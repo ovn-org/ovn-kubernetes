@@ -278,16 +278,14 @@ func (oc *DefaultNetworkController) deleteNamespace(ns *kapi.Namespace) error {
 // with its mutex locked.
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
 func (oc *DefaultNetworkController) ensureNamespaceLocked(ns string, readOnly bool, namespace *kapi.Namespace) (*namespaceInfo, func(), error) {
-	var ips []net.IP
-
-	// special handling of host network namespace. issues/3381
-	if config.Kubernetes.HostNetworkNamespace != "" && ns == config.Kubernetes.HostNetworkNamespace {
-		ips = oc.getAllHostNamespaceAddresses()
-	} else {
-		ips = oc.getAllNamespacePodAddresses(ns)
+	ipsGetter := func(ns string) []net.IP {
+		// special handling of host network namespace. issues/3381
+		if config.Kubernetes.HostNetworkNamespace != "" && ns == config.Kubernetes.HostNetworkNamespace {
+			return oc.getAllHostNamespaceAddresses()
+		}
+		return oc.getAllNamespacePodAddresses(ns)
 	}
-
-	return oc.ensureNamespaceLockedCommon(ns, readOnly, namespace, ips, oc.configureNamespace)
+	return oc.ensureNamespaceLockedCommon(ns, readOnly, namespace, ipsGetter, oc.configureNamespace)
 }
 
 func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
