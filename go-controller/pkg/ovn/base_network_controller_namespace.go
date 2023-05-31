@@ -220,7 +220,7 @@ func (bnc *BaseNetworkController) multicastDeleteNamespace(ns *kapi.Namespace, n
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
 // if no k8s namespace object is provided, this function will attempt to find it via informer cache
 func (bnc *BaseNetworkController) ensureNamespaceLockedCommon(ns string, readOnly bool, namespace *kapi.Namespace,
-	ips []net.IP, configureNamespace func(nsInfo *namespaceInfo, ns *kapi.Namespace) error) (*namespaceInfo, func(), error) {
+	ipsGetter func(ns string) []net.IP, configureNamespace func(nsInfo *namespaceInfo, ns *kapi.Namespace) error) (*namespaceInfo, func(), error) {
 	bnc.namespacesMutex.Lock()
 	nsInfo := bnc.namespaces[ns]
 	nsInfoExisted := false
@@ -236,6 +236,7 @@ func (bnc *BaseNetworkController) ensureNamespaceLockedCommon(ns string, readOnl
 		defer bnc.namespacesMutex.Unlock()
 		// create the adddress set for the new namespace
 		var err error
+		ips := ipsGetter(ns)
 		nsInfo.addressSet, err = bnc.createNamespaceAddrSetAllPods(ns, ips)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create address set for namespace: %s, error: %v", ns, err)
