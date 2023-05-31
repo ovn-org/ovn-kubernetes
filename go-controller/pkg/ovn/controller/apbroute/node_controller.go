@@ -349,16 +349,8 @@ func (c *ExternalGatewayNodeController) syncNamespace(namespace *v1.Namespace) e
 	}
 	if apierrors.IsNotFound(err) || !namespace.DeletionTimestamp.IsZero() {
 		// DELETE use case
-
 		klog.Infof("Deleting namespace reference %s", namespace.Name)
-		_, found := c.mgr.getNamespaceInfoFromCache(namespace.Name)
-		if !found {
-			// namespace is not a recipient for policies
-			return nil
-		}
-		c.mgr.deleteNamespaceInfoInCache(namespace.Name)
-		c.mgr.unlockNamespaceInfoCache(namespace.Name)
-		return nil
+		return c.mgr.processDeleteNamespace(namespace.Name)
 	}
 	matches, err := c.mgr.getPoliciesForNamespace(namespace.Name)
 	if err != nil {
@@ -369,29 +361,31 @@ func (c *ExternalGatewayNodeController) syncNamespace(namespace *v1.Namespace) e
 		// it's not a namespace being cached already and it is not a target for policies, nothing to do
 		return nil
 	}
+
+	defer c.mgr.unlockNamespaceInfoCache(namespace.Name)
+	if found && cacheInfo.markForDelete {
+		// namespace exists and has been marked for deletion, this means there should be an event to complete deleting the namespace.
+		// wait for the namespace to be deleted before recreating it in the cache.
+		return fmt.Errorf("cannot add namespace %s because it is currently being deleted", namespace.Name)
+	}
+
 	if !found {
 		// ADD use case
 		// new namespace or namespace updated its labels and now match a routing policy
-		defer c.mgr.unlockNamespaceInfoCache(namespace.Name)
 		cacheInfo = c.mgr.newNamespaceInfoInCache(namespace.Name)
-		cacheInfo.policies = matches
+		cacheInfo.Policies = matches
 		return c.mgr.processAddNamespace(namespace, cacheInfo)
 	}
 
-	if !cacheInfo.policies.Equal(matches) {
+	if !cacheInfo.Policies.Equal(matches) {
 		// UPDATE use case
 		// policies differ, need to reconcile them
-		defer c.mgr.unlockNamespaceInfoCache(namespace.Name)
-		err = c.mgr.processUpdateNamespace(namespace.Name, cacheInfo.policies, matches, cacheInfo)
+		err = c.mgr.processUpdateNamespace(namespace.Name, cacheInfo.Policies, matches, cacheInfo)
 		if err != nil {
 			return err
 		}
-		if cacheInfo.policies.Len() == 0 {
-			c.mgr.deleteNamespaceInfoInCache(namespace.Name)
-		}
 		return nil
 	}
-	c.mgr.unlockNamespaceInfoCache(namespace.Name)
 	return nil
 
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -49,6 +50,12 @@ func (m *externalPolicyManager) applyProcessedPolicy(policyName string, routePol
 		return err
 	}
 	for _, ns := range targetNs {
+		// ensure namespace still exists before processing it
+		_, err := m.namespaceLister.Get(ns.Name)
+		if apierrors.IsNotFound(err) {
+			// namespace no longer exists
+			continue
+		}
 		cacheInfo, found := m.getNamespaceInfoFromCache(ns.Name)
 		if !found {
 			cacheInfo = m.newNamespaceInfoInCache(ns.Name)
@@ -84,14 +91,10 @@ func (m *externalPolicyManager) processDeletePolicy(policyName string) error {
 			continue
 		}
 		err = m.removePolicyFromNamespace(ns.Name, &routePolicy, cacheInfo)
+		m.unlockNamespaceInfoCache(ns.Name)
 		if err != nil {
-			m.unlockNamespaceInfoCache(ns.Name)
 			return err
 		}
-		if cacheInfo.policies.Len() == 0 {
-			m.deleteNamespaceInfoInCache(ns.Name)
-		}
-		m.unlockNamespaceInfoCache(ns.Name)
 	}
 	err = m.deleteRoutePolicyFromCache(routePolicy.Name)
 	if err != nil {
@@ -162,7 +165,7 @@ func (m *externalPolicyManager) calculateAnnotatedPodGatewayIPsForNamespace(targ
 // In a nutshell, if a gateway IP is only found in the policy being deleted, then the IP is removed from the network resource. But if the IP is
 // found in at least a legacy annotation or another policy impacting the namespace, then the IP is not removed from the cache or the network resource (north bound or conntrack)
 func (m *externalPolicyManager) deletePolicyInNamespace(namespaceName, policyName string, routePolicy *routePolicy, cacheInfo *namespaceInfo) error {
-	coexistingPolicies := cacheInfo.policies.Clone().Delete(policyName)
+	coexistingPolicies := cacheInfo.Policies.Clone().Delete(policyName)
 	annotatedGWIPs, err := m.calculateAnnotatedNamespaceGatewayIPsForNamespace(namespaceName)
 	if err != nil {
 		return err
@@ -184,16 +187,16 @@ func (m *externalPolicyManager) deletePolicyInNamespace(namespaceName, policyNam
 
 	static := sets.New[string]()
 	for _, gatewayInfo := range pp.staticGateways {
-		static = static.Union(gatewayInfo.gws)
+		static = static.Insert(gatewayInfo.Gateways.UnsortedList()...)
 	}
 	for _, gwInfo := range routePolicy.staticGateways {
-		static = static.Delete(gwInfo.gws.UnsortedList()...)
+		static = static.Delete(gwInfo.Gateways.UnsortedList()...)
 	}
 	coexistingIPs = coexistingIPs.Union(annotatedGWIPs).Union(static)
 
 	for _, gwInfo := range routePolicy.staticGateways {
 		// Filter out the IPs that are not in coexisting. Those IPs are to be deleted.
-		invalidGWIPs := gwInfo.gws.Difference(coexistingIPs)
+		invalidGWIPs := gwInfo.Gateways.Difference(coexistingIPs)
 		// Filter out the IPs from the coexisting list that are to be kept by calculating the difference between the coexising and those IPs that are to be deleted and not coexisting at the same time.
 		ipsToKeep := coexistingIPs.Difference(invalidGWIPs)
 		klog.Infof("Coexisting %s, invalid %s, ipsToKeep %s", strings.Join(sets.List(coexistingIPs), ","), strings.Join(sets.List(invalidGWIPs), ","), strings.Join(sets.List(ipsToKeep), ","))
@@ -201,11 +204,11 @@ func (m *externalPolicyManager) deletePolicyInNamespace(namespaceName, policyNam
 		if err != nil {
 			return err
 		}
-		if gwInfo.gws.Equal(invalidGWIPs) {
-			cacheInfo.staticGateways = cacheInfo.staticGateways.Delete(gwInfo)
+		if gwInfo.Gateways.Difference(invalidGWIPs).Len() == 0 {
+			cacheInfo.StaticGateways = cacheInfo.StaticGateways.Delete(gwInfo)
 			continue
 		}
-		gwInfo.gws = gwInfo.gws.Delete(invalidGWIPs.UnsortedList()...)
+		gwInfo.Gateways.Delete(invalidGWIPs.UnsortedList()...)
 	}
 
 	annotatedGWIPs, err = m.calculateAnnotatedPodGatewayIPsForNamespace(namespaceName)
@@ -220,16 +223,16 @@ func (m *externalPolicyManager) deletePolicyInNamespace(namespaceName, policyNam
 
 	dynamic := sets.New[string]()
 	for _, gatewayInfo := range pp.dynamicGateways {
-		dynamic = static.Union(gatewayInfo.gws)
+		dynamic = static.Insert(gatewayInfo.Gateways.UnsortedList()...)
 	}
 	for _, gwInfo := range routePolicy.dynamicGateways {
-		dynamic = dynamic.Delete(gwInfo.gws.UnsortedList()...)
+		dynamic = dynamic.Delete(gwInfo.Gateways.UnsortedList()...)
 	}
 	coexistingIPs = coexistingIPs.Union(annotatedGWIPs).Union(dynamic)
 
 	for pod, gwInfo := range routePolicy.dynamicGateways {
 		// Filter out the IPs that are not in coexisting. Those IPs are to be deleted.
-		invalidGWIPs := gwInfo.gws.Difference(coexistingIPs)
+		invalidGWIPs := gwInfo.Gateways.Difference(coexistingIPs)
 		// Filter out the IPs from the coexisting list that are to be kept by calculating the difference between the coexising and those IPs that are to be deleted and not coexisting at the same time.
 		ipsToKeep := coexistingIPs.Difference(invalidGWIPs)
 		klog.Infof("Coexisting %s, invalid %s, ipsToKeep %s", strings.Join(sets.List(coexistingIPs), ","), strings.Join(sets.List(invalidGWIPs), ","), strings.Join(sets.List(ipsToKeep), ","))
@@ -237,12 +240,12 @@ func (m *externalPolicyManager) deletePolicyInNamespace(namespaceName, policyNam
 		if err != nil {
 			return err
 		}
-		if gwInfo.gws.Equal(invalidGWIPs) {
+		if gwInfo.Gateways.Difference(invalidGWIPs).Len() == 0 {
 			// delete cached information for the pod gateway
-			delete(cacheInfo.dynamicGateways, pod)
+			delete(cacheInfo.DynamicGateways, pod)
 			continue
 		}
-		gwInfo.gws = gwInfo.gws.Delete(invalidGWIPs.UnsortedList()...)
+		gwInfo.Gateways.Delete(invalidGWIPs.UnsortedList()...)
 	}
 	return nil
 }
@@ -256,7 +259,10 @@ func (m *externalPolicyManager) applyProcessedPolicyToNamespace(namespaceName, p
 			return err
 		}
 		var duplicated sets.Set[string]
-		cacheInfo.staticGateways, duplicated = cacheInfo.staticGateways.Insert(routePolicy.staticGateways...)
+		cacheInfo.StaticGateways, duplicated, err = cacheInfo.StaticGateways.Insert(routePolicy.staticGateways...)
+		if err != nil {
+			return err
+		}
 		if duplicated.Len() > 0 {
 			klog.Warningf("Found duplicated gateway IP(s) %+s in policy %s", sets.List(duplicated), policyName)
 		}
@@ -266,9 +272,10 @@ func (m *externalPolicyManager) applyProcessedPolicyToNamespace(namespaceName, p
 		if err != nil {
 			return err
 		}
-		cacheInfo.dynamicGateways[pod] = info
+		cacheInfo.DynamicGateways[pod] = newGatewayInfo(info.Gateways.items, info.BFDEnabled)
+
 	}
-	cacheInfo.policies = cacheInfo.policies.Insert(policyName)
+	cacheInfo.Policies = cacheInfo.Policies.Insert(policyName)
 	return nil
 }
 
@@ -369,9 +376,6 @@ func (m *externalPolicyManager) removeDiscrepanciesInRoutePolicy(currentPolicy, 
 			m.unlockNamespaceInfoCache(unmatchNs)
 			return err
 		}
-		if cacheInfo.policies.Len() == 0 {
-			m.deleteNamespaceInfoInCache(unmatchNs)
-		}
 		m.unlockNamespaceInfoCache(unmatchNs)
 	}
 
@@ -400,14 +404,10 @@ func (m *externalPolicyManager) removeDiscrepanciesInRoutePolicy(currentPolicy, 
 			continue
 		}
 		err = m.deletePolicyInNamespace(ns.Name, currentPolicy.Name, &routePolicy{dynamicGateways: processedDynamicHops, staticGateways: processedStaticHops}, cacheInfo)
+		m.unlockNamespaceInfoCache(ns.Name)
 		if err != nil {
-			m.unlockNamespaceInfoCache(ns.Name)
 			return err
 		}
-		if cacheInfo.policies.Len() == 0 {
-			m.deleteNamespaceInfoInCache(ns.Name)
-		}
-		m.unlockNamespaceInfoCache(ns.Name)
 	}
 	return nil
 }
@@ -436,7 +436,7 @@ func (m *externalPolicyManager) processStaticHopsGatewayInformation(hops []*admi
 		if ip == nil {
 			return nil, fmt.Errorf("could not parse routing external gw annotation value '%s'", h.IP)
 		}
-		gwList = append(gwList, &gatewayInfo{gws: sets.New(ip.String()), bfdEnabled: h.BFDEnabled})
+		gwList = append(gwList, newGatewayInfo(sets.New(ip.String()), h.BFDEnabled))
 	}
 	return gwList, nil
 }
@@ -472,7 +472,7 @@ func (m *externalPolicyManager) processDynamicHopsGatewayInformation(hops []*adm
 					klog.Warningf("Found overlapping dynamic hop policy for pod %s, discarding match entry", key)
 					continue
 				}
-				podsInfo[key] = &gatewayInfo{gws: foundGws, bfdEnabled: h.BFDEnabled}
+				podsInfo[key] = newGatewayInfo(foundGws, h.BFDEnabled)
 			}
 		}
 	}
@@ -683,9 +683,9 @@ func (m *externalPolicyManager) retrieveDynamicGatewayIPsForPolicies(coexistingP
 	coexistingDynamicIPs := sets.New[string]()
 
 	for name := range coexistingPolicies {
-		policy, err := m.routeLister.Get(name)
-		if err != nil {
-			klog.Warningf("Unable to find route policy %s:%+v", name, err)
+		policy, found, _ := m.getRoutePolicyFromCache(name)
+		if !found {
+			klog.Warningf("Unable to find route policy %s in cache", name)
 			continue
 		}
 		pp, err := m.processDynamicHopsGatewayInformation(policy.Spec.NextHops.DynamicHops)
@@ -693,7 +693,7 @@ func (m *externalPolicyManager) retrieveDynamicGatewayIPsForPolicies(coexistingP
 			return nil, err
 		}
 		for _, gatewayInfo := range pp {
-			coexistingDynamicIPs = coexistingDynamicIPs.Union(gatewayInfo.gws)
+			coexistingDynamicIPs = coexistingDynamicIPs.Insert(gatewayInfo.Gateways.UnsortedList()...)
 		}
 	}
 	return coexistingDynamicIPs, nil
@@ -705,9 +705,9 @@ func (m *externalPolicyManager) retrieveStaticGatewayIPsForPolicies(policies set
 	coexistingStaticIPs := sets.New[string]()
 
 	for name := range policies {
-		policy, err := m.routeLister.Get(name)
-		if err != nil {
-			klog.Warningf("Unable to find route policy %s:%+v", name, err)
+		policy, found, _ := m.getRoutePolicyFromCache(name)
+		if !found {
+			klog.Warningf("Unable to find route policy %s in cache", name)
 			continue
 		}
 		pp, err := m.processStaticHopsGatewayInformation(policy.Spec.NextHops.StaticHops)
@@ -715,7 +715,7 @@ func (m *externalPolicyManager) retrieveStaticGatewayIPsForPolicies(policies set
 			return nil, err
 		}
 		for _, gatewayInfo := range pp {
-			coexistingStaticIPs = coexistingStaticIPs.Union(gatewayInfo.gws)
+			coexistingStaticIPs = coexistingStaticIPs.Insert(gatewayInfo.Gateways.UnsortedList()...)
 		}
 	}
 	return coexistingStaticIPs, nil

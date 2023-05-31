@@ -2,7 +2,6 @@ package apbroute
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
@@ -18,43 +17,57 @@ import (
 
 type gatewayInfoList []*gatewayInfo
 
-func (g gatewayInfoList) String() string {
-
-	s := strings.Builder{}
-	for _, item := range g {
-		s.WriteString(fmt.Sprintf("%s, ", item.gws))
+// HasBFDEnabled returns the BFD value for the given IP stored in the gatewayInfoList when found.
+// It also returns a boolean that indicates if the IP was found and an error
+// An IP can only have one BFD value.
+func (g gatewayInfoList) HasBFDEnabled(ip string) (bool, bool) {
+	for _, i := range g {
+		if i.Gateways.Has(ip) {
+			return i.BFDEnabled, true
+		}
 	}
-	return s.String()
+	return false, false
 }
 
+// HasIP returns true if the given IP is found in one of the gatewayInfo elements stored in the gatewayInfoList
 func (g gatewayInfoList) HasIP(ip string) bool {
 	for _, i := range g {
-		if i.gws.Has(ip) {
+		if i.Gateways.Has(ip) {
 			return true
 		}
 	}
 	return false
 }
 
-func (g gatewayInfoList) Insert(items ...*gatewayInfo) (gatewayInfoList, sets.Set[string]) {
+// Insert adds a slice of gatewayInfo's to the gatewayInfolist and ensures that no IP duplicates are inserted. It returns a new
+// gatewayInfoList containing the added gatewayInfo elements and set containing the duplicated IPs found during the Insert operation.
+func (g gatewayInfoList) Insert(items ...*gatewayInfo) (gatewayInfoList, sets.Set[string], error) {
 	ret := append(gatewayInfoList{}, g...)
 	duplicated := sets.New[string]()
 	for _, item := range items {
-		for _, ip := range item.gws.UnsortedList() {
-			if ret.HasIP(ip) {
+		gws := sets.Set[string]{}
+		for _, ip := range item.Gateways.UnsortedList() {
+			bfd, found := ret.HasBFDEnabled(ip)
+			if found {
+				if bfd != item.BFDEnabled {
+					return nil, nil, fmt.Errorf("attempting to insert duplicated IP %s with different BFD states: enabled/disabled", ip)
+				}
 				duplicated = duplicated.Insert(ip)
 				continue
 			}
-			ret = append(ret, item)
+			gws.Insert(ip)
+		}
+		if len(gws) > 0 {
+			ret = append(ret, newGatewayInfo(gws, item.BFDEnabled))
 		}
 	}
-	return ret, duplicated
+	return ret, duplicated, nil
 }
 func (g gatewayInfoList) Delete(item *gatewayInfo) gatewayInfoList {
 	ret := gatewayInfoList{}
 	for _, i := range g {
-		if !i.gws.Equal(item.gws) {
-			ret, _ = ret.Insert(i)
+		if !i.Equal(item) {
+			ret, _, _ = ret.Insert(i)
 		}
 	}
 	return ret
@@ -64,42 +77,88 @@ func (g gatewayInfoList) Len() int {
 	return len(g)
 }
 
-func (g gatewayInfoList) Less(i, j int) bool { return lessGWsIP(g[i], g[j]) }
-func (g gatewayInfoList) Swap(i, j int)      { g[i], g[j] = g[j], g[i] }
-
-func lessGWsIP(l, r *gatewayInfo) bool {
-
-	for lip := range l.gws {
-		for rip := range r.gws {
-			if lip > rip {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 type gatewayInfo struct {
-	gws        sets.Set[string]
-	bfdEnabled bool
+	Gateways   *syncSet
+	BFDEnabled bool
 }
+
+func newGatewayInfo(items sets.Set[string], bfdEnabled bool) *gatewayInfo {
+	return &gatewayInfo{Gateways: &syncSet{items: items, mux: &sync.Mutex{}}, BFDEnabled: bfdEnabled}
+}
+
+type syncSet struct {
+	items sets.Set[string]
+	mux   *sync.Mutex
+}
+
+// Equal compares two gatewayInfo instances and returns true if all the gateway IPs are equal, regardless of the order, as well as the BFDEnabled field value.
+func (g *gatewayInfo) Equal(g2 *gatewayInfo) bool {
+	return g.BFDEnabled == g2.BFDEnabled && g.Gateways.Equal(g2.Gateways)
+}
+
+func (g *syncSet) Equal(s2 *syncSet) bool {
+	s2.mux.Lock()
+	s2items := s2.items.Clone()
+	s2.mux.Unlock()
+	g.mux.Lock()
+	defer g.mux.Unlock()
+	return g.items.Equal(s2items)
+}
+
+func (g *syncSet) Has(ip string) bool {
+	g.mux.Lock()
+	defer g.mux.Unlock()
+	return g.items.Has(ip)
+
+}
+func (g *syncSet) UnsortedList() []string {
+	g.mux.Lock()
+	defer g.mux.Unlock()
+	return g.items.Clone().UnsortedList()
+}
+
+func (g *syncSet) Delete(items ...string) {
+	g.mux.Lock()
+	defer g.mux.Unlock()
+	g.items = g.items.Delete(items...)
+}
+
+func (g *syncSet) Insert(items ...string) {
+	g.mux.Lock()
+	defer g.mux.Unlock()
+	g.items = g.items.Insert(items...)
+}
+
+func (g *syncSet) Difference(items sets.Set[string]) sets.Set[string] {
+	g.mux.Lock()
+	defer g.mux.Unlock()
+	return g.items.Difference(items)
+}
+
+func (g syncSet) Len() int {
+	g.mux.Lock()
+	defer g.mux.Unlock()
+	return g.items.Len()
+}
+
 type namespaceInfo struct {
-	policies        sets.Set[string]
-	staticGateways  gatewayInfoList
-	dynamicGateways map[ktypes.NamespacedName]*gatewayInfo
+	Policies        sets.Set[string]
+	StaticGateways  gatewayInfoList
+	DynamicGateways map[ktypes.NamespacedName]*gatewayInfo
+	markForDelete   bool
 }
 
 func newNamespaceInfo() *namespaceInfo {
 	return &namespaceInfo{
-		policies:        sets.New[string](),
-		dynamicGateways: make(map[ktypes.NamespacedName]*gatewayInfo),
-		staticGateways:  gatewayInfoList{},
+		Policies:        sets.New[string](),
+		DynamicGateways: make(map[ktypes.NamespacedName]*gatewayInfo),
+		StaticGateways:  gatewayInfoList{},
 	}
 }
 
 type routeInfo struct {
-	policy      *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute
-	toBeDeleted bool
+	policy          *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute
+	markedForDelete bool
 }
 
 type ExternalRouteInfo struct {
@@ -191,7 +250,7 @@ func (m *externalPolicyManager) getRoutePolicyFromCache(policyName string) (admi
 		}
 		found = f
 		policy = *ri.policy
-		markedForDeletion = ri.toBeDeleted
+		markedForDeletion = ri.markedForDelete
 		return nil
 	})
 	return policy, found, markedForDeletion
@@ -204,7 +263,7 @@ func (m *externalPolicyManager) storeRoutePolicyInCache(policyInfo *adminpolicyb
 			m.routePolicySyncCache.LoadOrStore(policyName, &routeInfo{policy: policyInfo})
 			return nil
 		}
-		if ri.toBeDeleted {
+		if ri.markedForDelete {
 			return fmt.Errorf("attempting to store policy %s that is in the process of being deleted", policyInfo.Name)
 		}
 		ri.policy = policyInfo
@@ -215,7 +274,7 @@ func (m *externalPolicyManager) storeRoutePolicyInCache(policyInfo *adminpolicyb
 func (m *externalPolicyManager) deleteRoutePolicyFromCache(policyName string) error {
 	return m.routePolicySyncCache.DoWithLock(policyName, func(policyName string) error {
 		ri, found := m.routePolicySyncCache.Load(policyName)
-		if found && !ri.toBeDeleted {
+		if found && !ri.markedForDelete {
 			return fmt.Errorf("attempting to delete route policy %s from cache before it has been marked for deletion", policyName)
 		}
 		m.routePolicySyncCache.Delete(policyName)
@@ -235,7 +294,7 @@ func (m *externalPolicyManager) getAndMarkRoutePolicyForDeletionInCache(policyNa
 		if !found {
 			return nil
 		}
-		ri.toBeDeleted = true
+		ri.markedForDelete = true
 		exists = true
 		routePolicy = *ri.policy
 		return nil
@@ -253,7 +312,25 @@ func (m *externalPolicyManager) getNamespaceInfoFromCache(namespaceName string) 
 	return nsInfo, true
 }
 
+func (m *externalPolicyManager) getAndMarkForDeleteNamespaceInfoFromCache(namespaceName string) (*namespaceInfo, bool) {
+	nsInfo, ok := m.getNamespaceInfoFromCache(namespaceName)
+	if !ok {
+		return nil, false
+	}
+	nsInfo.markForDelete = true
+	return nsInfo, ok
+}
+
 func (m *externalPolicyManager) deleteNamespaceInfoInCache(namespaceName string) {
+	nsInfo, ok := m.namespaceInfoSyncCache.Load(namespaceName)
+	if !ok {
+		klog.Warningf("Failed to retrieve namespace %s for deletion", namespaceName)
+		return
+	}
+	if !nsInfo.markForDelete {
+		klog.Warningf("Attempting to delete namespace %s when it has not been marked for deletion", namespaceName)
+		return
+	}
 	m.namespaceInfoSyncCache.Delete(namespaceName)
 }
 
@@ -326,7 +403,7 @@ func (m *externalPolicyManager) getDynamicGatewayIPsForTargetNamespace(namespace
 			if ns.Name == namespaceName {
 				// only collect the dynamic gateways
 				for _, gwInfo := range p.dynamicGateways {
-					policyGWIPs = policyGWIPs.Union(gwInfo.gws)
+					policyGWIPs = policyGWIPs.Insert(gwInfo.Gateways.UnsortedList()...)
 				}
 			}
 		}
@@ -363,7 +440,7 @@ func (m *externalPolicyManager) getStaticGatewayIPsForTargetNamespace(namespaceN
 			if ns.Name == namespaceName {
 				// only collect the static gateways
 				for _, gwInfo := range p.staticGateways {
-					policyGWIPs.Insert(gwInfo.gws.UnsortedList()...)
+					policyGWIPs.Insert(gwInfo.Gateways.UnsortedList()...)
 				}
 			}
 		}
