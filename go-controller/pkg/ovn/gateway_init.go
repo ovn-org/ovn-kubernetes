@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -72,7 +73,15 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 			}
 		}
 		podIPs, err := util.GetPodIPsOfNetwork(&pod, oc.NetInfo)
-		if err != nil {
+		if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
+			// It is possible that the pod is scheduled during this time, but the LSP add or
+			// IP Allocation has not happened and it is waiting for the WatchPods to start
+			// after WatchNodes completes (This function is called during syncNodes). So since
+			// the pod doesn't have any IPs, there is no SNAT here to keep for this pod so we skip
+			// this pod from processing and move onto the next one.
+			klog.Warningf("Unable to fetch podIPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			continue // no-op
+		} else if err != nil {
 			return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 		for _, podIP := range podIPs {
