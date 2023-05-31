@@ -266,6 +266,17 @@ var _ = Describe("Multi Homing", func() {
 				clientPodConfig.namespace = f.Namespace.Name
 				serverPodConfig.namespace = f.Namespace.Name
 
+				if netConfig.topology == "localnet" {
+					nodes := ovsPods(cs)
+					Expect(nodes).NotTo(BeEmpty())
+					defer func() {
+						Expect(teardownUnderlay(nodes)).To(Succeed())
+					}()
+
+					const secondaryInterfaceName = "eth1"
+					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+				}
+
 				By("creating the attachment configuration")
 				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
 					context.Background(),
@@ -511,16 +522,17 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"can communicate over an Localnet secondary network when the pods are scheduled on the same node",
+				"can communicate over an Localnet secondary network when the pods are scheduled on different nodes",
 				networkAttachmentConfig{
 					name:     secondaryNetworkName,
 					topology: "localnet",
 					cidr:     secondaryLocalnetNetworkCIDR,
+					vlanID:   localnetVLANID,
 				},
 				podConfiguration{
 					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
 					name:         clientPodName,
-					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+					nodeSelector: map[string]string{nodeHostnameKey: workerOneNodeName},
 				},
 				podConfiguration{
 					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
@@ -530,15 +542,16 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"can communicate over an Localnet secondary network without IPAM when the pods are scheduled on the same node",
+				"can communicate over an Localnet secondary network without IPAM when the pods are scheduled on different nodes",
 				networkAttachmentConfig{
 					name:     secondaryNetworkName,
 					topology: "localnet",
+					vlanID:   localnetVLANID,
 				},
 				podConfiguration{
 					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
 					name:         clientPodName,
-					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+					nodeSelector: map[string]string{nodeHostnameKey: workerOneNodeName},
 					isPrivileged: true,
 				},
 				podConfiguration{
@@ -550,10 +563,11 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"can communicate over an localnet secondary network without IPAM when the pods are scheduled on the same node, with static IPs configured via network selection elements",
+				"can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes, with static IPs configured via network selection elements",
 				networkAttachmentConfig{
 					name:     secondaryNetworkName,
 					topology: "localnet",
+					vlanID:   localnetVLANID,
 				},
 				podConfiguration{
 					attachments: []nadapi.NetworkSelectionElement{{
@@ -561,7 +575,7 @@ var _ = Describe("Multi Homing", func() {
 						IPRequest: []string{clientIP},
 					}},
 					name:         clientPodName,
-					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+					nodeSelector: map[string]string{nodeHostnameKey: workerOneNodeName},
 				},
 				podConfiguration{
 					attachments: []nadapi.NetworkSelectionElement{{
@@ -574,16 +588,17 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"can communicate over an localnet secondary network with an IPv6 subnet when pods are scheduled on the same node",
+				"can communicate over an localnet secondary network with an IPv6 subnet when pods are scheduled on different nodes",
 				networkAttachmentConfig{
 					name:     secondaryNetworkName,
 					topology: "localnet",
 					cidr:     secondaryIPv6CIDR,
+					vlanID:   localnetVLANID,
 				},
 				podConfiguration{
 					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
 					name:         clientPodName,
-					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+					nodeSelector: map[string]string{nodeHostnameKey: workerOneNodeName},
 				},
 				podConfiguration{
 					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
@@ -593,16 +608,17 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"can communicate over an localnet secondary network with a dual stack configuration when pods are scheduled on the same node",
+				"can communicate over an localnet secondary network with a dual stack configuration when pods are scheduled on different nodes",
 				networkAttachmentConfig{
 					name:     secondaryNetworkName,
 					topology: "localnet",
 					cidr:     strings.Join([]string{secondaryLocalnetNetworkCIDR, secondaryIPv6CIDR}, ","),
+					vlanID:   localnetVLANID,
 				},
 				podConfiguration{
 					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
 					name:         clientPodName,
-					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
+					nodeSelector: map[string]string{nodeHostnameKey: workerOneNodeName},
 				},
 				podConfiguration{
 					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},

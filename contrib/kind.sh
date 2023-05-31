@@ -321,8 +321,7 @@ parse_args() {
                                                 ;;
             --isolated )                        OVN_ISOLATED=true
                                                 ;;
-            -mne | --multi-network-enable )     shift
-                                                ENABLE_MULTI_NET=true
+            -mne | --multi-network-enable )     ENABLE_MULTI_NET=true
                                                 ;;
             --delete )                          delete
                                                 exit
@@ -1066,11 +1065,25 @@ docker_create_second_interface() {
   echo "adding second interfaces to nodes"
 
   # Create the network as dual stack, regardless of the type of the deployment. Ignore if already exists.
-  docker network create --ipv6 --driver=bridge kindexgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
+  "$OCI_BIN" network create --ipv6 --driver=bridge kindexgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
 
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
-    docker network connect kindexgw "$n"
+    "$OCI_BIN" network connect kindexgw "$n"
+  done
+}
+
+docker_create_second_disconnected_interface() {
+  echo "adding second interfaces to nodes"
+  local bridge_name="${1:-kindexgw}"
+  echo "bridge: $bridge_name"
+
+  # Create the network without subnets; ignore if already exists.
+  "$OCI_BIN" network create --internal --driver=bridge "$bridge_name" || true
+
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    "$OCI_BIN" network connect "$bridge_name" "$n"
   done
 }
 
@@ -1169,6 +1182,7 @@ fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
   install_multus
   install_mpolicy_crd
+  docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
 fi
 kubectl_wait_pods
 sleep_until_pods_settle
