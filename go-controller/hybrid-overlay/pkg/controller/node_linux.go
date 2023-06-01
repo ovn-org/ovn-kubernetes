@@ -53,8 +53,8 @@ type NodeController struct {
 	// channel to indicate we need to update flows immediately
 	flowChan chan struct{}
 
-	nodeLister listers.NodeLister
-	podLister  listers.PodLister
+	nodeLister     listers.NodeLister
+	localPodLister listers.PodLister
 }
 
 // newNodeController returns a node handler that listens for node events
@@ -66,18 +66,18 @@ func newNodeController(
 	_ kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
-	podLister listers.PodLister,
+	localPodLister listers.PodLister,
 ) (nodeController, error) {
 
 	node := &NodeController{
-		nodeName:   nodeName,
-		initState:  new(uint32),
-		vxlanPort:  uint16(config.HybridOverlay.VXLANPort),
-		flowCache:  make(map[string]*flowCacheEntry),
-		flowMutex:  sync.Mutex{},
-		flowChan:   make(chan struct{}, 1),
-		nodeLister: nodeLister,
-		podLister:  podLister,
+		nodeName:       nodeName,
+		initState:      new(uint32),
+		vxlanPort:      uint16(config.HybridOverlay.VXLANPort),
+		flowCache:      make(map[string]*flowCacheEntry),
+		flowMutex:      sync.Mutex{},
+		flowChan:       make(chan struct{}, 1),
+		nodeLister:     nodeLister,
+		localPodLister: localPodLister,
 	}
 	atomic.StoreUint32(node.initState, hotypes.InitialStartup)
 	return node, nil
@@ -112,16 +112,6 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	// if the IP/MAC or Annotations have changed
 	ignoreLearn := true
 
-	if atomic.LoadUint32(n.initState) == hotypes.InitialStartup {
-		node, err := n.nodeLister.Get(n.nodeName)
-		if err != nil {
-			return fmt.Errorf("hybrid overlay not initialized on %s, and failed to get node data: %v",
-				n.nodeName, err)
-		}
-		if err = n.EnsureHybridOverlayBridge(node); err != nil {
-			return fmt.Errorf("failed to ensure hybrid overlay in pod handler: %v", err)
-		}
-	}
 	if n.drMAC == nil || n.drIP == nil {
 		return fmt.Errorf("empty values for DR MAC: %s or DR IP: %s on node %s", n.drMAC, n.drIP, n.nodeName)
 	}
@@ -274,11 +264,10 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 		err = n.hybridOverlayNodeUpdate(node)
 	}
 	if atomic.LoadUint32(n.initState) == hotypes.DistributedRouterInitialized {
-		pods, err := n.podLister.List(labels.Everything())
+		pods, err := n.localPodLister.List(labels.Everything())
 		if err != nil {
 			return fmt.Errorf("cannot fully initialize node %s for hybrid overlay, cannot list pods: %v", n.nodeName, err)
 		}
-
 		for _, pod := range pods {
 			err := n.AddPod(pod)
 			if err != nil {
