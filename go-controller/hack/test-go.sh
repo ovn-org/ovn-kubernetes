@@ -49,6 +49,10 @@ function testrun {
     if [ ! -z "${COVERALLS:-}" ]; then
         args="${args} -test.coverprofile=${idx}.coverprofile "
     fi
+    if [[ " ${big_pkgs[@]} " =~ " $pkg " ]]; then
+        echo "Increasing timeout to 20m for package ${pkg}"
+        args="${args} -test.timeout=20m"
+    fi
     if grep -q -r "ginkgo" ."${path}"; then
 	    prefix=$(echo "${path}" | cut -c 2- | sed 's,/,_,g')
         ginkgoargs="-ginkgo.v ${ginkgo_focus} -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
@@ -63,6 +67,9 @@ function testrun {
 
 # These packages requires root for network namespace manipulation in unit tests
 root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node")
+
+# These packages are big and require more than the 10m default to run the unit tests
+big_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn")
 
 i=0
 for pkg in ${PKGS}; do
