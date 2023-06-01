@@ -37,7 +37,9 @@ spec:
       serviceAccountName: ovn
       hostNetwork: true
       dnsPolicy: Default
-
+      {% if ovnkube_compact_mode_enable=="true" and ovn_unprivileged_mode=="no" %}
+      hostPID: true
+      {% endif %}
       # required to be scheduled on a linux node with node-role.kubernetes.io/control-plane label and
       # only one instance of ovnkube-master pod per node
       affinity:
@@ -125,12 +127,22 @@ spec:
       - name: ovnkube-master
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-
+        {% if ovnkube_compact_mode_enable=="true" %}
         command: ["/root/ovnkube.sh", "ovn-master"]
-
         securityContext:
           runAsUser: 0
-
+          {% if ovn_unprivileged_mode=="no" -%}
+          privileged: true
+          {% else %}
+          capabilities:
+            add:
+            - NET_ADMIN
+          {% endif %}
+        {% else %}
+        command: ["/root/ovnkube.sh", "ovn-master"]
+        securityContext:
+          runAsUser: 0
+        {% endif %}
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # Run directories where we need to be able to access sockets
@@ -146,7 +158,29 @@ spec:
         - mountPath: /ovn-cert
           name: host-ovn-cert
           readOnly: true
-
+        {% if ovnkube_compact_mode_enable=="true" %}
+        # Common mounts
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
+        # CNI related mounts which we take over
+        - mountPath: /opt/cni/bin
+          name: host-opt-cni-bin
+        - mountPath: /etc/cni/net.d
+          name: host-etc-cni-netd
+        - mountPath: /var/run/netns
+          name: host-netns
+          mountPropagation: HostToContainer
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+          readOnly: true
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+          readOnly: true
+        - mountPath: /var/run/ovn-kubernetes
+          name: host-var-run-ovn-kubernetes
+        {% endif %}
         resources:
           requests:
             cpu: 100m
@@ -166,6 +200,8 @@ spec:
           value: "{{ ovnkube_config_duration_enable }}"
         - name: OVNKUBE_METRICS_SCALE_ENABLE
           value: "{{ ovnkube_metrics_scale_enable }}"
+        - name: OVNKUBE_COMPACT_MODE_ENABLE
+          value: "{{ ovnkube_compact_mode_enable }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
@@ -252,5 +288,28 @@ spec:
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate
+      {% if ovnkube_compact_mode_enable=="true" %}
+      - name: host-slash
+        hostPath:
+          path: /
+      - name: host-opt-cni-bin
+        hostPath:
+          path: /opt/cni/bin
+      - name: host-etc-cni-netd
+        hostPath:
+          path: /etc/cni/net.d
+      - name: host-netns
+        hostPath:
+          path: /var/run/netns
+      - name: host-run-ovs
+        hostPath:
+          path: /run/openvswitch
+      - name: host-var-lib-ovs
+        hostPath:
+          path: /var/lib/openvswitch
+      - name: host-var-run-ovn-kubernetes
+        hostPath:
+          path: /var/run/ovn-kubernetes
+      {% endif %}
       tolerations:
       - operator: "Exists"

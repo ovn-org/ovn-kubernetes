@@ -57,7 +57,7 @@ const (
 	ObjectNameKey ExternalIDKey = types.OvnK8sPrefix + "/name"
 	// PrimaryIDKey will be used as a primary index, that is unique for every db object,
 	// and can be built based on the combination of all the other ids.
-	PrimaryIDKey ExternalIDKey = types.OvnK8sPrefix + "/id"
+	PrimaryIDKey ExternalIDKey = types.PrimaryIDKey
 )
 
 // dbIDsMap is used to make sure the same ownerType is not defined twice for the same dbObjType to avoid conflicts.
@@ -89,25 +89,27 @@ func newObjectIDsType(dbTable dbObjType, ownerObjectType ownerType, keys []Exter
 // - objectIDs provide values for keys that are used by given idsType. To create a new object, all fields should be set.
 // For predicate search, only some values that need to be matched may be set.
 //
-//  dbIndex := NewDbObjectIDs(AddressSetEgressFirewallDNS, "DefaultController",
-//		map[ExternalIDKey]string{
-//			ObjectNameKey: "dns.name",
-// 			AddressSetIPFamilyKey: "ipv4"
-//	})
-// uses AddressSetEgressFirewallDNS = newObjectIDsType(addressSet, EgressFirewallDNSOwnerType, []ExternalIDKey{
-//		// dnsName
-//		ObjectNameKey,
-//		AddressSetIPFamilyKey,
-//  })
+//	 dbIndex := NewDbObjectIDs(AddressSetEgressFirewallDNS, "DefaultController",
+//			map[ExternalIDKey]string{
+//				ObjectNameKey: "dns.name",
+//				AddressSetIPFamilyKey: "ipv4"
+//		})
+//
+//	uses AddressSetEgressFirewallDNS = newObjectIDsType(addressSet, EgressFirewallDNSOwnerType, []ExternalIDKey{
+//			// dnsName
+//			ObjectNameKey,
+//			AddressSetIPFamilyKey,
+//	 })
 //
 // its dbIndex will be mapped to the following ExternalIDs
-//  {
-//		"k8s.ovn.org/owner-controller": "DefaultController"
-//		"k8s.ovn.org/owner-type": "EgressFirewallDNS" (value of EgressFirewallDNSOwnerType)
-//		"k8s.ovn.org/name": "dns.name"
-// 		"k8s.ovn.org/ipFamily": "ipv4"
-//		"k8s.ovn.org/id": "DefaultController:EgressFirewallDNS:dns.name:ipv4"
-//  }
+//
+//	 {
+//			"k8s.ovn.org/owner-controller": "DefaultController"
+//			"k8s.ovn.org/owner-type": "EgressFirewallDNS" (value of EgressFirewallDNSOwnerType)
+//			"k8s.ovn.org/name": "dns.name"
+//			"k8s.ovn.org/ipFamily": "ipv4"
+//			"k8s.ovn.org/id": "DefaultController:EgressFirewallDNS:dns.name:ipv4"
+//	 }
 type DbObjectIDs struct {
 	idsType *ObjectIDsType
 	// ownerControllerName specifies which controller owns the object.
@@ -227,6 +229,10 @@ func (objectIDs *DbObjectIDs) String() string {
 		id += ":" + objectIDs.objectIDs[key]
 	}
 	return id
+}
+
+func (objectIDs *DbObjectIDs) GetIDsType() *ObjectIDsType {
+	return objectIDs.idsType
 }
 
 // getUniqueID returns primary id that is build based on objectIDs values.

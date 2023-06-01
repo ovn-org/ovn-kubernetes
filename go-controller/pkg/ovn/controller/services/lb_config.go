@@ -97,7 +97,7 @@ func (c *lbConfig) makeNodeRouterTargetIPs(service *v1.Service, node *nodeInfo, 
 
 	// any targets local to the node need to have a special
 	// harpin IP added, but only for the router LB
-	targetIPs, updated := util.UpdateIPsSlice(targetIPs, node.nodeIPsStr(), []string{hostMasqueradeIP})
+	targetIPs, updated := util.UpdateIPsSlice(targetIPs, node.l3gatewayAddressesStr(), []string{hostMasqueradeIP})
 
 	// We either only removed stuff from the original slice, or updated some IPs.
 	if len(targetIPs) != len(epIPs) || updated {
@@ -131,14 +131,14 @@ var protos = []v1.Protocol{
 // - services with InternalTrafficPolicy=Local
 //
 // Template LBs will be created for
-// - services with NodePort set but *without* ExternalTrafficPolicy=Local or
-//   affinity timeout set.
+//   - services with NodePort set but *without* ExternalTrafficPolicy=Local or
+//     affinity timeout set.
 func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.EndpointSlice, useLBGroup, useTemplates bool) (perNodeConfigs, templateConfigs, clusterConfigs []lbConfig) {
 	needsAffinityTimeout := hasSessionAffinityTimeOut(service)
 
 	// For each svcPort, determine if it will be applied per-node or cluster-wide
 	for _, svcPort := range service.Spec.Ports {
-		eps := util.GetLbEndpoints(endpointSlices, svcPort, service.Spec.PublishNotReadyAddresses)
+		eps := util.GetLbEndpoints(endpointSlices, svcPort, service)
 
 		// if ExternalTrafficPolicy or InternalTrafficPolicy is local, then we need to do things a bit differently
 		externalTrafficLocal := (service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal)
@@ -618,7 +618,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				vips := make([]string, 0, len(config.vips))
 				for _, vip := range config.vips {
 					if vip == placeholderNodeIPs {
-						vips = append(vips, node.nodeIPsStr()...)
+						vips = append(vips, node.hostAddressesStr()...)
 					} else {
 						vips = append(vips, vip)
 					}

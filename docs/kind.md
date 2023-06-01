@@ -93,7 +93,7 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
                  [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]
                  [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]
                  [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]
-                 [-cl |--ovn-loglevel-controller <loglevel>]
+                 [-cl |--ovn-loglevel-controller <loglevel>] [-me|--multicast-enabled]
                  [-ep |--experimental-provider <name>] |
                  [-eb |--egress-gw-separate-bridge]
                  [-h]]
@@ -103,6 +103,7 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 -kt  | --keep-taint                 Do not remove taint components.
                                     DEFAULT: Remove taint components.
 -ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled.
+-me  | --multicast-enabled          Enable multicast. DEFAULT: Disabled.
 -scm | --separate-cluster-manager   Separate cluster manager from ovnkube-master and run as a separate container within ovnkube-master deployment.
 -ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled.
 -ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled.

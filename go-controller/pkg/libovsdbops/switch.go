@@ -31,7 +31,6 @@ func GetLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch) (*
 	found := []*nbdb.LogicalSwitch{}
 	opModel := operationModel{
 		Model:          sw,
-		ModelPredicate: func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		ExistingResult: &found,
 		ErrNotFound:    true,
 		BulkOp:         false,
@@ -53,7 +52,6 @@ func CreateOrUpdateLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.Logica
 	}
 	opModel := operationModel{
 		Model:          sw,
-		ModelPredicate: func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelUpdates: fields,
 		ErrNotFound:    false,
 		BulkOp:         false,
@@ -116,8 +114,14 @@ func DeleteLogicalSwitchesWithPredicateOps(nbClient libovsdbclient.Client, ops [
 // DeleteLogicalSwitchOps returns the operations to delete the provided logical switch
 func DeleteLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation,
 	swName string) ([]libovsdb.Operation, error) {
-	return DeleteLogicalSwitchesWithPredicateOps(nbClient, ops,
-		func(item *nbdb.LogicalSwitch) bool { return item.Name == swName })
+	opModel := operationModel{
+		Model:       &nbdb.LogicalSwitch{Name: swName},
+		ErrNotFound: false,
+		BulkOp:      false,
+	}
+
+	m := newModelClient(nbClient)
+	return m.DeleteOps(ops, opModel)
 }
 
 // DeleteLogicalSwitch deletes the provided logical switch
@@ -141,7 +145,6 @@ func AddLoadBalancersToLogicalSwitchOps(nbClient libovsdbclient.Client, ops []li
 	}
 	opModel := operationModel{
 		Model:            sw,
-		ModelPredicate:   func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelMutations: []interface{}{&sw.LoadBalancer},
 		ErrNotFound:      true,
 		BulkOp:           false,
@@ -160,7 +163,6 @@ func RemoveLoadBalancersFromLogicalSwitchOps(nbClient libovsdbclient.Client, ops
 	}
 	opModel := operationModel{
 		Model:            sw,
-		ModelPredicate:   func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelMutations: []interface{}{&sw.LoadBalancer},
 		// if we want to delete loadbalancer from the switch that doesn't exist, that is noop
 		ErrNotFound: false,
@@ -186,7 +188,6 @@ func AddACLsToLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 
 	opModels := operationModel{
 		Model:            sw,
-		ModelPredicate:   func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelMutations: []interface{}{&sw.ACLs},
 		ErrNotFound:      true,
 		BulkOp:           false,
@@ -302,7 +303,6 @@ func createOrUpdateLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []l
 	}
 	opModel := operationModel{
 		Model:            sw,
-		ModelPredicate:   func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelMutations: []interface{}{&sw.Ports},
 		ErrNotFound:      !createSwitch,
 		BulkOp:           false,
@@ -367,7 +367,6 @@ func DeleteLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []libovsdb.
 	}
 	opModel := operationModel{
 		Model:            sw,
-		ModelPredicate:   func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelMutations: []interface{}{&sw.Ports},
 		ErrNotFound:      true,
 		BulkOp:           false,

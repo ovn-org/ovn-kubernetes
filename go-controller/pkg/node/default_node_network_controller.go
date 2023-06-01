@@ -56,6 +56,13 @@ type BaseNodeNetworkController struct {
 	util.NetInfo
 	util.NetConfInfo
 
+	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
+	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*util.DPUConnectionDetails). Key of nadToDPUCDMap
+	// is nadName; value is DPU_ConnectionDetails when VF representor is successfully configured for that
+	// given NAD. DPU mode only
+	// Note that we assume that Pod's Network Attachment Selection Annotation will not change over time.
+	podNADToDPUCDMap sync.Map
+
 	// stopChan and WaitGroup per controller
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
@@ -761,7 +768,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		if err := nc.watchPodsDPU(); err != nil {
+		if _, err := nc.watchPodsDPU(); err != nil {
 			return err
 		}
 	} else {
@@ -833,7 +840,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 		// nothing to do upon an add event
 		return nil
 	}
-	namespacedName, err := serviceNamespacedNameFromEndpointSlice(oldEndpointSlice)
+	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(oldEndpointSlice)
 	if err != nil {
 		return fmt.Errorf("cannot reconcile conntrack: %v", err)
 	}
@@ -851,7 +858,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 				oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
 				// upon an update event, remove conntrack entries for IP addresses that are no longer
 				// in the endpointslice, skip otherwise
-				if newEndpointSlice != nil && doesEndpointSliceContainValidEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
+				if newEndpointSlice != nil && util.DoesEndpointSliceContainEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
 					continue
 				}
 				// upon update and delete events, flush conntrack only for UDP
@@ -1005,26 +1012,6 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). ",
 		mtu, interfaceName, requiredMTU)
 	return nil
-}
-
-// doesEndpointSliceContainValidEndpoint returns true if the endpointslice
-// contains an endpoint with the given IP/Port/Protocol and this endpoint is considered valid
-func doesEndpointSliceContainValidEndpoint(epSlice *discovery.EndpointSlice,
-	epIP string, epPort int32, protocol kapi.Protocol, service *kapi.Service) bool {
-	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
-	for _, port := range epSlice.Ports {
-		for _, endpoint := range epSlice.Endpoints {
-			if !util.IsEndpointValid(endpoint, includeTerminating) {
-				continue
-			}
-			for _, ip := range endpoint.Addresses {
-				if utilnet.ParseIPSloppy(ip).String() == epIP && *port.Port == epPort && *port.Protocol == protocol {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 func configureSvcRouteViaBridge(bridge string) error {

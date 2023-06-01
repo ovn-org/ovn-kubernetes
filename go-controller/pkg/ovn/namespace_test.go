@@ -2,10 +2,12 @@ package ovn
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -69,6 +71,14 @@ func getNsAddrSetHashNames(ns string) (string, string) {
 	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, DefaultNetworkControllerName))
 }
 
+func buildNamespaceAddressSets(namespace string, ips []net.IP) (*nbdb.AddressSet, *nbdb.AddressSet) {
+	v4set, v6set := addressset.GetDbObjsForAS(getNamespaceAddrSetDbIDs(namespace, "default-network-controller"), ips)
+
+	v4set.UUID = fmt.Sprintf("%s-ipv4-addrSet", namespace)
+	v6set.UUID = fmt.Sprintf("%s-ipv6-addrSet", namespace)
+	return v4set, v6set
+}
+
 var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	const (
 		namespaceName         = "namespace1"
@@ -86,7 +96,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		err := config.PrepareTestConfig()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		fakeOvn = NewFakeOVN()
+		fakeOvn = NewFakeOVN(true)
 		wg = &sync.WaitGroup{}
 	})
 
@@ -287,6 +297,10 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			expectedDatabaseState := []libovsdb.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
+			// Addressset of the host-network namespace was initialized but the node logical switch management port address may or may not
+			// be in the addressset yet, depending on if the host subnets annotation of the node exists in the informer cache. The addressset
+			// can only be deterministic when WatchNamespaces() handles this host network namespace.
+
 			fakeOvn.controller.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(fakeOvn.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
 			_, err = fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(ovntypes.OVNClusterRouter)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -295,7 +309,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			err = fakeOvn.controller.WatchNamespaces()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(hostNetworkNamespace)
 
 			err = fakeOvn.controller.WatchNodes()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

@@ -35,7 +35,7 @@ spec:
       dnsPolicy: Default
       {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
-
+      {% if ovnkube_compact_mode_enable=="false" %}
       - name: ovnkube-node
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
@@ -228,7 +228,7 @@ spec:
           initialDelaySeconds: 30
           timeoutSeconds: 30
           periodSeconds: 60
-
+      {% endif %}
       {% if ovnkube_app_name=="ovnkube-node" -%}
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"

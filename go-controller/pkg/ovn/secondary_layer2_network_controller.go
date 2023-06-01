@@ -4,6 +4,7 @@ import (
 	"context"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"sync"
@@ -19,9 +20,13 @@ type SecondaryLayer2NetworkController struct {
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
 func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
-	netconfInfo util.NetConfInfo) *SecondaryLayer2NetworkController {
+	netconfInfo util.NetConfInfo, addressSetFactory addressset.AddressSetFactory) *SecondaryLayer2NetworkController {
 	stopChan := make(chan struct{})
 
+	ipv4Mode, ipv6Mode := netconfInfo.IPMode()
+	if addressSetFactory == nil {
+		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
+	}
 	oc := &SecondaryLayer2NetworkController{
 		BaseSecondaryLayer2NetworkController{
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
@@ -34,7 +39,10 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					logicalPortCache:            newPortCache(stopChan),
 					namespaces:                  make(map[string]*namespaceInfo),
 					namespacesMutex:             sync.Mutex{},
-					addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient),
+					addressSetFactory:           addressSetFactory,
+					networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
+					sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
+					podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
 					stopChan:                    stopChan,
 					wg:                          &sync.WaitGroup{},
 				},
@@ -43,6 +51,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	}
 
 	// disable multicast support for secondary networks
+	// TBD: changes needs to be made to support multicast in secondary networks
 	oc.multicastSupport = false
 
 	oc.initRetryFramework()

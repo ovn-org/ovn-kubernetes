@@ -49,7 +49,7 @@ type PodInterfaceInfo struct {
 	CheckExtIDs          bool   `json:"check-external-ids"`
 	IsDPUHostMode        bool   `json:"is-dpu-host-mode"`
 	PodUID               string `json:"pod-uid"`
-	VfNetdevName         string `json:"vf-netdev-name"`
+	NetdevName           string `json:"vf-netdev-name"`
 	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
 
 	// network name, for default network, it is "default", otherwise it is net-attach-def's netconf spec name

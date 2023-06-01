@@ -284,6 +284,9 @@ while [ "$1" != "" ]; do
   --stateless-netpol-enable)
     OVN_STATELESS_NETPOL_ENABLE=$VALUE
     ;;
+  --compact-mode)
+    COMPACT_MODE=$VALUE
+    ;;
 
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
@@ -432,8 +435,11 @@ ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE}
 echo "ovnkube_metrics_scale_enable: ${ovnkube_metrics_scale_enable}"
 ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE}
 echo "ovn_stateless_netpol_enable: ${ovn_stateless_netpol_enable}"
+ovnkube_compact_mode_enable=${COMPACT_MODE:-"false"}
+echo "ovnkube_compact_mode_enable: ${ovnkube_compact_mode_enable}"
 
 ovn_image=${ovnkube_image} \
+  ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -476,6 +482,7 @@ ovn_image=${ovnkube_image} \
 # ovnkube node for dpu-host daemonset
 # TODO: we probably dont need all of these when running on dpu host
 ovn_image=${image} \
+  ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_image_pull_policy=${image_pull_policy} \
   kind=${KIND} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
@@ -536,6 +543,8 @@ ovn_image=${ovnkube_image} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_stateless_netpol_enable=${ovn_netpol_acl_enable} \
+  ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${image} \

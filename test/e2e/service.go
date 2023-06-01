@@ -824,6 +824,8 @@ spec:
 
 		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
 		framework.RunKubectlOrDie("default", "scale", "deployment", backendName, "--replicas=3")
+		err = framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, svcName, 3, time.Second, time.Second*120)
+		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 		// number of iptable rules should have decreased by 1

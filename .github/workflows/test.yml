@@ -378,7 +378,7 @@ jobs:
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "separate-cluster-manager": "false"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "separate-cluster-manager": "false"}
           - {"target": "node-ip-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "separate-cluster-manager": "true"}
-          - {"target": "node-ip-migration", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "separate-cluster-manager": "false"}
+          - {"target": "compact-mode",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "separate-cluster-manager": "false"}
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
@@ -394,6 +394,7 @@ jobs:
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
       ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' }}"
       OVN_SEPARATE_CLUSTER_MANAGER: "${{ matrix.separate-cluster-manager == 'true' }}"
+      OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
     steps:
 
     - name: Free up disk space
@@ -448,6 +449,8 @@ jobs:
           make -C test control-plane WHAT="Multi Homing"
         elif [ "${{ matrix.target }}" == "node-ip-migration" ]; then
           make -C test control-plane WHAT="Node IP address migration"
+        elif [ "${{ matrix.target }}" == "compact-mode" ]; then
+          SINGLE_NODE_CLUSTER="true" make -C test shard-network
         else
           make -C test ${{ matrix.target }}
         fi

@@ -120,7 +120,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	oc.defaultCOPPUUID = *(logicalRouter.Copp)
 
 	pg := &nbdb.PortGroup{
-		Name: types.ClusterPortGroupName,
+		Name: types.ClusterPortGroupNameBase,
 	}
 	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
 	if err != nil && err != libovsdbclient.ErrNotFound {
@@ -129,7 +129,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	if pg == nil {
 		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
 		// Create a cluster-wide port group that all logical switch ports are part of
-		pg := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
+		pg := oc.buildPortGroup(types.ClusterPortGroupNameBase, types.ClusterPortGroupNameBase, nil, nil)
 		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
 		if err != nil {
 			klog.Errorf("Failed to create cluster port group: %v", err)
@@ -138,7 +138,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	}
 
 	pg = &nbdb.PortGroup{
-		Name: types.ClusterRtrPortGroupName,
+		Name: types.ClusterRtrPortGroupNameBase,
 	}
 	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
 	if err != nil && err != libovsdbclient.ErrNotFound {
@@ -149,7 +149,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		// Create a cluster-wide port group with all node-to-cluster router
 		// logical switch ports. Currently the only user is multicast but it might
 		// be used for other features in the future.
-		pg = libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
+		pg = oc.buildPortGroup(types.ClusterRtrPortGroupNameBase, types.ClusterRtrPortGroupNameBase, nil, nil)
 		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
 		if err != nil {
 			klog.Errorf("Failed to create cluster port group: %v", err)
@@ -172,6 +172,10 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		if err := oc.createDefaultAllowMulticastPolicy(); err != nil {
 			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
 			return err
+		}
+	} else {
+		if err = oc.disableMulticast(); err != nil {
+			return fmt.Errorf("failed to delete default multicast policy, error: %v", err)
 		}
 	}
 
@@ -258,7 +262,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 
-		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.nbClient); err != nil {
+		if err := oc.addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
 			return err
 		}
 
@@ -293,7 +297,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		return err
 	}
 
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterPortGroupName, logicalSwitchPort.UUID)
+	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterPortGroupNameBase, logicalSwitchPort.UUID)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return err
@@ -337,7 +341,7 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		if err != nil {
 			return err
 		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs.UnsortedList())
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), sets.List(hostAddrs))
 		if err != nil && err != util.NoIPError {
 			return err
 		}
@@ -661,9 +665,13 @@ func (oc *DefaultNetworkController) syncChassis(nodes []*kapi.Node) error {
 		return fmt.Errorf("failed to get chassis private list: %v", err)
 	}
 
-	templateVarList, err := libovsdbops.ListTemplateVar(oc.nbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get template var list: error: %v", err)
+	templateVarList := []*nbdb.ChassisTemplateVar{}
+
+	if oc.svcTemplateSupport {
+		templateVarList, err = libovsdbops.ListTemplateVar(oc.nbClient)
+		if err != nil {
+			return fmt.Errorf("failed to get template var list: error: %w", err)
+		}
 	}
 
 	chassisHostNameMap := map[string]*sbdb.Chassis{}
@@ -872,35 +880,5 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
-	return nil
-}
-
-func (oc *DefaultNetworkController) createACLLoggingMeter() error {
-	band := &nbdb.MeterBand{
-		Action: types.MeterAction,
-		Rate:   config.Logging.ACLLoggingRateLimit,
-	}
-	ops, err := libovsdbops.CreateMeterBandOps(oc.nbClient, nil, band)
-	if err != nil {
-		return fmt.Errorf("can't create meter band %v: %v", band, err)
-	}
-
-	meterFairness := true
-	meter := &nbdb.Meter{
-		Name: types.OvnACLLoggingMeter,
-		Fair: &meterFairness,
-		Unit: types.PacketsPerSecond,
-	}
-	ops, err = libovsdbops.CreateOrUpdateMeterOps(oc.nbClient, ops, meter, []*nbdb.MeterBand{band},
-		&meter.Bands, &meter.Fair, &meter.Unit)
-	if err != nil {
-		return fmt.Errorf("can't create meter %v: %v", meter, err)
-	}
-
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("can't transact ACL logging meter: %v", err)
-	}
-
 	return nil
 }

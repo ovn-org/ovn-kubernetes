@@ -154,8 +154,8 @@ const (
 	// Geneve header length for IPv6 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
 	GeneveHeaderLengthIPv6 = GeneveHeaderLengthIPv4 + 20
 
-	ClusterPortGroupName    = "clusterPortGroup"
-	ClusterRtrPortGroupName = "clusterRtrPortGroup"
+	ClusterPortGroupNameBase    = "clusterPortGroup"
+	ClusterRtrPortGroupNameBase = "clusterRtrPortGroup"
 
 	OVSDBTimeout     = 10 * time.Second
 	OVSDBWaitTimeout = 0
@@ -181,4 +181,8 @@ const (
 	Layer3Topology   = "layer3"
 	Layer2Topology   = "layer2"
 	LocalnetTopology = "localnet"
+
+	// db index keys
+	// PrimaryIDKey is used as a primary client index
+	PrimaryIDKey = OvnK8sPrefix + "/id"
 )

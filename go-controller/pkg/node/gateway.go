@@ -396,6 +396,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		}
 		res.bridgeName = bridgeName
 		res.uplinkName = uplinkName
+		gwIntf = bridgeName
 	} else if _, _, err := util.RunOVSVsctl("br-exists", intfName); err != nil {
 		// This is not a OVS bridge. We need to create a OVS bridge
 		// and add cluster.GatewayIntf as a port of that bridge.

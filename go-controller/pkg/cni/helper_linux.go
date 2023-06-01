@@ -135,13 +135,13 @@ func setSysctl(sysctl string, newVal int) error {
 }
 
 func moveIfToNetns(ifname string, netns ns.NetNS) error {
-	vfDev, err := util.GetNetLinkOps().LinkByName(ifname)
+	dev, err := util.GetNetLinkOps().LinkByName(ifname)
 	if err != nil {
-		return fmt.Errorf("failed to lookup vf device %v: %q", ifname, err)
+		return fmt.Errorf("failed to lookup device %v: %q", ifname, err)
 	}
 
-	// move VF device to ns
-	if err = util.GetNetLinkOps().LinkSetNsFd(vfDev, int(netns.Fd())); err != nil {
+	// move netdevice to ns
+	if err = util.GetNetLinkOps().LinkSetNsFd(dev, int(netns.Fd())); err != nil {
 		return fmt.Errorf("failed to move device %+v to netns: %q", ifname, err)
 	}
 
@@ -250,22 +250,22 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 }
 
 // Setup sriov interface in the pod
-func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, pciAddrs string) (*current.Interface, *current.Interface, error) {
+func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, deviceID string) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
 
-	vfNetdevice := ifInfo.VfNetdevName
+	netdevice := ifInfo.NetdevName
 
-	// 1. Move VF to Container namespace
-	err := moveIfToNetns(vfNetdevice, netns)
+	// 1. Move netdevice to Container namespace
+	err := moveIfToNetns(netdevice, netns)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	err = netns.Do(func(hostNS ns.NetNS) error {
 		contIface.Name = ifName
-		err = renameLink(vfNetdevice, contIface.Name)
+		err = renameLink(netdevice, contIface.Name)
 		if err != nil {
 			return err
 		}
@@ -306,26 +306,19 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	}
 
 	if !ifInfo.IsDPUHostMode {
-		// 2. get Uplink netdevice
-		uplink, err := util.GetSriovnetOps().GetUplinkRepresentor(pciAddrs)
+		// 2. get device representor name
+		oldHostRepName, err := util.GetFunctionRepresentorName(deviceID)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		// 3. get VF index from PCI
-		vfIndex, err := util.GetSriovnetOps().GetVfIndexByPciAddress(pciAddrs)
+		// 3. make sure it's not a port managed by OVS to avoid conflicts when renaming the representor
+		_, err = ovsExec("--if-exists", "del-port", oldHostRepName)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		// 4. lookup representor
-		rep, err := util.GetSriovnetOps().GetVfRepresentor(uplink, vfIndex)
-		if err != nil {
-			return nil, nil, err
-		}
-		oldHostRepName := rep
-
-		// 5. rename the host VF representor
+		// 4. rename the host representor
 		hostIface.Name = containerID[:(15-len(ifnameSuffix))] + ifnameSuffix
 		if err = renameLink(oldHostRepName, hostIface.Name); err != nil {
 			return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostRepName, hostIface.Name, err)
@@ -337,7 +330,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		}
 		hostIface.Mac = link.Attrs().HardwareAddr.String()
 
-		// 6. set MTU on VF representor
+		// 5. set MTU on the representor
 		if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
 			return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
 		}
@@ -366,17 +359,41 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
 	// but only the latest one should have the iface-id set.
-	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
-	for _, uuid := range uuids {
-		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
-			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
+	names, _ := ovsFind("Interface", "name", "external-ids:iface-id="+ifaceID)
+	for _, name := range names {
+		if name == hostIfaceName {
+			// this may be result of restarting ovnkube-node, and it is trying to add the same VF representor to
+			// br-int for the same pod; do not delete port in this case.
+			continue
+		}
+		if out, err := ovsExec("--with-iface", "del-port", "br-int", name); err != nil {
+			klog.Warningf("Failed to delete stale OVS port %q with iface-id %q from br-int: %v\n %q",
+				name, ifaceID, err, out)
+		}
+	}
+
+	// if the specified port was created for other Pod/NAD, return error
+	extIds, err := ovsFind("Interface", "external_ids", "name="+hostIfaceName)
+	if err == nil && len(extIds) == 1 {
+		extId := extIds[0]
+		ifaceIDStr := util.GetExternalIDValByKey(extId, "iface-id")
+		nadNameString := util.GetExternalIDValByKey(extId, types.NADExternalID)
+		// if NADExternalID does not exists, it is default network
+		if nadNameString == "" {
+			nadNameString = types.DefaultNetworkName
+		}
+		if ifaceIDStr != ifaceID {
+			return fmt.Errorf("OVS port %s was added for iface-id (%s), now readding it for (%s)", hostIfaceName, ifaceIDStr, ifaceID)
+		}
+		if nadNameString != ifInfo.NADName {
+			return fmt.Errorf("OVS port %s was added for NAD (%s), expect (%s)", hostIfaceName, nadNameString, ifInfo.NADName)
 		}
 	}
 
 	// Add the new sandbox's OVS port, tag the port as transient so stale
 	// pod ports are scrubbed on hard reboot
 	ovsArgs := []string{
-		"add-port", "br-int", hostIfaceName, "other_config:transient=true", "--", "set",
+		"--may-exist", "add-port", "br-int", hostIfaceName, "other_config:transient=true", "--", "set",
 		"interface", hostIfaceName,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
@@ -390,8 +407,10 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")))
 	}
 
-	if len(ifInfo.VfNetdevName) != 0 {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:vf-netdev-name=%s", ifInfo.VfNetdevName))
+	if len(ifInfo.NetdevName) != 0 {
+		// NOTE: For SF representor same external_id is used due to https://github.com/ovn-org/ovn-kubernetes/pull/3054
+		// Review this line when upgrade mechanism will be implemented
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:vf-netdev-name=%s", ifInfo.NetdevName))
 	}
 
 	if ifInfo.NetName != types.DefaultNetworkName {
@@ -532,13 +551,12 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		klog.Warningf("Unexpected configuration %s, Device ID must be present for pod request on smart-nic host", podDesc)
 		return nil
 	}
-	// 1. For SRIOV case, we'd need to move the VF from container namespace back to the host namespace
-	// 2. If it is secondary network and non-dpu mode, needs to get the container interface index
+	// 1. For SRIOV case, we'd need to move the netdevice from container namespace back to the host namespace
+	// 2. If it is secondary network and non-dpu mode, then get the container interface index
 	//    so that we know the host-side interface name.
 	ifnameSuffix := ""
 	isSecondary := pr.netName != types.DefaultNetworkName
 	if pr.CNIConf.DeviceID != "" || (isSecondary && !ifInfo.IsDPUHostMode) {
-		// For SRIOV case, we'd need to move the VF from container namespace back to the host namespace
 		netns, err := ns.GetNS(pr.Netns)
 		if err != nil {
 			return fmt.Errorf("failed to get container namespace %s: %v", podDesc, err)
@@ -563,19 +581,19 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 				if err != nil {
 					return fmt.Errorf("failed to bring down container interface %s %s: %v", pr.IfName, podDesc, err)
 				}
-				// rename VF device to make sure it is unique in the host namespace:
-				// if the VF's original name is empty, sandbox id and a '0' letter prefix is used to make up the unique name.
-				oldVfName := ifInfo.VfNetdevName
-				if oldVfName == "" {
+				// rename netdevice to make sure it is unique in the host namespace:
+				// if original name of netdevice is empty, sandbox id and a '0' letter prefix is used to make up the unique name.
+				oldName := ifInfo.NetdevName
+				if oldName == "" {
 					id := fmt.Sprintf("_0%d", link.Attrs().Index)
-					oldVfName = pr.SandboxID[:(15-len(id))] + id
+					oldName = pr.SandboxID[:(15-len(id))] + id
 				}
-				err = util.GetNetLinkOps().LinkSetName(link, oldVfName)
+				err = util.GetNetLinkOps().LinkSetName(link, oldName)
 				if err != nil {
 					return fmt.Errorf("failed to rename container interface %s to %s %s: %v",
-						pr.IfName, oldVfName, podDesc, err)
+						pr.IfName, oldName, podDesc, err)
 				}
-				// move VF device to host netns
+				// move netdevice to host netns
 				err = util.GetNetLinkOps().LinkSetNsFd(link, int(hostNS.Fd()))
 				if err != nil {
 					return fmt.Errorf("failed to move container interface %s back to host namespace %s: %v",

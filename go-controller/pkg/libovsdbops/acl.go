@@ -3,8 +3,6 @@ package libovsdbops
 import (
 	"context"
 	"fmt"
-	"reflect"
-
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
@@ -21,25 +19,9 @@ func GetACLName(acl *nbdb.ACL) string {
 	return ""
 }
 
-// isEquivalentACL if it has same uuid, or if it has same name
-// and external ids, or if it has same priority, direction, match
-// and action.
-func isEquivalentACL(existing *nbdb.ACL, searched *nbdb.ACL) bool {
-	if searched.UUID != "" && existing.UUID == searched.UUID {
-		return true
-	}
-
-	eName := GetACLName(existing)
-	sName := GetACLName(searched)
-	// TODO if we want to support adding/removing external ids,
-	// we need to compare them differently, perhaps just the common subset
-	if eName != "" && eName == sName && reflect.DeepEqual(existing.ExternalIDs, searched.ExternalIDs) {
-		return true
-	}
-	return existing.Priority == searched.Priority &&
-		existing.Direction == searched.Direction &&
-		existing.Match == searched.Match &&
-		existing.Action == searched.Action
+func getACLMutableFields(acl *nbdb.ACL) []interface{} {
+	return []interface{}{&acl.Action, &acl.Direction, &acl.ExternalIDs, &acl.Log, &acl.Match, &acl.Meter,
+		&acl.Name, &acl.Options, &acl.Priority, &acl.Severity}
 }
 
 type aclPredicate func(*nbdb.ACL) bool
@@ -62,7 +44,6 @@ func FindACLs(nbClient libovsdbclient.Client, acls []*nbdb.ACL) ([]*nbdb.ACL, er
 		found := []*nbdb.ACL{}
 		opModel := operationModel{
 			Model:          acl,
-			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
 			ExistingResult: &found,
 			ErrNotFound:    false,
 			BulkOp:         false,
@@ -136,8 +117,7 @@ func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 		}
 		opModel := operationModel{
 			Model:          acl,
-			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
-			OnModelUpdates: onModelUpdatesAllNonDefault(),
+			OnModelUpdates: getACLMutableFields(acl),
 			ErrNotFound:    false,
 			BulkOp:         false,
 		}
@@ -155,8 +135,7 @@ func UpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acl
 		acl := acls[i]
 		opModel := operationModel{
 			Model:          acl,
-			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
-			OnModelUpdates: onModelUpdatesAllNonDefault(),
+			OnModelUpdates: getACLMutableFields(acl),
 			ErrNotFound:    true,
 			BulkOp:         false,
 		}
@@ -187,7 +166,6 @@ func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 		acl := acls[i]
 		opModel := operationModel{
 			Model:          acl,
-			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
 			OnModelUpdates: []interface{}{&acl.Severity, &acl.Log},
 			ErrNotFound:    true,
 			BulkOp:         false,

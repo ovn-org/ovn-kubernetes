@@ -11,13 +11,12 @@ import (
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	kapi "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/Microsoft/hcsshim/hcn"
+	iputils "github.com/containernetworking/plugins/pkg/ip"
 )
 
 const (
@@ -265,7 +264,7 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 	// is hardcoded here to be the first IP on the subnet.
 	// TODO: could be made configurable as Windows doesn't have any restrictions
 	// as to what this gateway address should be.
-	gatewayAddress := util.NextIP(nodeSubnet.IP)
+	gatewayAddress := iputils.NextIP(nodeSubnet.IP)
 
 	if config.HybridOverlay.VXLANPort > 65535 {
 		return fmt.Errorf("the hybrid overlay VXLAN port cannot be greater than 65535. Current value: %v", config.HybridOverlay.VXLANPort)

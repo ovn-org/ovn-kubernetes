@@ -140,24 +140,6 @@ func TestDeleteSwitchesWithPredicateOps(t *testing.T) {
 		p            logicalSwitchPredicate
 	}{
 		{
-			desc:      "remove switch of specified name",
-			expectErr: false,
-			initialNbdb: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					fakeSwitch1.DeepCopy(),
-					fakeSwitch2.DeepCopy(),
-					fakeSwitch3.DeepCopy(),
-				},
-			},
-			expectedNbdb: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					fakeSwitch1.DeepCopy(),
-					fakeSwitch3.DeepCopy(),
-				},
-			},
-			p: func(item *nbdb.LogicalSwitch) bool { return item.Name == "sw2" },
-		},
-		{
 			desc:      "remove switches of specified external_id key",
 			expectErr: false,
 			initialNbdb: libovsdbtest.TestSetup{

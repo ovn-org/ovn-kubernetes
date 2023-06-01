@@ -594,7 +594,7 @@ func (oc *DefaultNetworkController) addPolicyBasedRoutes(nodeName, mgmtPortIP st
 // N+2 is fully made.
 func (oc *DefaultNetworkController) syncPolicyBasedRoutes(nodeName string, matches sets.Set[string], priority, nexthop string) error {
 	// create a map to track matches found
-	matchTracker := sets.NewString(matches.UnsortedList()...)
+	matchTracker := sets.New(sets.List(matches)...)
 
 	if priority == types.NodeSubnetPolicyPriority {
 		policies, err := oc.findPolicyBasedRoutes(priority)

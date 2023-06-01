@@ -409,7 +409,7 @@ func (oc *DefaultNetworkController) deletePodGWRoutesForNamespace(pod *kapi.Pod,
 		return fmt.Errorf("failed to delete GW routes for pod %s: %w", pod.Name, err)
 	}
 	// remove the exgw podIP from the namespace's k8s.ovn.org/external-gw-pod-ips list
-	if err := util.UpdateExternalGatewayPodIPsAnnotation(oc.kube, namespace, existingGWs.UnsortedList()); err != nil {
+	if err := util.UpdateExternalGatewayPodIPsAnnotation(oc.kube, namespace, sets.List(existingGWs)); err != nil {
 		klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", util.ExternalGatewayPodIPsAnnotation, existingGWs, namespace, err)
 	}
 	return nil
