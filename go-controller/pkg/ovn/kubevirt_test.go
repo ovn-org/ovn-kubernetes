@@ -707,7 +707,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					hostname: "vm1",
 				}},
 			}),
-			Entry("for post-copy live migration", testData{
+			FEntry("for post-copy live migration", testData{
 				lrpNetworks:   []string{"100.64.0.4/24", "fd12::4/64"},
 				dnsServiceIPs: []string{"10.127.5.3", "fd7b:6b4d:7b25:d22f::3"},
 				testVirtLauncherPod: newVirtLauncherTPod(

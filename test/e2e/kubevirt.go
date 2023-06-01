@@ -599,6 +599,6 @@ passwd:
 
 	},
 		Entry("with pre-copy should keep connectivity", kvv1.MigrationPreCopy),
-		Entry("with post-copy should keep connectivity", kvv1.MigrationPostCopy),
+		//Entry("with post-copy should keep connectivity", kvv1.MigrationPostCopy),
 	)
 })

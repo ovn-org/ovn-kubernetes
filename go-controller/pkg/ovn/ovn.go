@@ -221,7 +221,8 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, a
 			return fmt.Errorf("addPodExternalGW failed for remote pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
 	}
-	return nil
+
+	return oc.ensureRoutingForVM(pod)
 }
 
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
