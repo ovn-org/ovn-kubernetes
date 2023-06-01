@@ -175,22 +175,23 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 
 	c.routePolicyInformer.Start(c.stopCh)
 
-	if !cache.WaitForNamedCacheSync("apbexternalroutenamespaces", c.stopCh, c.namespaceSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
-	}
+	startWg := &sync.WaitGroup{}
 
-	if !cache.WaitForNamedCacheSync("apbexternalroutepods", c.stopCh, c.podSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
-	}
-
-	if !cache.WaitForNamedCacheSync("adminpolicybasedexternalroutes", c.stopCh, c.routeSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	for _, se := range []struct {
+		resourceName string
+		syncFn       cache.InformerSynced
+	}{
+		{"apbexternalroutenamespaces", c.namespaceSynced},
+		{"apbexternalroutepods", c.podSynced},
+		{"adminpolicybasedexternalroutes", c.routeSynced},
+	} {
+		startWg.Add(1)
+		go func(resourceName string, syncFn cache.InformerSynced) {
+			defer startWg.Done()
+			if !cache.WaitForNamedCacheSync(resourceName, c.stopCh, syncFn) {
+				utilruntime.HandleError(fmt.Errorf("timed out waiting for %q caches to sync", resourceName))
+			}
+		}(se.resourceName, se.syncFn)
 	}
 
 	klog.Infof("Repairing Admin Policy Based External Route Services")
@@ -198,37 +199,26 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 
 	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			wait.Until(func() {
-				// processes route policies
-				c.runPolicyWorker(wg)
-			}, time.Second, c.stopCh)
-		}()
+		for _, workerFn := range []func(*sync.WaitGroup){
+			// processes route policies
+			c.runPolicyWorker,
+			// detects gateway pod changes and updates the pod's IP and MAC in the northbound DB
+			c.runPodWorker,
+			// detects namespace changes and applies polices that match the namespace selector in the `From` policy field
+			c.runNamespaceWorker,
+		} {
+			startWg.Add(1)
+			wg.Add(1)
+			go func(fn func(*sync.WaitGroup)) {
+				startWg.Done()
+				defer wg.Done()
+				wait.Until(func() {
+					fn(wg)
+				}, time.Second, c.stopCh)
+			}(workerFn)
+		}
 	}
-
-	for i := 0; i < threadiness; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			wait.Until(func() {
-				// detects gateway pod changes and updates the pod's IP and MAC in the northbound DB
-				c.runPodWorker(wg)
-			}, time.Second, c.stopCh)
-		}()
-	}
-
-	for i := 0; i < threadiness; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			wait.Until(func() {
-				// detects namespace changes and applies polices that match the namespace selector in the `From` policy field
-				c.runNamespaceWorker(wg)
-			}, time.Second, c.stopCh)
-		}()
-	}
+	startWg.Wait()
 
 	// wait until we're told to stop
 	<-c.stopCh
@@ -238,7 +228,6 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 	c.namespaceQueue.ShutDown()
 
 	wg.Wait()
-
 }
 
 func (c *ExternalGatewayMasterController) runPolicyWorker(wg *sync.WaitGroup) {
