@@ -17,9 +17,9 @@ type DHCPConfig struct {
 	V6Options *nbdb.DHCPOptions
 }
 
-func ComposeDHCPConfig(k8scli *factory.WatchFactory, hostname string, cidrs []*net.IPNet) (*DHCPConfig, error) {
-	if len(cidrs) == 0 {
-		return nil, fmt.Errorf("missing cidrs to compose dchp options")
+func ComposeDHCPConfig(k8scli *factory.WatchFactory, hostname string, ips []*net.IPNet) (*DHCPConfig, error) {
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("missing ips to compose dchp options")
 	}
 	if hostname == "" {
 		return nil, fmt.Errorf("missing hostname to compose dchp options")
@@ -31,7 +31,11 @@ func ComposeDHCPConfig(k8scli *factory.WatchFactory, hostname string, cidrs []*n
 	}
 
 	dhcpConfig := &DHCPConfig{}
-	for _, cidr := range cidrs {
+	for _, ip := range ips {
+		_, cidr, err := net.ParseCIDR(ip.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed converting ips to cidr to configure dhcp: %v", err)
+		}
 		if utilnet.IsIPv4CIDR(cidr) {
 			dhcpConfig.V4Options = ComposeDHCPv4Options(cidr.String(), ARPProxyIPv4, dnsServerIPv4, hostname)
 		} else if utilnet.IsIPv6CIDR(cidr) {

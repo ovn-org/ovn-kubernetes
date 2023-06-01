@@ -389,6 +389,8 @@ jobs:
           - {"target": "multi-node-zones",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-multi-node-zones", "num-workers": "3", "num-nodes-per-zone": "2"}
           - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
@@ -467,13 +469,10 @@ jobs:
           make -C test control-plane WHAT="Node IP address migration"
         elif [ "${{ matrix.target }}" == "compact-mode" ]; then
           SINGLE_NODE_CLUSTER="true" make -C test shard-network
-<<<<<<< HEAD
         elif [ "${{ matrix.target }}" == "multi-node-zones" ]; then
           make -C test control-plane WHAT="Multi node zones interconnect"
-=======
         elif [ "${{ matrix.target }}" == "kv-live-migration" ]; then
           make -C test control-plane WHAT="Kubevirt Virtual Machines"
->>>>>>> f49b800f0 (test, e2e: test kubevirt live migration)
         else
           make -C test ${{ matrix.target }}
         fi
