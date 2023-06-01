@@ -390,6 +390,9 @@ passwd:
 							Labels: labels,
 						},
 						Spec: kvv1.VirtualMachineInstanceSpec{
+							NodeSelector: map[string]string{
+								"node-role.kubernetes.io/worker": "",
+							},
 							Domain: kvv1.DomainSpec{
 								Resources: kvv1.ResourceRequirements{
 									Requests: corev1.ResourceList{

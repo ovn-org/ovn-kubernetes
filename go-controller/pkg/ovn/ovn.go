@@ -220,7 +220,8 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, a
 			return fmt.Errorf("addPodExternalGW failed for remote pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
 	}
-	return nil
+
+	return oc.ensureRoutingForVM(pod)
 }
 
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
@@ -256,6 +257,11 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *
 		return fmt.Errorf("deleteLogicalPort failed for pod %s: %w",
 			getPodNamespacedName(pod), err)
 	}
+
+	if err := oc.cleanUpForVM(pod); err != nil {
+		return fmt.Errorf("failed removing local zone VM artifacts: %v", err)
+	}
+
 	return nil
 }
 

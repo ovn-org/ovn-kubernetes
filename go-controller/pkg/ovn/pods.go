@@ -110,11 +110,6 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 	if err != nil {
 		return err
 	}
-
-	if err := oc.cleanupForVM(pod); err != nil {
-		return err
-	}
-
 	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
 	if pInfo == nil {
 		return nil
