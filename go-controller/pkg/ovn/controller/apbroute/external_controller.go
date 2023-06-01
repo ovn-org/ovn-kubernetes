@@ -40,12 +40,16 @@ func (g gatewayInfoList) Insert(items ...*gatewayInfo) (gatewayInfoList, sets.Se
 	ret := append(gatewayInfoList{}, g...)
 	duplicated := sets.New[string]()
 	for _, item := range items {
+		cp := &gatewayInfo{bfdEnabled: item.bfdEnabled, gws: sets.Set[string]{}}
 		for _, ip := range item.gws.UnsortedList() {
 			if ret.HasIP(ip) {
 				duplicated = duplicated.Insert(ip)
 				continue
 			}
-			ret = append(ret, item)
+			cp.gws.Insert(ip)
+		}
+		if len(cp.gws) > 0 {
+			ret = append(ret, cp)
 		}
 	}
 	return ret, duplicated
