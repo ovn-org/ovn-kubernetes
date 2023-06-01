@@ -13,7 +13,7 @@ import (
 )
 
 type nodePortWatcherEventHandler struct {
-	retry.EventHandler
+	retry.EmptyEventHandler
 
 	objType  reflect.Type
 	n        *nodePortWatcher
@@ -137,22 +137,3 @@ func (h *nodePortWatcherEventHandler) SyncFunc(objs []interface{}) error {
 	}
 	return syncFunc(objs)
 }
-
-// All the following receiver functions are not needed by the resource types
-// in nodePortWatcher, but are imposed by the retry.EventHandler interface.
-
-func (h *nodePortWatcherEventHandler) GetInternalCacheEntry(obj interface{}) interface{} { return nil }
-
-func (h *nodePortWatcherEventHandler) IsResourceScheduled(obj interface{}) bool { return true }
-
-func (h *nodePortWatcherEventHandler) IsObjectInTerminalState(obj interface{}) bool { return false }
-
-func (h *nodePortWatcherEventHandler) RecordAddEvent(obj interface{}) {}
-
-func (h *nodePortWatcherEventHandler) RecordUpdateEvent(obj interface{}) {}
-
-func (h *nodePortWatcherEventHandler) RecordDeleteEvent(obj interface{}) {}
-
-func (h *nodePortWatcherEventHandler) RecordSuccessEvent(obj interface{}) {}
-
-func (h *nodePortWatcherEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {}

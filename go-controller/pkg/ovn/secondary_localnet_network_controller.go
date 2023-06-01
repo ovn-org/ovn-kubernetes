@@ -6,7 +6,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"sync"
@@ -30,21 +29,15 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 	oc := &SecondaryLocalnetNetworkController{
 		BaseSecondaryLayer2NetworkController{
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
-				BaseNetworkController: BaseNetworkController{
-					CommonNetworkControllerInfo: *cnci,
-					controllerName:              netInfo.GetNetworkName() + "-network-controller",
-					NetInfo:                     netInfo,
-					lsManager:                   lsm.NewL2SwitchManager(),
-					logicalPortCache:            newPortCache(stopChan),
-					namespaces:                  make(map[string]*namespaceInfo),
-					namespacesMutex:             sync.Mutex{},
-					addressSetFactory:           addressSetFactory,
-					networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
-					sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-					podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
-					stopChan:                    stopChan,
-					wg:                          &sync.WaitGroup{},
-				},
+				BaseNetworkController: *NewBaseNetworkController(
+					cnci,
+					addressSetFactory,
+					netInfo,
+					lsm.NewL2SwitchManager(),
+					stopChan,
+					&sync.WaitGroup{},
+					false,
+				),
 			},
 		},
 	}

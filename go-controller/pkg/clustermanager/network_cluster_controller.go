@@ -371,7 +371,7 @@ func (ncc *networkClusterController) Cleanup(netName string) error {
 // networkClusterControllerEventHandler object handles the events
 // from retry framework.
 type networkClusterControllerEventHandler struct {
-	objretry.EventHandler
+	objretry.EmptyEventHandler
 
 	objType  reflect.Type
 	ncc      *networkClusterController
@@ -460,35 +460,6 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 	return syncFunc(objs)
 }
 
-// RecordAddEvent records the add event on this object. Not used here.
-func (h *networkClusterControllerEventHandler) RecordAddEvent(obj interface{}) {
-}
-
-// RecordUpdateEvent records the update event on this object. Not used here.
-func (h *networkClusterControllerEventHandler) RecordUpdateEvent(obj interface{}) {
-}
-
-// RecordDeleteEvent records the delete event on this object. Not used here.
-func (h *networkClusterControllerEventHandler) RecordDeleteEvent(obj interface{}) {
-}
-
-func (h *networkClusterControllerEventHandler) RecordSuccessEvent(obj interface{}) {
-}
-
-// RecordErrorEvent records an error event on this object. Not used here.
-func (h *networkClusterControllerEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
-}
-
-// isResourceScheduled returns true if the object has been scheduled.  Always returns true.
-func (h *networkClusterControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
-	return true
-}
-
-// IsObjectInTerminalState returns true if the object is a in terminal state.  Always returns true.
-func (h *networkClusterControllerEventHandler) IsObjectInTerminalState(obj interface{}) bool {
-	return false
-}
-
 func (h *networkClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
 	// switch based on type
 	if h.objType == factory.NodeType {
@@ -507,11 +478,6 @@ func (h *networkClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 inte
 	}
 
 	return false, nil
-}
-
-// GetInternalCacheEntry returns the internal cache entry for this object
-func (h *networkClusterControllerEventHandler) GetInternalCacheEntry(obj interface{}) interface{} {
-	return nil
 }
 
 // getResourceFromInformerCache returns the latest state of the object from the informers cache

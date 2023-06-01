@@ -13,7 +13,7 @@ import (
 )
 
 type nodeEventHandler struct {
-	retry.EventHandler
+	retry.EmptyEventHandler
 
 	objType  reflect.Type
 	nc       *DefaultNodeNetworkController
@@ -215,22 +215,3 @@ func (h *nodeEventHandler) SyncFunc(objs []interface{}) error {
 	}
 	return syncFunc(objs)
 }
-
-// All the following receiver functions are not needed by the resource types
-// in OvnNode, but are imposed by the retry.EventHandler interface.
-
-func (h *nodeEventHandler) GetInternalCacheEntry(obj interface{}) interface{} { return nil }
-
-func (h *nodeEventHandler) IsResourceScheduled(obj interface{}) bool { return true }
-
-func (h *nodeEventHandler) IsObjectInTerminalState(obj interface{}) bool { return false }
-
-func (h *nodeEventHandler) RecordAddEvent(obj interface{}) {}
-
-func (h *nodeEventHandler) RecordUpdateEvent(obj interface{}) {}
-
-func (h *nodeEventHandler) RecordDeleteEvent(obj interface{}) {}
-
-func (h *nodeEventHandler) RecordSuccessEvent(obj interface{}) {}
-
-func (h *nodeEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {}

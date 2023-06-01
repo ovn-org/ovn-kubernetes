@@ -19,7 +19,6 @@ import (
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -265,22 +264,15 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
-			BaseNetworkController: BaseNetworkController{
-				CommonNetworkControllerInfo: *cnci,
-				controllerName:              netInfo.GetNetworkName() + "-network-controller",
-				NetInfo:                     netInfo,
-				lsManager:                   lsm.NewLogicalSwitchManager(),
-				logicalPortCache:            newPortCache(stopChan),
-				namespaces:                  make(map[string]*namespaceInfo),
-				namespacesMutex:             sync.Mutex{},
-				addressSetFactory:           addressSetFactory,
-				networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
-				sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-				podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
-				stopChan:                    stopChan,
-				wg:                          &sync.WaitGroup{},
-				localZoneNodes:              &sync.Map{},
-			},
+			BaseNetworkController: *NewBaseNetworkController(
+				cnci,
+				addressSetFactory,
+				netInfo,
+				lsm.NewLogicalSwitchManager(),
+				stopChan,
+				&sync.WaitGroup{},
+				true,
+			),
 		},
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},

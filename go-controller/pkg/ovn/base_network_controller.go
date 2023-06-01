@@ -140,6 +140,29 @@ type BaseNetworkController struct {
 	localZoneNodes *sync.Map
 }
 
+func NewBaseNetworkController(cnci *CommonNetworkControllerInfo, addressSetFactory addressset.AddressSetFactory,
+	netInfo util.NetInfo, lsManager *lsm.LogicalSwitchManager, stopChan chan struct{}, wg *sync.WaitGroup, initiLocalZoneNodes bool) *BaseNetworkController {
+	c := &BaseNetworkController{
+		CommonNetworkControllerInfo: *cnci,
+		controllerName:              netInfo.GetNetworkName() + "-network-controller",
+		NetInfo:                     netInfo,
+		lsManager:                   lsManager,
+		logicalPortCache:            newPortCache(stopChan),
+		namespaces:                  make(map[string]*namespaceInfo),
+		namespacesMutex:             sync.Mutex{},
+		addressSetFactory:           addressSetFactory,
+		networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
+		sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
+		podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
+		stopChan:                    stopChan,
+		wg:                          wg,
+	}
+	if initiLocalZoneNodes {
+		c.localZoneNodes = &sync.Map{}
+	}
+	return c
+}
+
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
 // configuration for secondary network controller
 type BaseSecondaryNetworkController struct {

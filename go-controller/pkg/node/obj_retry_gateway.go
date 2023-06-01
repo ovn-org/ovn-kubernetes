@@ -14,7 +14,7 @@ import (
 )
 
 type gwEventHandler struct {
-	retry.EventHandler
+	retry.EmptyEventHandler
 
 	objType  reflect.Type
 	g        *gateway
@@ -169,22 +169,3 @@ func (h *gwEventHandler) SyncFunc(objs []interface{}) error {
 	}
 	return syncFunc(objs)
 }
-
-// All the following receiver functions are not needed by the resource types
-// in gateway, but are imposed by the retry.EventHandler interface.
-
-func (h *gwEventHandler) GetInternalCacheEntry(obj interface{}) interface{} { return nil }
-
-func (h *gwEventHandler) IsResourceScheduled(obj interface{}) bool { return true }
-
-func (h *gwEventHandler) IsObjectInTerminalState(obj interface{}) bool { return false }
-
-func (h *gwEventHandler) RecordAddEvent(obj interface{}) {}
-
-func (h *gwEventHandler) RecordUpdateEvent(obj interface{}) {}
-
-func (h *gwEventHandler) RecordDeleteEvent(obj interface{}) {}
-
-func (h *gwEventHandler) RecordSuccessEvent(obj interface{}) {}
-
-func (h *gwEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {}

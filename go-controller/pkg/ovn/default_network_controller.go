@@ -184,22 +184,14 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	}
 
 	oc := &DefaultNetworkController{
-		BaseNetworkController: BaseNetworkController{
-			CommonNetworkControllerInfo: *cnci,
-			controllerName:              DefaultNetworkControllerName,
-			NetInfo:                     &util.DefaultNetInfo{},
-			lsManager:                   lsm.NewLogicalSwitchManager(),
-			logicalPortCache:            newPortCache(defaultStopChan),
-			namespaces:                  make(map[string]*namespaceInfo),
-			namespacesMutex:             sync.Mutex{},
-			addressSetFactory:           addressSetFactory,
-			networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
-			sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-			podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
-			stopChan:                    defaultStopChan,
-			wg:                          defaultWg,
-			localZoneNodes:              &sync.Map{},
-		},
+		BaseNetworkController: *NewBaseNetworkController(
+			cnci,
+			addressSetFactory,
+			&util.DefaultNetInfo{},
+			lsm.NewLogicalSwitchManager(),
+			defaultStopChan,
+			defaultWg,
+			true),
 		externalGWCache: apbExternalRouteController.ExternalGWCache,
 		exGWCacheMutex:  apbExternalRouteController.ExGWCacheMutex,
 		eIPC: egressIPZoneController{

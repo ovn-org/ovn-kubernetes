@@ -60,6 +60,32 @@ type EventHandler interface {
 	RecordErrorEvent(obj interface{}, reason string, err error)
 }
 
+// EmptyEventHandler has the default implementations for some EventHandler
+// methods, that are not required for every handler
+type EmptyEventHandler struct{}
+
+func (h *EmptyEventHandler) SyncFunc([]interface{}) error { return nil }
+
+func (h *EmptyEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
+	return false, nil
+}
+
+func (h *EmptyEventHandler) GetInternalCacheEntry(obj interface{}) interface{} { return nil }
+
+func (h *EmptyEventHandler) IsResourceScheduled(obj interface{}) bool { return true }
+
+func (h *EmptyEventHandler) IsObjectInTerminalState(obj interface{}) bool { return false }
+
+func (h *EmptyEventHandler) RecordAddEvent(obj interface{}) {}
+
+func (h *EmptyEventHandler) RecordUpdateEvent(obj interface{}) {}
+
+func (h *EmptyEventHandler) RecordDeleteEvent(obj interface{}) {}
+
+func (h *EmptyEventHandler) RecordSuccessEvent(obj interface{}) {}
+
+func (h *EmptyEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {}
+
 type ResourceHandler struct {
 	// HasUpdateFunc is true if an update event for this resource type is implemented as an
 	// update action; it is false, if instead it is implemented as a delete on the old obj and
