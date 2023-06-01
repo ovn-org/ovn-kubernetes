@@ -2883,9 +2883,9 @@ func deleteNamespace(namespaceName string, fakeClient kubernetes.Interface) {
 
 func (o *FakeOVN) RunAPBExternalPolicyController() {
 	klog.Warningf("#### [%p] INIT Admin Policy Based External Controller", o)
-	o.controller.wg.Add(1)
+	o.wg.Add(1)
 	go func() {
-		defer o.controller.wg.Done()
+		defer o.wg.Done()
 		o.controller.apbExternalRouteController.Run(5)
 	}()
 }
