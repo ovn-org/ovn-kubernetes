@@ -34,7 +34,9 @@ var _ = ginkgo.Describe("Route Manager", func() {
 	loIP := net.IPv4(127, 1, 1, 1)
 	loIPDiff := net.IPv4(127, 1, 1, 2)
 	loGWIP := net.IPv4(127, 1, 1, 254)
-	if os.Getuid() != 0 {
+
+	if os.Getenv("NOROOT") == "TRUE" {
+		defer ginkgo.GinkgoRecover()
 		ginkgo.Skip("Test requires root privileges")
 	}
 
@@ -46,10 +48,9 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		wg = &sync.WaitGroup{}
 		stopCh = make(chan struct{})
-		wg.Add(1)
 		syncPeriod := 10 * time.Millisecond
 		logAllActivity := true
-		rm = newRouteManager(wg, logAllActivity, syncPeriod)
+		rm = newRouteManager(logAllActivity, syncPeriod)
 		err = testNS.Do(func(netNS ns.NetNS) error {
 			defer ginkgo.GinkgoRecover()
 			loLink, err = netlink.LinkByName(loLinkName)
@@ -73,7 +74,9 @@ var _ = ginkgo.Describe("Route Manager", func() {
 			return nil
 		})
 
+		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg.Done()
 			defer ginkgo.GinkgoRecover()
 			rm.run(stopCh)
 			return nil

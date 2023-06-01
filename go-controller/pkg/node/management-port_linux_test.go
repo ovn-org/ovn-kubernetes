@@ -267,16 +267,17 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}, existingNode.Name)
 	waiter := newStartupWaiter()
 	wg := &sync.WaitGroup{}
-	rm := newRouteManager(wg, true, 10*time.Second)
+	rm := newRouteManager(true, 10*time.Second)
 	stopCh := make(chan struct{})
 	defer func() {
 		close(stopCh)
 		wg.Wait()
 	}()
 
+	wg.Add(1)
 	go testNS.Do(func(netNS ns.NetNS) error {
+		defer wg.Done()
 		defer GinkgoRecover()
-		wg.Add(1)
 		rm.run(stopCh)
 		return nil
 	})
@@ -360,10 +361,13 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}, existingNode.Name)
 	waiter := newStartupWaiter()
 	wg := &sync.WaitGroup{}
-	rm := newRouteManager(wg, true, 10*time.Second)
+	rm := newRouteManager(true, 10*time.Second)
 	stopCh := make(chan struct{})
-	go rm.run(stopCh)
 	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		rm.run(stopCh)
+	}()
 	defer func() {
 		close(stopCh)
 		wg.Wait()
@@ -446,11 +450,12 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 	wg := &sync.WaitGroup{}
-	rm := newRouteManager(wg, true, 10*time.Second)
+	rm := newRouteManager(true, 10*time.Second)
 	stopCh := make(chan struct{})
+	wg.Add(1)
 	go testNS.Do(func(netNS ns.NetNS) error {
+		defer wg.Done()
 		defer GinkgoRecover()
-		wg.Add(1)
 		rm.run(stopCh)
 		return nil
 	})
