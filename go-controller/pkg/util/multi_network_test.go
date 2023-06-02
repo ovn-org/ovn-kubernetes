@@ -7,6 +7,8 @@ import (
 
 	"github.com/onsi/gomega"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+
 	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -219,6 +221,25 @@ func TestParseNetconf(t *testing.T) {
     }
 `,
 			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: missing NADName in secondary network netconf tenantred"),
+		},
+		{
+			desc: "valid attachment definition for a localnet topology with a VLAN",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "vlanID": 10,
+            "netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology: "localnet",
+				NADName:  "ns1/nad1",
+				MTU:      1400,
+				VLANID:   10,
+				NetConf:  cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
+			},
 		},
 	}
 
