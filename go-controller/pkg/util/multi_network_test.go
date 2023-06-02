@@ -1,11 +1,15 @@
 package util
 
 import (
+	"fmt"
 	"net"
 	"testing"
 
 	"github.com/onsi/gomega"
 
+	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -121,4 +125,128 @@ func TestParseSubnets(t *testing.T) {
 			g.Expect(excludes).To(gomega.ConsistOf(tc.expectedExcludes))
 		})
 	}
+}
+
+func TestParseNetconf(t *testing.T) {
+	type testConfig struct {
+		desc                        string
+		inputNetAttachDefConfigSpec string
+		name                        string
+		namespace                   string
+		expectedNetConf             *ovncnitypes.NetConf
+		expectedError               error
+	}
+
+	tests := []testConfig{
+		{
+			desc:          "empty network attachment configuration",
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: unexpected end of JSON input"),
+		},
+		{
+			desc: "net-attach-def-name attribute does not match the metadata",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "vlanID": 10,
+            "netAttachDefName": "default/tenantred"
+    }
+`,
+			expectedError: fmt.Errorf("net-attach-def name (ns1/nad1) is inconsistent with config (default/tenantred)"),
+		},
+		{
+			desc: "attachment definition with no `name` attribute",
+			inputNetAttachDefConfigSpec: `
+    {
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "vlanID": 10,
+            "netAttachDefName": "default/tenantred"
+    }
+`,
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: invalid name in in secondary network netconf ()"),
+		},
+		{
+			desc: "attachment definition for another plugin",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "some other thing",
+            "topology": "localnet",
+            "vlanID": 10,
+            "netAttachDefName": "default/tenantred"
+    }
+`,
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: net-attach-def not managed by OVN"),
+		},
+		{
+			desc: "attachment definition with IPAM key defined, using a wrong type",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "vlanID": 10,
+            "netAttachDefName": "default/tenantred",
+            "ipam": "this is wrong"
+    }
+`,
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: json: cannot unmarshal string into Go struct field NetConf.ipam of type types.IPAM"),
+		},
+		{
+			desc: "attachment definition with IPAM key defined",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "vlanID": 10,
+            "netAttachDefName": "ns1/nad1",
+            "ipam": {"type": "ninjaturtle"}
+    }
+`,
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: IPAM key is not supported. Use OVN-K provided IPAM via the `subnets` attribute"),
+		},
+		{
+			desc: "attachment definition missing the NAD name attribute",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "vlanID": 10
+    }
+`,
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: missing NADName in secondary network netconf tenantred"),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			networkAttachmentDefinition := applyNADDefaults(
+				&nadv1.NetworkAttachmentDefinition{
+					Spec: nadv1.NetworkAttachmentDefinitionSpec{
+						Config: test.inputNetAttachDefConfigSpec,
+					},
+				})
+			if test.expectedError != nil {
+				_, err := ParseNetConf(networkAttachmentDefinition)
+				g.Expect(err).To(gomega.MatchError(test.expectedError))
+			} else {
+				g.Expect(ParseNetConf(networkAttachmentDefinition)).To(gomega.Equal(test.expectedNetConf))
+			}
+		})
+	}
+}
+
+func applyNADDefaults(nad *nadv1.NetworkAttachmentDefinition) *nadv1.NetworkAttachmentDefinition {
+	const (
+		name      = "nad1"
+		namespace = "ns1"
+	)
+	nad.Name = name
+	nad.Namespace = namespace
+	return nad
 }
