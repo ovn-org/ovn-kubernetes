@@ -241,6 +241,21 @@ func TestParseNetconf(t *testing.T) {
 				NetConf:  cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
 			},
 		},
+		{
+			desc: "valid attachment definition for the default network",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				NADName: "ns1/nad1",
+				MTU:     1400,
+				NetConf: cnitypes.NetConf{Name: "default", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
 	}
 
 	for _, test := range tests {
