@@ -3,7 +3,6 @@ package node
 import (
 	"fmt"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -22,21 +21,19 @@ type routeManager struct {
 	store      map[string]routesPerLink // key is link name
 	addRouteCh chan routesPerLink
 	delRouteCh chan routesPerLink
-	wg         *sync.WaitGroup
 }
 
 // newRouteManager manages routes which include adding and deletion of routes. It also manages restoration of managed routes.
 // Begin managing routes by calling run() to start the manager.
 // Routes should be added via add(route) and deletion via del(route) functions only.
 // All other functions are used internally.
-func newRouteManager(wg *sync.WaitGroup, logRouteChanges bool, syncPeriod time.Duration) *routeManager {
+func newRouteManager(logRouteChanges bool, syncPeriod time.Duration) *routeManager {
 	return &routeManager{
 		logRouteChanges: logRouteChanges,
 		syncPeriod:      syncPeriod,
 		store:           make(map[string]routesPerLink),
 		addRouteCh:      make(chan routesPerLink, 5),
 		delRouteCh:      make(chan routesPerLink, 5),
-		wg:              wg,
 	}
 }
 
@@ -47,7 +44,6 @@ func (rm *routeManager) run(stopCh <-chan struct{}) {
 	subscribed, routeEventCh = subscribeNetlinkRouteEvents(stopCh)
 	ticker := time.NewTicker(rm.syncPeriod)
 	defer ticker.Stop()
-	defer rm.wg.Done()
 
 	for {
 		select {

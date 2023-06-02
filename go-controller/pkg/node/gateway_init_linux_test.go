@@ -253,9 +253,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
-		rm := newRouteManager(wg, true, 10*time.Second)
+		rm := newRouteManager(true, 10*time.Second)
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg.Done()
 			defer GinkgoRecover()
 			rm.run(stop)
 			return nil
@@ -616,9 +617,10 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		ifAddrs := ovntest.MustParseIPNets(hostCIDR)
 		ifAddrs[0].IP = ovntest.MustParseIP(dpuIP)
 
-		rm := newRouteManager(wg, true, 10*time.Second)
+		rm := newRouteManager(true, 10*time.Second)
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg.Done()
 			defer GinkgoRecover()
 			rm.run(stop)
 			return nil
@@ -729,6 +731,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg.Done()
 			defer GinkgoRecover()
 			nc.routeManager.run(stop)
 			return nil
@@ -1046,9 +1049,10 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
-		rm := newRouteManager(wg, true, 10*time.Second)
+		rm := newRouteManager(true, 10*time.Second)
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg.Done()
 			defer GinkgoRecover()
 			rm.run(stop)
 			return nil
@@ -1542,10 +1546,13 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 			netlinkMock.On("RouteAdd", expectedRoute).Return(nil)
 			wg := &sync.WaitGroup{}
-			rm := newRouteManager(wg, true, 10*time.Second)
+			rm := newRouteManager(true, 10*time.Second)
 			stopCh := make(chan struct{})
 			wg.Add(1)
-			go rm.run(stopCh)
+			go func() {
+				defer wg.Done()
+				rm.run(stopCh)
+			}()
 			defer func() {
 				close(stopCh)
 				wg.Wait()
@@ -1586,10 +1593,13 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*previousRoute}, nil)
 			netlinkMock.On("RouteReplace", expectedRoute).Return(nil)
 			wg := &sync.WaitGroup{}
-			rm := newRouteManager(wg, true, 10*time.Second)
+			rm := newRouteManager(true, 10*time.Second)
 			stopCh := make(chan struct{})
-			go rm.run(stopCh)
 			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				rm.run(stopCh)
+			}()
 			defer func() {
 				close(stopCh)
 				wg.Wait()
@@ -1603,10 +1613,13 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf("failed to find interface"))
 			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
 			wg := &sync.WaitGroup{}
-			rm := newRouteManager(wg, true, 10*time.Second)
+			rm := newRouteManager(true, 10*time.Second)
 			stopCh := make(chan struct{})
-			go rm.run(stopCh)
 			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				rm.run(stopCh)
+			}()
 			defer func() {
 				close(stopCh)
 				wg.Wait()
@@ -1624,10 +1637,13 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkByName", mock.Anything).Return(nil, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			wg := &sync.WaitGroup{}
-			rm := newRouteManager(wg, true, 10*time.Second)
+			rm := newRouteManager(true, 10*time.Second)
 			stopCh := make(chan struct{})
-			go rm.run(stopCh)
 			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				rm.run(stopCh)
+			}()
 			defer func() {
 				close(stopCh)
 				wg.Wait()

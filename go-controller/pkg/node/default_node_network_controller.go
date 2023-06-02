@@ -117,7 +117,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 			stopChan:                        stopChan,
 			wg:                              wg,
 		},
-		routeManager: newRouteManager(wg, true, 2*time.Minute),
+		routeManager: newRouteManager(true, 2*time.Minute),
 	}
 }
 
@@ -631,8 +631,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := level.Set("5"); err != nil {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
-	go nc.routeManager.run(ctx.Done())
-
+	nc.wg.Add(1)
+	go func() {
+		defer nc.wg.Done()
+		nc.routeManager.run(nc.stopChan)
+	}()
 	if node, err = nc.Kube.GetNode(nc.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 	}
