@@ -137,6 +137,7 @@ func TestParseNetconf(t *testing.T) {
 		namespace                   string
 		expectedNetConf             *ovncnitypes.NetConf
 		expectedError               error
+		unsupportedReason           string
 	}
 
 	tests := []testConfig{
@@ -256,10 +257,38 @@ func TestParseNetconf(t *testing.T) {
 				NetConf: cnitypes.NetConf{Name: "default", Type: "ovn-k8s-cni-overlay"},
 			},
 		},
+		{
+			desc: "valid attachment definition for a localnet topology with a VLAN using a plugins list",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "cniVersion": "1.0.0",
+            "plugins": [
+              {
+                "type": "ovn-k8s-cni-overlay",
+                "topology": "localnet",
+                "vlanID": 10,
+                "netAttachDefName": "ns1/nad1"
+              }
+            ],
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology: "localnet",
+				NADName:  "ns1/nad1",
+				MTU:      1400,
+				VLANID:   10,
+				NetConf:  cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
+			},
+			unsupportedReason: "NetConfList plugin specs are not currently supported. This is the *only* supported configuration type for CNI version >= 1.0.0",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
+			if test.unsupportedReason != "" {
+				t.Skip(test.unsupportedReason)
+			}
 			g := gomega.NewWithT(t)
 			networkAttachmentDefinition := applyNADDefaults(
 				&nadv1.NetworkAttachmentDefinition{
