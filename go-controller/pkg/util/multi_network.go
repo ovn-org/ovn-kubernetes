@@ -409,10 +409,6 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 	if err != nil {
 		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
 	}
-	// skip non-OVN NAD
-	if netconf.Type != "ovn-k8s-cni-overlay" {
-		return nil, ErrorAttachDefNotOvnManaged
-	}
 
 	if netconf.Name != types.DefaultNetworkName {
 		nadName := GetNADName(netattachdef.Namespace, netattachdef.Name)
