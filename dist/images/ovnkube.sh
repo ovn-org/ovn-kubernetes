@@ -465,7 +465,7 @@ process_healthy() {
 check_health() {
   ctl_file=""
   case ${1} in
-  "ovnkube" | "ovnkube-master" | "ovn-dbchecker" | "ovnkube-cluster-manager" | "ovnkube-network-controller-manager")
+  "ovnkube" | "ovnkube-master" | "ovn-dbchecker" | "ovnkube-cluster-manager" | "ovnkube-controller")
     # just check for presence of pid
     ;;
   "ovnnb_db" | "ovnsb_db")
@@ -987,7 +987,7 @@ run-ovn-northd() {
   exit 8
 }
 
-# v3 - run ovnkube --master (both cluster-manager and network-controller-manager)
+# v3 - run ovnkube --master (both cluster-manager and ovnkube-controller)
 ovn-master() {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
@@ -1178,13 +1178,13 @@ ovn-master() {
   exit 9
 }
 
-# v3 - run ovnkube --network-controller-manager
-ovn-network-controller-manager() {
+# v3 - run ovnkube --ovnkube-controller
+ovnkube-controller() {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
-  rm -f ${OVN_RUNDIR}/ovnkube-network-controller-manager.pid
+  rm -f ${OVN_RUNDIR}/ovnkube-controller.pid
 
-  echo "=============== ovn-network-controller-manager (wait for ready_to_start_node) =========="
+  echo "=============== ovnkube-controller (wait for ready_to_start_node) =========="
   wait_for_event ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
 
@@ -1192,7 +1192,7 @@ ovn-network-controller-manager() {
   wait_for_event process_ready ovn-northd
 
   # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
-  echo "=============== ovn-network-controller-manager - (wait for ovs)"
+  echo "=============== ovnkube-controller - (wait for ovs)"
   wait_for_event ovs_ready
 
   hybrid_overlay_flags=
@@ -1316,7 +1316,7 @@ ovn-network-controller-manager() {
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
 
   ovn_zone=$(get_node_zone)
-  echo "ovn-network-controller-manager's configured zone is ${ovn_zone}"
+  echo "ovnkube-controller's configured zone is ${ovn_zone}"
 
   ovn_dbs=""
   if [[ $ovn_nbdb != "local" ]]; then
@@ -1332,9 +1332,9 @@ ovn-network-controller-manager() {
   fi
   echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
 
-  echo "=============== ovn-network-controller-manager ========== MASTER ONLY"
+  echo "=============== ovnkube-controller ========== MASTER ONLY"
   /usr/bin/ovnkube \
-    --init-network-controller-manager ${K8S_NODE} \
+    --init-ovnkube-controller ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     ${ovn_dbs} \
     --gateway-mode=${ovn_gateway_mode} \
@@ -1347,8 +1347,8 @@ ovn-network-controller-manager() {
     ${empty_lb_events_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
-    --pidfile ${OVN_RUNDIR}/ovnkube-network-controller-manager.pid \
-    --logfile /var/log/ovn-kubernetes/ovnkube-network-controller-manager.log \
+    --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
+    --logfile /var/log/ovn-kubernetes/ovnkube-controller.log \
     ${ovn_master_ssl_opts} \
     ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
@@ -1365,10 +1365,10 @@ ovn-network-controller-manager() {
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
-  echo "=============== ovn-network-controller-manager ========== running"
-  wait_for_event attempts=3 process_ready ovnkube-network-controller-manager
+  echo "=============== ovnkube-controller ========== running"
+  wait_for_event attempts=3 process_ready ovnkube-controller
 
-  process_healthy ovnkube-network-controller-manager
+  process_healthy ovnkube-controller
   exit 9
 }
 
@@ -1876,8 +1876,8 @@ case ${cmd} in
 "ovn-master") # pod ovnkube-master container ovnkube-master
   ovn-master
   ;;
-"ovn-network-controller-manager") # pod ovnkube-master container ovnkube-network-controller-manager
-  ovn-network-controller-manager
+"ovnkube-controller") # pod ovnkube-master container ovnkube-controller
+  ovnkube-controller
   ;;
 "ovn-cluster-manager") # pod ovnkube-master container ovnkube-cluster-manager
   ovn-cluster-manager

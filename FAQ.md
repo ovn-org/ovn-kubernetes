@@ -21,7 +21,7 @@ need to be made aware of it by following the instructions below.
 OVN CNI requires several TCP and UDP ports to be opened on each of the node
 that is part of the K8s cluster.
 
- 1. The node on which ovnkube-master or ovnkube-network-controller-manager runs, open following ports:
+ 1. The node on which ovnkube-master or ovnkube-controller runs, open following ports:
     ```text
     TCP:
       port 9409 (prometheus port to export ovnkube-master metrics)

@@ -155,11 +155,12 @@ var (
 )
 
 // NewMasterWatchFactory initializes a new watch factory for:
-// a) network controller manager + cluster manager or
-// b) network controller manager + node
+// a) ovnkube controller + cluster manager or
+// b) ovnkube controller + node
+// c) all-in-one a.k.a ovnkube controller + cluster-manager + node
 // processes.
 func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory, error) {
-	wf, err := NewNCMWatchFactory(ovnClientset.GetNetworkControllerManagerClientset())
+	wf, err := NewOVNKubeControllerWatchFactory(ovnClientset.GetOVNKubeControllerClientset())
 	if err != nil {
 		return nil, err
 	}
@@ -173,8 +174,8 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 	return wf, nil
 }
 
-// NewNCMWatchFactory initializes a new watch factory for the network controller manager process
-func NewNCMWatchFactory(ovnClientset *util.OVNNetworkControllerManagerClientset) (*WatchFactory, error) {
+// NewOVNKubeControllerWatchFactory initializes a new watch factory for the ovnkube controller process
+func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClientset) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
