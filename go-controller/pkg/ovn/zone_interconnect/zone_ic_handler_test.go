@@ -252,7 +252,7 @@ func checkInterconnectResources(zone string, netName string, nbClient libovsdbcl
 var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 	var (
 		app                *cli.App
-		libovsdbCleanup    *libovsdbtest.Cleanup
+		libovsdbCleanup    *libovsdbtest.Context
 		testNode1          corev1.Node
 		testNode2          corev1.Node
 		testNode3          corev1.Node

@@ -70,7 +70,7 @@ type FakeOVN struct {
 	nbClient     libovsdbclient.Client
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
-	nbsbCleanup  *libovsdbtest.Cleanup
+	nbsbCleanup  *libovsdbtest.Context
 	egressQoSWg  *sync.WaitGroup
 	egressSVCWg  *sync.WaitGroup
 

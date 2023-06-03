@@ -62,7 +62,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	var (
 		app             *cli.App
 		asFactory       AddressSetFactory
-		libovsdbCleanup *libovsdbtest.Cleanup
+		libovsdbCleanup *libovsdbtest.Context
 		addrsetDbIDs    = getNamespaceAddrSetDbIDs(addrsetName, controllerName)
 	)
 

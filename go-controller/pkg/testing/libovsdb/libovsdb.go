@@ -39,20 +39,20 @@ type TestSetup struct {
 
 type TestData interface{}
 
-type clientBuilderFn func(config.OvnAuthConfig, *Cleanup) (libovsdbclient.Client, error)
+type clientBuilderFn func(config.OvnAuthConfig, *Context) (libovsdbclient.Client, error)
 type serverBuilderFn func(config.OvnAuthConfig, []TestData) (*server.OvsdbServer, error)
 
 var validUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-type Cleanup struct {
+type Context struct {
 	clientStopCh chan struct{}
 	clientWg     *sync.WaitGroup
 	serverStopCh chan struct{}
 	serverWg     *sync.WaitGroup
 }
 
-func newCleanup() *Cleanup {
-	return &Cleanup{
+func newContext() *Context {
+	return &Context{
 		clientStopCh: make(chan struct{}),
 		clientWg:     &sync.WaitGroup{},
 		serverStopCh: make(chan struct{}),
@@ -60,7 +60,7 @@ func newCleanup() *Cleanup {
 	}
 }
 
-func (c *Cleanup) Cleanup() {
+func (c *Context) Cleanup() {
 	// Stop the client first to ensure we don't trigger reconnect behavior
 	// due to a stopped server
 	close(c.clientStopCh)
@@ -70,49 +70,49 @@ func (c *Cleanup) Cleanup() {
 }
 
 // NewNBSBTestHarness runs NB & SB OVSDB servers and returns corresponding clients
-func NewNBSBTestHarness(setup TestSetup) (libovsdbclient.Client, libovsdbclient.Client, *Cleanup, error) {
-	cleanup := newCleanup()
+func NewNBSBTestHarness(setup TestSetup) (libovsdbclient.Client, libovsdbclient.Client, *Context, error) {
+	testCtx := newContext()
 
-	nbClient, _, err := NewNBTestHarness(setup, cleanup)
+	nbClient, _, err := NewNBTestHarness(setup, testCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	sbClient, _, err := NewSBTestHarness(setup, cleanup)
+	sbClient, _, err := NewSBTestHarness(setup, testCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return nbClient, sbClient, cleanup, nil
+	return nbClient, sbClient, testCtx, nil
 }
 
 // NewNBTestHarness runs NB server and returns corresponding client
-func NewNBTestHarness(setup TestSetup, cleanup *Cleanup) (libovsdbclient.Client, *Cleanup, error) {
-	if cleanup == nil {
-		cleanup = newCleanup()
+func NewNBTestHarness(setup TestSetup, testCtx *Context) (libovsdbclient.Client, *Context, error) {
+	if testCtx == nil {
+		testCtx = newContext()
 	}
 
-	client, err := newOVSDBTestHarness(setup.NBData, newNBServer, newNBClient, cleanup)
+	client, err := newOVSDBTestHarness(setup.NBData, newNBServer, newNBClient, testCtx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return client, cleanup, err
+	return client, testCtx, err
 }
 
 // NewSBTestHarness runs SB server and returns corresponding client
-func NewSBTestHarness(setup TestSetup, cleanup *Cleanup) (libovsdbclient.Client, *Cleanup, error) {
-	if cleanup == nil {
-		cleanup = newCleanup()
+func NewSBTestHarness(setup TestSetup, testCtx *Context) (libovsdbclient.Client, *Context, error) {
+	if testCtx == nil {
+		testCtx = newContext()
 	}
 
-	client, err := newOVSDBTestHarness(setup.SBData, newSBServer, newSBClient, cleanup)
+	client, err := newOVSDBTestHarness(setup.SBData, newSBServer, newSBClient, testCtx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return client, cleanup, err
+	return client, testCtx, err
 }
 
-func newOVSDBTestHarness(serverData []TestData, newServer serverBuilderFn, newClient clientBuilderFn, cleanup *Cleanup) (libovsdbclient.Client, error) {
+func newOVSDBTestHarness(serverData []TestData, newServer serverBuilderFn, newClient clientBuilderFn, testCtx *Context) (libovsdbclient.Client, error) {
 	cfg := config.OvnAuthConfig{
 		Scheme:  config.OvnDBSchemeUnix,
 		Address: "unix:" + tempOVSDBSocketFileName(),
@@ -123,52 +123,50 @@ func newOVSDBTestHarness(serverData []TestData, newServer serverBuilderFn, newCl
 		return nil, err
 	}
 
-	c, err := newClient(cfg, cleanup)
+	c, err := newClient(cfg, testCtx)
 	if err != nil {
 		s.Close()
 		return nil, err
 	}
 
-	cleanup.serverWg.Add(1)
+	testCtx.serverWg.Add(1)
 	go func() {
-		defer cleanup.serverWg.Done()
-		<-cleanup.serverStopCh
+		defer testCtx.serverWg.Done()
+		<-testCtx.serverStopCh
 		s.Close()
 	}()
 
 	return c, nil
 }
 
-func newNBClient(cfg config.OvnAuthConfig, cleanup *Cleanup) (libovsdbclient.Client, error) {
-	stopChan := make(chan struct{})
-	libovsdbOvnNBClient, err := libovsdb.NewNBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
-	if err != nil {
-		return nil, err
-	}
-	cleanup.clientWg.Add(1)
+func clientWaitOnCleanup(testCtx *Context, client libovsdbclient.Client, stopChan chan struct{}) {
+	testCtx.clientWg.Add(1)
 	go func() {
-		defer cleanup.clientWg.Done()
-		<-cleanup.clientStopCh
+		defer testCtx.clientWg.Done()
+		<-testCtx.clientStopCh
 		close(stopChan)
-		libovsdbOvnNBClient.Close()
+		client.Close()
 	}()
-	return libovsdbOvnNBClient, err
 }
 
-func newSBClient(cfg config.OvnAuthConfig, cleanup *Cleanup) (libovsdbclient.Client, error) {
+func newNBClient(cfg config.OvnAuthConfig, testCtx *Context) (libovsdbclient.Client, error) {
 	stopChan := make(chan struct{})
-	libovsdbOvnSBClient, err := libovsdb.NewSBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
+	nbClient, err := libovsdb.NewNBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
 	if err != nil {
 		return nil, err
 	}
-	cleanup.clientWg.Add(1)
-	go func() {
-		defer cleanup.clientWg.Done()
-		<-cleanup.clientStopCh
-		close(stopChan)
-		libovsdbOvnSBClient.Close()
-	}()
-	return libovsdbOvnSBClient, err
+	clientWaitOnCleanup(testCtx, nbClient, stopChan)
+	return nbClient, err
+}
+
+func newSBClient(cfg config.OvnAuthConfig, testCtx *Context) (libovsdbclient.Client, error) {
+	stopChan := make(chan struct{})
+	sbClient, err := libovsdb.NewSBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
+	if err != nil {
+		return nil, err
+	}
+	clientWaitOnCleanup(testCtx, sbClient, stopChan)
+	return sbClient, err
 }
 
 func newSBServer(cfg config.OvnAuthConfig, data []TestData) (*server.OvsdbServer, error) {
