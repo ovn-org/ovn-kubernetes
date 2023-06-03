@@ -182,12 +182,15 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 	}
 
 	klog.Infof("Repairing Admin Network Policies")
-	/*if runRepair {
-		// Run the repair controller only once
-		// it keeps in sync Kubernetes and OVN
-		// and handles removal of stale data on upgrades
-		c.repair.runBeforeSync()
-	}*/
+	// Run the repair function at startup so that we synchronize KAPI and OVNDBs
+	err := c.repairAdminNetworkPolicies()
+	if err != nil {
+		klog.Errorf("Failed to repair Admin Network Policies: %v", err)
+	}
+	err = c.repairBaselineAdminNetworkPolicy()
+	if err != nil {
+		klog.Errorf("Failed to repair Baseline Admin Network Policy: %v", err)
+	}
 
 	wg := &sync.WaitGroup{}
 	// Start the workers after the repair loop to avoid races
