@@ -1281,6 +1281,67 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
+				ginkgo.By("adding wrong service labels to the nodes they will be deleted")
+				node1.Labels[fmt.Sprintf("%s/testns-svc2", egressSVCLabelPrefix)] = ""
+				node1.Labels[fmt.Sprintf("%s/non-existing-svc", egressSVCLabelPrefix)] = ""
+				node1.ResourceVersion = "3"
+				node1, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node1, metav1.UpdateOptions{})
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+				node2.Labels[fmt.Sprintf("%s/non-existing-svc", egressSVCLabelPrefix)] = ""
+				node2.ResourceVersion = "3"
+				node2, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+				gomega.Eventually(func() error {
+					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc1.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if es.Status.Host != "" {
+						return fmt.Errorf("expected svc1's host value %s to be empty", es.Status.Host)
+					}
+
+					node1ExpectedLabels := map[string]string{
+						"home": "pineapple",
+					}
+
+					node1, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if !reflect.DeepEqual(node1.Labels, node1ExpectedLabels) {
+						return fmt.Errorf("expected node1's labels %v to be equal %v", node1.Labels, node1ExpectedLabels)
+					}
+
+					es, err = fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc2.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if es.Status.Host != node2.Name {
+						return fmt.Errorf("expected svc1's host value %s to be node2", es.Status.Host)
+					}
+
+					node2ExpectedLabels := map[string]string{
+						"home": "moai",
+						fmt.Sprintf("%s/testns-svc2", egressSVCLabelPrefix): "",
+					}
+
+					node2, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node2Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if !reflect.DeepEqual(node2.Labels, node2ExpectedLabels) {
+						return fmt.Errorf("expected node2's labels %v to be equal %v", node2.Labels, node2ExpectedLabels)
+					}
+
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
+
 				ginkgo.By("deleting the second node the second service's status will be deleted")
 				err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node2.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
