@@ -220,6 +220,8 @@ func (c *Controller) setBaselineAdminNetworkPolicy(banpObj *anpapi.BaselineAdmin
 	// there should not be an item in the cache for the given priority
 	// as we first attempt to delete before create.
 	if _, loaded := c.banpCache.LoadOrStore(BANPFlowPriority, banp); loaded {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateBANPStatusToNotReady(banpObj, PolicyAlreadyExistsInCache)
 		return fmt.Errorf("error attempting to add BANP %s when, "+
 			"the cluster already has an existing BANP", banpObj.Name)
 	}
@@ -229,14 +231,20 @@ func (c *Controller) setBaselineAdminNetworkPolicy(banpObj *anpapi.BaselineAdmin
 	ops := []ovsdb.Operation{}
 	acls, err := c.buildBANPACLs(banp, portGroupName)
 	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateBANPStatusToNotReady(banpObj, PolicyBuildACLFailed)
 		return fmt.Errorf("unable to build acls for anp %s: %w", banp.name, err)
 	}
 	ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, acls...)
 	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateBANPStatusToNotReady(banpObj, PolicyCreateUpdateACLFailed)
 		return fmt.Errorf("failed to create ACL ops: %v", err)
 	}
 	podsCache, ports, err := c.getPortsOfSubject(banp.subject.namespaceSelector, banp.subject.podSelector)
 	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateBANPStatusToNotReady(banpObj, PolicyBuildPortGroupFailed)
 		return fmt.Errorf("unable to fetch ports for anp %s: %w", banp.name, err)
 	}
 	banp.subject.pods = podsCache
@@ -244,12 +252,18 @@ func (c *Controller) setBaselineAdminNetworkPolicy(banpObj *anpapi.BaselineAdmin
 	pg := libovsdbops.BuildPortGroup(portGroupName, ports, acls, pgExternalIDs)
 	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(c.nbClient, ops, pg)
 	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateBANPStatusToNotReady(banpObj, PolicyCreateUpdatePortGroupFailed)
 		return fmt.Errorf("failed to create ops to add port to a port group: %v", err)
 	}
 	_, err = libovsdbops.TransactAndCheck(c.nbClient, ops)
 	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateBANPStatusToNotReady(banpObj, PolicyTransactFailed)
 		return fmt.Errorf("failed to run ovsdb txn to add ports to port group: %v", err)
 	}
+	// we can ignore the error if status update doesn't succeed; best effort
+	_ = c.updateBANPStatusToReady(banpObj)
 	banp.stale = false // we can mark it as "ready" now
 	return nil
 }

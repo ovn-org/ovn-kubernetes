@@ -49,17 +49,50 @@ func (c *Controller) updateANPStatusToReady(anp *anpapi.AdminNetworkPolicy) erro
 	return nil
 }
 
-func (c *Controller) updateANPStatusToNotReady(anp *anpapi.AdminNetworkPolicy, reason string) error {
+func (c *Controller) updateANPStatusToNotReady(anp *anpapi.AdminNetworkPolicy, message string) error {
 	meta.SetStatusCondition(&anp.Status.Conditions, metav1.Condition{
-		Type:   AdminNetworkPolicyReadyStatusType,
-		Status: metav1.ConditionFalse,
-		Reason: reason,
+		Type:    AdminNetworkPolicyReadyStatusType,
+		Status:  metav1.ConditionFalse,
+		Reason:  PolicyNotReadyReason,
+		Message: message,
 	})
-	_, err := c.anpClientSet.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
+	_, err := c.anpClientSet.PolicyV1alpha1().AdminNetworkPolicies().UpdateStatus(context.TODO(), anp, metav1.UpdateOptions{})
 	if err != nil {
 		return err
 	}
 	klog.Infof("Successfully patched the status of ANP %v with condition type %v/%v and reason %s",
-		anp.Name, AdminNetworkPolicyReadyStatusType, metav1.ConditionFalse, reason)
+		anp.Name, AdminNetworkPolicyReadyStatusType, metav1.ConditionFalse, message)
+	return nil
+}
+
+func (c *Controller) updateBANPStatusToReady(banp *anpapi.BaselineAdminNetworkPolicy) error {
+	meta.SetStatusCondition(&banp.Status.Conditions, metav1.Condition{
+		Type:    BaselineAdminNetworkPolicyReadyStatusType,
+		Status:  metav1.ConditionTrue,
+		Reason:  PolicyReadyReason,
+		Message: "Setting up OVN DB plumbing was successful",
+	})
+	_, err := c.anpClientSet.PolicyV1alpha1().BaselineAdminNetworkPolicies().UpdateStatus(context.TODO(), banp, metav1.UpdateOptions{})
+	if err != nil {
+		return err
+	}
+	klog.Infof("Successfully patched the status of BANP %v with condition type %v/%v",
+		banp.Name, BaselineAdminNetworkPolicyReadyStatusType, metav1.ConditionTrue)
+	return nil
+}
+
+func (c *Controller) updateBANPStatusToNotReady(banp *anpapi.BaselineAdminNetworkPolicy, message string) error {
+	meta.SetStatusCondition(&banp.Status.Conditions, metav1.Condition{
+		Type:    BaselineAdminNetworkPolicyReadyStatusType,
+		Status:  metav1.ConditionFalse,
+		Reason:  PolicyNotReadyReason,
+		Message: message,
+	})
+	_, err := c.anpClientSet.PolicyV1alpha1().BaselineAdminNetworkPolicies().UpdateStatus(context.TODO(), banp, metav1.UpdateOptions{})
+	if err != nil {
+		return err
+	}
+	klog.Infof("Successfully patched the status of BANP %v with condition type %v/%v and reason %s",
+		banp.Name, BaselineAdminNetworkPolicyReadyStatusType, metav1.ConditionFalse, message)
 	return nil
 }
