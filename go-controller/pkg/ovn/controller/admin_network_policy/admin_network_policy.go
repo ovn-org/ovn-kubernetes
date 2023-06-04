@@ -325,6 +325,8 @@ func (c *Controller) setAdminNetworkPolicy(anpObj *anpapi.AdminNetworkPolicy) er
 	anp.stale = true // until we finish processing successfully
 
 	if existingName, loaded := c.anpPriorityMap.Load(anp.priority); loaded {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateANPStatusToNotReady(anpObj, ANPWithSamePriorityExists)
 		return fmt.Errorf("error attempting to add ANP %s with priority %d when, "+
 			"it already has an ANP %s with the same priority", anpObj.Name, anpObj.Spec.Priority, existingName)
 	}
@@ -332,6 +334,8 @@ func (c *Controller) setAdminNetworkPolicy(anpObj *anpapi.AdminNetworkPolicy) er
 	// there should not be an item in the cache for the given name
 	// as we first attempt to delete before create.
 	if _, loaded := c.anpCache.LoadOrStore(anpObj.Name, anp); loaded {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateANPStatusToNotReady(anpObj, PolicyAlreadyExistsInCache)
 		return fmt.Errorf("error attempting to add ANP %s with priority %d when, "+
 			"cache already has an ANP with the same name present", anpObj.Name, anpObj.Spec.Priority)
 	}
@@ -340,14 +344,20 @@ func (c *Controller) setAdminNetworkPolicy(anpObj *anpapi.AdminNetworkPolicy) er
 	ops := []ovsdb.Operation{}
 	acls, err := c.buildANPACLs(anp, portGroupName)
 	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateANPStatusToNotReady(anpObj, PolicyBuildACLFailed)
 		return fmt.Errorf("unable to build acls for anp %s: %w", anp.name, err)
 	}
 	ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, acls...)
 	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateANPStatusToNotReady(anpObj, PolicyCreateUpdateACLFailed)
 		return fmt.Errorf("failed to create ACL ops: %v", err)
 	}
 	podsCache, ports, err := c.getPortsOfSubject(anp.subject.namespaceSelector, anp.subject.podSelector)
 	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateANPStatusToNotReady(anpObj, PolicyBuildPortGroupFailed)
 		return fmt.Errorf("unable to fetch ports for anp %s: %w", anp.name, err)
 	}
 	anp.subject.pods = podsCache
@@ -355,12 +365,18 @@ func (c *Controller) setAdminNetworkPolicy(anpObj *anpapi.AdminNetworkPolicy) er
 	pg := libovsdbops.BuildPortGroup(portGroupName, ports, acls, pgExternalIDs)
 	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(c.nbClient, ops, pg)
 	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateANPStatusToNotReady(anpObj, PolicyCreateUpdatePortGroupFailed)
 		return fmt.Errorf("failed to create ops to add port to a port group: %v", err)
 	}
 	_, err = libovsdbops.TransactAndCheck(c.nbClient, ops)
 	if err != nil {
-		return fmt.Errorf("failed to run ovsdb txn to add ports to port group: %v", err)
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateANPStatusToNotReady(anpObj, PolicyTransactFailed)
+		return fmt.Errorf("failed to run ovsdb txn to add ports and acls to port group: %v", err)
 	}
+	// we can ignore the error if status update doesn't succeed; best effort
+	_ = c.updateANPStatusToReady(anpObj)
 	anp.stale = false // we can mark it as "ready" now
 	return nil
 }
