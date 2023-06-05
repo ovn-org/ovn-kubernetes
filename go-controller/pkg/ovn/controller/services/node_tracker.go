@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -34,8 +35,10 @@ type nodeTracker struct {
 type nodeInfo struct {
 	// the node's Name
 	name string
-	// The list of physical IPs the node has, as reported by the gatewayconf annotation
-	nodeIPs []net.IP
+	// The list of physical IPs reported by the gatewayconf annotation
+	l3gatewayAddresses []net.IP
+	// The list of physical IPs the node has, as reported by the host-address annotation
+	hostAddresses []net.IP
 	// The pod network subnet(s)
 	podSubnets []net.IPNet
 	// the name of the node's GatewayRouter, or "" of non-existent
@@ -46,10 +49,18 @@ type nodeInfo struct {
 	chassisID string
 }
 
-func (ni *nodeInfo) nodeIPsStr() []string {
-	out := make([]string, 0, len(ni.nodeIPs))
-	for _, nodeIP := range ni.nodeIPs {
-		out = append(out, nodeIP.String())
+func (ni *nodeInfo) hostAddressesStr() []string {
+	out := make([]string, 0, len(ni.hostAddresses))
+	for _, ip := range ni.hostAddresses {
+		out = append(out, ip.String())
+	}
+	return out
+}
+
+func (ni *nodeInfo) l3gatewayAddressesStr() []string {
+	out := make([]string, 0, len(ni.l3gatewayAddresses))
+	for _, ip := range ni.l3gatewayAddresses {
+		out = append(out, ip.String())
 	}
 	return out
 }
@@ -58,7 +69,7 @@ func (ni *nodeInfo) nodeIPsStr() []string {
 // includes node IPs, still as a mask-1 net
 func (ni *nodeInfo) nodeSubnets() []net.IPNet {
 	out := append([]net.IPNet{}, ni.podSubnets...)
-	for _, ip := range ni.nodeIPs {
+	for _, ip := range ni.hostAddresses {
 		if ipv4 := ip.To4(); ipv4 != nil {
 			out = append(out, net.IPNet{
 				IP:   ip,
@@ -102,11 +113,16 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, erro
 				return
 			}
 
-			// updateNode needs to be called only when hostSubnet annotation has changed or
-			// if L3Gateway annotation's ip addresses have changed or the name of the node (very rare)
-			// has changed. No need to trigger update for any other field change.
-			if util.NodeSubnetAnnotationChanged(oldObj, newObj) || util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
-				util.NodeChassisIDAnnotationChanged(oldObj, newObj) || oldObj.Name != newObj.Name {
+			// updateNode needs to be called in the following cases:
+			// - hostSubnet annotation has changed
+			// - L3Gateway annotation's ip addresses have changed
+			// - the name of the node (very rare) has changed
+			// - the `host-addresses` annotation changed
+			// . No need to trigger update for any other field change.
+			if util.NodeSubnetAnnotationChanged(oldObj, newObj) ||
+				util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
+				oldObj.Name != newObj.Name ||
+				util.NodeHostAddressesAnnotationChanged(oldObj, newObj) {
 				nt.updateNode(newObj)
 			}
 		},
@@ -136,14 +152,15 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, erro
 
 // updateNodeInfo updates the node info cache, and syncs all services
 // if it changed.
-func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisID string, nodeIPs []net.IP, podSubnets []*net.IPNet) {
+func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisID string, l3gatewayAddresses, hostAddresses []net.IP, podSubnets []*net.IPNet) {
 	ni := nodeInfo{
-		name:              nodeName,
-		nodeIPs:           nodeIPs,
-		podSubnets:        make([]net.IPNet, 0, len(podSubnets)),
-		gatewayRouterName: routerName,
-		switchName:        switchName,
-		chassisID:         chassisID,
+		name:               nodeName,
+		l3gatewayAddresses: l3gatewayAddresses,
+		hostAddresses:      hostAddresses,
+		podSubnets:         make([]net.IPNet, 0, len(podSubnets)),
+		gatewayRouterName:  routerName,
+		switchName:         switchName,
+		chassisID:          chassisID,
 	}
 	for i := range podSubnets {
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
@@ -199,7 +216,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 
 	switchName := node.Name
 	grName := ""
-	ips := []net.IP{}
+	l3gatewayAddresses := []net.IP{}
 	chassisID := ""
 
 	// if the node has a gateway config, it will soon have a gateway router
@@ -211,10 +228,22 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		grName = util.GetGatewayRouterFromNode(node.Name)
 		if gwConf.NodePortEnable {
 			for _, ip := range gwConf.IPAddresses {
-				ips = append(ips, ip.IP)
+				l3gatewayAddresses = append(l3gatewayAddresses, ip.IP)
 			}
 		}
 		chassisID = gwConf.ChassisID
+	}
+
+	hostAddresses, err := util.ParseNodeHostAddresses(node)
+	if err != nil {
+		klog.Warningf("Failed to get node host addresses for [%s]: %s", node.Name, err.Error())
+		hostAddresses = sets.New[string]()
+	}
+
+	hostAddressesIPs := make([]net.IP, 0, len(hostAddresses))
+	for _, ipStr := range hostAddresses.UnsortedList() {
+		ip := net.ParseIP(ipStr)
+		hostAddressesIPs = append(hostAddressesIPs, ip)
 	}
 
 	nt.updateNodeInfo(
@@ -222,7 +251,8 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		switchName,
 		grName,
 		chassisID,
-		ips,
+		l3gatewayAddresses,
+		hostAddressesIPs,
 		hsn,
 	)
 }

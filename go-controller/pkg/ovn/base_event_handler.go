@@ -7,9 +7,9 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/client-go/tools/cache"
-
 	"k8s.io/klog/v2"
 
+	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -24,7 +24,6 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 	switch objType {
 	case factory.PodType,
 		factory.NodeType,
-		factory.AddressSetPodSelectorType,
 		factory.EgressIPType,
 		factory.EgressIPNamespaceType,
 		factory.EgressIPPodType,
@@ -32,7 +31,8 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		factory.EgressFwNodeType,
 		factory.CloudPrivateIPConfigType,
 		factory.LocalPodSelectorType,
-		factory.NamespaceType:
+		factory.NamespaceType,
+		factory.MultiNetworkPolicyType:
 		return true
 	}
 	return false
@@ -74,18 +74,10 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 		return !shouldUpdate, nil
 
 	case factory.PodType,
-		factory.EgressIPPodType,
-		factory.AddressSetPodSelectorType,
-		factory.LocalPodSelectorType:
+		factory.EgressIPPodType:
 		// For these types, there was no old vs new obj comparison in the original update code,
 		// so pretend they're always different so that the update code gets executed
 		return false, nil
-
-	case factory.PeerNamespaceSelectorType,
-		factory.AddressSetNamespaceAndPodSelectorType:
-		// For these types there is no update code, so pretend old and new
-		// objs are always equivalent and stop processing the update event.
-		return true, nil
 
 	case factory.EgressFirewallType:
 		oldEgressFirewall, ok := obj1.(*egressfirewall.EgressFirewall)
@@ -123,6 +115,17 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 	case factory.NamespaceType:
 		// force update path for Namespace resource.
 		return false, nil
+
+	case factory.MultiNetworkPolicyType:
+		mnp1, ok := obj1.(*mnpapi.MultiNetworkPolicy)
+		if !ok {
+			return false, fmt.Errorf("could not cast obj1 of type %T to *multinetworkpolicyapi.MultiNetworkPolicy", obj1)
+		}
+		mnp2, ok := obj2.(*mnpapi.MultiNetworkPolicy)
+		if !ok {
+			return false, fmt.Errorf("could not cast obj2 of type %T to *multinetworkpolicyapi.MultiNetworkPolicy", obj2)
+		}
+		return reflect.DeepEqual(mnp1, mnp2), nil
 	}
 
 	return false, fmt.Errorf("no object comparison for type %s", objType)
@@ -151,14 +154,10 @@ func (h *baseNetworkControllerEventHandler) getResourceFromInformerCache(objType
 		obj, err = watchFactory.GetNode(name)
 
 	case factory.PodType,
-		factory.AddressSetPodSelectorType,
-		factory.LocalPodSelectorType,
 		factory.EgressIPPodType:
 		obj, err = watchFactory.GetPod(namespace, name)
 
-	case factory.AddressSetNamespaceAndPodSelectorType,
-		factory.PeerNamespaceSelectorType,
-		factory.EgressIPNamespaceType,
+	case factory.EgressIPNamespaceType,
 		factory.NamespaceType:
 		obj, err = watchFactory.GetNamespace(name)
 
@@ -170,6 +169,9 @@ func (h *baseNetworkControllerEventHandler) getResourceFromInformerCache(objType
 
 	case factory.CloudPrivateIPConfigType:
 		obj, err = watchFactory.GetCloudPrivateIPConfig(name)
+
+	case factory.MultiNetworkPolicyType:
+		obj, err = watchFactory.GetMultiNetworkPolicy(namespace, name)
 
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
@@ -197,7 +199,8 @@ func needsUpdateDuringRetry(objType reflect.Type) bool {
 		factory.EgressIPType,
 		factory.EgressIPPodType,
 		factory.EgressIPNamespaceType,
-		factory.CloudPrivateIPConfigType:
+		factory.CloudPrivateIPConfigType,
+		factory.MultiNetworkPolicyType:
 		return true
 	}
 	return false
@@ -207,8 +210,6 @@ func needsUpdateDuringRetry(objType reflect.Type) bool {
 func (h *baseNetworkControllerEventHandler) isObjectInTerminalState(objType reflect.Type, obj interface{}) bool {
 	switch objType {
 	case factory.PodType,
-		factory.AddressSetPodSelectorType,
-		factory.LocalPodSelectorType,
 		factory.EgressIPPodType:
 		pod := obj.(*kapi.Pod)
 		return util.PodCompleted(pod)

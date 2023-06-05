@@ -6,6 +6,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"sync"
@@ -21,21 +22,29 @@ type SecondaryLocalnetNetworkController struct {
 
 // NewSecondaryLocalnetNetworkController create a new OVN controller for the given secondary localnet NAD
 func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
-	netconfInfo util.NetConfInfo) *SecondaryLocalnetNetworkController {
+	netconfInfo util.NetConfInfo, addressSetFactory addressset.AddressSetFactory) *SecondaryLocalnetNetworkController {
 	stopChan := make(chan struct{})
 
+	ipv4Mode, ipv6Mode := netconfInfo.IPMode()
+	if addressSetFactory == nil {
+		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
+	}
 	oc := &SecondaryLocalnetNetworkController{
 		BaseSecondaryLayer2NetworkController{
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
+					controllerName:              netInfo.GetNetworkName() + "-network-controller",
 					NetConfInfo:                 netconfInfo,
 					NetInfo:                     netInfo,
 					lsManager:                   lsm.NewL2SwitchManager(),
 					logicalPortCache:            newPortCache(stopChan),
 					namespaces:                  make(map[string]*namespaceInfo),
 					namespacesMutex:             sync.Mutex{},
-					addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient),
+					addressSetFactory:           addressSetFactory,
+					networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
+					sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
+					podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
 					stopChan:                    stopChan,
 					wg:                          &sync.WaitGroup{},
 				},
@@ -44,6 +53,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 	}
 
 	// disable multicast support for secondary networks
+	// TBD: changes needs to be made to support multicast in secondary networks
 	oc.multicastSupport = false
 
 	oc.initRetryFramework()

@@ -2,10 +2,8 @@ package node
 
 import (
 	"fmt"
-	"net"
 	"sync"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -15,7 +13,6 @@ import (
 	ktypes "k8s.io/apimachinery/pkg/types"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	utilnet "k8s.io/utils/net"
 )
 
 // initLoadBalancerHealthChecker initializes the health check server for
@@ -56,7 +53,7 @@ func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) error {
 				svc.Namespace, svc.Name, err)
 		}
 		namespacedName := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
-		l.endpoints[namespacedName] = l.CountLocalEndpointAddresses(epSlices)
+		l.endpoints[namespacedName] = l.CountLocalReadyEndpointAddresses(epSlices)
 		if err = l.server.SyncEndpoints(l.endpoints); err != nil {
 			return fmt.Errorf("unable to sync endpoint slice %v; err: %v", name, err)
 		}
@@ -102,7 +99,7 @@ func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
 }
 
 func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.EndpointSlice) error {
-	namespacedName, err := serviceNamespacedNameFromEndpointSlice(epSlice)
+	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(epSlice)
 	if err != nil {
 		return fmt.Errorf("skipping %s/%s: %v", epSlice.Namespace, epSlice.Name, err)
 	}
@@ -112,7 +109,7 @@ func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.Endpoi
 		return fmt.Errorf("could not fetch all endpointslices for service %s during health check", namespacedName.String())
 	}
 
-	localEndpointAddressCount := l.CountLocalEndpointAddresses(epSlices)
+	localEndpointAddressCount := l.CountLocalReadyEndpointAddresses(epSlices)
 	if len(epSlices) == 0 {
 		// let's delete it from cache and wait for the next update;
 		// this will show as 0 endpoints for health checks
@@ -124,7 +121,7 @@ func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.Endpoi
 }
 
 func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
-	namespacedName, err := serviceNamespacedNameFromEndpointSlice(epSlice)
+	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(epSlice)
 	if err != nil {
 		return fmt.Errorf("cannot add %s/%s to loadBalancerHealthChecker: %v", epSlice.Namespace, epSlice.Name, err)
 	}
@@ -137,7 +134,7 @@ func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.Endpoint
 }
 
 func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) error {
-	namespacedName, err := serviceNamespacedNameFromEndpointSlice(newEpSlice)
+	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(newEpSlice)
 	if err != nil {
 		return fmt.Errorf("cannot update %s/%s in loadBalancerHealthChecker: %v",
 			newEpSlice.Namespace, newEpSlice.Name, err)
@@ -156,9 +153,14 @@ func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.Endpo
 	return l.SyncEndPointSlices(epSlice)
 }
 
-// CountLocalEndpointAddresses returns the number of IP addresses from ready endpoints that are local
-// to the node for a service
-func (l *loadBalancerHealthChecker) CountLocalEndpointAddresses(endpointSlices []*discovery.EndpointSlice) int {
+// CountLocalReadyEndpointAddresses returns the number of IP addresses from ready
+// endpoints that are local to the node for a service. This is used to determine the
+// response to LB health checks for services with externalTrafficPolicy=local. We consider
+// the ready field for health checks and the serving field for setting up services and endpoints,
+// so that we can steer traffic to a local terminating endpoint (ready=false, serving=true, terminating=true),
+// while responding negatively to its service health checks, giving time to LBs to update their
+// cache of available nodes.
+func (l *loadBalancerHealthChecker) CountLocalReadyEndpointAddresses(endpointSlices []*discovery.EndpointSlice) int {
 	localEndpointAddresses := sets.NewString()
 	for _, endpointSlice := range endpointSlices {
 		for _, endpoint := range endpointSlice.Endpoints {
@@ -169,48 +171,4 @@ func (l *loadBalancerHealthChecker) CountLocalEndpointAddresses(endpointSlices [
 		}
 	}
 	return len(localEndpointAddresses)
-}
-
-// hasLocalHostNetworkEndpoints returns true if there is at least one host-networked endpoint
-// in the provided list that is local to this node.
-// It returns false if none of the endpoints are local host-networked endpoints or if ep.Subsets is nil.
-func hasLocalHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddresses []net.IP) bool {
-	for _, epSlice := range epSlices {
-		for _, endpoint := range epSlice.Endpoints {
-			if !util.IsEndpointReady(endpoint) {
-				continue
-			}
-			for _, ip := range endpoint.Addresses {
-				for _, nodeIP := range nodeAddresses {
-					if nodeIP.String() == utilnet.ParseIPSloppy(ip).String() {
-						return true
-					}
-				}
-			}
-		}
-	}
-	return false
-}
-
-// isHostEndpoint determines if the given endpoint ip belongs to a host networked pod
-func isHostEndpoint(endpointIP string) bool {
-	for _, clusterNet := range config.Default.ClusterSubnets {
-		if clusterNet.CIDR.Contains(net.ParseIP(endpointIP)) {
-			return false
-		}
-	}
-	return true
-}
-
-func serviceNamespacedNameFromEndpointSlice(epSlice *discovery.EndpointSlice) (ktypes.NamespacedName, error) {
-	// Return the namespaced name of the corresponding service
-	var serviceNamespacedName ktypes.NamespacedName
-	svcName := epSlice.Labels[discovery.LabelServiceName]
-	if svcName == "" {
-		// should not happen, since the informer already filters out endpoint slices with an empty service label
-		return serviceNamespacedName,
-			fmt.Errorf("endpointslice %s/%s: empty value for label %s",
-				epSlice.Namespace, epSlice.Name, discovery.LabelServiceName)
-	}
-	return ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}, nil
 }

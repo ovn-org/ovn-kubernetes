@@ -140,23 +140,52 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 		needIPv6NextHop = true
 	}
 
-	// FIXME DUAL-STACK: config.Gateway.NextHop should be a slice of nexthops
 	if config.Gateway.NextHop != "" {
-		// Parse NextHop to make sure it is valid before using. Return error if not valid.
-		nextHop := net.ParseIP(config.Gateway.NextHop)
-		if nextHop == nil {
-			return nil, "", fmt.Errorf("failed to parse configured next-hop: %s", config.Gateway.NextHop)
+		nextHopsRaw := strings.Split(config.Gateway.NextHop, ",")
+		if len(nextHopsRaw) > 2 {
+			return nil, "", fmt.Errorf("unexpected next-hops are provided, more than 2 next-hops is not allowed: %s", config.Gateway.NextHop)
 		}
-		if config.IPv4Mode && !utilnet.IsIPv6(nextHop) {
-			gatewayNextHops = append(gatewayNextHops, nextHop)
-			needIPv4NextHop = false
-		}
-		if config.IPv6Mode && utilnet.IsIPv6(nextHop) {
-			gatewayNextHops = append(gatewayNextHops, nextHop)
-			needIPv6NextHop = false
+		for _, nh := range nextHopsRaw {
+			// Parse NextHop to make sure it is valid before using. Return error if not valid.
+			nextHop := net.ParseIP(nh)
+			if nextHop == nil {
+				return nil, "", fmt.Errorf("failed to parse configured next-hop: %s", config.Gateway.NextHop)
+			}
+			if config.IPv4Mode {
+				if needIPv4NextHop {
+					if !utilnet.IsIPv6(nextHop) {
+						gatewayNextHops = append(gatewayNextHops, nextHop)
+						needIPv4NextHop = false
+					}
+				} else {
+					if !utilnet.IsIPv6(nextHop) {
+						return nil, "", fmt.Errorf("only one IPv4 next-hop is allowed: %s", config.Gateway.NextHop)
+					}
+				}
+			}
+
+			if config.IPv6Mode {
+				if needIPv6NextHop {
+					if utilnet.IsIPv6(nextHop) {
+						gatewayNextHops = append(gatewayNextHops, nextHop)
+						needIPv6NextHop = false
+					}
+				} else {
+					if utilnet.IsIPv6(nextHop) {
+						return nil, "", fmt.Errorf("only one IPv6 next-hop is allowed: %s", config.Gateway.NextHop)
+					}
+				}
+			}
 		}
 	}
 	gatewayIntf := config.Gateway.Interface
+	if gatewayIntf != "" {
+		if bridgeName, _, err := util.RunOVSVsctl("port-to-br", gatewayIntf); err == nil {
+			// This is an OVS bridge's internal port
+			gatewayIntf = bridgeName
+		}
+	}
+
 	if needIPv4NextHop || needIPv6NextHop || gatewayIntf == "" {
 		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf)
 		if err != nil {

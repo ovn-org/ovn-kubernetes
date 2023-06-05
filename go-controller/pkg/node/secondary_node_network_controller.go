@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
@@ -13,6 +14,8 @@ import (
 // and reacting upon the watched resources (e.g. pods, endpoints) for secondary network
 type SecondaryNodeNetworkController struct {
 	BaseNodeNetworkController
+	// pod events factory handler
+	podHandler *factory.Handler
 }
 
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
@@ -33,6 +36,11 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
+	handler, err := nc.watchPodsDPU()
+	if err != nil {
+		return err
+	}
+	nc.podHandler = handler
 	return nil
 }
 
@@ -41,6 +49,10 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 	klog.Infof("Stop secondary node network controller of network %s", nc.GetNetworkName())
 	close(nc.stopChan)
 	nc.wg.Wait()
+
+	if nc.podHandler != nil {
+		nc.watchFactory.RemovePodHandler(nc.podHandler)
+	}
 }
 
 // Cleanup cleans up node entities for the given secondary network

@@ -50,7 +50,7 @@ func newRepair(serviceLister corelisters.ServiceLister, nbClient libovsdbclient.
 }
 
 // runBeforeSync performs some cleanup of stale LBs and other miscellaneous setup.
-func (r *repair) runBeforeSync() {
+func (r *repair) runBeforeSync(useTemplates bool) {
 	// no need to lock, single-threaded.
 
 	startTime := time.Now()
@@ -68,9 +68,15 @@ func (r *repair) runBeforeSync() {
 	}
 
 	// Find all templates.
-	allTemplates, err := listSvcTemplates(r.nbClient)
-	if err != nil {
-		klog.Errorf("Unable to get templates for repair: %v", err)
+	allTemplates := TemplateMap{}
+
+	if useTemplates {
+		var err error
+
+		allTemplates, err = listSvcTemplates(r.nbClient)
+		if err != nil {
+			klog.Errorf("Unable to get templates for repair: %v", err)
+		}
 	}
 
 	// Find all load-balancers associated with Services

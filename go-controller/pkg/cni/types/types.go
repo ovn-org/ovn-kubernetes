@@ -1,8 +1,9 @@
 package types
 
 import (
-	"github.com/containernetworking/cni/pkg/types"
 	"net"
+
+	"github.com/containernetworking/cni/pkg/types"
 )
 
 // NetConf is CNI NetConf with DeviceID
@@ -27,7 +28,7 @@ type NetConf struct {
 	// VLANID, valid in localnet topology network only
 	VLANID int `json:"vlanID,omitempty"`
 
-	// PciAddrs in case of using sriov
+	// PciAddrs in case of using sriov or Auxiliry device name in case of SF
 	DeviceID string `json:"deviceID,omitempty"`
 	// LogFile to log all the messages from cni shim binary to
 	LogFile string `json:"logFile,omitempty"`
@@ -36,7 +37,7 @@ type NetConf struct {
 	// LogFileMaxSize is the maximum size in bytes of the logfile
 	// before it gets rolled.
 	LogFileMaxSize int `json:"logfile-maxsize"`
-	// LogFileMaxBackups represents the the maximum number of
+	// LogFileMaxBackups represents the maximum number of
 	// old log files to retain
 	LogFileMaxBackups int `json:"logfile-maxbackups"`
 	// LogFileMaxAge represents the maximum number

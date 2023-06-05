@@ -249,6 +249,8 @@ ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE:-false}
 ovn_encap_ip=${OVN_ENCAP_IP:-}
 
 ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
+# OVNKUBE_COMPACT_MODE_ENABLE indicate if ovnkube run master and node in one process
+ovnkube_compact_mode_enable=${OVNKUBE_COMPACT_MODE_ENABLE:-false}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -983,13 +985,15 @@ ovn-master() {
 	  egressfirewall_enabled_flag="--enable-egress-firewall"
   fi
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
+
   egressqos_enabled_flag=
   if [[ ${ovn_egressqos_enable} == "true" ]]; then
 	  egressqos_enabled_flag="--enable-egress-qos"
   fi
+
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network"
+	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
   echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
 
@@ -1020,9 +1024,18 @@ ovn-master() {
   fi
   echo "ovn_stateless_netpol_enable_flag: ${ovn_stateless_netpol_enable_flag}"
 
-  echo "=============== ovn-master ========== MASTER ONLY"
+  init_node_flags=
+  if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
+    init_node_flags="--init-node ${K8S_NODE} --nodeport"
+    echo "init_node_flags: ${init_node_flags}"
+    echo "=============== ovn-master ========== MASTER and NODE"
+  else
+    echo "=============== ovn-master ========== MASTER ONLY"
+  fi
+
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
+    ${init_node_flags} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --gateway-mode=${ovn_gateway_mode} \
@@ -1055,6 +1068,9 @@ ovn-master() {
 
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
+  if [[ ${ovnkube_compact_mode_enable} == "true" ]] && [[ ${ovnkube_node_mode} != "dpu" ]]; then
+    setup_cni
+  fi
 
   process_healthy ovnkube-master
   exit 9
@@ -1169,7 +1185,7 @@ ovn-network-controller-manager() {
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network"
+	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
   echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
 
@@ -1265,7 +1281,7 @@ ovn-cluster-manager() {
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network"
+	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
   echo "multi_network_enabled_flag: ${multi_network_enabled_flag}"
 
@@ -1420,7 +1436,7 @@ ovn-node() {
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network"
+	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
 
   netflow_targets=

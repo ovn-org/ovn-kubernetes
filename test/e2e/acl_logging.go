@@ -34,7 +34,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 		namespacePrefix         = "acl-logging-netpol"
 		pokerPodIndex           = 0
 		pokedPodIndex           = 1
-		egressDefaultDenySuffix = "egressDefaultDeny"
+		egressDefaultDenySuffix = "Egress"
 	)
 
 	fr := wrappedTestFramework(namespacePrefix)
@@ -83,7 +83,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 	It("the logs have the expected log level", func() {
 		clientPodScheduledPodName := pods[pokerPodIndex].Spec.NodeName
 		// Retry here in the case where OVN acls have not been programmed yet
-		composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
+		composedPolicyNameRegex := fmt.Sprintf("NP:%s:%s", nsName, egressDefaultDenySuffix)
 		Eventually(func() (bool, error) {
 			return assertACLLogs(
 				clientPodScheduledPodName,
@@ -119,7 +119,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 
 		It("the ACL logs are updated accordingly", func() {
 			clientPodScheduledPodName := pods[pokerPodIndex].Spec.NodeName
-			composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
+			composedPolicyNameRegex := fmt.Sprintf("NP:%s:%s", nsName, egressDefaultDenySuffix)
 			Eventually(func() (bool, error) {
 				return assertACLLogs(
 					clientPodScheduledPodName,
@@ -139,7 +139,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 		It("ACL logging is disabled", func() {
 			clientPod := pods[pokerPodIndex]
 			pokedPod := pods[pokedPodIndex]
-			composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
+			composedPolicyNameRegex := fmt.Sprintf("NP:%s:%s", nsName, egressDefaultDenySuffix)
 			Consistently(func() (bool, error) {
 				return isCountUpdatedAfterPokePod(fr, &clientPod, &pokedPod, composedPolicyNameRegex, denyACLVerdict, "")
 			}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
@@ -155,7 +155,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 		It("ACL logging is disabled", func() {
 			clientPod := pods[pokerPodIndex]
 			pokedPod := pods[pokedPodIndex]
-			composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
+			composedPolicyNameRegex := fmt.Sprintf("NP:%s:%s", nsName, egressDefaultDenySuffix)
 			Consistently(func() (bool, error) {
 				return isCountUpdatedAfterPokePod(fr, &clientPod, &pokedPod, composedPolicyNameRegex, denyACLVerdict, "")
 			}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
@@ -702,7 +702,7 @@ func isCountUpdatedAfterPokePod(fr *framework.Framework, clientPod, pokedPod *v1
 }
 
 func generateEgressFwRegex(nsName string) string {
-	return fmt.Sprintf("egressFirewall_%s_.*", nsName)
+	return fmt.Sprintf("EF:%s:.*", nsName)
 }
 
 func pokeExternalHost(fr *framework.Framework, pokePod *v1.Pod, dstIP string, dstPort int) {

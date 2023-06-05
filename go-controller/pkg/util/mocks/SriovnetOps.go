@@ -15,6 +15,29 @@ type SriovnetOps struct {
 	mock.Mock
 }
 
+// GetNetDevicesFromAux provides a mock function with given fields: auxDev
+func (_m *SriovnetOps) GetNetDevicesFromAux(auxDev string) ([]string, error) {
+	ret := _m.Called(auxDev)
+
+	var r0 []string
+	if rf, ok := ret.Get(0).(func(string) []string); ok {
+		r0 = rf(auxDev)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(auxDev)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetNetDevicesFromPci provides a mock function with given fields: pciAddress
 func (_m *SriovnetOps) GetNetDevicesFromPci(pciAddress string) ([]string, error) {
 	ret := _m.Called(pciAddress)
@@ -31,6 +54,27 @@ func (_m *SriovnetOps) GetNetDevicesFromPci(pciAddress string) ([]string, error)
 	var r1 error
 	if rf, ok := ret.Get(1).(func(string) error); ok {
 		r1 = rf(pciAddress)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetPfPciFromAux provides a mock function with given fields: auxDev
+func (_m *SriovnetOps) GetPfPciFromAux(auxDev string) (string, error) {
+	ret := _m.Called(auxDev)
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(auxDev)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(auxDev)
 	} else {
 		r1 = ret.Error(1)
 	}

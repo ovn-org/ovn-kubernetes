@@ -94,6 +94,7 @@ usage() {
     echo "                 [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
     echo "                 [-dp |--disable-pkt-mtu-check]"
     echo "                 [-df |--disable-forwarding]"
+    echo "                 [-pl]|--install-cni-plugins ]"
     echo "                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>]"
     echo "                 [-if |--ipfix-targets <targets>]  [-ifs|--ipfix-sampling <num>]"
     echo "                 [-ifm|--ipfix-cache-max-flows <num>] [-ifa|--ipfix-cache-active-timeout <num>]"
@@ -101,7 +102,7 @@ usage() {
     echo "                 [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]"
     echo "                 [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]"
     echo "                 [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]"
-    echo "                 [-cl |--ovn-loglevel-controller <loglevel>]"
+    echo "                 [-cl |--ovn-loglevel-controller <loglevel>] [-me|--multicast-enabled]"
     echo "                 [-ep |--experimental-provider <name>] |"
     echo "                 [-eb |--egress-gw-separate-bridge] |"
     echo "                 [-lr |--local-kind-registry |"
@@ -110,6 +111,7 @@ usage() {
     echo "                 [-cn | --cluster-name |"
     echo "                 [-ehp|--egress-ip-healthcheck-port <num>]"
     echo "                 [-is | --ipsec]"
+    echo "                 [-cm | --compact-mode]"
     echo "                 [--isolated]"
     echo "                 [-h]]"
     echo ""
@@ -118,10 +120,13 @@ usage() {
     echo "-kt  | --keep-taint                 Do not remove taint components."
     echo "                                    DEFAULT: Remove taint components."
     echo "-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled."
+    echo "-scm | --separate-cluster-manager   Separate cluster manager from ovnkube-master and run as a separate container within ovnkube-master deployment."
+    echo "-me  | --multicast-enabled          Enable multicast. DEFAULT: Disabled."
     echo "-ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled."
     echo "-ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled."
     echo "-dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled"
     echo "-df  | --disable-forwarding         Disable forwarding on OVNK managed interfaces. Default: Disabled"
+    echo "-pl  | --install-cni-plugins ]      Installs additional CNI network plugins. DEFAULT: Disabled"
     echo "-nf  | --netflow-targets            Comma delimited list of ip:port or :port (using node IP) netflow collectors. DEFAULT: Disabled."
     echo "-sf  | --sflow-targets              Comma delimited list of ip:port or :port (using node IP) sflow collectors. DEFAULT: Disabled."
     echo "-if  | --ipfix-targets              Comma delimited list of ip:port or :port (using node IP) ipfix collectors. DEFAULT: Disabled."
@@ -157,6 +162,7 @@ usage() {
     echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
     echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
     echo "-sm  | --scale-metrics              Enable scale metrics"
+    echo "-cm  | --compact-mode               Enable compact mode, ovnkube master and node run in the same process."
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
@@ -177,6 +183,8 @@ parse_args() {
             -ii | --install-ingress )           KIND_INSTALL_INGRESS=true
                                                 ;;
             -mlb | --install-metallb )          KIND_INSTALL_METALLB=true
+                                                ;;
+            -pl | --install-cni-plugins )       KIND_INSTALL_PLUGINS=true
                                                 ;;
             -ha | --ha-enabled )                OVN_HA=true
                                                 ;;
@@ -307,6 +315,8 @@ parse_args() {
                                                 ;;
            -sm  | --scale-metrics )             OVN_METRICS_SCALE_ENABLE=true
                                                 ;;
+           -cm  | --compact-mode )              OVN_COMPACT_MODE=true
+                                                ;;
             --isolated )                        OVN_ISOLATED=true
                                                 ;;
             -mne | --multi-network-enable )     shift
@@ -334,6 +344,7 @@ print_params() {
      echo "MANIFEST_OUTPUT_DIR = $MANIFEST_OUTPUT_DIR"
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
      echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
+     echo "KIND_INSTALL_PLUGINS = $KIND_INSTALL_PLUGINS"
      echo "OVN_HA = $OVN_HA"
      echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
@@ -475,6 +486,7 @@ set_default_params() {
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
+  KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
   KIND_LOCAL_REGISTRY_NAME=${KIND_LOCAL_REGISTRY_NAME:-kind-registry}
@@ -537,6 +549,10 @@ set_default_params() {
   fi
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
   OVN_SEPARATE_CLUSTER_MANAGER=${OVN_SEPARATE_CLUSTER_MANAGER:-false}
+  OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
+  if [ "$OVN_COMPACT_MODE" == true ]; then
+    KIND_NUM_WORKER=0
+  fi
 }
 
 detect_apiserver_url() {
@@ -791,7 +807,8 @@ create_ovn_kube_manifests() {
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
     --multi-network-enable="${ENABLE_MULTI_NET}" \
-    --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}"
+    --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
+    --compact-mode="${OVN_COMPACT_MODE}"
   popd
 }
 
@@ -875,6 +892,9 @@ install_metallb() {
   fi
   git clone https://github.com/metallb/metallb.git
   pushd metallb
+  # temporary fix for metallb issue
+  # https://github.com/metallb/metallb/commit/fdf92741c7fac20eedf3caa0aa922f9ff0f0e7dd#r110009241
+  git reset --hard f5ba918
   pip install -r dev-env/requirements.txt
   inv dev-env -n ovn -b frr -p bgp
   docker network create --driver bridge clientnet
@@ -902,6 +922,21 @@ install_metallb() {
   sleep 30
 }
 
+install_plugins() {
+  git clone https://github.com/containernetworking/plugins.git
+  pushd plugins
+  ./build_linux.sh
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  # Opted for not overwritting the existing plugins
+  for node in $KIND_NODES; do
+    for plugin in bandwidth bridge dhcp dummy firewall host-device ipvlan macvlan sbr static tuning vlan vrf; do
+      $OCI_BIN cp ./bin/$plugin $node:/opt/cni/bin/
+    done
+  done
+  popd
+  rm -rf plugins
+}
+
 destroy_metallb() {
   docker stop lbclient || true # its possible the lbclient doesn't exist which is fine, ignore error
   docker stop frr || true # its possible the lbclient doesn't exist which is fine, ignore error
@@ -913,6 +948,12 @@ install_multus() {
   echo "Installing multus-cni daemonset ..."
   multus_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml"
   run_kubectl apply -f "$multus_manifest"
+}
+
+install_mpolicy_crd() {
+  echo "Installing multi-network-policy CRD ..."
+  mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml"
+  run_kubectl apply -f "$mpolicy_manifest"
 }
 
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
@@ -1116,6 +1157,7 @@ if [ "$KIND_INSTALL_INGRESS" == true ]; then
 fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
   install_multus
+  install_mpolicy_crd
 fi
 kubectl_wait_pods
 sleep_until_pods_settle
@@ -1127,4 +1169,7 @@ if [ "${ENABLE_IPSEC}" == true ]; then
 fi
 if [ "$KIND_INSTALL_METALLB" == true ]; then
   install_metallb
+fi
+if [ "$KIND_INSTALL_PLUGINS" == true ]; then
+  install_plugins
 fi

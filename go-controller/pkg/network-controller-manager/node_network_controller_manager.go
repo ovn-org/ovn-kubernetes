@@ -187,7 +187,7 @@ func (ncm *nodeNetworkControllerManager) Stop() {
 // derive iface-id from pod name and namespace then remove any interfaces assoicated with a sandbox that are
 // not scheduled to the node.
 func (ncm *nodeNetworkControllerManager) checkForStaleOVSRepresentorInterfaces() {
-	// Get all ovn-kuberntes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
+	// Get all representor interfaces. these are OVS interfaces that have their external_ids:sandbox and vf-netdev-name set.
 	out, stderr, err := util.RunOVSVsctl("--columns=name,external_ids", "--data=bare", "--no-headings",
 		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\"", "external_ids:vf-netdev-name!=\"\"")
 	if err != nil {

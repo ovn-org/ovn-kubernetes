@@ -4,36 +4,19 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"strconv"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
-
+	iputils "github.com/containernetworking/plugins/pkg/ip"
 	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+
 	utilnet "k8s.io/utils/net"
 )
 
 var NoIPError = errors.New("no IP available")
-
-// NextIP returns IP incremented by 1
-func NextIP(ip net.IP) net.IP {
-	i := ipToInt(ip)
-	return intToIP(i.Add(i, big.NewInt(1)))
-}
-
-func ipToInt(ip net.IP) *big.Int {
-	if v := ip.To4(); v != nil {
-		return big.NewInt(0).SetBytes(v)
-	}
-	return big.NewInt(0).SetBytes(ip.To16())
-}
-
-func intToIP(i *big.Int) net.IP {
-	return net.IP(i.Bytes())
-}
 
 // ExtractPortAddresses returns the MAC and IPs of the given logical switch port
 func ExtractPortAddresses(lsp *nbdb.LogicalSwitchPort) (net.HardwareAddr, []net.IP, error) {
@@ -104,23 +87,36 @@ func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
 }
 
 // GetNodeGatewayIfAddr returns the node logical switch gateway address
-// (the ".1" address)
+// (the ".1" address), return nil if the subnet is invalid
 func GetNodeGatewayIfAddr(subnet *net.IPNet) *net.IPNet {
-	return &net.IPNet{IP: NextIP(subnet.IP), Mask: subnet.Mask}
+	if subnet == nil {
+		return nil
+	}
+	ip := iputils.NextIP(subnet.IP)
+	if ip == nil {
+		return nil
+	}
+	return &net.IPNet{IP: ip, Mask: subnet.Mask}
 }
 
 // GetNodeManagementIfAddr returns the node logical switch management port address
-// (the ".2" address)
+// (the ".2" address), return nil if the subnet is invalid
 func GetNodeManagementIfAddr(subnet *net.IPNet) *net.IPNet {
 	gwIfAddr := GetNodeGatewayIfAddr(subnet)
-	return &net.IPNet{IP: NextIP(gwIfAddr.IP), Mask: subnet.Mask}
+	if gwIfAddr == nil {
+		return nil
+	}
+	return &net.IPNet{IP: iputils.NextIP(gwIfAddr.IP), Mask: subnet.Mask}
 }
 
 // GetNodeHybridOverlayIfAddr returns the node logical switch hybrid overlay
-// port address (the ".3" address)
+// port address (the ".3" address), return nil if the subnet is invalid
 func GetNodeHybridOverlayIfAddr(subnet *net.IPNet) *net.IPNet {
 	mgmtIfAddr := GetNodeManagementIfAddr(subnet)
-	return &net.IPNet{IP: NextIP(mgmtIfAddr.IP), Mask: subnet.Mask}
+	if mgmtIfAddr == nil {
+		return nil
+	}
+	return &net.IPNet{IP: iputils.NextIP(mgmtIfAddr.IP), Mask: subnet.Mask}
 }
 
 // JoinHostPortInt32 is like net.JoinHostPort(), but with an int32 for the port

@@ -21,7 +21,6 @@ func GetLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter
 	found := []*nbdb.LogicalRouter{}
 	opModel := operationModel{
 		Model:          router,
-		ModelPredicate: func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		ExistingResult: &found,
 		ErrNotFound:    true,
 		BulkOp:         false,
@@ -53,7 +52,6 @@ func CreateOrUpdateLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.Lo
 	}
 	opModel := operationModel{
 		Model:          router,
-		ModelPredicate: func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelUpdates: fields,
 		ErrNotFound:    false,
 		BulkOp:         false,
@@ -115,8 +113,14 @@ func DeleteLogicalRoutersWithPredicateOps(nbClient libovsdbclient.Client, ops []
 // DeleteLogicalRouterOps returns the operations to delete the provided logical router
 func DeleteLogicalRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation,
 	router *nbdb.LogicalRouter) ([]libovsdb.Operation, error) {
-	return DeleteLogicalRoutersWithPredicateOps(nbClient, nil,
-		func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name })
+	opModel := operationModel{
+		Model:       router,
+		ErrNotFound: false,
+		BulkOp:      false,
+	}
+
+	m := newModelClient(nbClient)
+	return m.DeleteOps(ops, opModel)
 }
 
 // DeleteLogicalRouter deletes the provided logical router
@@ -181,7 +185,6 @@ func CreateOrUpdateLogicalRouterPort(nbClient libovsdbclient.Client, router *nbd
 	})
 	opModels = append(opModels, operationModel{
 		Model:            router,
-		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.Ports},
 		ErrNotFound:      true,
 		BulkOp:           false,
@@ -214,7 +217,6 @@ func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.Logic
 	}
 	opModel := operationModel{
 		Model:            router,
-		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.Ports},
 		ErrNotFound:      true,
 		BulkOp:           false,
@@ -302,7 +304,6 @@ func CreateOrUpdateLogicalRouterPolicyWithPredicateOps(nbClient libovsdbclient.C
 		},
 		{
 			Model:            router,
-			ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 			OnModelMutations: []interface{}{&router.Policies},
 			ErrNotFound:      true,
 			BulkOp:           false,
@@ -352,7 +353,6 @@ func DeleteLogicalRouterPolicyWithPredicateOps(nbClient libovsdbclient.Client, o
 		},
 		{
 			Model:            router,
-			ModelPredicate:   func(lr *nbdb.LogicalRouter) bool { return lr.Name == router.Name },
 			OnModelMutations: []interface{}{&router.Policies},
 			ErrNotFound:      true,
 			BulkOp:           false,
@@ -397,7 +397,6 @@ func CreateOrAddNextHopsToLogicalRouterPolicyWithPredicateOps(nbClient libovsdbc
 		},
 		{
 			Model:            router,
-			ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 			OnModelMutations: []interface{}{&router.Policies},
 			ErrNotFound:      true,
 			BulkOp:           false,
@@ -443,7 +442,6 @@ func deleteNextHopsFromLogicalRouterPolicyOps(nbClient libovsdbclient.Client, op
 	if len(router.Policies) > 0 {
 		opModel := operationModel{
 			Model:            router,
-			ModelPredicate:   func(lr *nbdb.LogicalRouter) bool { return lr.Name == router.Name },
 			OnModelMutations: []interface{}{&router.Policies},
 			BulkOp:           false,
 			ErrNotFound:      false,
@@ -529,7 +527,6 @@ func DeleteLogicalRouterPolicies(nbClient libovsdbclient.Client, routerName stri
 
 	opModel := operationModel{
 		Model:            router,
-		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.Policies},
 		ErrNotFound:      true,
 		BulkOp:           false,
@@ -578,7 +575,6 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 		},
 		{
 			Model:            router,
-			ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 			OnModelMutations: []interface{}{&router.StaticRoutes},
 			ErrNotFound:      true,
 			BulkOp:           false,
@@ -658,7 +654,6 @@ func CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient libovsdbclien
 		}
 		opModel := operationModel{
 			Model:            router,
-			ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 			OnModelMutations: []interface{}{&router.StaticRoutes},
 			ErrNotFound:      true,
 			BulkOp:           false,
@@ -698,7 +693,6 @@ func DeleteLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client
 		},
 		{
 			Model:            router,
-			ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 			OnModelMutations: []interface{}{&router.StaticRoutes},
 			ErrNotFound:      true,
 			BulkOp:           false,
@@ -731,7 +725,6 @@ func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName 
 
 	opModel := operationModel{
 		Model:            router,
-		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.StaticRoutes},
 		ErrNotFound:      true,
 		BulkOp:           false,
@@ -792,7 +785,6 @@ func AddLoadBalancersToLogicalRouterOps(nbClient libovsdbclient.Client, ops []li
 	}
 	opModel := operationModel{
 		Model:            router,
-		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.LoadBalancer},
 		ErrNotFound:      true,
 		BulkOp:           false,
@@ -814,7 +806,6 @@ func RemoveLoadBalancersFromLogicalRouterOps(nbClient libovsdbclient.Client, ops
 	}
 	opModel := operationModel{
 		Model:            router,
-		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.LoadBalancer},
 		// if we want to delete loadbalancer from the router that doesn't exist, that is noop
 		ErrNotFound: false,
