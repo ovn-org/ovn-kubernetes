@@ -38,14 +38,14 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 	defaultNodes := []nodeInfo{
 		{
 			name:              "node-a",
-			nodeIPs:           []net.IP{net.ParseIP("10.0.0.1")},
+			hostAddresses:     []net.IP{net.ParseIP("10.0.0.1")},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
 			name:              "node-b",
-			nodeIPs:           []net.IP{net.ParseIP("10.0.0.2")},
+			hostAddresses:     []net.IP{net.ParseIP("10.0.0.2")},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},
@@ -189,14 +189,14 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 	defaultNodes := []nodeInfo{
 		{
 			name:              "node-a",
-			nodeIPs:           []net.IP{net.ParseIP("10.0.0.1")},
+			hostAddresses:     []net.IP{net.ParseIP("10.0.0.1")},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
 			name:              "node-b",
-			nodeIPs:           []net.IP{net.ParseIP("10.0.0.2")},
+			hostAddresses:     []net.IP{net.ParseIP("10.0.0.2")},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},
