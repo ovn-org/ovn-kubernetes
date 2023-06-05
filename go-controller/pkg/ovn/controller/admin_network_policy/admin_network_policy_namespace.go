@@ -26,7 +26,7 @@ const (
 
 type mapAndOp struct {
 	m   *sync.Map
-	key string
+	key any
 	val any
 	op  mapOp
 }

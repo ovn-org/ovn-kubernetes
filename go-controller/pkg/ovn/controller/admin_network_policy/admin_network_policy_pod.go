@@ -118,9 +118,11 @@ func (c *Controller) setPodForANP(anpName string, pod *v1.Pod, anpCache *adminNe
 			portsToAdd = append(portsToAdd, lsp.UUID)
 			klog.Infof("SURYA %v", portsToAdd)
 			podMapOps = append(podMapOps, mapAndOp{nsCache.(*sync.Map), pod.Name, lsp.UUID, mapInsert})
+			populateNamedPortsFromPod(anpCache.subject.namedPorts, pod, true)
 		} else if !anpCache.subject.podSelector.Matches(podLabels) && loaded {
 			portsToDelete = append(portsToDelete, lsp.UUID)
 			podMapOps = append(podMapOps, mapAndOp{nsCache.(*sync.Map), pod.Name, lsp.UUID, mapDelete})
+			populateNamedPortsFromPod(anpCache.subject.namedPorts, pod, false)
 		}
 	}
 	for _, rule := range anpCache.ingressRules {
@@ -141,6 +143,7 @@ func (c *Controller) setPodForANP(anpName string, pod *v1.Pod, anpCache *adminNe
 				ops = append(ops, addrOps...)
 				klog.Infof("SURYA %v", ops)
 				podMapOps = append(podMapOps, mapAndOp{nsCache.(*sync.Map), pod.Name, podIPs, mapInsert})
+				populateNamedPortsFromPod(peer.namedPorts, pod, true)
 			} else if !peer.podSelector.Matches(podLabels) && loaded {
 				klog.Infof("SURYA %v, %v", podLabels, peer.podSelector)
 				addrOps, err := rule.addrSet.DeleteIPsReturnOps(podIPs)
@@ -150,6 +153,15 @@ func (c *Controller) setPodForANP(anpName string, pod *v1.Pod, anpCache *adminNe
 				ops = append(ops, addrOps...)
 				klog.Infof("SURYA %v", ops)
 				podMapOps = append(podMapOps, mapAndOp{nsCache.(*sync.Map), pod.Name, podIPs, mapDelete})
+				populateNamedPortsFromPod(peer.namedPorts, pod, false)
+			}
+		}
+		for _, port := range rule.ports {
+			// we have to take care of named port additions and deletions.
+			// NOTE: As per K8s specs, once a container is created for a pod, its port field is immutable so we cannot update
+			// the port field during the pod lifecycle so we just need to take care of pod starting to match or stopping to match
+			if port.name != "" {
+				// TODO: Construct ACL for the port and add a CreateOrUpdateACL action for this
 			}
 		}
 	}
@@ -171,6 +183,7 @@ func (c *Controller) setPodForANP(anpName string, pod *v1.Pod, anpCache *adminNe
 				ops = append(ops, addrOps...)
 				klog.Infof("SURYA %v", ops)
 				podMapOps = append(podMapOps, mapAndOp{nsCache.(*sync.Map), pod.Name, podIPs, mapInsert})
+				populateNamedPortsFromPod(peer.namedPorts, pod, true)
 			} else if !peer.podSelector.Matches(podLabels) && loaded {
 				klog.Infof("SURYA %v, %v", podLabels, peer.podSelector)
 				addrOps, err := rule.addrSet.DeleteIPsReturnOps(podIPs)
@@ -180,6 +193,7 @@ func (c *Controller) setPodForANP(anpName string, pod *v1.Pod, anpCache *adminNe
 				ops = append(ops, addrOps...)
 				klog.Infof("SURYA %v", ops)
 				podMapOps = append(podMapOps, mapAndOp{nsCache.(*sync.Map), pod.Name, podIPs, mapDelete})
+				populateNamedPortsFromPod(peer.namedPorts, pod, false)
 			}
 		}
 	}
@@ -483,4 +497,73 @@ func (c *Controller) clearPodForBANP(namespace, name string, banpCache *baseline
 		pc.Delete(name)
 	}
 	return nil
+}
+
+func populateNamedPortsFromPod(namedPortCache *sync.Map, pod *v1.Pod, add bool) error {
+	for _, container := range pod.Spec.Containers {
+		for _, port := range container.Ports {
+			if port.Name == "" {
+				continue
+			}
+			ipToPortCache, _ := namedPortCache.LoadOrStore(port.Name, &sync.Map{})
+			klog.Infof("SURYA %v", ipToPortCache)
+			podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+			if err != nil {
+				return err
+			}
+			anpPort := adminNetworkPolicyPort{
+				port:     port.ContainerPort,
+				protocol: string(port.Protocol),
+				name:     port.Name,
+			}
+			for _, podIP := range podIPs {
+				klog.Infof("SURYA %v/%v", podIP, anpPort)
+				// we always store the latest value, if podIP existed, overwrite it
+				if add {
+					ipToPortCache.(*sync.Map).Store(podIP, anpPort)
+				} else {
+					ipToPortCache.(*sync.Map).Delete(podIP)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func fetchNamedPortsFromPod(pod *v1.Pod) map[string]adminNetworkPolicyPort {
+	namedPorts := make(map[string]adminNetworkPolicyPort, 0)
+	for _, container := range pod.Spec.Containers {
+		for _, port := range container.Ports {
+			if port.Name == "" {
+				continue
+			}
+			anpPort := adminNetworkPolicyPort{
+				port:     port.ContainerPort,
+				protocol: string(port.Protocol),
+				name:     port.Name,
+			}
+			namedPorts[port.Name] = anpPort
+		}
+	}
+	return namedPorts
+}
+
+func constructMapOpsForNamedPorts(namedPortCache *sync.Map, pod *v1.Pod, podIPs []net.IP, add bool) []mapAndOp {
+	podMapOps := []mapAndOp{}
+	var oper mapOp
+	if add {
+		oper = mapInsert
+	} else {
+		oper = mapDelete
+	}
+	existingPodNamedPorts := fetchNamedPortsFromPod(pod)
+	for portName, portInfo := range existingPodNamedPorts {
+		ipToPortCache, _ := namedPortCache.LoadOrStore(portName, &sync.Map{})
+		klog.Infof("SURYA %v", ipToPortCache)
+		for _, podIP := range podIPs {
+			klog.Infof("SURYA %v/%v", podIP, portInfo)
+			podMapOps = append(podMapOps, mapAndOp{ipToPortCache.(*sync.Map), podIP, portInfo, oper})
+		}
+	}
+	return podMapOps
 }

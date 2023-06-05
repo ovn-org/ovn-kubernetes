@@ -42,7 +42,9 @@ type adminNetworkPolicySubject struct {
 	namespaceSelector labels.Selector
 	podSelector       labels.Selector
 	// map of pods matching the provided namespaceSelector and podSelector
-	pods *sync.Map // {K:namespace name V:{K:pod's name V:-> port UUID}}
+	pods *sync.Map // {K:namespace name V:syncMap{K:pod's name V:-> LSP UUID}}
+	// map of namedPorts; used only for namedPort logic. NOTE: This is expensive
+	namedPorts *sync.Map // {K:namedPortName V:syncMap{K:podIP: V:adminNetworkPolicyPort}}
 }
 
 // TODO: Implement sameLabels & notSameLabels
@@ -50,13 +52,16 @@ type adminNetworkPolicyPeer struct {
 	namespaceSelector labels.Selector
 	podSelector       labels.Selector
 	// map of pods matching the provided namespaceSelector and podSelector
-	pods *sync.Map // {K:namespace name V:{K:pod's name V:-> ips in the addrSet}}
+	pods *sync.Map // {K:namespace name V:syncMap{K:pod's name V:-> ips in the addrSet}}
+	// map of namedPorts; used only for namedPort logic. NOTE: This is expensive
+	namedPorts *sync.Map // {K:namedPortName V:syncMap{K:podIP: V:adminNetworkPolicyPort}}
 }
 
 type adminNetworkPolicyPort struct {
 	protocol string
-	port     int32 // will store startPort if its a range
-	endPort  int32
+	port     int32  // will store startPort if its a range; if this is set then name will be empty
+	endPort  int32  // if this is set then name will be empty
+	name     string // will store namedPort value; if this is set then port and endPort will be 0
 }
 
 type gressRule struct {
@@ -175,7 +180,7 @@ func cloneANPPort(raw anpapi.AdminNetworkPolicyPort) *adminNetworkPolicyPort {
 		anpPort.protocol = getPortProtocol(raw.PortNumber.Protocol)
 		anpPort.port = raw.PortNumber.Port
 	} else if raw.NamedPort != nil {
-		// TODO: Add support for this
+		anpPort.name = *raw.NamedPort
 	} else {
 		anpPort.protocol = getPortProtocol(raw.PortRange.Protocol)
 		anpPort.port = raw.PortRange.Start
@@ -341,6 +346,12 @@ func (c *Controller) setAdminNetworkPolicy(anpObj *anpapi.AdminNetworkPolicy) er
 	}
 
 	portGroupName, readableGroupName := getAdminNetworkPolicyPGName(anp.name)
+	lsps, err := c.getPortsOfSubject(anp.subject)
+	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateANPStatusToNotReady(anpObj, PolicyBuildPortGroupFailed)
+		return fmt.Errorf("unable to fetch ports for anp %s: %w", anp.name, err)
+	}
 	ops := []ovsdb.Operation{}
 	acls, err := c.buildANPACLs(anp, portGroupName)
 	if err != nil {
@@ -354,15 +365,8 @@ func (c *Controller) setAdminNetworkPolicy(anpObj *anpapi.AdminNetworkPolicy) er
 		_ = c.updateANPStatusToNotReady(anpObj, PolicyCreateUpdateACLFailed)
 		return fmt.Errorf("failed to create ACL ops: %v", err)
 	}
-	podsCache, ports, err := c.getPortsOfSubject(anp.subject.namespaceSelector, anp.subject.podSelector)
-	if err != nil {
-		// we can ignore the error if status update doesn't succeed; best effort
-		_ = c.updateANPStatusToNotReady(anpObj, PolicyBuildPortGroupFailed)
-		return fmt.Errorf("unable to fetch ports for anp %s: %w", anp.name, err)
-	}
-	anp.subject.pods = podsCache
 	pgExternalIDs := map[string]string{ANPExternalIDKey: readableGroupName}
-	pg := libovsdbops.BuildPortGroup(portGroupName, ports, acls, pgExternalIDs)
+	pg := libovsdbops.BuildPortGroup(portGroupName, lsps, acls, pgExternalIDs)
 	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(c.nbClient, ops, pg)
 	if err != nil {
 		// we can ignore the error if status update doesn't succeed; best effort
@@ -388,14 +392,14 @@ func getAdminNetworkPolicyPGName(name string) (hashedPGName, readablePGName stri
 func (c *Controller) buildANPACLs(anp *adminNetworkPolicy, pgName string) ([]*nbdb.ACL, error) {
 	acls := []*nbdb.ACL{}
 	for _, ingressRule := range anp.ingressRules {
-		acl, err := c.convertANPRuleToACL(ingressRule, pgName, anp.name)
+		acl, err := c.convertANPRuleToACL(anp, ingressRule, pgName)
 		if err != nil {
 			return nil, err
 		}
 		acls = append(acls, acl...)
 	}
 	for _, egressRule := range anp.egressRules {
-		acl, err := c.convertANPRuleToACL(egressRule, pgName, anp.name)
+		acl, err := c.convertANPRuleToACL(anp, egressRule, pgName)
 		if err != nil {
 			return nil, err
 		}
@@ -405,14 +409,14 @@ func (c *Controller) buildANPACLs(anp *adminNetworkPolicy, pgName string) ([]*nb
 	return acls, nil
 }
 
-func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string) ([]*nbdb.ACL, error) {
+func (c *Controller) convertANPRuleToACL(anp *adminNetworkPolicy, rule *gressRule, pgName string) ([]*nbdb.ACL, error) {
 	// create address-set
 	// TODO (tssurya): Revisit this logic to see if its better to do one address-set per peer
 	// and join them with OR if that is more perf efficient. Had briefly discussed this OVN team
 	// We are not yet clear which is better since both have advantages and disadvantages.
 	// Decide this after doing some scale runs.
 	var err error
-	rule.addrSet, err = c.createASForPeers(rule.peers, rule.priority, rule.gressPrefix, anpName, libovsdbops.AddressSetAdminNetworkPolicy)
+	rule.addrSet, err = c.createASForPeers(rule.peers, rule.priority, rule.gressPrefix, anp.name, libovsdbops.AddressSetAdminNetworkPolicy)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create address set for "+
 			" rule %s with priority %d: %w", rule.name, rule.priority, err)
@@ -434,10 +438,10 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 	}
 	acls := []*nbdb.ACL{}
 	if len(rule.ports) == 0 {
-		extIDs = getANPRuleACLDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.priority), controllerName, libovsdbops.ACLAdminNetworkPolicy).GetExternalIDs()
+		extIDs = getANPRuleACLDbIDs(anp.name, rule.gressPrefix, fmt.Sprintf("%d", rule.priority), controllerName, libovsdbops.ACLAdminNetworkPolicy).GetExternalIDs()
 		match = fmt.Sprintf("%s && %s", l3Match, lportMatch)
 		acl := libovsdbops.BuildACL(
-			getANPGressPolicyACLName(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.priority)),
+			getANPGressPolicyACLName(anp.name, rule.gressPrefix, fmt.Sprintf("%d", rule.priority)),
 			direction,
 			int(rule.priority),
 			match,
@@ -450,28 +454,39 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 			types.DefaultANPACLTier,
 		)
 		acls = append(acls, acl)
-	} else {
-		for i, port := range rule.ports {
-			extIDs = getANPRuleACLDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d.%d", rule.priority, i), controllerName, libovsdbops.ACLAdminNetworkPolicy).GetExternalIDs()
+		return acls, nil
+	}
+	for i, port := range rule.ports {
+		extIDs = getANPRuleACLDbIDs(anp.name, rule.gressPrefix, fmt.Sprintf("%d.%d", rule.priority, i), controllerName, libovsdbops.ACLAdminNetworkPolicy).GetExternalIDs()
+		if port.name == "" {
 			l4Match := constructMatchFromPorts(port)
 			match = fmt.Sprintf("%s && %s && %s", l3Match, lportMatch, l4Match)
-			acl := libovsdbops.BuildACL(
-				getANPGressPolicyACLName(anpName, rule.gressPrefix, fmt.Sprintf("%d.%d", rule.priority, i)),
-				direction,
-				int(rule.priority),
-				match,
-				getACLActionForANP(rule.action),
-				types.OvnACLLoggingMeter, // TODO: FIX THIS LATER
-				nbdb.ACLSeverityDebug,    // TODO: FIX THIS LATER
-				false,                    // TODO: FIX THIS LATER
-				extIDs,
-				options,
-				types.DefaultANPACLTier,
-			)
-			acls = append(acls, acl)
+		} else {
+			// named Ports; this will not be scale efficient
+			l4Matches, err := constructMatchFromNamedPorts(port.name, rule.peers, anp.subject, rule.gressPrefix)
+			if err != nil {
+				// it means either namespaces don't exist yet or pods with those namedPorts don't exist yet
+				// in that case, warn the user and don't create any rules for the namedPort and simply continue
+				klog.Warningf("Unable to create ACL for namedPort: %v", err)
+				continue
+			}
+			match = fmt.Sprintf("%s && (%s)", lportMatch, l4Matches)
 		}
+		acl := libovsdbops.BuildACL(
+			getANPGressPolicyACLName(anp.name, rule.gressPrefix, fmt.Sprintf("%d.%d", rule.priority, i)),
+			direction,
+			int(rule.priority),
+			match,
+			getACLActionForANP(rule.action),
+			types.OvnACLLoggingMeter, // TODO: FIX THIS LATER
+			nbdb.ACLSeverityDebug,    // TODO: FIX THIS LATER
+			false,                    // TODO: FIX THIS LATER
+			extIDs,
+			options,
+			types.DefaultANPACLTier,
+		)
+		acls = append(acls, acl)
 	}
-
 	return acls, nil
 }
 
@@ -505,6 +520,7 @@ func (c *Controller) createASForPeers(peers []*adminNetworkPolicyPeer, priority 
 	podsIps := []net.IP{}
 	for _, peer := range peers {
 		podsCache := sync.Map{}
+		namedPortsCache := sync.Map{}
 		// TODO: Double check how empty selector means all labels match works
 		namespaces, err := c.anpNamespaceLister.List(peer.namespaceSelector)
 		if err != nil {
@@ -521,6 +537,9 @@ func (c *Controller) createASForPeers(peers []*adminNetworkPolicyPeer, priority 
 			for _, pod := range pods {
 				// we don't handle HostNetworked or completed pods; unscheduled pods shall be handled via pod update path
 				if !util.PodWantsHostNetwork(pod) && !util.PodCompleted(pod) || !util.PodScheduled(pod) {
+					if err := populateNamedPortsFromPod(&namedPortsCache, pod, true); err != nil {
+						return nil, err
+					}
 					podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
 					if err != nil {
 						return nil, err
@@ -532,6 +551,7 @@ func (c *Controller) createASForPeers(peers []*adminNetworkPolicyPeer, priority 
 			podsCache.Store(namespace.Name, namespaceCache)
 		}
 		peer.pods = &podsCache
+		peer.namedPorts = &namedPortsCache
 	}
 	asIndex := GetANPPeerAddrSetDbIDs(anpName, gressPrefix, fmt.Sprintf("%d", priority), controllerName, idType)
 	addrSet, err = c.addressSetFactory.EnsureAddressSet(asIndex)
@@ -552,6 +572,58 @@ func GetANPPeerAddrSetDbIDs(name, gressPrefix, priority, controller string, idTy
 		// priority is the unique id for address set within given gressPrefix
 		libovsdbops.PriorityKey: priority,
 	})
+}
+
+func constructMatchFromNamedPorts(portName string, peers []*adminNetworkPolicyPeer, subject *adminNetworkPolicySubject, gressPrefix string) (string, error) {
+	var match string
+	if gressPrefix == ANPIngressPrefix || gressPrefix == BANPIngressPrefix {
+		// since direction of rule is ingress, we need to search for the destination port in the policy subject
+		// subject.namedPorts was populated inside getPortsOfSubject
+		ipToPortCache, loaded := subject.namedPorts.Load(portName)
+		if !loaded {
+			return "", fmt.Errorf("unable to find a matching namedPort %s in the subject pods of the defined policy", portName)
+		}
+		ipToPortCache.(*sync.Map).Range(func(key, value any) bool {
+			anpPort := value.(adminNetworkPolicyPort)
+			podIP := key.(net.IP)
+			isV4 := podIP.To4() != nil
+			switch {
+			case config.IPv4Mode && isV4:
+				match = match + fmt.Sprintf("(ip4.src == %s && %s && %s.dst==%d)", podIP, anpPort.protocol, anpPort.protocol, anpPort.port)
+			case config.IPv6Mode && !isV4:
+				match = match + fmt.Sprintf("(ip6.src == %s && %s && %s.dst==%d)", podIP, anpPort.protocol, anpPort.protocol, anpPort.port)
+			}
+			match = match + " || "
+			return true
+		})
+	} else {
+		// since direction of rule is egress, we need to search for the destination port in the policy rule peers
+		// peer.namedPorts was populated inside createASForPeers
+		for _, peer := range peers {
+			ipToPortCache, loaded := peer.namedPorts.Load(portName)
+			if !loaded {
+				continue // no-op, let's move to next peer
+			}
+			ipToPortCache.(*sync.Map).Range(func(key, value any) bool {
+				anpPort := value.(adminNetworkPolicyPort)
+				podIP := key.(net.IP)
+				isV4 := podIP.To4() != nil
+				switch {
+				case config.IPv4Mode && isV4:
+					match = match + fmt.Sprintf("(ip4.dst == %s && %s && %s.dst==%d)", podIP, anpPort.protocol, anpPort.protocol, anpPort.port)
+				case config.IPv6Mode && !isV4:
+					match = match + fmt.Sprintf("(ip6.dst == %s && %s && %s.dst==%d)", podIP, anpPort.protocol, anpPort.protocol, anpPort.port)
+				}
+				match = match + " || "
+				return true
+			})
+		}
+		if len(match) == 0 {
+			klog.Infof("SURYA: No match found")
+			return "", fmt.Errorf("unable to find a matching namedPort %s in the peer pods of the defined policy", portName)
+		}
+	}
+	return match, nil
 }
 
 func constructMatchFromAddressSet(gressPrefix string, addrSet addressset.AddressSet) string {
@@ -577,11 +649,13 @@ func constructMatchFromAddressSet(gressPrefix string, addrSet addressset.Address
 
 func constructMatchFromPorts(port *adminNetworkPolicyPort) string {
 	if port.endPort != 0 && port.endPort != port.port {
+		// Port Range is set
 		return fmt.Sprintf("(%s && %d<=%s.dst<=%d)", port.protocol, port.port, port.protocol, port.endPort)
-
 	} else if port.port != 0 {
+		// Port Number is set
 		return fmt.Sprintf("(%s && %s.dst==%d)", port.protocol, port.protocol, port.port)
 	}
+	// no ports were set, select full protocol
 	return fmt.Sprintf("(%s)", port.protocol)
 }
 
@@ -590,23 +664,27 @@ func getANPGressPolicyACLName(anpName, gressPrefix, priority string) string {
 	return strings.Join(substrings, "_")
 }
 
-func (c *Controller) getPortsOfSubject(namespaceSelector, podSelector labels.Selector) (*sync.Map, []*nbdb.LogicalSwitchPort, error) {
+func (c *Controller) getPortsOfSubject(subject *adminNetworkPolicySubject) ([]*nbdb.LogicalSwitchPort, error) {
 	ports := []*nbdb.LogicalSwitchPort{}
-	namespaces, err := c.anpNamespaceLister.List(namespaceSelector)
+	namespaces, err := c.anpNamespaceLister.List(subject.namespaceSelector)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	podsCache := sync.Map{}
+	namedPortsCache := sync.Map{}
 	for _, namespace := range namespaces {
 		namespaceCache, _ := podsCache.LoadOrStore(namespace.Name, &sync.Map{})
 		podNamespaceLister := c.anpPodLister.Pods(namespace.Name)
-		pods, err := podNamespaceLister.List(podSelector)
+		pods, err := podNamespaceLister.List(subject.podSelector)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for _, pod := range pods {
 			if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
 				continue
+			}
+			if err := populateNamedPortsFromPod(&namedPortsCache, pod, true); err != nil {
+				return nil, err
 			}
 			logicalPortName := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			lsp := &nbdb.LogicalSwitchPort{Name: logicalPortName}
@@ -616,7 +694,7 @@ func (c *Controller) getPortsOfSubject(namespaceSelector, podSelector labels.Sel
 					// reprocess it when LSP is created - whenever the next update for the pod comes
 					continue
 				}
-				return nil, nil, fmt.Errorf("error retrieving logical switch port with Name %s "+
+				return nil, fmt.Errorf("error retrieving logical switch port with Name %s "+
 					" from libovsdb cache: %w", logicalPortName, err)
 			}
 			ports = append(ports, lsp)
@@ -624,8 +702,9 @@ func (c *Controller) getPortsOfSubject(namespaceSelector, podSelector labels.Sel
 		}
 		podsCache.LoadOrStore(namespace.Name, namespaceCache)
 	}
-
-	return &podsCache, ports, nil
+	subject.pods = &podsCache
+	subject.namedPorts = &namedPortsCache
+	return ports, nil
 }
 
 func (c *Controller) clearAdminNetworkPolicy(anpName string) error {

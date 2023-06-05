@@ -228,6 +228,12 @@ func (c *Controller) setBaselineAdminNetworkPolicy(banpObj *anpapi.BaselineAdmin
 	klog.Infof("SURYA %v", len(banpObj.Spec.Egress))
 
 	portGroupName, readableGroupName := getBaselineAdminNetworkPolicyPGName(banp.name)
+	lsps, err := c.getPortsOfSubject(banp.subject)
+	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateBANPStatusToNotReady(banpObj, PolicyBuildPortGroupFailed)
+		return fmt.Errorf("unable to fetch ports for anp %s: %w", banp.name, err)
+	}
 	ops := []ovsdb.Operation{}
 	acls, err := c.buildBANPACLs(banp, portGroupName)
 	if err != nil {
@@ -241,15 +247,8 @@ func (c *Controller) setBaselineAdminNetworkPolicy(banpObj *anpapi.BaselineAdmin
 		_ = c.updateBANPStatusToNotReady(banpObj, PolicyCreateUpdateACLFailed)
 		return fmt.Errorf("failed to create ACL ops: %v", err)
 	}
-	podsCache, ports, err := c.getPortsOfSubject(banp.subject.namespaceSelector, banp.subject.podSelector)
-	if err != nil {
-		// we can ignore the error if status update doesn't succeed; best effort
-		_ = c.updateBANPStatusToNotReady(banpObj, PolicyBuildPortGroupFailed)
-		return fmt.Errorf("unable to fetch ports for anp %s: %w", banp.name, err)
-	}
-	banp.subject.pods = podsCache
 	pgExternalIDs := map[string]string{BANPExternalIDKey: readableGroupName}
-	pg := libovsdbops.BuildPortGroup(portGroupName, ports, acls, pgExternalIDs)
+	pg := libovsdbops.BuildPortGroup(portGroupName, lsps, acls, pgExternalIDs)
 	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(c.nbClient, ops, pg)
 	if err != nil {
 		// we can ignore the error if status update doesn't succeed; best effort
