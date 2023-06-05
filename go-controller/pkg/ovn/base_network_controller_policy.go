@@ -24,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kerrorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
 
@@ -211,7 +212,6 @@ type NetpolRequirements interface {
 	getPodNADNames(pod *kapi.Pod) []string
 	GetLogicalPortName(pod *kapi.Pod, nadName string) string
 	logicalPortCacheGet(pod *kapi.Pod, nadName string) (*lpInfo, error)
-	newNetpolRetryFramework(objectType reflect.Type, syncFunc func([]interface{}) error, extraParameters interface{}) *retry.RetryFramework
 
 	// future addressSet controller's functions
 	EnsurePodSelectorAddressSet(podSelector, namespaceSelector *metav1.LabelSelector,
@@ -857,7 +857,7 @@ func (c *NetworkPolicyController) addLocalPodHandler(policy *knet.NetworkPolicy,
 		_ = c.handleLocalPodSelectorAddFunc(np, objs...)
 		return nil
 	}
-	retryLocalPods := c.externalInterface.newNetpolRetryFramework(
+	retryLocalPods := c.newNetpolRetryFramework(
 		factory.LocalPodSelectorType,
 		syncFunc,
 		&NetworkPolicyExtraParameters{
@@ -1431,7 +1431,7 @@ func (c *NetworkPolicyController) addPeerNamespaceHandler(
 		_ = c.handlePeerNamespaceSelectorAdd(np, gress, objs...)
 		return nil
 	}
-	retryPeerNamespaces := c.externalInterface.newNetpolRetryFramework(
+	retryPeerNamespaces := c.newNetpolRetryFramework(
 		factory.PeerNamespaceSelectorType,
 		syncFunc,
 		&NetworkPolicyExtraParameters{gp: gress, np: np},
@@ -1493,4 +1493,186 @@ func getStaleNetpolAddrSetDbIDs(policyNamespace, policyName, policyType, idx, co
 		libovsdbops.PolicyDirectionKey: strings.ToLower(policyType),
 		libovsdbops.GressIdxKey:        idx,
 	})
+}
+
+// newNetpolRetryFramework builds and returns a retry framework for the input resource
+// type and assigns all ovnk-master-specific function attributes in the returned struct;
+// these functions will then be called by the retry logic in the retry package when
+// WatchResource() is called.
+// newNetpolRetryFramework takes as input a resource type (required)
+// and the following optional parameters: a namespace and a label filter for the
+// shared informer, a sync function to process all objects of this type at startup,
+// and resource-specific extra parameters (used now for network-policy-dependant types).
+// newNetpolRetryFramework is also called directly by the watchers that are
+// dynamically created when a network policy is added:
+// PeerNamespaceSelectorType, LocalPodSelectorType,
+func (c *NetworkPolicyController) newNetpolRetryFramework(
+	objectType reflect.Type,
+	syncFunc func([]interface{}) error,
+	extraParameters interface{}) *retry.RetryFramework {
+	eventHandler := &networkControllerPolicyEventHandler{
+		objType:          objectType,
+		watchFactory:     c.watchFactory,
+		netpolController: c,
+		extraParameters:  extraParameters, // in use by network policy dynamic watchers
+		syncFunc:         syncFunc,
+	}
+	resourceHandler := &retry.ResourceHandler{
+		HasUpdateFunc:          hasResourceAnUpdateFunc(objectType),
+		NeedsUpdateDuringRetry: needsUpdateDuringRetry(objectType),
+		ObjType:                objectType,
+		EventHandler:           eventHandler,
+	}
+	return retry.NewRetryFramework(
+		c.stopChan,
+		c.wg,
+		c.watchFactory,
+		resourceHandler,
+	)
+}
+
+// event handlers handles policy related events
+type networkControllerPolicyEventHandler struct {
+	retry.EmptyEventHandler
+	watchFactory     *factory.WatchFactory
+	objType          reflect.Type
+	netpolController *NetworkPolicyController
+	extraParameters  interface{}
+	syncFunc         func([]interface{}) error
+}
+
+// AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
+// type considers them equal and therefore no update is needed. It returns false when the two objects are not considered
+// equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
+// function or with a delete on the old obj followed by an add on the new obj).
+func (h *networkControllerPolicyEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
+	// switch based on type
+	switch h.objType {
+	case factory.LocalPodSelectorType: //
+		// For these types, there was no old vs new obj comparison in the original update code,
+		// so pretend they're always different so that the update code gets executed
+		return false, nil
+
+	case factory.PeerNamespaceSelectorType: //
+		// For these types there is no update code, so pretend old and new
+		// objs are always equivalent and stop processing the update event.
+		return true, nil
+	}
+	return false, fmt.Errorf("no object comparison for type %s", h.objType)
+}
+
+// GetResourceFromInformerCache returns the latest state of the object, given an object key and its type.
+// from the informers cache.
+func (h *networkControllerPolicyEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
+	var obj interface{}
+	var namespace, name string
+	var err error
+
+	namespace, name, err = cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to split key %s: %v", key, err)
+	}
+
+	switch h.objType {
+	case factory.LocalPodSelectorType:
+		obj, err = h.watchFactory.GetPod(namespace, name)
+
+	case factory.PeerNamespaceSelectorType:
+		obj, err = h.watchFactory.GetNamespace(name)
+
+	default:
+		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
+			h.objType)
+	}
+	return obj, err
+}
+
+// AddResource adds the specified object to the cluster according to its type and returns the error,
+// if any, yielded during object creation.
+// Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
+func (h *networkControllerPolicyEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+	switch h.objType {
+	case factory.PeerNamespaceSelectorType:
+		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
+		return h.netpolController.handlePeerNamespaceSelectorAdd(extraParameters.np, extraParameters.gp, obj)
+
+	case factory.LocalPodSelectorType:
+		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
+		return h.netpolController.handleLocalPodSelectorAddFunc(
+			extraParameters.np,
+			obj)
+
+	default:
+		return fmt.Errorf("no add function for object type %s", h.objType)
+	}
+}
+
+// UpdateResource updates the specified object in the cluster to its version in newObj according to its
+// type and returns the error, if any, yielded during the object update.
+// Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
+// is in the retryCache or not.
+func (h *networkControllerPolicyEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+	switch h.objType {
+	case factory.LocalPodSelectorType:
+		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
+		return h.netpolController.handleLocalPodSelectorAddFunc(
+			extraParameters.np,
+			newObj)
+	}
+	return fmt.Errorf("no update function for object type %s", h.objType)
+}
+
+// DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
+// Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
+// used for now for pods and network policies.
+func (h *networkControllerPolicyEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+	switch h.objType {
+	case factory.PeerNamespaceSelectorType:
+		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
+		return h.netpolController.handlePeerNamespaceSelectorDel(extraParameters.np, extraParameters.gp, obj)
+
+	case factory.LocalPodSelectorType:
+		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
+		return h.netpolController.handleLocalPodSelectorDelFunc(
+			extraParameters.np,
+			obj)
+
+	default:
+		return fmt.Errorf("object type %s not supported", h.objType)
+	}
+}
+
+func (h *networkControllerPolicyEventHandler) SyncFunc(objs []interface{}) error {
+	var syncFunc func([]interface{}) error
+
+	if h.syncFunc != nil {
+		// syncFunc was provided explicitly
+		syncFunc = h.syncFunc
+	} else {
+		switch h.objType {
+		case factory.LocalPodSelectorType,
+			factory.PeerNamespaceSelectorType:
+			syncFunc = nil
+
+		default:
+			return fmt.Errorf("no sync function for object type %s", h.objType)
+		}
+	}
+	if syncFunc == nil {
+		return nil
+	}
+	return syncFunc(objs)
+}
+
+// IsObjectInTerminalState returns true if the given object is a in terminal state.
+// This is used now for pods that are either in a PodSucceeded or in a PodFailed state.
+func (h *networkControllerPolicyEventHandler) IsObjectInTerminalState(obj interface{}) bool {
+	switch h.objType {
+	case factory.LocalPodSelectorType:
+		pod := obj.(*kapi.Pod)
+		return util.PodCompleted(pod)
+
+	default:
+		return false
+	}
 }
