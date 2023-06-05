@@ -52,7 +52,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Southbound",
-  "version": "20.27.0",
+  "version": "20.27.2",
   "tables": {
     "Address_Set": {
       "columns": {
@@ -1202,7 +1202,8 @@ var schema = `{
                 "set",
                 [
                   "from-lport",
-                  "to-lport"
+                  "to-lport",
+                  "both"
                 ]
               ]
             }
@@ -1225,7 +1226,8 @@ var schema = `{
                 "set",
                 [
                   "gre",
-                  "erspan"
+                  "erspan",
+                  "local"
                 ]
               ]
             }
