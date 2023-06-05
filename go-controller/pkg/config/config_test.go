@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,7 +115,7 @@ var _ = AfterSuite(func() {
 func createTempFile(name string) (string, []byte, error) {
 	fileData := []byte{0x20}
 	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, fileData, 0o644); err != nil {
+	if err := os.WriteFile(fname, fileData, 0o644); err != nil {
 		return "", nil, err
 	}
 	return fname, fileData, nil
@@ -124,7 +123,7 @@ func createTempFile(name string) (string, []byte, error) {
 
 func createTempFileContent(name, value string) (string, error) {
 	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, []byte(value), 0o644); err != nil {
+	if err := os.WriteFile(fname, []byte(value), 0o644); err != nil {
 		return "", err
 	}
 	return fname, nil
@@ -234,7 +233,7 @@ enable-interconnect=false
 		}
 		newData += line + "\n"
 	}
-	return ioutil.WriteFile(path, []byte(newData), 0o644)
+	return os.WriteFile(path, []byte(newData), 0o644)
 }
 
 var _ = Describe("Config Operations", func() {
@@ -242,7 +241,7 @@ var _ = Describe("Config Operations", func() {
 	var cfgFile *os.File
 
 	var tmpErr error
-	tmpDir, tmpErr = ioutil.TempDir("", "configtest_certdir")
+	tmpDir, tmpErr = os.MkdirTemp("", "configtest_certdir")
 	if tmpErr != nil {
 		GinkgoT().Errorf("failed to create tempdir: %v", tmpErr)
 	}
@@ -257,7 +256,7 @@ var _ = Describe("Config Operations", func() {
 		app.Name = "test"
 		app.Flags = Flags
 
-		cfgFile, err = ioutil.TempFile("", "conftest-")
+		cfgFile, err = os.CreateTemp("", "conftest-")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
@@ -794,7 +793,7 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("overrides config file and defaults with CLI legacy service-cluster-ip-range option", func() {
-		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
+		err := os.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
 service-cidrs=172.18.0.0/24
 `), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -817,7 +816,7 @@ service-cidrs=172.18.0.0/24
 	})
 
 	It("accepts legacy service-cidr config file option", func() {
-		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
+		err := os.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
 service-cidr=172.18.0.0/24
 `), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -853,7 +852,7 @@ service-cidr=172.18.0.0/24
 	})
 
 	It("overrides config file and defaults with CLI legacy cluster-subnet option", func() {
-		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+		err := os.WriteFile(cfgFile.Name(), []byte(`[default]
 cluster-subnets=172.18.0.0/23
 `), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -909,7 +908,7 @@ cluster-subnets=172.18.0.0/23
 	})
 
 	It("overrides config file and defaults with CLI legacy --init-gateways option", func() {
-		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
+		err := os.WriteFile(cfgFile.Name(), []byte(`[gateway]
 mode=local
 `), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -932,7 +931,7 @@ mode=local
 	})
 
 	It("overrides config file and defaults with CLI legacy --gateway-local option", func() {
-		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
+		err := os.WriteFile(cfgFile.Name(), []byte(`[gateway]
 mode=shared
 `), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -956,7 +955,7 @@ mode=shared
 	})
 
 	It("honors legacy [kubernetes] metrics config file options", func() {
-		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
+		err := os.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
 metrics-bind-address=1.1.1.1:8080
 ovn-metrics-bind-address=1.1.1.2:8081
 metrics-enable-pprof=true
@@ -982,7 +981,7 @@ metrics-enable-pprof=true
 	})
 
 	It("overrides legacy [kubernetes] metrics config file options with [metrics] ones", func() {
-		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
+		err := os.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
 metrics-bind-address=1.1.1.1:8080
 ovn-metrics-bind-address=1.1.1.2:8081
 metrics-enable-pprof=false
@@ -1362,7 +1361,7 @@ enable-pprof=true
 	})
 
 	It("ignores unknown fields in config file and does not return an error", func() {
-		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+		err := os.WriteFile(cfgFile.Name(), []byte(`[default]
 key=value
 mtu=1234
 
@@ -1392,7 +1391,7 @@ foo=bar
 	})
 
 	It("rejects a config with invalid syntax", func() {
-		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+		err := os.WriteFile(cfgFile.Name(), []byte(`[default]
 mtu=1234
 
 [foobar

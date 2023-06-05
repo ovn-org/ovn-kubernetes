@@ -3,7 +3,6 @@ package config
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/url"
 	"os"
@@ -1505,7 +1504,7 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
 	// token adn ca.crt may be from files mounted in container.
 	saConfig := savedKubernetes
-	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
+	if data, err := os.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
 		saConfig.Token = string(data)
 		saConfig.TokenFile = filepath.Join(saPath, kubeServiceAccountFileToken)
 	}
@@ -1570,7 +1569,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	}
 
 	if Kubernetes.CACert != "" {
-		bytes, err := ioutil.ReadFile(Kubernetes.CACert)
+		bytes, err := os.ReadFile(Kubernetes.CACert)
 		if err != nil {
 			return err
 		}

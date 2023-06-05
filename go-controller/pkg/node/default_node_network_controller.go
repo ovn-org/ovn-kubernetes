@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"strconv"
@@ -364,7 +363,7 @@ func setupOVNNode(node *kapi.Node) error {
 func isOVNControllerReady() (bool, error) {
 	// check node's connection status
 	runDir := util.GetOvnRunDir()
-	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
+	pid, err := os.ReadFile(runDir + "ovn-controller.pid")
 	if err != nil {
 		return false, fmt.Errorf("unknown pid for ovn-controller process: %v", err)
 	}

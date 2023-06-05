@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -49,7 +48,7 @@ var _ = AfterSuite(func() {
 
 func createTempFile(name string) (string, error) {
 	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, []byte{0x20}, 0o644); err != nil {
+	if err := os.WriteFile(fname, []byte{0x20}, 0o644); err != nil {
 		return "", err
 	}
 	return fname, nil
@@ -750,7 +749,7 @@ var _ = Describe("Management Port Operations", func() {
 		var testNS ns.NetNS
 		var fexec *ovntest.FakeExec
 
-		tmpDir, tmpErr = ioutil.TempDir("", "clusternodetest_certdir")
+		tmpDir, tmpErr = os.MkdirTemp("", "clusternodetest_certdir")
 		if tmpErr != nil {
 			GinkgoT().Errorf("failed to create tempdir: %v", tmpErr)
 		}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -55,7 +54,7 @@ func WriteCNIConfig() error {
 	}
 
 	var f *os.File
-	f, err = ioutil.TempFile(CNI.ConfDir, "ovnkube-")
+	f, err = os.CreateTemp(CNI.ConfDir, "ovnkube-")
 	if err != nil {
 		return err
 	}

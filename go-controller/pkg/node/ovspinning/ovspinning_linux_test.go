@@ -6,7 +6,6 @@ package ovspinning
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"runtime"
@@ -69,7 +68,7 @@ func TestAlignCPUAffinity(t *testing.T) {
 	}
 
 	// Disable the feature by making the enabler file empty
-	ioutil.WriteFile(featureEnablerFile, []byte(""), 0)
+	os.WriteFile(featureEnablerFile, []byte(""), 0)
 	assert.NoError(t, err)
 
 	var tmpCPUset unix.CPUSet
@@ -89,7 +88,7 @@ func TestIsFileNotEmpty(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, result)
 
-	ioutil.WriteFile(featureEnablerFile, []byte("1"), 0)
+	os.WriteFile(featureEnablerFile, []byte("1"), 0)
 	result, err = isFileNotEmpty(featureEnablerFile)
 	assert.NoError(t, err)
 	assert.True(t, result)
@@ -184,13 +183,13 @@ func setTickDuration(d time.Duration) func() {
 
 func mockFeatureEnableFile(t *testing.T, data string) func() {
 
-	f, err := ioutil.TempFile("", "enable_dynamic_cpu_affinity")
+	f, err := os.CreateTemp("", "enable_dynamic_cpu_affinity")
 	assert.NoError(t, err)
 
 	previousValue := featureEnablerFile
 	featureEnablerFile = f.Name()
 
-	ioutil.WriteFile(featureEnablerFile, []byte(data), 0)
+	os.WriteFile(featureEnablerFile, []byte(data), 0)
 	assert.NoError(t, err)
 
 	return func() {

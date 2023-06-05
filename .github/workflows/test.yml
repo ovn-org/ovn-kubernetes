@@ -94,7 +94,7 @@ jobs:
         ref: master
     
     - name: Set up Go
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
+      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_GHCR != 'true' && steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
       uses: actions/setup-go@v4
       with:
         go-version-file: 'go-controller/go.mod'

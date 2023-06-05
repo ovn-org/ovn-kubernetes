@@ -6,7 +6,6 @@ package cni
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"runtime"
@@ -130,7 +129,7 @@ func renameLink(curName, newName string) error {
 }
 
 func setSysctl(sysctl string, newVal int) error {
-	return ioutil.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0o640)
+	return os.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0o640)
 }
 
 func moveIfToNetns(ifname string, netns ns.NetNS) error {
