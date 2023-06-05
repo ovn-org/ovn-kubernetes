@@ -28,6 +28,7 @@ RUN INSTALL_PKGS=" \
     python3-openvswitch python3-pyOpenSSL \
     autoconf automake libtool g++ gcc fedora-packager rpmdevtools \
     unbound unbound-devel groff python3-sphinx graphviz openssl openssl-devel \
+    libbpf-devel libxdp-devel numactl-devel \
     checkpolicy libcap-ng-devel selinux-policy-devel" && \
     dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
     dnf clean all && rm -rf /var/cache/dnf/*
