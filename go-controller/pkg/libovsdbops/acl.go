@@ -176,3 +176,21 @@ func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 	modelClient := newModelClient(nbClient)
 	return modelClient.CreateOrUpdateOps(ops, opModels...)
 }
+
+func UpdateACLsMatchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
+	opModels := make([]operationModel, 0, len(acls))
+	for i := range acls {
+		// can't use i in the predicate, for loop replaces it in-memory
+		acl := acls[i]
+		opModel := operationModel{
+			Model:          acl,
+			OnModelUpdates: []interface{}{&acl.Match},
+			ErrNotFound:    true,
+			BulkOp:         false,
+		}
+		opModels = append(opModels, opModel)
+	}
+
+	modelClient := newModelClient(nbClient)
+	return modelClient.CreateOrUpdateOps(ops, opModels...)
+}

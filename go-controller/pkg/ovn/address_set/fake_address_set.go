@@ -173,10 +173,10 @@ func (f *FakeAddressSetFactory) expectAddressSetWithIPs(g gomega.Gomega, dbIDs *
 	for _, ip := range ips {
 		if utilnet.IsIPv6(net.ParseIP(ip)) {
 			g.Expect(as6).NotTo(gomega.BeNil())
-			g.Expect(as6.ips).To(gomega.HaveKey(ip))
+			g.Expect(as6.ips).To(gomega.HaveKey(ip), fmt.Sprintf("address set %s", dbIDs.String()))
 		} else {
 			g.Expect(as4).NotTo(gomega.BeNil())
-			g.Expect(as4.ips).To(gomega.HaveKey(ip))
+			g.Expect(as4.ips).To(gomega.HaveKey(ip), fmt.Sprintf("address set %s", dbIDs.String()))
 		}
 	}
 	if lenAddressSet != len(ips) {

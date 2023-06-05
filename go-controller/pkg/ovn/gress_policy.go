@@ -21,6 +21,8 @@ const (
 	noneMatch = "None"
 	// emptyIdx is used to create ACL for gressPolicy that doesn't have ports or ipBlocks
 	emptyIdx = -1
+	// ovnEmptyMatch in ovn doesn't match anything
+	ovnEmptyMatch = "0"
 )
 
 type gressPolicy struct {
@@ -145,8 +147,8 @@ func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
 	gp.ipBlocks = append(gp.ipBlocks, ipblockJSON)
 }
 
-// getL3MatchFromAddressSet may return empty string, which means that there are no address sets selected for giver
-// gressPolicy at the time, and acl should not be created.
+// getL3MatchFromAddressSet may return empty string, which means that there are no address sets selected
+// for a given gressPolicy at the time.
 func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 	v4AddressSets := syncMapToSortedList(gp.peerV4AddressSets)
 	v6AddressSets := syncMapToSortedList(gp.peerV6AddressSets)
@@ -287,8 +289,7 @@ func (gp *gressPolicy) isEmpty() bool {
 // by the parent NetworkPolicy)
 // buildLocalPodACLs is safe for concurrent use, since it only uses gressPolicy fields that don't change
 // since creation, or are safe for concurrent use like peerVXAddressSets
-func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLoggingLevels) (createdACLs []*nbdb.ACL,
-	skippedACLs []*nbdb.ACL) {
+func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLoggingLevels) []*nbdb.ACL {
 	var lportMatch string
 	if gp.policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == @%s", portGroupName)
@@ -310,6 +311,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 	if gp.isNetPolStateless {
 		action = nbdb.ACLActionAllowStateless
 	}
+	acls := []*nbdb.ACL{}
 	for _, portPolIdx := range portPolicyIdxs {
 		if portPolIdx != emptyIdx {
 			portPol := gp.portPolicies[portPolIdx]
@@ -328,7 +330,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 				aclIDs := gp.getNetpolACLDbIDs(portPolIdx, ipBlockIdx)
 				acl := BuildACL(aclIDs, types.DefaultAllowPriority, ipBlockMatch, action,
 					aclLogging, gp.aclPipeline)
-				createdACLs = append(createdACLs, acl)
+				acls = append(acls, acl)
 			}
 		}
 		// if there are pod/namespace selector, then allow packets from/to that address_set or
@@ -341,7 +343,11 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 				l3Match = gp.getL3MatchFromAddressSet()
 			}
 
-			if l4Match == noneMatch {
+			if l3Match == "" {
+				// if l3Match is empty, then no address sets are selected for a given gressPolicy.
+				// "ip4.dst == {}" causes ovn-controller warning, we use ovnEmptyMatch instead
+				addrSetMatch = ovnEmptyMatch
+			} else if l4Match == noneMatch {
 				addrSetMatch = fmt.Sprintf("%s && %s", l3Match, lportMatch)
 			} else {
 				addrSetMatch = fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
@@ -349,17 +355,10 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 			aclIDs := gp.getNetpolACLDbIDs(portPolIdx, emptyIdx)
 			acl := BuildACL(aclIDs, types.DefaultAllowPriority, addrSetMatch, action,
 				aclLogging, gp.aclPipeline)
-			if l3Match == "" {
-				// if l3Match is empty, then no address sets are selected for a given gressPolicy.
-				// fortunately l3 match is not a part of externalIDs, that means that we can find
-				// the deleted acl without knowing the previous match.
-				skippedACLs = append(skippedACLs, acl)
-			} else {
-				createdACLs = append(createdACLs, acl)
-			}
+			acls = append(acls, acl)
 		}
 	}
-	return
+	return acls
 }
 
 func getACLPolicyKey(policyNamespace, policyName string) string {

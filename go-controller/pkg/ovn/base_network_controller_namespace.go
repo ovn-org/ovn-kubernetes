@@ -30,13 +30,15 @@ type namespaceInfo struct {
 	// of all pods in the namespace.
 	addressSet addressset.AddressSet
 
-	// Map of related network policies. Policy will add itself to this list when it's ready to subscribe
-	// to namespace Update events. Retry logic to update network policy based on namespace event is handled by namespace.
+	// Map of related network policies.
+	// Policies can be added or removed with SubscribeToNamespaceUpdates and UnsubscribeFromNamespaceUpdates
+	// interface. After the policy is added to this map, it will receive namespace event via handleNetPolNamespaceUpdate
+	// calls.
+	// Retry logic to update network policy based on namespace event is handled by namespace.
 	// Policy should only be added after successful create, and deleted before any network policy resources are deleted.
-	// This is the map of keys that can be used to get networkPolicy from oc.networkPolicies.
 	//
 	// You must hold the namespaceInfo's mutex to add/delete dependent policies.
-	// Namespace can take oc.networkPolicies key Lock while holding nsInfo lock, the opposite should never happen.
+	// Network policies should never hold namespace lock while acquiring any other lock.
 	relatedNetworkPolicies map[string]bool
 
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
@@ -340,13 +342,51 @@ func (bnc *BaseNetworkController) updateNamespaceAclLogging(ns, aclAnnotation st
 			"ACL logging is set to deny=%s allow=%s, err: %q",
 			ns, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow, err)
 	}
-	if err := bnc.handleNetPolNamespaceUpdate(ns, nsInfo); err != nil {
-		return err
-	} else {
-		klog.Infof("Namespace %s: NetworkPolicy ACL logging setting updated to deny=%s allow=%s",
-			ns, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+	// when at least one network policy was registered for a namespace, netpolNamespaceUpdateHandler must also be registered
+	if len(nsInfo.relatedNetworkPolicies) > 0 {
+		if err := bnc.netpolNamespaceUpdateHandler(ns, &nsInfo.aclLogging, nsInfo.relatedNetworkPolicies); err != nil {
+			return err
+		} else {
+			klog.Infof("Namespace %s: NetworkPolicy ACL logging setting updated to deny=%s allow=%s",
+				ns, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+		}
 	}
 	return nil
+}
+
+func (bnc *BaseNetworkController) RegisterNetpolHandler(updateHandler func(namespace string, aclLogging *ACLLoggingLevels, relatedNPKeys map[string]bool) error) {
+	bnc.netpolNamespaceUpdateHandler = updateHandler
+}
+
+func (bnc *BaseNetworkController) SubscribeToNamespaceUpdates(namespace string, npKey string, initialSync func(aclLogging *ACLLoggingLevels) error) error {
+	// lock namespace
+	nsInfo, nsUnlock := bnc.getNamespaceLocked(namespace, false)
+	if nsInfo == nil {
+		// namespace was deleted while we were adding network policy,
+		// try to cleanup network policy
+		// expect retry to be handled by delete event that should come
+		return fmt.Errorf("unable to get namespace at the end of network policy %s creation: namespace is nil", npKey)
+	}
+	// defer unlock namespace
+	defer nsUnlock()
+
+	err := initialSync(&nsInfo.aclLogging)
+	if err != nil {
+		return err
+	}
+
+	// subscribe to namespace update events
+	nsInfo.relatedNetworkPolicies[npKey] = true
+	return nil
+}
+
+func (bnc *BaseNetworkController) UnsubscribeFromNamespaceUpdates(namespace, npKey string) {
+	nsInfo, nsUnlock := bnc.getNamespaceLocked(namespace, false)
+	if nsInfo != nil {
+		// unsubscribe from namespace events
+		delete(nsInfo.relatedNetworkPolicies, npKey)
+		nsUnlock()
+	}
 }
 
 func (bnc *BaseNetworkController) getAllNamespacePodAddresses(ns string) []net.IP {

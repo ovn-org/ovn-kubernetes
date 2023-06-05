@@ -287,6 +287,7 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 		hashedASName, _ := getMultinetNsAddrSetHashNames(nsName, controllerName)
 		hashedASNames = append(hashedASNames, hashedASName)
 	}
+	hasNsSelector := false
 	ipBlocks := []string{}
 	for _, peer := range peers {
 		// follow the algorithm from setupGressPolicy
@@ -296,6 +297,9 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 			peerIndex := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace), controllerName)
 			asv4, _ := addressset.GetHashNamesForAS(peerIndex)
 			hashedASNames = append(hashedASNames, asv4)
+		}
+		if peer.NamespaceSelector != nil {
+			hasNsSelector = true
 		}
 		if peer.IPBlock != nil {
 			ipBlocks = append(ipBlocks, peer.IPBlock.CIDR)
@@ -308,9 +312,15 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 		idx:             gressIdx,
 		controllerName:  controllerName,
 	}
-	if len(hashedASNames) > 0 {
-		gressAsMatch := asMatch(hashedASNames)
-		match := fmt.Sprintf("ip4.%s == {%s} && %s == @%s", ipDir, gressAsMatch, portDir, pgName)
+	if len(hashedASNames) > 0 || hasNsSelector {
+		var match string
+		if len(hashedASNames) > 0 {
+			gressAsMatch := asMatch(hashedASNames)
+			match = fmt.Sprintf("ip4.%s == {%s} && %s == @%s", ipDir, gressAsMatch, portDir, pgName)
+		} else {
+			match = ovnEmptyMatch
+		}
+
 		action := nbdb.ACLActionAllowRelated
 		if statelessNetPol {
 			action = nbdb.ACLActionAllowStateless
@@ -1322,12 +1332,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				expectedData = getUpdatedInitialDB([]testPod{nPodTest})
-				// acls will be deleted, since no namespaces are selected at this point.
-				// since test server doesn't garbage-collect de-referenced acls, they will stay in the db
-				// gressPolicyExpectedData[2] is the policy port group
-				gressPolicyExpectedData[2].(*nbdb.PortGroup).ACLs = nil
-				//gressPolicyExpectedData = getPolicyData(networkPolicy, []string{nPodTest.portUUID}, []string{},
-				//	nil, "", false)
+				gressPolicyExpectedData = getPolicyData(networkPolicy, []string{nPodTest.portUUID}, []string{}, nil)
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
@@ -1362,10 +1367,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				expectedData = initialDB.NBData
-				// acls will be deleted, since no namespaces are selected at this point.
-				// since test server doesn't garbage-collect de-referenced acls, they will stay in the db
-				// gressPolicyExpectedData[2] is the policy port group
-				gressPolicyExpectedData[2].(*nbdb.PortGroup).ACLs = nil
+				gressPolicyExpectedData = getPolicyData(networkPolicy, nil, []string{}, nil)
+
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
@@ -2156,20 +2159,20 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gomega.Expect(gp.addNamespaceAddressSet(one.GetObjectID(libovsdbops.ObjectNameKey), asFactory)).To(gomega.BeTrue())
 		expected := buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, one}, &defaultAclLogging)
-		actual, _ := gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual := gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.addNamespaceAddressSet(two.GetObjectID(libovsdbops.ObjectNameKey), asFactory)).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, one, two}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// address sets should be alphabetized
 		gomega.Expect(gp.addNamespaceAddressSet(three.GetObjectID(libovsdbops.ObjectNameKey), asFactory)).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, one, two, three}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// re-adding an existing set is a no-op
@@ -2178,14 +2181,14 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gomega.Expect(gp.addNamespaceAddressSet(four.GetObjectID(libovsdbops.ObjectNameKey), asFactory)).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, one, two, three, four}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// now delete a set
 		gomega.Expect(gp.delNamespaceAddressSet(one.GetObjectID(libovsdbops.ObjectNameKey))).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, two, three, four}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// deleting again is a no-op
@@ -2195,13 +2198,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gomega.Expect(gp.addNamespaceAddressSet(five.GetObjectID(libovsdbops.ObjectNameKey), asFactory)).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, two, three, four, five}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.delNamespaceAddressSet(three.GetObjectID(libovsdbops.ObjectNameKey))).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, two, four, five}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// deleting again is no-op
@@ -2210,31 +2213,31 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gomega.Expect(gp.addNamespaceAddressSet(six.GetObjectID(libovsdbops.ObjectNameKey), asFactory)).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, two, four, five, six}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.delNamespaceAddressSet(two.GetObjectID(libovsdbops.ObjectNameKey))).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, four, five, six}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.delNamespaceAddressSet(five.GetObjectID(libovsdbops.ObjectNameKey))).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, four, six}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.delNamespaceAddressSet(six.GetObjectID(libovsdbops.ObjectNameKey))).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs, four}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.delNamespaceAddressSet(four.GetObjectID(libovsdbops.ObjectNameKey))).To(gomega.BeTrue())
 		expected = buildExpectedIngressPeerNSv4ACL(gp, pgName, []*libovsdbops.DbObjectIDs{
 			asIDs}, &defaultAclLogging)
-		actual, _ = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
+		actual = gp.buildLocalPodACLs(pgName, &defaultAclLogging)
 		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// deleting again is no-op

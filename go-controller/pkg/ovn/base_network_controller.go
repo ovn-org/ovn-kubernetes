@@ -103,8 +103,9 @@ type BaseNetworkController struct {
 	// oc.waitForNamespaceLocked() to read this map, and oc.createNamespaceLocked()
 	// or oc.deleteNamespaceLocked() to modify it. namespacesMutex is only held
 	// from inside those functions.
-	namespaces      map[string]*namespaceInfo
-	namespacesMutex sync.Mutex
+	namespaces                   map[string]*namespaceInfo
+	namespacesMutex              sync.Mutex
+	netpolNamespaceUpdateHandler func(namespace string, aclLogging *ACLLoggingLevels, relatedNPKeys map[string]bool) error
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
