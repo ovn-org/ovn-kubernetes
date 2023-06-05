@@ -631,6 +631,13 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					podToCreate.CreationTimestamp = metav1.NewTime(time.Now())
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), podToCreate, metav1.CreateOptions{})
 					Expect(err).NotTo(HaveOccurred())
+					Eventually(func() error {
+						_, err := fakeOvn.controller.watchFactory.GetPod(podToCreate.Namespace, podToCreate.Name)
+						return err
+					}).
+						WithTimeout(time.Minute).
+						WithPolling(time.Second).
+						Should(Succeed(), "should fill in the cache with the pod")
 				}
 
 				expectedOVN := []libovsdbtest.TestData{}
