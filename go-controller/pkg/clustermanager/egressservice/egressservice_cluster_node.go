@@ -1,14 +1,10 @@
-package egress_services
+package egressservice
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"sort"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
@@ -18,9 +14,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
@@ -82,89 +76,6 @@ func (c *Controller) CheckNodesReachabilityIterate() {
 	}
 }
 
-type egressSVCDialer interface {
-	dial(ip net.IP, timeout time.Duration) bool
-}
-
-var dialer egressSVCDialer = &egressSVCDial{}
-
-type egressSVCDial struct{}
-
-// Blantant copy from: https://github.com/openshift/sdn/blob/master/pkg/network/common/egressip.go#L499-L505
-// Ping a node and return whether or not we think it is online. We do this by trying to
-// open a TCP connection to the "discard" service (port 9); if the node is offline, the
-// attempt will either time out with no response, or else return "no route to host" (and
-// we will return false). If the node is online then we presumably will get a "connection
-// refused" error; but the code below assumes that anything other than timeout or "no
-// route" indicates that the node is online.
-func (e *egressSVCDial) dial(ip net.IP, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip.String(), "9"), timeout)
-	if conn != nil {
-		conn.Close()
-	}
-	if opErr, ok := err.(*net.OpError); ok {
-		if opErr.Timeout() {
-			return false
-		}
-		if sysErr, ok := opErr.Err.(*os.SyscallError); ok && sysErr.Err == syscall.EHOSTUNREACH {
-			return false
-		}
-	}
-	return true
-}
-
-func IsReachableViaGRPC(mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient, healthCheckPort, totalTimeout int) bool {
-	dialCtx, dialCancel := context.WithTimeout(context.Background(), time.Duration(totalTimeout)*time.Second)
-	defer dialCancel()
-
-	if !healthClient.IsConnected() {
-		// gRPC session is not up. Attempt to connect and if that suceeds, we will declare node as reacheable.
-		return healthClient.Connect(dialCtx, mgmtIPs, healthCheckPort)
-	}
-
-	// gRPC session is already established. Send a probe, which will succeed, or close the session.
-	return healthClient.Probe(dialCtx)
-}
-
-func IsReachableLegacy(node string, mgmtIPs []net.IP, totalTimeout int) bool {
-	var retryTimeOut, initialRetryTimeOut time.Duration
-
-	numMgmtIPs := len(mgmtIPs)
-	if numMgmtIPs == 0 {
-		return false
-	}
-
-	switch totalTimeout {
-	// Check if we need to do node reachability check
-	case 0:
-		return true
-	case 1:
-		// Using time duration for initial retry with 700/numIPs msec and retry of 100/numIPs msec
-		// to ensure total wait time will be in range with the configured value including a sleep of 100msec between attempts.
-		initialRetryTimeOut = time.Duration(700/numMgmtIPs) * time.Millisecond
-		retryTimeOut = time.Duration(100/numMgmtIPs) * time.Millisecond
-	default:
-		// Using time duration for initial retry with 900/numIPs msec
-		// to ensure total wait time will be in range with the configured value including a sleep of 100msec between attempts.
-		initialRetryTimeOut = time.Duration(900/numMgmtIPs) * time.Millisecond
-		retryTimeOut = initialRetryTimeOut
-	}
-
-	timeout := initialRetryTimeOut
-	endTime := time.Now().Add(time.Second * time.Duration(totalTimeout))
-	for time.Now().Before(endTime) {
-		for _, ip := range mgmtIPs {
-			if dialer.dial(ip, timeout) {
-				return true
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-		timeout = retryTimeOut
-	}
-	klog.Errorf("Failed reachability check for %s", node)
-	return false
-}
-
 func (c *Controller) onNodeAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
@@ -178,6 +89,11 @@ func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
 	oldNode := oldObj.(*corev1.Node)
 	newNode := newObj.(*corev1.Node)
 
+	key, err := cache.MetaNamespaceKeyFunc(newObj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", newObj, err))
+		return
+	}
 	// Don't process resync or objects that are marked for deletion
 	if oldNode.ResourceVersion == newNode.ResourceVersion ||
 		!newNode.GetDeletionTimestamp().IsZero() {
@@ -189,16 +105,9 @@ func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
 	oldNodeReady := nodeIsReady(oldNode)
 	newNodeReady := nodeIsReady(newNode)
 
-	// We only care about node updates that relate to readiness, labels or
-	// addresses
-	if labels.Equals(oldNodeLabels, newNodeLabels) &&
-		oldNodeReady == newNodeReady &&
-		!util.NodeHostAddressesAnnotationChanged(oldNode, newNode) {
-		return
-	}
-
-	key, err := cache.MetaNamespaceKeyFunc(newObj)
-	if err == nil {
+	// We only care about node updates that relate to readiness or label changes
+	if !labels.Equals(oldNodeLabels, newNodeLabels) ||
+		oldNodeReady != newNodeReady {
 		c.nodesQueue.Add(key)
 	}
 }
@@ -260,18 +169,7 @@ func (c *Controller) syncNode(key string) error {
 		klog.V(4).Infof("Finished syncing Egress Service node %s: %v", nodeName, time.Since(startTime))
 	}()
 
-	if err := c.deleteLegacyDefaultNoRerouteNodePolicies(c.nbClient, nodeName); err != nil {
-		return err
-	}
-
-	// We ensure node no re-route policies contemplating possible node IP
-	// address changes regardless of allocated services.
-	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, c.controllerName, c.nodeLister)
-	if err != nil {
-		return err
-	}
-
-	n, err := c.nodeLister.Get(nodeName)
+	n, err := c.watchFactory.GetNode(nodeName)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
@@ -280,8 +178,8 @@ func (c *Controller) syncNode(key string) error {
 
 	if n == nil {
 		if state != nil {
-			// The node was deleted but had allocated services.
-			// We mark it as draining and remove all of the allocations from it,
+			// The node was deleted or is no longer ready but had allocated services.
+			// We mark it as draining and remove all allocations from it,
 			// queuing them to attempt assigning a new node.
 			// Services can't be assigned to a node while it is in draining status.
 			state.draining = true
@@ -294,7 +192,6 @@ func (c *Controller) syncNode(key string) error {
 			state.healthClient.Disconnect()
 		}
 
-		// nothing to sync here
 		return nil
 	}
 
@@ -377,7 +274,7 @@ func (c *Controller) syncNode(key string) error {
 
 // Returns a new nodeState for a node given its name.
 func (c *Controller) nodeStateFor(name string) (*nodeState, error) {
-	node, err := c.nodeLister.Get(name)
+	node, err := c.watchFactory.GetNode(name)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +298,9 @@ func (c *Controller) nodeStateFor(name string) (*nodeState, error) {
 		v6IP = ip
 	}
 
-	return &nodeState{name: name, mgmtIPs: mgmtIPs, v4MgmtIP: v4IP, v6MgmtIP: v6IP,
+	v4NodeAddr, v6NodeAddr := util.GetNodeInternalAddrs(node)
+
+	return &nodeState{name: name, mgmtIPs: mgmtIPs, v4MgmtIP: v4IP, v6MgmtIP: v6IP, v4InternalNodeIP: v4NodeAddr, v6InternalNodeIP: v6NodeAddr,
 		healthClient: healthcheck.NewEgressIPHealthClient(name), allocations: map[string]*svcState{}, labels: node.Labels,
 		reachable: true, draining: false}, nil
 }
@@ -435,13 +334,18 @@ func nodeIsReady(n *corev1.Node) bool {
 // which marks it as the node who is holding that service.
 func (c *Controller) labelNodeForService(namespace, name, node string) error {
 	labels := map[string]any{c.nodeLabelForService(namespace, name): ""}
-	return c.patchNodeLabels(node, labels)
+	return c.kubeOVN.SetLabelsOnNode(node, labels)
 }
 
 // Removes the 'egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>:""' label from the given node.
 func (c *Controller) removeNodeServiceLabel(namespace, name, node string) error {
 	labels := map[string]any{c.nodeLabelForService(namespace, name): nil} // Patching with a nil value results in the delete of the key
-	return c.patchNodeLabels(node, labels)
+	err := c.kubeOVN.SetLabelsOnNode(node, labels)
+	if err != nil && apierrors.IsNotFound(err) {
+		klog.V(5).Infof("Node %s doesn't exist", node)
+		return nil
+	}
+	return err
 }
 
 // Returns the 'egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>' key for the given namespace and name of a service.
@@ -449,35 +353,11 @@ func (c *Controller) nodeLabelForService(namespace, name string) string {
 	return fmt.Sprintf("%s/%s-%s", egressSVCLabelPrefix, namespace, name)
 }
 
-// Patches the node's metadata.labels with the given labels.
-func (c *Controller) patchNodeLabels(node string, labels map[string]any) error {
-	patch := struct {
-		Metadata map[string]any `json:"metadata"`
-	}{
-		Metadata: map[string]any{
-			"labels": labels,
-		},
-	}
-
-	klog.V(4).Infof("Setting labels %v on node %s", labels, node)
-	patchData, err := json.Marshal(&patch)
-	if err != nil {
-		klog.Errorf("Error in setting labels on node %s: %v", node, err)
-		return err
-	}
-
-	_, err = c.client.CoreV1().Nodes().Patch(context.TODO(), node, types.MergePatchType, patchData, metav1.PatchOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
-}
-
 // Returns the most suitable nodeState of the node for the given selector -
 // The most suitable node being one that matches the selector with the
 // least amount of allocations and is not in a "draining" state.
 func (c *Controller) selectNodeFor(selector labels.Selector) (*nodeState, error) {
-	nodes, err := c.nodeLister.List(selector)
+	nodes, err := c.watchFactory.GetNodesBySelector(selector)
 	if err != nil {
 		return nil, err
 	}

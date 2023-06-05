@@ -517,7 +517,7 @@ spec:
 		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalIPv6),
 	)
 
-	ginkgotable.DescribeTable("Should validate egress service has higher priority than EgressIP",
+	ginkgotable.DescribeTable("Should validate egress service has higher priority than EgressIP when not assigned to the same node",
 		func(protocol v1.IPFamily, dstIP *string) {
 			labels := map[string]string{"wants": "egress"}
 			ginkgo.By("Creating the backend pods")
@@ -537,14 +537,17 @@ spec:
 			err := podsCreateSync.Wait()
 			framework.ExpectNoError(err, "failed to create backend pods")
 
-			ginkgo.By("Creating an egress service without node selectors")
+			ginkgo.By("Creating an egress service with node selector")
 			egressServiceConfig := fmt.Sprintf(`
 apiVersion: k8s.ovn.org/v1
 kind: EgressService
 metadata:
   name: ` + serviceName + `
   namespace: ` + f.Namespace.Name + `
-`)
+spec:
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/hostname: ` + nodes[1].Name)
 
 			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
 				framework.Failf("Unable to write CRD config to disk: %v", err)
@@ -566,6 +569,7 @@ metadata:
 
 			// Assign the egress IP without conflicting with any node IP,
 			// the kind subnet is /16 or /64 so the following should be fine.
+			ginkgo.By("Assigning the EgressIP to a different node")
 			eipNode := nodes[0]
 			framework.AddOrUpdateLabelOnNode(f.ClientSet, eipNode.Name, "k8s.ovn.org/egress-assignable", "dummy")
 			defer func() {

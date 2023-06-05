@@ -18,7 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
-	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
+	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
@@ -500,7 +500,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
-		c, err := oc.InitEgressServiceController()
+		c, err := oc.InitEgressServiceZoneController()
 		if err != nil {
 			return fmt.Errorf("unable to create new egress service controller while creating new default network controller: %w", err)
 		}

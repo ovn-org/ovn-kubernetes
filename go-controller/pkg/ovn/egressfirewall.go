@@ -100,7 +100,7 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 		if err != nil {
 			return nil, fmt.Errorf("rule destination has invalid node selector, err: %v", err)
 		}
-		nodes, err := oc.watchFactory.GetNodesBySelector(*rawEgressFirewallRule.To.NodeSelector)
+		nodes, err := oc.watchFactory.GetNodesByLabelSelector(*rawEgressFirewallRule.To.NodeSelector)
 		if err != nil {
 			return efr, fmt.Errorf("unable to query nodes for egress firewall: %w", err)
 		}
