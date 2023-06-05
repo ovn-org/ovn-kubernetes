@@ -48,7 +48,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "7.0.0",
+  "version": "7.0.4",
   "tables": {
     "ACL": {
       "columns": {
@@ -63,7 +63,8 @@ var schema = `{
                   "allow-related",
                   "allow-stateless",
                   "drop",
-                  "reject"
+                  "reject",
+                  "pass"
                 ]
               ]
             }
@@ -168,6 +169,15 @@ var schema = `{
             },
             "min": 0,
             "max": 1
+          }
+        },
+        "tier": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 0,
+              "maxInteger": 3
+            }
           }
         }
       }
@@ -1570,7 +1580,8 @@ var schema = `{
                 "set",
                 [
                   "from-lport",
-                  "to-lport"
+                  "to-lport",
+                  "both"
                 ]
               ]
             }
@@ -1593,7 +1604,8 @@ var schema = `{
                 "set",
                 [
                   "gre",
-                  "erspan"
+                  "erspan",
+                  "local"
                 ]
               ]
             }
