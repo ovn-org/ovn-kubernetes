@@ -322,16 +322,16 @@ func (bnc *BaseNetworkController) configureNamespaceCommon(nsInfo *namespaceInfo
 
 // GetNamespaceACLLogging retrieves ACLLoggingLevels for the Namespace.
 // nsInfo will be locked (and unlocked at the end) for given namespace if it exists.
-func (bnc *BaseNetworkController) GetNamespaceACLLogging(ns string) *ACLLoggingLevels {
+func (bnc *BaseNetworkController) GetNamespaceACLLogging(ns string) ACLLoggingLevels {
 	nsInfo, nsUnlock := bnc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
-		return &ACLLoggingLevels{
+		return ACLLoggingLevels{
 			Allow: "",
 			Deny:  "",
 		}
 	}
 	defer nsUnlock()
-	return &nsInfo.aclLogging
+	return nsInfo.aclLogging
 }
 
 func (bnc *BaseNetworkController) updateNamespaceAclLogging(ns, aclAnnotation string, nsInfo *namespaceInfo) error {

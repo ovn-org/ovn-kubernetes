@@ -200,7 +200,7 @@ func newNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 // NetpolNamespaceHandler controller namespace-network policy dependency for namespace ACLLoggingLevels
 type NetpolNamespaceHandler interface {
 	RegisterNetpolHandler(updateHandler func(namespace string, aclLogging *ACLLoggingLevels, relatedNPKeys map[string]bool) error)
-	GetNamespaceACLLogging(ns string) *ACLLoggingLevels
+	GetNamespaceACLLogging(ns string) ACLLoggingLevels
 	SubscribeToNamespaceUpdates(namespace string, npKey string, initialSync func(aclLogging *ACLLoggingLevels) error) error
 	UnsubscribeFromNamespaceUpdates(namespace, npKey string)
 }
@@ -1174,7 +1174,7 @@ func (c *NetworkPolicyController) AddNetworkPolicy(policy *knet.NetworkPolicy) e
 	var np *networkPolicy
 	var err error
 
-	np, err = c.createNetworkPolicy(policy, aclLogging)
+	np, err = c.createNetworkPolicy(policy, &aclLogging)
 	defer func() {
 		if err != nil {
 			klog.Infof("Create network policy %s failed, try to cleanup", npKey)

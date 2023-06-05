@@ -238,7 +238,7 @@ func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfire
 	}
 	ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
 	aclLoggingLevels := oc.GetNamespaceACLLogging(ef.namespace)
-	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, aclLoggingLevels); err != nil {
+	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, &aclLoggingLevels); err != nil {
 		return err
 	}
 	oc.egressFirewalls.Store(egressFirewall.Namespace, ef)
@@ -745,7 +745,7 @@ func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode
 		ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
 		aclLoggingLevels := oc.GetNamespaceACLLogging(ef.namespace)
 		if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS,
-			aclLoggingLevels, modifiedRuleIDs...); err != nil {
+			&aclLoggingLevels, modifiedRuleIDs...); err != nil {
 			efErr = fmt.Errorf("failed to add egress firewall for namespace: %s, error: %w", namespace, err)
 			return false
 		}
