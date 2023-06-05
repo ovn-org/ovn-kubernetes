@@ -107,6 +107,7 @@ func getDefaultDenyDataHelper(namespace string, policyTypeIngress, policyTypeEgr
 		map[string]string{
 			"apply-after-lb": "true",
 		},
+		types.DefaultACLTier,
 	)
 	egressDenyACL.UUID = aclIDs.String() + "-UUID"
 
@@ -124,6 +125,7 @@ func getDefaultDenyDataHelper(namespace string, policyTypeIngress, policyTypeEgr
 		map[string]string{
 			"apply-after-lb": "true",
 		},
+		types.DefaultACLTier,
 	)
 	egressAllowACL.UUID = aclIDs.String() + "-UUID"
 
@@ -140,6 +142,7 @@ func getDefaultDenyDataHelper(namespace string, policyTypeIngress, policyTypeEgr
 		shouldBeLogged,
 		aclIDs.GetExternalIDs(),
 		nil,
+		types.DefaultACLTier,
 	)
 	ingressDenyACL.UUID = aclIDs.String() + "-UUID"
 
@@ -155,6 +158,7 @@ func getDefaultDenyDataHelper(namespace string, policyTypeIngress, policyTypeEgr
 		false,
 		aclIDs.GetExternalIDs(),
 		nil,
+		types.DefaultACLTier,
 	)
 	ingressAllowACL.UUID = aclIDs.String() + "-UUID"
 
@@ -329,6 +333,7 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 			shouldBeLogged,
 			dbIDs.GetExternalIDs(),
 			options,
+			types.DefaultACLTier,
 		)
 		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
@@ -347,6 +352,7 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 			shouldBeLogged,
 			dbIDs.GetExternalIDs(),
 			options,
+			types.DefaultACLTier,
 		)
 		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
@@ -364,6 +370,7 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 			shouldBeLogged,
 			dbIDs.GetExternalIDs(),
 			options,
+			types.DefaultACLTier,
 		)
 		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
@@ -489,6 +496,7 @@ func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
 		map[string]string{
 			"apply-after-lb": "true",
 		},
+		types.DefaultACLTier,
 	)
 	egressACL.UUID = "hairpinning-egress-UUID"
 	ingressIDs := fakeController.getNetpolDefaultACLDbIDs("Ingress")
@@ -503,6 +511,7 @@ func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
 		false,
 		ingressIDs.GetExternalIDs(),
 		nil,
+		types.DefaultACLTier,
 	)
 	ingressACL.UUID = "hairpinning-ingress-UUID"
 	clusterPortGroup.ACLs = []string{egressACL.UUID, ingressACL.UUID}
@@ -1966,7 +1975,8 @@ func getAllowFromNodeExpectedACL(nodeName, mgmtIP string, logicalSwitch *nbdb.Lo
 		"",
 		false,
 		dbIDs.GetExternalIDs(),
-		nil)
+		nil,
+		types.DefaultACLTier)
 	nodeACL.UUID = dbIDs.String() + "-UUID"
 	if logicalSwitch != nil {
 		logicalSwitch.ACLs = []string{nodeACL.UUID}
@@ -2121,7 +2131,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		asMatch := asMatch(hashedASNames)
 		match := fmt.Sprintf("ip4.src == {%s} && outport == @%s", asMatch, pgName)
 		acl := libovsdbops.BuildACL(getACLName(aclIDs), nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match,
-			nbdb.ACLActionAllowRelated, types.OvnACLLoggingMeter, aclLogging.Allow, true, aclIDs.GetExternalIDs(), nil)
+			nbdb.ACLActionAllowRelated, types.OvnACLLoggingMeter, aclLogging.Allow, true, aclIDs.GetExternalIDs(), nil,
+			types.DefaultACLTier)
 		return acl
 	}
 

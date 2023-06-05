@@ -35,3 +35,9 @@ control-plane:
 	KIND_IPV6_SUPPORT=$(KIND_IPV6_SUPPORT) \
 	OVN_HA=$(OVN_HA) \
 	./scripts/e2e-cp.sh $(WHAT)
+
+.PHONY: conformance
+conformance:
+	E2E_REPORT_DIR=$(E2E_REPORT_DIR) \
+	E2E_REPORT_PREFIX=$(JOB_NAME)_ \
+	./scripts/conformance.sh

@@ -276,6 +276,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{
 				Kube:                 kube.Kube{KClient: fakeOvn.fakeClient.KubeClient},
+				ANPClient:            fakeOvn.fakeClient.ANPClient,
 				EIPClient:            fakeOvn.fakeClient.EgressIPClient,
 				EgressFirewallClient: fakeOvn.fakeClient.EgressFirewallClient}, testNode.Name)
 

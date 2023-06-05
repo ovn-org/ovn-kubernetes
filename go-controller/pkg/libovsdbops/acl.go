@@ -63,7 +63,7 @@ func FindACLs(nbClient libovsdbclient.Client, acls []*nbdb.ACL) ([]*nbdb.ACL, er
 
 // BuildACL builds an ACL with empty optional properties unset
 func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string,
-	severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {
+	severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string, tier int) *nbdb.ACL {
 	name = fmt.Sprintf("%.63s", name)
 
 	var realName *string
@@ -89,6 +89,7 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 		Meter:       realMeter,
 		ExternalIDs: externalIds,
 		Options:     options,
+		Tier:        tier,
 	}
 
 	return acl

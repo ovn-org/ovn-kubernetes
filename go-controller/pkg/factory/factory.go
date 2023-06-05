@@ -6,6 +6,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	anpscheme "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/scheme"
+	anpinformerfactory "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions"
+	anpinformer "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions/apis/v1alpha1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
@@ -66,6 +71,7 @@ type WatchFactory struct {
 	handlerCounter uint64
 
 	iFactory             informerfactory.SharedInformerFactory
+	anpFactory           anpinformerfactory.SharedInformerFactory
 	eipFactory           egressipinformerfactory.SharedInformerFactory
 	efFactory            egressfirewallinformerfactory.SharedInformerFactory
 	cpipcFactory         ocpcloudnetworkinformerfactory.SharedInformerFactory
@@ -138,6 +144,8 @@ var (
 	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
 	EgressQoSType                         reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
 	EgressServiceType                     reflect.Type = reflect.TypeOf(&egressserviceapi.EgressService{})
+	AdminNetworkPolicyType                reflect.Type = reflect.TypeOf(&anpapi.AdminNetworkPolicy{})
+	BaselineAdminNetworkPolicyType        reflect.Type = reflect.TypeOf(&anpapi.BaselineAdminNetworkPolicy{})
 	AddressSetNamespaceAndPodSelectorType reflect.Type = reflect.TypeOf(&addressSetNamespaceAndPodSelector{})
 	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
 	AddressSetPodSelectorType             reflect.Type = reflect.TypeOf(&addressSetPodSelector{})
@@ -164,6 +172,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
 		iFactory:             informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		anpFactory:           anpinformerfactory.NewSharedInformerFactory(ovnClientset.ANPClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
 		egressQoSFactory:     egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
@@ -171,6 +180,10 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
+	}
+
+	if err := anpapi.AddToScheme(anpscheme.Scheme); err != nil {
+		return nil, err
 	}
 
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
@@ -243,6 +256,16 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 	if err != nil {
 		return nil, err
 	}
+	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
+		wf.informers[AdminNetworkPolicyType], err = newInformer(AdminNetworkPolicyType, wf.anpFactory.Policy().V1alpha1().AdminNetworkPolicies().Informer())
+		if err != nil {
+			return nil, err
+		}
+		wf.informers[BaselineAdminNetworkPolicyType], err = newInformer(BaselineAdminNetworkPolicyType, wf.anpFactory.Policy().V1alpha1().BaselineAdminNetworkPolicies().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
 		if err != nil {
@@ -284,6 +307,14 @@ func (wf *WatchFactory) Start() error {
 	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
 		if !synced {
 			return fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy && wf.anpFactory != nil {
+		wf.anpFactory.Start(wf.stopChan)
+		for oType, synced := range wf.anpFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP && wf.eipFactory != nil {
@@ -495,6 +526,14 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case PolicyType:
 		if policy, ok := obj.(*knet.NetworkPolicy); ok {
 			return &policy.ObjectMeta, nil
+		}
+	case AdminNetworkPolicyType:
+		if adminNetworkPolicy, ok := obj.(*anpapi.AdminNetworkPolicy); ok {
+			return &adminNetworkPolicy.ObjectMeta, nil
+		}
+	case BaselineAdminNetworkPolicyType:
+		if baselineAdminNetworkPolicy, ok := obj.(*anpapi.BaselineAdminNetworkPolicy); ok {
+			return &baselineAdminNetworkPolicy.ObjectMeta, nil
 		}
 	case NamespaceType:
 		if namespace, ok := obj.(*kapi.Namespace); ok {
@@ -993,6 +1032,10 @@ func (wf *WatchFactory) NamespaceInformer() v1coreinformers.NamespaceInformer {
 	return wf.iFactory.Core().V1().Namespaces()
 }
 
+func (wf *WatchFactory) NamespaceCoreInformer() v1coreinformers.NamespaceInformer {
+	return wf.iFactory.Core().V1().Namespaces()
+}
+
 func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
 	return wf.informers[ServiceType].inf
 }
@@ -1007,6 +1050,14 @@ func (wf *WatchFactory) EgressQoSInformer() egressqosinformer.EgressQoSInformer 
 
 func (wf *WatchFactory) EgressServiceInformer() egressserviceinformer.EgressServiceInformer {
 	return wf.egressServiceFactory.K8s().V1().EgressServices()
+}
+
+func (wf *WatchFactory) ANPInformer() anpinformer.AdminNetworkPolicyInformer {
+	return wf.anpFactory.Policy().V1alpha1().AdminNetworkPolicies()
+}
+
+func (wf *WatchFactory) BANPInformer() anpinformer.BaselineAdminNetworkPolicyInformer {
+	return wf.anpFactory.Policy().V1alpha1().BaselineAdminNetworkPolicies()
 }
 
 // withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the

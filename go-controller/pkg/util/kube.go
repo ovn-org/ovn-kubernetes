@@ -37,11 +37,13 @@ import (
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 )
 
 // OVNClientset is a wrapper around all clientsets used by OVN-Kubernetes
 type OVNClientset struct {
 	KubeClient               kubernetes.Interface
+	ANPClient                anpclientset.Interface
 	EgressIPClient           egressipclientset.Interface
 	EgressFirewallClient     egressfirewallclientset.Interface
 	CloudNetworkClient       ocpcloudnetworkclientset.Interface
@@ -55,6 +57,7 @@ type OVNClientset struct {
 // OVNMasterClientset
 type OVNMasterClientset struct {
 	KubeClient               kubernetes.Interface
+	ANPClient                anpclientset.Interface
 	EgressIPClient           egressipclientset.Interface
 	EgressFirewallClient     egressfirewallclientset.Interface
 	EgressQoSClient          egressqosclientset.Interface
@@ -79,6 +82,7 @@ type OVNClusterManagerClientset struct {
 func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 	return &OVNMasterClientset{
 		KubeClient:               cs.KubeClient,
+		ANPClient:                cs.ANPClient,
 		EgressIPClient:           cs.EgressIPClient,
 		EgressFirewallClient:     cs.EgressFirewallClient,
 		EgressQoSClient:          cs.EgressQoSClient,
@@ -196,6 +200,10 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kubernetes rest config, err: %v", err)
 	}
+	anpClientset, err := anpclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	egressFirewallClientset, err := egressfirewallclientset.NewForConfig(kconfig)
 	if err != nil {
 		return nil, err
@@ -233,6 +241,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 
 	return &OVNClientset{
 		KubeClient:               kclientset,
+		ANPClient:                anpClientset,
 		EgressIPClient:           egressIPClientset,
 		EgressFirewallClient:     egressFirewallClientset,
 		CloudNetworkClient:       cloudNetworkClientset,

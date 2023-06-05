@@ -761,7 +761,7 @@ build_ovn_image() {
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-    $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
+    $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora.dev .
 
     # store in local registry
     if [ "$KIND_LOCAL_REGISTRY" == true ];then
@@ -806,6 +806,7 @@ create_ovn_kube_manifests() {
     --ovn-loglevel-sb="${OVN_LOG_LEVEL_SB}" \
     --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
     --ovnkube-config-duration-enable=true \
+    --admin-network-policy-enable=true \
     --egress-ip-enable=true \
     --egress-ip-healthcheck-port="${OVN_EGRESSIP_HEALTHCHECK_PORT}" \
     --egress-firewall-enable=true \
@@ -845,6 +846,10 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressservices.yaml
   run_kubectl apply -f k8s.ovn.org_adminpolicybasedexternalroutes.yaml
   run_kubectl apply -f ovn-setup.yaml
+  run_kubectl apply -f policy.networking.k8s.io_adminnetworkpolicies.yaml
+  run_kubectl apply -f policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
+
+  run_kubectl apply -f policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
   # leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=

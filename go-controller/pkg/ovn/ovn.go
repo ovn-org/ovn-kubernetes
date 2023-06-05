@@ -14,11 +14,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -496,4 +498,20 @@ func (oc *DefaultNetworkController) InitEgressServiceController() (*egresssvc.Co
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.svcFactory.Core().V1().Services(),
 		oc.svcFactory.Discovery().V1().EndpointSlices(),
 		oc.svcFactory.Core().V1().Nodes())
+}
+
+func (oc *DefaultNetworkController) newANPController(client clientset.Interface, nbClient libovsdbclient.Client, anpClient anpclientset.Interface, addressSetFactory addressset.AddressSetFactory, recorder record.EventRecorder) error {
+	var err error
+	oc.anpController, err = anpcontroller.NewController(
+		client,
+		nbClient,
+		anpClient,
+		oc.watchFactory.ANPInformer(),
+		oc.watchFactory.BANPInformer(),
+		oc.watchFactory.NamespaceCoreInformer(),
+		oc.watchFactory.PodCoreInformer(),
+		addressSetFactory,
+		recorder,
+	)
+	return err
 }
