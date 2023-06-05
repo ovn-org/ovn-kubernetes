@@ -295,6 +295,7 @@ func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 	// multi-network policy support is not enabled.
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+		oc.createNetpolController()
 		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}
 }

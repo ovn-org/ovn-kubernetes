@@ -50,7 +50,7 @@ func getFakeController(controllerName string) *DefaultNetworkController {
 	return controller
 }
 
-func newNetworkPolicy(name, namespace string, podSelector metav1.LabelSelector, ingress []knet.NetworkPolicyIngressRule,
+func newKnetNetworkPolicy(name, namespace string, podSelector metav1.LabelSelector, ingress []knet.NetworkPolicyIngressRule,
 	egress []knet.NetworkPolicyEgressRule, policyTypes ...knet.PolicyType) *knet.NetworkPolicy {
 	policy := &knet.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -86,11 +86,18 @@ func getFakeBaseController(netInfo util.NetInfo) *BaseNetworkController {
 	}
 }
 
+func getFakeNetpolController(netInfo util.NetInfo) *NetworkPolicyController {
+	return &NetworkPolicyController{
+		controllerName: netInfo.GetNetworkName() + "-network-controller",
+		netInfo:        netInfo,
+	}
+}
+
 // getDefaultDenyData builds namespace-owned port groups, considering the same ports are selected for ingress
 // and egress
 func getDefaultDenyDataHelper(namespace string, policyTypeIngress, policyTypeEgress bool, ports []string,
 	denyLogSeverity nbdb.ACLSeverity, staleNetpolName string, netInfo util.NetInfo) []libovsdb.TestData {
-	fakeController := getFakeBaseController(netInfo)
+	fakeController := getFakeNetpolController(netInfo)
 	egressPGName := fakeController.defaultDenyPortGroupName(namespace, aclEgress)
 	shouldBeLogged := denyLogSeverity != ""
 	aclIDs := fakeController.getDefaultDenyPolicyACLIDs(namespace, aclEgress, defaultDenyACL)
@@ -261,7 +268,7 @@ func getMultinetNsAddrSetHashNames(ns, controllerName string) (string, string) {
 func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []string, tcpPeerPorts []int32,
 	peers []knet.NetworkPolicyPeer, logSeverity nbdb.ACLSeverity, policyType knet.PolicyType, stale,
 	statelessNetPol bool, netInfo util.NetInfo) []*nbdb.ACL {
-	fakeController := getFakeBaseController(netInfo)
+	fakeController := getFakeNetpolController(netInfo)
 	pgName := fakeController.getNetworkPolicyPGName(namespace, policyName)
 	controllerName := netInfo.GetNetworkName() + "-network-controller"
 	shouldBeLogged := logSeverity != ""
@@ -417,7 +424,7 @@ func getPolicyDataHelper(networkPolicy *knet.NetworkPolicy, localPortUUIDs []str
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	fakeController := getFakeBaseController(netInfo)
+	fakeController := getFakeNetpolController(netInfo)
 	pgDbIDs := fakeController.getNetworkPolicyPortGroupDbIDs(networkPolicy.Namespace, networkPolicy.Name)
 	pg := libovsdbops.BuildPortGroup(
 		pgDbIDs,
@@ -567,12 +574,12 @@ func getMatchLabelsNetworkPolicy(policyName, netpolNamespace, peerNamespace, pee
 			},
 		}
 	}
-	return newNetworkPolicy(policyName, netpolNamespace, metav1.LabelSelector{}, ingressRules, egressRules)
+	return newKnetNetworkPolicy(policyName, netpolNamespace, metav1.LabelSelector{}, ingressRules, egressRules)
 }
 
 func getPortNetworkPolicy(policyName, namespace, labelName, labelVal string, tcpPort int32) *knet.NetworkPolicy {
 	tcpProtocol := v1.ProtocolTCP
-	return newNetworkPolicy(policyName, namespace,
+	return newKnetNetworkPolicy(policyName, namespace,
 		metav1.LabelSelector{
 			MatchLabels: map[string]string{
 				labelName: labelVal,
@@ -733,7 +740,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy1 := getMatchLabelsNetworkPolicy(netPolicyName1, namespace1.Name,
 					"", "podName", true, true)
 				// network policy with ipBlock (won't have any address sets)
-				networkPolicy2 := newNetworkPolicy(netPolicyName2, namespace1.Name, metav1.LabelSelector{},
+				networkPolicy2 := newKnetNetworkPolicy(netPolicyName2, namespace1.Name, metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{{
 						From: []knet.NetworkPolicyPeer{{
 							IPBlock: &knet.IPBlock{
@@ -876,7 +883,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					"egress", "0", DefaultNetworkControllerName)
 				localASName, _ := addressset.GetHashNamesForAS(staleAddrSetIDs)
 				peerASName, _ := getNsAddrSetHashNames(namespace2.Name)
-				fakeController := getFakeController(DefaultNetworkControllerName)
+				fakeController := getFakeNetpolController(&util.DefaultNetInfo{})
 				pgName := fakeController.getNetworkPolicyPGName(networkPolicy.Namespace, networkPolicy.Name)
 				initialData := getPolicyData(networkPolicy, nil, []string{namespace2.Name}, nil)
 				staleACL := initialData[0].(*nbdb.ACL)
@@ -1010,12 +1017,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					},
 				}
 				// equivalent rules in one peer
-				networkPolicy1 := newNetworkPolicy(netPolicyName1, namespace1.Name, metav1.LabelSelector{},
+				networkPolicy1 := newKnetNetworkPolicy(netPolicyName1, namespace1.Name, metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{{
 						From: []knet.NetworkPolicyPeer{peer, peer},
 					}}, nil)
 				// equivalent rules in different peers
-				networkPolicy2 := newNetworkPolicy(netPolicyName2, namespace1.Name, metav1.LabelSelector{},
+				networkPolicy2 := newKnetNetworkPolicy(netPolicyName2, namespace1.Name, metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
 						{
 							From: []knet.NetworkPolicyPeer{peer},
@@ -1033,7 +1040,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				initialData = append(initialData, defaultDenyExpectedData...)
 
 				// start with the updated network policy, but previous-version db
-				networkPolicy1Updated := newNetworkPolicy(netPolicyName1, namespace1.Name, metav1.LabelSelector{},
+				networkPolicy1Updated := newKnetNetworkPolicy(netPolicyName1, namespace1.Name, metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{{
 						From: []knet.NetworkPolicyPeer{peer},
 					}}, nil)
@@ -1060,7 +1067,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			func(peer knet.NetworkPolicyPeer, peerNamespaces []string) {
 				namespace1 := *newNamespace(namespaceName1)
 				namespace2 := *newNamespace(namespaceName2)
-				netpol := newNetworkPolicy("netpolName", namespace1.Name, metav1.LabelSelector{}, []knet.NetworkPolicyIngressRule{
+				netpol := newKnetNetworkPolicy("netpolName", namespace1.Name, metav1.LabelSelector{}, []knet.NetworkPolicyIngressRule{
 					{
 						From: []knet.NetworkPolicyPeer{peer},
 					},
@@ -1613,7 +1620,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				namespace1 := *newNamespace(namespaceName1)
 				nPodTest := getTestPod(namespace1.Name, nodeName)
 				tcpProtocol := v1.Protocol(v1.ProtocolTCP)
-				networkPolicy := newNetworkPolicy(netPolicyName1, namespace1.Name,
+				networkPolicy := newKnetNetworkPolicy(netPolicyName1, namespace1.Name,
 					metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							labelName: labelVal,
@@ -1668,7 +1675,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				namespace1 := *newNamespace(namespaceName1)
 				nPodTest := getTestPod(namespace1.Name, nodeName)
 				tcpProtocol := v1.Protocol(v1.ProtocolTCP)
-				networkPolicy := newNetworkPolicy(netPolicyName1, namespace1.Name,
+				networkPolicy := newKnetNetworkPolicy(netPolicyName1, namespace1.Name,
 					metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							labelName: labelVal,
@@ -1724,7 +1731,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// it just puts network policy to retry loop.
 				// To check the error message directly, we can explicitly add network policy, then
 				// delete NetworkPolicy's resources to pretend controller doesn't know about it.
-				// Then on the next addNetworkPolicy call the result should be the same as on restart.
+				// Then on the next AddNetworkPolicy call the result should be the same as on restart.
 				// Before ACLs were updated to have new DbIDs, defaultDeny acls (arp and default deny)
 				// were equivalent, since their names were cropped and only contained namespace name,
 				// and externalIDs only had defaultDenyPolicyTypeACLExtIdKey: Egress/Ingress.
@@ -1738,9 +1745,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				ginkgo.By("Simulate the initial re-add of all network policies during upgrade and ensure we are stable")
 				// pretend controller didn't see this netpol object, all related db rows are still present
-				fakeOvn.controller.networkPolicies.Delete(getPolicyKey(networkPolicy1))
-				fakeOvn.controller.sharedNetpolPortGroups.Delete(networkPolicy1.Namespace)
-				err := fakeOvn.controller.addNetworkPolicy(networkPolicy1)
+				fakeOvn.controller.netpolController.networkPolicies.Delete(getPolicyKey(networkPolicy1))
+				fakeOvn.controller.netpolController.sharedNetpolPortGroups.Delete(networkPolicy1.Namespace)
+				err := fakeOvn.controller.netpolController.AddNetworkPolicy(networkPolicy1)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil
 			}
@@ -1759,12 +1766,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					},
 				}
 				// equivalent rules in one peer
-				networkPolicy1 := newNetworkPolicy(netPolicyName1, namespace1.Name, metav1.LabelSelector{},
+				networkPolicy1 := newKnetNetworkPolicy(netPolicyName1, namespace1.Name, metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{{
 						From: []knet.NetworkPolicyPeer{peer, peer},
 					}}, nil)
 				// equivalent rules in different peers
-				networkPolicy2 := newNetworkPolicy(netPolicyName2, namespace1.Name, metav1.LabelSelector{},
+				networkPolicy2 := newKnetNetworkPolicy(netPolicyName2, namespace1.Name, metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
 						{
 							From: []knet.NetworkPolicyPeer{peer},
@@ -1820,7 +1827,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 		table.DescribeTable("ACL logging for network policies reacts to severity updates", func(networkPolicies ...*knet.NetworkPolicy) {
 			ginkgo.By("Provisioning the system with an initial empty policy, we know deterministically the names of the default deny ACLs")
-			initialDenyAllPolicy := newNetworkPolicy("emptyPol", namespaceName1, metav1.LabelSelector{}, nil, nil)
+			initialDenyAllPolicy := newKnetNetworkPolicy("emptyPol", namespaceName1, metav1.LabelSelector{}, nil, nil)
 			// originalACLLogSeverity.Deny == nbdb.ACLSeverityAlert
 			initialExpectedData := getDefaultDenyDataWithLogSev(initialDenyAllPolicy, nil, nbdb.ACLSeverityAlert)
 			initialExpectedData = append(initialExpectedData,

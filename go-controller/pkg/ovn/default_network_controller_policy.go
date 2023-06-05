@@ -85,7 +85,7 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 			}
 		}
 	}
-	err := oc.syncNetworkPoliciesCommon(expectedPolicies)
+	err := oc.netpolController.SyncNetworkPoliciesCommon(expectedPolicies)
 	if err != nil {
 		return err
 	}

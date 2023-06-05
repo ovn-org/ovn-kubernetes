@@ -238,6 +238,7 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 	oc.retryEgressNodes = oc.newRetryFramework(factory.EgressNodeType)
 	oc.retryEgressFwNodes = oc.newRetryFramework(factory.EgressFwNodeType)
 	oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+	oc.createNetpolController()
 	oc.retryNetworkPolicies = oc.newRetryFramework(factory.PolicyType)
 }
 
@@ -706,7 +707,7 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
 
-		if err = h.oc.addNetworkPolicy(np); err != nil {
+		if err = h.oc.netpolController.AddNetworkPolicy(np); err != nil {
 			klog.Infof("Network Policy add failed for %s/%s, will try again later: %v",
 				np.Namespace, np.Name, err)
 			return err
@@ -960,7 +961,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
-		return h.oc.deleteNetworkPolicy(knp)
+		return h.oc.netpolController.DeleteNetworkPolicy(knp)
 
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)

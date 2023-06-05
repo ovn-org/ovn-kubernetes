@@ -34,7 +34,7 @@ func (bsnc *BaseSecondaryNetworkController) syncMultiNetworkPolicies(multiPolici
 		}
 	}
 
-	return bsnc.syncNetworkPoliciesCommon(expectedPolicies)
+	return bsnc.netpolController.SyncNetworkPoliciesCommon(expectedPolicies)
 }
 
 func (bsnc *BaseSecondaryNetworkController) shouldApplyMultiPolicy(mpolicy *mnpapi.MultiNetworkPolicy) bool {

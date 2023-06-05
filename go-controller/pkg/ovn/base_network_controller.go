@@ -114,19 +114,7 @@ type BaseNetworkController struct {
 	// and will eventually updated to latest version once topology upgrade is done.
 	topologyVersion int
 
-	// network policies map, key should be retrieved with getPolicyKey(policy *knet.NetworkPolicy).
-	// network policies that failed to be created will also be added here, and can be retried or cleaned up later.
-	// network policy is only deleted from this map after successful cleanup.
-	// Allowed order of locking is namespace Lock -> oc.networkPolicies key Lock -> networkPolicy.Lock
-	// Don't take namespace Lock while holding networkPolicy key lock to avoid deadlock.
-	networkPolicies *syncmap.SyncMap[*networkPolicy]
-
-	// map of existing shared port groups for network policies
-	// port group exists in the db if and only if port group key is present in this map
-	// key is namespace
-	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
-	// make sure to keep this order to avoid deadlocks
-	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
+	netpolController *NetworkPolicyController
 
 	podSelectorAddressSets *syncmap.SyncMap[*PodSelectorAddressSet]
 
@@ -152,8 +140,6 @@ func NewBaseNetworkController(cnci *CommonNetworkControllerInfo, addressSetFacto
 		namespaces:                  make(map[string]*namespaceInfo),
 		namespacesMutex:             sync.Mutex{},
 		addressSetFactory:           addressSetFactory,
-		networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
-		sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
 		podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
 		stopChan:                    stopChan,
 		wg:                          wg,
@@ -162,6 +148,16 @@ func NewBaseNetworkController(cnci *CommonNetworkControllerInfo, addressSetFacto
 		c.localZoneNodes = &sync.Map{}
 	}
 	return c
+}
+
+func (bnc *BaseNetworkController) createNetpolController() {
+	enableMetrics := !bnc.IsSecondary() && config.Metrics.EnableScaleMetrics
+	bnc.netpolController = NewNetworkPolicyController(bnc.addressSetFactory, bnc.nbClient, bnc.watchFactory, bnc.controllerName,
+		enableMetrics, bnc.NetInfo, bnc.stopChan, bnc.wg, bnc)
+}
+
+func (bnc *BaseNetworkController) logicalPortCacheGet(pod *kapi.Pod, nadName string) (*lpInfo, error) {
+	return bnc.logicalPortCache.get(pod, nadName)
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific

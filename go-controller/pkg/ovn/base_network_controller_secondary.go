@@ -74,7 +74,7 @@ func (bsnc *BaseSecondaryNetworkController) AddSecondaryNetworkResourceCommon(ob
 		if err != nil {
 			return err
 		}
-		if err := bsnc.addNetworkPolicy(np); err != nil {
+		if err := bsnc.netpolController.AddNetworkPolicy(np); err != nil {
 			klog.Infof("MultiNetworkPolicy add failed for %s/%s, will try again later: %v",
 				mp.Namespace, mp.Name, err)
 			return err
@@ -121,7 +121,7 @@ func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon
 			if err != nil {
 				return err
 			}
-			if err := bsnc.deleteNetworkPolicy(np); err != nil {
+			if err := bsnc.netpolController.DeleteNetworkPolicy(np); err != nil {
 				klog.Infof("MultiNetworkPolicy delete failed for %s/%s, will try again later: %v",
 					oldMp.Namespace, oldMp.Name, err)
 				return err
@@ -133,7 +133,7 @@ func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon
 			if err != nil {
 				return err
 			}
-			if err := bsnc.addNetworkPolicy(np); err != nil {
+			if err := bsnc.netpolController.AddNetworkPolicy(np); err != nil {
 				klog.Infof("MultiNetworkPolicy add failed for %s/%s, will try again later: %v",
 					newMp.Namespace, newMp.Name, err)
 				return err
@@ -175,7 +175,7 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 			return err
 		}
 		// delete this policy regardless it applies to this network controller, in case of missing update event
-		if err := bsnc.deleteNetworkPolicy(np); err != nil {
+		if err := bsnc.netpolController.DeleteNetworkPolicy(np); err != nil {
 			klog.Infof("MultiNetworkPolicy delete failed for %s/%s, will try again later: %v",
 				mp.Namespace, mp.Name, err)
 			return err

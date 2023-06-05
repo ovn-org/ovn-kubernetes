@@ -171,6 +171,7 @@ func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
 	// multi-network policy for IPAM-less secondary networks either.
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+		oc.createNetpolController()
 		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}
 }
