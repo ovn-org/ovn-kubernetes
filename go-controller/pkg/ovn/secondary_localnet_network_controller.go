@@ -21,11 +21,18 @@ type SecondaryLocalnetNetworkController struct {
 
 // NewSecondaryLocalnetNetworkController create a new OVN controller for the given secondary localnet NAD
 func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) *SecondaryLocalnetNetworkController {
+	return newSecondaryLocalnetNetworkControllerCommon(cnci, netInfo, nil)
+}
+
+func newSecondaryLocalnetNetworkControllerCommon(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
+	addressSetFactory addressset.AddressSetFactory) *SecondaryLocalnetNetworkController {
 
 	stopChan := make(chan struct{})
 
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
-	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
+	if addressSetFactory == nil {
+		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
+	}
 	oc := &SecondaryLocalnetNetworkController{
 		BaseSecondaryLayer2NetworkController{
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{

@@ -252,6 +252,11 @@ type SecondaryLayer3NetworkController struct {
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
 func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) *SecondaryLayer3NetworkController {
+	return newSecondaryLayer3NetworkControllerCommon(cnci, netInfo, nil)
+}
+
+func newSecondaryLayer3NetworkControllerCommon(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
+	addressSetFactory addressset.AddressSetFactory) *SecondaryLayer3NetworkController {
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
@@ -260,7 +265,9 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		zoneICHandler = zoneic.NewZoneInterconnectHandler(netInfo, cnci.nbClient, cnci.sbClient)
 	}
 
-	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
+	if addressSetFactory == nil {
+		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
+	}
 
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{

@@ -355,16 +355,13 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 
 		switch topoType {
 		case types.Layer3Topology:
-			l3Controller := NewSecondaryLayer3NetworkController(cnci, nInfo)
-			l3Controller.addressSetFactory = asf
+			l3Controller := newSecondaryLayer3NetworkControllerCommon(cnci, nInfo, asf)
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
-			l2Controller := NewSecondaryLayer2NetworkController(cnci, nInfo)
-			l2Controller.addressSetFactory = asf
+			l2Controller := newSecondaryLocalnetNetworkControllerCommon(cnci, nInfo, asf)
 			secondaryController = &l2Controller.BaseSecondaryNetworkController
 		case types.LocalnetTopology:
-			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo)
-			localnetController.addressSetFactory = asf
+			localnetController := newSecondaryLayer2NetworkControllerCommon(cnci, nInfo, asf)
 			secondaryController = &localnetController.BaseSecondaryNetworkController
 		default:
 			return fmt.Errorf("topoloty type %s not supported", topoType)
