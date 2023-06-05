@@ -11,7 +11,6 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.18.4"
   K8S_VERSION: v1.24.0
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
@@ -37,15 +36,19 @@ jobs:
       uses: actions/checkout@v3
 
     - name: Set up Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v4
       with:
-        go-version: ${{ env.GO_VERSION }}
+        go-version-file: 'go-controller/go.mod'
       id: go
+
+    - name: Retrieve golangci-lint version
+      run: |
+        cat go-controller/.golangci.env >> $GITHUB_ENV
 
     - name: Verify
       uses: golangci/golangci-lint-action@v3
       with:
-        version: v1.46
+        version: ${{ env.GOLANGCI_LINT_VERSION }}
         working-directory: go-controller
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
         skip-go-installation: true
@@ -84,18 +87,18 @@ jobs:
             exit 0
         fi
     # only run the following steps if the master image was not found in the cache
-    - name: Set up Go
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
-      uses: actions/setup-go@v3
-      with:
-        go-version: ${{ env.GO_VERSION }}
-      id: go
-
     - name: Check out code into the Go module directory - from master branch
       if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_GHCR != 'true' && steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
       uses: actions/checkout@v3
       with:
         ref: master
+    
+    - name: Set up Go
+      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go-controller/go.mod'
+      id: go
 
     - name: Build - from master branch
       if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_GHCR != 'true' && steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
@@ -163,16 +166,17 @@ jobs:
         fi
 
     # only run the following steps if the PR image was not found in the cache
-    - name: Set up Go
-      if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
-      uses: actions/setup-go@v3
-      with:
-        go-version: ${{ env.GO_VERSION }}
-      id: go
 
     - name: Check out code into the Go module directory - from current pr branch
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
       uses: actions/checkout@v3
+    
+    - name: Set up Go
+      if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go-controller/go.mod'
+      id: go
 
     - name: Build and Test - from current pr branch
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
@@ -257,18 +261,7 @@ jobs:
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_MULTICAST_ENABLE:  "false"
     steps:
-    - name: Set up Go
-      uses: actions/setup-go@v3
-      with:
-        go-version: ${{ env.GO_VERSION }}
-      id: go
-
-    - name: Set up environment
-      run: |
-        export GOPATH=$(go env GOPATH)
-        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "$GOPATH/bin" >> $GITHUB_PATH
-
+    
     - name: Free up disk space
       run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
 
@@ -292,6 +285,18 @@ jobs:
       uses: actions/checkout@v3
       with:
           ref: master
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go-controller/go.mod'
+      id: go
+
+    - name: Set up environment
+      run: |
+        export GOPATH=$(go env GOPATH)
+        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+        echo "$GOPATH/bin" >> $GITHUB_PATH
 
     - name: kind setup
       run: |
@@ -405,14 +410,15 @@ jobs:
     - name: Free up disk space
       run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
 
-    - name: Set up Go
-      uses: actions/setup-go@v3
-      with:
-        go-version: ${{ env.GO_VERSION }}
-      id: go
-
+    
     - name: Check out code into the Go module directory
       uses: actions/checkout@v3
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go-controller/go.mod'
+      id: go
 
     - name: Set up environment
       run: |
@@ -492,14 +498,14 @@ jobs:
       DUALSTACK_CONVERSION:  "true"
     steps:
 
-    - name: Set up Go
-      uses: actions/setup-go@v3
-      with:
-        go-version: ${{ env.GO_VERSION }}
-      id: go
-
     - name: Check out code into the Go module directory
       uses: actions/checkout@v3
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go-controller/go.mod'
+      id: go
 
     - name: Set up environment
       run: |
@@ -577,14 +583,14 @@ jobs:
       - name: Free up disk space
         run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
 
-      - name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: ${{ env.GO_VERSION }}
-        id: go
-
       - name: Check out code into the Go module directory
         uses: actions/checkout@v3
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go-controller/go.mod'
+        id: go
 
       - name: Set up environment
         run: |
