@@ -432,7 +432,7 @@ func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) erro
 	}
 	err = libovsdbops.DeleteLogicalRouterPorts(bnc.nbClient, &logicalRouter, &logicalRouterPort)
 	if err != nil {
-		return fmt.Errorf("failed to delete router port %s: %v", logicalRouterPort.Name, err)
+		return fmt.Errorf("failed to delete router port %s: %w", logicalRouterPort.Name, err)
 	}
 
 	return nil

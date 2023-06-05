@@ -20,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
+	"github.com/pkg/errors"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
@@ -473,7 +474,7 @@ func (oc *DefaultNetworkController) cleanupNodeResources(nodeName string) error 
 	}
 
 	if err := oc.gatewayCleanup(nodeName); err != nil {
-		return fmt.Errorf("failed to clean up node %s gateway: (%v)", nodeName, err)
+		return fmt.Errorf("failed to clean up node %s gateway: (%w)", nodeName, err)
 	}
 
 	chassisTemplateVars := make([]*nbdb.ChassisTemplateVar, 0)
@@ -602,11 +603,46 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to get node logical switches which have other-config set: %v", err)
 	}
+
+	staleNodes := sets.NewString()
 	for _, nodeSwitch := range nodeSwitches {
 		if !foundNodes.Has(nodeSwitch.Name) {
-			if err := oc.cleanupNodeResources(nodeSwitch.Name); err != nil {
-				return fmt.Errorf("failed to cleanup node resources:%s, err:%v", nodeSwitch.Name, err)
-			}
+			staleNodes.Insert(nodeSwitch.Name)
+		}
+	}
+
+	// Find stale external logical swiches, based on well known prefix and node name
+	lookupExtSwFunction := func(item *nbdb.LogicalSwitch) bool {
+		nodeName := strings.TrimPrefix(item.Name, types.ExternalSwitchPrefix)
+		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
+			staleNodes.Insert(nodeName)
+			return true
+		}
+		return false
+	}
+	_, err = libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, lookupExtSwFunction)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		klog.Warning("Failed trying to find stale external logical switches")
+	}
+
+	// Find stale gateway routers, based on well known prefix and node name
+	lookupGwRouterFunction := func(item *nbdb.LogicalRouter) bool {
+		nodeName := strings.TrimPrefix(item.Name, types.GWRouterPrefix)
+		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
+			staleNodes.Insert(nodeName)
+			return true
+		}
+		return false
+	}
+	_, err = libovsdbops.FindLogicalRoutersWithPredicate(oc.nbClient, lookupGwRouterFunction)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		klog.Warning("Failed trying to find stale gateway routers")
+	}
+
+	// Cleanup stale nodes (including gateway routers and external logical switches)
+	for _, staleNode := range staleNodes.UnsortedList() {
+		if err := oc.cleanupNodeResources(staleNode); err != nil {
+			return fmt.Errorf("failed to cleanup node resources:%s, err:%w", staleNode, err)
 		}
 	}
 

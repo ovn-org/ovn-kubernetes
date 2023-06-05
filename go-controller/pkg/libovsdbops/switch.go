@@ -368,7 +368,7 @@ func DeleteLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []libovsdb.
 	opModel := operationModel{
 		Model:            sw,
 		OnModelMutations: []interface{}{&sw.Ports},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 	opModels = append(opModels, opModel)
@@ -436,7 +436,7 @@ func DeleteLogicalSwitchPortsWithPredicateOps(nbClient libovsdbclient.Client, op
 	opModel := operationModel{
 		Model:            sw,
 		OnModelMutations: []interface{}{&sw.Ports},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 	opModels = append(opModels, opModel)

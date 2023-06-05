@@ -218,7 +218,7 @@ func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.Logic
 	opModel := operationModel{
 		Model:            router,
 		OnModelMutations: []interface{}{&router.Ports},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 	opModels = append(opModels, opModel)
@@ -708,7 +708,7 @@ func DeleteLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbclient.Cli
 		{
 			Model:            router,
 			OnModelMutations: []interface{}{&router.StaticRoutes},
-			ErrNotFound:      true,
+			ErrNotFound:      false,
 			BulkOp:           false,
 		},
 	}
