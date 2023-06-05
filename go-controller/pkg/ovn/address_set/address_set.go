@@ -117,6 +117,9 @@ func (asf *ovnAddressSetFactory) GetAddressSet(dbIDs *libovsdbops.DbObjectIDs) (
 	if err != nil {
 		return nil, fmt.Errorf("error getting address sets: %w", err)
 	}
+	if len(addrSetList) == 0 {
+		return nil, fmt.Errorf("requested address set %s not found", dbIDs.String())
+	}
 	for i := range addrSetList {
 		addrSet := addrSetList[i]
 		if addrSet.ExternalIDs[libovsdbops.AddressSetIPFamilyKey.String()] == ipv4InternalID {
