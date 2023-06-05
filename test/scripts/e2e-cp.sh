@@ -105,6 +105,14 @@ if [ "${WHAT}" != "${EXTERNAL_GATEWAY_TESTS}" ]; then
   SKIPPED_TESTS+="External Gateway"
 fi
 
+# Only run kubevirt virtual machines tests if they are explicitly requested
+KV_LIVE_MIGRATION_TESTS="Kubevirt Virtual Machines"
+if [ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+=$KV_LIVE_MIGRATION_TESTS
+fi
 
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
