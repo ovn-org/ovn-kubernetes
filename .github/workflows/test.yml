@@ -45,7 +45,7 @@ jobs:
     - name: Verify
       uses: golangci/golangci-lint-action@v3
       with:
-        version: v1.46
+        version: v1.47
         working-directory: go-controller
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
         skip-go-installation: true
@@ -387,6 +387,10 @@ jobs:
           - {"target": "compact-mode",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "multi-node-zones",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-multi-node-zones", "num-workers": "3", "num-nodes-per-zone": "2"}
+          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
@@ -401,6 +405,8 @@ jobs:
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
       ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' }}"
+      KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
+      KIND_LOCAL_REGISTRY: "${{ matrix.target == 'kv-live-migration' }}"
       OVN_SEPARATE_CLUSTER_MANAGER: "${{ matrix.separate-cluster-manager == 'true' }}"
       OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
       OVN_DUMMY_GATEWAY_BRIDGE: "${{ matrix.target == 'compact-mode' }}"
@@ -465,6 +471,8 @@ jobs:
           SINGLE_NODE_CLUSTER="true" make -C test shard-network
         elif [ "${{ matrix.target }}" == "multi-node-zones" ]; then
           make -C test control-plane WHAT="Multi node zones interconnect"
+        elif [ "${{ matrix.target }}" == "kv-live-migration" ]; then
+          make -C test control-plane WHAT="Kubevirt Virtual Machines"
         else
           make -C test ${{ matrix.target }}
         fi

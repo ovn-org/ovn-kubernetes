@@ -96,6 +96,15 @@ if [ "${WHAT}" != "${MULTI_NODE_ZONES_TESTS}" ]; then
   SKIPPED_TESTS+="Multi node zones interconnect"
 fi
 
+# Only run Node IP address migration tests if they are explicitly requested
+KV_LIVE_MIGRATION_TESTS="Kubevirt Virtual Machines"
+if [ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+=$KV_LIVE_MIGRATION_TESTS
+fi
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
