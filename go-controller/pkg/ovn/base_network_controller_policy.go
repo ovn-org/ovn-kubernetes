@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"fmt"
-	"net"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +20,6 @@ import (
 	kerrorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 type netpolDefaultDenyACLType string
@@ -252,45 +250,6 @@ func (bnc *BaseNetworkController) syncNetworkPoliciesCommon(expectedPolicies map
 			return fmt.Errorf("error removing stale port groups %v: %v", stalePGNames, err)
 		}
 		klog.Infof("Network policy sync cleaned up %d stale port groups", len(stalePGNames))
-	}
-
-	return nil
-}
-
-func getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP, controller string) *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNode, controller,
-		map[libovsdbops.ExternalIDKey]string{
-			libovsdbops.ObjectNameKey: nodeName,
-			libovsdbops.IpKey:         mgmtPortIP,
-		})
-}
-
-// There is no delete function for this ACL type, because the ACL is applied on a node switch.
-// When the node is deleted, switch will be deleted by the node sync, and the dependent ACLs will be
-// garbage-collected.
-func (bnc *BaseNetworkController) addAllowACLFromNode(nodeName string, mgmtPortIP net.IP) error {
-	ipFamily := "ip4"
-	if utilnet.IsIPv6(mgmtPortIP) {
-		ipFamily = "ip6"
-	}
-	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
-	dbIDs := getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP.String(), bnc.controllerName)
-	nodeACL := BuildACL(dbIDs, types.DefaultAllowPriority, match,
-		nbdb.ACLActionAllowRelated, nil, lportIngress)
-
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, nodeACL)
-	if err != nil {
-		return fmt.Errorf("failed to create or update ACL %v: %v", nodeACL, err)
-	}
-
-	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(bnc.nbClient, ops, nodeName, nodeACL)
-	if err != nil {
-		return fmt.Errorf("failed to add ACL %v to switch %s: %v", nodeACL, nodeName, err)
-	}
-
-	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -1462,12 +1421,4 @@ func getStaleNetpolAddrSetDbIDs(policyNamespace, policyName, policyType, idx, co
 		libovsdbops.PolicyDirectionKey: strings.ToLower(policyType),
 		libovsdbops.GressIdxKey:        idx,
 	})
-}
-
-func (bnc *BaseNetworkController) getNetpolDefaultACLDbIDs(direction string) *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolDefault, bnc.controllerName,
-		map[libovsdbops.ExternalIDKey]string{
-			libovsdbops.ObjectNameKey:      allowHairpinningACLID,
-			libovsdbops.PolicyDirectionKey: direction,
-		})
 }

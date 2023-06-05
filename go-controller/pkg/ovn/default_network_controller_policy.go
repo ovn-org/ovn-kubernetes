@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -9,6 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	knet "k8s.io/api/networking/v1"
+	utilnet "k8s.io/utils/net"
 )
 
 // WatchNetworkPolicy starts the watching of network policy resource and calls
@@ -16,6 +18,14 @@ import (
 func (oc *DefaultNetworkController) WatchNetworkPolicy() error {
 	_, err := oc.retryNetworkPolicies.WatchResource()
 	return err
+}
+
+func (oc *DefaultNetworkController) getNetpolDefaultACLDbIDs(direction string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolDefault, oc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey:      allowHairpinningACLID,
+			libovsdbops.PolicyDirectionKey: direction,
+		})
 }
 
 func (oc *DefaultNetworkController) addHairpinAllowACL() error {
@@ -84,6 +94,45 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 	err = oc.addHairpinAllowACL()
 	if err != nil {
 		return fmt.Errorf("failed to create allow hairping acl: %w", err)
+	}
+
+	return nil
+}
+
+func getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNode, controller,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: nodeName,
+			libovsdbops.IpKey:         mgmtPortIP,
+		})
+}
+
+// There is no delete function for this ACL type, because the ACL is applied on a node switch.
+// When the node is deleted, switch will be deleted by the node sync, and the dependent ACLs will be
+// garbage-collected.
+func (oc *DefaultNetworkController) addAllowACLFromNode(nodeName string, mgmtPortIP net.IP) error {
+	ipFamily := "ip4"
+	if utilnet.IsIPv6(mgmtPortIP) {
+		ipFamily = "ip6"
+	}
+	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
+	dbIDs := getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP.String(), oc.controllerName)
+	nodeACL := BuildACL(dbIDs, types.DefaultAllowPriority, match,
+		nbdb.ACLActionAllowRelated, nil, lportIngress)
+
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, nodeACL)
+	if err != nil {
+		return fmt.Errorf("failed to create or update ACL %v: %v", nodeACL, err)
+	}
+
+	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(oc.nbClient, ops, nodeName, nodeACL)
+	if err != nil {
+		return fmt.Errorf("failed to add ACL %v to switch %s: %v", nodeACL, nodeName, err)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	if err != nil {
+		return err
 	}
 
 	return nil
