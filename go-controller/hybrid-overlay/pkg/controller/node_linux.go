@@ -51,7 +51,8 @@ type NodeController struct {
 	flowCache map[string]*flowCacheEntry
 	flowMutex sync.Mutex
 	// channel to indicate we need to update flows immediately
-	flowChan chan struct{}
+	flowChan            chan struct{}
+	flowCacheSyncPeriod time.Duration
 
 	nodeLister     listers.NodeLister
 	localPodLister listers.PodLister
@@ -70,14 +71,15 @@ func newNodeController(
 ) (nodeController, error) {
 
 	node := &NodeController{
-		nodeName:       nodeName,
-		initState:      new(uint32),
-		vxlanPort:      uint16(config.HybridOverlay.VXLANPort),
-		flowCache:      make(map[string]*flowCacheEntry),
-		flowMutex:      sync.Mutex{},
-		flowChan:       make(chan struct{}, 1),
-		nodeLister:     nodeLister,
-		localPodLister: localPodLister,
+		nodeName:            nodeName,
+		initState:           new(uint32),
+		vxlanPort:           uint16(config.HybridOverlay.VXLANPort),
+		flowCache:           make(map[string]*flowCacheEntry),
+		flowMutex:           sync.Mutex{},
+		flowChan:            make(chan struct{}, 1),
+		flowCacheSyncPeriod: 30 * time.Second,
+		nodeLister:          nodeLister,
+		localPodLister:      localPodLister,
 	}
 	atomic.StoreUint32(node.initState, hotypes.InitialStartup)
 	return node, nil
@@ -667,8 +669,7 @@ func (n *NodeController) RunFlowSync(stopCh <-chan struct{}) {
 	klog.Info("Starting hybrid overlay OpenFlow sync thread")
 	klog.Info("Running initial OpenFlow sync")
 	n.syncFlows()
-	syncPeriod := 30 * time.Second
-	timer := time.NewTicker(syncPeriod)
+	timer := time.NewTicker(n.flowCacheSyncPeriod)
 	defer timer.Stop()
 	for {
 		select {
@@ -676,7 +677,7 @@ func (n *NodeController) RunFlowSync(stopCh <-chan struct{}) {
 			n.syncFlows()
 		case <-n.flowChan:
 			n.syncFlows()
-			timer.Reset(syncPeriod)
+			timer.Reset(n.flowCacheSyncPeriod)
 		case <-stopCh:
 			klog.Info("Shutting down OpenFlow sync thread")
 			return
