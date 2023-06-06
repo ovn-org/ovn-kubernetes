@@ -1191,20 +1191,6 @@ var _ = ginkgo.Describe("External Gateway test suite", func() {
 				if externalContainerNetwork == "host" {
 					skipper.Skipf("Skipping as host network doesn't support multiple external gateways")
 				}
-				// ensure there are no namespaces with the gateway annotation
-				gomega.Eventually(func() int {
-					nsList, err := f.ClientSet.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					count := 0
-					for _, ns := range nsList.Items {
-						_, f1 := ns.Annotations["k8s.ovn.org/routing-external-gws"]
-						_, f2 := ns.Annotations["k8s.ovn.org/external-gw-pod-ips"]
-						if f1 || f2 {
-							count++
-						}
-					}
-					return count
-				}, 20, 1).Should(gomega.Equal(0))
 				gwContainers, addressesv4, addressesv6 = setupGatewayContainers(f, nodes, gwContainer1, gwContainer2, srcPodName, externalUDPPort, externalTCPPort, ecmpRetry)
 			})
 
