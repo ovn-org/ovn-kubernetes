@@ -997,16 +997,16 @@ func FindNATsWithPredicate(nbClient libovsdbclient.Client, predicate natPredicat
 // GetRouterNATs looks up NATs associated to the provided logical router from
 // the cache
 func GetRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
-	router, err := GetLogicalRouter(nbClient, router)
+	r, err := GetLogicalRouter(nbClient, router)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get router: %s, error: %w", router.Name, err)
 	}
 
 	nats := []*nbdb.NAT{}
-	for _, uuid := range router.Nat {
+	for _, uuid := range r.Nat {
 		nat, err := GetNAT(nbClient, &nbdb.NAT{UUID: uuid})
-		if err != nil {
-			return nil, err
+		if err != nil && err != libovsdbclient.ErrNotFound {
+			return nil, fmt.Errorf("failed to lookup NAT entry with uuid: %s, error: %w", uuid, err)
 		}
 		nats = append(nats, nat)
 	}
