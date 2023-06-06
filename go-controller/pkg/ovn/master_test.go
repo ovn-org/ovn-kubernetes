@@ -17,11 +17,11 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -68,10 +68,22 @@ type tNode struct {
 	DnatSnatIP           string
 }
 
-func (n tNode) k8sNode() v1.Node {
+const (
+	// ovnNodeID is the id (of type integer) of a node. It is set by cluster-manager.
+	ovnNodeID = "k8s.ovn.org/node-id"
+
+	// ovnNodeGRLRPAddr is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.5/24)
+	ovnNodeGRLRPAddr = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
+)
+
+func (n tNode) k8sNode(nodeID string) v1.Node {
 	node := v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: n.Name,
+			Annotations: map[string]string{
+				ovnNodeID:        nodeID,
+				ovnNodeGRLRPAddr: "{\"ipv4\": \"100.64.0." + nodeID + "/16\"}",
+			},
 		},
 		Status: kapi.NodeStatus{
 			Addresses: []kapi.NodeAddress{{Type: kapi.NodeExternalIP, Address: n.NodeIP}},
@@ -966,7 +978,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				datapath,
 			},
 		}
-		testNode = node1.k8sNode()
+		testNode = node1.k8sNode("2")
 
 		kubeFakeClient = fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{testNode},
@@ -974,11 +986,13 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
 		egressQoSFakeClient := &egressqosfake.Clientset{}
+		egressServiceFakeClient := &egressservicefake.Clientset{}
 		fakeClient = &util.OVNMasterClientset{
 			KubeClient:           kubeFakeClient,
 			EgressIPClient:       egressIPFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
 			EgressQoSClient:      egressQoSFakeClient,
+			EgressServiceClient:  egressServiceFakeClient,
 		}
 		var err error
 
@@ -1031,10 +1045,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		}()
 
 		oc.SCTPSupport = true
-		oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		_, err = oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		expectedNBDatabaseState = addNodeLogicalFlows(nil, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 	})
@@ -1332,18 +1342,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				gomega.BeNil(),             // oldObj should be nil
 				gomega.Not(gomega.BeNil()), // newObj should not be nil
 			)
-
-			// check that a node event was posted
-			gomega.Eventually(func() []string {
-				eventsLock.Lock()
-				defer eventsLock.Unlock()
-				eventsCopy := make([]string, 0, len(events))
-				for _, e := range events {
-					eventsCopy = append(eventsCopy, e)
-				}
-				return eventsCopy
-			}, 10).Should(gomega.ContainElement(gomega.ContainSubstring("Warning ErrorReconcilingNode error creating gateway for node node1")))
-
 			connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 			defer cancel()
 			ginkgo.By("bring up NBDB")
@@ -1475,7 +1473,9 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "newNode",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":[\"%s\", \"fd02:0:0:2::2895/64\"]}", newNodeSubnet),
+						"k8s.ovn.org/node-subnets":                   fmt.Sprintf("{\"default\":[\"%s\", \"fd02:0:0:2::2895/64\"]}", newNodeSubnet),
+						"k8s.ovn.org/node-chassis-id":                "2",
+						"k8s.ovn.org/node-gateway-router-lrp-ifaddr": "{\"ipv4\":\"100.64.0.2/16\"}",
 					},
 				},
 			}
@@ -1655,11 +1655,6 @@ func TestController_syncNodes(t *testing.T) {
 				record.NewFakeRecorder(0),
 				wg)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
-			if err != nil {
-				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
-			}
-
 			err = controller.syncNodes([]interface{}{&testNode})
 			if err != nil {
 				t.Fatalf("%s: Error on syncNodes: %v", tt.name, err)
@@ -1748,10 +1743,6 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				record.NewFakeRecorder(0),
 				wg)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
-			if err != nil {
-				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
-			}
 
 			err = controller.deleteStaleNodeChassis(&tt.node)
 			if err != nil {

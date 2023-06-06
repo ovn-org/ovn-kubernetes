@@ -28,6 +28,26 @@ func ListChassisPrivate(sbClient libovsdbclient.Client) ([]*sbdb.ChassisPrivate,
 	return found, err
 }
 
+// GetChassis looks up a chassis from the cache using the 'Name' column which is an indexed
+// column.
+func GetChassis(sbClient libovsdbclient.Client, chassis *sbdb.Chassis) (*sbdb.Chassis, error) {
+	found := []*sbdb.Chassis{}
+	opModel := operationModel{
+		Model:          chassis,
+		ExistingResult: &found,
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+
+	m := newModelClient(sbClient)
+	err := m.Lookup(opModel)
+	if err != nil {
+		return nil, err
+	}
+
+	return found[0], nil
+}
+
 // DeleteChassis deletes the provided chassis and associated private chassis
 func DeleteChassis(sbClient libovsdbclient.Client, chassis ...*sbdb.Chassis) error {
 	opModels := make([]operationModel, 0, len(chassis))
@@ -114,4 +134,33 @@ func DeleteChassisWithPredicate(sbClient libovsdbclient.Client, p chassisPredica
 	m := newModelClient(sbClient)
 	err := m.Delete(opModels...)
 	return err
+}
+
+// CreateOrUpdateChassis creates or updates the chassis record along with the encap record
+func CreateOrUpdateChassis(sbClient libovsdbclient.Client, chassis *sbdb.Chassis, encap *sbdb.Encap) error {
+	m := newModelClient(sbClient)
+	opModels := []operationModel{
+		{
+			Model: encap,
+			DoAfter: func() {
+				encaps := append(chassis.Encaps, encap.UUID)
+				chassis.Encaps = sets.New(encaps...).UnsortedList()
+			},
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
+			ErrNotFound:    false,
+			BulkOp:         false,
+		},
+		{
+			Model:          chassis,
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
+			ErrNotFound:    false,
+			BulkOp:         false,
+		},
+	}
+
+	if _, err := m.CreateOrUpdate(opModels...); err != nil {
+		return err
+	}
+
+	return nil
 }

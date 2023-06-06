@@ -47,7 +47,7 @@ func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) 
 
 var expectedResult cnitypes.Result
 
-func serverHandleCNI(request *PodRequest, clientset *ClientSet, useOVSExternalIDs bool, kubeAuth *KubeAPIAuth) ([]byte, error) {
+func serverHandleCNI(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth) ([]byte, error) {
 	if request.Command == CNIAdd {
 		return json.Marshal(&expectedResult)
 	} else if request.Command == CNIDel || request.Command == CNIUpdate || request.Command == CNICheck {
@@ -89,7 +89,7 @@ func TestCNIServer(t *testing.T) {
 		t.Fatalf("failed to start watch factory: %v", err)
 	}
 
-	s, err := NewCNIServer(false, wf, fakeClient)
+	s, err := NewCNIServer(wf, fakeClient)
 	if err != nil {
 		t.Fatalf("error creating CNI server: %v", err)
 	}

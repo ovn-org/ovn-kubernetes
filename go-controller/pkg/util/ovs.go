@@ -605,17 +605,38 @@ func RunOVNControllerAppCtl(args ...string) (string, string, error) {
 // RunOvsVswitchdAppCtl runs an 'ovs-appctl -t /var/run/openvsiwthc/ovs-vswitchd.pid.ctl command'
 func RunOvsVswitchdAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
-	pid, err := afero.ReadFile(AppFs, savedOVSRunDir+"ovs-vswitchd.pid")
+	pid, err := GetOvsVSwitchdPID()
 	if err != nil {
-		return "", "", fmt.Errorf("failed to get ovs-vswitch pid : %v", err)
+		return "", "", err
 	}
+
 	cmdArgs = []string{
 		"-t",
-		savedOVSRunDir + fmt.Sprintf("ovs-vswitchd.%s.ctl", strings.TrimSpace(string(pid))),
+		savedOVSRunDir + fmt.Sprintf("ovs-vswitchd.%s.ctl", pid),
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// GetOvsVSwitchdPID retrieves the Process IDentifier for ovs-vswitchd daemon.
+func GetOvsVSwitchdPID() (string, error) {
+	pid, err := afero.ReadFile(AppFs, savedOVSRunDir+"ovs-vswitchd.pid")
+	if err != nil {
+		return "", fmt.Errorf("failed to get ovs-vswitch pid : %v", err)
+	}
+
+	return strings.TrimSpace(string(pid)), nil
+}
+
+// GetOvsDBServerPID retrieves the Process IDentifier for ovs-vswitchd daemon.
+func GetOvsDBServerPID() (string, error) {
+	pid, err := afero.ReadFile(AppFs, savedOVSRunDir+"ovsdb-server.pid")
+	if err != nil {
+		return "", fmt.Errorf("failed to get ovsdb-server pid : %v", err)
+	}
+
+	return strings.TrimSpace(string(pid)), nil
 }
 
 // RunIP runs a command via the iproute2 "ip" utility

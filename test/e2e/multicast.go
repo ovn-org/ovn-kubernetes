@@ -82,8 +82,8 @@ var _ = ginkgo.Describe("Multicast", func() {
 
 		// Start the multicast source (iperf client is the sender in multicast)
 		ginkgo.By("creating a pod as a multicast source in node " + clientNodeInfo.name)
-		// multicast group (-c 224.3.3.3), UDP (-u), TTL (-T 2), during (-t 3000) seconds, report every (-i 5) seconds
-		iperf := fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5", mcastGroup)
+		// multicast group (-c 224.3.3.3), UDP (-u), TTL (-T 3), during (-t 3000) seconds, report every (-i 5) seconds
+		iperf := fmt.Sprintf("iperf -c %s -u -T 3 -t 3000 -i 5", mcastGroup)
 		if IsIPv6Cluster(cs) {
 			iperf = iperf + " -V"
 		}

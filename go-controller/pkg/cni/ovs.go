@@ -267,9 +267,9 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 	var ofPort int
 	var err error
 
-	mac := ifInfo.MAC.String()
-	ifAddrs := ifInfo.IPs
-	checkExternalIDs := ifInfo.CheckExtIDs
+	// DPUHost mode can't use OVS external IDs for port-up detection because
+	// there is no ovn-controller running in DPUHost mode to set port-up
+	checkExternalIDs := !ifInfo.IsDPUHostMode
 	if checkExternalIDs {
 		detail = " (ovn-installed)"
 	} else {
@@ -278,6 +278,9 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 			return err
 		}
 	}
+
+	mac := ifInfo.MAC.String()
+	ifAddrs := ifInfo.IPs
 	for {
 		select {
 		case <-ctx.Done():

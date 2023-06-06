@@ -21,21 +21,18 @@ type SecondaryLocalnetNetworkController struct {
 }
 
 // NewSecondaryLocalnetNetworkController create a new OVN controller for the given secondary localnet NAD
-func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
-	netconfInfo util.NetConfInfo, addressSetFactory addressset.AddressSetFactory) *SecondaryLocalnetNetworkController {
+func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) *SecondaryLocalnetNetworkController {
+
 	stopChan := make(chan struct{})
 
-	ipv4Mode, ipv6Mode := netconfInfo.IPMode()
-	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
-	}
+	ipv4Mode, ipv6Mode := netInfo.IPMode()
+	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
 	oc := &SecondaryLocalnetNetworkController{
 		BaseSecondaryLayer2NetworkController{
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
 					controllerName:              netInfo.GetNetworkName() + "-network-controller",
-					NetConfInfo:                 netconfInfo,
 					NetInfo:                     netInfo,
 					lsManager:                   lsm.NewL2SwitchManager(),
 					logicalPortCache:            newPortCache(stopChan),
@@ -78,9 +75,8 @@ func (oc *SecondaryLocalnetNetworkController) Cleanup(netName string) error {
 
 func (oc *SecondaryLocalnetNetworkController) Init() error {
 	switchName := oc.GetNetworkScopedName(types.OVNLocalnetSwitch)
-	localnetNetConfInfo := oc.NetConfInfo.(*util.LocalnetNetConfInfo)
 
-	logicalSwitch, err := oc.InitializeLogicalSwitch(switchName, localnetNetConfInfo.ClusterSubnets, localnetNetConfInfo.ExcludeSubnets)
+	logicalSwitch, err := oc.InitializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
 	if err != nil {
 		return err
 	}
@@ -96,8 +92,8 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 			"network_name": oc.GetNetworkScopedName(types.LocalNetBridgeName),
 		},
 	}
-	if localnetNetConfInfo.VLANID != 0 {
-		intVlanID := localnetNetConfInfo.VLANID
+	intVlanID := int(oc.Vlan())
+	if intVlanID != 0 {
 		logicalSwitchPort.TagRequest = &intVlanID
 	}
 

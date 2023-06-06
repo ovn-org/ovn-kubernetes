@@ -83,8 +83,8 @@ func (pp *portPolicy) getL4Match() (string, error) {
 	return foundProtocol, nil
 }
 
-func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string, isNetPolStateless bool, netConfInfo util.NetConfInfo) *gressPolicy {
-	ipv4Mode, ipv6Mode := netConfInfo.IPMode()
+func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string, isNetPolStateless bool, netInfo util.BasicNetInfo) *gressPolicy {
+	ipv4Mode, ipv6Mode := netInfo.IPMode()
 	return &gressPolicy{
 		controllerName:    controllerName,
 		policyNamespace:   namespace,

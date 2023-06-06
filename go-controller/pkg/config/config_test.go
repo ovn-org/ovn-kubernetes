@@ -139,6 +139,7 @@ conntrack-zone=64321
 cluster-subnets=10.132.0.0/14/23
 lflow-cache-limit=1000
 lflow-cache-limit-kb=100000
+zone=global
 
 [kubernetes]
 kubeconfig=/path/to/kubeconfig
@@ -216,6 +217,7 @@ egressip-reachability-total-timeout=3
 egressip-node-healthcheck-port=1234
 enable-multi-network=false
 enable-multi-networkpolicy=false
+enable-interconnect=false
 `
 
 	var newData string
@@ -298,13 +300,13 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.128.0.0/14"), 23},
 			}))
+			gomega.Expect(Default.Zone).To(gomega.Equal("global"))
 			gomega.Expect(IPv4Mode).To(gomega.Equal(true))
 			gomega.Expect(IPv6Mode).To(gomega.Equal(false))
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.Equal(false))
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
 			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal(""))
-			gomega.Expect(OvnKubeNode.MgmtPortRepresentor).To(gomega.Equal(""))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeFalse())
@@ -312,6 +314,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(0))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeFalse())
+			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeFalse())
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
@@ -549,6 +552,7 @@ var _ = Describe("Config Operations", func() {
 		err = writeTestConfigFile(cfgFile.Name(), "kubeconfig="+kubeconfigFile, "cacert="+kubeCAFile,
 			"enable-multi-network=true",
 			"enable-multi-networkpolicy=true",
+			"enable-interconnect=true",
 			"zone=foo",
 		)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -586,6 +590,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
 			}))
+			gomega.Expect(Default.Zone).To(gomega.Equal("foo"))
 
 			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("1.1.1.1:8080"))
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("1.1.1.2:8081"))
@@ -625,6 +630,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(3))
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(1234))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeTrue())
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
@@ -675,6 +681,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.130.0.0/15"), 24},
 			}))
+			gomega.Expect(Default.Zone).To(gomega.Equal("bar"))
 
 			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("2.2.2.2:8080"))
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("2.2.2.3:8081"))
@@ -712,6 +719,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(4321))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeTrue())
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
@@ -772,7 +780,9 @@ var _ = Describe("Config Operations", func() {
 			"-egressip-node-healthcheck-port=4321",
 			"-enable-multi-network=true",
 			"-enable-multi-networkpolicy=true",
+			"-enable-interconnect=true",
 			"-healthz-bind-address=0.0.0.0:4321",
+			"-zone=bar",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1680,29 +1690,25 @@ foo=bar
 			}
 			file := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                   types.NodeModeDPU,
-					MgmtPortNetdev:         "enp1s0f0v0",
-					MgmtPortDPResourceName: "openshift.io/mgmtvf",
+					Mode: types.NodeModeDPU,
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
-			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
-			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal("openshift.io/mgmtvf"))
 		})
 
 		It("Overrides value from CLI", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                   types.NodeModeDPU,
+					Mode:                   types.NodeModeDPUHost,
 					MgmtPortNetdev:         "enp1s0f0v0",
 					MgmtPortDPResourceName: "openshift.io/mgmtvf",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPUHost))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
 			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal("openshift.io/mgmtvf"))
 		})
@@ -1731,15 +1737,16 @@ foo=bar
 				"hybrid overlay is not supported with ovnkube-node mode"))
 		})
 
-		It("Fails if management port is not provided and ovnkube node mode is dpu", func() {
+		It("Fails if management port is provided and ovnkube node mode is dpu", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeDPU,
+					Mode:           types.NodeModeDPU,
+					MgmtPortNetdev: "enp1s0f0v0",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided"))
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must not be provided"))
 		})
 
 		It("Fails if management port is not provided and ovnkube node mode is dpu-host", func() {

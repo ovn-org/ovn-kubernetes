@@ -2,12 +2,14 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -521,6 +524,137 @@ var _ = ginkgo.Describe("Services", func() {
 			return stdout == fmt.Sprintf(`{"responses":["%s"]}`, nodeName), nil
 		})
 		framework.ExpectNoError(err)
+	})
+
+	ginkgo.It("of type NodePort should listen on each host addresses", func() {
+		const (
+			endpointHTTPPort    = 80
+			endpointUDPPort     = 90
+			clusterHTTPPort     = 81
+			clusterUDPPort      = 91
+			clientContainerName = "npclient"
+		)
+
+		endPoints := make([]*v1.Pod, 0)
+		endpointsSelector := map[string]string{"servicebackend": "true"}
+		nodesHostnames := sets.NewString()
+
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		framework.ExpectNoError(err)
+
+		if len(nodes.Items) < 3 {
+			framework.Failf(
+				"Test requires >= 3 Ready nodes, but there are only %v nodes",
+				len(nodes.Items))
+		}
+
+		ginkgo.By("Creating the endpoints pod, one for each worker")
+		for _, node := range nodes.Items {
+			args := []string{
+				"netexec",
+				fmt.Sprintf("--http-port=%d", endpointHTTPPort),
+				fmt.Sprintf("--udp-port=%d", endpointUDPPort),
+			}
+			pod, err := createPod(f, node.Name+"-ep", node.Name, f.Namespace.Name, []string{},
+				endpointsSelector, func(p *v1.Pod) {
+					p.Spec.Containers[0].Args = args
+				})
+			framework.ExpectNoError(err)
+
+			endPoints = append(endPoints, pod)
+			nodesHostnames.Insert(pod.Name)
+		}
+
+		ginkgo.By("Creating an external container to send the traffic from")
+		createClusterExternalContainer(clientContainerName, agnhostImage,
+			[]string{"--network", "kind", "-P"},
+			[]string{"netexec", "--http-port=80"})
+
+		// If `kindexgw` exists, connect client container to it
+		runCommand(containerRuntime, "network", "connect", "kindexgw", clientContainerName)
+
+		ginkgo.By("Adding ip addresses to each node")
+		// add new secondary IP from node subnet to all nodes, if the cluster is v6 add an ipv6 address
+		toCurlAddresses := sets.NewString()
+		for i, node := range nodes.Items {
+
+			addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-addresses"]
+			gomega.Expect(ok).To(gomega.BeTrue())
+
+			var addrs []string
+			err := json.Unmarshal([]byte(addrAnnotation), &addrs)
+			framework.ExpectNoError(err, "failed to parse node[%s] host-address annotation[%s]", node.Name, addrAnnotation)
+
+			toCurlAddresses.Insert(addrs...)
+
+			var newIP string
+			if utilnet.IsIPv6String(e2enode.GetAddresses(&node, v1.NodeInternalIP)[0]) {
+				newIP = "fc00:f853:ccd:e794::" + strconv.Itoa(i)
+			} else {
+				newIP = "172.18.1." + strconv.Itoa(i+1)
+			}
+			// manually add the a secondary IP to each node
+			_, err = runCommand(containerRuntime, "exec", node.Name, "ip", "addr", "add", newIP, "dev", "breth0")
+			if err != nil {
+				framework.Failf("failed to add new Addresses to node %s: %v", node.Name, err)
+			}
+
+			nodeName := node.Name
+			defer func() {
+				runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "delete", newIP+"/32", "dev", "breth0")
+				framework.ExpectNoError(err, "failed to remove ip address %s from node %s", newIP, nodeName)
+			}()
+
+			toCurlAddresses.Insert(newIP)
+		}
+
+		defer deleteClusterExternalContainer(clientContainerName)
+
+		isIPv6Cluster := IsIPv6Cluster(f.ClientSet)
+
+		ginkgo.By("Creating NodePort services")
+
+		etpLocalServiceName := "etp-local-svc"
+		etpLocalSvc := nodePortServiceSpecFrom(etpLocalServiceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
+		etpLocalSvc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), etpLocalSvc, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		etpClusterServiceName := "etp-cluster-svc"
+		etpClusterSvc := nodePortServiceSpecFrom(etpClusterServiceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeCluster)
+		etpClusterSvc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), etpClusterSvc, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Waiting for the endpoints to pop up")
+
+		err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, etpLocalServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+		framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", etpLocalServiceName, f.Namespace.Name)
+
+		err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, etpClusterServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+		framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", etpClusterServiceName, f.Namespace.Name)
+
+		for _, serviceSpec := range []*v1.Service{etpLocalSvc, etpClusterSvc} {
+			tcpNodePort, udpNodePort := nodePortsFromService(serviceSpec)
+
+			for _, protocol := range []string{"http", "udp"} {
+				toCurlPort := int32(tcpNodePort)
+				if protocol == "udp" {
+					toCurlPort = int32(udpNodePort)
+				}
+
+				for _, address := range toCurlAddresses.List() {
+					if !isIPv6Cluster && utilnet.IsIPv6String(address) {
+						continue
+					}
+
+					ginkgo.By("Hitting service " + serviceSpec.Name + " on " + address + " via " + protocol)
+					gomega.Eventually(func() bool {
+						epHostname := pokeEndpoint("", clientContainerName, protocol, address, toCurlPort, "hostname")
+						// Expect to receive a valid hostname
+						return nodesHostnames.Has(epHostname)
+					}, "20s", "1s").Should(gomega.BeTrue())
+				}
+			}
+		}
 	})
 })
 

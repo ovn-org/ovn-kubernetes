@@ -5,6 +5,9 @@ on:
     - cron:  '0 6 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   GO_VERSION: "1.18.4"
   K8S_VERSION: v1.24.0

@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
@@ -21,7 +23,9 @@ import (
 	"github.com/vishvananda/netlink"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipv1fake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
@@ -31,8 +35,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
-
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -149,20 +151,26 @@ func checkMgmtTestPortIpsAndRoutes(configs []managementPortTestConfig, mgmtPortN
 		gatewayIP := ovntest.MustParseIP(cfg.expectedGatewayIP)
 		subnets := []string{cfg.clusterCIDR}
 		for _, subnet := range subnets {
-			foundRoute := false
 			dstIPnet := ovntest.MustParseIPNet(subnet)
 			route := &netlink.Route{Dst: dstIPnet}
 			filterMask := netlink.RT_FILTER_DST
-			routes, err := netlink.RouteListFiltered(cfg.family, route, filterMask)
-			Expect(err).NotTo(HaveOccurred())
-			for _, r := range routes {
-				if r.Gw.Equal(gatewayIP) && r.LinkIndex == mgmtPortLink.Attrs().Index {
-					foundRoute = true
-					break
+			Eventually(func() error {
+				foundRoute := false
+				routes, err := netlink.RouteListFiltered(cfg.family, route, filterMask)
+				if err != nil {
+					return err
 				}
-			}
-			Expect(foundRoute).To(BeTrue(), "did not find expected route to %s", subnet)
-			foundRoute = false
+				for _, r := range routes {
+					if r.Gw.Equal(gatewayIP) && r.LinkIndex == mgmtPortLink.Attrs().Index {
+						foundRoute = true
+						break
+					}
+				}
+				if !foundRoute {
+					return fmt.Errorf("did not find exected route to %s", subnet)
+				}
+				return nil
+			}, 1*time.Second).ShouldNot(HaveOccurred())
 			j++
 		}
 		Expect(j).To(Equal(1))
@@ -256,14 +264,30 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}}, existingNode.Name)
+	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}, existingNode.Name)
 	waiter := newStartupWaiter()
+	wg := &sync.WaitGroup{}
+	rm := newRouteManager(wg, true, 10*time.Second)
+	stopCh := make(chan struct{})
+	defer func() {
+		close(stopCh)
+		wg.Wait()
+	}()
+
+	go testNS.Do(func(netNS ns.NetNS) error {
+		defer GinkgoRecover()
+		wg.Add(1)
+		rm.run(stopCh)
+		return nil
+	})
 
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs)
-		_, err = mgmtPorts[0].Create(nodeAnnotator, waiter)
+		netdevName, rep := "", ""
+
+		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
+		_, err = mgmtPorts[0].Create(rm, nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		return nil
@@ -333,14 +357,25 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}}, existingNode.Name)
+	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}, existingNode.Name)
 	waiter := newStartupWaiter()
+	wg := &sync.WaitGroup{}
+	rm := newRouteManager(wg, true, 10*time.Second)
+	stopCh := make(chan struct{})
+	go rm.run(stopCh)
+	wg.Add(1)
+	defer func() {
+		close(stopCh)
+		wg.Wait()
+	}()
 
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs)
-		_, err = mgmtPorts[0].Create(nodeAnnotator, waiter)
+		netdevName, rep := "pf0vf0", "pf0vf0"
+
+		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
+		_, err = mgmtPorts[0].Create(rm, nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		// make sure interface was renamed and mtu was set
 		l, err := netlink.LinkByName(mgtPort)
@@ -375,6 +410,11 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		mtu        int    = 1400
 	)
 
+	// OVS cmd setup
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgtPort,
+	})
+
 	for _, cfg := range configs {
 		if cfg.family == netlink.FAMILY_V4 {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -405,12 +445,26 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
-
+	wg := &sync.WaitGroup{}
+	rm := newRouteManager(wg, true, 10*time.Second)
+	stopCh := make(chan struct{})
+	go testNS.Do(func(netNS ns.NetNS) error {
+		defer GinkgoRecover()
+		wg.Add(1)
+		rm.run(stopCh)
+		return nil
+	})
+	defer func() {
+		close(stopCh)
+		wg.Wait()
+	}()
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs)
-		_, err = mgmtPorts[0].Create(nil, nil)
+		netdevName, rep := "pf0vf0", ""
+
+		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
+		_, err = mgmtPorts[0].Create(rm, nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		// check mgmt port MAC, mtu and link state
@@ -870,7 +924,6 @@ var _ = Describe("Management Port Operations", func() {
 					"--cluster-subnets=" + v4clusterCIDR,
 					"--k8s-service-cidr=" + v4serviceCIDR,
 					"--ovnkube-node-mode=" + types.NodeModeDPU,
-					"--ovnkube-node-mgmt-port-netdev=" + mgmtPortNetdev,
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})

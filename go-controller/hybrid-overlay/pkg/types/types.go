@@ -4,6 +4,15 @@ import (
 	kapi "k8s.io/api/core/v1"
 )
 
+type HybridInitState *uint32
+
+// these constants represent the initialization states of a linux node
+const (
+	InitialStartup = iota
+	DistributedRouterInitialized
+	PodsInitialized
+)
+
 const (
 	// HybridOverlayAnnotationBase holds the hybrid overlay annotation base
 	HybridOverlayAnnotationBase = "k8s.ovn.org/hybrid-overlay-"

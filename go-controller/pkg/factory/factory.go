@@ -35,6 +35,11 @@ import (
 	mnpinformerfactory "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions"
 	mnplister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta1"
 
+	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
+	egressservicescheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/scheme"
+	egressserviceinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions"
+	egressserviceinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions/egressservice/v1"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
@@ -60,13 +65,14 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory         informerfactory.SharedInformerFactory
-	eipFactory       egressipinformerfactory.SharedInformerFactory
-	efFactory        egressfirewallinformerfactory.SharedInformerFactory
-	cpipcFactory     ocpcloudnetworkinformerfactory.SharedInformerFactory
-	egressQoSFactory egressqosinformerfactory.SharedInformerFactory
-	mnpFactory       mnpinformerfactory.SharedInformerFactory
-	informers        map[reflect.Type]*informer
+	iFactory             informerfactory.SharedInformerFactory
+	eipFactory           egressipinformerfactory.SharedInformerFactory
+	efFactory            egressfirewallinformerfactory.SharedInformerFactory
+	cpipcFactory         ocpcloudnetworkinformerfactory.SharedInformerFactory
+	egressQoSFactory     egressqosinformerfactory.SharedInformerFactory
+	mnpFactory           mnpinformerfactory.SharedInformerFactory
+	egressServiceFactory egressserviceinformerfactory.SharedInformerFactory
+	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
 }
@@ -131,6 +137,7 @@ var (
 	EgressFwNodeType                      reflect.Type = reflect.TypeOf(&egressFwNode{})
 	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
 	EgressQoSType                         reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
+	EgressServiceType                     reflect.Type = reflect.TypeOf(&egressserviceapi.EgressService{})
 	AddressSetNamespaceAndPodSelectorType reflect.Type = reflect.TypeOf(&addressSetNamespaceAndPodSelector{})
 	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
 	AddressSetPodSelectorType             reflect.Type = reflect.TypeOf(&addressSetPodSelector{})
@@ -156,14 +163,15 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:         informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:       egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efFactory:        egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
-		cpipcFactory:     ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
-		egressQoSFactory: egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
-		mnpFactory:       mnpinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
-		informers:        make(map[reflect.Type]*informer),
-		stopChan:         make(chan struct{}),
+		iFactory:             informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
+		cpipcFactory:         ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
+		egressQoSFactory:     egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
+		mnpFactory:           mnpinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
+		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
+		informers:            make(map[reflect.Type]*informer),
+		stopChan:             make(chan struct{}),
 	}
 
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
@@ -173,6 +181,9 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 		return nil, err
 	}
 	if err := egressqosapi.AddToScheme(egressqosscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := egressserviceapi.AddToScheme(egressservicescheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -257,6 +268,12 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 			return nil, err
 		}
 	}
+	if config.OVNKubernetesFeature.EnableEgressService {
+		wf.informers[EgressServiceType], err = newInformer(EgressServiceType, wf.egressServiceFactory.K8s().V1().EgressServices().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		wf.informers[MultiNetworkPolicyType], err = newInformer(MultiNetworkPolicyType, wf.mnpFactory.K8sCniCncfIo().V1beta1().MultiNetworkPolicies().Informer())
@@ -318,6 +335,15 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableEgressService && wf.egressServiceFactory != nil {
+		wf.egressServiceFactory.Start(wf.stopChan)
+		for oType, synced := range wf.egressServiceFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -325,9 +351,14 @@ func (wf *WatchFactory) Start() error {
 // informers to save memory + bandwidth. It is to be used by the node-only process.
 func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:  informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		informers: make(map[reflect.Type]*informer),
-		stopChan:  make(chan struct{}),
+		iFactory:             informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
+		informers:            make(map[reflect.Type]*informer),
+		stopChan:             make(chan struct{}),
+	}
+
+	if err := egressserviceapi.AddToScheme(egressservicescheme.Scheme); err != nil {
+		return nil, err
 	}
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
@@ -396,6 +427,13 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	wf.informers[NodeType], err = newInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer())
 	if err != nil {
 		return nil, err
+	}
+
+	if config.OVNKubernetesFeature.EnableEgressService {
+		wf.informers[EgressServiceType], err = newInformer(EgressServiceType, wf.egressServiceFactory.K8s().V1().EgressServices().Informer())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return wf, nil
@@ -710,6 +748,10 @@ func (wf *WatchFactory) RemoveEgressQoSHandler(handler *Handler) {
 	wf.removeHandler(EgressQoSType, handler)
 }
 
+func (wf *WatchFactory) RemoveEgressServiceHandler(handler *Handler) {
+	wf.removeHandler(EgressServiceType, handler)
+}
+
 // AddNetworkAttachmentDefinitionHandler adds a handler function that will be executed on NetworkAttachmentDefinition object changes
 func (wf *WatchFactory) AddNetworkAttachmentDefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 	return wf.addHandler(NetworkAttachmentDefinitionType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
@@ -939,8 +981,16 @@ func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
 	return wf.informers[ServiceType].inf
 }
 
+func (wf *WatchFactory) EndpointSliceInformer() cache.SharedIndexInformer {
+	return wf.informers[EndpointSliceType].inf
+}
+
 func (wf *WatchFactory) EgressQoSInformer() egressqosinformer.EgressQoSInformer {
 	return wf.egressQoSFactory.K8s().V1().EgressQoSes()
+}
+
+func (wf *WatchFactory) EgressServiceInformer() egressserviceinformer.EgressServiceInformer {
+	return wf.egressServiceFactory.K8s().V1().EgressServices()
 }
 
 // withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the

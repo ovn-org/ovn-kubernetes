@@ -56,6 +56,10 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *sbdb.IGMPGroup:
 		return t.UUID
+	case *sbdb.Encap:
+		return t.UUID
+	case *sbdb.PortBinding:
+		return t.UUID
 	case *sbdb.MACBinding:
 		return t.UUID
 	case *sbdb.SBGlobal:
@@ -112,6 +116,10 @@ func setUUID(model model.Model, uuid string) {
 	case *sbdb.ChassisPrivate:
 		t.UUID = uuid
 	case *sbdb.IGMPGroup:
+		t.UUID = uuid
+	case *sbdb.Encap:
+		t.UUID = uuid
+	case *sbdb.PortBinding:
 		t.UUID = uuid
 	case *sbdb.MACBinding:
 		t.UUID = uuid
@@ -231,6 +239,19 @@ func copyIndexes(model model.Model) model.Model {
 		return &sbdb.IGMPGroup{
 			UUID: t.UUID,
 		}
+	case *sbdb.Encap:
+		return &sbdb.Encap{
+			UUID: t.UUID,
+			Type: t.Type,
+			IP:   t.IP,
+		}
+	case *sbdb.PortBinding:
+		return &sbdb.PortBinding{
+			UUID:        t.UUID,
+			LogicalPort: t.LogicalPort,
+			Datapath:    t.Datapath,
+			TunnelKey:   t.TunnelKey,
+		}
 	case *sbdb.MACBinding:
 		return &sbdb.MACBinding{
 			UUID:        t.UUID,
@@ -299,6 +320,10 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*sbdb.ChassisPrivate{}
 	case *sbdb.IGMPGroup:
 		return &[]*sbdb.IGMPGroup{}
+	case *sbdb.Encap:
+		return &[]*sbdb.Encap{}
+	case *sbdb.PortBinding:
+		return &[]*sbdb.PortBinding{}
 	case *sbdb.MACBinding:
 		return &[]*sbdb.MACBinding{}
 	case *nbdb.QoS:

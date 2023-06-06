@@ -251,8 +251,8 @@ func UnmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[strin
 
 // GetPodCIDRsWithFullMask returns the pod's IP addresses in a CIDR with FullMask format
 // Internally it calls GetPodIPsOfNetwork
-func GetPodCIDRsWithFullMask(pod *v1.Pod) ([]*net.IPNet, error) {
-	podIPs, err := GetPodIPsOfNetwork(pod, &DefaultNetInfo{})
+func GetPodCIDRsWithFullMask(pod *v1.Pod, nInfo NetInfo) ([]*net.IPNet, error) {
+	podIPs, err := GetPodIPsOfNetwork(pod, nInfo)
 	if err != nil {
 		return nil, err
 	}

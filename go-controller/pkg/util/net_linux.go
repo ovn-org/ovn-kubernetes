@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/j-keck/arping"
@@ -308,35 +309,6 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 	return nil
 }
 
-// LinkRoutesApply applies routes for given subnets.
-// For each subnet it searches for an existing route by destination(subnet) on link:
-// * if found and gwIP, mtu or src changed the route will be updated
-// * if not found it adds a new route
-func LinkRoutesApply(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int, src net.IP) error {
-	for _, subnet := range subnets {
-		route, err := LinkRouteGetFilteredRoute(filterRouteByDst(link, subnet))
-		if err != nil {
-			return err
-		}
-		if route != nil {
-			if route.MTU != mtu || !src.Equal(route.Src) || !gwIP.Equal(route.Gw) {
-				route.MTU = mtu
-				route.Src = src
-				route.Gw = gwIP
-
-				err = netLinkOps.RouteReplace(route)
-				if err != nil {
-					return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v",
-						subnet.String(), gwIP.String(), mtu, err)
-				}
-			}
-		} else {
-			return LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, mtu, src)
-		}
-	}
-	return nil
-}
-
 // LinkRouteGetFilteredRoute gets a route for the given route filter.
 // returns nil if route is not found
 func LinkRouteGetFilteredRoute(routeFilter *netlink.Route, filterMask uint64) (*netlink.Route, error) {
@@ -470,6 +442,7 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 }
 
 // GetNetworkInterfaceIPs returns the IP addresses for the network interface 'iface'.
+// We filter out addresses that are link local, reserved for internal use or added by keepalived.
 func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 	link, err := netLinkOps.LinkByName(iface)
 	if err != nil {
@@ -483,7 +456,7 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 
 	var ips []*net.IPNet
 	for _, addr := range addrs {
-		if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) {
+		if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) || IsAddressAddedByKeepAlived(addr) {
 			continue
 		}
 		// Ignore addresses marked as secondary or deprecated since they may
@@ -512,6 +485,13 @@ func IsAddressReservedForInternalUse(addr net.IP) bool {
 		return false
 	}
 	return subnet.Contains(addr)
+}
+
+// IsAddressAddedByKeepAlived returns true if the input interface address obtained
+// through netlink has a label that ends with ":vip", which is how keepalived
+// marks the IP addresses it adds (https://github.com/openshift/machine-config-operator/pull/3683)
+func IsAddressAddedByKeepAlived(addr netlink.Addr) bool {
+	return strings.HasSuffix(addr.Label, ":vip")
 }
 
 // GetIPv6OnSubnet when given an IPv6 address with a 128 prefix for an interface,
@@ -569,14 +549,6 @@ func GetIFNameAndMTUForAddress(ifAddress net.IP) (string, int, error) {
 	}
 
 	return "", 0, fmt.Errorf("couldn't not find a link associated with the given OVN Encap IP (%s)", ifAddress)
-}
-
-func filterRouteByDst(link netlink.Link, subnet *net.IPNet) (*netlink.Route, uint64) {
-	return &netlink.Route{
-			Dst:       subnet,
-			LinkIndex: link.Attrs().Index,
-		},
-		netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF
 }
 
 func filterRouteByDstAndGw(link netlink.Link, subnet *net.IPNet, gw net.IP) (*netlink.Route, uint64) {

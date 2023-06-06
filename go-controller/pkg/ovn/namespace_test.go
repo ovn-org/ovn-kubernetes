@@ -12,7 +12,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -159,6 +158,11 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 						namespaceT,
 					},
 				},
+				&v1.NodeList{
+					Items: []v1.Node{
+						*newNode("node1", "192.168.126.202/24"),
+					},
+				},
 				&v1.PodList{
 					Items: []v1.Pod{
 						*tPod,
@@ -220,7 +224,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				DnatSnatIP:           "169.254.0.1",
 			}
 			// create a test node and annotate it with host subnet
-			testNode := node1.k8sNode()
+			testNode := node1.k8sNode("2")
 
 			hostNetworkNamespace := "test-host-network-ns"
 			config.Kubernetes.HostNetworkNamespace = hostNetworkNamespace
@@ -301,10 +305,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			// be in the addressset yet, depending on if the host subnets annotation of the node exists in the informer cache. The addressset
 			// can only be deterministic when WatchNamespaces() handles this host network namespace.
 
-			fakeOvn.controller.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(fakeOvn.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
-			_, err = fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(ovntypes.OVNClusterRouter)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gwLRPIPs, err := fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(node1.Name)
+			gwLRPIPs, err := util.ParseNodeGatewayRouterLRPAddrs(&testNode)
 			gomega.Expect(len(gwLRPIPs) != 0).To(gomega.BeTrue())
 
 			err = fakeOvn.controller.WatchNamespaces()

@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +26,7 @@ import (
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -485,12 +488,61 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 	return nil
 }
 
+// restartOVNKubeNodePodsInParallel restarts multiple ovnkube-node pods in parallel. See `restartOVNKubeNodePod`
+func restartOVNKubeNodePodsInParallel(clientset kubernetes.Interface, namespace string, nodeNames ...string) error {
+	framework.Logf("restarting ovnkube-node for %v", nodeNames)
+
+	restartFuncs := make([]func() error, 0, len(nodeNames))
+	for _, n := range nodeNames {
+		nodeName := n
+		restartFuncs = append(restartFuncs, func() error {
+			return restartOVNKubeNodePod(clientset, ovnNamespace, nodeName)
+		})
+	}
+
+	return utilerrors.AggregateGoroutines(restartFuncs...)
+}
+
+// getOVNKubePodLogsFiltered retrieves logs from ovnkube-node pods and filters logs lines according to filteringRegexp
+func getOVNKubePodLogsFiltered(clientset kubernetes.Interface, namespace, nodeName, filteringRegexp string) (string, error) {
+	ovnKubeNodePods, err := clientset.CoreV1().Pods(ovnNamespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: "name=ovnkube-node",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node pods: %w", err)
+	}
+
+	logs, err := e2epod.GetPodLogs(clientset, ovnNamespace, ovnKubeNodePods.Items[0].Name, "ovnkube-node")
+	if err != nil {
+		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node [%s/%s] logs: %w",
+			ovnNamespace, ovnKubeNodePods.Items[0].Name, err)
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(logs))
+	filteredLogs := ""
+	re := regexp.MustCompile(filteringRegexp)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if re.MatchString(line) {
+			filteredLogs += line + "\n"
+		}
+	}
+
+	err = scanner.Err()
+	if err != nil {
+		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while scanning ovnkube-node logs: %w", err)
+	}
+
+	return filteredLogs, nil
+}
+
 func findOvnKubeMasterNode() (string, error) {
 
-	ovnkubeMasterNode, err := framework.RunKubectl(ovnNs, "get", "leases", "ovn-kubernetes-master",
+	ovnkubeMasterNode, err := framework.RunKubectl(ovnNs, "get", "leases", "ovn-kubernetes-master-global",
 		"-o", "jsonpath='{.spec.holderIdentity}'")
 
-	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (ovn-kubernetes-master)"+
+	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (ovn-kubernetes-master-global)"+
 		"from %s %v", ovnNs, err))
 
 	framework.Logf(fmt.Sprintf("master instance of ovnkube-master is running on node %s", ovnkubeMasterNode))
@@ -511,12 +563,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		// Since this is not really a test of kubernetes in any way, we
 		// leave it as a pre-test assertion, rather than a Ginko test.
 		ginkgo.By("Executing a successful http request from the external internet")
-		resp, err := http.Get("http://google.com")
+		_, err := http.Get("http://google.com")
 		if err != nil {
 			framework.Failf("Unable to connect/talk to the internet: %v", err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			framework.Failf("Unexpected error code, expected 200, got, %v (%v)", resp.StatusCode, resp)
 		}
 
 		masterPods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.Background(), metav1.ListOptions{
@@ -2269,62 +2318,6 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 						}
 					}
 					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
-				}
-			}
-		})
-
-		// This test verifies a NodePort service is reachable on manually added IP addresses.
-		ginkgo.It("for NodePort services", func() {
-			isIPv6Cluster := IsIPv6Cluster(f.ClientSet)
-			serviceName := "nodeportservice"
-
-			ginkgo.By("Creating NodePort service")
-			svcSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
-			svcSpec, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), svcSpec, metav1.CreateOptions{})
-			framework.ExpectNoError(err)
-
-			ginkgo.By("Waiting for the endpoints to pop up")
-			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
-			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
-
-			tcpNodePort, udpNodePort := nodePortsFromService(svcSpec)
-
-			toCheckNodesAddresses := sets.NewString()
-			for _, node := range nodes.Items {
-
-				addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-addresses"]
-				gomega.Expect(ok).To(gomega.BeTrue())
-
-				var addrs []string
-				err := json.Unmarshal([]byte(addrAnnotation), &addrs)
-				framework.ExpectNoError(err, "failed to parse node[%s] host-address annotation[%s]", node.Name, addrAnnotation)
-
-				toCheckNodesAddresses.Insert(addrs...)
-			}
-
-			// Ensure newly added IP address are in the host-addresses annotation
-			for _, newAddress := range newNodeAddresses {
-				if !toCheckNodesAddresses.Has(newAddress) {
-					toCheckNodesAddresses.Insert(newAddress)
-				}
-			}
-
-			for _, protocol := range []string{"http", "udp"} {
-				toCurlPort := int32(tcpNodePort)
-				if protocol == "udp" {
-					toCurlPort = int32(udpNodePort)
-				}
-
-				for _, address := range toCheckNodesAddresses.List() {
-					if !isIPv6Cluster && utilnet.IsIPv6String(address) {
-						continue
-					}
-					ginkgo.By("Hitting the service on " + address + " via " + protocol)
-					gomega.Eventually(func() bool {
-						epHostname := pokeEndpoint("", clientContainerName, protocol, address, toCurlPort, "hostname")
-						// Expect to receive a valid hostname
-						return nodesHostnames.Has(epHostname)
-					}, "20s", "1s").Should(gomega.BeTrue())
 				}
 			}
 		})

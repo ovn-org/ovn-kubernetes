@@ -92,8 +92,9 @@ func NewNode(
 ) (*Node, error) {
 
 	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
+	podLister := listers.NewPodLister(podInformer.GetIndexer())
 
-	controller, err := newNodeController(kube, nodeName, nodeLister)
+	controller, err := newNodeController(kube, nodeName, nodeLister, podLister)
 	if err != nil {
 		return nil, err
 	}
