@@ -19,7 +19,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-var ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
+var (
+	ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
+	UnsupportedIPAMKeyError     = errors.New("IPAM key is not supported. Use OVN-K provided IPAM via the `subnets` attribute")
+)
 
 // BasicNetInfo is interface which holds basic network information
 type BasicNetInfo interface {
@@ -406,16 +409,16 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 	if err != nil {
 		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
 	}
-	// skip non-OVN NAD
-	if netconf.Type != "ovn-k8s-cni-overlay" {
-		return nil, ErrorAttachDefNotOvnManaged
-	}
 
 	if netconf.Name != types.DefaultNetworkName {
 		nadName := GetNADName(netattachdef.Namespace, netattachdef.Name)
 		if netconf.NADName != nadName {
 			return nil, fmt.Errorf("net-attach-def name (%s) is inconsistent with config (%s)", nadName, netconf.NADName)
 		}
+	}
+
+	if netconf.IPAM.Type != "" {
+		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, UnsupportedIPAMKeyError)
 	}
 
 	return netconf, nil
