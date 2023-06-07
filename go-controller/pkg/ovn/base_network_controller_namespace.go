@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -386,6 +387,14 @@ func (bsnc *BaseNetworkController) removeRemoteZonePodFromNamespaceAddressSet(po
 	podDesc := fmt.Sprintf("pod %s/%s/%s", bsnc.GetNetworkName(), pod.Namespace, pod.Name)
 	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, bsnc.NetInfo)
 	if err != nil {
+		// maybe the pod is not scheduled yet or addLSP has not happened yet, so it doesn't have IPs.
+		// let us ignore deletion failures for podIPs not found because
+		// there is nothing more we can do here.
+		if errors.Is(err, util.ErrNoPodIPFound) {
+			klog.Errorf("Unable to remove remote zone pod's %s/%s IP address from the "+
+				"namespace address-set, err: %v", pod.Namespace, pod.Name, err)
+			return nil
+		}
 		return fmt.Errorf("failed to get pod ips for the pod  %s/%s : %w", pod.Namespace, pod.Name, err)
 	}
 
