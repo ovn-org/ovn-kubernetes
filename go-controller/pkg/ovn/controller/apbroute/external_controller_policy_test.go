@@ -44,7 +44,7 @@ var (
 	stopChan           chan (struct{})
 	initialDB          libovsdbtest.TestSetup
 	nbClient           libovsdbclient.Client
-	nbsbCleanup        *libovsdbtest.Cleanup
+	nbsbCleanup        *libovsdbtest.Context
 	fakeRouteClient    *adminpolicybasedrouteclient.Clientset
 	fakeClient         *fake.Clientset
 	mgr                *externalPolicyManager

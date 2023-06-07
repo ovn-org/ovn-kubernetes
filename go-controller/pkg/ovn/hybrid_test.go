@@ -144,7 +144,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 		stopChan        chan struct{}
 		wg              *sync.WaitGroup
 		fexec           *ovntest.FakeExec
-		libovsdbCleanup *libovsdbtest.Cleanup
+		libovsdbCleanup *libovsdbtest.Context
 
 		f *factory.WatchFactory
 	)
