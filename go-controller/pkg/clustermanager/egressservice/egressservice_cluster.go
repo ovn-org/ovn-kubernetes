@@ -7,11 +7,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/listers/egressservice/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -28,6 +30,17 @@ import (
 const (
 	maxRetries           = 10
 	egressSVCLabelPrefix = "egress-service.k8s.ovn.org"
+)
+
+// serviceHost represents "reserved" hosts, that is when set on an EgressService they have a special meaning.
+type serviceHost string
+
+const (
+	// noHost is the key set on services with no allocated node
+	noHost serviceHost = types.EgressServiceNoHost
+
+	// noSNATHost is the key set on services with sourceIPBy=Network
+	noSNATHost serviceHost = types.EgressServiceNoSNATHost
 )
 
 // Controller represents the global egressservice controller
@@ -241,6 +254,11 @@ func (c *Controller) repair() error {
 			klog.Errorf("Failed to read EgressService key: %v", err)
 			continue
 		}
+
+		if es.Spec.SourceIPBy == egressserviceapi.SourceIPNetwork {
+			continue
+		}
+
 		svc := allServices[key]
 		if svc == nil {
 			continue
@@ -317,11 +335,22 @@ func (c *Controller) repair() error {
 
 	errorList := []error{}
 
-	// remove stale host entries from EgressServices without a valid service
+	// Remove stale host entries from EgressServices without a valid service,
+	// set host="ALL" for "SourceIPBy=Network" EgressServices.
 	for _, es := range egressServices {
 		key, err := cache.MetaNamespaceKeyFunc(es)
 		if err != nil {
 			klog.Errorf("Failed to read EgressService key: %v", err)
+			continue
+		}
+		if es.Spec.SourceIPBy == egressserviceapi.SourceIPNetwork {
+			if es.Status.Host == string(noSNATHost) {
+				continue
+			}
+			err := c.setEgressServiceHost(es.Namespace, es.Name, string(noSNATHost))
+			if err != nil {
+				klog.Errorf("Failed to set %s host entry on EgressService %s, err: %v", noSNATHost, key, err)
+			}
 			continue
 		}
 		_, found := c.services[key]
@@ -464,7 +493,7 @@ func (c *Controller) syncEgressService(key string) error {
 		}
 		// The service is configured but does no longer have the egress service resource,
 		// meaning we should clear all of its resources.
-		return c.clearServiceResourcesAndRequeue(key, state)
+		return c.clearServiceResourcesAndRequeue(key, state, noHost)
 	}
 
 	if svc == nil {
@@ -476,15 +505,35 @@ func (c *Controller) syncEgressService(key string) error {
 		}
 		// The service was deleted and was an egress service.
 		// We delete all of its relevant resources to avoid leaving stale configuration.
-		return c.clearServiceResourcesAndRequeue(key, state)
+		return c.clearServiceResourcesAndRequeue(key, state, noHost)
 	}
 
-	// At this point both the EgressService resource and the Service != nil
+	// At this point the Service has at least one ingress IP and its EgressService != nil.
+	// We check if it its sourceIPBy != LoadBalancerIP to determine if we need to clean its resources,
+	// set host=ALL and stop processing or not.
+	if es.Spec.SourceIPBy == egressserviceapi.SourceIPNetwork {
+		hostToSet := noSNATHost
+		if config.Gateway.Mode == config.GatewayModeShared {
+			klog.Errorf("Using SourceIPBy=Network is not supported on Shared gateway mode. EgressService: %s/%s", namespace, name)
+			hostToSet = noHost
+		}
+		if state == nil {
+			// The service does not need SNAT LRPs and was not an allocated egress service.
+			// We delete it from the unallocated service cache just in case and set its host
+			// to "ALL".
+			delete(c.unallocatedServices, key)
+			return c.setEgressServiceHost(namespace, name, string(hostToSet))
+		}
+
+		return c.clearServiceResourcesAndRequeue(key, state, hostToSet)
+	}
+
+	// At this point both the EgressService sourceIPBy=LBIP and the Service != nil
 
 	if state != nil && state.stale {
 		// The service is marked stale because something failed when trying to delete it.
 		// We try to delete it again before doing anything else.
-		return c.clearServiceResourcesAndRequeue(key, state)
+		return c.clearServiceResourcesAndRequeue(key, state, noHost)
 	}
 
 	if state == nil && len(svc.Status.LoadBalancer.Ingress) == 0 {
@@ -498,7 +547,7 @@ func (c *Controller) syncEgressService(key string) error {
 	if state != nil && len(svc.Status.LoadBalancer.Ingress) == 0 {
 		// The service has no ingress ips so it is not considered valid anymore.
 		klog.V(4).Infof("EgressService %s/%s does not have an ingress ip anymore, removing its existing configuration", namespace, name)
-		return c.clearServiceResourcesAndRequeue(key, state)
+		return c.clearServiceResourcesAndRequeue(key, state, noHost)
 	}
 
 	nodeSelector := es.Spec.NodeSelector
@@ -532,7 +581,7 @@ func (c *Controller) syncEgressService(key string) error {
 		}
 		klog.V(4).Infof("EgressService %s/%s does not have any endpoints, removing its existing configuration", namespace, name)
 		c.unallocatedServices[key] = selector
-		return c.clearServiceResourcesAndRequeue(key, state)
+		return c.clearServiceResourcesAndRequeue(key, state, noHost)
 	}
 
 	if state == nil {
@@ -561,7 +610,7 @@ func (c *Controller) syncEgressService(key string) error {
 		// The node no longer matches the selector.
 		// We clear its configured resources and requeue it to attempt
 		// selecting a new node for it.
-		return c.clearServiceResourcesAndRequeue(key, state)
+		return c.clearServiceResourcesAndRequeue(key, state, noHost)
 	}
 
 	// Node allocation is done - the last step is to label the node and set the status
@@ -576,12 +625,12 @@ func (c *Controller) syncEgressService(key string) error {
 }
 
 // Removes the status of an egress service.
-// This includes removing the host status value and
-// the label from the node and updating the caches.
+// This includes updating the status according to the given host,
+// removing the label from the node and updating the caches.
 // This also requeues the service after cleaning up to be sure we are not
 // missing an event after marking it as stale that should be handled.
 // This should only be called with the controller locked.
-func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcState) error {
+func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcState, host serviceHost) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
@@ -589,7 +638,7 @@ func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcSt
 
 	svcState.stale = true
 
-	if err := c.setEgressServiceHost(namespace, name, ""); err != nil {
+	if err := c.setEgressServiceHost(namespace, name, string(host)); err != nil {
 		return err
 	}
 

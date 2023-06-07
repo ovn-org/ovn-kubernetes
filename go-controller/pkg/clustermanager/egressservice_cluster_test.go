@@ -19,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
+var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 	var (
 		app    *cli.App
 		fakeCM *FakeClusterManager
@@ -69,11 +69,11 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 
 				node1.Labels = map[string]string{
 					"unrelated-label": "",
-					fmt.Sprintf("%s/deleted-service1", egressSVCLabelPrefix): "",
-					fmt.Sprintf("%s/deleted-service2", egressSVCLabelPrefix): "",
-					fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix):      "",
-					fmt.Sprintf("%s/testns-svc2", egressSVCLabelPrefix):      "",
-				}
+					fmt.Sprintf("%s/deleted-service1", egressSVCLabelPrefix):    "",
+					fmt.Sprintf("%s/deleted-service2", egressSVCLabelPrefix):    "",
+					fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix):         "",
+					fmt.Sprintf("%s/testns-svc2", egressSVCLabelPrefix):         "",
+					fmt.Sprintf("%s/srcip-not-by-lb-svc", egressSVCLabelPrefix): ""}
 
 				node2.Labels = map[string]string{
 					"unrelated-label": "",
@@ -88,6 +88,9 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Name:      "svc1",
 						Namespace: "testns",
 					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
+					},
 					Status: egressserviceapi.EgressServiceStatus{
 						Host: node1Name,
 					},
@@ -99,11 +102,28 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Name:      "svc2",
 						Namespace: "testns",
 					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
+					},
 					Status: egressserviceapi.EgressServiceStatus{
 						Host: node2Name,
 					},
 				}
 				svc2 := lbSvcFor("testns", "svc2")
+
+				srcIPNotByLBEgressService := egressserviceapi.EgressService{ // srcIPBy=Network
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "srcip-not-by-lb-svc",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPNetwork,
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: node1Name,
+					},
+				}
+				srcIPNotByLBService := lbSvcFor("testns", "srcip-not-by-lb-svc")
 
 				svc1EpSlice := discovery.EndpointSlice{
 					ObjectMeta: metav1.ObjectMeta{
@@ -137,6 +157,22 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 					},
 				}
 
+				srcIPNotByLBEpSlice := discovery.EndpointSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "srcip-not-by-lb-epslice",
+						Namespace: "testns",
+						Labels: map[string]string{
+							discovery.LabelServiceName: "srcip-not-by-lb-svc",
+						},
+					},
+					Endpoints: []discovery.Endpoint{
+						{
+							Addresses: []string{"10.128.1.27"},
+							NodeName:  &node1.Name,
+						},
+					},
+				}
+
 				objs := []runtime.Object{
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -153,18 +189,21 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Items: []v1.Service{
 							svc1,
 							svc2,
+							srcIPNotByLBService,
 						},
 					},
 					&discovery.EndpointSliceList{
 						Items: []discovery.EndpointSlice{
 							svc1EpSlice,
 							svc2EpSlice,
+							srcIPNotByLBEpSlice,
 						},
 					},
 					&egressserviceapi.EgressServiceList{
 						Items: []egressserviceapi.EgressService{
 							esvc1,
 							esvc2,
+							srcIPNotByLBEgressService,
 						},
 					},
 				}
@@ -224,8 +263,41 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Name:      "svc1",
 						Namespace: "testns",
 					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
+					},
 					Status: egressserviceapi.EgressServiceStatus{
 						Host: node1Name,
+					},
+				}
+
+				esvc2 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc2",
+						Namespace: "testns",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPNetwork,
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: node1Name, // should be changed to ALL
+					},
+				}
+				svc2 := lbSvcFor("testns", "svc2")
+
+				svc2EpSlice := discovery.EndpointSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc2-epslice",
+						Namespace: "testns",
+						Labels: map[string]string{
+							discovery.LabelServiceName: "svc2",
+						},
+					},
+					Endpoints: []discovery.Endpoint{
+						{
+							Addresses: []string{"10.128.2.5"},
+							NodeName:  &node1.Name,
+						},
 					},
 				}
 
@@ -240,9 +312,20 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 							*node1,
 						},
 					},
+					&v1.ServiceList{
+						Items: []v1.Service{
+							svc2,
+						},
+					},
+					&discovery.EndpointSliceList{
+						Items: []discovery.EndpointSlice{
+							svc2EpSlice,
+						},
+					},
 					&egressserviceapi.EgressServiceList{
 						Items: []egressserviceapi.EgressService{
 							esvc1,
+							esvc2,
 						},
 					},
 				}
@@ -250,16 +333,24 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 				fakeCM.start(objs...)
 
 				gomega.Eventually(func() error {
-					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc1.Name, metav1.GetOptions{})
+					es1, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
 					}
 
-					if es.Status.Host != "" {
-						return fmt.Errorf("expected svc1's host value %s to be empty", es.Status.Host)
+					if es1.Status.Host != "" {
+						return fmt.Errorf("expected svc1's host value %s to be empty", es1.Status.Host)
 					}
 
-					return nil
+					es2, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), esvc2.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if es2.Status.Host != "ALL" {
+						return fmt.Errorf("expected svc2's host value %s to be ALL", es2.Status.Host)
+					}
+
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
@@ -287,6 +378,7 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Namespace: "testns",
 					},
 					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
 						NodeSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"firstName": "Albus",
@@ -372,11 +464,29 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
+				ginkgo.By("updating the service's config to sourceIPBy=Network its status will be updated")
+				esvc1.Spec.SourceIPBy = egressserviceapi.SourceIPNetwork
+				esvc1.ResourceVersion = "2"
+				_, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Update(context.TODO(), &esvc1, metav1.UpdateOptions{})
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Eventually(func() error {
+					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if es.Status.Host != "ALL" {
+						return fmt.Errorf("expected svc1's host value %s to be ALL", es.Status.Host)
+					}
+
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
+
 				ginkgo.By("creating a second service without any EgressService")
 				s2 := lbSvcFor("testns", "svc2")
 				svc2 := &s2
 
-				svc2, err := fakeCM.fakeClient.KubeClient.CoreV1().Services("testns").Create(context.TODO(), svc2, metav1.CreateOptions{})
+				svc2, err = fakeCM.fakeClient.KubeClient.CoreV1().Services("testns").Create(context.TODO(), svc2, metav1.CreateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 				ginkgo.By("creating an EgressService for the second service with a config that matches the second node its status will be updated")
@@ -386,6 +496,7 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Namespace: "testns",
 					},
 					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
 						NodeSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"firstName": "Severus",
@@ -452,6 +563,7 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Namespace: "testns",
 					},
 					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
 						NodeSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"animal": "FlyingBison",
@@ -631,6 +743,7 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Namespace: "testns",
 					},
 					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
 						NodeSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"a:b": "c&",
@@ -733,6 +846,7 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Namespace: "testns",
 					},
 					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
 						NodeSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"square": "pants",
@@ -922,6 +1036,7 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Namespace: "testns",
 					},
 					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
 						NodeSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"home": "pineapple",
@@ -937,6 +1052,7 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Namespace: "testns",
 					},
 					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
 						NodeSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"home": "moai",
@@ -1201,6 +1317,7 @@ var _ = ginkgo.Describe("Cluster manager egress service operations", func() {
 						Namespace: "testns",
 					},
 					Spec: egressserviceapi.EgressServiceSpec{
+						SourceIPBy: egressserviceapi.SourceIPLoadBalancer,
 						NodeSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"kubernetes.io/hostname": node1.Name,

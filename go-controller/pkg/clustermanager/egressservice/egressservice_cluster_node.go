@@ -184,7 +184,7 @@ func (c *Controller) syncNode(key string) error {
 			// Services can't be assigned to a node while it is in draining status.
 			state.draining = true
 			for svcKey, svcState := range state.allocations {
-				if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
+				if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
 					return err
 				}
 			}
@@ -217,7 +217,7 @@ func (c *Controller) syncNode(key string) error {
 		// because we don't care about its reachability status until it becomes ready.
 		state.draining = true
 		for svcKey, svcState := range state.allocations {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
 				return err
 			}
 		}
@@ -232,7 +232,7 @@ func (c *Controller) syncNode(key string) error {
 		// When it is fully drained and reachable again it will be requeued.
 		state.draining = true
 		for svcKey, svcState := range state.allocations {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
 				return err
 			}
 		}
@@ -245,7 +245,7 @@ func (c *Controller) syncNode(key string) error {
 	// If a service's selector no longer matches this node we attempt to reallocate it.
 	for svcKey, svcState := range state.allocations {
 		if !svcState.selector.Matches(labels.Set(n.Labels)) || svcState.stale {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
 				return err
 			}
 		}
