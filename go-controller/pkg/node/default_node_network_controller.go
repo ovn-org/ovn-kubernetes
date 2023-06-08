@@ -1125,23 +1125,23 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 		return fmt.Errorf("unable to get pods from informer: %v", err)
 	}
 
-	var errors []error
+	var errs []error
 	for _, pod := range pods {
 		pod := pod
 		podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
-		if err != nil {
-			errors = append(errors, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
+		if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
+			errs = append(errs, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
 		}
 		for _, podIP := range podIPs { // flush conntrack only for UDP
 			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
 			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
 			err := util.DeleteConntrack(podIP.String(), 0, kapi.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
 			if err != nil {
-				errors = append(errors, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP.String(), err))
+				errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP.String(), err))
 			}
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return apierrors.NewAggregate(errs)
 }
 
 func (nc *DefaultNodeNetworkController) WatchNamespaces() error {

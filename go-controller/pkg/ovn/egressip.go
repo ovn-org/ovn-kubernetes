@@ -713,6 +713,9 @@ func (oc *DefaultNetworkController) deletePodEgressIPAssignments(name string, st
 		return nil
 	}
 	podIPs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+	// FIXME(trozet): this error can be ignored if ErrNoPodIPFound, but unit test:
+	// egressIP pod recreate with same name (stateful-sets) shouldn't use stale logicalPortCache entries AND stale podAssignment cache entries
+	// heavily relies on this error happening.
 	if err != nil {
 		return err
 	}

@@ -263,8 +263,7 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod, nInfo NetInfo) ([]*net.IPNet, error) {
 		_, ipnet, err := net.ParseCIDR(podIPStr + mask)
 		if err != nil {
 			// this should not happen;
-			klog.Warningf("Failed to parse pod IP %v err: %v", podIP, err)
-			continue
+			return nil, fmt.Errorf("failed to parse pod IP %v err: %w", podIP, err)
 		}
 		ips = append(ips, ipnet)
 	}
