@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -41,7 +40,7 @@ func ovnControllerReadiness(target string) error {
 
 	// Ensure that the ovs-vswitchd and ovsdb-server processes that ovn-controller
 	// dependent on are running and you need to use ovs-appctl via the unix control path
-	ovsdbPid, err := ioutil.ReadFile("/var/run/openvswitch/ovsdb-server.pid")
+	ovsdbPid, err := os.ReadFile("/var/run/openvswitch/ovsdb-server.pid")
 	if err != nil {
 		return fmt.Errorf("failed to get pid for osvdb-server process: %v", err)
 	}
@@ -51,7 +50,7 @@ func ovnControllerReadiness(target string) error {
 		return fmt.Errorf("failed retrieving list of databases from ovsdb-server: %v", err)
 	}
 
-	ovsPid, err := ioutil.ReadFile("/var/run/openvswitch/ovs-vswitchd.pid")
+	ovsPid, err := os.ReadFile("/var/run/openvswitch/ovs-vswitchd.pid")
 	if err != nil {
 		return fmt.Errorf("failed to get pid for ovs-vswitchd process: %v", err)
 	}

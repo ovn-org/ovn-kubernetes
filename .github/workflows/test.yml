@@ -45,7 +45,7 @@ jobs:
     - name: Verify
       uses: golangci/golangci-lint-action@v3
       with:
-        version: v1.46
+        version: v1.52
         working-directory: go-controller
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
         skip-go-installation: true
