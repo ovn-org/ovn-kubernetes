@@ -901,6 +901,9 @@ install_ovn_multiple_nodes_zones() {
   n=1
   for node in $KIND_NODES; do
     zone="zone-${zone_idx}"
+    if [ "${zone}" == "zone-1" ]; then
+      zone="global"
+    fi
     kubectl label node "${node}" k8s.ovn.org/zone-name=${zone} --overwrite
     if [ "${n}" == "1" ]; then
       # Mark 1st node of each zone as zone control plane
