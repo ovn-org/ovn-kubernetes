@@ -14,7 +14,6 @@ var (
 	// Default comparable options to bypass comparing the mux object and define a less function to sort the slices.
 	cmpOpts = []cmp.Option{
 		cmpopts.IgnoreFields(syncSet{}, "mux"),
-		cmpopts.IgnoreFields(namespaceInfo{}, "markForDelete"),
 		cmpopts.SortSlices(func(x, y interface{}) bool {
 			s1, ok1 := x.(*gatewayInfo)
 			s2, ok2 := y.(*gatewayInfo)

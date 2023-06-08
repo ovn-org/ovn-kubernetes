@@ -204,7 +204,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 					Policies:       sets.New(dynamicPolicy.Name),
 					StaticGateways: gatewayInfoList{},
 					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: "default", Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
+						{Namespace: pod1.Namespace, Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
 					},
 				}))
 			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(Equal(
@@ -212,12 +212,12 @@ var _ = Describe("OVN External Gateway policy", func() {
 					Policies:       sets.New(dynamicPolicyTest2.Name),
 					StaticGateways: gatewayInfoList{},
 					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: "default", Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
+						{Namespace: pod1.Namespace, Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
 					},
 				}))
 			deletePod(pod1, fakeClient)
 			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(2))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(Equal(
+			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5, 1).Should(Equal(
 				&namespaceInfo{
 					Policies:        sets.New(dynamicPolicy.Name),
 					StaticGateways:  gatewayInfoList{},
@@ -344,8 +344,8 @@ var _ = Describe("OVN External Gateway policy", func() {
 					Policies:       sets.New(dynamicPolicy.Name),
 					StaticGateways: gatewayInfoList{},
 					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: "default", Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
-						{Namespace: "default", Name: pod3.Name}: newGatewayInfo(sets.New(pod3.Status.PodIPs[0].IP), false),
+						{Namespace: pod2.Namespace, Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
+						{Namespace: pod3.Namespace, Name: pod3.Name}: newGatewayInfo(sets.New(pod3.Status.PodIPs[0].IP), false),
 					},
 				}))
 			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(Equal(
@@ -360,7 +360,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 					Policies:       sets.New(dynamicPolicy.Name),
 					StaticGateways: gatewayInfoList{},
 					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: "default", Name: pod3.Name}: newGatewayInfo(sets.New(pod3.Status.PodIPs[0].IP), false),
+						{Namespace: pod3.Namespace, Name: pod3.Name}: newGatewayInfo(sets.New(pod3.Status.PodIPs[0].IP), false),
 					},
 				}))
 			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(Equal(
@@ -368,7 +368,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 					Policies:       sets.New(dynamicPolicyForTest2Only.Name),
 					StaticGateways: gatewayInfoList{},
 					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: "default", Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
+						{Namespace: pod2.Namespace, Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
 					},
 				}))
 		})
@@ -386,7 +386,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 					},
 				}))
 			updatePodLabels(pod1, map[string]string{}, fakeClient)
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5, 1).Should(Equal(
+			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(Equal(
 				&namespaceInfo{
 					Policies:       sets.New(dynamicPolicy.Name),
 					StaticGateways: gatewayInfoList{},

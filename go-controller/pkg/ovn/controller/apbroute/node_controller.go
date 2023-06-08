@@ -8,7 +8,6 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -265,66 +264,26 @@ func (c *ExternalGatewayNodeController) processNextPolicyWorkItem(wg *sync.WaitG
 	wg.Add(1)
 	defer wg.Done()
 
-	obj, shutdown := c.routeQueue.Get()
-
+	key, shutdown := c.routeQueue.Get()
 	if shutdown {
 		return false
 	}
+	defer c.routeQueue.Done(key)
 
-	defer c.routeQueue.Done(obj)
-
-	item := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
-	klog.Infof("Processing policy %s", item.Name)
-	err := c.syncRoutePolicy(item)
+	item := key.(string)
+	klog.Infof("Processing policy %s", key)
+	_, err := c.mgr.syncRoutePolicy(key.(string), c.routeQueue)
 	if err != nil {
 		if c.routeQueue.NumRequeues(item) < maxRetries {
-			klog.V(2).InfoS("Error found while processing policy: %v", err.Error())
+			klog.V(2).InfoS("Error found while processing policy: %s, error: %v", key, err.Error())
 			c.routeQueue.AddRateLimited(item)
 			return true
 		}
-		klog.Warningf("Dropping policy %q out of the queue: %v", item.Name, err)
+		klog.Warningf("Dropping policy %q out of the queue: %v", key, err)
 		utilruntime.HandleError(err)
 	}
-	c.routeQueue.Forget(obj)
+	c.routeQueue.Forget(key)
 	return true
-}
-
-func (c *ExternalGatewayNodeController) syncRoutePolicy(routePolicy *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) error {
-	_, err := c.routeLister.Get(routePolicy.Name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	if apierrors.IsNotFound(err) {
-		// DELETE use case
-		klog.Infof("Deleting policy %s", routePolicy.Name)
-		err := c.mgr.processDeletePolicy(routePolicy.Name)
-		if err != nil {
-			return fmt.Errorf("failed to delete Admin Policy Based External Route %s:%w", routePolicy.Name, err)
-		}
-		klog.Infof("Policy %s deleted", routePolicy.Name)
-		return nil
-	}
-	currentPolicy, found, markedForDeletion := c.mgr.getRoutePolicyFromCache(routePolicy.Name)
-	if markedForDeletion {
-		klog.Warningf("Attempting to add or update route policy %s when it has been marked for deletion. Skipping...", routePolicy.Name)
-		return nil
-	}
-	if !found {
-		// ADD use case
-		klog.Infof("Adding policy %s", routePolicy.Name)
-		_, err := c.mgr.processAddPolicy(routePolicy)
-		if err != nil {
-			return fmt.Errorf("failed to create Admin Policy Based External Route %s:%w", routePolicy.Name, err)
-		}
-		return nil
-	}
-	// UPDATE use case
-	klog.Infof("Updating policy %s", routePolicy.Name)
-	_, err = c.mgr.processUpdatePolicy(&currentPolicy, routePolicy)
-	if err != nil {
-		return fmt.Errorf("failed to update Admin Policy Based External Route %s:%w", routePolicy.Name, err)
-	}
-	return nil
 }
 
 func (c *ExternalGatewayNodeController) onPolicyAdd(obj interface{}) {
@@ -360,7 +319,6 @@ func (c *ExternalGatewayNodeController) onPolicyUpdate(oldObj, newObj interface{
 		!newRoutePolicy.GetDeletionTimestamp().IsZero() {
 		return
 	}
-
 	c.routeQueue.Add(newObj)
 }
 
@@ -394,14 +352,12 @@ func (c *ExternalGatewayNodeController) processNextNamespaceWorkItem(wg *sync.Wa
 	defer wg.Done()
 
 	obj, shutdown := c.namespaceQueue.Get()
-
 	if shutdown {
 		return false
 	}
-
 	defer c.namespaceQueue.Done(obj)
 
-	err := c.syncNamespace(obj.(*v1.Namespace))
+	err := c.mgr.syncNamespace(obj.(*v1.Namespace), c.routeQueue)
 	if err != nil {
 		if c.namespaceQueue.NumRequeues(obj) < maxRetries {
 			klog.V(2).InfoS("Error found while processing namespace %s:%w", obj.(*v1.Namespace), err)
@@ -413,54 +369,6 @@ func (c *ExternalGatewayNodeController) processNextNamespaceWorkItem(wg *sync.Wa
 	}
 	c.namespaceQueue.Forget(obj)
 	return true
-}
-
-func (c *ExternalGatewayNodeController) syncNamespace(namespace *v1.Namespace) error {
-	_, err := c.namespaceLister.Get(namespace.Name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	if apierrors.IsNotFound(err) || !namespace.DeletionTimestamp.IsZero() {
-		// DELETE use case
-		klog.Infof("Deleting namespace reference %s", namespace.Name)
-		return c.mgr.processDeleteNamespace(namespace.Name)
-	}
-	matches, err := c.mgr.getPoliciesForNamespace(namespace.Name)
-	if err != nil {
-		return err
-	}
-	cacheInfo, found := c.mgr.getNamespaceInfoFromCache(namespace.Name)
-	if !found && len(matches) == 0 {
-		// it's not a namespace being cached already and it is not a target for policies, nothing to do
-		return nil
-	}
-
-	defer c.mgr.unlockNamespaceInfoCache(namespace.Name)
-	if found && cacheInfo.markForDelete {
-		// namespace exists and has been marked for deletion, this means there should be an event to complete deleting the namespace.
-		// wait for the namespace to be deleted before recreating it in the cache.
-		return fmt.Errorf("cannot add namespace %s because it is currently being deleted", namespace.Name)
-	}
-
-	if !found {
-		// ADD use case
-		// new namespace or namespace updated its labels and now match a routing policy
-		cacheInfo = c.mgr.newNamespaceInfoInCache(namespace.Name)
-		cacheInfo.Policies = matches
-		return c.mgr.processAddNamespace(namespace, cacheInfo)
-	}
-
-	if !cacheInfo.Policies.Equal(matches) {
-		// UPDATE use case
-		// policies differ, need to reconcile them
-		err = c.mgr.processUpdateNamespace(namespace.Name, cacheInfo.Policies, matches, cacheInfo)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	return nil
-
 }
 
 func (c *ExternalGatewayNodeController) onPodAdd(obj interface{}) {
@@ -534,15 +442,13 @@ func (c *ExternalGatewayNodeController) processNextPodWorkItem(wg *sync.WaitGrou
 	defer wg.Done()
 
 	obj, shutdown := c.podQueue.Get()
-
 	if shutdown {
 		return false
 	}
-
 	defer c.podQueue.Done(obj)
 
 	p := obj.(*v1.Pod)
-	err := c.syncPod(p)
+	err := c.mgr.syncPod(p, c.podLister, c.routeQueue)
 	if err != nil {
 		if c.podQueue.NumRequeues(obj) < maxRetries {
 			klog.V(2).InfoS("Error found while processing pod %s/%s:%w", p.Namespace, p.Name, err)
@@ -555,33 +461,6 @@ func (c *ExternalGatewayNodeController) processNextPodWorkItem(wg *sync.WaitGrou
 
 	c.podQueue.Forget(obj)
 	return true
-}
-
-func (c *ExternalGatewayNodeController) syncPod(pod *v1.Pod) error {
-
-	_, err := c.podLister.Pods(pod.Namespace).Get(pod.Name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	namespaces := c.mgr.filterNamespacesUsingPodGateway(ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name})
-	klog.Infof("Processing pod reference %s/%s", pod.Namespace, pod.Name)
-	if apierrors.IsNotFound(err) || !pod.DeletionTimestamp.IsZero() {
-		// DELETE case
-		if namespaces.Len() == 0 {
-			// nothing to do, this pod is not a gateway pod
-			return nil
-		}
-		klog.Infof("Deleting pod gateway %s/%s", pod.Namespace, pod.Name)
-		return c.mgr.processDeletePod(pod, namespaces)
-	}
-	if namespaces.Len() == 0 {
-		// ADD case: new pod or existing pod that is not a gateway pod and could now be one.
-		klog.Infof("Adding pod reference %s/%s", pod.Namespace, pod.Name)
-		return c.mgr.processAddPod(pod)
-	}
-	// UPDATE case
-	klog.Infof("Updating pod gateway %s/%s", pod.Namespace, pod.Name)
-	return c.mgr.processUpdatePod(pod, namespaces)
 }
 
 func (c *ExternalGatewayNodeController) GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespaceName string) (sets.Set[string], error) {
