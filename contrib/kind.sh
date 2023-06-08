@@ -250,8 +250,6 @@ parse_args() {
                                                 ;;
             -sw | --allow-system-writes )       KIND_ALLOW_SYSTEM_WRITES=true
                                                 ;;
-            -scm | --separate-cluster-manager)  OVN_SEPARATE_CLUSTER_MANAGER=true
-                                                ;;
             -gm | --gateway-mode )              shift
                                                 if [ "$1" != "local" ] && [ "$1" != "shared" ]; then
                                                     echo "Invalid gateway mode: $1"
@@ -404,7 +402,6 @@ print_params() {
      echo "OVN_METRICS_SCALE_ENABLE = $OVN_METRICS_SCALE_ENABLE"
      echo "OVN_ISOLATED = $OVN_ISOLATED"
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
-     echo "OVN_SEPARATE_CLUSTER_MANAGER = $OVN_SEPARATE_CLUSTER_MANAGER"
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
        echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
@@ -594,7 +591,6 @@ set_default_params() {
     OVN_GATEWAY_OPTS="--allow-no-uplink --gateway-interface=br-ex"
   fi
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
-  OVN_SEPARATE_CLUSTER_MANAGER=${OVN_SEPARATE_CLUSTER_MANAGER:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
@@ -884,12 +880,7 @@ install_ovn_global_zone() {
     run_kubectl apply -f ovnkube-db.yaml
   fi
 
-  if [ "$OVN_SEPARATE_CLUSTER_MANAGER" ==  true ]; then
-    run_kubectl apply -f ovnkube-cm-ncm.yaml
-  else
-    run_kubectl apply -f ovnkube-master.yaml
-  fi
-
+  run_kubectl apply -f ovnkube-master.yaml
   run_kubectl apply -f ovnkube-node.yaml
 }
 
