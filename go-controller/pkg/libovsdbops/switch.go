@@ -379,7 +379,7 @@ func DeleteLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []libovsdb.
 	return ops, err
 }
 
-// DeleteLogicalSwitchPortsOps deletes the provided logical switch ports and
+// DeleteLogicalSwitchPorts deletes the provided logical switch ports and
 // removes them from the provided logical switch
 func DeleteLogicalSwitchPorts(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch, lsps ...*nbdb.LogicalSwitchPort) error {
 	ops, err := DeleteLogicalSwitchPortsOps(nbClient, nil, sw, lsps...)

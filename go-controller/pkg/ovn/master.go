@@ -904,12 +904,13 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 		if err := oc.cleanupNodeResources(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up the local resources for the remote node %s, err : %w", node.Name, err)
 		}
+		oc.localZoneNodes.Delete(node.Name)
 	}
 
 	var err error
 	if syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
 		// Call zone chassis handler's AddRemoteZoneNode function to creates
-		// the remote chassis for the remote zone node node in the SB DB or mark
+		// the remote chassis for the remote zone node in the SB DB or mark
 		// the entry as remote if it was local chassis earlier
 		if err = oc.zoneChassisHandler.AddRemoteZoneNode(node); err != nil {
 			err = fmt.Errorf("adding or updating remote node %s failed, err - %w", node.Name, err)
@@ -925,6 +926,7 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 			}
 		}
 	}
+
 	return err
 }
 
