@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -35,6 +36,7 @@ import (
 func getPodAnnotations(fakeClient kubernetes.Interface, namespace, name string) string {
 	pod, err := fakeClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	fmt.Printf("########### %s\n", pod.Annotations)
 	return pod.Annotations[util.OvnPodAnnotationName]
 }
 
@@ -156,9 +158,9 @@ type portInfo struct {
 	portName string
 }
 
-func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, namespace string) (to testPod) {
+func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, namespace string) testPod {
 	portName := util.GetLogicalPortName(namespace, podName)
-	to = testPod{
+	to := testPod{
 		portUUID:          portName + "-UUID",
 		nodeSubnet:        nodeSubnet,
 		nodeMgtIP:         nodeMgtIP,
@@ -171,7 +173,22 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 		namespace:         namespace,
 		secondaryPodInfos: map[string]*secondaryPodInfo{},
 	}
-	return
+
+	isIPv6 := ovntest.MustParseIP(podIP).To4() == nil
+
+	var routeSources []*net.IPNet
+	joinNet := config.Gateway.V4JoinSubnet
+	if isIPv6 {
+		joinNet = config.Gateway.V6JoinSubnet
+	}
+	routeSources = append(routeSources, ovntest.MustParseIPNet(joinNet))
+
+	gwip := ovntest.MustParseIP(nodeGWIP)
+	for _, rs := range routeSources {
+		to.routes = append(to.routes, util.PodRoute{rs, gwip})
+	}
+
+	return to
 }
 
 func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN, uuid string) {
@@ -181,23 +198,29 @@ func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN, uuid string) {
 }
 
 func (p testPod) getAnnotationsJson() string {
-	var podRoutes string
-	for key, route := range p.routes {
-		routeString := `{"dest":"` + route.Dest.String() + `","nextHop":"` + route.NextHop.String() + `"}`
-		if key == len(p.routes)-1 {
-			podRoutes += podRoutes + routeString
-		} else {
-			podRoutes += podRoutes + routeString + ","
-		}
+	var routes []string
+	for _, r := range p.routes {
+		routes = append(routes, `{"dest":"`+r.Dest.String()+`","nextHop":"`+r.NextHop.String()+`"}`)
+	}
+	routesJSON := ""
+	if len(routes) > 0 {
+		routesJSON = ",\n    \"routes\": [\n" + strings.Join(routes, ",") + "\n    ]"
 	}
 
-	podRoutesJSON := ""
-	if len(podRoutes) > 0 {
-		podRoutesJSON = `, "routes":[` + podRoutes + `]`
+	ipPrefix := 24
+	if ovntest.MustParseIP(p.podIP).To4() == nil {
+		ipPrefix = 64
 	}
-	return `{"default": {"ip_addresses":["` + p.podIP + `/24"], "mac_address":"` + p.podMAC + `",
-		"gateway_ips": ["` + p.nodeGWIP + `"], "ip_address":"` + p.podIP + `/24", "gateway_ip": "` + p.nodeGWIP + `"` + podRoutesJSON + `}}`
 
+	return fmt.Sprintf(`{
+  "default": {
+    "ip_addresses": ["%s/%d"],
+    "mac_address": "%s",
+    "gateway_ips": ["%s"],
+    "ip_address": "%s/%d",
+    "gateway_ip": "%s"%s
+  }
+}`, p.podIP, ipPrefix, p.podMAC, p.nodeGWIP, p.podIP, ipPrefix, p.nodeGWIP, routesJSON)
 }
 
 func setPodAnnotations(podObj *v1.Pod, testPod testPod) {

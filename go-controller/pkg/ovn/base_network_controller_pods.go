@@ -376,6 +376,23 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitchSubnetsInCache(switchN
 	return nil
 }
 
+func joinSubnetToRoute(isIPv6 bool, gatewayIP net.IP) util.PodRoute {
+	joinSubnet := config.Gateway.V4JoinSubnet
+	if isIPv6 {
+		joinSubnet = config.Gateway.V6JoinSubnet
+	}
+	_, subnet, err := net.ParseCIDR(joinSubnet)
+	if err != nil {
+		// Join subnet should have been validated already by config
+		panic(fmt.Sprintf("Failed to parse join subnet %q: %v", joinSubnet, err))
+	}
+
+	return util.PodRoute{
+		Dest:    subnet,
+		NextHop: gatewayIP,
+	}
+}
+
 func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nadapi.NetworkSelectionElement,
 	podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error {
 	if bnc.IsSecondary() {
@@ -442,7 +459,6 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 		if isIPv6 {
 			otherDefaultRoute = otherDefaultRouteV6
 		}
-		var gatewayIP net.IP
 		if otherDefaultRoute {
 			for _, clusterSubnet := range config.Default.ClusterSubnets {
 				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
@@ -461,12 +477,11 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 				}
 			}
 		} else {
-			gatewayIP = gatewayIPnet.IP
+			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
 		}
 
-		if gatewayIP != nil {
-			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIP)
-		}
+		// Ensure default join subnet traffic always goes to OVN
+		podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(isIPv6, gatewayIPnet.IP))
 	}
 	return nil
 }
