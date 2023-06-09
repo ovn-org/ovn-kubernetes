@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 )
 
@@ -84,8 +85,13 @@ func (c *Controller) syncAdminNetworkPolicyPod(key string) error {
 			if !loaded {
 				continue
 			}
-			c.clearPodForANP(namespace, name, anpObj)
+			c.clearPodForANP(namespace, name, anpObj, c.anpQueue)
 		}
+		banpObj := c.banpCache
+		if banpObj.name == "" { // empty struct, BANP is not setup yet
+			return nil
+		}
+		c.clearPodForANP(namespace, name, banpObj, c.banpQueue)
 		return nil
 	}
 	if !util.PodScheduled(pod) || util.PodWantsHostNetwork(pod) {
@@ -100,23 +106,28 @@ func (c *Controller) syncAdminNetworkPolicyPod(key string) error {
 		if !loaded {
 			continue
 		}
-		c.setPodForANP(pod, anpObj, namespaceLabels)
+		c.setPodForANP(pod, anpObj, namespaceLabels, c.anpQueue)
 	}
+	banpObj := c.banpCache
+	if banpObj.name == "" { // empty struct, BANP is not setup yet
+		return nil
+	}
+	c.setPodForANP(pod, banpObj, namespaceLabels, c.banpQueue)
 
 	return nil
 }
 
 // clearPodForANP will handle the logic for figuring out if the provided pod name
 // used to match the given anpCache.name policy. If so, it will requeue the anpCache.name key back
-// into the main anpQueue cache for reconciling the db objects. If not, function is a no-op.
-func (c *Controller) clearPodForANP(namespace, name string, anpCache *adminNetworkPolicyState) {
+// into the main (b)anpQueue cache for reconciling the db objects. If not, function is a no-op.
+func (c *Controller) clearPodForANP(namespace, name string, anpCache *adminNetworkPolicyState, queue workqueue.RateLimitingInterface) {
 	// (i) if this pod used to match this ANP's .Spec.Subject requeue it and return
 	// (ii) if (i) is false, check if it used to match any of the .Spec.Ingress.Peers requeue it and return
 	// (iii) if (i) & (ii) are false, check if it used to match any of the .Spec.Egress.Peers requeue it and return
 	if podCache, ok := anpCache.subject.namespaces[namespace]; ok {
 		if podCache.Has(name) {
 			klog.V(4).Infof("Pod %s/%s used to match ANP %s subject, requeuing...", namespace, name, anpCache.name)
-			c.anpQueue.Add(anpCache.name)
+			queue.Add(anpCache.name)
 			return
 		}
 	}
@@ -125,7 +136,7 @@ func (c *Controller) clearPodForANP(namespace, name string, anpCache *adminNetwo
 			if podCache, ok := peer.namespaces[namespace]; ok {
 				if podCache.Has(name) {
 					klog.V(4).Infof("Pod %s/%s used to match ANP %s ingress rule %d peer, requeuing...", namespace, name, anpCache.name, rule.priority)
-					c.anpQueue.Add(anpCache.name)
+					queue.Add(anpCache.name)
 					return
 				}
 			}
@@ -136,7 +147,7 @@ func (c *Controller) clearPodForANP(namespace, name string, anpCache *adminNetwo
 			if podCache, ok := peer.namespaces[namespace]; ok {
 				if podCache.Has(name) {
 					klog.V(4).Infof("Pod %s/%s used to match ANP %s egress rule %d peer, requeuing...", namespace, name, anpCache.name, rule.priority)
-					c.anpQueue.Add(anpCache.name)
+					queue.Add(anpCache.name)
 					return
 				}
 			}
@@ -147,9 +158,9 @@ func (c *Controller) clearPodForANP(namespace, name string, anpCache *adminNetwo
 
 // setPodForANP will handle the logic for figuring out if the provided pod name
 // used to match the given anpCache.name policy or if it started matching the given anpCache.name.
-// If so, it will requeue the anpCache.name key back into the main anpQueue cache for reconciling
+// If so, it will requeue the anpCache.name key back into the main (b)anpQueue cache for reconciling
 // the db objects. If not, function is a no-op.
-func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState, namespaceLabels labels.Labels) {
+func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState, namespaceLabels labels.Labels, queue workqueue.RateLimitingInterface) {
 	// (i) if this pod used to match this ANP's .Spec.Subject requeue it and return OR
 	// (ii) if this pod started to match this ANP's .Spec.Subject requeue it and return OR
 	// (iii) if above conditions are are false, check if it used to match any of the .Spec.Ingress.Peers requeue it and return OR
@@ -163,7 +174,7 @@ func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState
 	if podCache, ok := anpCache.subject.namespaces[pod.Namespace]; ok {
 		if podCache.Has(pod.Name) {
 			klog.V(4).Infof("Pod %s/%s used to match ANP %s subject, requeuing...", pod.Namespace, pod.Name, anpCache.name)
-			c.anpQueue.Add(anpCache.name)
+			queue.Add(anpCache.name)
 			return
 		}
 	}
@@ -171,7 +182,7 @@ func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState
 	podLabels := labels.Set(pod.Labels)
 	if anpCache.subject.namespaceSelector.Matches(namespaceLabels) && anpCache.subject.podSelector.Matches(podLabels) {
 		klog.V(4).Infof("Pod %s/%s started to match ANP %s subject, requeuing...", pod.Namespace, pod.Name, anpCache.name)
-		c.anpQueue.Add(anpCache.name)
+		queue.Add(anpCache.name)
 		return
 	}
 	// case(iii)/(iv)
@@ -181,14 +192,14 @@ func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState
 			if podCache, ok := peer.namespaces[pod.Namespace]; ok {
 				if podCache.Has(pod.Name) {
 					klog.V(4).Infof("Pod %s/%s used to match ANP %s ingress rule %d peer, requeuing...", pod.Namespace, pod.Name, anpCache.name, rule.priority)
-					c.anpQueue.Add(anpCache.name)
+					queue.Add(anpCache.name)
 					return
 				}
 			}
 			// case(iv)
 			if peer.namespaceSelector.Matches(namespaceLabels) && peer.podSelector.Matches(podLabels) {
 				klog.V(4).Infof("Pod %s/%s started to match ANP %s ingress rule %d peer, requeuing...", pod.Namespace, pod.Name, anpCache.name, rule.priority)
-				c.anpQueue.Add(anpCache.name)
+				queue.Add(anpCache.name)
 				return
 			}
 		}
@@ -200,14 +211,14 @@ func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState
 			if podCache, ok := peer.namespaces[pod.Namespace]; ok {
 				if podCache.Has(pod.Name) {
 					klog.V(4).Infof("Pod %s/%s used to match ANP %s egress rule %d peer, requeuing...", pod.Namespace, pod.Name, anpCache.name, rule.priority)
-					c.anpQueue.Add(anpCache.name)
+					queue.Add(anpCache.name)
 					return
 				}
 			}
 			// case(vi)
 			if peer.namespaceSelector.Matches(namespaceLabels) && peer.podSelector.Matches(podLabels) {
 				klog.V(4).Infof("Pod %s/%s started to match ANP %s egress rule %d peer, requeuing...", pod.Namespace, pod.Name, anpCache.name, rule.priority)
-				c.anpQueue.Add(anpCache.name)
+				queue.Add(anpCache.name)
 				return
 			}
 		}
