@@ -77,6 +77,8 @@ const (
 	PlaceHolderACLTier = 0
 	// Default Tier for all ACLs
 	DefaultACLTier = 2
+	// Default Tier for all ACLs belonging to Admin Network Policy
+	DefaultANPACLTier = 1
 
 	// priority of logical router policies on the OVNClusterRouter
 	EgressFirewallStartPriority           = 10000

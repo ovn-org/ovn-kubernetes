@@ -50,6 +50,14 @@ type Controller struct {
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 
+	// anp name is key -> cloned value of ANP kapi is value
+	anpCache map[string]*adminNetworkPolicyState
+	// If more than one ANP is created at the same priority behaviour is undefined in k8s upsteam.
+	// If more than one ANP is created at the same priority OVNK will only create the first
+	// incoming ANP, rest of them will not be created.
+	// This map tracks anp.Spec.Priority->anp.Name
+	anpPriorityMap map[int32]string
+
 	// queues for the CRDs where incoming work is placed to de-dup
 	anpQueue  workqueue.RateLimitingInterface
 	banpQueue workqueue.RateLimitingInterface
@@ -85,6 +93,8 @@ func NewController(
 		nbClient:          nbClient,
 		anpClientSet:      anpClient,
 		addressSetFactory: addressSetFactory,
+		anpCache:          make(map[string]*adminNetworkPolicyState),
+		anpPriorityMap:    make(map[int32]string),
 	}
 
 	klog.Info("Setting up event handlers for Admin Network Policy")

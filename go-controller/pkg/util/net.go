@@ -296,3 +296,12 @@ func IPsToNetworkIPs(ips ...*net.IPNet) []*net.IPNet {
 	}
 	return nets
 }
+
+// StringsToIPs takes a slice of strings and returns a slice of net.IPs
+func StringsToIPs(ips []string) []net.IP {
+	s := make([]net.IP, len(ips))
+	for i := range ips {
+		s[i] = net.ParseIP(ips[i])
+	}
+	return s
+}
