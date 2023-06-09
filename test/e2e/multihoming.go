@@ -716,6 +716,19 @@ var _ = Describe("Multi Homing", func() {
 
 					serverPodConfig.namespace = f.Namespace.Name
 
+					if netConfig.topology == "localnet" {
+						By("setting up the localnet underlay")
+						nodes := ovsPods(cs)
+						Expect(nodes).NotTo(BeEmpty())
+						defer func() {
+							By("tearing down the localnet underlay")
+							Expect(teardownUnderlay(nodes)).To(Succeed())
+						}()
+
+						const secondaryInterfaceName = "eth1"
+						Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+					}
+
 					for _, ns := range []v1.Namespace{*f.Namespace, *extraNamespace} {
 						stepInfo := fmt.Sprintf("creating the attachment configuration for namespace %q", ns.Name)
 						By(stepInfo)
