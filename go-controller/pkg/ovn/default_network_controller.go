@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
@@ -93,6 +94,8 @@ type DefaultNetworkController struct {
 	svcController *svccontroller.Controller
 	// Controller used to handle egress services
 	egressSvcController *egresssvc.Controller
+	// Controller used for programming OVN for Admin Network Policy
+	anpController *anpcontroller.Controller
 
 	// Controller used to handle the admin policy based external route resources
 	apbExternalRouteController *apbroutecontroller.ExternalGatewayMasterController
@@ -440,6 +443,19 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	if err := WithSyncDurationMetric("pod", oc.WatchPods); err != nil {
 		return err
+	}
+
+	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
+		err := oc.newANPController()
+		if err != nil {
+			return fmt.Errorf("unable to create admin network policy controller, err: %v", err)
+		}
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			// Until we have scale issues in future let's spawn only one thread
+			oc.anpController.Run(1, oc.stopChan)
+		}()
 	}
 
 	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
