@@ -200,7 +200,7 @@ e) if none of the above are true, ErrNotFound is returned.
 If BulkOp is set, update or mutate can happen accross multiple models found.
 */
 func (m *modelClient) CreateOrUpdate(opModels ...operationModel) ([]ovsdb.OperationResult, error) {
-	created, ops, err := m.createOrUpdateOps(nil, opModels...)
+	created, ops, err := m.createOrUpdateOps(nil, true, opModels...)
 	if err != nil {
 		return nil, err
 	}
@@ -208,11 +208,11 @@ func (m *modelClient) CreateOrUpdate(opModels ...operationModel) ([]ovsdb.Operat
 }
 
 func (m *modelClient) CreateOrUpdateOps(ops []ovsdb.Operation, opModels ...operationModel) ([]ovsdb.Operation, error) {
-	_, ops, err := m.createOrUpdateOps(ops, opModels...)
+	_, ops, err := m.createOrUpdateOps(ops, true, opModels...)
 	return ops, err
 }
 
-func (m *modelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...operationModel) (interface{}, []ovsdb.Operation, error) {
+func (m *modelClient) createOrUpdateOps(ops []ovsdb.Operation, doCreate bool, opModels ...operationModel) (interface{}, []ovsdb.Operation, error) {
 	hasGuardOp := len(ops) > 0 && isGuardOp(&ops[0])
 	guardOp := []ovsdb.Operation{}
 	doWhenFound := func(model interface{}, opModel *operationModel) ([]ovsdb.Operation, error) {
@@ -224,19 +224,22 @@ func (m *modelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...opera
 		}
 		return nil, nil
 	}
-	doWhenNotFound := func(model interface{}, opModel *operationModel) ([]ovsdb.Operation, error) {
-		if !hasGuardOp {
-			// for the first insert of certain models, build a wait operation
-			// that checks for duplicates as a guard op to prevent against
-			// duplicate transactions
-			var err error
-			guardOp, err = buildFailOnDuplicateOps(m.client, opModel.Model)
-			if err != nil {
-				return nil, err
+	var doWhenNotFound opModelToOpMapper
+	if doCreate {
+		doWhenNotFound = func(model interface{}, opModel *operationModel) ([]ovsdb.Operation, error) {
+			if !hasGuardOp {
+				// for the first insert of certain models, build a wait operation
+				// that checks for duplicates as a guard op to prevent against
+				// duplicate transactions
+				var err error
+				guardOp, err = buildFailOnDuplicateOps(m.client, opModel.Model)
+				if err != nil {
+					return nil, err
+				}
+				hasGuardOp = len(guardOp) > 0
 			}
-			hasGuardOp = len(guardOp) > 0
+			return m.create(opModel)
 		}
-		return m.create(opModel)
 	}
 	created, ops, err := m.buildOps(ops, doWhenFound, doWhenNotFound, opModels...)
 	if len(guardOp) > 0 {
@@ -244,6 +247,37 @@ func (m *modelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...opera
 		ops = append(guardOp, ops...)
 	}
 	return created, ops, err
+}
+
+/*
+Update performs idempotent operations against libovsdb according to the
+following logic:
+
+a) performs a lookup of the models in the cache by ModelPredicate if provided,
+or by Model otherwise. If the models do not exist and ErrNotFound is set,
+it returns ErrNotFound
+
+b) if OnModelUpdates is specified; it performs a direct update of the model if
+it exists.
+
+c) if b) is not true, but OnModelMutations is specified; it performs a direct
+mutation (insert) of the Model if it exists.
+
+e) if none of the above are true, ErrNotFound is returned.
+
+If BulkOp is set, update or mutate can happen across multiple models found.
+*/
+func (m *modelClient) Update(opModels ...operationModel) ([]ovsdb.OperationResult, error) {
+	created, ops, err := m.createOrUpdateOps(nil, false, opModels...)
+	if err != nil {
+		return nil, err
+	}
+	return TransactAndCheckAndSetUUIDs(m.client, created, ops)
+}
+
+func (m *modelClient) UpdateOps(ops []ovsdb.Operation, opModels ...operationModel) ([]ovsdb.Operation, error) {
+	_, ops, err := m.createOrUpdateOps(ops, false, opModels...)
+	return ops, err
 }
 
 /*
