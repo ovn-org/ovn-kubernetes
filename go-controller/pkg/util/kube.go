@@ -419,6 +419,11 @@ func PodCompleted(pod *kapi.Pod) bool {
 	return pod.Status.Phase == kapi.PodSucceeded || pod.Status.Phase == kapi.PodFailed
 }
 
+// PodRunning checks if the pod is in running state or not
+func PodRunning(pod *kapi.Pod) bool {
+	return pod.Status.Phase == kapi.PodRunning
+}
+
 // PodScheduled returns if the given pod is scheduled
 func PodScheduled(pod *kapi.Pod) bool {
 	return pod.Spec.NodeName != ""
