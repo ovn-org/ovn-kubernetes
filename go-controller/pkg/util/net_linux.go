@@ -469,6 +469,19 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 	return nil
 }
 
+// DeleteConntrackServicePort is a wrapper around DeleteConntrack for the purpose of deleting conntrack entries that
+// belong to ServicePorts. Before deleting any conntrack entry, it makes sure that the port is valid. If the port is
+// invalid, it will log a level 5 info message and simply return.
+func DeleteConntrackServicePort(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType,
+	labels [][]byte) error {
+	if err := ValidatePort(protocol, port); err != nil {
+		klog.V(5).Infof("Skipping conntrack deletion for IP %q, protocol %q, port \"%d\", err: %q",
+			ip, protocol, port, err)
+		return nil
+	}
+	return DeleteConntrack(ip, port, protocol, ipFilterType, labels)
+}
+
 // GetNetworkInterfaceIPs returns the IP addresses for the network interface 'iface'.
 func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 	link, err := netLinkOps.LinkByName(iface)
