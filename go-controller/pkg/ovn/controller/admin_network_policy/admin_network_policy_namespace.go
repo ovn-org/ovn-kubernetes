@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 )
 
@@ -74,8 +75,13 @@ func (c *Controller) syncAdminNetworkPolicyNamespace(key string) error {
 			if !loaded {
 				continue
 			}
-			c.clearNamespaceForANP(name, anpObj)
+			c.clearNamespaceForANP(name, anpObj, c.anpQueue)
 		}
+		banpObj := c.banpCache
+		if banpObj.name == "" {
+			return nil
+		}
+		c.clearNamespaceForANP(name, banpObj, c.banpQueue)
 		return nil
 	}
 	// case (i)/(ii)
@@ -84,28 +90,33 @@ func (c *Controller) syncAdminNetworkPolicyNamespace(key string) error {
 		if !loaded {
 			continue
 		}
-		c.setNamespaceForANP(namespace, anpObj)
+		c.setNamespaceForANP(namespace, anpObj, c.anpQueue)
 	}
+	banpObj := c.banpCache
+	if banpObj.name == "" { // empty struct, BANP is not setup yet
+		return nil
+	}
+	c.setNamespaceForANP(namespace, banpObj, c.banpQueue)
 	return nil
 }
 
-// clearNamespaceForANP will handle the logic for figuring out if the provided namespace name
+// clearNamespaceFor(B)ANP will handle the logic for figuring out if the provided namespace name
 // used to match the given anpCache.name policy. If so, it will requeue the anpCache.name key back
-// into the main anpQueue cache for reconciling the db objects. If not, function is a no-op.
-func (c *Controller) clearNamespaceForANP(name string, anpCache *adminNetworkPolicyState) {
+// into the main (b)anpQueue cache for reconciling the db objects. If not, function is a no-op.
+func (c *Controller) clearNamespaceForANP(name string, anpCache *adminNetworkPolicyState, queue workqueue.RateLimitingInterface) {
 	// (i) if this namespace used to match this ANP's .Spec.Subject requeue it and return
 	// (ii) if (i) is false, check if it used to match any of the .Spec.Ingress.Peers requeue it and return
 	// (iii) if (i) & (ii) are false, check if it used to match any of the .Spec.Egress.Peers requeue it and return
 	if _, ok := anpCache.subject.namespaces[name]; ok {
 		klog.V(4).Infof("Namespace %s used to match ANP %s subject, requeuing...", name, anpCache.name)
-		c.anpQueue.Add(anpCache.name)
+		queue.Add(anpCache.name)
 		return
 	}
 	for _, rule := range anpCache.ingressRules {
 		for _, peer := range rule.peers {
 			if _, ok := peer.namespaces[name]; ok {
 				klog.V(4).Infof("Namespace %s used to match ANP %s ingress rule %d peer, requeuing...", name, anpCache.name, rule.priority)
-				c.anpQueue.Add(anpCache.name)
+				queue.Add(anpCache.name)
 				return
 			}
 		}
@@ -114,7 +125,7 @@ func (c *Controller) clearNamespaceForANP(name string, anpCache *adminNetworkPol
 		for _, peer := range rule.peers {
 			if _, ok := peer.namespaces[name]; ok {
 				klog.V(4).Infof("Namespace %s used to match ANP %s egress rule %d peer, requeuing...", name, anpCache.name, rule.priority)
-				c.anpQueue.Add(anpCache.name)
+				queue.Add(anpCache.name)
 				return
 			}
 		}
@@ -123,9 +134,9 @@ func (c *Controller) clearNamespaceForANP(name string, anpCache *adminNetworkPol
 
 // setNamespaceForANP will handle the logic for figuring out if the provided namespace name
 // used to match the given anpCache.name policy or if it started matching the given anpCache.name.
-// If so, it will requeue the anpCache.name key back into the main anpQueue cache for reconciling
+// If so, it will requeue the anpCache.name key back into the main (b)anpQueue cache for reconciling
 // the db objects. If not, function is a no-op.
-func (c *Controller) setNamespaceForANP(namespace *v1.Namespace, anpCache *adminNetworkPolicyState) {
+func (c *Controller) setNamespaceForANP(namespace *v1.Namespace, anpCache *adminNetworkPolicyState, queue workqueue.RateLimitingInterface) {
 	// (i) if this namespace used to match this ANP's .Spec.Subject requeue it and return OR
 	// (ii) if this namespace started to match this ANP's .Spec.Subject requeue it and return OR
 	// (iii) if above conditions are are false, check if it used to match any of the .Spec.Ingress.Peers requeue it and return OR
@@ -138,14 +149,14 @@ func (c *Controller) setNamespaceForANP(namespace *v1.Namespace, anpCache *admin
 	// case(i)
 	if _, ok := anpCache.subject.namespaces[namespace.Name]; ok {
 		klog.V(4).Infof("Namespace %s used to match ANP %s subject, requeuing...", namespace.Name, anpCache.name)
-		c.anpQueue.Add(anpCache.name)
+		queue.Add(anpCache.name)
 		return
 	}
 	// case(ii)
 	nsLabels := labels.Set(namespace.Labels)
 	if anpCache.subject.namespaceSelector.Matches(nsLabels) {
 		klog.V(4).Infof("Namespace %s started to match ANP %s subject, requeuing...", namespace.Name, anpCache.name)
-		c.anpQueue.Add(anpCache.name)
+		queue.Add(anpCache.name)
 		return
 	}
 	// case(iii)/(iv)
@@ -154,13 +165,13 @@ func (c *Controller) setNamespaceForANP(namespace *v1.Namespace, anpCache *admin
 			// case(iii)
 			if _, ok := peer.namespaces[namespace.Name]; ok {
 				klog.V(4).Infof("Namespace %s used to match ANP %s ingress rule %d peer, requeuing...", namespace.Name, anpCache.name, rule.priority)
-				c.anpQueue.Add(anpCache.name)
+				queue.Add(anpCache.name)
 				return
 			}
 			// case(iv)
 			if peer.namespaceSelector.Matches(nsLabels) {
 				klog.V(4).Infof("Namespace %s  started to match ANP %s ingress rule %d peer, requeuing...", namespace.Name, anpCache.name, rule.priority)
-				c.anpQueue.Add(anpCache.name)
+				queue.Add(anpCache.name)
 				return
 			}
 		}
@@ -171,13 +182,13 @@ func (c *Controller) setNamespaceForANP(namespace *v1.Namespace, anpCache *admin
 			// case(v)
 			if _, ok := peer.namespaces[namespace.Name]; ok {
 				klog.V(4).Infof("Namespace %s used to match ANP %s egress rule %d peer, requeuing...", namespace.Name, anpCache.name, rule.priority)
-				c.anpQueue.Add(anpCache.name)
+				queue.Add(anpCache.name)
 				return
 			}
 			// case(vi)
 			if peer.namespaceSelector.Matches(nsLabels) {
 				klog.V(4).Infof("Namespace %s  started to match ANP %s egress rule %d peer, requeuing...", namespace.Name, anpCache.name, rule.priority)
-				c.anpQueue.Add(anpCache.name)
+				queue.Add(anpCache.name)
 				return
 			}
 		}
