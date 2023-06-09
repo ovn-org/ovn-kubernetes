@@ -437,6 +437,11 @@ func (m *modelClient) Lookup(opModels ...operationModel) error {
 	return err
 }
 
+func (m *modelClient) LookupOps(ops []ovsdb.Operation, opModels ...operationModel) ([]ovsdb.Operation, error) {
+	_, ops, err := m.buildOps(ops, nil, nil, opModels...)
+	return ops, err
+}
+
 // CreateOrUpdate, Delete and Lookup can be called to
 // 1. create or update a single model
 // Model should be set, bulkOp = false, errNotfound = false
