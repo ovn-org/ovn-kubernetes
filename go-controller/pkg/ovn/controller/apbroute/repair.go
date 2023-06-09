@@ -201,7 +201,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromPolicyRules
 					podIPStr := utilnet.ParseIPSloppy(podIP.IP).String()
 					clusterRouteCache[podIPStr] = &managedGWIPs{namespacedName: ktypes.NamespacedName{Namespace: nsPod.Namespace, Name: nsPod.Name}, nodeName: nsPod.Spec.NodeName, gwList: make(gatewayInfoList, 0)}
 					for _, gwInfo := range allGWIPs {
-						for gw := range gwInfo.gws {
+						for _, gw := range gwInfo.Gateways.UnsortedList() {
 							if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIPStr) {
 								continue
 							}
@@ -221,10 +221,10 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromPolicyRules
 func (c *ExternalGatewayMasterController) processOVNRoute(ovnRoute *ovnRoute, gwList gatewayInfoList, podIP string, managedIPGWInfo *managedGWIPs) bool {
 	// podIP exists, check if route matches
 	for _, gwInfo := range gwList {
-		for clusterNextHop := range gwInfo.gws {
+		for _, clusterNextHop := range gwInfo.Gateways.UnsortedList() {
 			if ovnRoute.nextHop == clusterNextHop {
 				// populate the externalGWInfo cache with this pair podIP->next Hop IP.
-				err := c.nbClient.updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP, ovnRoute.nextHop, managedIPGWInfo.nodeName, gwInfo.bfdEnabled, managedIPGWInfo.namespacedName)
+				err := c.nbClient.updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP, ovnRoute.nextHop, managedIPGWInfo.nodeName, gwInfo.BFDEnabled, managedIPGWInfo.namespacedName)
 				if err == nil {
 					return true
 				}
@@ -244,14 +244,17 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 	}
 	for _, ns := range nsList {
 		if nsGWIPs, ok := ns.Annotations[util.RoutingExternalGWsAnnotation]; ok && nsGWIPs != "" {
-			gwInfo := &gatewayInfo{gws: sets.New[string]()}
+			var bfdEnabled bool
+			ips := sets.Set[string]{}
 			for _, ip := range strings.Split(nsGWIPs, ",") {
 				podIPStr := utilnet.ParseIPSloppy(ip).String()
-				gwInfo.gws.Insert(podIPStr)
+				ips.Insert(podIPStr)
 			}
+
 			if _, ok := ns.Annotations[util.BfdAnnotation]; ok {
-				gwInfo.bfdEnabled = true
+				bfdEnabled = true
 			}
+			gwInfo := newGatewayInfo(ips, bfdEnabled)
 			nsPodList, err := c.podLister.Pods(ns.Name).List(labels.Everything())
 			if err != nil {
 				return nil, err
@@ -283,10 +286,11 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 			klog.Errorf("No pod IPs found for pod %s/%s", pod.Namespace, pod.Name)
 			continue
 		}
-		gwInfo := &gatewayInfo{gws: foundGws}
+		var bfdEnabled bool
 		if _, ok := pod.Annotations[util.BfdAnnotation]; ok {
-			gwInfo.bfdEnabled = true
+			bfdEnabled = true
 		}
+		gwInfo := newGatewayInfo(foundGws, bfdEnabled)
 		for _, targetNs := range strings.Split(targetNamespaces, ",") {
 			// iterate through all pods and associate the gw ips to those that correspond
 			populateManagedGWIPsCacheInNamespace(targetNs, gwInfo, clusterRouteCache, podList)
@@ -296,7 +300,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 }
 
 func populateManagedGWIPsCacheInNamespace(targetNamespace string, gwInfo *gatewayInfo, cache map[string]*managedGWIPs, podList []*v1.Pod) {
-	for gwIP := range gwInfo.gws {
+	for _, gwIP := range gwInfo.Gateways.UnsortedList() {
 		for _, pod := range podList {
 			// ignore completed pods, host networked pods, pods not scheduled
 			if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
@@ -313,7 +317,7 @@ func populateManagedGWIPsCacheInNamespace(targetNamespace string, gwInfo *gatewa
 						nodeName:       pod.Spec.NodeName,
 					}
 				}
-				cache[podIPStr].gwList = append(cache[podIPStr].gwList, &gatewayInfo{gws: sets.New(gwIP), bfdEnabled: gwInfo.bfdEnabled})
+				cache[podIPStr].gwList = append(cache[podIPStr].gwList, newGatewayInfo(sets.New(gwIP), gwInfo.BFDEnabled))
 			}
 		}
 	}

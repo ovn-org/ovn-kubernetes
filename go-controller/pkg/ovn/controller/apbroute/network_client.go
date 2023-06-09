@@ -219,9 +219,9 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddr
 		for _, gateway := range gateways {
 			// TODO (trozet): use the go bindings here and batch commands
 			// validate the ip and gateway belong to the same address family
-			gws, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(podIPNet.IP), gateway.gws.UnsortedList())
+			gws, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(podIPNet.IP), gateway.Gateways.UnsortedList())
 			if err != nil {
-				klog.Warningf("Address families for the pod address %s and gateway %s did not match", podIPNet.IP.String(), gateway.gws)
+				klog.Warningf("Address families for the pod address %s and gateway %s did not match", podIPNet.IP.String(), gateway.Gateways)
 				continue
 			}
 			podIP := podIPNet.IP.String()
@@ -232,7 +232,7 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddr
 					continue
 				}
 				mask := util.GetIPFullMask(podIP)
-				if err := nb.createOrUpdateBFDStaticRoute(gateway.bfdEnabled, gw, podIP, gr, port, mask); err != nil {
+				if err := nb.createOrUpdateBFDStaticRoute(gateway.BFDEnabled, gw, podIP, gr, port, mask); err != nil {
 					return err
 				}
 				if routeInfo.PodExternalRoutes[podIP] == nil {

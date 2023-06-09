@@ -6,6 +6,7 @@ import (
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -15,12 +16,33 @@ import (
 // The logic goes through all the policies and applies the gateway IPs derived from the static and dynamic hop to all the pods in the namespace.
 // Lastly, it updates the cacheInfo to contain the static and dynamic gateway IPs generated from the previous action to keep track of the gateway IPs applied in the namespace.
 func (m *externalPolicyManager) processAddNamespace(new *v1.Namespace, cacheInfo *namespaceInfo) error {
-	staticGateways, dynamicGateways, err := m.aggregateNamespaceInfo(cacheInfo.policies)
+	staticGateways, dynamicGateways, err := m.aggregateNamespaceInfo(cacheInfo.Policies)
 	if err != nil {
 		return err
 	}
-	cacheInfo.staticGateways = staticGateways
-	cacheInfo.dynamicGateways = dynamicGateways
+	cacheInfo.StaticGateways = staticGateways
+	cacheInfo.DynamicGateways = dynamicGateways
+	return nil
+}
+
+// processDeleteNamespace processes a delete namespace event by ensuring that no pod is still running in that namespace before deleting the namespace info cache. It also
+// marks the namespace for deletion so that if a new pod event appears targeting the namespace, the operation will be rejected.
+func (m *externalPolicyManager) processDeleteNamespace(namespaceName string) error {
+	_, found := m.getAndMarkForDeleteNamespaceInfoFromCache(namespaceName)
+	if !found {
+		// namespace is not a recipient for policies
+		return nil
+	}
+	defer m.unlockNamespaceInfoCache(namespaceName)
+	podsInNs, err := m.podLister.Pods(namespaceName).List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	if len(podsInNs) != 0 {
+		klog.Infof("Attempting to delete namespace %s with resources still attached to it. Retrying...", namespaceName)
+		return fmt.Errorf("unable to delete namespace %s with resources still attached to it", namespaceName)
+	}
+	m.deleteNamespaceInfoInCache(namespaceName)
 	return nil
 }
 
@@ -58,7 +80,7 @@ func (m *externalPolicyManager) processUpdateNamespace(namespaceName string, cur
 		}
 	}
 	// at least one policy apply, let's update the cache
-	cacheInfo.policies = newPolicies
+	cacheInfo.Policies = newPolicies
 	return nil
 
 }
@@ -93,7 +115,7 @@ func (m *externalPolicyManager) removePolicyFromNamespace(targetNamespace string
 	if err != nil {
 		return err
 	}
-	cacheInfo.policies.Delete(policy.Name)
+	cacheInfo.Policies = cacheInfo.Policies.Delete(policy.Name)
 	return nil
 }
 
@@ -125,7 +147,10 @@ func (m *externalPolicyManager) aggregateNamespaceInfo(policies sets.Set[string]
 			return nil, nil, err
 		}
 		var duplicated sets.Set[string]
-		static, duplicated = static.Insert(processedPolicy.staticGateways...)
+		static, duplicated, err = static.Insert(processedPolicy.staticGateways...)
+		if err != nil {
+			return nil, nil, err
+		}
 		if duplicated.Len() > 0 {
 			klog.Warningf("Found duplicated gateway IP(s) %+s in policy(s) %+s", sets.List(duplicated), sets.List(policies))
 		}

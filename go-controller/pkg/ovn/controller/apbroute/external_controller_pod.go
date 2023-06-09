@@ -38,11 +38,15 @@ func (m *externalPolicyManager) processAddPod(newPod *v1.Pod) error {
 	}
 	if len(podPolicies) > 0 {
 		// this is a gateway pod
-		klog.Infof("Adding pod gateway %s/%s for policy %+v", newPod.Namespace, newPod.Name, podPolicies)
+		pnames := []string{}
+		for _, p := range podPolicies {
+			pnames = append(pnames, p.Name)
+		}
+		klog.Infof("Adding pod gateway %s/%s for policy %s", newPod.Namespace, newPod.Name, strings.Join(pnames, ","))
 		return m.applyPodGWPolicies(newPod, podPolicies)
 	}
 	cacheInfo, found := m.getNamespaceInfoFromCache(newPod.Namespace)
-	if !found || (found && cacheInfo.policies.Len() == 0) {
+	if !found || (found && cacheInfo.Policies.Len() == 0) {
 		// this is a standard pod and there are no external gateway policies applicable to the pod's namespace. Nothing to do
 		if !found {
 			return nil
@@ -51,9 +55,13 @@ func (m *externalPolicyManager) processAddPod(newPod *v1.Pod) error {
 		return nil
 	}
 	defer m.unlockNamespaceInfoCache(newPod.Namespace)
+	if cacheInfo.markForDelete {
+		klog.Infof("Attempting to add a pod to namespace %s when it has been marked for deletion", newPod.Namespace)
+		return fmt.Errorf("failed to add external gateways to pod %[1]s/%[2]s when namespace %[1]s has been marked for deletion", newPod.Namespace, newPod.Name)
+	}
 	// there are external gateway policies applicable to the pod's namespace.
-	klog.Infof("Applying policies to new pod %s/%s %+v", newPod.Namespace, newPod.Name, cacheInfo.policies)
-	return m.applyGatewayInfoToPod(newPod, cacheInfo.staticGateways, cacheInfo.dynamicGateways)
+	klog.Infof("Applying policies to new pod %s/%s %+v", newPod.Namespace, newPod.Name, cacheInfo.Policies)
+	return m.applyGatewayInfoToPod(newPod, cacheInfo.StaticGateways, cacheInfo.DynamicGateways)
 }
 
 func (m *externalPolicyManager) applyPodGWPolicies(pod *v1.Pod, externalRoutePolicies []*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) error {
@@ -90,7 +98,7 @@ func (m *externalPolicyManager) applyPodGWPolicy(pod *v1.Pod, externalRoutePolic
 			continue
 		}
 		// update the gwInfo in the namespace cache
-		cacheInfo.dynamicGateways[key] = gwInfo
+		cacheInfo.DynamicGateways[key] = gwInfo
 		m.unlockNamespaceInfoCache(ns)
 		if err != nil {
 			return err
@@ -108,7 +116,7 @@ func (m *externalPolicyManager) removePodGatewayFromNamespace(nsName string, pod
 	}
 	defer m.unlockNamespaceInfoCache(nsName)
 
-	gateways, found := cacheInfo.dynamicGateways[podNamespacedName]
+	gwInfo, found := cacheInfo.DynamicGateways[podNamespacedName]
 	if !found {
 		klog.Warningf("Pod %s/%s not found in dynamic cacheInfo for namespace %s", podNamespacedName.Namespace, podNamespacedName.Name, nsName)
 		return nil
@@ -118,13 +126,13 @@ func (m *externalPolicyManager) removePodGatewayFromNamespace(nsName string, pod
 		return err
 	}
 	// it is safe to pass the current policies and not to expect the pod IP in the coexisting list of IPs since the pod will no longer match the dynamic hop selectors in any of the policies
-	coexistingIPs, err := m.retrieveDynamicGatewayIPsForPolicies(cacheInfo.policies)
+	coexistingIPs, err := m.retrieveDynamicGatewayIPsForPolicies(cacheInfo.Policies)
 	if err != nil {
 		return err
 	}
 	coexistingIPs = coexistingIPs.Union(annotatedGWIPs)
 	// Filter out the IPs that are not in coexisting. Those IPs are to be deleted.
-	invalidGWIPs := gateways.gws.Difference(coexistingIPs)
+	invalidGWIPs := gwInfo.Gateways.Difference(coexistingIPs)
 	// Filter out the IPs from the coexisting list that are to be kept by calculating the difference between the coexising and those IPs that are to be deleted and not coexisting at the same time.
 	ipsToKeep := coexistingIPs.Difference(invalidGWIPs)
 	klog.Infof("Coexisting %s, invalid %s, ipsToKeep %s", strings.Join(sets.List(coexistingIPs), ","), strings.Join(sets.List(invalidGWIPs), ","), strings.Join(sets.List(ipsToKeep), ","))
@@ -132,10 +140,10 @@ func (m *externalPolicyManager) removePodGatewayFromNamespace(nsName string, pod
 	if err != nil {
 		return err
 	}
-	gateways.gws.Delete(invalidGWIPs.UnsortedList()...)
-	if gateways.gws.Len() == 0 {
+	gwInfo.Gateways.Delete(invalidGWIPs.UnsortedList()...)
+	if len(gwInfo.Gateways.UnsortedList()) == 0 {
 		// remove pod from namespace cache
-		delete(cacheInfo.dynamicGateways, podNamespacedName)
+		delete(cacheInfo.DynamicGateways, podNamespacedName)
 	}
 	return nil
 }
@@ -159,7 +167,7 @@ func (m *externalPolicyManager) addPodGatewayToNamespace(podNamespacedName ktype
 		cacheInfo = m.newNamespaceInfoInCache(namespaceName)
 	}
 	// add pod gateway information to the namespace cache
-	cacheInfo.dynamicGateways[podNamespacedName] = gatewayInfo
+	cacheInfo.DynamicGateways[podNamespacedName] = gatewayInfo
 	return nil
 }
 
@@ -190,9 +198,9 @@ func (m *externalPolicyManager) processUpdatePod(updatedPod *v1.Pod, oldTargetNs
 	// the pods have changed and they don't target the same sets of namespaces, delete its reference on the ones that don't apply
 	// and add to the new ones, if necessary
 	nsToRemove := oldTargetNs.Difference(newTargetNs)
-	nsToAdd := newTargetNs.Difference(oldTargetNs)
-	klog.Infof("Removing pod gateway %s/%s from namespace(s): %s", updatedPod.Namespace, updatedPod.Name, strings.Join(sets.List(nsToRemove), ","))
-	klog.Infof("Adding pod gateway %s/%s to namespace(s): %s", updatedPod.Namespace, updatedPod.Name, strings.Join(sets.List(nsToAdd), ","))
+	if len(nsToRemove) > 0 {
+		klog.Infof("Removing pod gateway %s/%s from namespace(s): %s", updatedPod.Namespace, updatedPod.Name, strings.Join(sets.List(nsToRemove), ","))
+	}
 	// retrieve the gateway information for the pod
 	for ns := range nsToRemove {
 		err = m.removePodGatewayFromNamespace(ns, ktypes.NamespacedName{Namespace: updatedPod.Namespace, Name: updatedPod.Name})
@@ -208,6 +216,10 @@ func (m *externalPolicyManager) processUpdatePod(updatedPod *v1.Pod, oldTargetNs
 		return err
 	}
 
+	nsToAdd := newTargetNs.Difference(oldTargetNs)
+	if len(nsToAdd) > 0 {
+		klog.Infof("Adding pod gateway %s/%s to namespace(s): %s", updatedPod.Namespace, updatedPod.Name, strings.Join(sets.List(nsToAdd), ","))
+	}
 	for ns := range nsToAdd {
 		err = m.addPodGatewayToNamespace(ktypes.NamespacedName{Namespace: updatedPod.Namespace, Name: updatedPod.Name}, ns, pp)
 		if err != nil {
@@ -281,7 +293,7 @@ func (m *externalPolicyManager) deletePodGatewayInNamespace(pod *v1.Pod, targetN
 		return nil
 	}
 	defer m.unlockNamespaceInfoCache(targetNamespace)
-	gwInfo, ok := cacheInfo.dynamicGateways[key]
+	gwInfo, ok := cacheInfo.DynamicGateways[key]
 	if !ok {
 		return fmt.Errorf("unable to find cached pod %s/%s external gateway information in namespace %s", pod.Namespace, pod.Name, targetNamespace)
 	}
@@ -289,13 +301,13 @@ func (m *externalPolicyManager) deletePodGatewayInNamespace(pod *v1.Pod, targetN
 	if err != nil {
 		return err
 	}
-	coexistingIPs, err := m.retrieveDynamicGatewayIPsForPolicies(cacheInfo.policies)
+	coexistingIPs, err := m.retrieveDynamicGatewayIPsForPolicies(cacheInfo.Policies)
 	if err != nil {
 		return err
 	}
 	coexistingIPs = coexistingIPs.Union(annotatedGWIPs)
 	// Filter out the IPs that are not in coexisting. Those IPs are to be deleted.
-	invalidGWIPs := gwInfo.gws.Difference(coexistingIPs)
+	invalidGWIPs := gwInfo.Gateways.Difference(coexistingIPs)
 	// Filter out the IPs from the coexisting list that are to be kept by calculating the difference between the coexising and those IPs that are to be deleted and not coexisting at the same time.
 	ipsToKeep := coexistingIPs.Difference(invalidGWIPs)
 	klog.Infof("Coexisting %s, invalid %s, ipsToKeep %s", strings.Join(sets.List(coexistingIPs), ","), strings.Join(sets.List(invalidGWIPs), ","), strings.Join(sets.List(ipsToKeep), ","))
@@ -303,9 +315,10 @@ func (m *externalPolicyManager) deletePodGatewayInNamespace(pod *v1.Pod, targetN
 	if err != nil {
 		return err
 	}
-	gwInfo.gws.Delete(invalidGWIPs.UnsortedList()...)
-	if cacheInfo.dynamicGateways[key].gws.Len() == 0 {
-		delete(cacheInfo.dynamicGateways, key)
+	gwInfo.Gateways.Delete(invalidGWIPs.UnsortedList()...)
+	if cacheInfo.DynamicGateways[key].Gateways.Len() == 0 {
+		klog.Infof("Deleting gateway info of gateway pod %s targeting namespace %s", key, targetNamespace)
+		delete(cacheInfo.DynamicGateways, key)
 	}
 	return nil
 }
@@ -400,7 +413,7 @@ func (m *externalPolicyManager) filterNamespacesUsingPodGateway(key ktypes.Names
 		if !found {
 			continue
 		}
-		if _, ok := cacheInfo.dynamicGateways[key]; ok {
+		if _, ok := cacheInfo.DynamicGateways[key]; ok {
 			namespaces = namespaces.Insert(namespaceName)
 		}
 		m.unlockNamespaceInfoCache(namespaceName)
