@@ -443,7 +443,7 @@ func (c *Controller) getPortsOfSubject(anpSubject *adminNetworkPolicySubject) ([
 			return nil, err
 		}
 		for _, pod := range pods {
-			if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
+			if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) || !c.isPodScheduledinLocalZone(pod) {
 				continue
 			}
 			logicalPortName := util.GetLogicalPortName(pod.Namespace, pod.Name)

@@ -49,6 +49,17 @@ type Controller struct {
 	eventRecorder record.EventRecorder
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
+	// pass in the isPodScheduledinLocalZone util from bnc - used only to determine
+	// what zones the pods are in.
+	// isPodScheduledinLocalZone returns whether the provided pod is in a zone local to the zone controller
+	// So if pod is not scheduled yet it is considered remote. Also if we can't fetch node from kapi and determing the zone,
+	// we consider it remote - this is ok for this controller as this variable is only used to
+	// determine if we need to add pod's port to port group or not - future updates should
+	// take care of reconciling the state of the cluster
+	// TODO(tssurya): Revisit this in future uniformly across the code base if needed.
+	isPodScheduledinLocalZone func(*v1.Pod) bool
+	// store's the name of the zone that this controller belongs to
+	zone string
 
 	// anp name is key -> cloned value of ANP kapi is value
 	anpCache map[string]*adminNetworkPolicyState
@@ -90,16 +101,20 @@ func NewController(
 	namespaceInformer corev1informers.NamespaceInformer,
 	podInformer corev1informers.PodInformer,
 	addressSetFactory addressset.AddressSetFactory,
+	isPodScheduledinLocalZone func(*v1.Pod) bool,
+	zone string,
 	recorder record.EventRecorder) (*Controller, error) {
 
 	c := &Controller{
-		controllerName:    controllerName,
-		nbClient:          nbClient,
-		anpClientSet:      anpClient,
-		addressSetFactory: addressSetFactory,
-		anpCache:          make(map[string]*adminNetworkPolicyState),
-		anpPriorityMap:    make(map[int32]string),
-		banpCache:         &adminNetworkPolicyState{}, // safe to initialise pointer to empty struct than nil
+		controllerName:            controllerName,
+		nbClient:                  nbClient,
+		anpClientSet:              anpClient,
+		addressSetFactory:         addressSetFactory,
+		isPodScheduledinLocalZone: isPodScheduledinLocalZone,
+		zone:                      zone,
+		anpCache:                  make(map[string]*adminNetworkPolicyState),
+		anpPriorityMap:            make(map[int32]string),
+		banpCache:                 &adminNetworkPolicyState{}, // safe to initialise pointer to empty struct than nil
 	}
 
 	klog.Info("Setting up event handlers for Admin Network Policy")
@@ -431,7 +446,8 @@ func (c *Controller) onANPPodUpdate(oldObj, newObj interface{}) {
 		return
 	}
 	// We only care about pod's label changes, pod's IP changes
-	// and pod going into completed state. Rest of the cases we may return
+	// pod going into completed state and pod getting scheduled and switching
+	// zones. Rest of the cases we may return
 	oldPodLabels := labels.Set(oldPod.Labels)
 	newPodLabels := labels.Set(newPod.Labels)
 	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, &util.DefaultNetInfo{})
