@@ -472,6 +472,8 @@ func (oc *DefaultNetworkController) newANPController() error {
 		oc.watchFactory.NamespaceCoreInformer(),
 		oc.watchFactory.PodCoreInformer(),
 		oc.addressSetFactory,
+		oc.isPodScheduledinLocalZone,
+		oc.zone,
 		oc.recorder,
 	)
 	return err

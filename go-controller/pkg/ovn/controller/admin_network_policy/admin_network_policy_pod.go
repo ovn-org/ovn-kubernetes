@@ -94,6 +94,9 @@ func (c *Controller) syncAdminNetworkPolicyPod(key string) error {
 		c.clearPodForANP(namespace, name, banpObj, c.banpQueue)
 		return nil
 	}
+	// We don't want to shortcuit only local zone pods here since peer pods
+	// whether local or remote need to be dealt with. So we let the main
+	// ANP controller take care of the local zone pods logic for the policy subjects
 	if !util.PodScheduled(pod) || util.PodWantsHostNetwork(pod) {
 		// we don't support ANP with host-networked pods
 		// if pod is no scheduled yet, return and we can process it on its next update

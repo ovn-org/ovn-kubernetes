@@ -1323,6 +1323,12 @@ ovnkube-controller() {
   fi
   echo "multicast_enabled_flag=${multicast_enabled_flag}"
 
+  anp_enabled_flag=
+  if [[ ${ovn_admin_network_policy_enable} == "true" ]]; then
+      anp_enabled_flag="--enable-admin-network-policy"
+  fi
+  echo "anp_enabled_flag=${anp_enabled_flag}"
+
   egressip_enabled_flag=
   if [[ ${ovn_egressip_enable} == "true" ]]; then
       egressip_enabled_flag="--enable-egress-ip"
@@ -1424,6 +1430,7 @@ ovnkube-controller() {
     ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
+    ${anp_enabled_flag} \
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
     ${egressfirewall_enabled_flag} \
