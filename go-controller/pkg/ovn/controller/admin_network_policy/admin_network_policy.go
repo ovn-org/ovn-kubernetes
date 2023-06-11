@@ -78,9 +78,18 @@ func (c *Controller) syncAdminNetworkPolicy(key string) error {
 	}
 	// at this stage the ANP exists in the cluster
 	err = c.ensureAdminNetworkPolicy(anp)
-	if err != nil && errors.Unwrap(err) != ErrorANPPriorityUnsupported && errors.Unwrap(err) != ErrorANPWithDuplicatePriority {
+	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateANPStatusToNotReady(anp, c.zone, err.Error())
+		if errors.Unwrap(err) != ErrorANPPriorityUnsupported && errors.Unwrap(err) != ErrorANPWithDuplicatePriority {
+			// we don't want to retry for these specific errors since they
+			// need manual intervention from users to update their CRDs
+			return nil
+		}
 		return err
 	}
+	// we can ignore the error if status update doesn't succeed; best effort
+	_ = c.updateANPStatusToReady(anp, c.zone)
 	return nil
 }
 
