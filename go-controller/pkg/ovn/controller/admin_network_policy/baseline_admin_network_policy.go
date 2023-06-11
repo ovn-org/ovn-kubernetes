@@ -73,8 +73,12 @@ func (c *Controller) syncBaselineAdminNetworkPolicy(key string) error {
 	// at this stage the BANP exists in the cluster
 	err = c.ensureBaselineAdminNetworkPolicy(banp)
 	if err != nil {
+		// we can ignore the error if status update doesn't succeed; best effort
+		_ = c.updateBANPStatusToNotReady(banp, c.zone, err.Error())
 		return err
 	}
+	// we can ignore the error if status update doesn't succeed; best effort
+	_ = c.updateBANPStatusToReady(banp, c.zone)
 	return nil
 }
 
