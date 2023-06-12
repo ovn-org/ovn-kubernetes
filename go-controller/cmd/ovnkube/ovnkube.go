@@ -421,7 +421,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 	if runMode.networkControllerManager {
 		// create factory and start the controllers asked for
-		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+		masterWatchFactory, err = factory.NewNCMWatchFactory(ovnClientset.GetNetworkControllerManagerClientset())
 		if err != nil {
 			return err
 		}
@@ -431,6 +431,11 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	if runMode.clusterManager {
 		var clusterManagerWatchFactory *factory.WatchFactory
 		if runMode.networkControllerManager {
+			// if CM and NCM modes are enabled, then we should call the combo mode - NewMasterWatchFactory
+			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+			if err != nil {
+				return err
+			}
 			clusterManagerWatchFactory = masterWatchFactory
 		} else {
 			clusterManagerWatchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset.GetClusterManagerClientset())
@@ -484,15 +489,24 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	if runMode.node {
 		var nodeWatchFactory factory.NodeWatchFactory
 
-		if masterWatchFactory == nil {
+		if runMode.networkControllerManager && runMode.clusterManager {
+			// masterWatchFactory would be initialized as NewMasterWatchFactory already, let's use that
+			nodeWatchFactory = masterWatchFactory
+		} else if runMode.networkControllerManager {
+			// masterWatchFactory would be initialized as NewNCMWatchFactory, let's change that
+			// if Node and NCM modes are enabled, then we should call the combo mode - NewMasterWatchFactory
+			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+			if err != nil {
+				return err
+			}
+			nodeWatchFactory = masterWatchFactory
+		} else {
 			var err error
 			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), runMode.identity)
 			if err != nil {
 				return err
 			}
 			defer nodeWatchFactory.Shutdown()
-		} else {
-			nodeWatchFactory = masterWatchFactory
 		}
 
 		if config.Kubernetes.Token == "" {
