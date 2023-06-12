@@ -4,6 +4,7 @@ on:
   merge_group:
   pull_request:
     branches: [ master ]
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: '0 */12 * * *'
 
@@ -64,9 +65,35 @@ jobs:
       uses: tim-actions/dco@v1.1.0
       with:
         commits: ${{ steps.get-pr-commits.outputs.commits }}
+  
+  fail_draft:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == true
+    runs-on: ubuntu-latest
+    steps:
+    - name: Fails in order to indicate that pull request needs to be marked as ready to review.
+      run: exit 1
+
+  # Marks all newly opened pull requests as drafts
+  open-as-draft:
+    name: Mark as draft
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'opened' &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark as draft
+        uses: voiceflow/draft-pr@latest
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   build-master:
     name: Build-master
+    if: |
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
     # Create a cache for the built master image
@@ -253,7 +280,10 @@ jobs:
 
   ovn-upgrade-e2e:
     name: Upgrade OVN from Master to PR branch based image
-    if: github.event_name != 'schedule'
+    if: |
+      github.event_name != 'schedule' &&
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs:
@@ -367,7 +397,10 @@ jobs:
 
   e2e:
     name: e2e
-    if: github.event_name != 'schedule'
+    if: |
+      github.event_name != 'schedule' &&
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
     timeout-minutes: 220
@@ -498,7 +531,10 @@ jobs:
 
   e2e-dual-conversion:
     name: e2e-dual-conversion
-    if: github.event_name != 'schedule'
+    if: |
+      github.event_name != 'schedule' &&
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
