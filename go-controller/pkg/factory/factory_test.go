@@ -307,6 +307,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		ovnClientset = &util.OVNMasterClientset{
 			KubeClient:           fakeClient,
 			EgressIPClient:       egressIPFakeClient,
+			CloudNetworkClient:   cloudNetworkFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
 			EgressQoSClient:      egressQoSFakeClient,
 			EgressServiceClient:  egressServiceFakeClient,

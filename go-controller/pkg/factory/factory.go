@@ -153,9 +153,27 @@ var (
 	ServiceForFakeNodePortWatcherType         reflect.Type = reflect.TypeOf(&serviceForFakeNodePortWatcher{}) // only for unit tests
 )
 
-// NewMasterWatchFactory initializes a new watch factory for the network controller manager
-// or network controller manager+cluster manager or network controller manager+node processes.
+// NewMasterWatchFactory initializes a new watch factory for:
+// a) network controller manager + cluster manager or
+// b) network controller manager + node
+// processes.
 func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory, error) {
+	wf, err := NewNCMWatchFactory(ovnClientset.GetNetworkControllerManagerClientset())
+	if err != nil {
+		return nil, err
+	}
+	wf.cpipcFactory = ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval)
+	if util.PlatformTypeIsEgressIPCloudProvider() {
+		wf.informers[CloudPrivateIPConfigType], err = newInformer(CloudPrivateIPConfigType, wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+	return wf, nil
+}
+
+// NewNCMWatchFactory initializes a new watch factory for the network controller manager process
+func NewNCMWatchFactory(ovnClientset *util.OVNNetworkControllerManagerClientset) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by

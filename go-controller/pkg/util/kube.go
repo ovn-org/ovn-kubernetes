@@ -56,6 +56,18 @@ type OVNClientset struct {
 type OVNMasterClientset struct {
 	KubeClient               kubernetes.Interface
 	EgressIPClient           egressipclientset.Interface
+	CloudNetworkClient       ocpcloudnetworkclientset.Interface
+	EgressFirewallClient     egressfirewallclientset.Interface
+	EgressQoSClient          egressqosclientset.Interface
+	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
+	EgressServiceClient      egressserviceclientset.Interface
+	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
+}
+
+// OVNNetworkControllerManagerClientset
+type OVNNetworkControllerManagerClientset struct {
+	KubeClient               kubernetes.Interface
+	EgressIPClient           egressipclientset.Interface
 	EgressFirewallClient     egressfirewallclientset.Interface
 	EgressQoSClient          egressqosclientset.Interface
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
@@ -79,6 +91,31 @@ type OVNClusterManagerClientset struct {
 
 func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 	return &OVNMasterClientset{
+		KubeClient:               cs.KubeClient,
+		EgressIPClient:           cs.EgressIPClient,
+		CloudNetworkClient:       cs.CloudNetworkClient,
+		EgressFirewallClient:     cs.EgressFirewallClient,
+		EgressQoSClient:          cs.EgressQoSClient,
+		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
+		EgressServiceClient:      cs.EgressServiceClient,
+		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
+	}
+}
+
+func (cs *OVNMasterClientset) GetNetworkControllerManagerClientset() *OVNNetworkControllerManagerClientset {
+	return &OVNNetworkControllerManagerClientset{
+		KubeClient:               cs.KubeClient,
+		EgressIPClient:           cs.EgressIPClient,
+		EgressFirewallClient:     cs.EgressFirewallClient,
+		EgressQoSClient:          cs.EgressQoSClient,
+		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
+		EgressServiceClient:      cs.EgressServiceClient,
+		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
+	}
+}
+
+func (cs *OVNClientset) GetNetworkControllerManagerClientset() *OVNNetworkControllerManagerClientset {
+	return &OVNNetworkControllerManagerClientset{
 		KubeClient:               cs.KubeClient,
 		EgressIPClient:           cs.EgressIPClient,
 		EgressFirewallClient:     cs.EgressFirewallClient,
