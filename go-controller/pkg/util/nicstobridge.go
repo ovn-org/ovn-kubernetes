@@ -5,7 +5,6 @@ package util
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 	"syscall"
@@ -189,7 +188,7 @@ func setupDefaultFile() {
 		return
 	}
 
-	fileContents, err := ioutil.ReadFile(defaultFile)
+	fileContents, err := os.ReadFile(defaultFile)
 	if err != nil {
 		klog.Warningf("Failed to parse file %s (%v)",
 			defaultFile, err)

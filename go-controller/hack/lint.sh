@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-VERSION=v1.52.2
+VERSION=v1.52
 if [ "$#" -ne 1 ]; then
     echo "Expected command line argument - container runtime (docker/podman) got $# arguments: $@"
     exit 1

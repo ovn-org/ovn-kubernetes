@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -202,7 +202,7 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 // CNI server client
 func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	var cr Request
-	b, _ := ioutil.ReadAll(r.Body)
+	b, _ := io.ReadAll(r.Body)
 	if err := json.Unmarshal(b, &cr); err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
 	var cm CNIRequestMetrics
 
-	b, _ := ioutil.ReadAll(r.Body)
+	b, _ := io.ReadAll(r.Body)
 	if err := json.Unmarshal(b, &cm); err != nil {
 		klog.Warningf("Failed to unmarshal JSON (%s) to CNIRequestMetrics struct: %v",
 			string(b), err)

@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"reflect"
 	"strings"
@@ -183,7 +182,7 @@ func createTLSConfig(certFile, privKeyFile, caCertFile, serverName string) (*tls
 	if err != nil {
 		return nil, fmt.Errorf("error generating x509 certs for ovndbapi: %s", err)
 	}
-	caCert, err := ioutil.ReadFile(caCertFile)
+	caCert, err := os.ReadFile(caCertFile)
 	if err != nil {
 		return nil, fmt.Errorf("error generating ca certs for ovndbapi: %s", err)
 	}
