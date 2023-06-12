@@ -455,28 +455,31 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 
 		gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
 
+		// Ensure default pod network traffic always goes to OVN
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+				podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+					Dest:    clusterSubnet.CIDR,
+					NextHop: gatewayIPnet.IP,
+				})
+			}
+		}
+
+		// Ensure default service network traffic always goes to OVN
+		for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
+			if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
+				podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+					Dest:    serviceSubnet,
+					NextHop: gatewayIPnet.IP,
+				})
+			}
+		}
+
 		otherDefaultRoute := otherDefaultRouteV4
 		if isIPv6 {
 			otherDefaultRoute = otherDefaultRouteV6
 		}
-		if otherDefaultRoute {
-			for _, clusterSubnet := range config.Default.ClusterSubnets {
-				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
-						Dest:    clusterSubnet.CIDR,
-						NextHop: gatewayIPnet.IP,
-					})
-				}
-			}
-			for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
-				if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
-					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
-						Dest:    serviceSubnet,
-						NextHop: gatewayIPnet.IP,
-					})
-				}
-			}
-		} else {
+		if !otherDefaultRoute {
 			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
 		}
 

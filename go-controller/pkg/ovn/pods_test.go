@@ -20,6 +20,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilnet "k8s.io/utils/net"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -177,6 +178,16 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 	isIPv6 := ovntest.MustParseIP(podIP).To4() == nil
 
 	var routeSources []*net.IPNet
+	for _, subnet := range config.Default.ClusterSubnets {
+		if utilnet.IsIPv6CIDR(subnet.CIDR) == isIPv6 {
+			routeSources = append(routeSources, subnet.CIDR)
+		}
+	}
+	for _, sc := range config.Kubernetes.ServiceCIDRs {
+		if utilnet.IsIPv6CIDR(sc) == isIPv6 {
+			routeSources = append(routeSources, sc)
+		}
+	}
 	joinNet := config.Gateway.V4JoinSubnet
 	if isIPv6 {
 		joinNet = config.Gateway.V6JoinSubnet
