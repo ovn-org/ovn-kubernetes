@@ -4,6 +4,7 @@ on:
   merge_group:
   pull_request:
     branches: [ master ]
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: '0 */12 * * *'
 
@@ -65,8 +66,38 @@ jobs:
       with:
         commits: ${{ steps.get-pr-commits.outputs.commits }}
 
+  # Set PR as Draft if it does nto have the ok-to-test label
+  check-draft:
+    name: Mark as Draft
+    if: |
+      github.event_name == 'pull_request' &&
+      !contains(github.event.pull_request.labels.*.name, 'ok-to-test') &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark as draft
+        uses: voiceflow/draft-pr@latest
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+  
+  # Fails all draft PRs to ensure they are undrafted before merging
+  fail-draft:
+    name: Fail if Draft
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == true
+    needs: [ check-draft ]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Fails in order to indicate that pull request needs to be marked as ready to review.
+      run: exit 1
+
   build-master:
     name: Build-master
+    if: |
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    needs: [ check-draft ]
     runs-on: ubuntu-latest
     steps:
     # Create a cache for the built master image
@@ -253,12 +284,16 @@ jobs:
 
   ovn-upgrade-e2e:
     name: Upgrade OVN from Master to PR branch based image
-    if: github.event_name != 'schedule'
+    if: |
+      github.event_name != 'schedule' &&
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs:
       - build-master
       - build-pr
+      - check-draft
     strategy:
       fail-fast: false
       matrix:
@@ -367,8 +402,14 @@ jobs:
 
   e2e:
     name: e2e
-    if: github.event_name != 'schedule'
+    if: |
+      github.event_name != 'schedule' &&
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
+    needs: 
+      - check-draft
+      - build-pr
     # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
     timeout-minutes: 220
     strategy:
@@ -402,7 +443,6 @@ jobs:
           - {"target": "compact-mode",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "multi-node-zones",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-multi-node-zones", "num-workers": "3", "num-nodes-per-zone": "2"}
-    needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' }}"
@@ -498,7 +538,10 @@ jobs:
 
   e2e-dual-conversion:
     name: e2e-dual-conversion
-    if: github.event_name != 'schedule'
+    if: |
+      github.event_name != 'schedule' &&
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -508,7 +551,9 @@ jobs:
           - {"ha": "HA", "interconnect": "interconnect-disabled"}
           - {"ha": "noHA", "interconnect": "interconnect-single-node-zones", "num-zones": "3", "num-nodes-per-zone": "1"}
           # - {"ha": "noHA", "interconnect": "interconnect-multi-node-zones", "num-zones": "2", "num-nodes-per-zone": "2"}
-    needs: [ build-pr ]
+    needs:
+      - build-pr
+      - check-draft
     env:
       JOB_NAME: "DualStack-conversion-shared-${{ matrix.ha }}-${{ matrix.interconnect }}"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
@@ -586,6 +631,7 @@ jobs:
   e2e-periodic:
     name: e2e-periodic
     if: github.event_name == 'schedule'
+    needs: [ build-pr ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -595,7 +641,6 @@ jobs:
         ha: ["HA"]
         gateway-mode: ["local"]
         ipfamily: ["ipv4", "ipv6", "dualstack"]
-    needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
