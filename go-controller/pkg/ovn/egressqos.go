@@ -151,7 +151,7 @@ func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.
 		// we don't handle HostNetworked or completed pods
 		if !util.PodWantsHostNetwork(pod) && !util.PodCompleted(pod) {
 			podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
-			if err != nil {
+			if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
 				return nil, nil, err
 			}
 			podsCache.Store(pod.Name, podIPs)

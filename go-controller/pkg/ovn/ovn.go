@@ -184,14 +184,11 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 // ensureRemoteZonePod tries to set up remote zone pod bits required to interconnect it.
 //   - Adds the remote pod ips to the pod namespace address set for network policy and egress gw
 //
-// It returns nil on success and error on failure; failur indicates the pod set up should be retried later.
+// It returns nil on success and error on failure; failure indicates the pod set up should be retried later.
 func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
-	if len(pod.Status.PodIPs) < 1 {
-		return nil
-	}
 	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
 	if err != nil {
-		return fmt.Errorf("failed to get pod ips for the pod  %s/%s : %w", pod.Namespace, pod.Name, err)
+		return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w", pod.Namespace, pod.Name, err)
 	}
 
 	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {

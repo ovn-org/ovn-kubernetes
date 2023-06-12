@@ -11,7 +11,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -258,15 +257,11 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod, nInfo NetInfo) ([]*net.IPNet, error) {
 	}
 	ips := make([]*net.IPNet, 0, len(podIPs))
 	for _, podIP := range podIPs {
-		podIPStr := podIP.String()
-		mask := GetIPFullMask(podIPStr)
-		_, ipnet, err := net.ParseCIDR(podIPStr + mask)
-		if err != nil {
-			// this should not happen;
-			klog.Warningf("Failed to parse pod IP %v err: %v", podIP, err)
-			continue
+		ipNet := net.IPNet{
+			IP:   podIP,
+			Mask: GetFullNetMask(podIP),
 		}
-		ips = append(ips, ipnet)
+		ips = append(ips, &ipNet)
 	}
 	return ips, nil
 }
@@ -275,52 +270,22 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod, nInfo NetInfo) ([]*net.IPNet, error) {
 // and then falling back to the Pod Status IPs. This function is intended to
 // also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
 func GetPodIPsOfNetwork(pod *v1.Pod, nInfo NetInfo) ([]net.IP, error) {
-	ips := []net.IP{}
-	networkMap := map[string]*nadapi.NetworkSelectionElement{}
-	if !nInfo.IsSecondary() {
-		// default network, Pod annotation is under the name of DefaultNetworkName
-		networkMap[types.DefaultNetworkName] = nil
-	} else {
-		var err error
-		var on bool
+	if nInfo.IsSecondary() {
+		return SecondaryNetworkPodIPs(pod, nInfo)
+	}
+	return DefaultNetworkPodIPs(pod)
+}
 
-		on, networkMap, err = GetPodNADToNetworkMapping(pod, nInfo)
-		if err != nil {
-			return nil, err
-		} else if !on {
-			// the pod is not attached to this specific network, don't return error
-			return []net.IP{}, nil
-		}
-	}
-	for nadName := range networkMap {
-		annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
-		if annotation != nil {
-			// Use the OVN annotation if valid
-			for _, ip := range annotation.IPs {
-				ips = append(ips, ip.IP)
-			}
-			// An OVN annotation should never have empty IPs, but just in case
-			if len(ips) == 0 {
-				klog.Warningf("No IPs found in existing OVN annotation for NAD %s! Pod Name: %s, Annotation: %#v",
-					nadName, pod.Name, annotation)
-			}
-		}
-	}
-	if len(ips) != 0 {
+func DefaultNetworkPodIPs(pod *v1.Pod) ([]net.IP, error) {
+	ips := getAnnotatedPodIPs(pod, types.DefaultNetworkName)
+	if len(ips) > 0 {
 		return ips, nil
 	}
-
-	if nInfo.IsSecondary() {
-		return []net.IP{}, fmt.Errorf("no pod annotation of pod %s/%s found for network %s",
-			pod.Namespace, pod.Name, nInfo.GetNetworkName())
-	}
-
 	// Otherwise, default network, if the annotation is not valid try to use Kube API pod IPs
 	ips = make([]net.IP, 0, len(pod.Status.PodIPs))
 	for _, podIP := range pod.Status.PodIPs {
 		ip := utilnet.ParseIPSloppy(podIP.IP)
 		if ip == nil {
-			klog.Warningf("Failed to parse pod IP %q", podIP)
 			continue
 		}
 		ips = append(ips, ip)
@@ -338,6 +303,45 @@ func GetPodIPsOfNetwork(pod *v1.Pod, nInfo NetInfo) ([]net.IP, error) {
 	}
 
 	return []net.IP{ip}, nil
+}
+
+func SecondaryNetworkPodIPs(pod *v1.Pod, networkInfo NetInfo) ([]net.IP, error) {
+	ips := []net.IP{}
+	podNadNames, err := PodNadNames(pod, networkInfo)
+	if err != nil {
+		return nil, err
+	}
+	for _, nadName := range podNadNames {
+		ips = append(ips, getAnnotatedPodIPs(pod, nadName)...)
+	}
+	return ips, nil
+}
+
+func PodNadNames(pod *v1.Pod, netinfo NetInfo) ([]string, error) {
+	on, networkMap, err := GetPodNADToNetworkMapping(pod, netinfo)
+	// skip pods that are not on this network
+	if err != nil {
+		return nil, err
+	} else if !on {
+		return []string{}, nil
+	}
+	nadNames := make([]string, 0, len(networkMap))
+	for nadName := range networkMap {
+		nadNames = append(nadNames, nadName)
+	}
+	return nadNames, nil
+}
+
+func getAnnotatedPodIPs(pod *v1.Pod, nadName string) []net.IP {
+	var ips []net.IP
+	annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
+	if annotation != nil {
+		// Use the OVN annotation if valid
+		for _, ip := range annotation.IPs {
+			ips = append(ips, ip.IP)
+		}
+	}
+	return ips
 }
 
 // GetK8sPodDefaultNetworkSelection get pod default network from annotations

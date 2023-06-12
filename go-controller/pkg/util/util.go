@@ -74,6 +74,21 @@ func GetIPFullMask(ip string) string {
 	return IPv4FullMask
 }
 
+// GetFullNetMask returns a 32 bit netmask for IPv4 addresses and a 128 bit netmask for IPv6 addresses
+func GetFullNetMask(ip net.IP) net.IPMask {
+	const (
+		// IPv4FullMask is the maximum prefix mask for an IPv4 address
+		IPv4FullMask = 32
+		// IPv6FullMask is the maximum prefix mask for an IPv6 address
+		IPv6FullMask = 128
+	)
+
+	if utilnet.IsIPv6(ip) {
+		return net.CIDRMask(IPv6FullMask, IPv6FullMask)
+	}
+	return net.CIDRMask(IPv4FullMask, IPv4FullMask)
+}
+
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
 func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
