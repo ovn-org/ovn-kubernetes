@@ -194,4 +194,8 @@ const (
 
 	EgressServiceNoHost     = ""    // set on services with no allocated node
 	EgressServiceNoSNATHost = "ALL" // set on services with sourceIPBy=Network
+
+	// MaxLogicalPortTunnelKey is maximum tunnel key that can be requested for a
+	// Logical Switch or Router Port
+	MaxLogicalPortTunnelKey = 32767
 )

@@ -9,9 +9,11 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -65,45 +67,65 @@ func (p testPod) getPod(t *testing.T) *corev1.Pod {
 	return pod
 }
 
-type allocatorStub struct {
+type ipAllocatorStub struct {
 	released bool
 }
 
-func (a *allocatorStub) AddOrUpdateSubnet(name string, subnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {
+func (a *ipAllocatorStub) AddOrUpdateSubnet(name string, subnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (a allocatorStub) DeleteSubnet(name string) {
+func (a ipAllocatorStub) DeleteSubnet(name string) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (a *allocatorStub) GetSubnets(name string) ([]*net.IPNet, error) {
+func (a *ipAllocatorStub) GetSubnets(name string) ([]*net.IPNet, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (a *allocatorStub) AllocateUntilFull(name string) error {
+func (a *ipAllocatorStub) AllocateUntilFull(name string) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (a *allocatorStub) AllocateIPs(name string, ips []*net.IPNet) error {
+func (a *ipAllocatorStub) AllocateIPs(name string, ips []*net.IPNet) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (a *allocatorStub) AllocateNextIPs(name string) ([]*net.IPNet, error) {
+func (a *ipAllocatorStub) AllocateNextIPs(name string) ([]*net.IPNet, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (a *allocatorStub) ReleaseIPs(name string, ips []*net.IPNet) error {
+func (a *ipAllocatorStub) ReleaseIPs(name string, ips []*net.IPNet) error {
 	a.released = true
 	return nil
 }
 
-func (a *allocatorStub) ConditionalIPRelease(name string, ips []*net.IPNet, predicate func() (bool, error)) (bool, error) {
+func (a *ipAllocatorStub) ConditionalIPRelease(name string, ips []*net.IPNet, predicate func() (bool, error)) (bool, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (a *allocatorStub) ForSubnet(name string) subnet.NamedAllocator {
+func (a *ipAllocatorStub) ForSubnet(name string) subnet.NamedAllocator {
 	return nil
+}
+
+type idAllocatorStub struct {
+	released bool
+}
+
+func (a *idAllocatorStub) AllocateID(name string) (int, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (a *idAllocatorStub) ReserveID(name string, id int) error {
+	panic("not implemented") // TODO: Implement
+}
+
+func (a *idAllocatorStub) ReleaseID(name string) {
+	a.released = true
+}
+
+func (a *idAllocatorStub) ForName(name string) id.NamedAllocator {
+	panic("not implemented") // TODO: Implement
 }
 
 func TestPodAllocator_reconcileForNAD(t *testing.T) {
@@ -113,13 +135,15 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 		release bool
 	}
 	tests := []struct {
-		name           string
-		args           args
-		ipam           bool
-		tracked        bool
-		expectAllocate bool
-		expectRelease  bool
-		expectTracked  bool
+		name            string
+		args            args
+		ipam            bool
+		idAllocation    bool
+		tracked         bool
+		expectAllocate  bool
+		expectIPRelease bool
+		expectIDRelease bool
+		expectTracked   bool
 	}{
 		{
 			name: "Pod not scheduled",
@@ -156,7 +180,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			expectAllocate: true,
 		},
 		{
-			name: "Pod completed, release inactive",
+			name: "Pod completed, release inactive, IP allocation",
 			ipam: true,
 			args: args{
 				new: &testPod{
@@ -170,7 +194,33 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			expectTracked: true,
 		},
 		{
-			name: "Pod completed, release active, not previously released",
+			name:         "Pod completed, release inactive, ID allocation",
+			idAllocation: true,
+			args: args{
+				new: &testPod{
+					scheduled: true,
+					completed: true,
+					network: &nadapi.NetworkSelectionElement{
+						Name: "nad",
+					},
+				},
+			},
+			expectTracked: true,
+		},
+		{
+			name: "Pod completed, release inactive, no allocation",
+			args: args{
+				new: &testPod{
+					scheduled: true,
+					completed: true,
+					network: &nadapi.NetworkSelectionElement{
+						Name: "nad",
+					},
+				},
+			},
+		},
+		{
+			name: "Pod completed, release active, not previously released, IP allocation",
 			ipam: true,
 			args: args{
 				new: &testPod{
@@ -182,11 +232,27 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				},
 				release: true,
 			},
-			expectRelease: true,
-			expectTracked: true,
+			expectIPRelease: true,
+			expectTracked:   true,
 		},
 		{
-			name: "Pod completed, release active, not previously released, no IPAM",
+			name:         "Pod completed, release active, not previously released, ID allocation",
+			idAllocation: true,
+			args: args{
+				new: &testPod{
+					scheduled: true,
+					completed: true,
+					network: &nadapi.NetworkSelectionElement{
+						Name: "nad",
+					},
+				},
+				release: true,
+			},
+			expectTracked:   true,
+			expectIDRelease: true,
+		},
+		{
+			name: "Pod completed, release active, not previously released, no allocation",
 			args: args{
 				new: &testPod{
 					scheduled: true,
@@ -199,7 +265,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			},
 		},
 		{
-			name: "Pod completed, release active, previously released",
+			name: "Pod completed, release active, previously released, IP allocation",
 			ipam: true,
 			args: args{
 				new: &testPod{
@@ -215,15 +281,29 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			expectTracked: true,
 		},
 		{
+			name:         "Pod completed, release active, previously released, ID allocation",
+			idAllocation: true,
+			args: args{
+				new: &testPod{
+					scheduled: true,
+					completed: true,
+					network: &nadapi.NetworkSelectionElement{
+						Name: "nad",
+					},
+				},
+				release: true,
+			},
+			tracked:       true,
+			expectTracked: true,
+		},
+		{
 			name: "Pod deleted, not scheduled",
-			ipam: true,
 			args: args{
 				old: &testPod{},
 			},
 		},
 		{
 			name: "Pod deleted, on host network",
-			ipam: true,
 			args: args{
 				old: &testPod{
 					hostNetwork: true,
@@ -232,7 +312,6 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 		},
 		{
 			name: "Pod deleted, not on network",
-			ipam: true,
 			args: args{
 				old: &testPod{
 					scheduled: true,
@@ -240,7 +319,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			},
 		},
 		{
-			name: "Pod deleted, not previously released",
+			name: "Pod deleted, not previously released, IP allocation",
 			ipam: true,
 			args: args{
 				old: &testPod{
@@ -251,11 +330,51 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				},
 				release: true,
 			},
-			expectRelease: true,
+			expectIPRelease: true,
 		},
 		{
-			name: "Pod deleted, previously released",
+			name:         "Pod deleted, not previously released, ID allocation",
+			idAllocation: true,
+			args: args{
+				old: &testPod{
+					scheduled: true,
+					network: &nadapi.NetworkSelectionElement{
+						Name: "nad",
+					},
+				},
+				release: true,
+			},
+			expectIDRelease: true,
+		},
+		{
+			name: "Pod deleted, not previously released, no allocation",
+			args: args{
+				old: &testPod{
+					scheduled: true,
+					network: &nadapi.NetworkSelectionElement{
+						Name: "nad",
+					},
+				},
+				release: true,
+			},
+		},
+		{
+			name: "Pod deleted, previously released, IP allocation",
 			ipam: true,
+			args: args{
+				old: &testPod{
+					scheduled: true,
+					network: &nadapi.NetworkSelectionElement{
+						Name: "nad",
+					},
+				},
+				release: true,
+			},
+			tracked: true,
+		},
+		{
+			name:         "Pod deleted, previously released, ID allocation",
+			idAllocation: true,
 			args: args{
 				old: &testPod{
 					scheduled: true,
@@ -271,7 +390,8 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			ipallocator := &allocatorStub{}
+			ipallocator := &ipAllocatorStub{}
+			idallocator := &idAllocatorStub{}
 
 			podListerMock := &v1mocks.PodLister{}
 			kubeMock := &kubemocks.Interface{}
@@ -287,11 +407,13 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			).Return(nil)
 
 			netConf := &ovncnitypes.NetConf{
-				Topology: types.LocalnetTopology,
+				Topology: types.Layer2Topology,
 			}
 			if tt.ipam {
 				netConf.Subnets = "10.1.130.0/24"
 			}
+
+			config.OVNKubernetesFeature.EnableInterconnect = tt.idAllocation
 
 			netInfo, err := util.NewNetInfo(netConf)
 			if err != nil {
@@ -307,7 +429,8 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 
 			a := &PodAllocator{
 				netInfo:                netInfo,
-				allocator:              ipallocator,
+				ipAllocator:            ipallocator,
+				idAllocator:            idallocator,
 				podAnnotationAllocator: podAnnotationAllocator,
 				releasedPods:           map[string]sets.Set[string]{},
 				releasedPodsMutex:      sync.Mutex{},
@@ -335,8 +458,12 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				t.Errorf("expected pod ips allocated to be %v but it was %v", tt.expectAllocate, allocated)
 			}
 
-			if tt.expectRelease != ipallocator.released {
-				t.Errorf("expected pod ips released to be %v but it was %v", tt.expectRelease, ipallocator.released)
+			if tt.expectIPRelease != ipallocator.released {
+				t.Errorf("expected pod ips released to be %v but it was %v", tt.expectIPRelease, ipallocator.released)
+			}
+
+			if tt.expectIDRelease != idallocator.released {
+				t.Errorf("expected pod ID released to be %v but it was %v", tt.expectIPRelease, ipallocator.released)
 			}
 
 			if tt.expectTracked != a.releasedPods["namespace/nad"].Has("pod") {
