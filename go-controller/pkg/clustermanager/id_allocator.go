@@ -11,6 +11,13 @@ const (
 	invalidID = -1
 )
 
+// Allocator of IDs for a set of resources identified by name
+type Allocator interface {
+	AllocateID(name string) (int, error)
+	ReserveID(name string, id int) error
+	ReleaseID(name string)
+}
+
 // idAllocator is used to allocate id for a resource and store the resource - id in a map
 type idAllocator struct {
 	nameIdMap sync.Map
@@ -27,9 +34,9 @@ func NewIDAllocator(name string, maxIds int) (*idAllocator, error) {
 	}, nil
 }
 
-// allocateID allocates an id for the resource 'name' and returns the id.
+// AllocateID allocates an id for the resource 'name' and returns the id.
 // If the id for the resource is already allocated, it returns the cached id.
-func (idAllocator *idAllocator) allocateID(name string) (int, error) {
+func (idAllocator *idAllocator) AllocateID(name string) (int, error) {
 	// Check the idMap and return the id if its already allocated
 	v, ok := idAllocator.nameIdMap.Load(name)
 	if ok {
@@ -46,11 +53,11 @@ func (idAllocator *idAllocator) allocateID(name string) (int, error) {
 	return id, nil
 }
 
-// reserveID reserves the id 'id' for the resource 'name'. It returns an
+// ReserveID reserves the id 'id' for the resource 'name'. It returns an
 // error if the 'id' is already reserved by a resource other than 'name'.
 // It also returns an error if the resource 'name' has a different 'id'
 // already reserved.
-func (idAllocator *idAllocator) reserveID(name string, id int) error {
+func (idAllocator *idAllocator) ReserveID(name string, id int) error {
 	v, ok := idAllocator.nameIdMap.Load(name)
 	if ok {
 		if v.(int) == id {
@@ -69,8 +76,8 @@ func (idAllocator *idAllocator) reserveID(name string, id int) error {
 	return nil
 }
 
-// releaseID releases the id allocated for the resource 'name'
-func (idAllocator *idAllocator) releaseID(name string) {
+// ReleaseID releases the id allocated for the resource 'name'
+func (idAllocator *idAllocator) ReleaseID(name string) {
 	v, ok := idAllocator.nameIdMap.Load(name)
 	if ok {
 		idAllocator.idBitmap.Release(v.(int))

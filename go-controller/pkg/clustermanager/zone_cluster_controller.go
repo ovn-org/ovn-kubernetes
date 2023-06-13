@@ -56,10 +56,10 @@ func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *fa
 	}
 
 	// Reserve the id 0. We don't want to assign this id to any of the nodes.
-	if err := nodeIDAllocator.reserveID("zero", 0); err != nil {
+	if err := nodeIDAllocator.ReserveID("zero", 0); err != nil {
 		return nil, fmt.Errorf("idAllocator failed to reserve id 0")
 	}
-	if err := nodeIDAllocator.reserveID("one", 1); err != nil {
+	if err := nodeIDAllocator.ReserveID("one", 1); err != nil {
 		return nil, fmt.Errorf("idAllocator failed to reserve id 1")
 	}
 
@@ -157,7 +157,7 @@ func (zcc *zoneClusterController) Stop() {
 
 // handleAddUpdateNodeEvent handles the add or update node event
 func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) error {
-	allocatedNodeID, err := zcc.nodeIDAllocator.allocateID(node.Name)
+	allocatedNodeID, err := zcc.nodeIDAllocator.AllocateID(node.Name)
 	if err != nil {
 		return fmt.Errorf("failed to allocate an id to the node %s : err - %w", node.Name, err)
 	}
@@ -217,7 +217,7 @@ func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) er
 
 // handleAddUpdateNodeEvent handles the delete node event
 func (zcc *zoneClusterController) handleDeleteNode(node *corev1.Node) error {
-	zcc.nodeIDAllocator.releaseID(node.Name)
+	zcc.nodeIDAllocator.ReleaseID(node.Name)
 	return nil
 }
 
@@ -237,7 +237,7 @@ func (zcc *zoneClusterController) syncNodeIDs(nodes []interface{}) error {
 		nodeID := util.GetNodeID(node)
 		if nodeID != util.InvalidNodeID {
 			klog.Infof("Node %s has the id %d set", node.Name, nodeID)
-			if err := zcc.nodeIDAllocator.reserveID(node.Name, nodeID); err != nil {
+			if err := zcc.nodeIDAllocator.ReserveID(node.Name, nodeID); err != nil {
 				// The id set on this node is duplicate.
 				klog.Infof("Node %s has a duplicate id %d set", node.Name, nodeID)
 				duplicateIdNodes = append(duplicateIdNodes, node.Name)
@@ -246,7 +246,7 @@ func (zcc *zoneClusterController) syncNodeIDs(nodes []interface{}) error {
 	}
 
 	for i := range duplicateIdNodes {
-		newNodeID, err := zcc.nodeIDAllocator.allocateID(duplicateIdNodes[i])
+		newNodeID, err := zcc.nodeIDAllocator.AllocateID(duplicateIdNodes[i])
 		if err != nil {
 			return fmt.Errorf("failed to allocate id for node %s : err - %w", duplicateIdNodes[i], err)
 		} else {

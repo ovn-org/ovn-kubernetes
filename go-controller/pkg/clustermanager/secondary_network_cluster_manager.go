@@ -41,7 +41,7 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 	}
 
 	// Reserve the id 0 for the default network.
-	if err := networkIDAllocator.reserveID("default", defaultNetworkID); err != nil {
+	if err := networkIDAllocator.ReserveID("default", defaultNetworkID); err != nil {
 		return nil, fmt.Errorf("idAllocator failed to reserve defaultNetworkID %d", defaultNetworkID)
 	}
 	sncm := &secondaryNetworkClusterManager{
@@ -78,7 +78,7 @@ func (sncm *secondaryNetworkClusterManager) Start() error {
 				// two networks have the same id. We will resync the node
 				// annotations correctly when the network controller
 				// is created.
-				_ = sncm.networkIDAllocator.reserveID(networkName, id)
+				_ = sncm.networkIDAllocator.ReserveID(networkName, id)
 			}
 		}
 	}
@@ -100,7 +100,7 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 
 	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
 
-	networkId, err := sncm.networkIDAllocator.allocateID(nInfo.GetNetworkName())
+	networkId, err := sncm.networkIDAllocator.AllocateID(nInfo.GetNetworkName())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create NetworkController for secondary layer3 network %s : %w", nInfo.GetNetworkName(), err)
 	}
