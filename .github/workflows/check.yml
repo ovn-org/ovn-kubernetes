@@ -1,0 +1,48 @@
+name: ovn-check
+
+on:
+  merge_group:
+  pull_request:
+    branches: [ master ]
+  schedule:
+    - cron: '0 */12 * * *'
+
+concurrency:
+  group: ovn-check-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.18.4"
+
+  # This must be a directory
+  CI_IMAGE_CACHE: tmp/image_cache/
+  CI_IMAGE_PR_TAR: image-pr.tar
+  CI_DIST_IMAGES_OUTPUT: dist/images/_output/
+
+jobs:
+  
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: ${{ env.GO_VERSION }}
+      id: go
+
+    - name: Verify
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: v1.52
+        working-directory: go-controller
+        args: --modules-download-mode=vendor --timeout=15m0s --verbose
+
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      test: true
+      upload: true
