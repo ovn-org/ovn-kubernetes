@@ -92,8 +92,8 @@ func (sncm *secondaryNetworkClusterManager) Stop() {
 }
 
 // NewNetworkController implements the networkAttachDefController.NetworkControllerManager
-// interface function.  This function is called by the net-attach-def controller when
-// a layer2 or layer3 secondary network is created.  Layer2 type is not handled here.
+// interface function. This function is called by the net-attach-def controller when
+// a secondary network is created.
 func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
 	if !sncm.isTopologyManaged(nInfo) {
 		return nil, nad.ErrNetworkControllerTopologyNotManaged
@@ -113,8 +113,15 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 func (sncm *secondaryNetworkClusterManager) isTopologyManaged(nInfo util.NetInfo) bool {
 	switch nInfo.TopologyType() {
 	case ovntypes.Layer3Topology:
+		// we need to allocate subnets to each node regardless of configuration
 		return true
+	case ovntypes.Layer2Topology:
+		// for IC, pod IPs and tunnel IDs need to be allocated
+		// in non IC config, this is done from ovnkube-master network controller
+		return config.OVNKubernetesFeature.EnableInterconnect
 	case ovntypes.LocalnetTopology:
+		// for IC, pod IPs need to be allocated
+		// in non IC config, this is done from ovnkube-master network controller
 		return config.OVNKubernetesFeature.EnableInterconnect && len(nInfo.Subnets()) > 0
 	}
 	return false
