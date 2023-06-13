@@ -76,7 +76,21 @@ jobs:
   build-master:
     name: Build-master
     runs-on: ubuntu-latest
+    concurrency:
+      group: ovn-build-master
     steps:
+    
+    - name: Check out code into the Go module directory - from master branch
+      uses: actions/checkout@v3
+      with:
+        ref: master
+    
+    - name: Get git information - from master branch
+      id: git-info-master 
+      run: |
+        echo "REF=$(git rev-parse --symbolic-full-name HEAD)" >> "$GITHUB_OUTPUT"
+        echo "SHA=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+    
     # Create a cache for the built master image
     - name: Restore master image cache
       id: image_cache_master
@@ -84,7 +98,8 @@ jobs:
       with:
         path: |
           ${{ env.CI_IMAGE_CACHE }}
-        key: ${{ github.run_id }}-image-cache-master
+        key: ${{ steps.git-info-master.outputs.REF }}-${{ steps.git-info-master.outputs.SHA }}-image-cache
+    
     # if CI_IMAGE_MASTER_TAR isn't in cache, try pulling it and saving to the cache rather
     # than building, resort back to building if the cache isn't populated and
     # pulling the image fails.
@@ -96,16 +111,10 @@ jobs:
         if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz ]; then
             cp ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz ${CI_IMAGE_MASTER_TAR}.gz
             gunzip ${CI_IMAGE_MASTER_TAR}.gz
-            echo "::set-output name=MASTER_IMAGE_RESTORED_FROM_CACHE::true"
+            echo "MASTER_IMAGE_RESTORED=true" >> "$GITHUB_OUTPUT"
             exit 0
         fi
 
-        if docker pull ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-f:master; then
-            docker tag ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-f:master ovn-daemonset-f:dev
-
-            echo "::set-output name=MASTER_IMAGE_RESTORED_FROM_GHCR::true"
-            exit 0
-        fi
     # only run the following steps if the master image was not found in the cache
     - name: Set up Go
       if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
@@ -114,14 +123,8 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
       id: go
 
-    - name: Check out code into the Go module directory - from master branch
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_GHCR != 'true' && steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
-      uses: actions/checkout@v3
-      with:
-        ref: master
-
     - name: Build - from master branch
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_GHCR != 'true' && steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
+      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
       run: |
         set -x
         pushd go-controller
@@ -130,16 +133,16 @@ jobs:
         popd
 
     - name: Build docker image - from master branch
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_GHCR != 'true' && steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
+      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
       run: |
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
-          echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
+          echo "ref: ${{ steps.git-info-master.outputs.REF }} commit: ${{ steps.git-info-master.outputs.SHA }}" > git_info
           docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
         popd
 
     - name: Cache master image
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
+      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
       continue-on-error: false
       run: |
         set -x
