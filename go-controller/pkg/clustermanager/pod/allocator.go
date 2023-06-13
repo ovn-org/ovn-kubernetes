@@ -19,10 +19,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// PodIPAllocator acts on pods events handed off by the cluster network
-// controller and allocates or releases IPs for them updating the pod annotation
-// as necessary with all the additional information derived from those IPs.
-type PodIPAllocator struct {
+// PodAllocator acts on pods events handed off by the cluster network controller
+// and allocates or releases resources (IPs and tunnel IDs at the time of this
+// writing) to pods on behalf of cluster manager.
+type PodAllocator struct {
 	netInfo util.NetInfo
 
 	// allocator of IPs within subnets
@@ -37,15 +37,15 @@ type PodIPAllocator struct {
 	releasedPodsMutex sync.Mutex
 }
 
-// NewPodIPAllocator builds a new PodIPAllocator
-func NewPodIPAllocator(netInfo util.NetInfo, podLister listers.PodLister, kube kube.Interface) *PodIPAllocator {
+// NewPodAllocator builds a new PodAllocator
+func NewPodAllocator(netInfo util.NetInfo, podLister listers.PodLister, kube kube.Interface) *PodAllocator {
 	podAnnotationAllocator := pod.NewPodAnnotationAllocator(
 		netInfo,
 		podLister,
 		kube,
 	)
 
-	podIPAllocator := &PodIPAllocator{
+	podAllocator := &PodAllocator{
 		netInfo:                netInfo,
 		releasedPods:           map[string]sets.Set[string]{},
 		releasedPodsMutex:      sync.Mutex{},
@@ -54,15 +54,15 @@ func NewPodIPAllocator(netInfo util.NetInfo, podLister listers.PodLister, kube k
 
 	// this network might not have IPAM, we will just allocate MAC addresses
 	if util.DoesNetworkRequireIPAM(netInfo) {
-		podIPAllocator.allocator = subnet.NewAllocator()
+		podAllocator.allocator = subnet.NewAllocator()
 	}
 
-	return podIPAllocator
+	return podAllocator
 }
 
 // InitRanges initializes the allocator with the subnets configured for the
 // network
-func (a *PodIPAllocator) InitRanges() error {
+func (a *PodAllocator) InitRanges() error {
 	if a.netInfo.TopologyType() != types.LocalnetTopology {
 		return fmt.Errorf("topology %s not supported", a.netInfo.TopologyType())
 	}
@@ -77,13 +77,13 @@ func (a *PodIPAllocator) InitRanges() error {
 
 // Reconcile allocates or releases IPs for pods updating the pod annotation
 // as necessary with all the additional information derived from those IPs
-func (a *PodIPAllocator) Reconcile(old, new *corev1.Pod) error {
+func (a *PodAllocator) Reconcile(old, new *corev1.Pod) error {
 	releaseIPsFromAllocator := true
 	return a.reconcile(old, new, releaseIPsFromAllocator)
 }
 
 // Sync initializes the allocator with pods that already exist on the cluster
-func (a *PodIPAllocator) Sync(objs []interface{}) error {
+func (a *PodAllocator) Sync(objs []interface{}) error {
 	// on sync, we don't release IPs from the allocator, we are just trying to
 	// allocate annotated IPs; specifically we don't want to release IPs of
 	// completed pods that might be being used by other pods
@@ -104,7 +104,7 @@ func (a *PodIPAllocator) Sync(objs []interface{}) error {
 	return nil
 }
 
-func (a *PodIPAllocator) reconcile(old, new *corev1.Pod, releaseIPsFromAllocator bool) error {
+func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseIPsFromAllocator bool) error {
 	var pod *corev1.Pod
 	if old != nil {
 		pod = old
@@ -144,7 +144,7 @@ func (a *PodIPAllocator) reconcile(old, new *corev1.Pod, releaseIPsFromAllocator
 	return nil
 }
 
-func (a *PodIPAllocator) reconcileForNAD(old, new *corev1.Pod, nad string, network *nettypes.NetworkSelectionElement, releaseIPsFromAllocator bool) error {
+func (a *PodAllocator) reconcileForNAD(old, new *corev1.Pod, nad string, network *nettypes.NetworkSelectionElement, releaseIPsFromAllocator bool) error {
 	var pod *corev1.Pod
 	if old != nil {
 		pod = old
@@ -162,7 +162,7 @@ func (a *PodIPAllocator) reconcileForNAD(old, new *corev1.Pod, nad string, netwo
 	return a.allocatePodOnNAD(pod, nad, network)
 }
 
-func (a *PodIPAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, podDeleted, releaseIPsFromAllocator bool) error {
+func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, podDeleted, releaseIPsFromAllocator bool) error {
 	if !util.DoesNetworkRequireIPAM(a.netInfo) {
 		// no need to release if no IPAM
 		return nil
@@ -201,7 +201,7 @@ func (a *PodIPAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, podDeleted
 	return nil
 }
 
-func (a *PodIPAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *nettypes.NetworkSelectionElement) error {
+func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *nettypes.NetworkSelectionElement) error {
 	var ipAllocator subnet.NamedAllocator
 	if util.DoesNetworkRequireIPAM(a.netInfo) {
 		ipAllocator = a.allocator.ForSubnet(a.netInfo.GetNetworkName())
@@ -234,7 +234,7 @@ func (a *PodIPAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *
 	return err
 }
 
-func (a *PodIPAllocator) addReleasedPod(nad, uid string) {
+func (a *PodAllocator) addReleasedPod(nad, uid string) {
 	a.releasedPodsMutex.Lock()
 	defer a.releasedPodsMutex.Unlock()
 	releasedPods := a.releasedPods[nad]
@@ -245,7 +245,7 @@ func (a *PodIPAllocator) addReleasedPod(nad, uid string) {
 	releasedPods.Insert(uid)
 }
 
-func (a *PodIPAllocator) deleteReleasedPod(nad, uid string) {
+func (a *PodAllocator) deleteReleasedPod(nad, uid string) {
 	a.releasedPodsMutex.Lock()
 	defer a.releasedPodsMutex.Unlock()
 	releasedPods := a.releasedPods[nad]
@@ -257,7 +257,7 @@ func (a *PodIPAllocator) deleteReleasedPod(nad, uid string) {
 	}
 }
 
-func (a *PodIPAllocator) isPodReleased(nad, uid string) bool {
+func (a *PodAllocator) isPodReleased(nad, uid string) bool {
 	a.releasedPodsMutex.Lock()
 	defer a.releasedPodsMutex.Unlock()
 	releasedPods := a.releasedPods[nad]

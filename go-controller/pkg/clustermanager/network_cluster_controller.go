@@ -42,7 +42,7 @@ type networkClusterController struct {
 	// unique id of the network
 	networkID int
 
-	podIPAllocator      *pod.PodIPAllocator
+	podIPAllocator      *pod.PodAllocator
 	hostSubnetAllocator *subnetallocator.HostSubnetAllocator
 
 	util.NetInfo
@@ -68,7 +68,7 @@ func newNetworkClusterController(networkID int, netInfo util.NetInfo, ovnClient 
 	}
 
 	if ncc.hasPodIPAllocation() {
-		ncc.podIPAllocator = pod.NewPodIPAllocator(netInfo, wf.PodCoreInformer().Lister(), kube)
+		ncc.podIPAllocator = pod.NewPodAllocator(netInfo, wf.PodCoreInformer().Lister(), kube)
 	}
 
 	ncc.initRetryFramework()

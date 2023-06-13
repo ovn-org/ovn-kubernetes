@@ -106,7 +106,7 @@ func (a *allocatorStub) ForSubnet(name string) subnet.NamedAllocator {
 	return nil
 }
 
-func TestPodIPAllocator_reconcileForNAD(t *testing.T) {
+func TestPodAllocator_reconcileForNAD(t *testing.T) {
 	type args struct {
 		old     *testPod
 		new     *testPod
@@ -305,7 +305,7 @@ func TestPodIPAllocator_reconcileForNAD(t *testing.T) {
 				kubeMock,
 			)
 
-			a := &PodIPAllocator{
+			a := &PodAllocator{
 				netInfo:                netInfo,
 				allocator:              ipallocator,
 				podAnnotationAllocator: podAnnotationAllocator,
