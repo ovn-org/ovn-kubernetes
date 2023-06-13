@@ -20,6 +20,21 @@ env:
   CI_DIST_IMAGES_OUTPUT: dist/images/_output/
 
 jobs:
+
+  dco:
+    name: DCO
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Get PR commits
+      id: 'get-pr-commits'
+      uses: tim-actions/get-pr-commits@v1.1.0
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Run DCO check
+      uses: tim-actions/dco@v1.1.0
+      with:
+        commits: ${{ steps.get-pr-commits.outputs.commits }}
   
   lint:
     name: Lint
