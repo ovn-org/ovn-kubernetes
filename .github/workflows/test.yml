@@ -4,6 +4,7 @@ on:
   merge_group:
   pull_request:
     branches: [ master ]
+    types: [opened, reopened, synchronize, ready_for_review]
   schedule:
     - cron: '0 */12 * * *'
 
@@ -29,9 +30,45 @@ env:
 
 
 jobs:
+  # Require 'ok-to-test' to run e2e tests
+  test-ready:
+    name: Ready to Test
+    runs-on: ubuntu-latest
+    steps:
+    - run: |
+        github_event_name="${{ github.event_name }}"
+        if [ "$github_event_name" != "pull_request" ]; then
+          exit 0
+        fi
+        github_event_pr_draft="${{ github.event.pull_request.draft }}"
+        github_event_pr_ok_to_test="${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') }}"
+        if [ "$github_event_pr_draft" != "true" ] &&  [ "$github_event_pr_ok_to_test" == "true" ]; then
+          exit 0
+        fi
+
+        cat <<"EOF"
+        
+        You PR is not ready to test. E2E tests will not run.
+        
+        To mark your PR as ready to test:
+         1. Set your PR as a Draft
+         2. Label your PR as 'ok-to-test'
+         3. Undraft the PR (note: this also sets your PR as ready to review)
+        
+        Please be mindful of the limited resources available. If you need 
+        feedback from the E2E tests while work is in progress, please run 
+        them locally or run the workflows on your forked repository.
+
+        If you add the 'ok-to-test' but later on find out that your PR
+        requires more work, please consider removing the 'ok-to-test' label
+        in the meantime.
+        
+        EOF
+        exit 1
 
   build-pr:
     uses: ./.github/workflows/build.yml
+    needs: [ test-ready ]
     with:
       test: false
       upload: true
@@ -129,8 +166,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs:
-      - build-master
+      - test-ready
       - build-pr
+      - build-master
     strategy:
       fail-fast: false
       matrix:
@@ -241,6 +279,9 @@ jobs:
     name: e2e
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    needs: 
+      - test-ready
+      - build-pr
     # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
     timeout-minutes: 220
     strategy:
@@ -275,7 +316,6 @@ jobs:
           - {"target": "multi-node-zones",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-multi-node-zones", "num-workers": "3", "num-nodes-per-zone": "2"}
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-    needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' }}"
@@ -383,7 +423,9 @@ jobs:
           - {"ha": "HA", "interconnect": "interconnect-disabled"}
           - {"ha": "noHA", "interconnect": "interconnect-single-node-zones", "num-zones": "3", "num-nodes-per-zone": "1"}
           # - {"ha": "noHA", "interconnect": "interconnect-multi-node-zones", "num-zones": "2", "num-nodes-per-zone": "2"}
-    needs: [ build-pr ]
+    needs:
+      - test-ready
+      - build-pr
     env:
       JOB_NAME: "DualStack-conversion-shared-${{ matrix.ha }}-${{ matrix.interconnect }}"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
