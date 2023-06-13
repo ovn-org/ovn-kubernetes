@@ -1,0 +1,133 @@
+name: ovn-build
+
+on:
+  workflow_call:
+    inputs:
+      test:
+        required: true
+        type: boolean
+        default: false
+      upload:
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: ovn-build-pr-${{ github.head_ref || github.run_id }}
+
+env:
+  GO_VERSION: "1.18.4"
+
+  # This must be a directory
+  CI_IMAGE_CACHE: tmp/image_cache/
+  CI_IMAGE_PR_TAR: image-pr.tar
+  CI_DIST_IMAGES_OUTPUT: dist/images/_output/
+
+jobs:
+
+  build-pr:
+    name: Build-PR
+    runs-on: ubuntu-latest
+    steps:
+    # Create a cache for the build PR image
+    - name: Restore PR image cache
+      id: image_cache_pr
+      uses: actions/cache@v3
+      with:
+        path: |
+          ${{ env.CI_IMAGE_CACHE }}
+        key: ${{ github.ref }}-${{ github.sha }}-image-cache
+
+    - name: Check if PR image build is needed
+      id: is_pr_image_build_needed
+      continue-on-error: true
+      run: |
+        set -x
+        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}.gz ]; then
+            mkdir -p ${CI_DIST_IMAGES_OUTPUT}
+            cp ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}.gz ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_PR_TAR}.gz
+            gunzip ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_PR_TAR}.gz
+            echo "PR_IMAGE_RESTORED=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    # only run the following steps if the PR image was not found in the cache
+    - name: Set up Go
+      if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
+      uses: actions/setup-go@v3
+      with:
+        go-version: ${{ env.GO_VERSION }}
+      id: go
+
+    - name: Check out code into the Go module directory - from current pr branch
+      if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
+      uses: actions/checkout@v3
+
+    - name: Test - from current pr branch
+      if: inputs.test == true && steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
+      run: |
+        set -x
+        pushd go-controller
+           # exit early if there are gofmt issues
+           make gofmt
+           COVERALLS=1 CONTAINER_RUNNABLE=1 make check
+        popd
+
+    - name: Submit code coverage to Coveralls
+      if: inputs.test == true && steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
+      continue-on-error: true
+      env:
+        COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GO111MODULE: off
+      run: |
+        set -x
+        go get github.com/mattn/goveralls
+        go get github.com/modocache/gover
+        PATH=$PATH:$(go env GOPATH)/bin
+
+        mkdir -p $(go env GOPATH)/src/github.com/ovn-org
+        ln -sf $(pwd) $(go env GOPATH)/src/github.com/ovn-org/ovn-kubernetes
+
+        gover
+        goveralls -coverprofile=gover.coverprofile -service=github
+
+    - name: Build - from current pr branch
+      if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
+      run: |
+        set -x
+        pushd go-controller
+           make
+           make windows
+        popd
+
+    - name: Build docker image - from current pr branch
+      if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
+      run: |
+        pushd dist/images
+          sudo cp -f ../../go-controller/_output/go/bin/ovn* .
+          echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
+          docker build -t ovn-daemonset-f:pr -f Dockerfile.fedora .
+          mkdir _output
+          docker save ovn-daemonset-f:pr > _output/${CI_IMAGE_PR_TAR}
+        popd
+
+    - name: Cache PR image
+      if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
+      continue-on-error: true
+      run: |
+        set -x
+        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR} ]; then
+            rm -f ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}
+        fi
+        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}.gz ]; then
+           rm -f ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}.gz
+        fi
+        mkdir -p ${CI_IMAGE_CACHE}/
+        cp ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_PR_TAR} ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}
+        gzip ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}
+
+    # run the following if none of the previous steps failed
+    - uses: actions/upload-artifact@v3
+      if: inputs.upload == true
+      with:
+        name: test-image-pr
+        path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}
