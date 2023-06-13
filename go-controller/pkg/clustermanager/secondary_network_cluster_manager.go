@@ -7,6 +7,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -29,13 +30,13 @@ type secondaryNetworkClusterManager struct {
 	ovnClient     *util.OVNClusterManagerClientset
 	watchFactory  *factory.WatchFactory
 	// networkIDAllocator is used to allocate a unique ID for each secondary layer3 network
-	networkIDAllocator *idAllocator
+	networkIDAllocator id.Allocator
 }
 
 func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset,
 	wf *factory.WatchFactory, recorder record.EventRecorder) (*secondaryNetworkClusterManager, error) {
 	klog.Infof("Creating secondary network cluster manager")
-	networkIDAllocator, err := NewIDAllocator("NetworkIDs", maxSecondaryNetworkIDs)
+	networkIDAllocator, err := id.NewIDAllocator("NetworkIDs", maxSecondaryNetworkIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create an IdAllocator for the secondary network ids, err: %v", err)
 	}

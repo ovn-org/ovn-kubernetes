@@ -1,4 +1,4 @@
-package clustermanager
+package id
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ type idAllocator struct {
 }
 
 // NewIDAllocator returns an IDAllocator
-func NewIDAllocator(name string, maxIds int) (*idAllocator, error) {
+func NewIDAllocator(name string, maxIds int) (Allocator, error) {
 	idBitmap := bitmapallocator.NewContiguousAllocationMap(maxIds, name)
 
 	return &idAllocator{

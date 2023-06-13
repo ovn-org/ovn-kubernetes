@@ -11,6 +11,7 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -37,7 +38,7 @@ type zoneClusterController struct {
 	retryNodes *objretry.RetryFramework
 
 	// ID allocator for the nodes
-	nodeIDAllocator *idAllocator
+	nodeIDAllocator id.Allocator
 
 	// node gateway router port IP generators (connecting to the join switch)
 	nodeGWRouterLRPIPv4Generator *ipGenerator
@@ -50,7 +51,7 @@ type zoneClusterController struct {
 
 func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) (*zoneClusterController, error) {
 	// Since we don't assign 0 to any node, create IDAllocator with one extra element in maxIds.
-	nodeIDAllocator, err := NewIDAllocator("NodeIDs", maxNodeIDs+1)
+	nodeIDAllocator, err := id.NewIDAllocator("NodeIDs", maxNodeIDs+1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create an IdAllocator for the nodes, err: %w", err)
 	}
