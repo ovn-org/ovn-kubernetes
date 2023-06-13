@@ -16,6 +16,14 @@ type Allocator interface {
 	AllocateID(name string) (int, error)
 	ReserveID(name string, id int) error
 	ReleaseID(name string)
+	ForName(name string) NamedAllocator
+}
+
+// NamedAllocator of IDs for a specific resource
+type NamedAllocator interface {
+	AllocateID() (int, error)
+	ReserveID(int) error
+	ReleaseID()
 }
 
 // idAllocator is used to allocate id for a resource and store the resource - id in a map
@@ -83,4 +91,28 @@ func (idAllocator *idAllocator) ReleaseID(name string) {
 		idAllocator.idBitmap.Release(v.(int))
 		idAllocator.nameIdMap.Delete(name)
 	}
+}
+
+func (idAllocator *idAllocator) ForName(name string) NamedAllocator {
+	return &namedAllocator{
+		name:      name,
+		allocator: idAllocator,
+	}
+}
+
+type namedAllocator struct {
+	name      string
+	allocator *idAllocator
+}
+
+func (allocator *namedAllocator) AllocateID() (int, error) {
+	return allocator.allocator.AllocateID(allocator.name)
+}
+
+func (allocator *namedAllocator) ReserveID(id int) error {
+	return allocator.allocator.ReserveID(allocator.name, id)
+}
+
+func (allocator *namedAllocator) ReleaseID() {
+	allocator.allocator.ReleaseID(allocator.name)
 }
