@@ -70,40 +70,64 @@ BRANCH=$(jq -r '.head.ref' pr.json)
 curl --request GET \
     --url "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs?event=pull_request&actor=${ACTOR}&branch=${BRANCH}" \
     --header "authorization: Bearer ${GITHUB_TOKEN}" \
-    --header "content-type: application/json" | jq '.workflow_runs | max_by(.run_number)' > run.json
+    --header "content-type: application/json" |\
+    jq '.workflow_runs |
+        group_by(.name) | 
+        map(max_by(.run_number)) | 
+    ' > workflow_runs.json
 
-ACTION_URL=""
+
 if [ "$ACTION" == "/retest" ]; then
-  ACTION_URL=$(jq -r '.rerun_url' run.json)
+  cat workflow_runs.json |\
+    jq -r '.[] |
+      map(select(.status|contains("completed"))) |
+      .[] | .rerun_url
+    ' > url.data
 elif [ "$ACTION" == "/retest-failed" ]; then
   # New feature, rerun failed jobs:
   # https://docs.github.com/en/rest/reference/actions#re-run-failed-jobs-from-a-workflow-run
-  RERUN_URL=$(jq -r '.rerun_url' run.json)
-  ACTION_URL=${RERUN_URL}-failed-jobs
+  cat workflow_runs.json |\
+    jq -r '
+      map(select(.status|contains("completed"))) |
+      map(select(.conclusion|contains("failure"))) |
+      .[] | .rerun_url + "-failed-jobs"
+    ' > url.data
 elif [ "$ACTION" == "/cancel" ]; then
-  ACTION_URL=$(jq -r '.cancel_url' run.json)
+  cat workflow_runs.json |\
+    jq -r '
+      map(select(.status | test ("queued|in_progress|pending" )) |
+      .[] | .cancel_url
+    ' > url.data
 else
   echo "Something went wrong, unsupported action"
   exit 0
 fi
 
-# Execute the action.
-# Store the response code in a variable.
-# Store the answer in file .action-response.json.
-RESPONSE_CODE=$(curl --write-out '%{http_code}' --silent --output .action-response.json --request POST \
-    --url "${ACTION_URL}" \
-    --header "authorization: Bearer ${GITHUB_TOKEN}" \
-    --header "content-type: application/json")
-
-
 REACTION_SYMBOL="rocket"
-if ! echo ${RESPONSE_CODE} | egrep -q '^2'; then
-  REACTION_SYMBOL="confused"
-fi
+for url in $(cat url.data); do
+  # Execute the action.
+  # Store the response code in a variable.
+  # Store the answer in file .action-response.json.
+  RESPONSE_CODE=$(curl --write-out '%{http_code}' --silent --output .action-response.json --request POST \
+      --url "${url}" \
+      --header "authorization: Bearer ${GITHUB_TOKEN}" \
+      --header "content-type: application/json")
+
+
+  if ! echo ${RESPONSE_CODE} | egrep -q '^2'; then
+    REACTION_SYMBOL="confused"
+    RESPONSE_MESSAGE=$(jq -r '.message' .action-response.json)
+    send_comment "Oops, something went wrong:\n~~~\n${RESPONSE_MESSAGE}\n~~~\n"
+    break
+  fi
+  touch triggered.data
+  echo $url | sed -e 's|/api.github.com/repos/|/github.com/|' -e 's|/[^/]*$||' >> triggered.data
+  rm .action-response.json
+done
+
 send_reaction "${REACTION_SYMBOL}"
 
-# In case we received a non 2xx response code, relay the error message as a comment.
-if ! echo ${RESPONSE_CODE} | egrep -q '^2'; then
-  RESPONSE_MESSAGE=$(jq -r '.message' .action-response.json)
-  send_comment "Oops, something went wrong:\n~~~\n${RESPONSE_MESSAGE}\n~~~\n"
+if [ -f "triggered.data" ]; then
+  RESPONSE_MESSAGE="The following workflows runs were triggered:\n$(cat triggered.data)"
+  send_comment "${RESPONSE_MESSAGE}"
 fi

@@ -16,4 +16,4 @@ jobs:
       - name: Re-Test Action
         uses: ./.github/actions/retest-action
         with:
-          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
