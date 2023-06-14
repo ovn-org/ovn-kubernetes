@@ -227,7 +227,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 
 	if c.useNetlink {
 		// get updated interface IP addresses for the gateway bridge
-		ifAddrs, err = c.gatewayBridge.updateInterfaceIPAddresses()
+		ifAddrs, err = c.gatewayBridge.updateInterfaceIPAddresses(node)
 		if err != nil {
 			return err
 		}

@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -1089,6 +1090,12 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignmentsWithLock(name strin
 // work on ovnkube-master restarts when all egress IP handlers will most likely
 // match and perform the setup for the same pod and status multiple times over.
 func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
+	podKey := getPodKey(pod)
+	// If pod is already in succeeded or failed state, return it without proceeding further.
+	if util.PodCompleted(pod) {
+		klog.Infof("Pod %s is already in completed state, skipping egress ip assignment", podKey)
+		return nil
+	}
 	// If statusAssignments is empty just return, not doing this will delete the
 	// external GW set up, even though there might be no egress IP set up to
 	// perform.
@@ -1096,7 +1103,6 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 		return nil
 	}
 	var remainingAssignments []egressipv1.EgressIPStatusItem
-	podKey := getPodKey(pod)
 	// Retrieve the pod's networking configuration from the
 	// logicalPortCache. The reason for doing this: a) only normal network
 	// pods are placed in this cache, b) once the pod is placed here we know
@@ -1292,7 +1298,7 @@ func (oc *DefaultNetworkController) deletePodEgressIPAssignments(name string, st
 		podStatus.standbyEgressIPNames.Delete(name)
 		return nil
 	}
-	podIPs, err := util.GetPodCIDRsWithFullMask(pod)
+	podIPs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
 	if err != nil {
 		return err
 	}
@@ -1899,13 +1905,6 @@ func (oc *DefaultNetworkController) setNodeEgressReachable(nodeName string, isRe
 
 func (oc *DefaultNetworkController) addEgressNode(nodeName string) error {
 	var errors []error
-	// Check if EgressIP node create failed and if does try adding it again
-	if node, ok := oc.addEgressNodeFailed.Load(nodeName); ok {
-		failedNode := node.(*kapi.Node)
-		if err := oc.setupNodeForEgress(failedNode); err != nil {
-			return err
-		}
-	}
 	klog.V(5).Infof("Egress node: %s about to be initialized", nodeName)
 	// This option will program OVN to start sending GARPs for all external IPS
 	// that the logical switch port has been configured to use. This is
@@ -2040,28 +2039,101 @@ func (oc *DefaultNetworkController) initEgressIPAllocator(node *kapi.Node) (err 
 	return nil
 }
 
-// setupNodeForEgress sets up default logical router policy for every node and
-// initiates the allocator cache for the node in question, if the node has the
-// necessary annotation.
-func (oc *DefaultNetworkController) setupNodeForEgress(node *v1.Node) error {
-	if err := CreateDefaultNoRerouteNodePolicies(oc.nbClient, oc.addressSetFactory, node, oc.controllerName); err != nil {
-		oc.addEgressNodeFailed.Store(node.Name, node)
-		return err
+// reconcileNodeForEgressIP with respect and old and new status of a node
+func (oc *DefaultNetworkController) reconcileNodeForEgressIP(oldNode, newNode *v1.Node) error {
+	// Check if the node's addresses changed. If so, update LR policies.
+	if oldNode == nil || newNode == nil || util.NodeHostAddressesAnnotationChanged(oldNode, newNode) {
+		klog.Infof("Egress IP detected IP address change. Updating no re-route policies")
+		err := oc.ensureDefaultNoRerouteNodePolicies()
+		if err != nil {
+			return err
+		}
 	}
-	oc.addEgressNodeFailed.Delete(node.Name)
-	if err := oc.initEgressIPAllocator(node); err != nil {
-		klog.V(5).Infof("Egress node initialization error: %v", err)
+
+	nodeEgressLabel := util.GetNodeEgressLabel()
+	var oldLabels map[string]string
+	var newLabels map[string]string
+	var isOldReady, isNewReady, isNewReachable bool
+	var nodeName string
+	if oldNode != nil {
+		oldLabels = oldNode.GetLabels()
+		isOldReady = oc.isEgressNodeReady(oldNode)
+		nodeName = oldNode.Name
 	}
+	if newNode != nil {
+		// Initialize the allocator on every update,
+		// ovnkube-node/cloud-network-config-controller will make sure to
+		// annotate the node with the egressIPConfig, but that might have
+		// happened after we processed the ADD for that object, hence keep
+		// retrying for all UPDATEs.
+		if err := oc.initEgressIPAllocator(newNode); err != nil {
+			klog.Warningf("Egress node initialization error: %v", err)
+		}
+
+		newLabels = newNode.GetLabels()
+		isNewReady = oc.isEgressNodeReady(newNode)
+		isNewReachable = oc.isEgressNodeReachable(newNode)
+		nodeName = newNode.Name
+	} else if oldNode != nil {
+		err := oc.deleteEgressIPAllocator(oldNode)
+		if err != nil {
+			return nil
+		}
+	}
+
+	_, oldHadEgressLabel := oldLabels[nodeEgressLabel]
+	_, newHasEgressLabel := newLabels[nodeEgressLabel]
+	oc.setNodeEgressAssignable(nodeName, newHasEgressLabel)
+	oc.setNodeEgressReady(nodeName, isNewReady)
+
+	// If the node is not labeled for egress assignment, just return
+	// directly, we don't really need to set the ready / reachable
+	// status on this node if the user doesn't care about using it.
+	if !oldHadEgressLabel && !newHasEgressLabel {
+		return nil
+	}
+
+	if oldHadEgressLabel && !newHasEgressLabel {
+		klog.Infof("Node: %s has been un-labeled, deleting it from egress assignment", nodeName)
+		return oc.deleteEgressNode(nodeName)
+	}
+
+	if !oldHadEgressLabel && newHasEgressLabel {
+		klog.Infof("Node: %s has been labeled, adding it for egress assignment", nodeName)
+		if isNewReady && isNewReachable {
+			oc.setNodeEgressReachable(nodeName, isNewReachable)
+			if err := oc.addEgressNode(nodeName); err != nil {
+				return err
+			}
+		} else {
+			klog.Warningf("Node: %s has been labeled, but node is not ready"+
+				" and reachable, cannot use it for egress assignment", nodeName)
+		}
+		return nil
+	}
+
+	if isOldReady == isNewReady {
+		return nil
+	}
+
+	if !isNewReady {
+		klog.Warningf("Node: %s is not ready, deleting it from egress assignment", nodeName)
+		if err := oc.deleteEgressNode(nodeName); err != nil {
+			return err
+		}
+	} else if isNewReady && isNewReachable {
+		klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", nodeName)
+		oc.setNodeEgressReachable(nodeName, isNewReachable)
+		if err := oc.addEgressNode(nodeName); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-// deleteNodeForEgress remove the default allow logical router policies for the
-// node and removes the node from the allocator cache.
-func (oc *DefaultNetworkController) deleteNodeForEgress(node *v1.Node) error {
-	v4NodeAddr, v6NodeAddr := util.GetNodeInternalAddrs(node)
-	if err := DeleteDefaultNoRerouteNodePolicies(oc.addressSetFactory, node.Name, v4NodeAddr, v6NodeAddr, oc.controllerName); err != nil {
-		return err
-	}
+// deleteEgressIPAllocator removes the node from the allocator cache.
+func (oc *DefaultNetworkController) deleteEgressIPAllocator(node *v1.Node) error {
 	oc.eIPC.allocator.Lock()
 	if eNode, exists := oc.eIPC.allocator.cache[node.Name]; exists {
 		eNode.healthClient.Disconnect()
@@ -2195,6 +2267,9 @@ type egressIPController struct {
 	// Currently WatchEgressIP, WatchEgressNamespace and WatchEgressPod could
 	// all access that map simultaneously, hence why this guard is needed.
 	podAssignmentMutex *sync.Mutex
+	// nodeIPUpdateMutex is used to ensure safe handling of node ip address
+	// updates. VIP addresses are dynamic and might move across nodes.
+	nodeIPUpdateMutex *sync.Mutex
 	// podAssignment is a cache used for keeping track of which egressIP status
 	// has been setup for each pod. The key is defined by getPodKey
 	podAssignment map[string]*podAssignmentState
@@ -2374,14 +2449,14 @@ func (e *egressIPController) addExternalGWPodSNAT(podNamespace, podName string, 
 // external GW setup in those cases.
 func (e *egressIPController) addExternalGWPodSNATOps(ops []ovsdb.Operation, podNamespace, podName string, status egressipv1.EgressIPStatusItem) ([]ovsdb.Operation, error) {
 	if config.Gateway.DisableSNATMultipleGWs {
-		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node {
+		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node && util.PodNeedsSNAT(pod) {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
 			// NOTE: This needs to be done only if the pod was on the same node as egressNode
 			extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)
 			if err != nil {
 				return nil, err
 			}
-			podIPs, err := util.GetPodCIDRsWithFullMask(pod)
+			podIPs, err := util.GetPodCIDRsWithFullMask(pod, &util.DefaultNetInfo{})
 			if err != nil {
 				return nil, err
 			}
@@ -2791,32 +2866,45 @@ func createDefaultNoReroutePodPolicies(nbClient libovsdbclient.Client, v4Cluster
 	return nil
 }
 
-// createDefaultNoRerouteNodePolicies ensures egress pods east<->west traffic with hostNetwork pods,
+func (oc *DefaultNetworkController) ensureDefaultNoRerouteNodePolicies() error {
+	oc.eIPC.nodeIPUpdateMutex.Lock()
+	defer oc.eIPC.nodeIPUpdateMutex.Unlock()
+	nodeLister := listers.NewNodeLister(oc.watchFactory.NodeInformer().GetIndexer())
+	return ensureDefaultNoRerouteNodePolicies(oc.nbClient, oc.addressSetFactory, oc.controllerName, nodeLister)
+}
+
+// ensureDefaultNoRerouteNodePolicies ensures egress pods east<->west traffic with hostNetwork pods,
 // i.e: ensuring that an egress pod can still communicate with a hostNetwork pod / service backed by hostNetwork pods
 // without using egressIPs.
 // sample: 101 ip4.src == $a12749576804119081385 && ip4.dst == $a11079093880111560446 allow pkt_mark=1008
-func CreateDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, node *kapi.Node, controllerName string) error {
-	v4NodeAddr, v6NodeAddr := util.GetNodeInternalAddrs(node)
+// All the cluster node's addresses are considered. This is to avoid race conditions after a VIP moves from one node
+// to another where we might process events out of order. For the same reason this function needs to be called under
+// lock.
+func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, controllerName string, nodeLister listers.NodeLister) error {
+	nodes, err := nodeLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+
+	v4NodeAddrs, v6NodeAddrs, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, nodes...)
+	if err != nil {
+		return err
+	}
+
+	allAddresses := make([]net.IP, 0, len(v4NodeAddrs)+len(v6NodeAddrs))
+	allAddresses = append(allAddresses, v4NodeAddrs...)
+	allAddresses = append(allAddresses, v6NodeAddrs...)
+
 	var as addressset.AddressSet
-	var err error
 	dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, controllerName)
 	if as, err = addressSetFactory.GetAddressSet(dbIDs); err != nil {
 		return fmt.Errorf("cannot ensure that addressSet %s exists %v", NodeIPAddrSetName, err)
 	}
-	if v4NodeAddr != nil {
-		// add the nodeIP to the nodeIP address-set
-		if err = as.AddIPs([]net.IP{v4NodeAddr}); err != nil {
-			return fmt.Errorf("unable to add nodeIPs %s/%s for node %s: to the address set %s, err: %v",
-				v4NodeAddr.String(), v6NodeAddr.String(), node.Name, NodeIPAddrSetName, err)
-		}
+
+	if err = as.SetIPs(allAddresses); err != nil {
+		return fmt.Errorf("unable to set IPs to no re-route address set %s: %w", NodeIPAddrSetName, err)
 	}
-	if v6NodeAddr != nil {
-		// add the nodeIP to the nodeIP address-set
-		if err = as.AddIPs([]net.IP{v6NodeAddr}); err != nil {
-			return fmt.Errorf("unable to add nodeIPs %s/%s for node %s: to the address set %s, err: %v",
-				v4NodeAddr.String(), v6NodeAddr.String(), node.Name, NodeIPAddrSetName, err)
-		}
-	}
+
 	ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS := as.GetASHashNames()
 	// fetch the egressIP pods address-set
 	dbIDs = getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, controllerName)
@@ -2834,11 +2922,11 @@ func CreateDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressS
 
 	var matchV4, matchV6 string
 	// construct the policy match
-	if v4NodeAddr != nil {
+	if len(v4NodeAddrs) > 0 {
 		matchV4 = fmt.Sprintf(`(ip4.src == $%s || ip4.src == $%s) && ip4.dst == $%s`,
 			ipv4EgressIPServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4ClusterNodeIPAS)
 	}
-	if v6NodeAddr != nil {
+	if len(v6NodeAddrs) > 0 {
 		matchV6 = fmt.Sprintf(`(ip6.src == $%s || ip6.src == $%s) && ip6.dst == $%s`,
 			ipv6EgressIPServedPodsAS, ipv6EgressServiceServedPodsAS, ipv6ClusterNodeIPAS)
 	}
@@ -2853,33 +2941,6 @@ func CreateDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressS
 	if matchV6 != "" {
 		if err := createLogicalRouterPolicy(nbClient, matchV6, types.DefaultNoRereoutePriority, nil, options); err != nil {
 			return fmt.Errorf("unable to create IPv6 no-reroute node policies, err: %v", err)
-		}
-	}
-	return nil
-}
-
-// DeleteDefaultNoRerouteNodePolicies deletes the EIP node IP from the global node address-set
-// NOTE: We haven't added logic to fully delete the policy because there can never be a cluster with 0 nodes
-// So once created this policy will exist forever
-func DeleteDefaultNoRerouteNodePolicies(addressSetFactory addressset.AddressSetFactory, nodeName string, v4NodeAddr, v6NodeAddr net.IP, controllerName string) error {
-	var as addressset.AddressSet
-	var err error
-	dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, controllerName)
-	if as, err = addressSetFactory.GetAddressSet(dbIDs); err != nil {
-		return fmt.Errorf("cannot ensure that addressSet %s exists %v", NodeIPAddrSetName, err)
-	}
-	if v4NodeAddr != nil {
-		// remove the nodeIP from the nodeIP address-set
-		if err = as.DeleteIPs([]net.IP{v4NodeAddr}); err != nil {
-			return fmt.Errorf("unable to delete nodeIPs %s/%s for node %s: to the address set %s, err: %v",
-				v4NodeAddr.String(), v6NodeAddr.String(), nodeName, NodeIPAddrSetName, err)
-		}
-	}
-	if v6NodeAddr != nil {
-		// remove the nodeIP from the nodeIP address-set
-		if err = as.DeleteIPs([]net.IP{v6NodeAddr}); err != nil {
-			return fmt.Errorf("unable to delete nodeIPs %s/%s for node %s: to the address set %s, err: %v",
-				v4NodeAddr.String(), v6NodeAddr.String(), nodeName, NodeIPAddrSetName, err)
 		}
 	}
 	return nil

@@ -1,84 +1,124 @@
 package util
 
 import (
-	"fmt"
 	"net"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/onsi/gomega"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-func parseIPNets(ipNetStrs ...string) []*net.IPNet {
-	ipNets := make([]*net.IPNet, len(ipNetStrs))
-	for i := range ipNetStrs {
-		_, ipNet, err := net.ParseCIDR(ipNetStrs[i])
-		if err != nil {
-			panic(fmt.Sprintf("Could not parse %q as a CIDR: %v", ipNetStrs[i], err))
-		}
-		ipNets[i] = ipNet
-	}
-	return ipNets
-}
-
-func TestParseSubnetsString(t *testing.T) {
+func TestParseSubnets(t *testing.T) {
 	tests := []struct {
-		desc      string
-		input     string
-		expOutput []*net.IPNet
+		desc             string
+		topology         string
+		subnets          string
+		excludes         string
+		expectedSubnets  []config.CIDRNetworkEntry
+		expectedExcludes []*net.IPNet
+		expectError      bool
 	}{
 		{
-			desc:      "positive, single IPv4 subnet",
-			input:     "192.168.1.1/24",
-			expOutput: parseIPNets("192.168.1.1/24"),
+			desc:     "multiple subnets layer 3 topology",
+			topology: types.Layer3Topology,
+			subnets:  "192.168.1.1/26/28, fda6::/48",
+			expectedSubnets: []config.CIDRNetworkEntry{
+				{
+					CIDR:             ovntest.MustParseIPNet("192.168.1.0/26"),
+					HostSubnetLength: 28,
+				},
+				{
+					CIDR:             ovntest.MustParseIPNet("fda6::/48"),
+					HostSubnetLength: 64,
+				},
+			},
 		},
 		{
-			desc:      "positive, multiple IPv4 subnet",
-			input:     "192.168.1.1/24, 192.168.2.1/24",
-			expOutput: parseIPNets("192.168.1.1/24", "192.168.2.1/24"),
+			desc:     "empty subnets layer 3 topology",
+			topology: types.Layer3Topology,
 		},
 		{
-			desc:      "positive, empty string",
-			input:     " ",
-			expOutput: []*net.IPNet{},
+			desc:     "multiple subnets and excludes layer 2 topology",
+			topology: types.Layer2Topology,
+			subnets:  "192.168.1.1/26, fda6::/48",
+			excludes: "192.168.1.38/32, fda6::38/128",
+			expectedSubnets: []config.CIDRNetworkEntry{
+				{
+					CIDR: ovntest.MustParseIPNet("192.168.1.0/26"),
+				},
+				{
+					CIDR: ovntest.MustParseIPNet("fda6::/48"),
+				},
+			},
+			expectedExcludes: ovntest.MustParseIPNets("192.168.1.38/32", "fda6::38/128"),
 		},
 		{
-			desc:      "positive, single IPv6 subnet",
-			input:     "2001:db8:3c4d::/48",
-			expOutput: parseIPNets("2001:db8:3c4d::/48"),
+			desc:     "empty subnets layer 2 topology",
+			topology: types.Layer2Topology,
 		},
 		{
-			desc:      "positive, multiple IPv6 subnets",
-			input:     "2001:db8:3c4d::/48, 2001:db8::1:0/64",
-			expOutput: parseIPNets("2001:db8:3c4d::/48", "2001:db8::0:0/64"),
+			desc:        "invalid formatted excludes layer 2 topology",
+			topology:    types.Layer2Topology,
+			subnets:     "192.168.1.1/26",
+			excludes:    "192.168.1.1/26/32",
+			expectError: true,
 		},
 		{
-			desc:      "negative, incorrect subnets case 1",
-			input:     "192.168.1.1, 192.168.1.3/24",
-			expOutput: nil,
+			desc:        "invalid not contained excludes layer 2 topology",
+			topology:    types.Layer2Topology,
+			subnets:     "fda6::/48",
+			excludes:    "fda7::38/128",
+			expectError: true,
 		},
 		{
-			desc:      "negative, incorrect subnets case 2",
-			input:     "abcde, 192.168.1.1/24",
-			expOutput: nil,
+			desc:     "multiple subnets and excludes localnet topology",
+			topology: types.LocalnetTopology,
+			subnets:  "192.168.1.1/26, fda6::/48",
+			excludes: "192.168.1.38/32, fda6::38/128",
+			expectedSubnets: []config.CIDRNetworkEntry{
+				{
+					CIDR: ovntest.MustParseIPNet("192.168.1.0/26"),
+				},
+				{
+					CIDR: ovntest.MustParseIPNet("fda6::/48"),
+				},
+			},
+			expectedExcludes: ovntest.MustParseIPNets("192.168.1.38/32", "fda6::38/128"),
 		},
 		{
-			desc:      "negative, incorrect subnets case 2",
-			input:     "192.168.1.1/24; 192.168.1.2/24",
-			expOutput: nil,
+			desc:     "empty subnets localnet topology",
+			topology: types.LocalnetTopology,
+		},
+		{
+			desc:        "invalid formatted excludes localnet topology",
+			topology:    types.LocalnetTopology,
+			subnets:     "fda6::/48",
+			excludes:    "fda6::1/48/128",
+			expectError: true,
+		},
+		{
+			desc:        "invalid not contained excludes localnet topology",
+			topology:    types.LocalnetTopology,
+			subnets:     "192.168.1.1/26",
+			excludes:    "192.168.2.38/32",
+			expectError: true,
 		},
 	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			resIPNets, err := parseSubnetsString(tc.input)
-			t.Log(resIPNets, err)
-			if tc.expOutput == nil {
-				assert.Error(t, err)
-			} else {
-				assert.Equal(t, len(resIPNets), len(tc.expOutput))
-				for i := range resIPNets {
-					assert.Equal(t, *(resIPNets[i]), *(tc.expOutput[i]))
-				}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			subnets, excludes, err := parseSubnets(tc.subnets, tc.excludes, tc.topology)
+			if tc.expectError {
+				g.Expect(err).To(gomega.HaveOccurred())
+				return
 			}
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(subnets).To(gomega.ConsistOf(tc.expectedSubnets))
+			g.Expect(excludes).To(gomega.ConsistOf(tc.expectedExcludes))
 		})
 	}
 }

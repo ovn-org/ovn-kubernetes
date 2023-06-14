@@ -80,8 +80,8 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalP
 	// get all switches that Pod logical port would be reside on.
 	topoType := bnc.TopologyType()
 	if !bnc.IsSecondary() || topoType == ovntypes.Layer3Topology {
-		// for default network and layer3 topology type networks, get all node switches.
-		nodes, err := bnc.watchFactory.GetNodes()
+		// for default network and layer3 topology type networks, get all local zone node switches
+		nodes, err := bnc.GetLocalZoneNodes()
 		if err != nil {
 			return fmt.Errorf("failed to get nodes: %v", err)
 		}
@@ -220,20 +220,15 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 				return true, nil
 			}
 
-			var needleIPs []net.IP
-			for _, podIPNet := range podIfAddrs {
-				needleIPs = append(needleIPs, podIPNet.IP)
-			}
-
-			collidingPod, err := bnc.findPodWithIPAddresses(needleIPs)
+			canRelease, err := bnc.canReleasePodIPs(podIfAddrs)
 			if err != nil {
 				return false, fmt.Errorf("unable to determine if completed pod IP is in use by another pod. "+
 					"Will not release pod %s/%s IP: %#v from allocator. %v", pod.Namespace, pod.Name, podIfAddrs, err)
 			}
 
-			if collidingPod != nil {
-				klog.Infof("Will not release IP address: %s for %s. Detected another pod"+
-					" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), podDesc, collidingPod.Namespace, collidingPod.Name)
+			if !canRelease {
+				klog.Infof("Will not release IP address: %s for %s. Detected another pod using it."+
+					" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), podDesc)
 				return false, nil
 			}
 
@@ -317,6 +312,27 @@ func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP) (*k
 	return nil, nil
 }
 
+// canReleasePodIPs checks if the podIPs can be released or not.
+func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet) (bool, error) {
+	var needleIPs []net.IP
+	for _, podIPNet := range podIfAddrs {
+		needleIPs = append(needleIPs, podIPNet.IP)
+	}
+	collidingPod, err := bnc.findPodWithIPAddresses(needleIPs)
+	if err != nil {
+		return false, fmt.Errorf("unable to determine if pod IPs: %#v are in use by another pod :%w", podIfAddrs, err)
+
+	}
+
+	if collidingPod != nil {
+		klog.Infof("Should not release IP address: %s. Detected another pod"+
+			" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), collidingPod.Namespace, collidingPod.Name)
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func (bnc *BaseNetworkController) releasePodIPs(pInfo *lpInfo) error {
 	if err := bnc.lsManager.ReleaseIPs(pInfo.logicalSwitch, pInfo.ips); err != nil {
 		if !errors.Is(err, logicalswitchmanager.SwitchNotFound) {
@@ -379,8 +395,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 					return err
 				}
 				gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
-				layer3NetConfInfo := bnc.NetConfInfo.(*util.Layer3NetConfInfo)
-				for _, clusterSubnet := range layer3NetConfInfo.ClusterSubnets {
+				for _, clusterSubnet := range bnc.Subnets() {
 					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 						podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
 							Dest:    clusterSubnet.CIDR,
@@ -853,6 +868,25 @@ func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs [
 	}
 
 	return ops, nil
+}
+
+// isPodScheduledinLocalZone returns true if
+//   - bnc.localZoneNodes map is nil or
+//   - if the pod.Spec.NodeName is in the bnc.localZoneNodes map
+//
+// false otherwise.
+func (bnc *BaseNetworkController) isPodScheduledinLocalZone(pod *kapi.Pod) bool {
+	isLocalZonePod := true
+
+	if bnc.localZoneNodes != nil {
+		if util.PodScheduled(pod) {
+			_, isLocalZonePod = bnc.localZoneNodes.Load(pod.Spec.NodeName)
+		} else {
+			isLocalZonePod = false
+		}
+	}
+
+	return isLocalZonePod
 }
 
 // WatchPods starts the watching of the Pod resource and calls back the appropriate handler logic

@@ -63,8 +63,7 @@ var _ = Describe("Node", func() {
 						name: nodeName,
 						Kube: kubeMock,
 					},
-					NetConfInfo: &util.DefaultNetConfInfo{},
-					NetInfo:     &util.DefaultNetInfo{},
+					NetInfo: &util.DefaultNetInfo{},
 				},
 			}
 
@@ -253,6 +252,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
+						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true",
@@ -315,6 +315,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
+						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true",
@@ -390,6 +391,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
+						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=false "+
@@ -457,6 +459,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
+						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true",
@@ -530,6 +533,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
+						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true",
@@ -603,6 +607,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
+						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true",

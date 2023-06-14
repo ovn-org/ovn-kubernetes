@@ -6,10 +6,10 @@ import (
 	"net"
 	"testing"
 
-	"github.com/Mellanox/sriovnet"
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"

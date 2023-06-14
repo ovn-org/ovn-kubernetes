@@ -6,6 +6,7 @@ package util
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/coreos/go-iptables/iptables"
 )
@@ -80,6 +81,7 @@ func (t *FakeTable) getChain(chainName string) ([]string, error) {
 type FakeIPTables struct {
 	proto  iptables.Protocol
 	tables map[string]*FakeTable
+	sync.Mutex
 }
 
 // SetFakeIPTablesHelpers populates `helpers` with FakeIPTablesHelper that can be used in unit tests
@@ -111,8 +113,23 @@ func (f *FakeIPTables) getTable(tableName string) (*FakeTable, error) {
 	return table, nil
 }
 
+func (f *FakeIPTables) newChain(tableName, chainName string) error {
+	table, err := f.getTable(tableName)
+	if err != nil {
+		return err
+	}
+	if _, err := table.getChain(chainName); err == nil {
+		// existing chain returns an error
+		return err
+	}
+	(*table)[chainName] = nil
+	return nil
+}
+
 // List rules in specified table/chain
 func (f *FakeIPTables) List(tableName, chainName string) ([]string, error) {
+	f.Lock()
+	defer f.Unlock()
 	table, err := f.getTable(tableName)
 	if err != nil {
 		return nil, err
@@ -126,6 +143,8 @@ func (f *FakeIPTables) List(tableName, chainName string) ([]string, error) {
 
 // ListChains returns the names of all chains in the table
 func (f *FakeIPTables) ListChains(tableName string) ([]string, error) {
+	f.Lock()
+	defer f.Unlock()
 	table, ok := f.tables[tableName]
 	if !ok {
 		return nil, fmt.Errorf("table does not exist")
@@ -139,21 +158,16 @@ func (f *FakeIPTables) ListChains(tableName string) ([]string, error) {
 
 // NewChain creates a new chain in the specified table
 func (f *FakeIPTables) NewChain(tableName, chainName string) error {
-	table, err := f.getTable(tableName)
-	if err != nil {
-		return err
-	}
-	if _, err := table.getChain(chainName); err == nil {
-		// existing chain returns an error
-		return err
-	}
-	(*table)[chainName] = nil
-	return nil
+	f.Lock()
+	defer f.Unlock()
+	return f.newChain(tableName, chainName)
 }
 
 // ClearChain removes all rules in the specified table/chain.
 // If the chain does not exist, a new one will be created
 func (f *FakeIPTables) ClearChain(tableName, chainName string) error {
+	f.Lock()
+	defer f.Unlock()
 	table, err := f.getTable(tableName)
 	if err != nil {
 		return err
@@ -163,12 +177,14 @@ func (f *FakeIPTables) ClearChain(tableName, chainName string) error {
 		(*table)[chainName] = nil
 		return nil
 	}
-	return f.NewChain(tableName, chainName)
+	return f.newChain(tableName, chainName)
 }
 
 // DeleteChain deletes the chain in the specified table.
 // The chain must be empty
 func (f *FakeIPTables) DeleteChain(tableName, chainName string) error {
+	f.Lock()
+	defer f.Unlock()
 	table, err := f.getTable(tableName)
 	if err != nil {
 		return err
@@ -186,6 +202,8 @@ func (f *FakeIPTables) DeleteChain(tableName, chainName string) error {
 
 // Exists checks if given rulespec in specified table/chain exists
 func (f *FakeIPTables) Exists(tableName, chainName string, rulespec ...string) (bool, error) {
+	f.Lock()
+	defer f.Unlock()
 	table, err := f.getTable(tableName)
 	if err != nil {
 		return false, err
@@ -205,6 +223,8 @@ func (f *FakeIPTables) Exists(tableName, chainName string, rulespec ...string) (
 
 // Insert inserts a rule into the specified table/chain
 func (f *FakeIPTables) Insert(tableName, chainName string, pos int, rulespec ...string) error {
+	f.Lock()
+	defer f.Unlock()
 	table, err := f.getTable(tableName)
 	if err != nil {
 		return err
@@ -225,6 +245,8 @@ func (f *FakeIPTables) Insert(tableName, chainName string, pos int, rulespec ...
 
 // Append appends rulespec to specified table/chain
 func (f *FakeIPTables) Append(tableName, chainName string, rulespec ...string) error {
+	f.Lock()
+	defer f.Unlock()
 	table, err := f.getTable(tableName)
 	if err != nil {
 		return err
@@ -240,6 +262,8 @@ func (f *FakeIPTables) Append(tableName, chainName string, rulespec ...string) e
 
 // Delete removes a rule from the specified table/chain
 func (f *FakeIPTables) Delete(tableName, chainName string, rulespec ...string) error {
+	f.Lock()
+	defer f.Unlock()
 	table, err := f.getTable(tableName)
 	if err != nil {
 		return err
@@ -261,6 +285,8 @@ func (f *FakeIPTables) Delete(tableName, chainName string, rulespec ...string) e
 // MatchState matches the expected state against the actual rules
 // code under test added to iptables
 func (f *FakeIPTables) MatchState(tables map[string]FakeTable) error {
+	f.Lock()
+	defer f.Unlock()
 	if len(tables) != len(f.tables) {
 		return fmt.Errorf("expected %d tables, got %d", len(tables), len(f.tables))
 	}

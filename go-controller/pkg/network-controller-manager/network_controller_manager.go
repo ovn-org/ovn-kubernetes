@@ -20,6 +20,7 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -43,8 +44,6 @@ type networkControllerManager struct {
 	multicastSupport bool
 	// Supports OVN Template Load Balancers?
 	svcTemplateSupport bool
-	// Is ACL logging enabled while configuring meters?
-	aclLoggingEnabled bool
 
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
@@ -59,20 +58,25 @@ type networkControllerManager struct {
 	nadController *nad.NetAttachDefinitionController
 }
 
-func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
-	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
+func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
-	topoType := netConfInfo.TopologyType()
+	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, netConfInfo, nil), nil
+		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo), nil
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, netConfInfo, nil), nil
+		if config.OVNKubernetesFeature.EnableInterconnect {
+			return nil, fmt.Errorf("topology type %s not supported when Interconnect feature is enabled", topoType)
+		}
+		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo), nil
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, netConfInfo, nil), nil
+		if config.OVNKubernetesFeature.EnableInterconnect {
+			return nil, fmt.Errorf("topology type %s not supported when Interconnect feature is enabled", topoType)
+		}
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -83,14 +87,14 @@ func (cm *networkControllerManager) newDummyNetworkController(topoType, netName 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
-	netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
+	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, &util.Layer3NetConfInfo{}, nil), nil
+		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo), nil
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, &util.Layer2NetConfInfo{}, nil), nil
+		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo), nil
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, &util.LocalnetNetConfInfo{}, nil), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -186,6 +190,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
+			EgressServiceClient:  ovnClient.EgressServiceClient,
 		},
 		stopChan:     make(chan struct{}),
 		watchFactory: wf,
@@ -194,8 +199,9 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 		sbClient:     libovsdbOvnSBClient,
 		podRecorder:  &podRecorder,
 
-		wg:       wg,
-		identity: identity,
+		wg:               wg,
+		identity:         identity,
+		multicastSupport: config.EnableMulticast,
 	}
 
 	var err error
@@ -223,17 +229,6 @@ func (cm *networkControllerManager) configureSCTPSupport() error {
 	return nil
 }
 
-func (cm *networkControllerManager) configureMulticastSupport() {
-	cm.multicastSupport = config.EnableMulticast
-	if cm.multicastSupport {
-		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
-			klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
-				"Disabling Multicast Support")
-			cm.multicastSupport = false
-		}
-	}
-}
-
 func (cm *networkControllerManager) configureSvcTemplateSupport() {
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Chassis_Template_Var"); err != nil {
 		klog.Warningf("Version of OVN in use does not support Chassis_Template_Var. " +
@@ -242,21 +237,6 @@ func (cm *networkControllerManager) configureSvcTemplateSupport() {
 	} else {
 		cm.svcTemplateSupport = true
 	}
-}
-
-// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
-// groups on OVN 20.12 and later. The option is ignored if OVN doesn't
-// understand it. Logical datapath groups reduce the size of the southbound
-// database in large clusters. ovn-controllers should be upgraded to a version
-// that supports them before the option is turned on by the master.
-func (cm *networkControllerManager) enableOVNLogicalDataPathGroups() error {
-	nbGlobal := nbdb.NBGlobal{
-		Options: map[string]string{"use_logical_dp_groups": "true"},
-	}
-	if err := libovsdbops.UpdateNBGlobalSetOptions(cm.nbClient, &nbGlobal); err != nil {
-		return fmt.Errorf("failed to set NB global option to enable logical datapath groups: %v", err)
-	}
-	return nil
 }
 
 func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
@@ -296,19 +276,10 @@ func (cm *networkControllerManager) createACLLoggingMeter() error {
 	return nil
 }
 
-func (cm *networkControllerManager) enableACLLoggingSupport() {
-	cm.aclLoggingEnabled = true
-	if err := cm.createACLLoggingMeter(); err != nil {
-		klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
-			"Disabling ACL logging support", err)
-		cm.aclLoggingEnabled = false
-	}
-}
-
 // newCommonNetworkControllerInfo creates and returns the common networkController info
 func (cm *networkControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
 	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
-		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport, cm.aclLoggingEnabled)
+		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport)
 }
 
 // initDefaultNetworkController creates the controller for default network
@@ -327,20 +298,38 @@ func (cm *networkControllerManager) initDefaultNetworkController() error {
 // Start the network controller manager
 func (cm *networkControllerManager) Start(ctx context.Context) error {
 	klog.Info("Starting the network controller manager")
+
+	// Make sure that the NCM zone matches with the Noruthbound db zone.
+	// Wait for 300s before giving up
+	var zone string
+	err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+		zone, err := util.GetNBZone(cm.nbClient)
+		if err != nil {
+			return false, fmt.Errorf("error getting the zone name from the OVN Northbound db : %w", err)
+		}
+
+		if config.Default.Zone != zone {
+			return false, fmt.Errorf("network controller manager zone %s mismatch with the Northbound db zone %s", config.Default.Zone, zone)
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to start default network controller - OVN Nortboubd db zone %s doesn't match with the configured zone %s : err - %w", zone, config.Default.Zone, err)
+	}
+
 	cm.configureMetrics(cm.stopChan)
 
-	err := cm.configureSCTPSupport()
+	err = cm.configureSCTPSupport()
 	if err != nil {
 		return err
 	}
 
-	cm.configureMulticastSupport()
 	cm.configureSvcTemplateSupport()
-	cm.enableACLLoggingSupport()
 
-	err = cm.enableOVNLogicalDataPathGroups()
+	err = cm.createACLLoggingMeter()
 	if err != nil {
-		return err
+		return nil
 	}
 
 	if config.Metrics.EnableConfigDuration {

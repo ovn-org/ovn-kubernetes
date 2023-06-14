@@ -1,6 +1,8 @@
 package clustermanager
 
 import (
+	"fmt"
+
 	"github.com/containernetworking/cni/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -12,6 +14,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	// Maximum secondary network IDs that can be generated. An arbitrary value is chosen.
+	maxSecondaryNetworkIDs = 4096
+)
+
 // secondaryNetworkClusterManager object manages the multi net-attach-def controllers.
 // It implements networkAttachDefController.NetworkControllerManager and can be used
 // by NetAttachDefinitionController to add and delete NADs.
@@ -20,16 +27,28 @@ type secondaryNetworkClusterManager struct {
 	nadController *nad.NetAttachDefinitionController
 	ovnClient     *util.OVNClusterManagerClientset
 	watchFactory  *factory.WatchFactory
+	// networkIDAllocator is used to allocate a unique ID for each secondary layer3 network
+	networkIDAllocator *idAllocator
 }
 
 func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset,
 	wf *factory.WatchFactory, recorder record.EventRecorder) (*secondaryNetworkClusterManager, error) {
 	klog.Infof("Creating secondary network cluster manager")
-	sncm := &secondaryNetworkClusterManager{
-		ovnClient:    ovnClient,
-		watchFactory: wf,
+	networkIDAllocator, err := NewIDAllocator("NetworkIDs", maxSecondaryNetworkIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create an IdAllocator for the secondary network ids, err: %v", err)
 	}
-	var err error
+
+	// Reserve the id 0 for the default network.
+	if err := networkIDAllocator.reserveID("default", defaultNetworkID); err != nil {
+		return nil, fmt.Errorf("idAllocator failed to reserve defaultNetworkID %d", defaultNetworkID)
+	}
+	sncm := &secondaryNetworkClusterManager{
+		ovnClient:          ovnClient,
+		watchFactory:       wf,
+		networkIDAllocator: networkIDAllocator,
+	}
+
 	sncm.nadController, err = nad.NewNetAttachDefinitionController(
 		"cluster-manager", sncm, ovnClient.NetworkAttchDefClient, recorder)
 	if err != nil {
@@ -42,6 +61,26 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 // needed logical entities
 func (sncm *secondaryNetworkClusterManager) Start() error {
 	klog.Infof("Starting secondary network cluster manager")
+
+	// Reserve the network ids in the id allocator for the existing secondary layer3 networks.
+	nodes, err := sncm.watchFactory.GetNodes()
+	if err != nil {
+		return fmt.Errorf("error getting the nodes from the watch factory : err - %v", err)
+	}
+
+	for _, n := range nodes {
+		networkIdsMap, err := util.GetNodeNetworkIDsAnnotationNetworkIDs(n)
+		if err == nil {
+			for networkName, id := range networkIdsMap {
+				// Reserver the id for the network name. We can safely
+				// ignore any errors if there are duplicate ids or if
+				// two networks have the same id. We will resync the node
+				// annotations correctly when the network controller
+				// is created.
+				_ = sncm.networkIDAllocator.reserveID(networkName, id)
+			}
+		}
+	}
 	return sncm.nadController.Start()
 }
 
@@ -53,13 +92,16 @@ func (sncm *secondaryNetworkClusterManager) Stop() {
 // NewNetworkController implements the networkAttachDefController.NetworkControllerManager
 // interface function.  This function is called by the net-attach-def controller when
 // a layer2 or layer3 secondary network is created.  Layer2 type is not handled here.
-func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo,
-	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
-	topoType := netConfInfo.TopologyType()
+func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
+	topoType := nInfo.TopologyType()
 	if topoType == ovntypes.Layer3Topology {
-		layer3NetConfInfo := netConfInfo.(*util.Layer3NetConfInfo)
-		sncc := newNetworkClusterController(nInfo.GetNetworkName(), layer3NetConfInfo.ClusterSubnets,
-			sncm.ovnClient, sncm.watchFactory, false, nInfo, netConfInfo)
+		networkId, err := sncm.networkIDAllocator.allocateID(nInfo.GetNetworkName())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create NetworkController for secondary layer3 network %s : %w", nInfo.GetNetworkName(), err)
+		}
+
+		sncc := newNetworkClusterController(nInfo.GetNetworkName(), networkId, nInfo.Subnets(),
+			sncm.ovnClient, sncm.watchFactory, false, nInfo)
 		return sncc, nil
 	}
 
@@ -120,8 +162,7 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(allController
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) nad.NetworkController {
-	netInfo := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
-	layer3NetConfInfo := &util.Layer3NetConfInfo{}
-	return newNetworkClusterController(netInfo.GetNetworkName(), layer3NetConfInfo.ClusterSubnets,
-		sncm.ovnClient, sncm.watchFactory, false, netInfo, layer3NetConfInfo)
+	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
+	return newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, nil, sncm.ovnClient, sncm.watchFactory,
+		false, netInfo)
 }

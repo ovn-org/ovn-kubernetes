@@ -2,8 +2,8 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"strings"
@@ -23,9 +23,11 @@ import (
 
 var _ = ginkgo.Describe("Egress Services", func() {
 	const (
+		egressServiceYAML     = "egress_service.yaml"
 		externalContainerName = "external-container-for-egress-service"
 		podHTTPPort           = 8080
 		serviceName           = "test-egress-service"
+		customRoutingTable    = "100"
 	)
 
 	command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", podHTTPPort)}
@@ -54,10 +56,12 @@ var _ = ginkgo.Describe("Egress Services", func() {
 		ginkgo.By("Creating an external container to send the traffic to/from")
 		externalIPv4, externalIPv6 = createClusterExternalContainer(externalContainerName, agnhostImage,
 			[]string{"--privileged", "--network", "kind"}, []string{"netexec", fmt.Sprintf("--http-port=%d", podHTTPPort)})
+
 	})
 
 	ginkgo.AfterEach(func() {
 		deleteClusterExternalContainer(externalContainerName)
+		flushCustomRoutingTableOnNodes(nodes, customRoutingTable)
 	})
 
 	ginkgotable.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip without selectors",
@@ -69,7 +73,9 @@ var _ = ginkgo.Describe("Egress Services", func() {
 				i := i
 				podsCreateSync.Go(func() error {
 					p, err := createGenericPodWithLabel(f, name, nodes[i].Name, f.Namespace.Name, command, podsLabels)
-					framework.Logf("%s podIPs are: %v", p.Name, p.Status.PodIPs)
+					if p != nil {
+						framework.Logf("%s podIPs are: %v", p.Name, p.Status.PodIPs)
+					}
 					return err
 				})
 			}
@@ -78,8 +84,24 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			framework.ExpectNoError(err, "failed to create backend pods")
 
 			ginkgo.By("Creating an egress service without node selectors")
-			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
-				map[string]string{"k8s.ovn.org/egress-service": "{}"}, podsLabels, podHTTPPort)
+			egressServiceConfig := fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: ` + serviceName + `
+  namespace: ` + f.Namespace.Name + `
+`)
+
+			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			defer func() {
+				if err := os.Remove(egressServiceYAML); err != nil {
+					framework.Logf("Unable to remove the CRD config from disk: %v", err)
+				}
+			}()
+			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, podsLabels, podHTTPPort)
 			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
 			ginkgo.By("Getting the IPs of the node in charge of the service")
@@ -108,12 +130,52 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			// This is to be sure we did not break ingress traffic for the service
 			reachAllServiceBackendsFromExternalContainer(externalContainerName, svcIP, podHTTPPort, pods)
 
-			ginkgo.By("Resetting the service's annotations the backend pods should exit with their node's IP")
-			svc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
-			framework.ExpectNoError(err, "failed to get service")
-			svc.Annotations = map[string]string{}
-			_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Update(context.TODO(), svc, metav1.UpdateOptions{})
-			framework.ExpectNoError(err, "failed to reset service's annotations")
+			ginkgo.By("Creating the custom network")
+			setCustomRoutingTableOnNodes(nodes, customRoutingTable, externalIPv4, externalIPv6, protocol == v1.IPv4Protocol)
+
+			ginkgo.By("Updating the resource to contain a Network")
+			egressServiceConfig = fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: ` + serviceName + `
+  namespace: ` + f.Namespace.Name + `
+spec:
+  network: "100"
+`)
+			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			framework.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressServiceYAML)
+
+			ginkgo.By("Verifying the pods can't reach the external container due to the blackhole in the custom network")
+			gomega.Consistently(func() error {
+				for _, pod := range pods {
+					err := curlAgnHostClientIPFromPod(f.Namespace.Name, pod, svcIP, *dstIP, podHTTPPort)
+					if err != nil && !strings.Contains(err.Error(), "exit code 28") {
+						return fmt.Errorf("expected err to be a connection timed out due to blackhole, got: %w", err)
+					}
+
+					if err == nil {
+						return fmt.Errorf("pod %s managed to reach external client despite blackhole", pod)
+					}
+				}
+				return nil
+			}, 2*time.Second, 400*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "managed to reach external container despite blackhole")
+
+			ginkgo.By("Removing the blackhole to the external container the pods should be able to reach it with the loadbalancer's ingress ip")
+			delExternalClientBlackholeFromNodes(nodes, customRoutingTable, externalIPv4, externalIPv6, protocol == v1.IPv4Protocol)
+			gomega.Consistently(func() error {
+				for _, pod := range pods {
+					if err := curlAgnHostClientIPFromPod(f.Namespace.Name, pod, svcIP, *dstIP, podHTTPPort); err != nil {
+						return err
+					}
+				}
+				return nil
+			}, 2*time.Second, 400*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach external container with loadbalancer's ingress ip")
+
+			ginkgo.By("Deleting the EgressService the backend pods should exit with their node's IP")
+			framework.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressServiceYAML)
 
 			for i, pod := range pods {
 				node := &nodes[i]
@@ -156,8 +218,24 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			framework.ExpectNoError(err, "failed to create backend pods")
 
 			ginkgo.By("Creating an egress service without node selectors")
-			_ = createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
-				map[string]string{"k8s.ovn.org/egress-service": "{}"}, podsLabels, podHTTPPort)
+			egressServiceConfig := fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: ` + serviceName + `
+  namespace: ` + f.Namespace.Name + `
+`)
+
+			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			defer func() {
+				if err := os.Remove(egressServiceYAML); err != nil {
+					framework.Logf("Unable to remove the CRD config from disk: %v", err)
+				}
+			}()
+			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			_ = createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, podsLabels, podHTTPPort)
 
 			ginkgo.By("Getting the IPs of the node in charge of the service")
 			egressHost, _, _ := getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
@@ -171,7 +249,24 @@ var _ = ginkgo.Describe("Egress Services", func() {
 					break
 				}
 			}
-			ginkgo.By("Creating host-networked pod, on non-egress node to act as \"another node\"")
+			ginkgo.By("By setting a secondary IP on non-egress node acting as \"another node\"")
+			var otherDstIP string
+			if protocol == v1.IPv6Protocol {
+				otherDstIP = "fc00:f853:ccd:e793:ffff::1"
+			} else {
+				otherDstIP = "172.18.1.1"
+			}
+			_, err = runCommand(containerRuntime, "exec", dstNode.Name, "ip", "addr", "add", otherDstIP, "dev", "breth0")
+			if err != nil {
+				framework.Failf("failed to add address to node %s: %v", dstNode.Name, err)
+			}
+			defer func() {
+				_, err = runCommand(containerRuntime, "exec", dstNode.Name, "ip", "addr", "delete", otherDstIP, "dev", "breth0")
+				if err != nil {
+					framework.Failf("failed to remove address from node %s: %v", dstNode.Name, err)
+				}
+			}()
+			ginkgo.By("Creating host-networked pod on non-egress node acting as \"another node\"")
 			_, err = createPod(f, hostNetPod, dstNode.Name, f.Namespace.Name, []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", podHTTPPort)}, map[string]string{}, func(p *v1.Pod) {
 				p.Spec.HostNetwork = true
 			})
@@ -197,7 +292,10 @@ var _ = ginkgo.Describe("Egress Services", func() {
 				}
 				gomega.Consistently(func() error {
 					return curlAgnHostClientIPFromPod(f.Namespace.Name, pod, expectedsrcIP, dstIP, podHTTPPort)
-				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach other node with node's ip")
+				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach other node with node's primary ip")
+				gomega.Consistently(func() error {
+					return curlAgnHostClientIPFromPod(f.Namespace.Name, pod, expectedsrcIP, otherDstIP, podHTTPPort)
+				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach other node with node's secondary ip")
 			}
 		},
 		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol),
@@ -224,8 +322,28 @@ var _ = ginkgo.Describe("Egress Services", func() {
 
 			ginkgo.By("Creating an egress service selecting the first node")
 			firstNode := nodes[0].Name
-			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
-				map[string]string{"k8s.ovn.org/egress-service": fmt.Sprintf("{\"nodeSelector\":{\"matchLabels\":{\"kubernetes.io/hostname\": \"%s\"}}}", firstNode)}, podsLabels, podHTTPPort)
+			egressServiceConfig := fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: ` + serviceName + `
+  namespace: ` + f.Namespace.Name + `
+spec:
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/hostname: ` + firstNode + `
+`)
+
+			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			defer func() {
+				if err := os.Remove(egressServiceYAML); err != nil {
+					framework.Logf("Unable to remove the CRD config from disk: %v", err)
+				}
+			}()
+			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, podsLabels, podHTTPPort)
 			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
 			ginkgo.By("Verifying the first node was picked for handling the service's egress traffic")
@@ -255,18 +373,28 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			// This is to be sure we did not break ingress traffic for the service
 			reachAllServiceBackendsFromExternalContainer(externalContainerName, svcIP, podHTTPPort, pods)
 
-			ginkgo.By("Updating the service to select the second node")
+			ginkgo.By("Updating the egress service to select the second node")
 			secondNode := nodes[1].Name
-			svc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
-			framework.ExpectNoError(err, "failed to get service")
-			svc.Annotations = map[string]string{"k8s.ovn.org/egress-service": fmt.Sprintf("{\"nodeSelector\":{\"matchLabels\":{\"kubernetes.io/hostname\": \"%s\"}}}", secondNode)}
-			_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Update(context.TODO(), svc, metav1.UpdateOptions{})
-			framework.ExpectNoError(err, "failed to update service's annotations")
+			egressServiceConfig = fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: ` + serviceName + `
+  namespace: ` + f.Namespace.Name + `
+spec:
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/hostname: ` + secondNode + `
+`)
+			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			framework.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressServiceYAML)
 
 			ginkgo.By("Verifying the second node now handles the service's egress traffic")
-			node, egressHostV4IP, egressHostV6IP = getEgressSVCHost(f.ClientSet, svc.Namespace, svc.Name)
+			node, egressHostV4IP, egressHostV6IP = getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
 			framework.ExpectEqual(node.Name, secondNode, "the wrong node got selected for egress service")
-			nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s=", svc.Namespace, svc.Name)})
+			nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s=", f.Namespace.Name, serviceName)})
 			framework.ExpectNoError(err, "failed to list nodes")
 			framework.ExpectEqual(len(nodeList.Items), 1, fmt.Sprintf("expected only one node labeled for the service, got %v", nodeList.Items))
 
@@ -292,14 +420,25 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			ginkgo.By("Verifying the external container can reach all of the service's backend pods")
 			reachAllServiceBackendsFromExternalContainer(externalContainerName, svcIP, podHTTPPort, pods)
 
-			ginkgo.By("Updating the service to select no node")
-			svc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
-			framework.ExpectNoError(err, "failed to get service")
-			svc.Annotations = map[string]string{"k8s.ovn.org/egress-service": "{\"nodeSelector\":{\"matchLabels\":{\"perfect\": \"match\"}}}"}
-			_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Update(context.TODO(), svc, metav1.UpdateOptions{})
-			framework.ExpectNoError(err, "failed to update service's annotations")
+			ginkgo.By("Updating the egress service selector to match no node")
+			egressServiceConfig = fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: ` + serviceName + `
+  namespace: ` + f.Namespace.Name + `
+spec:
+  nodeSelector:
+    matchLabels:
+      perfect: match
+`)
+			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			framework.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressServiceYAML)
+
 			gomega.Eventually(func() error {
-				nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s=", svc.Namespace, svc.Name)})
+				nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s=", f.Namespace.Name, serviceName)})
 				if err != nil {
 					return err
 				}
@@ -347,9 +486,9 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			}()
 
 			ginkgo.By("Verifying the third node now handles the service's egress traffic")
-			node, egressHostV4IP, egressHostV6IP = getEgressSVCHost(f.ClientSet, svc.Namespace, svc.Name)
+			node, egressHostV4IP, egressHostV6IP = getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
 			framework.ExpectEqual(node.Name, thirdNode, "the wrong node got selected for egress service")
-			nodeList, err = f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s=", svc.Namespace, svc.Name)})
+			nodeList, err = f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s=", f.Namespace.Name, serviceName)})
 			framework.ExpectNoError(err, "failed to list nodes")
 			framework.ExpectEqual(len(nodeList.Items), 1, fmt.Sprintf("expected only one node labeled for the service, got %v", nodeList.Items))
 
@@ -388,7 +527,9 @@ var _ = ginkgo.Describe("Egress Services", func() {
 				i := i
 				podsCreateSync.Go(func() error {
 					p, err := createGenericPodWithLabel(f, name, nodes[i].Name, f.Namespace.Name, command, labels)
-					framework.Logf("%s podIPs are: %v", p.Name, p.Status.PodIPs)
+					if p != nil {
+						framework.Logf("%s podIPs are: %v", p.Name, p.Status.PodIPs)
+					}
 					return err
 				})
 			}
@@ -397,8 +538,24 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			framework.ExpectNoError(err, "failed to create backend pods")
 
 			ginkgo.By("Creating an egress service without node selectors")
-			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
-				map[string]string{"k8s.ovn.org/egress-service": "{}"}, labels, podHTTPPort)
+			egressServiceConfig := fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: ` + serviceName + `
+  namespace: ` + f.Namespace.Name + `
+`)
+
+			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			defer func() {
+				if err := os.Remove(egressServiceYAML); err != nil {
+					framework.Logf("Unable to remove the CRD config from disk: %v", err)
+				}
+			}()
+			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, labels, podHTTPPort)
 			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
 			ginkgo.By("Getting the IPs of the node in charge of the service")
@@ -439,7 +596,7 @@ spec:
             kubernetes.io/metadata.name: ` + f.Namespace.Name + `
 `)
 
-			if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+			if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 				framework.Failf("Unable to write CRD config to disk: %v", err)
 			}
 			defer func() {
@@ -474,12 +631,9 @@ spec:
 			// This is to be sure we did not break ingress traffic for the service
 			reachAllServiceBackendsFromExternalContainer(externalContainerName, svcIP, podHTTPPort, pods)
 
-			ginkgo.By("Resetting the service's annotations the backend pods should exit with the EgressIP")
-			svc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
-			framework.ExpectNoError(err, "failed to get service")
-			svc.Annotations = map[string]string{}
-			_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Update(context.TODO(), svc, metav1.UpdateOptions{})
-			framework.ExpectNoError(err, "failed to reset service's annotations")
+			ginkgo.By("Deleting the EgressService the backend pods should exit with the EgressIP")
+			framework.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressServiceYAML)
+
 			for _, pod := range pods {
 				gomega.Eventually(func() error {
 					return curlAgnHostClientIPFromPod(f.Namespace.Name, pod, egressIP.String(), *dstIP, podHTTPPort)
@@ -505,7 +659,9 @@ spec:
 				name := name
 				podsCreateSync.Go(func() error {
 					p, err := createGenericPodWithLabel(f, name, secondNode, f.Namespace.Name, command, podsLabels)
-					framework.Logf("%s podIPs are: %v", p.Name, p.Status.PodIPs)
+					if p != nil {
+						framework.Logf("%s podIPs are: %v", p.Name, p.Status.PodIPs)
+					}
 					return err
 				})
 			}
@@ -514,9 +670,29 @@ spec:
 			framework.ExpectNoError(err, "failed to create backend pods")
 
 			ginkgo.By("Creating an ETP=Local egress service selecting the first node")
-			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
-				map[string]string{"k8s.ovn.org/egress-service": fmt.Sprintf("{\"nodeSelector\":{\"matchLabels\":{\"kubernetes.io/hostname\": \"%s\"}}}", firstNode)},
-				podsLabels, podHTTPPort, func(svc *v1.Service) {
+			egressServiceConfig := fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: ` + serviceName + `
+  namespace: ` + f.Namespace.Name + `
+spec:
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/hostname: ` + firstNode + `
+`)
+
+			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			defer func() {
+				if err := os.Remove(egressServiceYAML); err != nil {
+					framework.Logf("Unable to remove the CRD config from disk: %v", err)
+				}
+			}()
+			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, podsLabels, podHTTPPort,
+				func(svc *v1.Service) {
 					svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
 				})
 			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
@@ -530,14 +706,12 @@ spec:
 					return fmt.Errorf("expected no nodes to be labeled for the service, got %v", nodeList.Items)
 				}
 
-				svc, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
+				status, err := getEgressServiceStatus(f.Namespace.Name, serviceName)
 				if err != nil {
 					return err
 				}
-
-				_, found := svc.Annotations["k8s.ovn.org/egress-service-host"]
-				if found {
-					return fmt.Errorf("expected no egress-service-host annotation on service, got: %v", svc.Annotations)
+				if status.Host != "" {
+					return fmt.Errorf("expected no host for egress service %s/%s got: %v", f.Namespace.Name, serviceName, status.Host)
 				}
 
 				return nil
@@ -545,7 +719,9 @@ spec:
 
 			ginkgo.By("Creating the third backend pod on the first node")
 			p, err := createGenericPodWithLabel(f, pods[2], firstNode, f.Namespace.Name, command, podsLabels)
-			framework.Logf("%s podIPs are: %v", p.Name, p.Status.PodIPs)
+			if p != nil {
+				framework.Logf("%s podIPs are: %v", p.Name, p.Status.PodIPs)
+			}
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Verifying the first node was selected for the service")
@@ -584,14 +760,12 @@ spec:
 					return fmt.Errorf("expected no nodes to be labeled for the service, got %v", nodeList.Items)
 				}
 
-				svc, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
+				status, err := getEgressServiceStatus(f.Namespace.Name, serviceName)
 				if err != nil {
 					return err
 				}
-
-				_, found := svc.Annotations["k8s.ovn.org/egress-service-host"]
-				if found {
-					return fmt.Errorf("expected no egress-service-host annotation on service, got: %v", svc.Annotations)
+				if status.Host != "" {
+					return fmt.Errorf("expected no host for egress service %s/%s got: %v", f.Namespace.Name, serviceName, status.Host)
 				}
 
 				return nil
@@ -621,12 +795,11 @@ spec:
 })
 
 // Creates a LoadBalancer service with the given IP and verifies it was set correctly.
-func createLBServiceWithIngressIP(cs kubernetes.Interface, namespace, name string, protocol v1.IPFamily, annotations, selector map[string]string, port int32, tweak ...func(svc *v1.Service)) *v1.Service {
+func createLBServiceWithIngressIP(cs kubernetes.Interface, namespace, name string, protocol v1.IPFamily, selector map[string]string, port int32, tweak ...func(svc *v1.Service)) *v1.Service {
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   namespace,
-			Name:        name,
-			Annotations: annotations,
+			Namespace: namespace,
+			Name:      name,
 		},
 		Spec: v1.ServiceSpec{
 			Selector: selector,
@@ -668,6 +841,29 @@ func createLBServiceWithIngressIP(cs kubernetes.Interface, namespace, name strin
 	return svc
 }
 
+type egressServiceStatus struct {
+	Host string `json:"host"`
+}
+
+type egressService struct {
+	Status egressServiceStatus `json:"status,omitempty"`
+}
+
+func getEgressServiceStatus(ns, name string) (egressServiceStatus, error) {
+	egressService := &egressService{}
+	egressServiceStdout, err := framework.RunKubectl(ns, "get", "egressservice", "-o", "json", name)
+	if err != nil {
+		framework.Logf("Error: failed to get the EgressService object, err: %v", err)
+		return egressServiceStatus{}, err
+	}
+	err = json.Unmarshal([]byte(egressServiceStdout), egressService)
+	if err != nil {
+		return egressServiceStatus{}, err
+	}
+
+	return egressService.Status, nil
+}
+
 // Returns the node in charge of the egress service's traffic and its v4/v6 addresses.
 func getEgressSVCHost(cs kubernetes.Interface, svcNamespace, svcName string) (*v1.Node, string, string) {
 	egressHost := &v1.Node{}
@@ -680,9 +876,14 @@ func getEgressSVCHost(cs kubernetes.Interface, svcNamespace, svcName string) (*v
 			return err
 		}
 
-		svcEgressHost, found := svc.Annotations["k8s.ovn.org/egress-service-host"]
-		if !found {
-			return fmt.Errorf("egress-service-host annotation missing from service, got: %v", svc.Annotations)
+		egressServiceStatus, err := getEgressServiceStatus(svcNamespace, svcName)
+		if err != nil {
+			return err
+		}
+
+		svcEgressHost := egressServiceStatus.Host
+		if svcEgressHost == "" {
+			return fmt.Errorf("egress service %s/%s does not have a host", svcNamespace, svcName)
 		}
 
 		egressHost, err = cs.CoreV1().Nodes().Get(context.TODO(), svcEgressHost, metav1.GetOptions{})
@@ -690,7 +891,7 @@ func getEgressSVCHost(cs kubernetes.Interface, svcNamespace, svcName string) (*v
 			return err
 		}
 
-		_, found = egressHost.Labels[fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s", svc.Namespace, svc.Name)]
+		_, found := egressHost.Labels[fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s", svc.Namespace, svc.Name)]
 		if !found {
 			return fmt.Errorf("node %s does not have the label for egress service %s/%s, labels: %v",
 				egressHost.Name, svc.Namespace, svc.Name, egressHost.Labels)
@@ -722,7 +923,7 @@ func setSVCRouteOnContainer(container, svcIP, v4Via, v6Via string) {
 // Returns an error if the expectedIP is different than the response.
 func curlAgnHostClientIPFromPod(namespace, pod, expectedIP, dstIP string, containerPort int) error {
 	dst := net.JoinHostPort(dstIP, fmt.Sprint(containerPort))
-	curlCmd := fmt.Sprintf("curl -s --retry-connrefused --retry 5 --max-time 1 http://%s/clientip", dst)
+	curlCmd := fmt.Sprintf("curl -s --retry-connrefused --retry 3 --max-time 0.5 http://%s/clientip", dst)
 	out, err := framework.RunHostCmd(namespace, pod, curlCmd)
 	if err != nil {
 		return fmt.Errorf("failed to curl agnhost on %s from %s, err: %w", dstIP, pod, err)
@@ -756,4 +957,71 @@ func reachAllServiceBackendsFromExternalContainer(container, svcIP string, svcPo
 	}
 
 	framework.ExpectEqual(len(backends), 0, fmt.Sprintf("did not reach all pods from outside, missed: %v", backends))
+}
+
+// Sets the "dummy" custom routing table on all of the nodes (this heavily relies on the environment to be a kind cluster)
+// We create a new routing table with 2 routes to the external container:
+// 1) The one from the default routing table.
+// 2) A blackhole with a higher priority
+// Then in the actual test we first verify that when the pods are using the custom routing table they can't reach the external container,
+// remove the blackhole route and verify that they can reach it now. This shows that they actually use a different routing table than the main one.
+func setCustomRoutingTableOnNodes(nodes []v1.Node, routingTable, externalV4, externalV6 string, useV4 bool) {
+	for _, node := range nodes {
+		if useV4 {
+			setRoutesOnCustomRoutingTable(node.Name, externalV4, routingTable)
+			continue
+		}
+		if externalV6 != "" {
+			setRoutesOnCustomRoutingTable(node.Name, externalV6, routingTable)
+		}
+	}
+}
+
+// Sets the regular+blackhole routes on the nodes to the external container.
+func setRoutesOnCustomRoutingTable(container, ip, table string) {
+	type route struct {
+		Dst string `json:"dst"`
+		Dev string `json:"dev"`
+	}
+	out, err := runCommand(containerRuntime, "exec", container, "ip", "--json", "route", "get", ip)
+	framework.ExpectNoError(err, fmt.Sprintf("failed to get default route to %s on node %s, out: %s", ip, container, out))
+
+	routes := []route{}
+	err = json.Unmarshal([]byte(out), &routes)
+	framework.ExpectNoError(err, fmt.Sprintf("failed to parse route to %s on node %s", ip, container))
+	gomega.Expect(routes).ToNot(gomega.HaveLen(0))
+
+	routeTo := routes[0]
+	out, err = runCommand(containerRuntime, "exec", container, "ip", "route", "add", ip, "dev", routeTo.Dev, "table", table, "prio", "100")
+	framework.ExpectNoError(err, fmt.Sprintf("failed to set route to %s on node %s table %s, out: %s", ip, container, table, out))
+
+	out, err = runCommand(containerRuntime, "exec", container, "ip", "route", "add", "blackhole", ip, "table", table, "prio", "50")
+	framework.ExpectNoError(err, fmt.Sprintf("failed to set blackhole route to %s on node %s table %s, out: %s", ip, container, table, out))
+}
+
+// Removes the blackhole route to the external container on the nodes.
+func delExternalClientBlackholeFromNodes(nodes []v1.Node, routingTable, externalV4, externalV6 string, useV4 bool) {
+	for _, node := range nodes {
+		if useV4 {
+			out, err := runCommand(containerRuntime, "exec", node.Name, "ip", "route", "del", "blackhole", externalV4, "table", routingTable)
+			framework.ExpectNoError(err, fmt.Sprintf("failed to delete blackhole route to %s on node %s table %s, out: %s", externalV4, node.Name, routingTable, out))
+			continue
+		}
+		out, err := runCommand(containerRuntime, "exec", node.Name, "ip", "route", "del", "blackhole", externalV6, "table", routingTable)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to delete blackhole route to %s on node %s table %s, out: %s", externalV6, node.Name, routingTable, out))
+	}
+}
+
+// Flush the custom routing table from all of the nodes.
+func flushCustomRoutingTableOnNodes(nodes []v1.Node, routingTable string) {
+	for _, node := range nodes {
+		out, err := runCommand(containerRuntime, "exec", node.Name, "ip", "route", "flush", "table", routingTable)
+		if err != nil && !strings.Contains(err.Error(), "FIB table does not exist") {
+			framework.Failf("Unable to flush table %s on node %s: out: %s, err: %v", routingTable, node.Name, out, err)
+		}
+		out, err = runCommand(containerRuntime, "exec", node.Name, "ip", "-6", "route", "flush", "table", routingTable)
+		if err != nil && !strings.Contains(err.Error(), "FIB table does not exist") {
+			framework.Failf("Unable to flush table %s on node %s: out: %s err: %v", routingTable, node.Name, out, err)
+		}
+	}
 }

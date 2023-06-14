@@ -58,8 +58,8 @@ var _ = Describe("cni_dpu tests", func() {
 		It("Sets dpu.connection-details pod annotation", func() {
 			var err error
 			pr.CNIConf.DeviceID = "0000:05:00.4"
-			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
+			fakeSriovnetOps.On("GetPfIndexByVfPciAddress", pr.CNIConf.DeviceID).Return(0, nil)
 			dpuCd := util.DPUConnectionDetails{
 				PfId:      "0",
 				VfId:      "2",
@@ -81,27 +81,29 @@ var _ = Describe("cni_dpu tests", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
-		It("Fails if srionvet fails to get PF PCI from VF PCI", func() {
+		It("Fails if srionvet fails to get PF Index from VF PCI", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
-			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return(
-				"", fmt.Errorf("failed to get PF address"))
+			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
+			fakeSriovnetOps.On("GetPfIndexByVfPciAddress", pr.CNIConf.DeviceID).Return(
+				-1, fmt.Errorf("failed to get PF Index"))
 			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, &podLister, "")
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("Fails if srionvet fails to get VF index from PF PCI address", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
-			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(
 				-1, fmt.Errorf("failed to get VF index"))
+			fakeSriovnetOps.On("GetPfIndexByVfPciAddress", pr.CNIConf.DeviceID).Return(0, nil)
 			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, &podLister, "")
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("Fails if PF PCI address fails to parse", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
-			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
+			fakeSriovnetOps.On("GetPfIndexByVfPciAddress", pr.CNIConf.DeviceID).Return(
+				-1, fmt.Errorf("failed to parse PF PCI address"))
 			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, &podLister, "")
 			Expect(err).To(HaveOccurred())
 		})
@@ -110,8 +112,8 @@ var _ = Describe("cni_dpu tests", func() {
 			var err error
 			pod.Annotations = map[string]string{}
 			pr.CNIConf.DeviceID = "0000:05:00.4"
-			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
+			fakeSriovnetOps.On("GetPfIndexByVfPciAddress", pr.CNIConf.DeviceID).Return(0, nil)
 			dpuCd := util.DPUConnectionDetails{
 				PfId:      "0",
 				VfId:      "2",

@@ -90,13 +90,14 @@ func generateNetAttachDef(namespace, nadName, nadSpec string) *nadapi.NetworkAtt
 }
 
 type podConfiguration struct {
-	attachments  []nadapi.NetworkSelectionElement
-	containerCmd []string
-	name         string
-	namespace    string
-	nodeSelector map[string]string
-	isPrivileged bool
-	labels       map[string]string
+	attachments            []nadapi.NetworkSelectionElement
+	containerCmd           []string
+	name                   string
+	namespace              string
+	nodeSelector           map[string]string
+	isPrivileged           bool
+	labels                 map[string]string
+	requiresExtraNamespace bool
 }
 
 func generatePodSpec(config podConfiguration) *v1.Pod {

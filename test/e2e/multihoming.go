@@ -651,16 +651,18 @@ var _ = Describe("Multi Homing", func() {
 			table.DescribeTable(
 				"multi-network policies configure traffic allow lists",
 				func(netConfig networkAttachmentConfig, allowedClientPodConfig podConfiguration, blockedClientPodConfig podConfiguration, serverPodConfig podConfiguration, policy *mnpapi.MultiNetworkPolicy) {
-					if blockedClientPodConfig.namespace == "" {
-						blockedClientPodConfig.namespace = f.Namespace.Name
-					} else {
-						blockedClientPodConfig.namespace = extraNamespace.Name
+					blockedClientPodNamespace := f.Namespace.Name
+					if blockedClientPodConfig.requiresExtraNamespace {
+						blockedClientPodNamespace = extraNamespace.Name
 					}
-					if allowedClientPodConfig.namespace == "" {
-						allowedClientPodConfig.namespace = f.Namespace.Name
-					} else {
-						allowedClientPodConfig.namespace = extraNamespace.Name
+					blockedClientPodConfig.namespace = blockedClientPodNamespace
+
+					allowedClientPodNamespace := f.Namespace.Name
+					if allowedClientPodConfig.requiresExtraNamespace {
+						allowedClientPodNamespace = extraNamespace.Name
 					}
+					allowedClientPodConfig.namespace = allowedClientPodNamespace
+
 					serverPodConfig.namespace = f.Namespace.Name
 
 					for _, ns := range []v1.Namespace{*f.Namespace, *extraNamespace} {
@@ -927,9 +929,9 @@ var _ = Describe("Multi Homing", func() {
 						networkName: uniqueNadName("spans-multiple-namespaces"),
 					},
 					podConfiguration{
-						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
-						name:        allowedClient(clientPodName),
-						namespace:   "pepe",
+						attachments:            []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:                   allowedClient(clientPodName),
+						requiresExtraNamespace: true,
 					},
 					podConfiguration{
 						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
@@ -961,9 +963,9 @@ var _ = Describe("Multi Homing", func() {
 						networkName: uniqueNadName("spans-multiple-namespaces"),
 					},
 					podConfiguration{
-						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
-						name:        allowedClient(clientPodName),
-						namespace:   "pepe",
+						attachments:            []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:                   allowedClient(clientPodName),
+						requiresExtraNamespace: true,
 					},
 					podConfiguration{
 						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
@@ -995,9 +997,9 @@ var _ = Describe("Multi Homing", func() {
 						networkName: uniqueNadName("spans-multiple-namespaces"),
 					},
 					podConfiguration{
-						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
-						name:        allowedClient(clientPodName),
-						namespace:   "pepe",
+						attachments:            []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:                   allowedClient(clientPodName),
+						requiresExtraNamespace: true,
 					},
 					podConfiguration{
 						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},

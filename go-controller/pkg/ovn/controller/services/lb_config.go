@@ -340,7 +340,7 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 // NodePort services with ETP=local or affinity timeout set still need
 // non-template per-node LBs.
 func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
-	nodeIPv4Template, nodeIPv6Template *Template) []LB {
+	nodeIPv4Templates, nodeIPv6Templates *NodeIPsTemplates) []LB {
 
 	cbp := configsByProto(configs)
 	eids := util.ExternalIDsForObject(service)
@@ -433,57 +433,63 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 					sharedV6Targets = joinHostsPort(config.eps.V6IPs, config.eps.Port)
 				}
 
-				if switchV4TargetNeedsTemplate {
-					switchV4Rules = append(switchV4Rules, LBRule{
-						Source:  Addr{Template: nodeIPv4Template, Port: config.inport},
-						Targets: []Addr{{Template: switchV4TemplateTarget}},
-					})
-				} else {
-					switchV4Rules = append(switchV4Rules, LBRule{
-						Source:  Addr{Template: nodeIPv4Template, Port: config.inport},
-						Targets: sharedV4Targets,
-					})
+				for _, nodeIPv4Template := range nodeIPv4Templates.AsTemplates() {
+
+					if switchV4TargetNeedsTemplate {
+						switchV4Rules = append(switchV4Rules, LBRule{
+							Source:  Addr{Template: nodeIPv4Template, Port: config.inport},
+							Targets: []Addr{{Template: switchV4TemplateTarget}},
+						})
+					} else {
+						switchV4Rules = append(switchV4Rules, LBRule{
+							Source:  Addr{Template: nodeIPv4Template, Port: config.inport},
+							Targets: sharedV4Targets,
+						})
+					}
+
+					if routerV4TargetNeedsTemplate {
+						routerV4Rules = append(routerV4Rules, LBRule{
+							Source:  Addr{Template: nodeIPv4Template, Port: config.inport},
+							Targets: []Addr{{Template: routerV4TemplateTarget}},
+						})
+					} else {
+						routerV4Rules = append(routerV4Rules, LBRule{
+							Source:  Addr{Template: nodeIPv4Template, Port: config.inport},
+							Targets: sharedV4Targets,
+						})
+					}
 				}
 
-				if switchV6TargetNeedsTemplate {
-					switchV6Rules = append(switchV6Rules, LBRule{
-						Source:  Addr{Template: nodeIPv6Template, Port: config.inport},
-						Targets: []Addr{{Template: switchV6TemplateTarget}},
-					})
-				} else {
-					switchV6Rules = append(switchV6Rules, LBRule{
-						Source:  Addr{Template: nodeIPv6Template, Port: config.inport},
-						Targets: sharedV6Targets,
-					})
-				}
+				for _, nodeIPv6Template := range nodeIPv6Templates.AsTemplates() {
 
-				if routerV4TargetNeedsTemplate {
-					routerV4Rules = append(routerV4Rules, LBRule{
-						Source:  Addr{Template: nodeIPv4Template, Port: config.inport},
-						Targets: []Addr{{Template: routerV4TemplateTarget}},
-					})
-				} else {
-					routerV4Rules = append(routerV4Rules, LBRule{
-						Source:  Addr{Template: nodeIPv4Template, Port: config.inport},
-						Targets: sharedV4Targets,
-					})
-				}
+					if switchV6TargetNeedsTemplate {
+						switchV6Rules = append(switchV6Rules, LBRule{
+							Source:  Addr{Template: nodeIPv6Template, Port: config.inport},
+							Targets: []Addr{{Template: switchV6TemplateTarget}},
+						})
+					} else {
+						switchV6Rules = append(switchV6Rules, LBRule{
+							Source:  Addr{Template: nodeIPv6Template, Port: config.inport},
+							Targets: sharedV6Targets,
+						})
+					}
 
-				if routerV6TargetNeedsTemplate {
-					routerV6Rules = append(routerV6Rules, LBRule{
-						Source:  Addr{Template: nodeIPv6Template, Port: config.inport},
-						Targets: []Addr{{Template: routerV6TemplateTarget}},
-					})
-				} else {
-					routerV6Rules = append(routerV6Rules, LBRule{
-						Source:  Addr{Template: nodeIPv6Template, Port: config.inport},
-						Targets: sharedV6Targets,
-					})
+					if routerV6TargetNeedsTemplate {
+						routerV6Rules = append(routerV6Rules, LBRule{
+							Source:  Addr{Template: nodeIPv6Template, Port: config.inport},
+							Targets: []Addr{{Template: routerV6TemplateTarget}},
+						})
+					} else {
+						routerV6Rules = append(routerV6Rules, LBRule{
+							Source:  Addr{Template: nodeIPv6Template, Port: config.inport},
+							Targets: sharedV6Targets,
+						})
+					}
 				}
 			}
 		}
 
-		if nodeIPv4Template.len() > 0 {
+		if nodeIPv4Templates.Len() > 0 {
 			if len(switchV4Rules) > 0 {
 				out = append(out, LB{
 					Name:        makeLBName(service, proto, "node_switch_template_IPv4"),
@@ -507,7 +513,8 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 				})
 			}
 		}
-		if nodeIPv6Template.len() > 0 {
+
+		if nodeIPv6Templates.Len() > 0 {
 			if len(switchV6Rules) > 0 {
 				out = append(out, LB{
 					Name:        makeLBName(service, proto, "node_switch_template_IPv6"),

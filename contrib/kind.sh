@@ -803,6 +803,7 @@ create_ovn_kube_manifests() {
     --egress-ip-healthcheck-port="${OVN_EGRESSIP_HEALTHCHECK_PORT}" \
     --egress-firewall-enable=true \
     --egress-qos-enable=true \
+    --egress-service-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
@@ -834,6 +835,7 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressfirewalls.yaml
   run_kubectl apply -f k8s.ovn.org_egressips.yaml
   run_kubectl apply -f k8s.ovn.org_egressqoses.yaml
+  run_kubectl apply -f k8s.ovn.org_egressservices.yaml
   run_kubectl apply -f ovn-setup.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA

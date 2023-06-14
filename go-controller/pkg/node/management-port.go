@@ -20,10 +20,10 @@ import (
 type ManagementPort interface {
 	// Create Management port, use annotator to update node annotation with management port details
 	// and waiter to set up condition to wait on for management port creation
-	Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error)
+	Create(routeManager *routeManager, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error)
 	// CheckManagementPortHealth checks periodically for management port health until stopChan is posted
 	// or closed and reports any warnings/errors to log
-	CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{})
+	CheckManagementPortHealth(routeManager *routeManager, cfg *managementPortConfig, stopChan chan struct{})
 	// Currently, the management port(s) that doesn't have an assignable IP address are the following cases:
 	//   - Full mode with HW backed device (e.g. Virtual Function Representor).
 	//   - DPU mode with Virtual Function Representor.
@@ -33,7 +33,7 @@ type ManagementPort interface {
 }
 
 // NewManagementPorts creates a new ManagementPorts
-func NewManagementPorts(nodeName string, hostSubnets []*net.IPNet) []ManagementPort {
+func NewManagementPorts(nodeName string, hostSubnets []*net.IPNet, netdevName, rep string) []ManagementPort {
 	// Kubernetes emits events when pods are created. The event will contain
 	// only lowercase letters of the hostname even though the kubelet is
 	// started with a hostname that contains lowercase and uppercase letters.
@@ -46,17 +46,17 @@ func NewManagementPorts(nodeName string, hostSubnets []*net.IPNet) []ManagementP
 
 	switch config.OvnKubeNode.Mode {
 	case types.NodeModeDPU:
-		return []ManagementPort{newManagementPortRepresentor(nodeName, hostSubnets)}
+		return []ManagementPort{newManagementPortRepresentor(nodeName, hostSubnets, rep)}
 	case types.NodeModeDPUHost:
-		return []ManagementPort{newManagementPortNetdev(hostSubnets)}
+		return []ManagementPort{newManagementPortNetdev(hostSubnets, netdevName)}
 	default:
 		// create OVS internal port or configure netdevice and its representor
 		if config.OvnKubeNode.MgmtPortNetdev == "" {
 			return []ManagementPort{newManagementPort(nodeName, hostSubnets)}
 		} else {
 			return []ManagementPort{
-				newManagementPortNetdev(hostSubnets),
-				newManagementPortRepresentor(nodeName, hostSubnets),
+				newManagementPortNetdev(hostSubnets, netdevName),
+				newManagementPortRepresentor(nodeName, hostSubnets, rep),
 			}
 		}
 	}
@@ -75,7 +75,7 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 	}
 }
 
-func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPort) Create(routeManager *routeManager, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
 		if err := syncMgmtPortInterface(mp.hostSubnets, mgmtPortName, true); err != nil {
 			return nil, fmt.Errorf("failed to sync management port: %v", err)
@@ -108,7 +108,7 @@ func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWa
 		return nil, err
 	}
 
-	cfg, err := createPlatformManagementPort(types.K8sMgmtIntfName, mp.hostSubnets)
+	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -121,10 +121,10 @@ func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWa
 	return cfg, nil
 }
 
-func (mp *managementPort) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPort) CheckManagementPortHealth(routeManager *routeManager, cfg *managementPortConfig, stopChan chan struct{}) {
 	go wait.Until(
 		func() {
-			checkManagementPortHealth(cfg)
+			checkManagementPortHealth(routeManager, cfg)
 		},
 		30*time.Second,
 		stopChan)
@@ -137,7 +137,7 @@ func (mp *managementPort) HasIpAddr() bool {
 
 func managementPortReady() (bool, error) {
 	k8sMgmtIntfName := types.K8sMgmtIntfName
-	if config.OvnKubeNode.MgmtPortRepresentor != "" {
+	if config.OvnKubeNode.MgmtPortNetdev != "" {
 		k8sMgmtIntfName += "_0"
 	}
 	// Get the OVS interface name for the Management Port

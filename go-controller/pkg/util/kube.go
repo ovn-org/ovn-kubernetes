@@ -34,6 +34,7 @@ import (
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
+	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -46,6 +47,7 @@ type OVNClientset struct {
 	EgressQoSClient          egressqosclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
+	EgressServiceClient      egressserviceclientset.Interface
 }
 
 // OVNMasterClientset
@@ -56,10 +58,12 @@ type OVNMasterClientset struct {
 	CloudNetworkClient       ocpcloudnetworkclientset.Interface
 	EgressQoSClient          egressqosclientset.Interface
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
+	EgressServiceClient      egressserviceclientset.Interface
 }
 
 type OVNNodeClientset struct {
-	KubeClient kubernetes.Interface
+	KubeClient          kubernetes.Interface
+	EgressServiceClient egressserviceclientset.Interface
 }
 
 type OVNClusterManagerClientset struct {
@@ -75,6 +79,7 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		CloudNetworkClient:       cs.CloudNetworkClient,
 		EgressQoSClient:          cs.EgressQoSClient,
 		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
+		EgressServiceClient:      cs.EgressServiceClient,
 	}
 }
 
@@ -87,13 +92,15 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 
 func (cs *OVNClientset) GetNodeClientset() *OVNNodeClientset {
 	return &OVNNodeClientset{
-		KubeClient: cs.KubeClient,
+		KubeClient:          cs.KubeClient,
+		EgressServiceClient: cs.EgressServiceClient,
 	}
 }
 
 func (cs *OVNMasterClientset) GetNodeClientset() *OVNNodeClientset {
 	return &OVNNodeClientset{
-		KubeClient: cs.KubeClient,
+		KubeClient:          cs.KubeClient,
+		EgressServiceClient: cs.EgressServiceClient,
 	}
 }
 
@@ -206,6 +213,11 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		return nil, err
 	}
 
+	egressserviceClientset, err := egressserviceclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+
 	return &OVNClientset{
 		KubeClient:               kclientset,
 		EgressIPClient:           egressIPClientset,
@@ -214,6 +226,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		EgressQoSClient:          egressqosClientset,
 		NetworkAttchDefClient:    networkAttchmntDefClientset,
 		MultiNetworkPolicyClient: multiNetworkPolicyClientset,
+		EgressServiceClient:      egressserviceClientset,
 	}, nil
 }
 
@@ -322,6 +335,12 @@ func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 	}
 	return "", fmt.Errorf("%s doesn't have an address with type %s or %s", node.GetName(),
 		kapi.NodeInternalIP, kapi.NodeExternalIP)
+}
+
+// PodNeedsSNAT returns true if the given pod is eligible to setup snat entry
+// in ovn for its egress traffic outside cluster, otherwise returns false.
+func PodNeedsSNAT(pod *kapi.Pod) bool {
+	return PodScheduled(pod) && !PodWantsHostNetwork(pod) && !PodCompleted(pod)
 }
 
 // PodWantsHostNetwork returns if the given pod is hostNetworked or not to determine if networking
