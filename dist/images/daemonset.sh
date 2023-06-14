@@ -683,7 +683,7 @@ ovn_image=${ovnkube_image} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
-  j2 ../templates/ovnkube-single-node-zone.yaml.j2 -o ../yaml/ovnkube-single-node-zone.yaml
+  j2 ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
 
 ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -734,7 +734,7 @@ ovn_image=${ovnkube_image} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
-  j2 ../templates/ovnkube-zone-controller.yaml.j2 -o ../yaml/ovnkube-zone-controller.yaml
+  j2 ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
