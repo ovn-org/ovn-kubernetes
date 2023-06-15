@@ -204,6 +204,14 @@ func (oc *DefaultNetworkController) addExternalGWsForNamespace(egress gatewayInf
 	return oc.addGWRoutesForNamespace(namespace, egress)
 }
 
+func (oc *DefaultNetworkController) isPodInLocalZone(pod *kapi.Pod) (bool, error) {
+	node, err := oc.watchFactory.GetNode(pod.Spec.NodeName)
+	if err != nil {
+		return false, err
+	}
+	return util.GetNodeZone(node) == oc.zone, nil
+}
+
 // addGWRoutesForNamespace handles adding routes for all existing pods in namespace
 func (oc *DefaultNetworkController) addGWRoutesForNamespace(namespace string, egress gatewayInfo) error {
 	existingPods, err := oc.watchFactory.GetPods(namespace)
@@ -310,7 +318,17 @@ func (oc *DefaultNetworkController) deletePodGWRoute(routeInfo *apbroutecontroll
 	if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
 		return nil
 	}
-
+	pod, err := oc.watchFactory.PodCoreInformer().Lister().Pods(routeInfo.PodName.Namespace).Get(routeInfo.PodName.Name)
+	if err == nil {
+		local, err := oc.isPodInLocalZone(pod)
+		if err != nil {
+			return err
+		}
+		if !local {
+			klog.V(4).InfoS("Pod %s is not in the local zone %s", routeInfo.PodName, oc.zone)
+			return nil
+		}
+	}
 	mask := util.GetIPFullMask(podIP)
 	if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
 		return fmt.Errorf("unable to delete pod %s ECMP route to GR %s, GW: %s: %w",
@@ -476,6 +494,18 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 	routeInfo, err := oc.ensureRouteInfoLocked(podNsName)
 	if err != nil {
 		return fmt.Errorf("failed to ensure routeInfo for %s, error: %v", podNsName, err)
+	}
+	pod, err := oc.watchFactory.PodCoreInformer().Lister().Pods(routeInfo.PodName.Namespace).Get(routeInfo.PodName.Name)
+	if err != nil {
+		return err
+	}
+	local, err := oc.isPodInLocalZone(pod)
+	if err != nil {
+		return err
+	}
+	if !local {
+		klog.V(4).InfoS("Pod %s is not in the local zone %s", routeInfo.PodName, oc.zone)
+		return nil
 	}
 	defer routeInfo.Unlock()
 	for _, podIPNet := range podIfAddrs {

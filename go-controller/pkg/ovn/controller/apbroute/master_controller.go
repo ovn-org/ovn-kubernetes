@@ -31,6 +31,7 @@ import (
 	adminpolicybasedroutelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/listers/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
@@ -89,14 +90,19 @@ func NewExternalMasterController(
 	externalRouteInformer := routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes()
 	externalGWCache := make(map[ktypes.NamespacedName]*ExternalRouteInfo)
 	exGWCacheMutex := &sync.RWMutex{}
+	zone, err := util.GetNBZone(nbClient)
+	if err != nil {
+		return nil, err
+	}
 	nbCli := &northBoundClient{
 		routeLister:       externalRouteInformer.Lister(),
 		nodeLister:        nodeLister,
+		podLister:         podInformer.Lister(),
 		nbClient:          nbClient,
 		addressSetFactory: addressSetFactory,
 		externalGWCache:   externalGWCache,
 		exGWCacheMutex:    exGWCacheMutex,
-		controllerName:    apbControllerName,
+		zone:              zone,
 	}
 
 	c := &ExternalGatewayMasterController{
@@ -133,7 +139,7 @@ func NewExternalMasterController(
 			nbCli),
 	}
 
-	_, err := namespaceInformer.Informer().AddEventHandler(
+	_, err = namespaceInformer.Informer().AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.onNamespaceAdd,
 			UpdateFunc: c.onNamespaceUpdate,
