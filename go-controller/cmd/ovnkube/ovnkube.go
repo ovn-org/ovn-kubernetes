@@ -315,7 +315,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	case runMode.networkControllerManager:
 		metrics.RegisterMasterBase()
 		haConfig = &config.MasterHA
-		name = "ovn-kubernetes-master-" + config.Default.Zone
+		name = networkControllerManagerLockName()
 	case runMode.clusterManager:
 		metrics.RegisterClusterManagerBase()
 		haConfig = &config.ClusterMgrHA
@@ -572,4 +572,13 @@ type ovnkubeMetricsProvider struct {
 
 func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
 	return &ovnkubeMasterMetrics{p.runMode}
+}
+
+func networkControllerManagerLockName() string {
+	// keep the same old lock name unless we are owners of a specific zone
+	name := "ovn-kubernetes-master"
+	if config.Default.Zone != types.OvnDefaultZone {
+		name = name + "-" + config.Default.Zone
+	}
+	return name
 }

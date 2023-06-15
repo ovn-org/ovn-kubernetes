@@ -586,7 +586,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			controlPlaneLeaseName = "ovn-kubernetes-master-ovn-control-plane"
 		} else {
 			controlPlanePodName = "ovnkube-master"
-			controlPlaneLeaseName = "ovn-kubernetes-master-global"
+			controlPlaneLeaseName = "ovn-kubernetes-master"
 		}
 
 		controlPlanePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.Background(), metav1.ListOptions{
