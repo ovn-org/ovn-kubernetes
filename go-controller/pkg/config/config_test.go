@@ -204,6 +204,7 @@ v6-join-subnet=fd90::/64
 router-subnet=10.50.0.0/16
 single-node=false
 disable-forwarding=true
+allow-no-uplink=false
 
 [hybridoverlay]
 enabled=true
@@ -310,6 +311,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeFalse())
+			gomega.Expect(Gateway.AllowNoUplink).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(1))
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(0))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeFalse())
@@ -625,6 +627,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.50.0.0/16"))
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeTrue())
+			gomega.Expect(Gateway.AllowNoUplink).To(gomega.BeFalse())
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(3))
@@ -713,6 +716,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.55.0.0/16"))
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeTrue())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeTrue())
+			gomega.Expect(Gateway.AllowNoUplink).To(gomega.BeTrue())
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(5))
@@ -767,6 +771,7 @@ var _ = Describe("Config Operations", func() {
 			"-gateway-router-subnet=10.55.0.0/16",
 			"-single-node",
 			"-disable-forwarding",
+			"-allow-no-uplink",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
 			"-monitor-all=false",

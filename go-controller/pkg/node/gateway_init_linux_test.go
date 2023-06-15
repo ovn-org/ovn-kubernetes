@@ -6,6 +6,7 @@ package node
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"runtime"
@@ -1763,6 +1764,126 @@ var _ = Describe("Gateway unit tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(gatewayIntf).To(Equal(ifName))
 			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+		})
+
+		Context("In Local GW mode", func() {
+			ovntest.OnSupportedPlatformsIt("Finds correct gateway interface and nexthops when dummy gateway bridge is created", func() {
+				ifName := "enf1f0"
+				dummyBridgeName := "br-ex"
+				_, ipnet, err := net.ParseCIDR("0.0.0.0/0")
+				Expect(err).ToNot(HaveOccurred())
+				hostGwIPs := []net.IP{net.ParseIP("10.0.0.11")}
+				lnk := &linkMock.Link{}
+				lnkAttr := &netlink.LinkAttrs{
+					Name:  ifName,
+					Index: 5,
+				}
+				defaultRoute := &netlink.Route{
+					Dst:       ipnet,
+					LinkIndex: 5,
+					Scope:     netlink.SCOPE_UNIVERSE,
+					Gw:        hostGwIPs[0],
+					MTU:       config.Default.MTU,
+				}
+				lnk.On("Attrs").Return(lnkAttr)
+				netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("LinkByIndex", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*defaultRoute}, nil)
+
+				fexec := ovntest.NewLooseCompareFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+					Err:    fmt.Errorf(""),
+					Output: "",
+				})
+				err = util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				gwIPs := []net.IP{net.ParseIP(types.V4DummyNextHopMasqueradeIP)}
+				config.Gateway.Interface = dummyBridgeName
+				config.Gateway.Mode = config.GatewayModeLocal
+				config.Gateway.AllowNoUplink = true
+
+				gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(gatewayIntf).To(Equal(dummyBridgeName))
+				Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+			})
+
+			ovntest.OnSupportedPlatformsIt("Finds correct gateway interface and nexthops when dummy gateway bridge is created and no default route", func() {
+				ifName := "enf1f0"
+				dummyBridgeName := "br-ex"
+				lnk := &linkMock.Link{}
+				lnkAttr := &netlink.LinkAttrs{
+					Name:  ifName,
+					Index: 5,
+				}
+
+				lnk.On("Attrs").Return(lnkAttr)
+				netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("LinkByIndex", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{}, nil)
+
+				fexec := ovntest.NewLooseCompareFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+					Err:    fmt.Errorf(""),
+					Output: "",
+				})
+				err := util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				gwIPs := []net.IP{net.ParseIP(types.V4DummyNextHopMasqueradeIP)}
+				config.Gateway.Interface = dummyBridgeName
+				config.Gateway.Mode = config.GatewayModeLocal
+				config.Gateway.AllowNoUplink = true
+
+				gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(gatewayIntf).To(Equal(dummyBridgeName))
+				Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+			})
+
+			ovntest.OnSupportedPlatformsIt("Returns error when dummy gateway bridge is created without allow-no-uplink flag", func() {
+				ifName := "enf1f0"
+				dummyBridgeName := "br-ex"
+				_, ipnet, err := net.ParseCIDR("0.0.0.0/0")
+				Expect(err).ToNot(HaveOccurred())
+				hostGwIPs := []net.IP{net.ParseIP("10.0.0.11")}
+				lnk := &linkMock.Link{}
+				lnkAttr := &netlink.LinkAttrs{
+					Name:  ifName,
+					Index: 5,
+				}
+				defaultRoute := &netlink.Route{
+					Dst:       ipnet,
+					LinkIndex: 5,
+					Scope:     netlink.SCOPE_UNIVERSE,
+					Gw:        hostGwIPs[0],
+					MTU:       config.Default.MTU,
+				}
+				lnk.On("Attrs").Return(lnkAttr)
+				netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("LinkByIndex", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*defaultRoute}, nil)
+
+				fexec := ovntest.NewLooseCompareFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+					Err:    fmt.Errorf(""),
+					Output: "",
+				})
+				err = util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				config.Gateway.Interface = dummyBridgeName
+				config.Gateway.Mode = config.GatewayModeLocal
+
+				gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+				Expect(errors.As(err, new(*GatewayInterfaceMismatchError))).To(BeTrue())
+				Expect(gatewayIntf).To(Equal(""))
+				Expect(len(gatewayNextHops)).To(Equal(0))
+			})
 		})
 	})
 })

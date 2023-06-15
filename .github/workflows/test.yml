@@ -399,6 +399,7 @@ jobs:
       ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' }}"
       OVN_SEPARATE_CLUSTER_MANAGER: "${{ matrix.separate-cluster-manager == 'true' }}"
       OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
+      OVN_DUMMY_GATEWAY_BRIDGE: "${{ matrix.target == 'compact-mode' }}"
     steps:
 
     - name: Free up disk space

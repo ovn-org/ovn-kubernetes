@@ -31,6 +31,7 @@ OVN_SVC_CIDR=""
 OVN_K8S_APISERVER=""
 OVN_GATEWAY_MODE=""
 OVN_GATEWAY_OPTS=""
+OVN_DUMMY_GATEWAY_BRIDGE=""
 OVN_DB_REPLICAS=""
 OVN_MTU=""
 OVN_SSL_ENABLE=""
@@ -107,6 +108,9 @@ while [ "$1" != "" ]; do
     ;;
   --gateway-options)
     OVN_GATEWAY_OPTS=$VALUE
+    ;;
+  --dummy-gateway-bridge)
+    OVN_DUMMY_GATEWAY_BRIDGE=$VALUE
     ;;
   --enable-ipsec)
     ENABLE_IPSEC=$VALUE
@@ -328,6 +332,9 @@ echo "ovn_gateway_mode: ${ovn_gateway_mode}"
 ovn_gateway_opts=${OVN_GATEWAY_OPTS}
 echo "ovn_gateway_opts: ${ovn_gateway_opts}"
 
+ovn_dummy_gateway_bridge=${OVN_DUMMY_GATEWAY_BRIDGE}
+echo "ovn_dummy_gateway_bridge: ${ovn_dummy_gateway_bridge}"
+
 enable_ipsec=${ENABLE_IPSEC:-false}
 echo "enable_ipsec: ${enable_ipsec}"
 
@@ -450,6 +457,7 @@ ovn_image=${ovnkube_image} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
@@ -495,6 +503,7 @@ ovn_image=${image} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
@@ -550,6 +559,8 @@ ovn_image=${ovnkube_image} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_stateless_netpol_enable=${ovn_netpol_acl_enable} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \

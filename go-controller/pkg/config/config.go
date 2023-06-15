@@ -406,6 +406,8 @@ type GatewayConfig struct {
 	SingleNode bool `gcfg:"single-node"`
 	// DisableForwarding (enabled by default) controls if forwarding is allowed on OVNK controlled interfaces
 	DisableForwarding bool `gcfg:"disable-forwarding"`
+	// AllowNoUplink (disabled by default) controls if the external gateway bridge without an uplink port is allowed in local gateway mode.
+	AllowNoUplink bool `gcfg:"allow-no-uplink"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -1272,6 +1274,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage: "Enable single node optimizations. " +
 			"Single node indicates a one node cluster and allows to simplify ovn-kubernetes gateway logic",
 		Destination: &cliConfig.Gateway.SingleNode,
+	},
+	&cli.BoolFlag{
+		Name:        "allow-no-uplink",
+		Usage:       "Allow the external gateway bridge without an uplink port in local gateway mode",
+		Destination: &cliConfig.Gateway.AllowNoUplink,
 	},
 	// Deprecated CLI options
 	&cli.BoolFlag{

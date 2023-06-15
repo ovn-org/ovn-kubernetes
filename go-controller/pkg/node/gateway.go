@@ -431,10 +431,15 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		// gateway interface is an OVS bridge
 		uplinkName, err := getIntfName(intfName)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to find intfName for %s", intfName)
+			if config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.AllowNoUplink {
+				klog.Infof("Could not find uplink for %s, setup gateway bridge with no uplink port, egress IP and egress GW will not work", intfName)
+			} else {
+				return nil, errors.Wrapf(err, "Failed to find intfName for %s", intfName)
+			}
+		} else {
+			res.uplinkName = uplinkName
 		}
 		res.bridgeName = intfName
-		res.uplinkName = uplinkName
 	}
 	var err error
 	// Now, we get IP addresses for the bridge
