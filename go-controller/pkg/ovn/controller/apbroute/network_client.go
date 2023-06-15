@@ -37,6 +37,7 @@ type networkClient interface {
 type northBoundClient struct {
 	routeLister adminpolicybasedroutelisters.AdminPolicyBasedExternalRouteLister
 	nodeLister  corev1listers.NodeLister
+	podLister   corev1listers.PodLister
 	// NorthBound client interface
 	nbClient libovsdbclient.Client
 
@@ -45,6 +46,8 @@ type northBoundClient struct {
 	externalGWCache   map[ktypes.NamespacedName]*ExternalRouteInfo
 	exGWCacheMutex    *sync.RWMutex
 	controllerName    string
+
+	zone string
 }
 
 type conntrackClient struct {
@@ -60,6 +63,15 @@ func (nb *northBoundClient) deleteLogicalRouterStaticRoutes(routerName string, l
 
 func (nb *northBoundClient) findLogicalRoutersWithPredicate(p func(item *nbdb.LogicalRouter) bool) ([]*nbdb.LogicalRouter, error) {
 	return libovsdbops.FindLogicalRoutersWithPredicate(nb.nbClient, p)
+}
+
+// When IC is enabled, isNodeInLocalZone returns whether the provided node is in a zone local to the zone controller
+func (nb *northBoundClient) isPodInLocalZone(pod *v1.Pod) (bool, error) {
+	node, err := nb.nodeLister.Get(pod.Spec.NodeName)
+	if err != nil {
+		return false, err
+	}
+	return util.GetNodeZone(node) == nb.zone, nil
 }
 
 // delAllHybridRoutePolicies deletes all the 501 hybrid-route-policies that
@@ -117,6 +129,17 @@ func (nb *northBoundClient) deleteGatewayIPs(namespace string, toBeDeletedGWIPs,
 		if routeInfo.Deleted {
 			routeInfo.Unlock()
 			continue
+		}
+		pod, err := nb.podLister.Pods(routeInfo.PodName.Namespace).Get(routeInfo.PodName.Name)
+		if err == nil {
+			local, err := nb.isPodInLocalZone(pod)
+			if err != nil {
+				return err
+			}
+			if !local {
+				klog.V(4).InfoS("Pod %s is not in the local zone %s", routeInfo.PodName, nb.zone)
+				return nil
+			}
 		}
 		for podIP, routes := range routeInfo.PodExternalRoutes {
 			for gw, gr := range routes {
@@ -214,6 +237,17 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddr
 	routeInfo, err := nb.ensureRouteInfoLocked(podNsName)
 	if err != nil {
 		return fmt.Errorf("failed to ensure routeInfo for %s, error: %v", podNsName, err)
+	}
+	pod, err := nb.podLister.Pods(routeInfo.PodName.Namespace).Get(routeInfo.PodName.Name)
+	if err != nil {
+		return err
+	}
+	local, err := nb.isPodInLocalZone(pod)
+	if err != nil {
+		return err
+	}
+	if !local {
+		return nil
 	}
 	defer routeInfo.Unlock()
 	for _, podIPNet := range podIfAddrs {
