@@ -243,6 +243,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			"always_learn_from_arp_request": "false",
 			"dynamic_neigh_routers":         "true",
 			"chassis":                       l3GatewayConfig.ChassisID,
+			"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 		},
 		ExternalIDs: map[string]string{
 			"physical_ip":  physicalIPs[0],
