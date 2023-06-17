@@ -477,7 +477,8 @@ func (as *fakeAddressSet) deleteIP(ip net.IP) ([]ovsdb.Operation, error) {
 }
 
 func (as *fakeAddressSet) destroy() error {
-	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
+	// Don't check here if the address set was already destroyed as it should be
+	// a thread safe, idempotent operation anyway.
 	atomic.StoreUint32(&as.destroyed, 1)
 	return nil
 }
