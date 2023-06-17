@@ -546,23 +546,23 @@ func (oc *DefaultNetworkController) clearInitialNodeNetworkUnavailableCondition(
 // and sbdb and deletes chassis that are stale
 func (oc *DefaultNetworkController) syncNodesPeriodic() {
 	//node names is a slice of all node names
-	kNodes, err := oc.kube.GetNodes()
+	kNodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
 		klog.Errorf("Error getting existing nodes from kube API: %v", err)
 		return
 	}
 
-	localZoneKNodes := make([]*kapi.Node, 0, len(kNodes.Items))
-	remoteZoneKNodes := make([]*kapi.Node, 0, len(kNodes.Items))
-	for i := range kNodes.Items {
-		if oc.isLocalZoneNode(&kNodes.Items[i]) {
-			localZoneKNodes = append(localZoneKNodes, &kNodes.Items[i])
+	localZoneNodeNames := make([]string, 0, len(kNodes))
+	remoteZoneNodeNames := make([]string, 0, len(kNodes))
+	for i := range kNodes {
+		if oc.isLocalZoneNode(kNodes[i]) {
+			localZoneNodeNames = append(localZoneNodeNames, kNodes[i].Name)
 		} else {
-			remoteZoneKNodes = append(remoteZoneKNodes, &kNodes.Items[i])
+			remoteZoneNodeNames = append(remoteZoneNodeNames, kNodes[i].Name)
 		}
 	}
 
-	if err := oc.syncChassis(localZoneKNodes, remoteZoneKNodes); err != nil {
+	if err := oc.syncChassis(localZoneNodeNames, remoteZoneNodeNames); err != nil {
 		klog.Errorf("Failed to sync chassis: error: %v", err)
 	}
 }
@@ -573,8 +573,8 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 // do not want to delete.
 func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	foundNodes := sets.New[string]()
-	localZoneKNodes := make([]*kapi.Node, 0, len(kNodes))
-	remoteZoneKNodes := make([]*kapi.Node, 0, len(kNodes))
+	localZoneNodeNames := make([]string, 0, len(kNodes))
+	remoteZoneKNodeNames := make([]string, 0, len(kNodes))
 	for _, tmp := range kNodes {
 		node, ok := tmp.(*kapi.Node)
 		if !ok {
@@ -589,9 +589,9 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		if oc.isLocalZoneNode(node) {
 			foundNodes.Insert(node.Name)
 			oc.localZoneNodes.Store(node.Name, true)
-			localZoneKNodes = append(localZoneKNodes, node)
+			localZoneNodeNames = append(localZoneNodeNames, node.Name)
 		} else {
-			remoteZoneKNodes = append(remoteZoneKNodes, node)
+			remoteZoneKNodeNames = append(remoteZoneKNodeNames, node.Name)
 		}
 	}
 
@@ -646,7 +646,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		}
 	}
 
-	if err := oc.syncChassis(localZoneKNodes, remoteZoneKNodes); err != nil {
+	if err := oc.syncChassis(localZoneNodeNames, remoteZoneKNodeNames); err != nil {
 		return fmt.Errorf("failed to sync chassis: error: %v", err)
 	}
 
@@ -665,7 +665,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 
 // Cleanup stale chassis and chassis template variables with no
 // corresponding nodes.
-func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes []*kapi.Node) error {
+func (oc *DefaultNetworkController) syncChassis(localZoneNodeNames, remoteZoneNodeNames []string) error {
 	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
 	if err != nil {
 		return fmt.Errorf("failed to get chassis list: error: %v", err)
@@ -711,8 +711,8 @@ func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes 
 
 	// Delete existing nodes from the chassis map.
 	// Also delete existing templateVars from the template map.
-	for _, node := range localZoneNodes {
-		if chassis, ok := chassisHostNameMap[node.Name]; ok {
+	for _, nodeName := range localZoneNodeNames {
+		if chassis, ok := chassisHostNameMap[nodeName]; ok {
 			delete(chassisNameMap, chassis.Name)
 			delete(chassisHostNameMap, chassis.Hostname)
 			delete(templateChassisMap, chassis.Name)
@@ -721,8 +721,8 @@ func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes 
 
 	// Delete existing remote zone nodes from the chassis map, but not from the templateVars
 	// as we need to cleanup chassisTemplateVars for the remote zone nodes
-	for _, node := range remoteZoneNodes {
-		if chassis, ok := chassisHostNameMap[node.Name]; ok {
+	for _, nodeName := range remoteZoneNodeNames {
+		if chassis, ok := chassisHostNameMap[nodeName]; ok {
 			delete(chassisNameMap, chassis.Name)
 			delete(chassisHostNameMap, chassis.Hostname)
 		}
