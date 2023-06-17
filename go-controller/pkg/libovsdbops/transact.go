@@ -18,7 +18,7 @@ import (
 // was not connected when the transaction occurred.
 func TransactWithRetry(ctx context.Context, c client.Client, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
 	var results []ovsdb.OperationResult
-	resultErr := wait.PollImmediateUntilWithContext(ctx, 200*time.Millisecond, func(ctx context.Context) (bool, error) {
+	resultErr := wait.PollUntilContextCancel(ctx, 200*time.Millisecond, true, func(ctx context.Context) (bool, error) {
 		var err error
 		results, err = c.Transact(ctx, ops...)
 		if err == nil {

@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: 1.18.4
+  GO_VERSION: 1.19.6
   REGISTRY: ghcr.io 
   OWNER: ovn-org
   REPOSITORY: ovn-kubernetes 

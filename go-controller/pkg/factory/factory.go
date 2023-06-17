@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync/atomic"
@@ -741,7 +742,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		// Process existing items as a set so the caller can clean up
 		// after a restart or whatever. We will wrap it with retries to ensure it succeeds.
 		// Being so, processExisting is expected to be idem-potent!
-		err := utilwait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+		err := utilwait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 			if err := processExisting(items); err != nil {
 				klog.Errorf("Failed (will retry) in processExisting %v: %v", items, err)
 				return false, nil
@@ -1140,7 +1141,7 @@ func noAlternateProxySelector() func(options *metav1.ListOptions) {
 func WithUpdateHandlingForObjReplace(funcs cache.ResourceEventHandler) cache.ResourceEventHandlerFuncs {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			funcs.OnAdd(obj)
+			funcs.OnAdd(obj, true)
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldObj := old.(metav1.Object)
@@ -1152,7 +1153,7 @@ func WithUpdateHandlingForObjReplace(funcs cache.ResourceEventHandler) cache.Res
 			// This occurs not so often, so log this occurance.
 			klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", newObj.GetNamespace(), newObj.GetName())
 			funcs.OnDelete(old)
-			funcs.OnAdd(new)
+			funcs.OnAdd(new, false)
 		},
 		DeleteFunc: func(obj interface{}) {
 			funcs.OnDelete(obj)
