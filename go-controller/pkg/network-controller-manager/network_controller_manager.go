@@ -191,6 +191,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 			EgressServiceClient:  ovnClient.EgressServiceClient,
+			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
 		},
 		stopChan:     make(chan struct{}),
 		watchFactory: wf,
@@ -302,7 +303,7 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 	// Make sure that the NCM zone matches with the Noruthbound db zone.
 	// Wait for 300s before giving up
 	var zone string
-	err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		zone, err := util.GetNBZone(cm.nbClient)
 		if err != nil {
 			return false, fmt.Errorf("error getting the zone name from the OVN Northbound db : %w", err)

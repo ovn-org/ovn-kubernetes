@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
@@ -154,19 +153,19 @@ func setupPIDFile(pidfile string) error {
 
 	// Create if it doesn't exist, else exit with error
 	if os.IsNotExist(err) {
-		if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+		if err := os.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 			klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 		}
 	} else {
 		// get the pid and see if it exists
-		pid, err := ioutil.ReadFile(pidfile)
+		pid, err := os.ReadFile(pidfile)
 		if err != nil {
 			return fmt.Errorf("pidfile %s exists but can't be read: %v", pidfile, err)
 		}
 		_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
 		if os.IsNotExist(err1) {
 			// Left over pid from dead process
-			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+			if err := os.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 				klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 			}
 		} else {
@@ -422,7 +421,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 	if runMode.networkControllerManager {
 		// create factory and start the controllers asked for
-		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+		masterWatchFactory, err = factory.NewNCMWatchFactory(ovnClientset.GetNetworkControllerManagerClientset())
 		if err != nil {
 			return err
 		}
@@ -432,6 +431,11 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	if runMode.clusterManager {
 		var clusterManagerWatchFactory *factory.WatchFactory
 		if runMode.networkControllerManager {
+			// if CM and NCM modes are enabled, then we should call the combo mode - NewMasterWatchFactory
+			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+			if err != nil {
+				return err
+			}
 			clusterManagerWatchFactory = masterWatchFactory
 		} else {
 			clusterManagerWatchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset.GetClusterManagerClientset())
@@ -485,15 +489,24 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	if runMode.node {
 		var nodeWatchFactory factory.NodeWatchFactory
 
-		if masterWatchFactory == nil {
+		if runMode.networkControllerManager && runMode.clusterManager {
+			// masterWatchFactory would be initialized as NewMasterWatchFactory already, let's use that
+			nodeWatchFactory = masterWatchFactory
+		} else if runMode.networkControllerManager {
+			// masterWatchFactory would be initialized as NewNCMWatchFactory, let's change that
+			// if Node and NCM modes are enabled, then we should call the combo mode - NewMasterWatchFactory
+			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+			if err != nil {
+				return err
+			}
+			nodeWatchFactory = masterWatchFactory
+		} else {
 			var err error
 			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), runMode.identity)
 			if err != nil {
 				return err
 			}
 			defer nodeWatchFactory.Shutdown()
-		} else {
-			nodeWatchFactory = masterWatchFactory
 		}
 
 		if config.Kubernetes.Token == "" {

@@ -164,13 +164,6 @@ var MetricMasterLeader = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "Identifies whether the instance of ovnkube-master is a leader(1) or not(0).",
 })
 
-var metricEgressIPCount = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
-	Name:      "num_egress_ips",
-	Help:      "The number of defined egress IP addresses",
-})
-
 var metricEgressIPAssignLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
@@ -186,20 +179,6 @@ var metricEgressIPUnassignLatency = prometheus.NewHistogram(prometheus.Histogram
 	Help:      "The latency of egress IP unassignment from ovn nb database",
 	Buckets:   prometheus.ExponentialBuckets(.001, 2, 15),
 })
-
-var metricEgressIPNodeUnreacheableCount = prometheus.NewCounter(prometheus.CounterOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
-	Name:      "egress_ips_node_unreachable_total",
-	Help:      "The total number of times assigned egress IP(s) were unreachable"},
-)
-
-var metricEgressIPRebalanceCount = prometheus.NewCounter(prometheus.CounterOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
-	Name:      "egress_ips_rebalance_total",
-	Help:      "The total number of times assigned egress IP(s) needed to be moved to a different node"},
-)
 
 var metricNetpolEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
@@ -412,7 +391,6 @@ func RegisterMasterPerformance(nbClient libovsdbclient.Client) {
 // LE is won.
 func RegisterMasterFunctional() {
 	// No need to unregister because process exits when leadership is lost.
-	prometheus.MustRegister(metricEgressIPCount)
 	if config.Metrics.EnableScaleMetrics {
 		klog.Infof("Scale metrics are enabled")
 		prometheus.MustRegister(metricEgressIPAssignLatency)
@@ -424,8 +402,6 @@ func RegisterMasterFunctional() {
 		prometheus.MustRegister(metricPodSelectorAddrSetNamespaceEventLatency)
 		prometheus.MustRegister(metricPodEventLatency)
 	}
-	prometheus.MustRegister(metricEgressIPNodeUnreacheableCount)
-	prometheus.MustRegister(metricEgressIPRebalanceCount)
 	prometheus.MustRegister(metricEgressFirewallRuleCount)
 	prometheus.MustRegister(metricEgressFirewallCount)
 	prometheus.MustRegister(metricEgressRoutingViaHost)
@@ -505,12 +481,6 @@ func RecordPodCreated(pod *kapi.Pod, netInfo util.NetInfo) {
 	}
 }
 
-// RecordEgressIPCount records the total number of Egress IPs.
-// This total may include multiple Egress IPs per EgressIP CR.
-func RecordEgressIPCount(count float64) {
-	metricEgressIPCount.Set(count)
-}
-
 // RecordEgressIPAssign records how long it took EgressIP to configure OVN.
 func RecordEgressIPAssign(duration time.Duration) {
 	metricEgressIPAssignLatency.Observe(duration.Seconds())
@@ -519,16 +489,6 @@ func RecordEgressIPAssign(duration time.Duration) {
 // RecordEgressIPUnassign records how long it took EgressIP to unconfigure OVN.
 func RecordEgressIPUnassign(duration time.Duration) {
 	metricEgressIPUnassignLatency.Observe(duration.Seconds())
-}
-
-// RecordEgressIPReachableNode records how many times EgressIP detected an unuseable node.
-func RecordEgressIPUnreachableNode() {
-	metricEgressIPNodeUnreacheableCount.Inc()
-}
-
-// RecordEgressIPRebalance records how many EgressIPs had to move to a different egress node.
-func RecordEgressIPRebalance(count int) {
-	metricEgressIPRebalanceCount.Add(float64(count))
 }
 
 func RecordNetpolEvent(eventName string, duration time.Duration) {

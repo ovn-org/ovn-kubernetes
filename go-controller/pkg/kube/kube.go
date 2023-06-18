@@ -6,6 +6,7 @@ import (
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
+	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -46,6 +47,7 @@ type Interface interface {
 	SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error
 	SetTaintOnNode(nodeName string, taint *kapi.Taint) error
 	RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error
+	SetLabelsOnNode(nodeName string, labels map[string]interface{}) error
 	PatchNode(old, new *kapi.Node) error
 	UpdateNode(node *kapi.Node) error
 	UpdateNodeStatus(node *kapi.Node) error
@@ -73,6 +75,7 @@ type KubeOVN struct {
 	EgressFirewallClient egressfirewallclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
 	EgressServiceClient  egressserviceclientset.Interface
+	APBRouteClient       adminpolicybasedrouteclientset.Interface
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -241,6 +244,27 @@ func (k *Kube) RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error {
 	}
 	klog.Infof("Removed taint %s on node %s", taint.ToString(), node.Name)
 	return nil
+}
+
+// SetLabelsOnNode takes the node name and map of key/value string pairs to set as labels
+func (k *Kube) SetLabelsOnNode(nodeName string, labels map[string]interface{}) error {
+	patch := struct {
+		Metadata map[string]any `json:"metadata"`
+	}{
+		Metadata: map[string]any{
+			"labels": labels,
+		},
+	}
+
+	klog.V(4).Infof("Setting labels %v on node %s", labels, nodeName)
+	patchData, err := json.Marshal(&patch)
+	if err != nil {
+		klog.Errorf("Error in setting labels on node %s: %v", nodeName, err)
+		return err
+	}
+
+	_, err = k.KClient.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
+	return err
 }
 
 // PatchNode patches the old node object with the changes provided in the new node object.

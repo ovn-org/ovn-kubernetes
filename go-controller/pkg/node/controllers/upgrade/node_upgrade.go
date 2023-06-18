@@ -39,7 +39,7 @@ func NewController(client kubernetes.Interface, wf factory.NodeWatchFactory) *up
 // WaitForTopologyVerions polls continuously until the running master has reported a topology of
 // at least the minimum requested.
 func (uc *upgradeController) WaitForTopologyVersion(ctx context.Context, minVersion int, timeout time.Duration) error {
-	return wait.PollWithContext(ctx, 10*time.Second, timeout, func(ctx context.Context) (bool, error) {
+	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		ver, err := uc.GetTopologyVersion(ctx)
 		if err == nil {
 			if ver >= minVersion {

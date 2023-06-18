@@ -19,7 +19,7 @@ import (
 	"github.com/onsi/gomega"
 )
 
-func setupOvn(nbData libovsdbtest.TestSetup) (client.Client, client.Client, *libovsdbtest.Cleanup) {
+func setupOvn(nbData libovsdbtest.TestSetup) (client.Client, client.Client, *libovsdbtest.Context) {
 	nbClient, sbClient, cleanup, err := libovsdbtest.NewNBSBTestHarness(nbData)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	return sbClient, nbClient, cleanup
@@ -56,7 +56,7 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 		instance       *ConfigDurationRecorder
 		k              *kube.Kube
 		nbClient       client.Client
-		cleanup        *libovsdbtest.Cleanup
+		cleanup        *libovsdbtest.Context
 		stop           chan struct{}
 		testNamespaceA = "testnamespacea"
 		testPodNameA   = "testpoda"

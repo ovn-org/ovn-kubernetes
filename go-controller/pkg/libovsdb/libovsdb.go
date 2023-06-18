@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"io/ioutil"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"os"
 	"reflect"
 	"strings"
@@ -20,7 +20,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/fsnotify/fsnotify.v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 )
@@ -183,7 +182,7 @@ func createTLSConfig(certFile, privKeyFile, caCertFile, serverName string) (*tls
 	if err != nil {
 		return nil, fmt.Errorf("error generating x509 certs for ovndbapi: %s", err)
 	}
-	caCert, err := ioutil.ReadFile(caCertFile)
+	caCert, err := os.ReadFile(caCertFile)
 	if err != nil {
 		return nil, fmt.Errorf("error generating ca certs for ovndbapi: %s", err)
 	}
@@ -218,7 +217,7 @@ func newSSLKeyPairWatcherFunc(certFile, privKeyFile string, tlsConfig *tls.Confi
 				if ok && event.Op&(fsnotify.Write|fsnotify.Remove) != 0 {
 					if event.Op&fsnotify.Remove != 0 {
 						// cert/key file removed, need wait for the file to be created again.
-						if err := wait.PollImmediate(10*time.Millisecond, 5*time.Second, func() (bool, error) {
+						if err := wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
 							if _, err := os.Stat(event.Name); os.IsNotExist(err) {
 								return false, nil
 							}

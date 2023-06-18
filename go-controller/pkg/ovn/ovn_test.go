@@ -15,14 +15,18 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	adminpolicybasedroutefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+
+	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -66,7 +70,7 @@ type FakeOVN struct {
 	nbClient     libovsdbclient.Client
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
-	nbsbCleanup  *libovsdbtest.Cleanup
+	nbsbCleanup  *libovsdbtest.Context
 	egressQoSWg  *sync.WaitGroup
 	egressSVCWg  *sync.WaitGroup
 
@@ -100,24 +104,26 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	egressQoSObjects := []runtime.Object{}
 	multiNetworkPolicyObjects := []runtime.Object{}
 	egressServiceObjects := []runtime.Object{}
+	apbExternalRouteObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
-	nads := []*nettypes.NetworkAttachmentDefinition{}
+	nads := []nettypes.NetworkAttachmentDefinition{}
 	for _, object := range objects {
-		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
+		switch o := object.(type) {
+		case *egressip.EgressIPList:
 			egressIPObjects = append(egressIPObjects, object)
-		} else if _, isEgressFirewallObject := object.(*egressfirewall.EgressFirewallList); isEgressFirewallObject {
+		case *egressfirewall.EgressFirewallList:
 			egressFirewallObjects = append(egressFirewallObjects, object)
-		} else if _, isEgressQoSObject := object.(*egressqos.EgressQoSList); isEgressQoSObject {
+		case *egressqos.EgressQoSList:
 			egressQoSObjects = append(egressQoSObjects, object)
-		} else if _, isMultiNetworkPolicyObject := object.(*mnpapi.MultiNetworkPolicyList); isMultiNetworkPolicyObject {
+		case *mnpapi.MultiNetworkPolicyList:
 			multiNetworkPolicyObjects = append(multiNetworkPolicyObjects, object)
-		} else if nadList, isNADObject := object.(*nettypes.NetworkAttachmentDefinitionList); isNADObject {
-			for i := range nadList.Items {
-				nads = append(nads, &nadList.Items[i])
-			}
-		} else if _, isEgressServiceObject := object.(*egressservice.EgressServiceList); isEgressServiceObject {
+		case *egressservice.EgressServiceList:
 			egressServiceObjects = append(egressServiceObjects, object)
-		} else {
+		case *nettypes.NetworkAttachmentDefinitionList:
+			nads = append(nads, o.Items...)
+		case *adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList:
+			apbExternalRouteObjects = append(apbExternalRouteObjects, object)
+		default:
 			v1Objects = append(v1Objects, object)
 		}
 	}
@@ -128,6 +134,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressQoSClient:          egressqosfake.NewSimpleClientset(egressQoSObjects...),
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
+		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 	}
 	o.init(nads)
 }
@@ -146,7 +153,7 @@ func (o *FakeOVN) shutdown() {
 	o.nbsbCleanup.Cleanup()
 }
 
-func (o *FakeOVN) init(nadList []*nettypes.NetworkAttachmentDefinition) {
+func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	var err error
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -168,7 +175,7 @@ func (o *FakeOVN) init(nadList []*nettypes.NetworkAttachmentDefinition) {
 	o.controller.routerLoadBalancerGroupUUID = types.ClusterRouterLBGroupName + "-UUID"
 
 	for _, nad := range nadList {
-		err := o.NewSecondaryNetworkController(nad)
+		err := o.NewSecondaryNetworkController(&nad)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 
@@ -225,8 +232,8 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
-			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 			EgressServiceClient:  ovnClient.EgressServiceClient,
+			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
 		},
 		wf,
 		recorder,
@@ -331,7 +338,6 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 				Kube:                 kube.Kube{KClient: o.fakeClient.KubeClient},
 				EIPClient:            o.fakeClient.EgressIPClient,
 				EgressFirewallClient: o.fakeClient.EgressFirewallClient,
-				CloudNetworkClient:   o.fakeClient.CloudNetworkClient,
 			},
 			o.watcher,
 			o.fakeRecorder,
@@ -379,4 +385,18 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 	ginkgo.By(fmt.Sprintf("OVN test init: add NAD %s to secondary network controller of %s network %s", nadName, topoType, netName))
 	secondaryController.AddNAD(nadName)
 	return nil
+}
+
+func (o *FakeOVN) patchEgressIPObj(nodeName, egressIP string) {
+	// NOTE: Cluster manager is the one who patches the egressIP object.
+	// For the sake of unit testing egressip zone controller we need to patch egressIP object manually
+	// There are tests in cluster-manager package covering the patch logic.
+	status := []egressipv1.EgressIPStatusItem{
+		{
+			Node:     nodeName,
+			EgressIP: egressIP,
+		},
+	}
+	err := o.controller.patchReplaceEgressIPStatus(egressIPName, status)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }

@@ -1,6 +1,7 @@
 package ovndbmanager
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -348,7 +349,7 @@ func convertSBDBSchema() error {
 
 func convertDBSchemaWithRetries(schemaFile, serverSock, dbName string) error {
 	var lastMigrationErr error
-	if err := wait.PollImmediate(5*time.Second, 5*time.Minute, func() (bool, error) {
+	if err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
 		lastMigrationErr = convertDBSchema(schemaFile, serverSock, dbName)
 		if lastMigrationErr != nil {
 			klog.ErrorS(lastMigrationErr, dbName+" scheme conversion failed")

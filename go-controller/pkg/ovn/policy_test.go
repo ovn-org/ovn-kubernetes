@@ -1985,7 +1985,7 @@ func getAllowFromNodeStaleACL(nodeName, mgmtIP string, logicalSwitch *nbdb.Logic
 // here only low-level operation are tested (directly calling updateStaleNetpolNodeACLs)
 var _ = ginkgo.Describe("OVN AllowFromNode ACL low-level operations", func() {
 	var (
-		nbCleanup     *libovsdbtest.Cleanup
+		nbCleanup     *libovsdbtest.Context
 		logicalSwitch *nbdb.LogicalSwitch
 	)
 

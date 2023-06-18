@@ -1,9 +1,9 @@
 package logicalswitchmanager
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"reflect"
 	"sync"

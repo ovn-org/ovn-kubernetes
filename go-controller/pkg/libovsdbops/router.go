@@ -678,6 +678,20 @@ func CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient libovsdbclien
 // routes from the cache based on a given predicate, deletes them and removes
 // them from the provided logical router
 func DeleteLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client, routerName string, p logicalRouterStaticRoutePredicate) error {
+	var ops []libovsdb.Operation
+	var err error
+	ops, err = DeleteLogicalRouterStaticRoutesWithPredicateOps(nbClient, ops, routerName, p)
+	if err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
+}
+
+// DeleteLogicalRouterStaticRoutesWithPredicateOps looks up logical router static
+// routes from the cache based on a given predicate, and returns the ops to delete
+// them and remove them from the provided logical router
+func DeleteLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, routerName string, p logicalRouterStaticRoutePredicate) ([]libovsdb.Operation, error) {
 	router := &nbdb.LogicalRouter{
 		Name: routerName,
 	}
@@ -700,7 +714,7 @@ func DeleteLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client
 	}
 
 	m := newModelClient(nbClient)
-	return m.Delete(opModels...)
+	return m.DeleteOps(ops, opModels...)
 }
 
 // DeleteLogicalRouterStaticRoutes deletes the logical router static routes and
@@ -771,6 +785,24 @@ func DeleteBFDs(nbClient libovsdbclient.Client, bfds ...*nbdb.BFD) error {
 
 	m := newModelClient(nbClient)
 	return m.Delete(opModels...)
+}
+
+func LookupBFD(nbClient libovsdbclient.Client, bfd *nbdb.BFD) (*nbdb.BFD, error) {
+	found := []*nbdb.BFD{}
+	opModel := operationModel{
+		Model:          bfd,
+		ModelPredicate: func(item *nbdb.BFD) bool { return item.DstIP == bfd.DstIP && item.LogicalPort == bfd.LogicalPort },
+		ExistingResult: &found,
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+
+	m := newModelClient(nbClient)
+	err := m.Lookup(opModel)
+	if err != nil {
+		return nil, err
+	}
+	return found[0], nil
 }
 
 // LB OPs
@@ -965,16 +997,16 @@ func FindNATsWithPredicate(nbClient libovsdbclient.Client, predicate natPredicat
 // GetRouterNATs looks up NATs associated to the provided logical router from
 // the cache
 func GetRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
-	router, err := GetLogicalRouter(nbClient, router)
+	r, err := GetLogicalRouter(nbClient, router)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get router: %s, error: %w", router.Name, err)
 	}
 
 	nats := []*nbdb.NAT{}
-	for _, uuid := range router.Nat {
+	for _, uuid := range r.Nat {
 		nat, err := GetNAT(nbClient, &nbdb.NAT{UUID: uuid})
-		if err != nil {
-			return nil, err
+		if err != nil && err != libovsdbclient.ErrNotFound {
+			return nil, fmt.Errorf("failed to lookup NAT entry with uuid: %s, error: %w", uuid, err)
 		}
 		nats = append(nats, nat)
 	}
