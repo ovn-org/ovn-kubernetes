@@ -1,4 +1,4 @@
-package subnetallocator
+package node
 
 import (
 	"fmt"

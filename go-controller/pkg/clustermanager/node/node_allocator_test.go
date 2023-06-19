@@ -1,4 +1,4 @@
-package subnetallocator
+package node
 
 import (
 	"fmt"
@@ -223,24 +223,24 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			sna := &HostSubnetAllocator{
+			na := &NodeAllocator{
 				netInfo:                netInfo,
 				clusterSubnetAllocator: NewSubnetAllocator(),
 			}
 
-			if err := sna.InitRanges(); err != nil {
-				t.Fatalf("Failed to initialize network ranges: %v", err)
+			if err := na.Init(); err != nil {
+				t.Fatalf("Failed to initialize node allocator: %v", err)
 			}
 
 			if tt.alreadyOwned != nil {
-				err := sna.clusterSubnetAllocator.MarkAllocatedNetworks(tt.alreadyOwned.owner, ovntest.MustParseIPNets(tt.alreadyOwned.subnet)...)
+				err := na.clusterSubnetAllocator.MarkAllocatedNetworks(tt.alreadyOwned.owner, ovntest.MustParseIPNets(tt.alreadyOwned.subnet)...)
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
 
 			// test network allocation works correctly
-			got, allocated, err := sna.allocateNodeSubnets(sna.clusterSubnetAllocator, "testnode", tt.existingNets, tt.configIPv4, tt.configIPv6)
+			got, allocated, err := na.allocateNodeSubnets(na.clusterSubnetAllocator, "testnode", tt.existingNets, tt.configIPv4, tt.configIPv6)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Controller.addNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -263,7 +263,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 
 			// Ensure an already owned subnet isn't touched
 			if tt.alreadyOwned != nil {
-				err = sna.clusterSubnetAllocator.MarkAllocatedNetworks("blahblah", ovntest.MustParseIPNets(tt.alreadyOwned.subnet)...)
+				err = na.clusterSubnetAllocator.MarkAllocatedNetworks("blahblah", ovntest.MustParseIPNets(tt.alreadyOwned.subnet)...)
 				if err == nil {
 					t.Fatal("Expected subnet to already be allocated by a different node")
 				}
@@ -288,23 +288,23 @@ func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sna := &HostSubnetAllocator{
+	na := &NodeAllocator{
 		netInfo:                netInfo,
 		clusterSubnetAllocator: NewSubnetAllocator(),
 	}
 
-	if err := sna.InitRanges(); err != nil {
-		t.Fatalf("Failed to initialize network ranges: %v", err)
+	if err := na.Init(); err != nil {
+		t.Fatalf("Failed to initialize node allocator: %v", err)
 	}
 
 	// Mark all v6 subnets already allocated to force an error in AllocateNodeSubnets()
-	if err := sna.clusterSubnetAllocator.MarkAllocatedNetworks("blah", ovntest.MustParseIPNet("2000::/127")); err != nil {
+	if err := na.clusterSubnetAllocator.MarkAllocatedNetworks("blah", ovntest.MustParseIPNet("2000::/127")); err != nil {
 		t.Fatalf("MarkAllocatedNetworks() expected no error but got: %v", err)
 	}
 
 	// test network allocation works correctly
-	v4usedBefore, v6usedBefore := sna.clusterSubnetAllocator.Usage()
-	got, allocated, err := sna.allocateNodeSubnets(sna.clusterSubnetAllocator, "testNode", nil, true, true)
+	v4usedBefore, v6usedBefore := na.clusterSubnetAllocator.Usage()
+	got, allocated, err := na.allocateNodeSubnets(na.clusterSubnetAllocator, "testNode", nil, true, true)
 	if err == nil {
 		t.Fatalf("allocateNodeSubnets() expected error but got success")
 	}
@@ -315,7 +315,7 @@ func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
 		t.Fatalf("allocateNodeSubnets() expected no allocated subnets, got %v", allocated)
 	}
 
-	v4usedAfter, v6usedAfter := sna.clusterSubnetAllocator.Usage()
+	v4usedAfter, v6usedAfter := na.clusterSubnetAllocator.Usage()
 	if v4usedAfter != v4usedBefore {
 		t.Fatalf("Expected %d v4 allocated subnets, but got %d", v4usedBefore, v4usedAfter)
 	}

@@ -10,8 +10,8 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/pod"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -42,8 +42,8 @@ type networkClusterController struct {
 	// unique id of the network
 	networkID int
 
-	podAllocator        *pod.PodAllocator
-	hostSubnetAllocator *subnetallocator.HostSubnetAllocator
+	podAllocator  *pod.PodAllocator
+	nodeAllocator *node.NodeAllocator
 
 	util.NetInfo
 }
@@ -63,8 +63,8 @@ func newNetworkClusterController(networkID int, netInfo util.NetInfo, ovnClient 
 		networkID:    networkID,
 	}
 
-	if ncc.hasNodeSubnetAllocation() {
-		ncc.hostSubnetAllocator = subnetallocator.NewHostSubnetAllocator(networkID, netInfo, wf.NodeCoreInformer().Lister(), kube)
+	if ncc.hasNodeAllocation() {
+		ncc.nodeAllocator = node.NewNodeAllocator(networkID, netInfo, wf.NodeCoreInformer().Lister(), kube)
 	}
 
 	if ncc.hasPodAllocation() {
@@ -88,13 +88,13 @@ func (ncc *networkClusterController) hasPodAllocation() bool {
 	return false
 }
 
-func (ncc *networkClusterController) hasNodeSubnetAllocation() bool {
-	// we only do node subnet allocation on L3 topologies or default network
+func (ncc *networkClusterController) hasNodeAllocation() bool {
+	// we only do node allocation on L3 topologies or default network
 	return ncc.TopologyType() == types.Layer3Topology || !ncc.IsSecondary()
 }
 
 func (ncc *networkClusterController) initRetryFramework() {
-	if ncc.hasNodeSubnetAllocation() {
+	if ncc.hasNodeAllocation() {
 		ncc.retryNodes = ncc.newRetryFramework(factory.NodeType, true)
 	}
 
@@ -105,13 +105,13 @@ func (ncc *networkClusterController) initRetryFramework() {
 
 // Start the network cluster controller. Depending on the cluster configuration
 // and type of network, it does the following:
-//   - initializes the host subnet allocator and starts listening to node events
+//   - initializes the node allocator and starts listening to node events
 //   - initializes the pod ip allocator and starts listening to pod events
 func (ncc *networkClusterController) Start(ctx context.Context) error {
-	if ncc.hasNodeSubnetAllocation() {
-		err := ncc.hostSubnetAllocator.InitRanges()
+	if ncc.hasNodeAllocation() {
+		err := ncc.nodeAllocator.Init()
 		if err != nil {
-			return fmt.Errorf("failed to initialize host subnet ip allocator: %w", err)
+			return fmt.Errorf("failed to initialize node allocator: %w", err)
 		}
 
 		nodeHandler, err := ncc.retryNodes.WatchResource()
@@ -170,8 +170,8 @@ func (ncc *networkClusterController) Cleanup(netName string) error {
 		return fmt.Errorf("default network can't be cleaned up")
 	}
 
-	if ncc.hasNodeSubnetAllocation() {
-		return ncc.hostSubnetAllocator.Cleanup(netName)
+	if ncc.hasNodeAllocation() {
+		return ncc.nodeAllocator.Cleanup(netName)
 	}
 
 	return nil
@@ -210,7 +210,7 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Node", obj)
 		}
-		if err = h.ncc.hostSubnetAllocator.HandleAddUpdateNodeEvent(node); err != nil {
+		if err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(node); err != nil {
 			klog.Infof("Node add failed for %s, will try again later: %v",
 				node.Name, err)
 			return err
@@ -247,7 +247,7 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Node", newObj)
 		}
-		if err = h.ncc.hostSubnetAllocator.HandleAddUpdateNodeEvent(node); err != nil {
+		if err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(node); err != nil {
 			klog.Infof("Node update failed for %s, will try again later: %v",
 				node.Name, err)
 			return err
@@ -277,7 +277,7 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
-		return h.ncc.hostSubnetAllocator.HandleDeleteNode(node)
+		return h.ncc.nodeAllocator.HandleDeleteNode(node)
 	}
 	return nil
 }
@@ -293,7 +293,7 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 		case factory.PodType:
 			syncFunc = h.ncc.podAllocator.Sync
 		case factory.NodeType:
-			syncFunc = h.ncc.hostSubnetAllocator.Sync
+			syncFunc = h.ncc.nodeAllocator.Sync
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
