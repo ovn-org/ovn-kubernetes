@@ -118,14 +118,18 @@ type ZoneInterconnectHandler struct {
 	networkClusterRouterName string
 	// transit switch name for the network
 	networkTransitSwitchName string
+
+	// cached network id
+	networkId int
 }
 
 // NewZoneInterconnectHandler returns a new ZoneInterconnectHandler object
 func NewZoneInterconnectHandler(nInfo util.NetInfo, nbClient, sbClient libovsdbclient.Client) *ZoneInterconnectHandler {
 	zic := &ZoneInterconnectHandler{
-		NetInfo:  nInfo,
-		nbClient: nbClient,
-		sbClient: sbClient,
+		NetInfo:   nInfo,
+		nbClient:  nbClient,
+		sbClient:  sbClient,
+		networkId: util.InvalidNetworkID,
 	}
 
 	zic.networkClusterRouterName = zic.GetNetworkScopedName(types.OVNClusterRouter)
@@ -160,29 +164,26 @@ func (zic *ZoneInterconnectHandler) Init(kube *kube.KubeOVN, ctx context.Context
 
 	maxTimeout := 2 * time.Minute
 	networkID := util.InvalidNetworkID
-	var err1 error
 	start := time.Now()
 	err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
-		nodes, err := kube.GetNodes()
+		nodeList, err := kube.GetNodes()
 		if err != nil {
-			err1 = fmt.Errorf("failed to get nodes: %v", err)
+			return false, fmt.Errorf("failed to get nodes: %v", err)
+		}
+
+		networkID, err = zic.getNetworkIdFromNodes(nodeList.Items)
+		if util.IsAnnotationNotSetError(err) {
 			return false, nil
 		}
-		for _, node := range nodes.Items {
-			networkID, err = util.ParseNetworkIDAnnotation(&node, zic.GetNetworkName())
-			if err != nil {
-				err1 = fmt.Errorf("failed to get the network id for the network %s on node %s: %v",
-					zic.GetNetworkName(), node.Name, err)
-			}
+		if err != nil {
+			return false, err
 		}
-		if networkID == util.InvalidNetworkID {
-			return false, err1
-		}
+
 		return true, nil
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to find network ID: %w, %v", err, err1)
+		return fmt.Errorf("failed to find network ID: %v", err)
 	}
 
 	if err := zic.EnsureTransitSwitch(networkID); err != nil {
@@ -689,4 +690,34 @@ func (zic *ZoneInterconnectHandler) getStaticRoutes(ipPrefixes []*net.IPNet, nex
 	}
 
 	return staticRoutes
+}
+
+// getNetworkId returns the cached network ID or looks it up in the provided node
+func (zic *ZoneInterconnectHandler) getNetworkIdFromNode(node *corev1.Node) (int, error) {
+	return zic.getNetworkIdFromNodes([]corev1.Node{*node})
+}
+
+// getNetworkId returns the cached network ID or looks it up in any of the provided nodes
+func (zic *ZoneInterconnectHandler) getNetworkIdFromNodes(nodes []corev1.Node) (int, error) {
+	if zic.networkId != util.InvalidNetworkID {
+		return zic.networkId, nil
+	}
+
+	var networkId int
+	var err error
+	for i := range nodes {
+		networkId, err = util.ParseNetworkIDAnnotation(&nodes[i], zic.GetNetworkName())
+		if util.IsAnnotationNotSetError(err) {
+			continue
+		}
+		if err != nil {
+			break
+		}
+		if networkId != util.InvalidNetworkID {
+			zic.networkId = networkId
+			return zic.networkId, nil
+		}
+	}
+
+	return util.InvalidNetworkID, fmt.Errorf("could not find network ID: %w", err)
 }
