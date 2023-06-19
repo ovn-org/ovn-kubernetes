@@ -14,7 +14,7 @@ func (m *externalPolicyManager) syncNamespace(namespace *v1.Namespace, routeQueu
 
 	keysToBeQueued := sets.New[string]()
 
-	// get a copy of all policies at this time and see if they include this namespace
+	// Get a copy of all policies at this time and see if they include this namespace
 	policyKeys := m.routePolicySyncCache.GetKeys()
 
 	for _, policyName := range policyKeys {
@@ -39,7 +39,7 @@ func (m *externalPolicyManager) syncNamespace(namespace *v1.Namespace, routeQueu
 		}
 	}
 
-	// check if this namespace is being tracked by policy in its namespace cache
+	// Check if this namespace is being tracked by policy in its namespace cache
 	cacheInfo, found := m.getNamespaceInfoFromCache(namespace.Name)
 	if found {
 		for policyName := range cacheInfo.Policies {
@@ -56,7 +56,7 @@ func (m *externalPolicyManager) syncNamespace(namespace *v1.Namespace, routeQueu
 	return nil
 }
 
-// must be called with lock on namespaceInfo cache
+// Must be called with lock on namespaceInfo cache
 func (m *externalPolicyManager) applyPolicyToNamespace(namespaceName string, policy *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, cacheInfo *namespaceInfo) error {
 
 	processedPolicy, err := m.processExternalRoutePolicy(policy)
@@ -70,7 +70,7 @@ func (m *externalPolicyManager) applyPolicyToNamespace(namespaceName string, pol
 	return nil
 }
 
-// must be called with lock on namespaceInfo cache
+// Must be called with lock on namespaceInfo cache
 func (m *externalPolicyManager) removePolicyFromNamespace(targetNamespace string, policy *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, cacheInfo *namespaceInfo) error {
 	processedPolicy, err := m.processExternalRoutePolicy(policy)
 	if err != nil {
@@ -81,7 +81,7 @@ func (m *externalPolicyManager) removePolicyFromNamespace(targetNamespace string
 		return err
 	}
 
-	klog.Infof("Deleting APB policy %s in namespace cache %s", policy.Name, targetNamespace)
+	klog.V(4).InfoS("Deleting APB policy %s in namespace cache %s", policy.Name, targetNamespace)
 	cacheInfo.Policies = cacheInfo.Policies.Delete(policy.Name)
 	if len(cacheInfo.Policies) == 0 {
 		m.namespaceInfoSyncCache.Delete(targetNamespace)

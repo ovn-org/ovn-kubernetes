@@ -231,7 +231,6 @@ func (m *externalPolicyManager) getRoutePolicyFromCache(policyName string) (*adm
 		found, markedForDeletion bool
 	)
 	_ = m.routePolicySyncCache.DoWithLock(policyName, func(policyName string) error {
-		klog.Infof("Getting route %s", policyName)
 		ri, f := m.routePolicySyncCache.Load(policyName)
 		if !f {
 			return nil

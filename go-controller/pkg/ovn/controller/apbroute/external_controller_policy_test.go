@@ -2,6 +2,7 @@ package apbroute
 
 import (
 	"context"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -206,9 +207,9 @@ var _ = Describe("OVN External Gateway policy", func() {
 			Eventually(func(g Gomega) {
 				p, found, _ := externalController.mgr.getRoutePolicyFromCache(multipleMatchPolicy.Name)
 				g.Expect(found).To(BeTrue())
-				g.Expect(p.Spec).To(BeEquivalentTo(multipleMatchPolicy.Spec))
+				g.Expect(p.Spec).To(BeComparableTo(multipleMatchPolicy.Spec, cmpOpts...))
 			}, 5).Should(Succeed())
-			Eventually(listNamespaceInfo(), 5).Should(HaveLen(3))
+			Eventually(listNamespaceInfo, 5).Should(HaveLen(3))
 			expected := &namespaceInfo{
 				Policies:       sets.New(multipleMatchPolicy.Name),
 				StaticGateways: gatewayInfoList{newGatewayInfo(sets.New(staticHopGWIP), false)},
@@ -230,7 +231,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 			initController([]runtime.Object{namespaceTest2, namespaceDefault, pod1}, []runtime.Object{dynamicPolicy})
 
 			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
-			Eventually(listNamespaceInfo(), 5).Should(HaveLen(0))
+			Eventually(listNamespaceInfo, 5).Should(HaveLen(0))
 		})
 
 		It("registers a new policy with multiple dynamic and static GWs and bfd enabled on all gateways", func() {
@@ -245,7 +246,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 			initController([]runtime.Object{namespaceDefault, namespaceTest, pod1, pod2, pod3, pod4, pod5, pod6}, []runtime.Object{staticMultiIPPolicy})
 
 			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
-			Eventually(listNamespaceInfo(), 5).Should(HaveLen(1))
+			Eventually(listNamespaceInfo, 5).Should(HaveLen(1))
 
 			Eventually(func() *namespaceInfo {
 				return getNamespaceInfo(namespaceTest.Name)
@@ -275,7 +276,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 			initController([]runtime.Object{namespaceDefault, namespaceTest, pod1}, []runtime.Object{staticPolicy, dynamicPolicy})
 			Eventually(func() []string { return listRoutePolicyInCache() }, 5).
 				Should(HaveLen(2))
-			Eventually(listNamespaceInfo(), 5).Should(HaveLen(1))
+			Eventually(listNamespaceInfo, 5).Should(HaveLen(1))
 			Eventually(func() *namespaceInfo {
 				return getNamespaceInfo(namespaceTest.Name)
 			}, 5).Should(BeComparableTo(
@@ -307,7 +308,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 
 			Eventually(func() []string { return listRoutePolicyInCache() }, 5).
 				Should(HaveLen(4))
-			Eventually(listNamespaceInfo(), 5).Should(HaveLen(1))
+			Eventually(listNamespaceInfo, 5).Should(HaveLen(1))
 
 			Eventually(func() *namespaceInfo {
 				return getNamespaceInfo(namespaceTest.Name)
@@ -548,7 +549,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 			initController([]runtime.Object{namespaceDefault, namespaceTest}, []runtime.Object{staticMultiIPPolicy})
 
 			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
-			Eventually(listNamespaceInfo(), 5).Should(HaveLen(1))
+			Eventually(listNamespaceInfo, 5).Should(HaveLen(1))
 
 			Eventually(func() *namespaceInfo {
 				return getNamespaceInfo(namespaceTest.Name)
@@ -615,7 +616,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 			initController([]runtime.Object{namespaceDefault, namespaceTest, pod1, pod2, pod3, pod4, pod5, pod6}, []runtime.Object{staticMultiIPPolicy, staticPolicy})
 
 			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(2))
-			Eventually(listNamespaceInfo(), 5).Should(HaveLen(1))
+			Eventually(listNamespaceInfo, 5).Should(HaveLen(1))
 			expected := &namespaceInfo{
 				Policies: sets.New(staticMultiIPPolicy.Name, staticPolicy.Name),
 				StaticGateways: gatewayInfoList{
@@ -652,7 +653,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() v1.Time {
-				// retrieve the CR and ensure the last update timestamp is different before comparing it against the slice.
+				// Retrieve the CR and ensure the last update timestamp is different before comparing it against the slice.
 				p, err = fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), staticMultiIPPolicy.Name, v1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				return p.Status.LastTransitionTime
@@ -667,7 +668,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 		It("validates that changing the BFD setting in a static hop will trigger an update", func() {
 			initController([]runtime.Object{namespaceDefault, namespaceTest}, []runtime.Object{staticPolicy})
 			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
-			Eventually(listNamespaceInfo(), 5).Should(HaveLen(1))
+			Eventually(listNamespaceInfo, 5).Should(HaveLen(1))
 
 			Eventually(func() *namespaceInfo {
 				return getNamespaceInfo(namespaceTest.Name)
@@ -710,7 +711,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 		It("validates that changing the BFD setting in a dynamic hop will trigger an update", func() {
 			initController([]runtime.Object{namespaceDefault, namespaceTest, pod1}, []runtime.Object{dynamicPolicy})
 			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
-			Eventually(listNamespaceInfo(), 5).Should(HaveLen(1))
+			Eventually(listNamespaceInfo, 5).Should(HaveLen(1))
 			Eventually(func() *namespaceInfo {
 				return getNamespaceInfo(namespaceTest.Name)
 			}, 5).Should(BeComparableTo(

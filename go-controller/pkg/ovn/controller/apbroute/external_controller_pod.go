@@ -30,9 +30,9 @@ func (m *externalPolicyManager) syncPod(pod *v1.Pod, podLister corev1listers.Pod
 	if pErr != nil {
 		return pErr
 	}
-	klog.Infof("Processing gateway pod %s/%s with matching policies %+v", pod.Namespace, pod.Name, policies.UnsortedList())
+	klog.V(4).InfoS("Processing gateway pod %s/%s with matching policies %+v", pod.Namespace, pod.Name, policies.UnsortedList())
 	for policyName := range policies {
-		klog.V(2).InfoS("Queueing policy %s", policyName)
+		klog.V(5).InfoS("Queueing policy %s", policyName)
 		routeQueue.Add(policyName)
 	}
 
@@ -92,13 +92,13 @@ func (m *externalPolicyManager) listPoliciesUsingPodGateway(key ktypes.Namespace
 		return nil, err
 	}
 	for _, p := range policies {
-		klog.Infof("Checking for policy %s to have pod %s", p.Name, key)
+		klog.V(5).InfoS("Checking for policy %s to have pod %s", p.Name, key)
 		pp, err := m.processExternalRoutePolicy(p)
 		if err != nil {
 			return nil, err
 		}
 		if _, found := pp.dynamicGateways[key]; found {
-			klog.Infof("Policy %s has pod %s", p.Name, key)
+			klog.V(5).InfoS("Policy %s has pod %s", p.Name, key)
 			ret = append(ret, p)
 		}
 
@@ -108,7 +108,7 @@ func (m *externalPolicyManager) listPoliciesUsingPodGateway(key ktypes.Namespace
 
 func (m *externalPolicyManager) listPoliciesInNamespacesUsingPodGateway(key ktypes.NamespacedName) (sets.Set[string], error) {
 	policies := sets.New[string]()
-	// iterate through all current namespaces that contain the pod. This is needed in case the pod is deleted from an existing namespace, in which case
+	// Iterate through all current namespaces that contain the pod. This is needed in case the pod is deleted from an existing namespace, in which case
 	// if we iterated applying the namespace selector in the policies, we would miss the fact that a pod was part of a namespace that is no longer
 	// and we'd miss updating that namespace and removing the pod through the reconciliation of the policy in that namespace.
 	nsList := m.listNamespaceInfoCache()
@@ -122,7 +122,7 @@ func (m *externalPolicyManager) listPoliciesInNamespacesUsingPodGateway(key ktyp
 		}
 		m.unlockNamespaceInfoCache(namespaceName)
 	}
-	// list all namespaces that match the policy, for those new namespaces where the pod now applies
+	// List all namespaces that match the policy, for those new namespaces where the pod now applies
 	p, err := m.listPoliciesUsingPodGateway(key)
 	if err != nil {
 		return nil, err
