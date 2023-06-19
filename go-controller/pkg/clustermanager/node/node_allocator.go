@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -23,7 +24,8 @@ import (
 // controller and does the following:
 //   - allocates subnet from the cluster subnet pool. It also allocates subnets
 //     from the hybrid overlay subnet pool if hybrid overlay is enabled.
-//     It stores these allocated subnets in the node annotation
+//     It stores these allocated subnets in the node annotation.
+//     Only for the default or layer3 networks.
 //   - stores the network id in each node's annotation.
 type NodeAllocator struct {
 	kube       kube.Interface
@@ -39,7 +41,7 @@ type NodeAllocator struct {
 }
 
 func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.NodeLister, kube kube.Interface) *NodeAllocator {
-	return &NodeAllocator{
+	na := &NodeAllocator{
 		kube:                         kube,
 		nodeLister:                   nodeLister,
 		networkID:                    networkID,
@@ -47,9 +49,23 @@ func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.No
 		clusterSubnetAllocator:       NewSubnetAllocator(),
 		hybridOverlaySubnetAllocator: NewSubnetAllocator(),
 	}
+
+	if na.hasNodeSubnetAllocation() {
+		na.clusterSubnetAllocator = NewSubnetAllocator()
+	}
+
+	if na.hasHybridOverlayAllocation() {
+		na.hybridOverlaySubnetAllocator = NewSubnetAllocator()
+	}
+
+	return na
 }
 
 func (na *NodeAllocator) Init() error {
+	if !na.hasNodeSubnetAllocation() {
+		return nil
+	}
+
 	clusterSubnets := na.netInfo.Subnets()
 
 	for _, clusterSubnet := range clusterSubnets {
@@ -132,6 +148,8 @@ func (na *NodeAllocator) releaseHybridOverlayNodeSubnet(nodeName string) {
 
 // HandleAddUpdateNodeEvent handles the add or update node event
 func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
+	defer na.recordSubnetCount()
+
 	if util.NoHostSubnet(node) {
 		if na.hasHybridOverlayAllocation() && houtil.IsHybridOverlayNode(node) {
 			annotator := kube.NewNodeAnnotator(na.kube, node.Name)
@@ -150,9 +168,7 @@ func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 		return nil
 	}
 
-	err := na.syncNodeNetworkAnnotations(node)
-	na.recordSubnetUsage()
-	return err
+	return na.syncNodeNetworkAnnotations(node)
 }
 
 // syncNodeNetworkAnnotations does 2 things
@@ -161,36 +177,43 @@ func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 	networkName := na.netInfo.GetNetworkName()
 
-	existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node, networkName)
-	if err != nil && !util.IsAnnotationNotSetError(err) {
-		// Log the error and try to allocate new subnets
-		klog.Warningf("Failed to get node %s host subnets annotations for network %s : %v", node.Name, networkName, err)
-	}
-
 	networkID, err := util.ParseNetworkIDAnnotation(node, networkName)
 	if err != nil && !util.IsAnnotationNotSetError(err) {
 		// Log the error and try to allocate new subnets
 		klog.Warningf("Failed to get node %s network id annotations for network %s : %v", node.Name, networkName, err)
 	}
 
-	// On return validExistingSubnets will contain any valid subnets that
-	// were already assigned to the node. allocatedSubnets will contain
-	// any newly allocated subnets required to ensure that the node has one subnet
-	// from each enabled IP family.
-	ipv4Mode, ipv6Mode := na.netInfo.IPMode()
-	validExistingSubnets, allocatedSubnets, err := na.allocateNodeSubnets(na.clusterSubnetAllocator, node.Name, existingSubnets, ipv4Mode, ipv6Mode)
-	if err != nil {
-		return err
+	updatedSubnetsMap := map[string][]*net.IPNet{}
+	var validExistingSubnets, allocatedSubnets []*net.IPNet
+	if na.hasNodeSubnetAllocation() {
+		existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node, networkName)
+		if err != nil && !util.IsAnnotationNotSetError(err) {
+			// Log the error and try to allocate new subnets
+			klog.Warningf("Failed to get node %s host subnets annotations for network %s : %v", node.Name, networkName, err)
+		}
+
+		// On return validExistingSubnets will contain any valid subnets that
+		// were already assigned to the node. allocatedSubnets will contain
+		// any newly allocated subnets required to ensure that the node has one subnet
+		// from each enabled IP family.
+		ipv4Mode, ipv6Mode := na.netInfo.IPMode()
+		validExistingSubnets, allocatedSubnets, err = na.allocateNodeSubnets(na.clusterSubnetAllocator, node.Name, existingSubnets, ipv4Mode, ipv6Mode)
+		if err != nil {
+			return err
+		}
+
+		// If the existing subnets weren't OK, or new ones were allocated, update the node annotation.
+		// This happens in a couple cases:
+		// 1) new node: no existing subnets and one or more new subnets were allocated
+		// 2) dual-stack to single-stack conversion: two existing subnets but only one will be valid, and no allocated subnets
+		// 3) bad subnet annotation: one more existing subnets will be invalid and might have allocated a correct one
+		if len(existingSubnets) != len(validExistingSubnets) || len(allocatedSubnets) > 0 {
+			updatedSubnetsMap[networkName] = validExistingSubnets
+		}
 	}
 
-	// If the existing subnets weren't OK, or new ones were allocated, update the node annotation.
-	// This happens in a couple cases:
-	// 1) new node: no existing subnets and one or more new subnets were allocated
-	// 2) dual-stack to single-stack conversion: two existing subnets but only one will be valid, and no allocated subnets
-	// 3) bad subnet annotation: one more existing subnets will be invalid and might have allocated a correct one
 	// Also update the node annotation if the networkID doesn't match
-	if len(existingSubnets) != len(validExistingSubnets) || len(allocatedSubnets) > 0 || na.networkID != networkID {
-		updatedSubnetsMap := map[string][]*net.IPNet{networkName: validExistingSubnets}
+	if len(updatedSubnetsMap) > 0 || na.networkID != networkID {
 		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, na.networkID)
 		if err != nil {
 			if errR := na.clusterSubnetAllocator.ReleaseNetworks(node.Name, allocatedSubnets...); errR != nil {
@@ -210,12 +233,19 @@ func (na *NodeAllocator) HandleDeleteNode(node *corev1.Node) error {
 		return nil
 	}
 
-	na.clusterSubnetAllocator.ReleaseAllNetworks(node.Name)
-	na.recordSubnetUsage()
+	if na.hasNodeSubnetAllocation() {
+		na.clusterSubnetAllocator.ReleaseAllNetworks(node.Name)
+		na.recordSubnetCount()
+	}
+
 	return nil
 }
 
 func (na *NodeAllocator) Sync(nodes []interface{}) error {
+	if !na.hasNodeSubnetAllocation() {
+		return nil
+	}
+
 	defer na.recordSubnetUsage()
 
 	networkName := na.netInfo.GetNetworkName()
@@ -429,4 +459,9 @@ func (na *NodeAllocator) allocateNodeSubnets(allocator SubnetAllocator, nodeName
 	// Success; prevent the release-on-error from triggering and return all node subnets
 	releaseAllocatedSubnets = false
 	return hostSubnets, allocatedSubnets, nil
+}
+
+func (na *NodeAllocator) hasNodeSubnetAllocation() bool {
+	// we only allocate subnets for L3 secondary network or default network
+	return na.netInfo.TopologyType() == types.Layer3Topology || !na.netInfo.IsSecondary()
 }

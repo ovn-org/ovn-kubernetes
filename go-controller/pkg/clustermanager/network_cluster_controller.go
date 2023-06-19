@@ -89,8 +89,19 @@ func (ncc *networkClusterController) hasPodAllocation() bool {
 }
 
 func (ncc *networkClusterController) hasNodeAllocation() bool {
-	// we only do node allocation on L3 topologies or default network
-	return ncc.TopologyType() == types.Layer3Topology || !ncc.IsSecondary()
+	// we only do node allocation on L3 or default network, and L2 on
+	// interconnect
+	switch ncc.TopologyType() {
+	case types.Layer3Topology:
+		// we need to allocate network IDs and subnets
+		return true
+	case types.Layer2Topology:
+		// we need to allocate network IDs
+		return config.OVNKubernetesFeature.EnableInterconnect
+	default:
+		// we need to allocate network IDs and subnets
+		return !ncc.IsSecondary()
+	}
 }
 
 func (ncc *networkClusterController) initRetryFramework() {

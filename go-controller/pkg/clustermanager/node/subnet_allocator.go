@@ -9,7 +9,7 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-var ErrSubnetAllocatorFull = fmt.Errorf("no subnets available.")
+var ErrSubnetAllocatorFull = fmt.Errorf("no subnets available")
 
 type SubnetAllocator interface {
 	AddNetworkRange(network *net.IPNet, hostSubnetLen int) error
@@ -264,9 +264,9 @@ type subnetAllocatorRange struct {
 func newSubnetAllocatorRange(network *net.IPNet, hostSubnetLen int) (*subnetAllocatorRange, error) {
 	clusterCIDRLen, addrLen := network.Mask.Size()
 	if hostSubnetLen >= addrLen {
-		return nil, fmt.Errorf("host capacity cannot be zero.")
+		return nil, fmt.Errorf("host capacity cannot be zero")
 	} else if hostSubnetLen < clusterCIDRLen {
-		return nil, fmt.Errorf("subnet capacity cannot be larger than number of networks available.")
+		return nil, fmt.Errorf("subnet capacity cannot be larger than number of networks available")
 	}
 	hostBits := uint32(addrLen - hostSubnetLen)
 	subnetBits := uint32(hostSubnetLen - clusterCIDRLen)
