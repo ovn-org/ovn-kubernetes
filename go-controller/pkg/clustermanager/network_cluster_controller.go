@@ -10,6 +10,7 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -26,6 +27,7 @@ import (
 // level to support the necessary configuration for the cluster networks.
 type networkClusterController struct {
 	watchFactory *factory.WatchFactory
+	kube         kube.Interface
 	stopChan     chan struct{}
 	wg           *sync.WaitGroup
 
@@ -39,16 +41,14 @@ type networkClusterController struct {
 	podHandler *factory.Handler
 	retryPods  *objretry.RetryFramework
 
-	// unique id of the network
-	networkID int
-
-	podAllocator  *pod.PodAllocator
-	nodeAllocator *node.NodeAllocator
+	podAllocator       *pod.PodAllocator
+	nodeAllocator      *node.NodeAllocator
+	networkIDAllocator idallocator.NamedAllocator
 
 	util.NetInfo
 }
 
-func newNetworkClusterController(networkID int, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
+func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
 	kube := &kube.Kube{
 		KClient: ovnClient.KubeClient,
 	}
@@ -56,23 +56,32 @@ func newNetworkClusterController(networkID int, netInfo util.NetInfo, ovnClient 
 	wg := &sync.WaitGroup{}
 
 	ncc := &networkClusterController{
-		NetInfo:      netInfo,
-		watchFactory: wf,
-		stopChan:     make(chan struct{}),
-		wg:           wg,
-		networkID:    networkID,
+		NetInfo:            netInfo,
+		watchFactory:       wf,
+		kube:               kube,
+		stopChan:           make(chan struct{}),
+		wg:                 wg,
+		networkIDAllocator: networkIDAllocator,
 	}
 
-	if ncc.hasNodeAllocation() {
-		ncc.nodeAllocator = node.NewNodeAllocator(networkID, netInfo, wf.NodeCoreInformer().Lister(), kube)
-	}
-
-	if ncc.hasPodAllocation() {
-		ncc.podAllocator = pod.NewPodAllocator(netInfo, wf.PodCoreInformer().Lister(), kube)
-	}
-
-	ncc.initRetryFramework()
 	return ncc
+}
+
+func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
+	// use an allocator that can only allocate a single network ID for the
+	// defaiult network
+	networkIDAllocator, err := idallocator.NewIDAllocator(types.DefaultNetworkName, 1)
+	if err != nil {
+		panic(fmt.Errorf("could not build ID allocator for default network: %w", err))
+	}
+	// Reserve the id 0 for the default network.
+	err = networkIDAllocator.ReserveID(types.DefaultNetworkName, defaultNetworkID)
+	if err != nil {
+		panic(fmt.Errorf("could not reserve default network ID: %w", err))
+	}
+
+	namedIDAllocator := networkIDAllocator.ForName(types.DefaultNetworkName)
+	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf)
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
@@ -104,14 +113,33 @@ func (ncc *networkClusterController) hasNodeAllocation() bool {
 	}
 }
 
-func (ncc *networkClusterController) initRetryFramework() {
+func (ncc *networkClusterController) init() error {
+	networkID, err := ncc.networkIDAllocator.AllocateID()
+	if err != nil {
+		return err
+	}
+
 	if ncc.hasNodeAllocation() {
 		ncc.retryNodes = ncc.newRetryFramework(factory.NodeType, true)
+
+		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.NetInfo, ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube)
+		err := ncc.nodeAllocator.Init()
+		if err != nil {
+			return fmt.Errorf("failed to initialize host subnet ip allocator: %w", err)
+		}
 	}
 
 	if ncc.hasPodAllocation() {
 		ncc.retryPods = ncc.newRetryFramework(factory.PodType, true)
+
+		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, ncc.watchFactory.PodCoreInformer().Lister(), ncc.kube)
+		err := ncc.podAllocator.Init()
+		if err != nil {
+			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
+		}
 	}
+
+	return nil
 }
 
 // Start the network cluster controller. Depending on the cluster configuration
@@ -119,12 +147,12 @@ func (ncc *networkClusterController) initRetryFramework() {
 //   - initializes the node allocator and starts listening to node events
 //   - initializes the pod ip allocator and starts listening to pod events
 func (ncc *networkClusterController) Start(ctx context.Context) error {
-	if ncc.hasNodeAllocation() {
-		err := ncc.nodeAllocator.Init()
-		if err != nil {
-			return fmt.Errorf("failed to initialize node allocator: %w", err)
-		}
+	err := ncc.init()
+	if err != nil {
+		return err
+	}
 
+	if ncc.hasNodeAllocation() {
 		nodeHandler, err := ncc.retryNodes.WatchResource()
 		if err != nil {
 			return fmt.Errorf("unable to watch pods: %w", err)
@@ -133,11 +161,6 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 	}
 
 	if ncc.hasPodAllocation() {
-		err := ncc.podAllocator.Init()
-		if err != nil {
-			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
-		}
-
 		podHandler, err := ncc.retryPods.WatchResource()
 		if err != nil {
 			return fmt.Errorf("unable to watch pods: %w", err)
@@ -182,7 +205,11 @@ func (ncc *networkClusterController) Cleanup(netName string) error {
 	}
 
 	if ncc.hasNodeAllocation() {
-		return ncc.nodeAllocator.Cleanup(netName)
+		err := ncc.nodeAllocator.Cleanup(netName)
+		if err != nil {
+			return err
+		}
+		ncc.networkIDAllocator.ReleaseID()
 	}
 
 	return nil
