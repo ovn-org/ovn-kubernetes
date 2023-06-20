@@ -1091,6 +1091,15 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				})
 				continue
 			} else {
+				eIPC.recorder.Eventf(
+					&v1.ObjectReference{
+						Kind: "EgressIP",
+						Name: name,
+					},
+					v1.EventTypeWarning,
+					"UnsupportedRequest",
+					"IP: %q for EgressIP: %s is already allocated for EgressIP: %s on %s", egressIP, name, status.Name, status.Node,
+				)
 				klog.Errorf("IP: %q for EgressIP: %s is already allocated for EgressIP: %s on %s", egressIP, name, status.Name, status.Node)
 				return assignments
 			}
