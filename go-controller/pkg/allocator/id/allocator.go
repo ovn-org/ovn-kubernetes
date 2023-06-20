@@ -34,7 +34,7 @@ type idAllocator struct {
 
 // NewIDAllocator returns an IDAllocator
 func NewIDAllocator(name string, maxIds int) (Allocator, error) {
-	idBitmap := bitmapallocator.NewContiguousAllocationMap(maxIds, name)
+	idBitmap := bitmapallocator.NewRoundRobinAllocationMap(maxIds, name)
 
 	return &idAllocator{
 		nameIdMap: sync.Map{},
