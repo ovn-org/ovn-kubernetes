@@ -181,6 +181,7 @@ func newEgressService(name, namespace string) *egressservice.EgressService {
 	return &egressservice.EgressService{
 		ObjectMeta: newObjectMeta(name, namespace),
 		Spec: egressservice.EgressServiceSpec{
+			SourceIPBy: egressservice.SourceIPLoadBalancer,
 			NodeSelector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"kubernetes.io/hostname": "node",

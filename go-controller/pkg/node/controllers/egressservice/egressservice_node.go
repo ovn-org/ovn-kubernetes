@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -260,7 +261,7 @@ func (c *Controller) repair() error {
 			continue
 		}
 
-		v4, v6, err := c.allEndpointsFor(svc)
+		v4, v6, err := c.allEndpointsFor(svc, es.Status.Host == types.EgressServiceNoSNATHost)
 		if err != nil {
 			klog.Errorf("Failed to fetch endpoints: %v", err)
 			continue
@@ -275,12 +276,17 @@ func (c *Controller) repair() error {
 		}
 
 		v4LB, v6LB := "", ""
-		for _, ip := range svc.Status.LoadBalancer.Ingress {
-			if utilnet.IsIPv4String(ip.IP) {
-				v4LB = ip.IP
-				continue
+		// the host being the noSNAT one means that we should not
+		// configure anything related to the lbs, so we set the
+		// cached lbs only if it is strictly our host.
+		if es.Status.Host != types.EgressServiceNoSNATHost {
+			for _, ip := range svc.Status.LoadBalancer.Ingress {
+				if utilnet.IsIPv4String(ip.IP) {
+					v4LB = ip.IP
+					continue
+				}
+				v6LB = ip.IP
 			}
-			v6LB = ip.IP
 		}
 
 		for _, cip := range util.GetClusterIPs(svc) {
@@ -674,12 +680,17 @@ func (c *Controller) syncEgressService(key string) error {
 
 	lbsChanged := false
 	v4LB, v6LB := "", ""
-	for _, ip := range svc.Status.LoadBalancer.Ingress {
-		if utilnet.IsIPv4String(ip.IP) {
-			v4LB = ip.IP
-			continue
+	// the host being the noSNAT one means that we should not
+	// configure anything related to the lbs, so we set the
+	// cached lbs only if it is strictly our host.
+	if es.Status.Host != types.EgressServiceNoSNATHost {
+		for _, ip := range svc.Status.LoadBalancer.Ingress {
+			if utilnet.IsIPv4String(ip.IP) {
+				v4LB = ip.IP
+				continue
+			}
+			v6LB = ip.IP
 		}
-		v6LB = ip.IP
 	}
 
 	if cachedState != nil {
@@ -705,7 +716,7 @@ func (c *Controller) syncEgressService(key string) error {
 	cachedState.v4LB = v4LB
 	cachedState.v6LB = v6LB
 
-	v4Eps, v6Eps, err := c.allEndpointsFor(svc)
+	v4Eps, v6Eps, err := c.allEndpointsFor(svc, es.Status.Host == types.EgressServiceNoSNATHost)
 	if err != nil {
 		return err
 	}
@@ -810,7 +821,7 @@ func (c *Controller) syncEgressService(key string) error {
 }
 
 // Returns all of the non-host endpoints for the given service grouped by IPv4/IPv6.
-func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.Set[string], sets.Set[string], error) {
+func (c *Controller) allEndpointsFor(svc *corev1.Service, localOnly bool) (sets.Set[string], sets.Set[string], error) {
 	// Get the endpoint slices associated to the Service
 	esLabelSelector := labels.Set(map[string]string{
 		discoveryv1.LabelServiceName: svc.Name,
@@ -835,6 +846,9 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.Set[string], set
 		}
 
 		for _, ep := range eps.Endpoints {
+			if localOnly && ep.NodeName != nil && *ep.NodeName != c.thisNode {
+				continue
+			}
 			for _, ip := range ep.Addresses {
 				ipStr := utilnet.ParseIPSloppy(ip).String()
 				if !services.IsHostEndpoint(ipStr) {
@@ -915,7 +929,7 @@ func (c *Controller) clearServiceRulesAndRequeue(key string, state *svcState) er
 
 // Returns true if the controller should configure the given service as an "Egress Service"
 func (c *Controller) shouldConfigureEgressSVC(svc *corev1.Service, svcHost string) bool {
-	return svcHost == c.thisNode &&
+	return (svcHost == c.thisNode || svcHost == types.EgressServiceNoSNATHost) &&
 		svc.Spec.Type == corev1.ServiceTypeLoadBalancer &&
 		len(svc.Status.LoadBalancer.Ingress) > 0
 }
