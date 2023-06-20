@@ -46,9 +46,9 @@ type Handler struct {
 	priority int
 }
 
-func (h *Handler) OnAdd(obj interface{}) {
+func (h *Handler) OnAdd(obj interface{}, isInInitialList bool) {
 	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
-		h.base.OnAdd(obj)
+		h.base.OnAdd(obj, isInInitialList)
 	}
 }
 
@@ -385,7 +385,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
-					h.OnAdd(e.obj)
+					h.OnAdd(e.obj, false)
 				})
 				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
 			})
@@ -401,7 +401,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 						// This occurs not so often, so log this occurance.
 						klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
 						h.OnDelete(e.oldObj)
-						h.OnAdd(e.obj)
+						h.OnAdd(e.obj, false)
 					} else {
 						h.OnUpdate(e.oldObj, e.obj)
 					}
@@ -434,7 +434,7 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 			metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 			start := time.Now()
 			i.forEachHandler(obj, func(h *Handler) {
-				h.OnAdd(obj)
+				h.OnAdd(obj, false)
 			})
 			metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
 		},
@@ -448,7 +448,7 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 					// This occurs not so often, so log this occurance.
 					klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
 					h.OnDelete(oldObj)
-					h.OnAdd(newObj)
+					h.OnAdd(newObj, false)
 				} else {
 					h.OnUpdate(oldObj, newObj)
 				}
@@ -543,7 +543,7 @@ func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (
 	}
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
 		for _, item := range items {
-			h.OnAdd(item)
+			h.OnAdd(item, false)
 		}
 	}
 	_, err = i.inf.AddEventHandler(i.newFederatedHandler())
@@ -576,7 +576,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// channel array.
 		for _, obj := range items {
 			addsMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
-				h.OnAdd(e.obj)
+				h.OnAdd(e.obj, false)
 			})
 		}
 

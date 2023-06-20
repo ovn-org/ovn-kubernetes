@@ -1,7 +1,9 @@
 package libovsdb
 
 import (
+	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -39,20 +41,24 @@ type TestSetup struct {
 
 type TestData interface{}
 
-type clientBuilderFn func(config.OvnAuthConfig, *Cleanup) (libovsdbclient.Client, error)
-type serverBuilderFn func(config.OvnAuthConfig, []TestData) (*server.OvsdbServer, error)
+type clientBuilderFn func(config.OvnAuthConfig, *Context) (libovsdbclient.Client, error)
+type serverBuilderFn func(config.OvnAuthConfig, []TestData) (*TestOvsdbServer, error)
 
 var validUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-type Cleanup struct {
+type Context struct {
 	clientStopCh chan struct{}
 	clientWg     *sync.WaitGroup
 	serverStopCh chan struct{}
 	serverWg     *sync.WaitGroup
+
+	SBServer *TestOvsdbServer
+	NBServer *TestOvsdbServer
+	VSServer *TestOvsdbServer
 }
 
-func newCleanup() *Cleanup {
-	return &Cleanup{
+func newContext() *Context {
+	return &Context{
 		clientStopCh: make(chan struct{}),
 		clientWg:     &sync.WaitGroup{},
 		serverStopCh: make(chan struct{}),
@@ -60,7 +66,7 @@ func newCleanup() *Cleanup {
 	}
 }
 
-func (c *Cleanup) Cleanup() {
+func (c *Context) Cleanup() {
 	// Stop the client first to ensure we don't trigger reconnect behavior
 	// due to a stopped server
 	close(c.clientStopCh)
@@ -70,49 +76,51 @@ func (c *Cleanup) Cleanup() {
 }
 
 // NewNBSBTestHarness runs NB & SB OVSDB servers and returns corresponding clients
-func NewNBSBTestHarness(setup TestSetup) (libovsdbclient.Client, libovsdbclient.Client, *Cleanup, error) {
-	cleanup := newCleanup()
+func NewNBSBTestHarness(setup TestSetup) (libovsdbclient.Client, libovsdbclient.Client, *Context, error) {
+	testCtx := newContext()
 
-	nbClient, _, err := NewNBTestHarness(setup, cleanup)
+	nbClient, _, err := NewNBTestHarness(setup, testCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	sbClient, _, err := NewSBTestHarness(setup, cleanup)
+	sbClient, _, err := NewSBTestHarness(setup, testCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return nbClient, sbClient, cleanup, nil
+	return nbClient, sbClient, testCtx, nil
 }
 
 // NewNBTestHarness runs NB server and returns corresponding client
-func NewNBTestHarness(setup TestSetup, cleanup *Cleanup) (libovsdbclient.Client, *Cleanup, error) {
-	if cleanup == nil {
-		cleanup = newCleanup()
+func NewNBTestHarness(setup TestSetup, testCtx *Context) (libovsdbclient.Client, *Context, error) {
+	if testCtx == nil {
+		testCtx = newContext()
 	}
 
-	client, err := newOVSDBTestHarness(setup.NBData, newNBServer, newNBClient, cleanup)
+	client, server, err := newOVSDBTestHarness(setup.NBData, newNBServer, newNBClient, testCtx)
 	if err != nil {
 		return nil, nil, err
 	}
+	testCtx.NBServer = server
 
-	return client, cleanup, err
+	return client, testCtx, err
 }
 
 // NewSBTestHarness runs SB server and returns corresponding client
-func NewSBTestHarness(setup TestSetup, cleanup *Cleanup) (libovsdbclient.Client, *Cleanup, error) {
-	if cleanup == nil {
-		cleanup = newCleanup()
+func NewSBTestHarness(setup TestSetup, testCtx *Context) (libovsdbclient.Client, *Context, error) {
+	if testCtx == nil {
+		testCtx = newContext()
 	}
 
-	client, err := newOVSDBTestHarness(setup.SBData, newSBServer, newSBClient, cleanup)
+	client, server, err := newOVSDBTestHarness(setup.SBData, newSBServer, newSBClient, testCtx)
 	if err != nil {
 		return nil, nil, err
 	}
+	testCtx.SBServer = server
 
-	return client, cleanup, err
+	return client, testCtx, err
 }
 
-func newOVSDBTestHarness(serverData []TestData, newServer serverBuilderFn, newClient clientBuilderFn, cleanup *Cleanup) (libovsdbclient.Client, error) {
+func newOVSDBTestHarness(serverData []TestData, newServer serverBuilderFn, newClient clientBuilderFn, testCtx *Context) (libovsdbclient.Client, *TestOvsdbServer, error) {
 	cfg := config.OvnAuthConfig{
 		Scheme:  config.OvnDBSchemeUnix,
 		Address: "unix:" + tempOVSDBSocketFileName(),
@@ -120,58 +128,56 @@ func newOVSDBTestHarness(serverData []TestData, newServer serverBuilderFn, newCl
 
 	s, err := newServer(cfg, serverData)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	c, err := newClient(cfg, cleanup)
+	c, err := newClient(cfg, testCtx)
 	if err != nil {
 		s.Close()
-		return nil, err
+		return nil, nil, err
 	}
 
-	cleanup.serverWg.Add(1)
+	testCtx.serverWg.Add(1)
 	go func() {
-		defer cleanup.serverWg.Done()
-		<-cleanup.serverStopCh
+		defer testCtx.serverWg.Done()
+		<-testCtx.serverStopCh
 		s.Close()
 	}()
 
-	return c, nil
+	return c, s, nil
 }
 
-func newNBClient(cfg config.OvnAuthConfig, cleanup *Cleanup) (libovsdbclient.Client, error) {
+func clientWaitOnCleanup(testCtx *Context, client libovsdbclient.Client, stopChan chan struct{}) {
+	testCtx.clientWg.Add(1)
+	go func() {
+		defer testCtx.clientWg.Done()
+		<-testCtx.clientStopCh
+		close(stopChan)
+		client.Close()
+	}()
+}
+
+func newNBClient(cfg config.OvnAuthConfig, testCtx *Context) (libovsdbclient.Client, error) {
 	stopChan := make(chan struct{})
-	libovsdbOvnNBClient, err := libovsdb.NewNBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
+	nbClient, err := libovsdb.NewNBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
 	if err != nil {
 		return nil, err
 	}
-	cleanup.clientWg.Add(1)
-	go func() {
-		defer cleanup.clientWg.Done()
-		<-cleanup.clientStopCh
-		close(stopChan)
-		libovsdbOvnNBClient.Close()
-	}()
-	return libovsdbOvnNBClient, err
+	clientWaitOnCleanup(testCtx, nbClient, stopChan)
+	return nbClient, err
 }
 
-func newSBClient(cfg config.OvnAuthConfig, cleanup *Cleanup) (libovsdbclient.Client, error) {
+func newSBClient(cfg config.OvnAuthConfig, testCtx *Context) (libovsdbclient.Client, error) {
 	stopChan := make(chan struct{})
-	libovsdbOvnSBClient, err := libovsdb.NewSBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
+	sbClient, err := libovsdb.NewSBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
 	if err != nil {
 		return nil, err
 	}
-	cleanup.clientWg.Add(1)
-	go func() {
-		defer cleanup.clientWg.Done()
-		<-cleanup.clientStopCh
-		close(stopChan)
-		libovsdbOvnSBClient.Close()
-	}()
-	return libovsdbOvnSBClient, err
+	clientWaitOnCleanup(testCtx, sbClient, stopChan)
+	return sbClient, err
 }
 
-func newSBServer(cfg config.OvnAuthConfig, data []TestData) (*server.OvsdbServer, error) {
+func newSBServer(cfg config.OvnAuthConfig, data []TestData) (*TestOvsdbServer, error) {
 	dbModel, err := sbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
@@ -180,7 +186,7 @@ func newSBServer(cfg config.OvnAuthConfig, data []TestData) (*server.OvsdbServer
 	return newOVSDBServer(cfg, dbModel, schema, data)
 }
 
-func newNBServer(cfg config.OvnAuthConfig, data []TestData) (*server.OvsdbServer, error) {
+func newNBServer(cfg config.OvnAuthConfig, data []TestData) (*TestOvsdbServer, error) {
 	dbModel, err := nbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
@@ -189,17 +195,10 @@ func newNBServer(cfg config.OvnAuthConfig, data []TestData) (*server.OvsdbServer
 	return newOVSDBServer(cfg, dbModel, schema, data)
 }
 
-func updateData(db database.Database, dbModel model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) error {
-	dbName := dbModel.Name()
-	m := mapper.NewMapper(schema)
-	updates := ovsdb.TableUpdates2{}
+func testDataToRows(dbMod model.DatabaseModel, data []TestData, addRowFn func(string, string, *ovsdb.Row)) error {
+	m := mapper.NewMapper(dbMod.Schema)
 	namedUUIDs := map[string]string{}
 	newData := copystructure.Must(copystructure.Copy(data)).([]TestData)
-
-	dbMod, errs := model.NewDatabaseModel(schema, dbModel)
-	if len(errs) > 0 {
-		return errs[0]
-	}
 
 	for _, d := range newData {
 		tableName := dbMod.FindTable(reflect.TypeOf(d))
@@ -232,7 +231,7 @@ func updateData(db database.Database, dbModel model.ClientDBModel, schema ovsdb.
 			namedUUIDs[namedUUID] = uuid
 		}
 
-		info, err := mapper.NewInfo(tableName, schema.Table(tableName), d)
+		info, err := mapper.NewInfo(tableName, dbMod.Schema.Table(tableName), d)
 		if err != nil {
 			return err
 		}
@@ -242,15 +241,26 @@ func updateData(db database.Database, dbModel model.ClientDBModel, schema ovsdb.
 			return err
 		}
 
+		addRowFn(tableName, uuid, &row)
+	}
+
+	return nil
+}
+
+func updateData(db database.Database, dbMod model.DatabaseModel, data []TestData) error {
+	updates := ovsdb.TableUpdates2{}
+
+	if err := testDataToRows(dbMod, data, func(tableName, uuid string, row *ovsdb.Row) {
 		if _, ok := updates[tableName]; !ok {
 			updates[tableName] = ovsdb.TableUpdate2{}
 		}
-
-		updates[tableName][uuid] = &ovsdb.RowUpdate2{Insert: &row}
+		updates[tableName][uuid] = &ovsdb.RowUpdate2{Insert: row}
+	}); err != nil {
+		return err
 	}
 
 	uuid := guuid.New()
-	err := db.Commit(dbName, uuid, updates)
+	err := db.Commit(dbMod.Schema.Name, uuid, updates)
 	if err != nil {
 		return fmt.Errorf("error populating server with initial data: %v", err)
 	}
@@ -258,7 +268,13 @@ func updateData(db database.Database, dbModel model.ClientDBModel, schema ovsdb.
 	return nil
 }
 
-func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) (*server.OvsdbServer, error) {
+type TestOvsdbServer struct {
+	*server.OvsdbServer
+	db    database.Database
+	dbMod model.DatabaseModel
+}
+
+func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) (*TestOvsdbServer, error) {
 	serverDBModel, err := serverdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
@@ -296,13 +312,13 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 			Sid:       &sid,
 		},
 	}
-	if err := updateData(db, serverDBModel, serverSchema, serverData); err != nil {
+	if err := updateData(db, servMod, serverData); err != nil {
 		return nil, err
 	}
 
 	// Populate with testcase data
 	if len(data) > 0 {
-		if err := updateData(db, dbModel, schema, data); err != nil {
+		if err := updateData(db, dbMod, data); err != nil {
 			return nil, err
 		}
 	}
@@ -327,13 +343,72 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 		os.RemoveAll(sockPath)
 	}()
 
-	err = wait.Poll(100*time.Millisecond, 500*time.Millisecond, func() (bool, error) { return s.Ready(), nil })
+	err = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 500*time.Millisecond, true, func(ctx context.Context) (bool, error) { return s.Ready(), nil })
 	if err != nil {
 		s.Close()
 		return nil, err
 	}
 
-	return s, nil
+	return &TestOvsdbServer{
+		OvsdbServer: s,
+		db:          db,
+		dbMod:       dbMod,
+	}, nil
+}
+
+// CreateTestData inserts test data into the database after the server is started.
+// We must use the server's Transact() method to ensure updates are sent to clients
+// that may have already been created.
+func (t *TestOvsdbServer) CreateTestData(data []TestData) error {
+	var ops []ovsdb.Operation
+
+	if err := testDataToRows(t.dbMod, data, func(tableName, uuid string, row *ovsdb.Row) {
+		ops = append(ops, ovsdb.Operation{
+			Op:       ovsdb.OperationInsert,
+			Table:    tableName,
+			Row:      *row,
+			UUIDName: uuid,
+		})
+	}); err != nil {
+		return err
+	}
+
+	if ok := t.dbMod.Schema.ValidateOperations(ops...); !ok {
+		return fmt.Errorf("validation failed for the operation")
+	}
+
+	// Marshal Transact args to JSON
+	args := ovsdb.NewTransactArgs(t.dbMod.Schema.Name, ops...)
+	jsonBytes, err := json.Marshal(struct {
+		Params interface{} `json:"params"`
+	}{args})
+	if err != nil {
+		return fmt.Errorf("failed to marshal parameters: %v", err)
+	}
+
+	// Unmarshal each arg into a raw JSON message for Transact
+	var rawArgs struct {
+		Params []json.RawMessage `json:"params"`
+	}
+	if err = json.Unmarshal(jsonBytes, &rawArgs); err != nil {
+		return fmt.Errorf("failed to unmarshal parameters: %v", err)
+	}
+
+	var rawReply []*ovsdb.OperationResult
+	if err := t.OvsdbServer.Transact(nil, rawArgs.Params, &rawReply); err != nil {
+		return fmt.Errorf("failed to transact test data: %v", err)
+	}
+
+	results := make([]ovsdb.OperationResult, 0, len(rawReply))
+	for _, result := range rawReply {
+		results = append(results, *result)
+	}
+	opErrors, err := ovsdb.CheckOperationResults(results, ops)
+	if err != nil {
+		return fmt.Errorf("error in transact with ops %+v results %+v and errors %+v: %v", ops, results, opErrors, err)
+	}
+
+	return nil
 }
 
 func tempOVSDBSocketFileName() string {

@@ -10,7 +10,6 @@ linters:
   disable-all: true
   enable:
     - gofmt
-    - deadcode
     - errcheck
     - gofmt
     - gosimple
@@ -18,8 +17,6 @@ linters:
     - ineffassign
     - nosprintfhostport
     - staticcheck
-    - structcheck
     - typecheck
     - unused
-    - varcheck
     - exportloopref

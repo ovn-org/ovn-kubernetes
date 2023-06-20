@@ -112,6 +112,7 @@ usage() {
     echo "                 [-ehp|--egress-ip-healthcheck-port <num>]"
     echo "                 [-is | --ipsec]"
     echo "                 [-cm | --compact-mode]"
+    echo "                 [-ic | --enable-interconnect]"
     echo "                 [--isolated]"
     echo "                 [-h]]"
     echo ""
@@ -163,6 +164,8 @@ usage() {
     echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
     echo "-sm  | --scale-metrics              Enable scale metrics"
     echo "-cm  | --compact-mode               Enable compact mode, ovnkube master and node run in the same process."
+    echo "-ic  | --enable-interconnect        Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
+    echo "-npz | --nodes-per-zone             If interconnect is enabled, number of nodes per zone (Default 1). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
@@ -237,9 +240,15 @@ parse_args() {
                                                 fi
                                                 KIND_NUM_WORKER=$1
                                                 ;;
-            -sw | --allow-system-writes )       KIND_ALLOW_SYSTEM_WRITES=true
+            -npz | --nodes-per-zone )           shift
+                                                if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                                    echo "Invalid num-nodes-per-zone: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                KIND_NUM_NODES_PER_ZONE=$1
                                                 ;;
-            -scm | --separate-cluster-manager)  OVN_SEPARATE_CLUSTER_MANAGER=true
+            -sw | --allow-system-writes )       KIND_ALLOW_SYSTEM_WRITES=true
                                                 ;;
             -gm | --gateway-mode )              shift
                                                 if [ "$1" != "local" ] && [ "$1" != "shared" ]; then
@@ -321,8 +330,9 @@ parse_args() {
                                                 ;;
             --isolated )                        OVN_ISOLATED=true
                                                 ;;
-            -mne | --multi-network-enable )     shift
-                                                ENABLE_MULTI_NET=true
+            -mne | --multi-network-enable )     ENABLE_MULTI_NET=true
+                                                ;;
+            -ic | --enable-interconnect )       OVN_ENABLE_INTERCONNECT=true
                                                 ;;
             --delete )                          delete
                                                 exit
@@ -359,7 +369,6 @@ print_params() {
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "ENABLE_IPSEC = $ENABLE_IPSEC"
-     echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "KIND_EXPERIMENTAL_PROVIDER = $KIND_EXPERIMENTAL_PROVIDER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
@@ -393,7 +402,11 @@ print_params() {
      echo "OVN_METRICS_SCALE_ENABLE = $OVN_METRICS_SCALE_ENABLE"
      echo "OVN_ISOLATED = $OVN_ISOLATED"
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
-     echo "OVN_SEPARATE_CLUSTER_MANAGER = $OVN_SEPARATE_CLUSTER_MANAGER"
+     echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
+     if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
+       echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
+     fi
+     echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo ""
 }
 
@@ -534,12 +547,35 @@ set_default_params() {
   JOIN_SUBNET_IPV4=${JOIN_SUBNET_IPV4:-100.64.0.0/16}
   JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
   KIND_NUM_MASTER=1
+  OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
+
+  if [ "$OVN_HA" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
+     echo "HA mode cannot be used together with Interconnect"
+     exit 1
+  fi
+
+  if [ "$OVN_COMPACT_MODE" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
+     echo "Compact mode cannot be used together with Interconnect"
+     exit 1
+  fi
+
   if [ "$OVN_HA" == true ]; then
     KIND_NUM_MASTER=3
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-0}
   else
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
+
+  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
+    KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-1}
+
+    TOTAL_NODES=$((KIND_NUM_WORKER + 1))
+    if [[ ${KIND_NUM_NODES_PER_ZONE} -gt 1 ]] && [[ $((TOTAL_NODES % KIND_NUM_NODES_PER_ZONE)) -ne 0 ]]; then
+      echo "(Total k8s nodes / number of nodes per zone) should be zero"
+      exit 1
+    fi
+  fi
+
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
@@ -555,7 +591,6 @@ set_default_params() {
     OVN_GATEWAY_OPTS="--allow-no-uplink --gateway-interface=br-ex"
   fi
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
-  OVN_SEPARATE_CLUSTER_MANAGER=${OVN_SEPARATE_CLUSTER_MANAGER:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
@@ -817,7 +852,8 @@ create_ovn_kube_manifests() {
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
     --multi-network-enable="${ENABLE_MULTI_NET}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
-    --compact-mode="${OVN_COMPACT_MODE}"
+    --compact-mode="${OVN_COMPACT_MODE}" \
+    --enable-interconnect="${OVN_ENABLE_INTERCONNECT}"
   popd
 }
 
@@ -837,6 +873,53 @@ install_ovn_image() {
   fi
 }
 
+install_ovn_global_zone() {
+  if [ "$OVN_HA" == true ]; then
+    run_kubectl apply -f ovnkube-db-raft.yaml
+  else
+    run_kubectl apply -f ovnkube-db.yaml
+  fi
+
+  run_kubectl apply -f ovnkube-master.yaml
+  run_kubectl apply -f ovnkube-node.yaml
+}
+
+install_ovn_single_node_zones() {
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
+  done
+
+  run_kubectl apply -f ovnkube-control-plane.yaml
+  run_kubectl apply -f ovnkube-single-node-zone.yaml
+}
+
+
+install_ovn_multiple_nodes_zones() {
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort)
+  zone_idx=1
+  n=1
+  for node in $KIND_NODES; do
+    zone="zone-${zone_idx}"
+    kubectl label node "${node}" k8s.ovn.org/zone-name=${zone} --overwrite
+    if [ "${n}" == "1" ]; then
+      # Mark 1st node of each zone as zone control plane
+      kubectl label node "${node}" node-role.kubernetes.io/zone-controller="" --overwrite
+    fi
+
+    if [ "${n}" == "${KIND_NUM_NODES_PER_ZONE}" ]; then
+      n=1
+      zone_idx=$((zone_idx+1))
+    else
+      n=$((n+1))
+    fi
+  done
+
+  run_kubectl apply -f ovnkube-control-plane.yaml
+  run_kubectl apply -f ovnkube-zone-controller.yaml
+  run_kubectl apply -f ovnkube-node.yaml
+}
+
 install_ovn() {
   pushd ${MANIFEST_OUTPUT_DIR}
 
@@ -844,6 +927,7 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressips.yaml
   run_kubectl apply -f k8s.ovn.org_egressqoses.yaml
   run_kubectl apply -f k8s.ovn.org_egressservices.yaml
+  run_kubectl apply -f k8s.ovn.org_adminpolicybasedexternalroutes.yaml
   run_kubectl apply -f ovn-setup.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
@@ -859,18 +943,18 @@ install_ovn() {
       kubectl taint node "$n" node-role.kubernetes.io/control-plane:NoSchedule- || true
     fi
   done
-  if [ "$OVN_HA" == true ]; then
-    run_kubectl apply -f ovnkube-db-raft.yaml
-  else
-    run_kubectl apply -f ovnkube-db.yaml
-  fi
+
   run_kubectl apply -f ovs-node.yaml
-  if [ "$OVN_SEPARATE_CLUSTER_MANAGER" ==  true ]; then
-    run_kubectl apply -f ovnkube-cm-ncm.yaml
+
+  if [ "$OVN_ENABLE_INTERCONNECT" == false ]; then
+    install_ovn_global_zone
   else
-    run_kubectl apply -f ovnkube-master.yaml
+    if [ "${KIND_NUM_NODES_PER_ZONE}" == "1" ]; then
+      install_ovn_single_node_zones
+    else
+      install_ovn_multiple_nodes_zones
+    fi
   fi
-  run_kubectl apply -f ovnkube-node.yaml
 
   popd
 
@@ -986,7 +1070,13 @@ kubectl_wait_pods() {
     kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
   done
 
-  for name in ovnkube-db ovnkube-master; do
+  pods=""
+  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
+    pods="ovnkube-control-plane"
+  else
+    pods="ovnkube-master ovnkube-db"
+  fi
+  for name in ${pods}; do
     timeout=$(calculate_timeout ${endtime})
     echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."
     kubectl wait pods -n ovn-kubernetes -l name=${name} --for condition=Ready --timeout=${timeout}s
@@ -1065,11 +1155,25 @@ docker_create_second_interface() {
   echo "adding second interfaces to nodes"
 
   # Create the network as dual stack, regardless of the type of the deployment. Ignore if already exists.
-  docker network create --ipv6 --driver=bridge kindexgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
+  "$OCI_BIN" network create --ipv6 --driver=bridge kindexgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
 
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
-    docker network connect kindexgw "$n"
+    "$OCI_BIN" network connect kindexgw "$n"
+  done
+}
+
+docker_create_second_disconnected_interface() {
+  echo "adding second interfaces to nodes"
+  local bridge_name="${1:-kindexgw}"
+  echo "bridge: $bridge_name"
+
+  # Create the network without subnets; ignore if already exists.
+  "$OCI_BIN" network create --internal --driver=bridge "$bridge_name" || true
+
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    "$OCI_BIN" network connect "$bridge_name" "$n"
   done
 }
 
@@ -1168,6 +1272,7 @@ fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
   install_multus
   install_mpolicy_crd
+  docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
 fi
 kubectl_wait_pods
 sleep_until_pods_settle

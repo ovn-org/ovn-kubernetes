@@ -409,6 +409,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			linuxNode, okay := n.controller.(*NodeController)
+			Expect(okay).To(BeTrue())
+			// setting the flowCacheSyncPeriod to 1 hour effectively disabling for testing
+			linuxNode.flowCacheSyncPeriod = 1 * time.Hour
 
 			addEnsureHybridOverlayBridgeMocks(nlMock, thisNodeDRIP, "")
 
@@ -424,8 +428,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				n.Run(stopChan)
 			}()
 
-			linuxNode, okay := n.controller.(*NodeController)
-			Expect(okay).To(BeTrue())
 			Eventually(func() bool {
 				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
 			}, 2).Should(BeTrue())
@@ -468,6 +470,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			linuxNode, okay := n.controller.(*NodeController)
+			Expect(okay).To(BeTrue())
+			// setting the flowCacheSyncPeriod to 1 hour effectively disabling for testing
+			linuxNode.flowCacheSyncPeriod = 1 * time.Hour
 
 			addEnsureHybridOverlayBridgeMocks(nlMock, thisNodeDRIP, "")
 			// initial flowSync
@@ -482,8 +488,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				n.Run(stopChan)
 			}()
 
-			linuxNode, okay := n.controller.(*NodeController)
-			Expect(okay).To(BeTrue())
 			Eventually(func() bool {
 				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
 			}, 2).Should(BeTrue())
@@ -635,6 +639,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			linuxNode, okay := n.controller.(*NodeController)
+			Expect(okay).To(BeTrue())
+			// setting the flowCacheSyncPeriod to 1 hour effectively disabling for testing
+			linuxNode.flowCacheSyncPeriod = 1 * time.Hour
 
 			addEnsureHybridOverlayBridgeMocks(nlMock, thisNodeDRIP, "")
 			// initial flowSync
@@ -649,8 +657,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				n.Run(stopChan)
 			}()
 
-			linuxNode, okay := n.controller.(*NodeController)
-			Expect(okay).To(BeTrue())
 			Eventually(func() bool {
 				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
 			}, 2).Should(BeTrue())
@@ -732,6 +738,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			linuxNode, okay := n.controller.(*NodeController)
+			Expect(okay).To(BeTrue())
+			// setting the flowCacheSyncPeriod to 1 hour effectively disabling for testing
+			linuxNode.flowCacheSyncPeriod = 1 * time.Hour
 
 			addEnsureHybridOverlayBridgeMocks(nlMock, thisNodeDRIP, "")
 			// add the mock commands for the update
@@ -748,8 +758,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				n.Run(stopChan)
 			}()
 
-			linuxNode, okay := n.controller.(*NodeController)
-			Expect(okay).To(BeTrue())
 			Eventually(func() bool {
 				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
 			}, 2).Should(BeTrue())
@@ -869,6 +877,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			linuxNode, okay := n.controller.(*NodeController)
+			Expect(okay).To(BeTrue())
+			// setting the flowCacheSyncPeriod to 1 hour effectively disabling for testing
+			linuxNode.flowCacheSyncPeriod = 1 * time.Hour
 
 			addEnsureHybridOverlayBridgeMocks(nlMock, thisNodeDRIP, "")
 			// initial flowSync
@@ -883,8 +895,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				n.Run(stopChan)
 			}()
 
-			linuxNode, okay := n.controller.(*NodeController)
-			Expect(okay).To(BeTrue())
 			Eventually(func() bool {
 				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
 			}, 2).Should(BeTrue())

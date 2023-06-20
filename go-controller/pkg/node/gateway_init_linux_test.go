@@ -24,6 +24,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -717,7 +718,8 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 			Items: []v1.Node{existingNode},
 		})
 		fakeClient := &util.OVNNodeClientset{
-			KubeClient: kubeFakeClient,
+			KubeClient:             kubeFakeClient,
+			AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})
@@ -732,7 +734,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		cnnci := NewCommonNodeNetworkControllerInfo(nil, wf, nil, nodeName)
+		cnnci := NewCommonNodeNetworkControllerInfo(nil, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName)
 		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)

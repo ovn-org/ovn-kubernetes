@@ -87,14 +87,14 @@ func NewNode(
 	kube kube.Interface,
 	nodeName string,
 	nodeInformer cache.SharedIndexInformer,
-	podInformer cache.SharedIndexInformer,
+	localPodInformer cache.SharedIndexInformer,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 ) (*Node, error) {
 
 	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
-	podLister := listers.NewPodLister(podInformer.GetIndexer())
+	localPodLister := listers.NewPodLister(localPodInformer.GetIndexer())
 
-	controller, err := newNodeController(kube, nodeName, nodeLister, podLister)
+	controller, err := newNodeController(kube, nodeName, nodeLister, localPodLister)
 	if err != nil {
 		return nil, err
 	}
@@ -119,14 +119,11 @@ func NewNode(
 	if err != nil {
 		return nil, err
 	}
-	n.podEventHandler, err = eventHandlerCreateFunction("pod", podInformer,
+	n.podEventHandler, err = eventHandlerCreateFunction("pod", localPodInformer,
 		func(obj interface{}) error {
 			pod, ok := obj.(*kapi.Pod)
 			if !ok {
 				return fmt.Errorf("object is not a pod")
-			}
-			if pod.Spec.NodeName != nodeName {
-				return nil
 			}
 			return n.controller.AddPod(pod)
 		},
@@ -134,9 +131,6 @@ func NewNode(
 			pod, ok := obj.(*kapi.Pod)
 			if !ok {
 				return fmt.Errorf("object is not a pod")
-			}
-			if pod.Spec.NodeName != nodeName {
-				return nil
 			}
 			return n.controller.DeletePod(pod)
 		},

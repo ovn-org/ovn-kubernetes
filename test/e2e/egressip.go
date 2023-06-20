@@ -82,9 +82,15 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) checkMode(restore bool) (s
 		// to restore to.
 		return "", "", false
 	}
-	framework.Logf("Checking the ovnkube-node and ovnkube-master healthcheck ports in use")
+	framework.Logf("Checking the ovnkube-node and ovnkube-master (ovnkube-cluster-manager if interconnect=true) healthcheck ports in use")
 	portNode := getTemplateContainerEnv(ovnNamespace, "daemonset/ovnkube-node", "ovnkube-node", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
-	portMaster := getTemplateContainerEnv(ovnNamespace, "deployment/ovnkube-master", "ovnkube-master", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
+	var portMaster string
+	if isInterconnectEnabled() {
+		portMaster = getTemplateContainerEnv(ovnNamespace, "deployment/ovnkube-control-plane", "ovnkube-cluster-manager", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
+	} else {
+		portMaster = getTemplateContainerEnv(ovnNamespace, "deployment/ovnkube-master", "ovnkube-master", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
+	}
+
 
 	wantLegacy := (h.Legacy && !restore) || (h.modeWasLegacy && restore)
 	isLegacy := portNode == "" || portNode == OVN_EGRESSIP_LEGACY_HEALTHCHECK_PORT_ENV
@@ -128,7 +134,11 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) setMode(nodeName string, r
 		framework.Logf("Updating ovnkube to use health check on port %s (0 is legacy, non 0 is GRPC)", portEnv)
 		setEnv := map[string]string{OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME: portEnv}
 		setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "daemonset/ovnkube-node", "ovnkube-node", setEnv)
-		setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "deployment/ovnkube-master", "ovnkube-master", setEnv)
+		if isInterconnectEnabled() {
+			setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "deployment/ovnkube-control-plane", "ovnkube-cluster-manager", setEnv)
+		} else {
+			setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "deployment/ovnkube-master", "ovnkube-master", setEnv)
+		}
 	}
 	if port != "" {
 		op := "Allow"
@@ -1076,19 +1086,26 @@ spec:
 
 		ginkgo.By("7. Check the OVN DB to ensure no SNATs are added for the standby egressIP")
 		dbPods, err := framework.RunKubectl("ovn-kubernetes", "get", "pods", "-l", "name=ovnkube-db", "-o=jsonpath='{.items..metadata.name}'")
+		dbContainerName := "nb-ovsdb"
+		if isInterconnectEnabled() {
+			dbPods, err = framework.RunKubectl("ovn-kubernetes", "get", "pods", "-l", "name=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress1Node.name), "-o=jsonpath='{.items..metadata.name}'")
+		}
 		if err != nil || len(dbPods) == 0 {
 			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
 		}
 		dbPod := strings.Split(dbPods, " ")[0]
 		dbPod = strings.TrimPrefix(dbPod, "'")
 		dbPod = strings.TrimSuffix(dbPod, "'")
+		if len(dbPod) == 0 {
+			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
+		}
 		logicalIP := fmt.Sprintf("logical_ip=%s", srcPodIP.String())
-		snats, err := framework.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", "nb-ovsdb", "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		snats, err := framework.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
 		if err != nil {
 			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
 		}
 		if !strings.Contains(snats, statuses[0].EgressIP) || strings.Contains(snats, egressIP3.String()) {
-			framework.Failf("Step 7. Check that the second egressIP object is assigned to node2 (pod2Node/egress1Node), failed")
+			framework.Failf("Step 7. Check the OVN DB to ensure no SNATs are added for the standby egressIP, failed")
 		}
 
 		ginkgo.By("8. Check connectivity from pod to an external container and verify that the srcIP is the expected egressIP from object1")
@@ -1147,7 +1164,7 @@ spec:
 		framework.ExpectNoError(err, "Step 11. Check connectivity from pod to an external container and verify that the srcIP is the expected standby egressIP3 from object2, failed: %v", err)
 
 		ginkgo.By("12. Check the OVN DB to ensure SNATs are added for only the standby egressIP")
-		snats, err = framework.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", "nb-ovsdb", "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		snats, err = framework.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
 		if err != nil {
 			framework.Failf("Error: Check the OVN DB to ensure SNATs are added for only the standby egressIP, err: %v", err)
 		}
@@ -1181,8 +1198,21 @@ spec:
 		})
 		framework.ExpectNoError(err, "Step 14. Ensure egressIP1 from egressIP object1 and egressIP3 from object2 is correctly transferred to egress2Node, failed: %v", err)
 
+		if isInterconnectEnabled() {
+			dbPods, err = framework.RunKubectl("ovn-kubernetes", "get", "pods", "-l", "name=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress2Node.name), "-o=jsonpath='{.items..metadata.name}'")
+		}
+		if err != nil || len(dbPods) == 0 {
+			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
+		}
+		dbPod = strings.Split(dbPods, " ")[0]
+		dbPod = strings.TrimPrefix(dbPod, "'")
+		dbPod = strings.TrimSuffix(dbPod, "'")
+		if len(dbPod) == 0 {
+			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
+		}
+
 		ginkgo.By("15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3")
-		snats, err = framework.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", "nb-ovsdb", "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		snats, err = framework.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
 		if err != nil {
 			framework.Failf("Error: Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, err: %v", err)
 		}

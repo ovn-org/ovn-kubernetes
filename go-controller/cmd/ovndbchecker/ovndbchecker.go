@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,7 +23,7 @@ import (
 )
 
 const (
-	// CustomAppHelpTemplate helps in grouping options to ovnkube
+	// CustomDBCheckAppHelpTemplate helps in grouping options to ovnkube
 	CustomDBCheckAppHelpTemplate = `NAME:
    {{.Name}} - {{.Usage}}
 
@@ -135,19 +134,19 @@ func setupPIDFile(pidfile string) error {
 
 	// Create if it doesn't exist, else exit with error
 	if os.IsNotExist(err) {
-		if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+		if err := os.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 			klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 		}
 	} else {
 		// get the pid and see if it exists
-		pid, err := ioutil.ReadFile(pidfile)
+		pid, err := os.ReadFile(pidfile)
 		if err != nil {
 			return fmt.Errorf("pidfile %s exists but can't be read: %v", pidfile, err)
 		}
 		_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
 		if os.IsNotExist(err1) {
 			// Left over pid from dead process
-			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+			if err := os.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 				klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 			}
 		} else {

@@ -67,9 +67,8 @@ func getNamespaceAddrSetDbIDs(namespaceName, controller string) *libovsdbops.DbO
 func (bnc *BaseNetworkController) WatchNamespaces() error {
 	if bnc.IsSecondary() {
 		// For secondary networks, we don't have to watch namespace events if
-		// multi-network policy support is not enabled. We don't support
-		// multi-network policy for IPAM-less secondary networks either.
-		if !util.IsMultiNetworkPoliciesSupportEnabled() || !bnc.doesNetworkRequireIPAM() {
+		// multi-network policy support is not enabled.
+		if !util.IsMultiNetworkPoliciesSupportEnabled() {
 			return nil
 		}
 	}
@@ -352,6 +351,10 @@ func (bnc *BaseNetworkController) updateNamespaceAclLogging(ns, aclAnnotation st
 }
 
 func (bnc *BaseNetworkController) getAllNamespacePodAddresses(ns string) []net.IP {
+	if !bnc.doesNetworkRequireIPAM() {
+		return nil
+	}
+
 	var ips []net.IP
 	// Get all the pods in the namespace and append their IP to the address_set
 	existingPods, err := bnc.watchFactory.GetPods(ns)

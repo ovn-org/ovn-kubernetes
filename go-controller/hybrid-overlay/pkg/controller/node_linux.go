@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net"
@@ -51,10 +52,11 @@ type NodeController struct {
 	flowCache map[string]*flowCacheEntry
 	flowMutex sync.Mutex
 	// channel to indicate we need to update flows immediately
-	flowChan chan struct{}
+	flowChan            chan struct{}
+	flowCacheSyncPeriod time.Duration
 
-	nodeLister listers.NodeLister
-	podLister  listers.PodLister
+	nodeLister     listers.NodeLister
+	localPodLister listers.PodLister
 }
 
 // newNodeController returns a node handler that listens for node events
@@ -66,18 +68,19 @@ func newNodeController(
 	_ kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
-	podLister listers.PodLister,
+	localPodLister listers.PodLister,
 ) (nodeController, error) {
 
 	node := &NodeController{
-		nodeName:   nodeName,
-		initState:  new(uint32),
-		vxlanPort:  uint16(config.HybridOverlay.VXLANPort),
-		flowCache:  make(map[string]*flowCacheEntry),
-		flowMutex:  sync.Mutex{},
-		flowChan:   make(chan struct{}, 1),
-		nodeLister: nodeLister,
-		podLister:  podLister,
+		nodeName:            nodeName,
+		initState:           new(uint32),
+		vxlanPort:           uint16(config.HybridOverlay.VXLANPort),
+		flowCache:           make(map[string]*flowCacheEntry),
+		flowMutex:           sync.Mutex{},
+		flowChan:            make(chan struct{}, 1),
+		flowCacheSyncPeriod: 30 * time.Second,
+		nodeLister:          nodeLister,
+		localPodLister:      localPodLister,
 	}
 	atomic.StoreUint32(node.initState, hotypes.InitialStartup)
 	return node, nil
@@ -112,16 +115,6 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	// if the IP/MAC or Annotations have changed
 	ignoreLearn := true
 
-	if atomic.LoadUint32(n.initState) == hotypes.InitialStartup {
-		node, err := n.nodeLister.Get(n.nodeName)
-		if err != nil {
-			return fmt.Errorf("hybrid overlay not initialized on %s, and failed to get node data: %v",
-				n.nodeName, err)
-		}
-		if err = n.EnsureHybridOverlayBridge(node); err != nil {
-			return fmt.Errorf("failed to ensure hybrid overlay in pod handler: %v", err)
-		}
-	}
 	if n.drMAC == nil || n.drIP == nil {
 		return fmt.Errorf("empty values for DR MAC: %s or DR IP: %s on node %s", n.drMAC, n.drIP, n.nodeName)
 	}
@@ -274,11 +267,10 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 		err = n.hybridOverlayNodeUpdate(node)
 	}
 	if atomic.LoadUint32(n.initState) == hotypes.DistributedRouterInitialized {
-		pods, err := n.podLister.List(labels.Everything())
+		pods, err := n.localPodLister.List(labels.Everything())
 		if err != nil {
 			return fmt.Errorf("cannot fully initialize node %s for hybrid overlay, cannot list pods: %v", n.nodeName, err)
 		}
-
 		for _, pod := range pods {
 			err := n.AddPod(pod)
 			if err != nil {
@@ -332,7 +324,7 @@ func getLocalNodeSubnet(nodeName string) (*net.IPNet, error) {
 	var err error
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
-	if err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+	if err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config:subnet"); err != nil {
 			return false, nil
 		}
@@ -678,8 +670,7 @@ func (n *NodeController) RunFlowSync(stopCh <-chan struct{}) {
 	klog.Info("Starting hybrid overlay OpenFlow sync thread")
 	klog.Info("Running initial OpenFlow sync")
 	n.syncFlows()
-	syncPeriod := 30 * time.Second
-	timer := time.NewTicker(syncPeriod)
+	timer := time.NewTicker(n.flowCacheSyncPeriod)
 	defer timer.Stop()
 	for {
 		select {
@@ -687,7 +678,7 @@ func (n *NodeController) RunFlowSync(stopCh <-chan struct{}) {
 			n.syncFlows()
 		case <-n.flowChan:
 			n.syncFlows()
-			timer.Reset(syncPeriod)
+			timer.Reset(n.flowCacheSyncPeriod)
 		case <-stopCh:
 			klog.Info("Shutting down OpenFlow sync thread")
 			return

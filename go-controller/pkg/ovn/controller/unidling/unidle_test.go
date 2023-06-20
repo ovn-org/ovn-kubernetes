@@ -30,7 +30,7 @@ func TestUnidlingContoller(t *testing.T) {
 }
 
 var _ = Describe("Unidling Controller", func() {
-	var cleanup *libovsdbtest.Cleanup
+	var cleanup *libovsdbtest.Context
 
 	BeforeEach(func() {
 		cleanup = nil

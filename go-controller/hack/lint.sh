@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-# pin golangci-lint version to 1.46.0
-VERSION=v1.46.0
+VERSION=v1.52
 if [ "$#" -ne 1 ]; then
     echo "Expected command line argument - container runtime (docker/podman) got $# arguments: $@"
     exit 1

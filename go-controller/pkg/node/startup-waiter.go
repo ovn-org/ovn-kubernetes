@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -41,7 +42,7 @@ func (w *startupWaiter) Wait() error {
 		w.wg.Add(1)
 		go func(task *waitTask) {
 			defer w.wg.Done()
-			err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+			err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 				return task.waitFn()
 			})
 			if err == nil && task.postFn != nil {

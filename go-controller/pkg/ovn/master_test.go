@@ -883,7 +883,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 
 		nbClient        libovsdbclient.Client
 		sbClient        libovsdbclient.Client
-		libovsdbCleanup *libovsdbtest.Cleanup
+		libovsdbCleanup *libovsdbtest.Context
 
 		dbSetup        libovsdbtest.TestSetup
 		node1          tNode

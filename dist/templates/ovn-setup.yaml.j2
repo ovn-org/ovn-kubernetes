@@ -87,7 +87,13 @@ rules:
   - egressqoses
   - egressservices
   - egressservices/status
+  - adminpolicybasedexternalroutes
   verbs: ["list", "get", "watch", "update", "patch"]
+- apiGroups:
+  - k8s.ovn.org
+  resources:
+  - adminpolicybasedexternalroutes/status  
+  verbs: [ "update"]  
 - apiGroups:
   - apiextensions.k8s.io
   resources:
