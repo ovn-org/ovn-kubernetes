@@ -1075,7 +1075,7 @@ func (nc *DefaultNodeNetworkController) checkAndDeleteStaleConntrackEntries() {
 func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *kapi.Namespace) error {
 	gatewayIPs, err := nc.apbExternalRouteNodeController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(newNs.Name)
 	if err != nil {
-		klog.Errorf("Unable to retrieve Admin Policy Based External Route objects:%v", err)
+		return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects: %w", err)
 	}
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
 	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")...)
