@@ -117,7 +117,7 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 	}
 
 	if config.Gateway.DisableSNATMultipleGWs {
-		if err := deletePodSNAT(oc.nbClient, pInfo.logicalSwitch, []*net.IPNet{}, pInfo.ips); err != nil {
+		if err := oc.deletePodSNAT(pInfo.logicalSwitch, []*net.IPNet{}, pInfo.ips); err != nil {
 			return fmt.Errorf("cannot delete GR SNAT for pod %s: %w", podDesc, err)
 		}
 	}
