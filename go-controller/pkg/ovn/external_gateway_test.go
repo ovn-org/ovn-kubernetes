@@ -20,17 +20,15 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/klog/v2"
-
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 )
 
 var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
@@ -2882,7 +2880,6 @@ func deleteNamespace(namespaceName string, fakeClient kubernetes.Interface) {
 }
 
 func (o *FakeOVN) RunAPBExternalPolicyController() {
-	klog.Warningf("#### [%p] INIT Admin Policy Based External Controller", o)
 	o.controller.wg.Add(1)
 	go func() {
 		defer o.controller.wg.Done()
