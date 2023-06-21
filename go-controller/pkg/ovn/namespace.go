@@ -187,7 +187,7 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 					if len(ips) > 0 {
 						if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
 							errors = append(errors, err)
-						} else if err = deletePodSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, ips); err != nil {
+						} else if err = oc.deletePodSNAT(pod.Spec.NodeName, extIPs, ips); err != nil {
 							errors = append(errors, err)
 						}
 					}

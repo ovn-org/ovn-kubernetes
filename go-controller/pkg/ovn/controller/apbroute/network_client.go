@@ -207,6 +207,14 @@ func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress gatewayInfoList) e
 // if allSNATs flag is set, then all the SNATs (including against egressIPs if any) for that pod will be deleted
 // used when disableSNATMultipleGWs=true
 func (nb *northBoundClient) deletePodSNAT(nodeName string, extIPs, podIPNets []*net.IPNet) error {
+	node, err := nb.nodeLister.Get(nodeName)
+	if err != nil {
+		return err
+	}
+	if util.GetNodeZone(node) != nb.zone {
+		klog.V(4).InfoS("Node %s is not in the local zone %s", nodeName, nb.zone)
+		return nil
+	}
 	nats, err := buildPodSNAT(extIPs, podIPNets)
 	if err != nil {
 		return err

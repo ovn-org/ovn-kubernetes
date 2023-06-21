@@ -2685,7 +2685,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Name: "node1",
 					},
 				}
-				err = deletePodSNAT(fakeOvn.controller.nbClient, nodeName, extIPs, []*net.IPNet{fullMaskPodNet})
+				err = fakeOvn.controller.deletePodSNAT(nodeName, extIPs, []*net.IPNet{fullMaskPodNet})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				return nil
