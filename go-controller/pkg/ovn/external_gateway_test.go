@@ -2646,8 +2646,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 
-				fakeOvn.RunAPBExternalPolicyController()
-
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						UUID:     "501-new-UUID",
