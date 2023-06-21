@@ -995,8 +995,13 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 			// trigger an event for the ovnkube-master to take action upon.
 			// Note that once we figure out the statusToAdd parts below we will trigger an
 			// update to cloudPrivateIP object which will trigger another patch for the eIP object.
-			if err := eIPC.patchReplaceEgressIPStatus(name, statusToKeep); err != nil {
-				return err
+			//
+			// Update the object only on an ADD/UPDATE. If we are processing a
+			// DELETE, new will be nil and we should not update the object.
+			if new != nil {
+				if err := eIPC.patchReplaceEgressIPStatus(name, statusToKeep); err != nil {
+					return err
+				}
 			}
 		}
 		// When egress IP is not fully assigned to a node, then statusToRemove may not
