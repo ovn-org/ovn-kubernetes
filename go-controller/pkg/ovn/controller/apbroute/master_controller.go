@@ -175,7 +175,7 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 
 	c.routePolicyInformer.Start(c.stopCh)
 
-	startWg := &sync.WaitGroup{}
+	syncWg := &sync.WaitGroup{}
 
 	for _, se := range []struct {
 		resourceName string
@@ -185,18 +185,20 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 		{"apbexternalroutepods", c.podSynced},
 		{"adminpolicybasedexternalroutes", c.routeSynced},
 	} {
-		startWg.Add(1)
+		syncWg.Add(1)
 		go func(resourceName string, syncFn cache.InformerSynced) {
-			defer startWg.Done()
+			defer syncWg.Done()
 			if !cache.WaitForNamedCacheSync(resourceName, c.stopCh, syncFn) {
 				utilruntime.HandleError(fmt.Errorf("timed out waiting for %q caches to sync", resourceName))
 			}
 		}(se.resourceName, se.syncFn)
 	}
+	syncWg.Wait()
 
 	klog.Infof("Repairing Admin Policy Based External Route Services")
 	c.repair()
 
+	startWg := &sync.WaitGroup{}
 	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
 		for _, workerFn := range []func(*sync.WaitGroup){
