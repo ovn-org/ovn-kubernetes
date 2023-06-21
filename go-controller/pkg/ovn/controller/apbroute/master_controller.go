@@ -313,7 +313,11 @@ func (c *ExternalGatewayMasterController) syncRoutePolicy(routePolicy *adminpoli
 }
 
 func (c *ExternalGatewayMasterController) onPolicyAdd(obj interface{}) {
-	policy := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	policy, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{}, obj))
+		return
+	}
 	if policy == nil {
 		utilruntime.HandleError(errors.New("invalid Admin Policy Based External Route provided to onPolicyAdd()"))
 		return
@@ -322,9 +326,16 @@ func (c *ExternalGatewayMasterController) onPolicyAdd(obj interface{}) {
 }
 
 func (c *ExternalGatewayMasterController) onPolicyUpdate(oldObj, newObj interface{}) {
-	oldRoutePolicy := oldObj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
-	newRoutePolicy := newObj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
-
+	oldRoutePolicy, ok := oldObj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{}, oldObj))
+		return
+	}
+	newRoutePolicy, ok := newObj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{}, newObj))
+		return
+	}
 	if oldRoutePolicy == nil || newRoutePolicy == nil {
 		utilruntime.HandleError(errors.New("invalid Admin Policy Based External Route provided to onPolicyUpdate()"))
 		return
@@ -357,7 +368,11 @@ func (c *ExternalGatewayMasterController) onPolicyDelete(obj interface{}) {
 }
 
 func (c *ExternalGatewayMasterController) onNamespaceAdd(obj interface{}) {
-	ns := obj.(*v1.Namespace)
+	ns, ok := obj.(*v1.Namespace)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Namespace{}, obj))
+		return
+	}
 	if ns == nil {
 		utilruntime.HandleError(errors.New("invalid Namespace provided to onNamespaceAdd()"))
 		return
@@ -366,9 +381,16 @@ func (c *ExternalGatewayMasterController) onNamespaceAdd(obj interface{}) {
 }
 
 func (c *ExternalGatewayMasterController) onNamespaceUpdate(oldObj, newObj interface{}) {
-	oldNamespace := oldObj.(*v1.Namespace)
-	newNamespace := newObj.(*v1.Namespace)
-
+	oldNamespace, ok := oldObj.(*v1.Namespace)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Namespace{}, oldObj))
+		return
+	}
+	newNamespace, ok := newObj.(*v1.Namespace)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Namespace{}, newObj))
+		return
+	}
 	if oldNamespace == nil || newNamespace == nil {
 		utilruntime.HandleError(errors.New("invalid Namespace provided to onNamespaceUpdate()"))
 		return
@@ -478,7 +500,11 @@ func (c *ExternalGatewayMasterController) syncNamespace(namespace *v1.Namespace)
 }
 
 func (c *ExternalGatewayMasterController) onPodAdd(obj interface{}) {
-	pod := obj.(*v1.Pod)
+	pod, ok := obj.(*v1.Pod)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Pod{}, obj))
+		return
+	}
 	if pod == nil {
 		utilruntime.HandleError(errors.New("invalid Pod provided to onPodAdd()"))
 		return
@@ -491,9 +517,16 @@ func (c *ExternalGatewayMasterController) onPodAdd(obj interface{}) {
 }
 
 func (c *ExternalGatewayMasterController) onPodUpdate(oldObj, newObj interface{}) {
-	o := oldObj.(*v1.Pod)
-	n := newObj.(*v1.Pod)
-
+	o, ok := oldObj.(*v1.Pod)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Pod{}, o))
+		return
+	}
+	n, ok := newObj.(*v1.Pod)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Pod{}, n))
+		return
+	}
 	if o == nil || n == nil {
 		utilruntime.HandleError(errors.New("invalid Pod provided to onPodUpdate()"))
 		return
