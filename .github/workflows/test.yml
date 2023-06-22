@@ -376,6 +376,7 @@ jobs:
         # num-workers : "<integer value>"
         # num-nodes-per-zone : "<integer value>"
         include:
+          - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "local",  "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
@@ -576,73 +577,3 @@ jobs:
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
-
-  e2e-periodic:
-    name: e2e-periodic
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ["shard-conformance"]
-        ha: ["HA"]
-        gateway-mode: ["local"]
-        ipfamily: ["ipv4", "ipv6", "dualstack"]
-    needs: [ build-pr ]
-    env:
-      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}"
-      OVN_HA: "${{ matrix.ha == 'HA' }}"
-      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
-      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
-      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' }}"
-      OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
-    steps:
-
-      - name: Free up disk space
-        run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
-
-      - name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: ${{ env.GO_VERSION }}
-        id: go
-
-      - name: Check out code into the Go module directory
-        uses: actions/checkout@v3
-
-      - name: Set up environment
-        run: |
-          export GOPATH=$(go env GOPATH)
-          echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-          echo "$GOPATH/bin" >> $GITHUB_PATH
-      - name: Disable ufw
-        # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
-        # Not needed for KIND deployments, so just disable all the time.
-        run: |
-          sudo ufw disable
-      - uses: actions/download-artifact@v3
-        with:
-          name: test-image-pr
-      - name: Load docker image
-        run: |
-          docker load --input ${CI_IMAGE_PR_TAR}
-      - name: kind setup
-        run: |
-          export OVN_IMAGE="ovn-daemonset-f:pr"
-          make -C test install-kind
-      - name: Run Tests
-        run: |
-          make -C test ${{ matrix.target }}
-      - name: Export logs
-        if: always()
-        run: |
-          mkdir -p /tmp/kind/logs
-          kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
-          path: /tmp/kind/logs
-
