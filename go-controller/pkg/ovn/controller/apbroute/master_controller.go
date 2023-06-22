@@ -2,6 +2,7 @@ package apbroute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -312,13 +313,33 @@ func (c *ExternalGatewayMasterController) syncRoutePolicy(routePolicy *adminpoli
 }
 
 func (c *ExternalGatewayMasterController) onPolicyAdd(obj interface{}) {
-	c.routeQueue.Add(obj)
+	policy, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{}, obj))
+		return
+	}
+	if policy == nil {
+		utilruntime.HandleError(errors.New("invalid Admin Policy Based External Route provided to onPolicyAdd()"))
+		return
+	}
+	c.routeQueue.Add(policy)
 }
 
 func (c *ExternalGatewayMasterController) onPolicyUpdate(oldObj, newObj interface{}) {
-	oldRoutePolicy := oldObj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
-	newRoutePolicy := newObj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
-
+	oldRoutePolicy, ok := oldObj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{}, oldObj))
+		return
+	}
+	newRoutePolicy, ok := newObj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{}, newObj))
+		return
+	}
+	if oldRoutePolicy == nil || newRoutePolicy == nil {
+		utilruntime.HandleError(errors.New("invalid Admin Policy Based External Route provided to onPolicyUpdate()"))
+		return
+	}
 	if oldRoutePolicy.Generation == newRoutePolicy.Generation ||
 		!newRoutePolicy.GetDeletionTimestamp().IsZero() {
 		return
@@ -328,25 +349,75 @@ func (c *ExternalGatewayMasterController) onPolicyUpdate(oldObj, newObj interfac
 }
 
 func (c *ExternalGatewayMasterController) onPolicyDelete(obj interface{}) {
-	c.routeQueue.Add(obj)
+	policy, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("couldn't get object from tomstone %#v", obj))
+			return
+		}
+		policy, ok = tombstone.Obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not an Admin Policy Based External Route %#v", tombstone.Obj))
+			return
+		}
+	}
+	if policy != nil {
+		c.routeQueue.Add(policy)
+	}
 }
 
 func (c *ExternalGatewayMasterController) onNamespaceAdd(obj interface{}) {
-	c.namespaceQueue.Add(obj)
+	ns, ok := obj.(*v1.Namespace)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Namespace{}, obj))
+		return
+	}
+	if ns == nil {
+		utilruntime.HandleError(errors.New("invalid Namespace provided to onNamespaceAdd()"))
+		return
+	}
+	c.namespaceQueue.Add(ns)
 }
 
 func (c *ExternalGatewayMasterController) onNamespaceUpdate(oldObj, newObj interface{}) {
-	oldNamespace := oldObj.(*v1.Namespace)
-	newNamespace := newObj.(*v1.Namespace)
-
+	oldNamespace, ok := oldObj.(*v1.Namespace)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Namespace{}, oldObj))
+		return
+	}
+	newNamespace, ok := newObj.(*v1.Namespace)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Namespace{}, newObj))
+		return
+	}
+	if oldNamespace == nil || newNamespace == nil {
+		utilruntime.HandleError(errors.New("invalid Namespace provided to onNamespaceUpdate()"))
+		return
+	}
 	if oldNamespace.ResourceVersion == newNamespace.ResourceVersion || !newNamespace.GetDeletionTimestamp().IsZero() {
 		return
 	}
-	c.namespaceQueue.Add(newObj)
+	c.namespaceQueue.Add(newNamespace)
 }
 
 func (c *ExternalGatewayMasterController) onNamespaceDelete(obj interface{}) {
-	c.namespaceQueue.Add(obj)
+	ns, ok := obj.(*v1.Namespace)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %#v", obj))
+			return
+		}
+		ns, ok = tombstone.Obj.(*v1.Namespace)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a Namespace: %#v", tombstone.Obj))
+			return
+		}
+	}
+	if ns != nil {
+		c.namespaceQueue.Add(ns)
+	}
 }
 
 func (c *ExternalGatewayMasterController) runNamespaceWorker(wg *sync.WaitGroup) {
@@ -429,13 +500,38 @@ func (c *ExternalGatewayMasterController) syncNamespace(namespace *v1.Namespace)
 }
 
 func (c *ExternalGatewayMasterController) onPodAdd(obj interface{}) {
-	c.podQueue.Add(obj)
+	pod, ok := obj.(*v1.Pod)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Pod{}, obj))
+		return
+	}
+	if pod == nil {
+		utilruntime.HandleError(errors.New("invalid Pod provided to onPodAdd()"))
+		return
+	}
+	// if the pod does not have IPs AND there are no multus network status annotations found, skip it
+	if len(pod.Status.PodIPs) == 0 && len(pod.Annotations[nettypes.NetworkStatusAnnot]) == 0 {
+		return
+	}
+	c.podQueue.Add(pod)
 }
 
 func (c *ExternalGatewayMasterController) onPodUpdate(oldObj, newObj interface{}) {
-	o := oldObj.(*v1.Pod)
-	n := newObj.(*v1.Pod)
-	// if labels AND assigned Pod IPs AND networkStatus annotations are the same, skip processing changes to the pod.
+	o, ok := oldObj.(*v1.Pod)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Pod{}, o))
+		return
+	}
+	n, ok := newObj.(*v1.Pod)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &v1.Pod{}, n))
+		return
+	}
+	if o == nil || n == nil {
+		utilruntime.HandleError(errors.New("invalid Pod provided to onPodUpdate()"))
+		return
+	}
+	// if labels AND assigned Pod IPs AND the multus network status annotations are the same, skip processing changes to the pod.
 	if reflect.DeepEqual(o.Labels, n.Labels) &&
 		reflect.DeepEqual(o.Status.PodIPs, n.Status.PodIPs) &&
 		reflect.DeepEqual(o.Annotations[nettypes.NetworkStatusAnnot], n.Annotations[nettypes.NetworkStatusAnnot]) {
@@ -445,7 +541,22 @@ func (c *ExternalGatewayMasterController) onPodUpdate(oldObj, newObj interface{}
 }
 
 func (c *ExternalGatewayMasterController) onPodDelete(obj interface{}) {
-	c.podQueue.Add(obj)
+	pod, ok := obj.(*v1.Pod)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %#v", obj))
+			return
+		}
+		pod, ok = tombstone.Obj.(*v1.Pod)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a Pod: %#v", tombstone.Obj))
+			return
+		}
+	}
+	if pod != nil {
+		c.podQueue.Add(pod)
+	}
 }
 
 func (c *ExternalGatewayMasterController) runPodWorker(wg *sync.WaitGroup) {
