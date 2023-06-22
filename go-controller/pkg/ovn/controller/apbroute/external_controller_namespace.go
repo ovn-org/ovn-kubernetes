@@ -31,6 +31,17 @@ func (m *externalPolicyManager) syncNamespace(namespace *v1.Namespace, routeQueu
 							keysToBeQueued.Insert(policyName)
 						}
 					}
+					for _, hop := range ri.policy.Spec.NextHops.DynamicHops {
+						gwNs, err := m.listNamespacesBySelector(hop.NamespaceSelector)
+						if err != nil {
+							return err
+						}
+						for _, ns := range gwNs {
+							if ns.Name == namespace.Name {
+								keysToBeQueued.Insert(policyName)
+							}
+						}
+					}
 				}
 				return nil
 			})
