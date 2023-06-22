@@ -321,6 +321,11 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, "+
 				"actions=%s",
 				cookie, npw.ofportPhys, flowProtocol, nwDst, externalIPOrLBIngressIP, svcPort.Port, actions),
+			// we send any ICMP destination unreachable, fragmentation needed to the OVN pipeline too so that
+			// path MTU discovery continues to work
+			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, icmp, %s=%s, icmp_type=3, icmp_code=4, "+
+				"actions=%s",
+				cookie, npw.ofportPhys, nwDst, externalIPOrLBIngressIP, actions),
 			// table=0, matches on return traffic from service externalIP or LB ingress and sends it out to primary node interface (br-ex)
 			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
 				"actions=output:%s",
