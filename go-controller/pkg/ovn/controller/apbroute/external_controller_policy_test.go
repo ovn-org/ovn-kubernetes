@@ -63,7 +63,7 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 		iFactory.NamespaceInformer(),
 		iFactory.NodeCoreInformer().Lister(),
 		nbClient,
-		addressset.NewFakeAddressSetFactory(controllerName))
+		addressset.NewFakeAddressSetFactory(apbControllerName))
 	Expect(err).NotTo(HaveOccurred())
 	mgr = externalController.mgr
 	go func() {

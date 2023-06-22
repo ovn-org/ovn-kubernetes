@@ -34,8 +34,9 @@ import (
 )
 
 const (
-	resyncInterval = 0
-	maxRetries     = 15
+	resyncInterval    = 0
+	maxRetries        = 15
+	apbControllerName = "apb-external-route-controller"
 )
 
 // Admin Policy Based Route services
@@ -95,6 +96,7 @@ func NewExternalMasterController(
 		addressSetFactory: addressSetFactory,
 		externalGWCache:   externalGWCache,
 		exGWCacheMutex:    exGWCacheMutex,
+		controllerName:    apbControllerName,
 	}
 
 	c := &ExternalGatewayMasterController{
