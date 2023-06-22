@@ -96,6 +96,16 @@ if [ "${WHAT}" != "${MULTI_NODE_ZONES_TESTS}" ]; then
   SKIPPED_TESTS+="Multi node zones interconnect"
 fi
 
+# Only run external gateway tests if they are explicitly requested
+EXTERNAL_GATEWAY_TESTS="External Gateway"
+if [ "${WHAT}" != "${EXTERNAL_GATEWAY_TESTS}" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="External Gateway"
+fi
+
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock

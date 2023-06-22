@@ -61,7 +61,7 @@ func init() {
 	}
 }
 
-// gatewayTestIPs collects all the addresses required for a external gateway
+// gatewayTestIPs collects all the addresses required for an external gateway
 // test.
 type gatewayTestIPs struct {
 	gatewayIPs []string
@@ -70,7 +70,7 @@ type gatewayTestIPs struct {
 	targetIPs  []string
 }
 
-var _ = ginkgo.Describe("External Gateway test suite", func() {
+var _ = ginkgo.Describe("External Gateway", func() {
 
 	var _ = ginkgo.Context("With annotations", func() {
 
