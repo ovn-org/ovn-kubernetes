@@ -270,16 +270,18 @@ func (c *ExternalGatewayNodeController) processNextPolicyWorkItem(wg *sync.WaitG
 	}
 	defer c.routeQueue.Done(key)
 
-	item := key.(string)
 	klog.V(4).InfoS("Processing policy %s", key)
 	_, err := c.mgr.syncRoutePolicy(key.(string), c.routeQueue)
 	if err != nil {
-		if c.routeQueue.NumRequeues(item) < maxRetries {
-			klog.V(4).InfoS("Error found while processing policy: %s, error: %v", key, err.Error())
-			c.routeQueue.AddRateLimited(item)
+		klog.Errorf("Failed to sync APB policy %s: %v", key, err)
+	}
+	if err != nil {
+		if c.routeQueue.NumRequeues(key) < maxRetries {
+			klog.V(4).InfoS("Error found while processing policy %s: %w", key, err)
+			c.routeQueue.AddRateLimited(key)
 			return true
 		}
-		klog.Warningf("Dropping policy %q out of the queue: %v", key, err)
+		klog.Warningf("Dropping policy %q out of the queue: %w", key, err)
 		utilruntime.HandleError(err)
 	}
 	c.routeQueue.Forget(key)
@@ -287,16 +289,18 @@ func (c *ExternalGatewayNodeController) processNextPolicyWorkItem(wg *sync.WaitG
 }
 
 func (c *ExternalGatewayNodeController) onPolicyAdd(obj interface{}) {
-	policy, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	_, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
 	if !ok {
 		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{}, obj))
 		return
 	}
-	if policy == nil {
-		utilruntime.HandleError(errors.New("invalid Admin Policy Based External Route provided to onPolicyAdd()"))
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	c.routeQueue.Add(policy)
+	klog.V(4).Infof("Adding policy %s", key)
+	c.routeQueue.Add(key)
 }
 
 func (c *ExternalGatewayNodeController) onPolicyUpdate(oldObj, newObj interface{}) {
@@ -319,26 +323,34 @@ func (c *ExternalGatewayNodeController) onPolicyUpdate(oldObj, newObj interface{
 		!newRoutePolicy.GetDeletionTimestamp().IsZero() {
 		return
 	}
-	c.routeQueue.Add(newObj)
+
+	key, err := cache.MetaNamespaceKeyFunc(newObj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", newObj, err))
+	}
+	c.routeQueue.Add(key)
 }
 
 func (c *ExternalGatewayNodeController) onPolicyDelete(obj interface{}) {
-	policy, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	_, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
 	if !ok {
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 		if !ok {
 			utilruntime.HandleError(fmt.Errorf("couldn't get object from tomstone %#v", obj))
 			return
 		}
-		policy, ok = tombstone.Obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+		_, ok = tombstone.Obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
 		if !ok {
 			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not an Admin Policy Based External Route %#v", tombstone.Obj))
 			return
 		}
 	}
-	if policy != nil {
-		c.routeQueue.Add(policy)
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		return
 	}
+	c.routeQueue.Add(key)
 }
 
 func (c *ExternalGatewayNodeController) runNamespaceWorker(wg *sync.WaitGroup) {
