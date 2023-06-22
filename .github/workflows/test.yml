@@ -58,6 +58,16 @@ jobs:
     name: Build-master
     runs-on: ubuntu-latest
     steps:
+    # Select which dockerfile to use.
+    - name: Use upstream OVN main branch for scheduled jobs
+      if: github.event_name == 'schedule'
+      run: |
+        echo "OVN_DOCKERFILE=Dockerfile.fedora.dev" >> $GITHUB_ENV
+
+    - name: Use Fedora OVN rpms for user triggered jobs
+      if: github.event_name != 'schedule'
+      run: |
+        echo "OVN_DOCKERFILE=Dockerfile.fedora" >> $GITHUB_ENV
     # Create a cache for the built master image
     - name: Restore master image cache
       id: image_cache_master
@@ -116,7 +126,7 @@ jobs:
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-f:dev -f ${OVN_DOCKERFILE} .
         popd
 
     - name: Cache master image
@@ -145,6 +155,16 @@ jobs:
     name: Build-PR
     runs-on: ubuntu-latest
     steps:
+    # Select which dockerfile to use.
+    - name: Use upstream OVN main branch for scheduled jobs
+      if: github.event_name == 'schedule'
+      run: |
+        echo "OVN_DOCKERFILE=Dockerfile.fedora.dev" >> $GITHUB_ENV
+
+    - name: Use Fedora OVN rpms for user triggered jobs
+      if: github.event_name != 'schedule'
+      run: |
+        echo "OVN_DOCKERFILE=Dockerfile.fedora" >> $GITHUB_ENV
     # Create a cache for the build PR image
     - name: Restore PR image cache
       id: image_cache_pr
@@ -196,7 +216,7 @@ jobs:
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:pr -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-f:pr -f ${OVN_DOCKERFILE} .
           mkdir _output
           docker save ovn-daemonset-f:pr > _output/${CI_IMAGE_PR_TAR}
         popd
@@ -242,7 +262,6 @@ jobs:
 
   ovn-upgrade-e2e:
     name: Upgrade OVN from Master to PR branch based image
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs:
@@ -356,7 +375,6 @@ jobs:
 
   e2e:
     name: e2e
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
     timeout-minutes: 220
@@ -493,7 +511,6 @@ jobs:
 
   e2e-dual-conversion:
     name: e2e-dual-conversion
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
