@@ -60,7 +60,7 @@ type Controller struct {
 	ensureNoRerouteNodePolicies              EnsureNoRerouteNodePoliciesFunc
 	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc
 
-	services       map[string]*svcState  // svc key -> state
+	services       map[string]*svcState  // svc key -> state, for services that have sourceIPBy LBIP
 	nodes          map[string]*nodeState // node name -> state, contains nodes that host an egress service
 	nodesZoneState map[string]bool       // node name -> is in local zone, contains all nodes in the cluster
 
@@ -330,7 +330,7 @@ func (c *Controller) repair() error {
 		}
 
 		svcHost := es.Status.Host
-		if svcHost == "" {
+		if svcHost == "" || svcHost == ovntypes.EgressServiceNoSNATHost {
 			continue
 		}
 
@@ -660,7 +660,18 @@ func (c *Controller) syncEgressService(key string) error {
 		return c.clearServiceResourcesAndRequeue(key, state)
 	}
 
-	// At this point both the EgressService is assigned and the Service != nil
+	// We check if it its host == noSNATHost (cluster manager detected sourceIPBy=Network)
+	// to determine if we need to clean its existing resources and stop processing or not.
+	if es.Status.Host == ovntypes.EgressServiceNoSNATHost {
+		if state == nil {
+			// The service does not need SNAT LRPs and was not an allocated egress service.
+			return nil
+		}
+
+		// The EgressService was previously configured but its host changed to ALL.
+		// We don't need to create any OVN objects when host=ALL (or cache the resource) so we delete its existing configuration.
+		return c.clearServiceResourcesAndRequeue(key, state)
+	}
 
 	if state != nil && state.stale {
 		// The service is marked stale because something failed when trying to delete it.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,7 +185,7 @@ func (c *Controller) syncNode(key string) error {
 			// Services can't be assigned to a node while it is in draining status.
 			state.draining = true
 			for svcKey, svcState := range state.allocations {
-				if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
+				if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
 					return err
 				}
 			}
@@ -208,6 +209,16 @@ func (c *Controller) syncNode(key string) error {
 			}
 		}
 
+		labelsToRemove := map[string]any{}
+		for labelKey := range nodeLabels {
+			if strings.HasPrefix(labelKey, egressSVCLabelPrefix) {
+				labelsToRemove[labelKey] = nil // Patching with a nil value results in the delete of the key
+			}
+		}
+		if len(labelsToRemove) > 0 {
+			return c.kubeOVN.SetLabelsOnNode(n.Name, labelsToRemove)
+		}
+
 		return nil
 	}
 
@@ -217,7 +228,7 @@ func (c *Controller) syncNode(key string) error {
 		// because we don't care about its reachability status until it becomes ready.
 		state.draining = true
 		for svcKey, svcState := range state.allocations {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
 				return err
 			}
 		}
@@ -232,7 +243,7 @@ func (c *Controller) syncNode(key string) error {
 		// When it is fully drained and reachable again it will be requeued.
 		state.draining = true
 		for svcKey, svcState := range state.allocations {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
 				return err
 			}
 		}
@@ -245,7 +256,7 @@ func (c *Controller) syncNode(key string) error {
 	// If a service's selector no longer matches this node we attempt to reallocate it.
 	for svcKey, svcState := range state.allocations {
 		if !svcState.selector.Matches(labels.Set(n.Labels)) || svcState.stale {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
 				return err
 			}
 		}
@@ -253,12 +264,24 @@ func (c *Controller) syncNode(key string) error {
 
 	// Label the node again for all of the current valid allocations in case
 	// the user manually changed it.
+	// We also remove labels that belong to a service not allocated to this node.
+	labelsToSet := map[string]any{}
 	for svcKey := range state.allocations {
 		namespace, name, _ := cache.SplitMetaNamespaceKey(svcKey)
-		err := c.labelNodeForService(namespace, name, state.name)
-		if err != nil {
-			return err
+		labelsToSet[c.nodeLabelForService(namespace, name)] = ""
+	}
+	for labelKey := range nodeLabels {
+		if strings.HasPrefix(labelKey, egressSVCLabelPrefix) {
+			if _, found := labelsToSet[labelKey]; found {
+				continue
+			}
+			labelsToSet[labelKey] = nil // Patching with a nil value results in the delete of the key
 		}
+	}
+
+	err = c.kubeOVN.SetLabelsOnNode(n.Name, labelsToSet)
+	if err != nil {
+		return err
 	}
 
 	// The node might match the selectors of an unallocated service.

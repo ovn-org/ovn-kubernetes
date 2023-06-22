@@ -28,7 +28,10 @@ import (
 // +kubebuilder:subresource:status
 // EgressService is a CRD that allows the user to request that the source
 // IP of egress packets originating from all of the pods that are endpoints
-// of a given LoadBalancer Service would be its ingress IP.
+// of the corresponding LoadBalancer Service would be its ingress IP.
+// In addition, it allows the user to request that egress packets originating from
+// all of the pods that are endpoints of the LoadBalancer service would use a different
+// network than the main one.
 type EgressService struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -39,7 +42,15 @@ type EgressService struct {
 
 // EgressServiceSpec defines the desired state of EgressService
 type EgressServiceSpec struct {
-	// Allows limiting the nodes that can be selected to handle the service's traffic.
+	// Determines the source IP of egress traffic originating from the pods backing the LoadBalancer Service.
+	// When `LoadBalancerIP` the source IP is set to its LoadBalancer ingress IP.
+	// When `Network` the source IP is set according to the interface of the Network,
+	// leveraging the masquerade rules that are already in place.
+	// Typically these rules specify SNAT to the IP of the outgoing interface,
+	// which means the packet will typically leave with the IP of the node.
+	SourceIPBy SourceIPMode `json:"sourceIPBy,omitempty"`
+
+	// Allows limiting the nodes that can be selected to handle the service's traffic when sourceIPBy=LoadBalancerIP.
 	// When present only a node whose labels match the specified selectors can be selected
 	// for handling the service's traffic.
 	// When it is not specified any node in the cluster can be chosen to manage the service's traffic.
@@ -53,9 +64,21 @@ type EgressServiceSpec struct {
 	Network string `json:"network,omitempty"`
 }
 
+// +kubebuilder:validation:Enum=LoadBalancerIP;Network
+type SourceIPMode string
+
+const (
+	// SourceIPLoadBalancer sets the source according to the LoadBalancer's ingress IP.
+	SourceIPLoadBalancer SourceIPMode = "LoadBalancerIP"
+
+	// SourceIPNetwork sets the source according to the IP of the outgoing interface of the Network.
+	SourceIPNetwork SourceIPMode = "Network"
+)
+
 // EgressServiceStatus defines the observed state of EgressService
 type EgressServiceStatus struct {
 	// The name of the node selected to handle the service's traffic.
+	// In case sourceIPBy=Network the field will be set to "ALL".
 	Host string `json:"host"`
 }
 

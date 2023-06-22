@@ -9,6 +9,8 @@ PKGS=${PKGS:-.}
 find_files="find ${PKGS} -not \( \
       \( \
         -wholename '*/vendor/*' \
+        -o -wholename './pkg/crd/*/register.go' \
+        -o -wholename './pkg/crd/*/factory.go' \
         -o -wholename '*/_output/*' \
       \) -prune \
     \) -name '*.go'"
