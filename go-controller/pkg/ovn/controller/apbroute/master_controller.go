@@ -34,12 +34,9 @@ import (
 )
 
 const (
-	resyncInterval = 0
-	maxRetries     = 15
-)
-
-var (
-	controllerName string
+	resyncInterval    = 0
+	maxRetries        = 15
+	apbControllerName = "apb-external-route-controller"
 )
 
 // Admin Policy Based Route services
@@ -78,7 +75,6 @@ type ExternalGatewayMasterController struct {
 }
 
 func NewExternalMasterController(
-	parentControllerName string,
 	client kubernetes.Interface,
 	apbRoutePolicyClient adminpolicybasedrouteclient.Interface,
 	stopCh <-chan struct{},
@@ -89,7 +85,6 @@ func NewExternalMasterController(
 	addressSetFactory addressset.AddressSetFactory,
 ) (*ExternalGatewayMasterController, error) {
 
-	controllerName = parentControllerName
 	routePolicyInformer := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
 	externalRouteInformer := routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes()
 	externalGWCache := make(map[ktypes.NamespacedName]*ExternalRouteInfo)
@@ -101,6 +96,7 @@ func NewExternalMasterController(
 		addressSetFactory: addressSetFactory,
 		externalGWCache:   externalGWCache,
 		exGWCacheMutex:    exGWCacheMutex,
+		controllerName:    apbControllerName,
 	}
 
 	c := &ExternalGatewayMasterController{

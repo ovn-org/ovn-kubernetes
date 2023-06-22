@@ -56,14 +56,14 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 	iFactory, err = factory.NewMasterWatchFactory(&util.OVNMasterClientset{KubeClient: fakeClient})
 	Expect(err).NotTo(HaveOccurred())
 	iFactory.Start()
-	externalController, err = NewExternalMasterController(controllerName, fakeClient,
+	externalController, err = NewExternalMasterController(fakeClient,
 		fakeRouteClient,
 		stopChan,
 		iFactory.PodCoreInformer(),
 		iFactory.NamespaceInformer(),
 		iFactory.NodeCoreInformer().Lister(),
 		nbClient,
-		addressset.NewFakeAddressSetFactory(controllerName))
+		addressset.NewFakeAddressSetFactory(apbControllerName))
 	Expect(err).NotTo(HaveOccurred())
 	mgr = externalController.mgr
 	go func() {

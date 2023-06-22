@@ -168,7 +168,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		zoneChassisHandler = zoneic.NewZoneChassisHandler(cnci.sbClient)
 	}
 	apbExternalRouteController, err := apbroutecontroller.NewExternalMasterController(
-		DefaultNetworkControllerName,
 		cnci.client,
 		cnci.kube.APBRouteClient,
 		defaultStopChan,

@@ -44,6 +44,7 @@ type northBoundClient struct {
 	addressSetFactory addressset.AddressSetFactory
 	externalGWCache   map[ktypes.NamespacedName]*ExternalRouteInfo
 	exGWCacheMutex    *sync.RWMutex
+	controllerName    string
 }
 
 type conntrackClient struct {
@@ -76,7 +77,7 @@ func (nb *northBoundClient) delAllHybridRoutePolicies() error {
 
 	// nuke all the address-sets.
 	// if we fail to remove LRP's above, we don't attempt to remove ASes due to dependency constraints.
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetHybridNodeRoute, controllerName, nil)
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetHybridNodeRoute, nb.controllerName, nil)
 	asPred := libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, nil)
 	err = libovsdbops.DeleteAddressSetsWithPredicate(nb.nbClient, asPred)
 	if err != nil {
@@ -261,7 +262,7 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddr
 func (nb *northBoundClient) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Add podIP to the node's address_set.
-		asIndex := getHybridRouteAddrSetDbIDs(node, controllerName)
+		asIndex := getHybridRouteAddrSetDbIDs(node, nb.controllerName)
 		as, err := nb.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot ensure that addressSet for node %s exists %v", node, err)
@@ -534,7 +535,7 @@ func (nb *northBoundClient) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr s
 func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Delete podIP from the node's address_set.
-		asIndex := getHybridRouteAddrSetDbIDs(node, controllerName)
+		asIndex := getHybridRouteAddrSetDbIDs(node, nb.controllerName)
 		as, err := nb.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
