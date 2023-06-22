@@ -29,6 +29,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	controllerName = "apb-external-route-controller"
+)
+
 type networkClient interface {
 	deleteGatewayIPs(namespaceName string, toBeDeletedGWIPs, toBeKept sets.Set[string]) error
 	addGatewayIPs(pod *v1.Pod, egress gatewayInfoList) error

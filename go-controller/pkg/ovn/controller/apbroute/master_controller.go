@@ -38,10 +38,6 @@ const (
 	maxRetries     = 15
 )
 
-var (
-	controllerName string
-)
-
 // Admin Policy Based Route services
 
 type ExternalGatewayMasterController struct {
@@ -78,7 +74,6 @@ type ExternalGatewayMasterController struct {
 }
 
 func NewExternalMasterController(
-	parentControllerName string,
 	client kubernetes.Interface,
 	apbRoutePolicyClient adminpolicybasedrouteclient.Interface,
 	stopCh <-chan struct{},
@@ -89,7 +84,6 @@ func NewExternalMasterController(
 	addressSetFactory addressset.AddressSetFactory,
 ) (*ExternalGatewayMasterController, error) {
 
-	controllerName = parentControllerName
 	routePolicyInformer := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
 	externalRouteInformer := routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes()
 	externalGWCache := make(map[ktypes.NamespacedName]*ExternalRouteInfo)

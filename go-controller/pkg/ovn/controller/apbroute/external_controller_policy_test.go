@@ -56,7 +56,7 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 	iFactory, err = factory.NewMasterWatchFactory(&util.OVNMasterClientset{KubeClient: fakeClient})
 	Expect(err).NotTo(HaveOccurred())
 	iFactory.Start()
-	externalController, err = NewExternalMasterController(controllerName, fakeClient,
+	externalController, err = NewExternalMasterController(fakeClient,
 		fakeRouteClient,
 		stopChan,
 		iFactory.PodCoreInformer(),
