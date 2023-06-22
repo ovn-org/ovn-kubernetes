@@ -84,6 +84,10 @@ COPY ovnkube.sh /root/
 COPY ovndb-raft-functions.sh /root/
 COPY iptables-scripts /usr/sbin/
 
+# Make some room.
+RUN REMOVE_PKGS="llvm-libs clang-libs" && \
+    dnf remove -y $REMOVE_PKGS && dnf clean all && rm -rf /var/cache/dnf/*
+
 RUN getent group openvswitch >/dev/null || groupadd -r openvswitch
 RUN getent passwd openvswitch >/dev/null || useradd -r -g openvswitch -d / -s /sbin/nologin -c "Open vSwitch Daemons" openvswitch
 

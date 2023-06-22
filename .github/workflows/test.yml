@@ -58,6 +58,11 @@ jobs:
     name: Build-master
     runs-on: ubuntu-latest
     steps:
+    # --squash is an experimental docker feature
+    - name: Enable Docker experimental features
+      run: |
+        echo '{"experimental": true}' | sudo tee /etc/docker/daemon.json
+        sudo service docker restart
     # Select which dockerfile to use.
     - name: Use upstream OVN main branch for scheduled jobs
       if: github.event_name == 'schedule'
@@ -126,7 +131,7 @@ jobs:
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:dev -f ${OVN_DOCKERFILE} .
+          docker build --squash -t ovn-daemonset-f:dev -f ${OVN_DOCKERFILE} .
         popd
 
     - name: Cache master image
@@ -155,6 +160,11 @@ jobs:
     name: Build-PR
     runs-on: ubuntu-latest
     steps:
+    # --squash is an experimental docker feature
+    - name: Enable Docker experimental features
+      run: |
+        echo '{"experimental": true}' | sudo tee /etc/docker/daemon.json
+        sudo service docker restart
     # Select which dockerfile to use.
     - name: Use upstream OVN main branch for scheduled jobs
       if: github.event_name == 'schedule'
@@ -216,7 +226,7 @@ jobs:
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:pr -f ${OVN_DOCKERFILE} .
+          docker build --squash -t ovn-daemonset-f:pr -f ${OVN_DOCKERFILE} .
           mkdir _output
           docker save ovn-daemonset-f:pr > _output/${CI_IMAGE_PR_TAR}
         popd
