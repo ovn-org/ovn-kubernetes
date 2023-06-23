@@ -11,6 +11,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -21,6 +22,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -143,6 +145,11 @@ type BaseNetworkController struct {
 	// If the map is nil, it means the controller is not tracking the node events
 	// and all the nodes are considered as local zone nodes.
 	localZoneNodes *sync.Map
+
+	// zoneICHandler creates the interconnect resources for local nodes and remote nodes.
+	// Interconnect resources are Transit switch and logical ports connecting this transit switch
+	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
+	zoneICHandler *zoneic.ZoneInterconnectHandler
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
