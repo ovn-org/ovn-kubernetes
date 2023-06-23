@@ -235,7 +235,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
 	var zoneICHandler *zoneic.ZoneInterconnectHandler
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		zoneICHandler = zoneic.NewZoneInterconnectHandler(netInfo, cnci.nbClient, cnci.sbClient)
+		zoneICHandler = zoneic.NewZoneInterconnectHandler(netInfo, cnci.nbClient, cnci.sbClient, cnci.watchFactory)
 	}
 
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
@@ -440,11 +440,6 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 }
 
 func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		if err := oc.zoneICHandler.Init(oc.kube, ctx); err != nil {
-			return err
-		}
-	}
 	_, err := oc.createOvnClusterRouter()
 	return err
 }
