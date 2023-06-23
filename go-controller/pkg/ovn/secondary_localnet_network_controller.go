@@ -52,7 +52,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 		},
 	}
 
-	if oc.handlesPodIPAllocation() {
+	if oc.allocatesPodAnnotation() {
 		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
@@ -98,7 +98,7 @@ func (oc *SecondaryLocalnetNetworkController) Cleanup(netName string) error {
 func (oc *SecondaryLocalnetNetworkController) Init() error {
 	switchName := oc.GetNetworkScopedName(types.OVNLocalnetSwitch)
 
-	logicalSwitch, err := oc.InitializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
+	logicalSwitch, err := oc.initializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
 	if err != nil {
 		return err
 	}

@@ -248,7 +248,7 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 	return nil
 }
 
-func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchName string, clusterSubnets []config.CIDRNetworkEntry,
+func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchName string, clusterSubnets []config.CIDRNetworkEntry,
 	excludeSubnets []*net.IPNet) (*nbdb.LogicalSwitch, error) {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name:        switchName,
@@ -269,7 +269,14 @@ func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchNa
 		}
 	}
 
-	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig, &logicalSwitch.ExternalIDs)
+	if oc.isLayer2Interconnect() {
+		err := oc.zoneICHandler.AddTransitSwitchConfig(&logicalSwitch)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
 	}

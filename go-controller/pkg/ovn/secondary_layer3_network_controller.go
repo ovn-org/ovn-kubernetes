@@ -190,7 +190,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 	} else {
 		switch h.objType {
 		case factory.PodType:
-			syncFunc = h.oc.syncPods
+			syncFunc = h.oc.syncPodsForSecondaryNetwork
 
 		case factory.NodeType:
 			syncFunc = h.oc.syncNodes
@@ -265,7 +265,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		syncZoneICFailed:            sync.Map{},
 	}
 
-	if oc.handlesPodIPAllocation() {
+	if oc.allocatesPodAnnotation() {
 		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
@@ -615,21 +615,4 @@ func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error
 	}
 
 	return nil
-}
-
-// syncPods syncs the pods for layer3 secondary networks.
-func (oc *SecondaryLayer3NetworkController) syncPods(pods []interface{}) error {
-	localZonePodIfaces := make([]interface{}, 0, len(pods))
-	// Exclude the remote zone pods and call syncPodsForSecondaryNetwork
-	for _, podInterface := range pods {
-		pod, ok := podInterface.(*kapi.Pod)
-		if !ok {
-			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
-		}
-		if oc.isPodScheduledinLocalZone(pod) {
-			localZonePodIfaces = append(localZonePodIfaces, podInterface)
-		}
-	}
-
-	return oc.syncPodsForSecondaryNetwork(localZonePodIfaces)
 }
