@@ -226,8 +226,6 @@ type SecondaryLayer3NetworkController struct {
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
 	syncZoneICFailed            sync.Map
-
-	zoneICHandler *zoneic.ZoneInterconnectHandler
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
@@ -259,12 +257,12 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				stopChan:                    stopChan,
 				wg:                          &sync.WaitGroup{},
 				localZoneNodes:              &sync.Map{},
+				zoneICHandler:               zoneICHandler,
 			},
 		},
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},
 		syncZoneICFailed:            sync.Map{},
-		zoneICHandler:               zoneICHandler,
 	}
 
 	if oc.handlesPodIPAllocation() {
