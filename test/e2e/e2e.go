@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	utilnet "k8s.io/utils/net"
 
@@ -390,7 +392,7 @@ func createPod(f *framework.Framework, podName, nodeSelector, namespace string, 
 		return nil, errors.Wrapf(err, "Failed to create pod %s %s", pod.Name, namespace)
 	}
 
-	err = e2epod.WaitForPodRunningInNamespace(f.ClientSet, res)
+	err = WaitForPodRunningInNamespace(f.ClientSet, res)
 
 	if err != nil {
 		logs, logErr := e2epod.GetPodLogs(f.ClientSet, namespace, pod.Name, contName)
@@ -406,6 +408,44 @@ func createPod(f *framework.Framework, podName, nodeSelector, namespace string, 
 		return nil, errors.Wrapf(err, "Failed to get pod %s %s", pod.Name, namespace)
 	}
 	return res, nil
+}
+
+// WaitTimeoutForPodRunningInNamespace waits the given timeout duration for the specified pod to become running.
+func WaitTimeoutForPodRunningInNamespace(c clientset.Interface, podName, namespace string, timeout time.Duration) error {
+	return wait.PollImmediate(poll, timeout, podRunning(c, podName, namespace))
+}
+
+// WaitForPodRunningInNamespace waits default amount of time (podStartTimeout) for the specified pod to become running.
+// Returns an error if timeout occurs first, or pod goes in to failed state.
+func WaitForPodRunningInNamespace(c clientset.Interface, pod *v1.Pod) error {
+	if pod.Status.Phase == v1.PodRunning {
+		return nil
+	}
+	return WaitTimeoutForPodRunningInNamespace(c, pod.Name, pod.Namespace, podStartTimeout)
+}
+
+var (
+	poll            = 2 * time.Second
+	errPodCompleted = fmt.Errorf("pod ran to completion")
+	podStartTimeout = 5 * time.Minute
+)
+
+func podRunning(c clientset.Interface, podName, namespace string) wait.ConditionFunc {
+	return func() (bool, error) {
+		pod, err := c.CoreV1().Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+		if err != nil {
+			klog.Errorf("Error %+v while retrieving pod %s", err, podName)
+			return false, err
+		}
+		klog.Infof("Pod %s status %s", podName, pod.Status.Phase)
+		switch pod.Status.Phase {
+		case v1.PodRunning:
+			return true, nil
+		case v1.PodFailed, v1.PodSucceeded:
+			return false, errPodCompleted
+		}
+		return false, nil
+	}
 }
 
 // Get the IP address of a pod in the specified namespace
