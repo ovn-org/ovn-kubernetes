@@ -12,6 +12,7 @@ import (
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -210,5 +211,44 @@ func (h *baseNetworkControllerEventHandler) isObjectInTerminalState(objType refl
 
 	default:
 		return false
+	}
+}
+
+func (h *baseNetworkControllerEventHandler) recordAddEvent(objType reflect.Type, obj interface{}) {
+	switch objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording add event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
+}
+
+// RecordUpdateEvent records the udpate event on this given object.
+func (h *baseNetworkControllerEventHandler) recordUpdateEvent(objType reflect.Type, obj interface{}) {
+	switch objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording update event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
+}
+
+// RecordDeleteEvent records the delete event on this given object.
+func (h *baseNetworkControllerEventHandler) recordDeleteEvent(objType reflect.Type, obj interface{}) {
+	switch objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording delete event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
+}
+
+// RecordSuccessEvent records the success event on this given object.
+func (h *baseNetworkControllerEventHandler) recordSuccessEvent(objType reflect.Type, obj interface{}) {
+	switch objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording success event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().End("multinetworkpolicy", mnp.Namespace, mnp.Name)
 	}
 }

@@ -63,32 +63,17 @@ func (h *secondaryLayer2NetworkControllerEventHandler) RecordAddEvent(obj interf
 
 // RecordUpdateEvent records the udpate event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
-	switch h.objType {
-	case factory.MultiNetworkPolicyType:
-		mnp := obj.(*mnpapi.MultiNetworkPolicy)
-		klog.V(5).Infof("Recording update event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
-		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
-	}
+	h.baseHandler.recordAddEvent(h.objType, obj)
 }
 
 // RecordDeleteEvent records the delete event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
-	switch h.objType {
-	case factory.MultiNetworkPolicyType:
-		mnp := obj.(*mnpapi.MultiNetworkPolicy)
-		klog.V(5).Infof("Recording delete event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
-		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
-	}
+	h.baseHandler.recordAddEvent(h.objType, obj)
 }
 
 // RecordSuccessEvent records the success event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
-	switch h.objType {
-	case factory.MultiNetworkPolicyType:
-		mnp := obj.(*mnpapi.MultiNetworkPolicy)
-		klog.V(5).Infof("Recording success event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
-		metrics.GetConfigDurationRecorder().End("multinetworkpolicy", mnp.Namespace, mnp.Name)
-	}
+	h.baseHandler.recordAddEvent(h.objType, obj)
 }
 
 // RecordErrorEvent records the error event on this given object.
