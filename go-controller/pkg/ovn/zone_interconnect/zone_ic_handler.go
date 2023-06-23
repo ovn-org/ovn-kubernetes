@@ -16,7 +16,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
@@ -110,6 +110,7 @@ const (
 // ZoneInterconnectHandler creates the OVN resources required for interconnecting
 // multiple zones for a network (default or secondary layer 3)
 type ZoneInterconnectHandler struct {
+	watchFactory *factory.WatchFactory
 	// network which is inter-connected
 	util.NetInfo
 	nbClient libovsdbclient.Client
@@ -124,12 +125,13 @@ type ZoneInterconnectHandler struct {
 }
 
 // NewZoneInterconnectHandler returns a new ZoneInterconnectHandler object
-func NewZoneInterconnectHandler(nInfo util.NetInfo, nbClient, sbClient libovsdbclient.Client) *ZoneInterconnectHandler {
+func NewZoneInterconnectHandler(nInfo util.NetInfo, nbClient, sbClient libovsdbclient.Client, watchFactory *factory.WatchFactory) *ZoneInterconnectHandler {
 	zic := &ZoneInterconnectHandler{
-		NetInfo:   nInfo,
-		nbClient:  nbClient,
-		sbClient:  sbClient,
-		networkId: util.InvalidNetworkID,
+		NetInfo:      nInfo,
+		nbClient:     nbClient,
+		sbClient:     sbClient,
+		watchFactory: watchFactory,
+		networkId:    util.InvalidNetworkID,
 	}
 
 	zic.networkClusterRouterName = zic.GetNetworkScopedName(types.OVNClusterRouter)
@@ -138,7 +140,7 @@ func NewZoneInterconnectHandler(nInfo util.NetInfo, nbClient, sbClient libovsdbc
 	return zic
 }
 
-func (zic *ZoneInterconnectHandler) EnsureTransitSwitch(networkID int) error {
+func (zic *ZoneInterconnectHandler) createOrUpdateTransitSwitch(networkID int) error {
 	transitSwitchTunnelKey := BaseTransitSwitchTunnelKey + networkID
 	ts := &nbdb.LogicalSwitch{
 		Name: zic.networkTransitSwitchName,
@@ -158,35 +160,36 @@ func (zic *ZoneInterconnectHandler) EnsureTransitSwitch(networkID int) error {
 	return nil
 }
 
-// Init sets up the global transit switch required for interoperability with other zones
-// Must wait for network id to be annotated to this node by cluster manager
-func (zic *ZoneInterconnectHandler) Init(kube *kube.KubeOVN, ctx context.Context) error {
-
-	maxTimeout := 2 * time.Minute
-	networkID := util.InvalidNetworkID
+// ensureTransitSwitch sets up the global transit switch required for interoperability with other zones
+// Must wait for network id to be annotated to any node by cluster manager
+func (zic *ZoneInterconnectHandler) ensureTransitSwitch(nodes []*corev1.Node) error {
 	start := time.Now()
-	err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
-		nodeList, err := kube.GetNodes()
-		if err != nil {
-			return false, fmt.Errorf("failed to get nodes: %v", err)
-		}
 
-		networkID, err = zic.getNetworkIdFromNodes(nodeList.Items)
-		if util.IsAnnotationNotSetError(err) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
+	// first try to get the network ID from the current state of the nodes
+	networkID, err := zic.getNetworkIdFromNodes(nodes)
 
-		return true, nil
-	})
+	// if not set yet, let's retry for a bit
+	if util.IsAnnotationNotSetError(err) {
+		maxTimeout := 2 * time.Minute
+		err = wait.PollUntilContextTimeout(context.Background(), 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+			var err error
+			networkID, err = zic.getNetworkId()
+			if util.IsAnnotationNotSetError(err) {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+
+			return true, nil
+		})
+	}
 
 	if err != nil {
 		return fmt.Errorf("failed to find network ID: %v", err)
 	}
 
-	if err := zic.EnsureTransitSwitch(networkID); err != nil {
+	if err := zic.createOrUpdateTransitSwitch(networkID); err != nil {
 		return err
 	}
 
@@ -244,9 +247,20 @@ func (zic *ZoneInterconnectHandler) DeleteNode(node *corev1.Node) error {
 	return zic.cleanupNode(node.Name)
 }
 
-// SyncNodes cleans up the interconnect resources present in the OVN Northbound db
-// for the stale nodes
-func (zic *ZoneInterconnectHandler) SyncNodes(kNodes []interface{}) error {
+// SyncNodes ensures a transit switch exists and cleans up the interconnect
+// resources present in the OVN Northbound db for the stale nodes
+func (zic *ZoneInterconnectHandler) SyncNodes(objs []interface{}) error {
+	foundNodeNames := sets.New[string]()
+	foundNodes := make([]*corev1.Node, len(objs))
+	for i, obj := range objs {
+		node, ok := obj.(*corev1.Node)
+		if !ok {
+			return fmt.Errorf("spurious object in syncNodes: %v", obj)
+		}
+		foundNodeNames.Insert(node.Name)
+		foundNodes[i] = node
+	}
+
 	// Get the transit switch. If its not present no cleanup to do
 	ts := &nbdb.LogicalSwitch{
 		Name: zic.networkTransitSwitchName,
@@ -255,24 +269,15 @@ func (zic *ZoneInterconnectHandler) SyncNodes(kNodes []interface{}) error {
 	ts, err := libovsdbops.GetLogicalSwitch(zic.nbClient, ts)
 	if err != nil {
 		if errors.Is(err, libovsdbclient.ErrNotFound) {
-			// Nothing to do as there is no transit switch. This can happen for the first time
-			// when interconnect is enabled.
-			return nil
+			// This can happen for the first time when interconnect is enabled.
+			// Let's ensure the transit switch exists
+			return zic.ensureTransitSwitch(foundNodes)
 		}
 
 		return err
 	}
 
-	foundNodes := sets.New[string]()
-	for _, tmp := range kNodes {
-		node, ok := tmp.(*corev1.Node)
-		if !ok {
-			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
-		}
-		foundNodes.Insert(node.Name)
-	}
-
-	staleNodes := []string{}
+	staleNodeNames := []string{}
 	for _, p := range ts.Ports {
 		lp := &nbdb.LogicalSwitchPort{
 			UUID: p,
@@ -288,13 +293,13 @@ func (zic *ZoneInterconnectHandler) SyncNodes(kNodes []interface{}) error {
 		}
 
 		lportNode := lp.ExternalIDs["node"]
-		if !foundNodes.Has(lportNode) {
-			staleNodes = append(staleNodes, lportNode)
+		if !foundNodeNames.Has(lportNode) {
+			staleNodeNames = append(staleNodeNames, lportNode)
 		}
 	}
 
-	for _, staleNode := range staleNodes {
-		if err := zic.cleanupNode(staleNode); err != nil {
+	for _, staleNodeName := range staleNodeNames {
+		if err := zic.cleanupNode(staleNodeName); err != nil {
 			klog.Errorf("Failed to cleanup the interconnect resources from OVN Northbound db for the stale node %s : %w", err)
 		}
 	}
@@ -692,13 +697,16 @@ func (zic *ZoneInterconnectHandler) getStaticRoutes(ipPrefixes []*net.IPNet, nex
 	return staticRoutes
 }
 
-// getNetworkId returns the cached network ID or looks it up in the provided node
-func (zic *ZoneInterconnectHandler) getNetworkIdFromNode(node *corev1.Node) (int, error) {
-	return zic.getNetworkIdFromNodes([]corev1.Node{*node})
+func (zic *ZoneInterconnectHandler) getNetworkId() (int, error) {
+	nodes, err := zic.watchFactory.GetNodes()
+	if err != nil {
+		return util.InvalidNetworkID, err
+	}
+	return zic.getNetworkIdFromNodes(nodes)
 }
 
 // getNetworkId returns the cached network ID or looks it up in any of the provided nodes
-func (zic *ZoneInterconnectHandler) getNetworkIdFromNodes(nodes []corev1.Node) (int, error) {
+func (zic *ZoneInterconnectHandler) getNetworkIdFromNodes(nodes []*corev1.Node) (int, error) {
 	if zic.networkId != util.InvalidNetworkID {
 		return zic.networkId, nil
 	}
@@ -706,7 +714,7 @@ func (zic *ZoneInterconnectHandler) getNetworkIdFromNodes(nodes []corev1.Node) (
 	var networkId int
 	var err error
 	for i := range nodes {
-		networkId, err = util.ParseNetworkIDAnnotation(&nodes[i], zic.GetNetworkName())
+		networkId, err = util.ParseNetworkIDAnnotation(nodes[i], zic.GetNetworkName())
 		if util.IsAnnotationNotSetError(err) {
 			continue
 		}
