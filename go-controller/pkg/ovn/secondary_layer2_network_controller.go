@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -61,24 +62,40 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	// TBD: changes needs to be made to support multicast in secondary networks
 	oc.multicastSupport = false
 
-	oc.initRetryFramework()
+	oc.BaseSecondaryLayer2NetworkController.initRetryFramework()
 	return oc
 }
 
 // Start starts the secondary layer2 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
-	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	klog.Infof("Starting controller for secondary network %s", oc.GetNetworkName())
+
+	start := time.Now()
+	defer func() {
+		klog.Infof("Starting controller for secondary network %s took %v", oc.GetNetworkName(), time.Since(start))
+	}()
+
 	if err := oc.Init(); err != nil {
 		return err
 	}
 
-	return oc.Run()
+	return oc.run(ctx)
+}
+
+func (oc *SecondaryLayer2NetworkController) run(ctx context.Context) error {
+	err := oc.WatchNodes()
+	if err != nil {
+		return err
+	}
+
+	return oc.BaseSecondaryLayer2NetworkController.run()
 }
 
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
 func (oc *SecondaryLayer2NetworkController) Cleanup(netName string) error {
-	return oc.cleanup(types.Layer2Topology, netName)
+	klog.Infof("Delete OVN logical entities for network %s", netName)
+	return oc.BaseSecondaryLayer2NetworkController.cleanup(types.Layer2Topology, netName)
 }
 
 func (oc *SecondaryLayer2NetworkController) Init() error {
@@ -86,4 +103,9 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 
 	_, err := oc.InitializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
 	return err
+}
+
+func (oc *SecondaryLayer2NetworkController) Stop() {
+	klog.Infof("Stoping controller for secondary network %s", oc.GetNetworkName())
+	oc.BaseSecondaryLayer2NetworkController.stop()
 }

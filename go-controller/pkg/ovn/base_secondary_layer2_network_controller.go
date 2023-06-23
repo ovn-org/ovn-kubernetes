@@ -5,7 +5,6 @@ import (
 	"net"
 	"reflect"
 	"strconv"
-	"time"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -183,8 +182,8 @@ func (oc *BaseSecondaryLayer2NetworkController) newRetryFramework(
 	)
 }
 
-// Stop gracefully stops the controller, and delete all logical entities for this network if requested
-func (oc *BaseSecondaryLayer2NetworkController) Stop() {
+// stop gracefully stops the controller, and delete all logical entities for this network if requested
+func (oc *BaseSecondaryLayer2NetworkController) stop() {
 	klog.Infof("Stop secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
 	close(oc.stopChan)
 	oc.wg.Wait()
@@ -203,8 +202,6 @@ func (oc *BaseSecondaryLayer2NetworkController) Stop() {
 // cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
 func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string) error {
-	klog.Infof("Delete OVN logical entities for %s network controller of network %s", topotype, netName)
-
 	// delete layer 2 logical switches
 	ops, err := libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, nil,
 		func(item *nbdb.LogicalSwitch) bool {
@@ -227,10 +224,7 @@ func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string
 	return nil
 }
 
-func (oc *BaseSecondaryLayer2NetworkController) Run() error {
-	klog.Infof("Starting all the Watchers for network %s ...", oc.GetNetworkName())
-	start := time.Now()
-
+func (oc *BaseSecondaryLayer2NetworkController) run() error {
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
 	if err := oc.WatchNamespaces(); err != nil {
@@ -245,8 +239,6 @@ func (oc *BaseSecondaryLayer2NetworkController) Run() error {
 	if err := oc.WatchMultiNetworkPolicy(); err != nil {
 		return err
 	}
-
-	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	// controller is fully running and resource handlers have synced, update Topology version in OVN
 	if err := oc.updateL2TopologyVersion(); err != nil {
