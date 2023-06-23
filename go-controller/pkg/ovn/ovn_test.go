@@ -182,6 +182,9 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	if err == nil {
 		for _, node := range existingNodes.Items {
 			o.controller.localZoneNodes.Store(node.Name, true)
+			for _, secondaryController := range o.secondaryControllers {
+				secondaryController.bnc.localZoneNodes.Store(node.Name, true)
+			}
 		}
 	}
 }
