@@ -99,7 +99,7 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 		err = createTestNBGlobal(nbClient, "global")
 		Expect(err).NotTo(HaveOccurred())
 	}
-	externalController, err = NewExternalMasterController(controllerName, fakeClient,
+	externalController, err = NewExternalMasterController(fakeClient,
 		fakeRouteClient,
 		stopChan,
 		iFactory.PodCoreInformer(),

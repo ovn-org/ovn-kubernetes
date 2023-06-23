@@ -103,6 +103,7 @@ func NewExternalMasterController(
 		externalGWCache:   externalGWCache,
 		exGWCacheMutex:    exGWCacheMutex,
 		zone:              zone,
+		controllerName:    apbControllerName,
 	}
 
 	c := &ExternalGatewayMasterController{

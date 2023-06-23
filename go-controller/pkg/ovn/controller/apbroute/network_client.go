@@ -45,8 +45,8 @@ type northBoundClient struct {
 	addressSetFactory addressset.AddressSetFactory
 	externalGWCache   map[ktypes.NamespacedName]*ExternalRouteInfo
 	exGWCacheMutex    *sync.RWMutex
-
-	zone string
+	controllerName    string
+	zone              string
 }
 
 type conntrackClient struct {
