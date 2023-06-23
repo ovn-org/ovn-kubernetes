@@ -8,13 +8,11 @@ import (
 	"sync"
 	"time"
 
-	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -60,42 +58,22 @@ func (h *secondaryLayer3NetworkControllerEventHandler) GetResourceFromInformerCa
 
 // RecordAddEvent records the add event on this given object.
 func (h *secondaryLayer3NetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
-	switch h.objType {
-	case factory.MultiNetworkPolicyType:
-		mnp := obj.(*mnpapi.MultiNetworkPolicy)
-		klog.V(5).Infof("Recording add event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
-		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
-	}
+	h.baseHandler.recordAddEvent(h.objType, obj)
 }
 
 // RecordUpdateEvent records the udpate event on this given object.
 func (h *secondaryLayer3NetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
-	switch h.objType {
-	case factory.MultiNetworkPolicyType:
-		mnp := obj.(*mnpapi.MultiNetworkPolicy)
-		klog.V(5).Infof("Recording update event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
-		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
-	}
+	h.baseHandler.recordUpdateEvent(h.objType, obj)
 }
 
 // RecordDeleteEvent records the delete event on this given object.
 func (h *secondaryLayer3NetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
-	switch h.objType {
-	case factory.MultiNetworkPolicyType:
-		mnp := obj.(*mnpapi.MultiNetworkPolicy)
-		klog.V(5).Infof("Recording delete event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
-		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
-	}
+	h.baseHandler.recordDeleteEvent(h.objType, obj)
 }
 
 // RecordSuccessEvent records the success event on this given object.
 func (h *secondaryLayer3NetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
-	switch h.objType {
-	case factory.MultiNetworkPolicyType:
-		mnp := obj.(*mnpapi.MultiNetworkPolicy)
-		klog.V(5).Infof("Recording success event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
-		metrics.GetConfigDurationRecorder().End("multinetworkpolicy", mnp.Namespace, mnp.Name)
-	}
+	h.baseHandler.recordSuccessEvent(h.objType, obj)
 }
 
 // RecordErrorEvent records the error event on this given object.
