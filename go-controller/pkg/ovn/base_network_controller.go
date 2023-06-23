@@ -775,3 +775,7 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 	/** HACK END **/
 	return util.GetNodeZone(node) == bnc.zone
 }
+
+func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
+	return config.OVNKubernetesFeature.EnableInterconnect && bnc.NetInfo.TopologyType() == types.Layer2Topology
+}
