@@ -20,7 +20,10 @@ spec:
       openAPIV3Schema:
         description: EgressService is a CRD that allows the user to request that the
           source IP of egress packets originating from all of the pods that are endpoints
-          of a given LoadBalancer Service would be its ingress IP.
+          of the corresponding LoadBalancer Service would be its ingress IP. In addition,
+          it allows the user to request that egress packets originating from all of
+          the pods that are endpoints of the LoadBalancer service would use a different
+          network than the main one.
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -45,10 +48,10 @@ spec:
                 type: string
               nodeSelector:
                 description: Allows limiting the nodes that can be selected to handle
-                  the service's traffic. When present only a node whose labels match
-                  the specified selectors can be selected for handling the service's
-                  traffic. When it is not specified any node in the cluster can be
-                  chosen to manage the service's traffic.
+                  the service's traffic when sourceIPBy=LoadBalancerIP. When present
+                  only a node whose labels match the specified selectors can be selected
+                  for handling the service's traffic. When it is not specified any
+                  node in the cluster can be chosen to manage the service's traffic.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -92,13 +95,25 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+              sourceIPBy:
+                description: Determines the source IP of egress traffic originating
+                  from the pods backing the LoadBalancer Service. When `LoadBalancerIP`
+                  the source IP is set to its LoadBalancer ingress IP. When `Network`
+                  the source IP is set according to the interface of the Network,
+                  leveraging the masquerade rules that are already in place. Typically
+                  these rules specify SNAT to the IP of the outgoing interface, which
+                  means the packet will typically leave with the IP of the node.
+                enum:
+                - LoadBalancerIP
+                - Network
+                type: string
             type: object
           status:
             description: EgressServiceStatus defines the observed state of EgressService
             properties:
               host:
                 description: The name of the node selected to handle the service's
-                  traffic.
+                  traffic. In case sourceIPBy=Network the field will be set to "ALL".
                 type: string
             required:
             - host

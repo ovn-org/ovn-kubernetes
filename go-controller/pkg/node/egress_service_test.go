@@ -60,9 +60,11 @@ var _ = Describe("Egress Service Operations", func() {
 		It("repairs iptables and ip rules when stale entries are present", func() {
 			app.Action = func(ctx *cli.Context) error {
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ip -4 --json rule show",
-					Output: "[{\"priority\":5000,\"src\":\"10.128.0.3\",\"table\":\"wrongTable\"},{\"priority\":5000,\"src\":\"goneEp\",\"table\":\"mynetwork\"},{\"priority\":5000,\"src\":\"10.128.0.3\",\"table\":\"mynetwork\"},{\"priority\":5000,\"src\":\"10.129.0.2\",\"table\":\"mynetwork\"}]",
-					Err:    nil,
+					Cmd: "ip -4 --json rule show",
+					Output: "[{\"priority\":5000,\"src\":\"10.128.0.3\",\"table\":\"wrongTable\"},{\"priority\":5000,\"src\":\"goneEp\",\"table\":\"mynetwork\"}," +
+						"{\"priority\":5000,\"src\":\"10.128.0.3\",\"table\":\"mynetwork\"},{\"priority\":5000,\"src\":\"10.129.0.2\",\"table\":\"mynetwork\"}," +
+						"{\"priority\":5000,\"src\":\"10.128.0.33\",\"table\":\"mynetwork\"},{\"priority\":5000,\"src\":\"10.129.0.3\",\"table\":\"mynetwork\"}]",
+					Err: nil,
 				})
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ip -4 rule del prio 5000 from 10.128.0.3 table wrongTable",
@@ -127,6 +129,17 @@ var _ = Describe("Egress Service Operations", func() {
 						},
 						Protocol: getIPTablesProtocol("5.5.5.5"),
 					},
+					{
+						Table: "nat",
+						Chain: "OVN-KUBE-EGRESS-SVC",
+						Args: []string{
+							"-s", "10.128.0.33",
+							"-m", "comment", "--comment", "namespace1/service2", // service with host=ALL
+							"-j", "SNAT",
+							"--to-source", "1.2.3.4",
+						},
+						Protocol: getIPTablesProtocol("5.5.5.5"),
+					},
 				}
 				Expect(appendIptRules(fakeRules)).To(Succeed())
 				epPortName := "https"
@@ -185,20 +198,65 @@ var _ = Describe("Egress Service Operations", func() {
 					[]discovery.Endpoint{ep1, ep2},
 					[]discovery.EndpointPort{epPort})
 
+				egressService2 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service2",
+						Namespace: "namespace1",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						Network: "mynetwork",
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: "ALL",
+					},
+				}
+				service2 := *newService("service2", "namespace1", "10.129.0.3",
+					[]v1.ServicePort{
+						{
+							NodePort: int32(31111),
+							Protocol: v1.ProtocolTCP,
+							Port:     int32(8080),
+						},
+					},
+					v1.ServiceTypeLoadBalancer,
+					[]string{},
+					v1.ServiceStatus{
+						LoadBalancer: v1.LoadBalancerStatus{
+							Ingress: []v1.LoadBalancerIngress{{
+								IP: "5.5.5.6",
+							}},
+						},
+					},
+					false, false,
+				)
+
+				ep3 := discovery.Endpoint{
+					Addresses: []string{"10.128.0.33"},
+				}
+
+				endpointSlice2 := *newEndpointSlice(
+					"service2",
+					"namespace1",
+					[]discovery.Endpoint{ep3},
+					[]discovery.EndpointPort{epPort})
+
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
 						Items: []v1.Service{
 							service,
+							service2,
 						},
 					},
 					&discovery.EndpointSliceList{
 						Items: []discovery.EndpointSlice{
 							endpointSlice,
+							endpointSlice2,
 						},
 					},
 					&egressserviceapi.EgressServiceList{
 						Items: []egressserviceapi.EgressService{
 							egressService,
+							egressService2,
 						},
 					},
 				)
@@ -503,6 +561,152 @@ var _ = Describe("Egress Service Operations", func() {
 				}).ShouldNot(HaveOccurred())
 
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fakeOvnNode.fakeExec.ErrorDesc)
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("manages ip rules for LoadBalancer egress service backed by ovn-k pods with Network and Host=ALL", func() {
+			app.Action = func(ctx *cli.Context) error {
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ip -4 --json rule show",
+					Output: "[]",
+					Err:    nil,
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ip -4 rule add prio 5000 from 10.129.0.2 table mynetwork",
+					Err: nil,
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ip -4 rule add prio 5000 from 10.128.0.3 table mynetwork",
+					Err: nil,
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ip -4 rule del prio 5000 from 10.129.0.2 table mynetwork",
+					Err: nil,
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ip -4 rule del prio 5000 from 10.128.0.3 table mynetwork",
+					Err: nil,
+				})
+				epPortName := "https"
+				epPortValue := int32(443)
+
+				egressService := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service1",
+						Namespace: "namespace1",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						Network: "mynetwork",
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: "ALL",
+					},
+				}
+
+				service := *newService("service1", "namespace1", "10.129.0.2",
+					[]v1.ServicePort{
+						{
+							NodePort: int32(31111),
+							Protocol: v1.ProtocolTCP,
+							Port:     int32(8080),
+						},
+					},
+					v1.ServiceTypeLoadBalancer,
+					[]string{},
+					v1.ServiceStatus{
+						LoadBalancer: v1.LoadBalancerStatus{
+							Ingress: []v1.LoadBalancerIngress{{
+								IP: "5.5.5.5",
+							}},
+						},
+					},
+					false, false,
+				)
+
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.128.0.3"},
+					NodeName:  &fakeNodeName,
+				}
+				epPort := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
+				}
+
+				// host-networked endpoint, should not have an ip rule created
+				ep2 := discovery.Endpoint{
+					Addresses: []string{"192.168.18.15"},
+					NodeName:  &fakeNodeName,
+				}
+
+				// ep that does not belong to our node should not have an ip rule created
+				someOtherNode := "someOtherNode"
+				ep3 := discovery.Endpoint{
+					Addresses: []string{"10.128.1.5"},
+					NodeName:  &someOtherNode,
+				}
+				// endpointSlice.Endpoints is ovn-networked so this will
+				// come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1, ep2, ep3},
+					[]discovery.EndpointPort{epPort})
+
+				fakeOvnNode.start(ctx,
+					&v1.ServiceList{
+						Items: []v1.Service{
+							service,
+						},
+					},
+					&discovery.EndpointSliceList{
+						Items: []discovery.EndpointSlice{
+							endpointSlice,
+						},
+					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							egressService,
+						},
+					},
+				)
+
+				wf := fakeOvnNode.watcher.(*factory.WatchFactory)
+				c, err := egressservice.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
+					wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
+				Expect(err).ToNot(HaveOccurred())
+				fakeOvnNode.wg.Add(1)
+				go func() {
+					defer fakeOvnNode.wg.Done()
+					c.Run(1)
+				}()
+
+				expectedTables := map[string]util.FakeTable{
+					"nat": {
+						"OVN-KUBE-EGRESS-SVC": []string{
+							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
+						},
+					},
+					"filter": {},
+					"mangle": {},
+				}
+				f4 := iptV4.(*util.FakeIPTables)
+				Eventually(func() error {
+					return f4.MatchState(expectedTables)
+				}).ShouldNot(HaveOccurred())
+
+				err = fakeOvnNode.fakeClient.EgressServiceClient.K8sV1().EgressServices("namespace1").Delete(context.TODO(), "service1", metav1.DeleteOptions{})
+				Expect(err).ToNot(HaveOccurred())
+
+				Eventually(func() error {
+					return f4.MatchState(expectedTables)
+				}).ShouldNot(HaveOccurred())
+
+				Eventually(func() bool {
+					return fakeOvnNode.fakeExec.CalledMatchesExpected()
+				}).Should(BeTrue())
 				return nil
 			}
 			err := app.Run([]string{app.Name})
