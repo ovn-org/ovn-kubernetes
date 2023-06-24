@@ -314,6 +314,7 @@ func (oc *DefaultNetworkController) deleteLogicalRouterStaticRoute(podIP, mask, 
 
 // deletePodGWRoute deletes all associated gateway routing resources for one
 // pod gateway route
+// this MUST be called with a lock on routeInfo
 func (oc *DefaultNetworkController) deletePodGWRoute(routeInfo *apbroutecontroller.ExternalRouteInfo, podIP, gw, gr string) error {
 	if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
 		return nil
@@ -325,7 +326,7 @@ func (oc *DefaultNetworkController) deletePodGWRoute(routeInfo *apbroutecontroll
 			return err
 		}
 		if !local {
-			klog.V(4).InfoS("Pod %s is not in the local zone %s", routeInfo.PodName, oc.zone)
+			klog.V(4).InfoS("Not deleting exgw routes for pod %s not in the local zone %s", routeInfo.PodName, oc.zone)
 			return nil
 		}
 	}
@@ -481,6 +482,20 @@ func (oc *DefaultNetworkController) deleteGWRoutesForPod(name ktypes.NamespacedN
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
 func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*net.IPNet, podNsName ktypes.NamespacedName, node string) error {
+	pod, err := oc.watchFactory.PodCoreInformer().Lister().Pods(podNsName.Namespace).Get(podNsName.Name)
+	if err != nil {
+		return err
+	}
+
+	local, err := oc.isPodInLocalZone(pod)
+	if err != nil {
+		return err
+	}
+	if !local {
+		klog.V(4).InfoS("Not adding exgw routes for pod %s not in the local zone %s", podNsName, oc.zone)
+		return nil
+	}
+
 	gr := util.GetGatewayRouterFromNode(node)
 
 	routesAdded := 0
@@ -495,19 +510,8 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 	if err != nil {
 		return fmt.Errorf("failed to ensure routeInfo for %s, error: %v", podNsName, err)
 	}
-	pod, err := oc.watchFactory.PodCoreInformer().Lister().Pods(routeInfo.PodName.Namespace).Get(routeInfo.PodName.Name)
-	if err != nil {
-		return err
-	}
-	local, err := oc.isPodInLocalZone(pod)
-	if err != nil {
-		return err
-	}
-	if !local {
-		klog.V(4).InfoS("Pod %s is not in the local zone %s", routeInfo.PodName, oc.zone)
-		return nil
-	}
 	defer routeInfo.Unlock()
+
 	for _, podIPNet := range podIfAddrs {
 		for _, gateway := range gateways {
 			// TODO (trozet): use the go bindings here and batch commands
