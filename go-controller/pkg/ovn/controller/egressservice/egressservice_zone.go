@@ -858,6 +858,12 @@ func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcSt
 		return err
 	}
 
+	delAddrSetOps, err := c.deletePodIPsFromAddressSetOps(createIPAddressNetSlice(svcState.v4LocalEndpoints.UnsortedList(), svcState.v6LocalEndpoints.UnsortedList()))
+	if err != nil {
+		return err
+	}
+	deleteOps = append(deleteOps, delAddrSetOps...)
+
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 			return item.ExternalIDs[svcExternalIDKey] == key
