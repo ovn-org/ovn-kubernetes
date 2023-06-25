@@ -902,8 +902,6 @@ func wrappedTestFramework(basename string) *framework.Framework {
 			return
 		}
 
-		ovnDocker := "ovn-control-plane"
-
 		logLocation := "/var/log"
 		dbLocation := "/var/lib/openvswitch"
 		ovsdbLocation := "/etc/origin/openvswitch"
@@ -915,7 +913,7 @@ func wrappedTestFramework(basename string) *framework.Framework {
 
 		var args []string
 
-		// grab all OVS dbs
+		// grab all OVS and OVN dbs
 		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 		framework.ExpectNoError(err)
 		for _, node := range nodes.Items {
@@ -929,18 +927,18 @@ func wrappedTestFramework(basename string) *framework.Framework {
 				fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
 			_, err = runCommand(args...)
 			framework.ExpectNoError(err)
-		}
 
-		args = []string{containerRuntime, "exec", ovnDocker, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
-		_, err = runCommand(args...)
-		framework.ExpectNoError(err)
-
-		// grab the OVN dbs
-		for _, db := range dbs {
-			args = []string{containerRuntime, "exec", ovnDocker, "cp", "-f", fmt.Sprintf("%s/%s", dbLocation, db),
-				fmt.Sprintf("%s/%s", logDir, db)}
+			// IC will have dbs on every node, but legacy mode wont, check if they exist
+			args = []string{containerRuntime, "exec", node.Name, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
 			_, err = runCommand(args...)
-			framework.ExpectNoError(err)
+			if err == nil {
+				for _, db := range dbs {
+					args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", dbLocation, db),
+						fmt.Sprintf("%s/%s", logDir, db)}
+					_, err = runCommand(args...)
+					framework.ExpectNoError(err)
+				}
+			}
 		}
 	})
 

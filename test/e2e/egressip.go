@@ -91,7 +91,6 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) checkMode(restore bool) (s
 		portMaster = getTemplateContainerEnv(ovnNamespace, "deployment/ovnkube-master", "ovnkube-master", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
 	}
 
-
 	wantLegacy := (h.Legacy && !restore) || (h.modeWasLegacy && restore)
 	isLegacy := portNode == "" || portNode == OVN_EGRESSIP_LEGACY_HEALTHCHECK_PORT_ENV
 	outOfSync := portNode != portMaster
@@ -375,7 +374,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		return statuses
 	}
 
-	f := newPrivelegedTestFramework(egressIPName)
+	f := wrappedTestFramework(egressIPName)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
