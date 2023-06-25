@@ -877,7 +877,6 @@ func pokeIPTableRules(clientContainer, pattern string) int {
 }
 
 // isDualStackCluster returns 'true' if at least one of the nodes has more than one node subnet.
-// This can reliably be determined by checking that Annotations["k8s.ovn.org/node-subnets"] parses into map[string][]string.
 func isDualStackCluster(nodes *v1.NodeList) bool {
 	for _, node := range nodes.Items {
 		annotation, ok := node.Annotations[ovnNodeSubnets]
@@ -885,9 +884,11 @@ func isDualStackCluster(nodes *v1.NodeList) bool {
 			continue
 		}
 
-		subnetsDual := make(map[string][]string)
-		if err := json.Unmarshal([]byte(annotation), &subnetsDual); err == nil {
-			return true
+		subnets := make(map[string][]string)
+		if err := json.Unmarshal([]byte(annotation), &subnets); err == nil {
+			if len(subnets["default"]) > 1 {
+				return true
+			}
 		}
 	}
 	return false
