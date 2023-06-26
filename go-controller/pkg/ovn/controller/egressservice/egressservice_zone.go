@@ -518,12 +518,15 @@ func (c *Controller) repair() error {
 	}
 
 	// update caches after transaction completed
+	var allLocalV4Eps []string
 	for key, v4ToAdd := range svcKeyToLocalConfiguredV4Endpoints {
 		c.services[key].v4LocalEndpoints.Insert(v4ToAdd...)
+		allLocalV4Eps = append(allLocalV4Eps, v4ToAdd...)
 	}
-
+	var allLocalV6Eps []string
 	for key, v6ToAdd := range svcKeyToLocalConfiguredV6Endpoints {
 		c.services[key].v6LocalEndpoints.Insert(v6ToAdd...)
+		allLocalV6Eps = append(allLocalV6Eps, v6ToAdd...)
 	}
 
 	for key, v4ToAdd := range svcKeyToRemoteConfiguredV4Endpoints {
@@ -532,6 +535,11 @@ func (c *Controller) repair() error {
 
 	for key, v6ToAdd := range svcKeyToRemoteConfiguredV6Endpoints {
 		c.services[key].v6RemoteEndpoints.Insert(v6ToAdd...)
+	}
+
+	// re-set the global egressservice address set
+	if err := c.setPodIPsInAddressSet(createIPAddressNetSlice(allLocalV4Eps, allLocalV6Eps)); err != nil {
+		errorList = append(errorList, fmt.Errorf("failed to set pod IPs in the egressservice address set, err: %v", err))
 	}
 
 	return errors.NewAggregate(errorList)
