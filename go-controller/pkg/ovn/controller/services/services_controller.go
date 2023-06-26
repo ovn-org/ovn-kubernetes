@@ -56,61 +56,36 @@ func NewController(client clientset.Interface,
 	recorder record.EventRecorder,
 ) (*Controller, error) {
 	klog.V(4).Info("Creating event broadcaster")
-
 	c := &Controller{
-		client:            client,
-		nbClient:          nbClient,
-		queue:             workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
-		workerLoopPeriod:  time.Second,
-		alreadyApplied:    map[string][]LB{},
-		nodeIPv4Templates: NewNodeIPsTemplates(v1.IPv4Protocol),
-		nodeIPv6Templates: NewNodeIPsTemplates(v1.IPv6Protocol),
+		client:                client,
+		nbClient:              nbClient,
+		queue:                 workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
+		workerLoopPeriod:      time.Second,
+		alreadyApplied:        map[string][]LB{},
+		nodeIPv4Templates:     NewNodeIPsTemplates(v1.IPv4Protocol),
+		nodeIPv6Templates:     NewNodeIPsTemplates(v1.IPv6Protocol),
+		serviceInformer:       serviceInformer,
+		serviceLister:         serviceInformer.Lister(),
+		servicesSynced:        serviceInformer.Informer().HasSynced,
+		endpointSliceInformer: endpointSliceInformer,
+		endpointSliceLister:   endpointSliceInformer.Lister(),
+		endpointSlicesSynced:  endpointSliceInformer.Informer().HasSynced,
+		eventRecorder:         recorder,
+		repair:                newRepair(serviceInformer.Lister(), nbClient),
+		nodeInformer:          nodeInformer,
+		nodesSynced:           nodeInformer.Informer().HasSynced,
 	}
-
-	// services
-	klog.Info("Setting up event handlers for services")
-	_, err := serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onServiceAdd,
-		UpdateFunc: c.onServiceUpdate,
-		DeleteFunc: c.onServiceDelete,
-	}))
-	if err != nil {
-		return nil, err
-	}
-	c.serviceLister = serviceInformer.Lister()
-	c.servicesSynced = serviceInformer.Informer().HasSynced
-
-	// endpoints slices
-	klog.Info("Setting up event handlers for endpoint slices")
-	_, err = endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onEndpointSliceAdd,
-		UpdateFunc: c.onEndpointSliceUpdate,
-		DeleteFunc: c.onEndpointSliceDelete,
-	}))
-	if err != nil {
-		return nil, err
-	}
-
-	c.endpointSliceLister = endpointSliceInformer.Lister()
-	c.endpointSlicesSynced = endpointSliceInformer.Informer().HasSynced
-
-	c.eventRecorder = recorder
-
-	// repair controller
-	c.repair = newRepair(serviceInformer.Lister(), nbClient)
-
-	zone, err := util.GetNBZone(nbClient)
+	zone, err := util.GetNBZone(c.nbClient)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get the NB Zone : err - %w", err)
 	}
 	// load balancers need to be applied to nodes, so
 	// we need to watch Node objects for changes.
-	c.nodeTracker, err = newNodeTracker(nodeInformer, zone)
+	// Need to re-sync all services when a node gains its switch or GWR
+	c.nodeTracker = newNodeTracker(zone, c.RequestFullSync)
 	if err != nil {
 		return nil, err
 	}
-	c.nodeTracker.resyncFn = c.RequestFullSync // Need to re-sync all services when a node gains its switch or GWR
-	c.nodesSynced = nodeInformer.Informer().HasSynced
 
 	return c, nil
 }
@@ -123,11 +98,13 @@ type Controller struct {
 	nbClient      libovsdbclient.Client
 	eventRecorder record.EventRecorder
 
+	serviceInformer coreinformers.ServiceInformer
 	// serviceLister is able to list/get services and is populated by the shared informer passed to
 	serviceLister corelisters.ServiceLister
 	// servicesSynced returns true if the service shared informer has been synced at least once.
 	servicesSynced cache.InformerSynced
 
+	endpointSliceInformer discoveryinformers.EndpointSliceInformer
 	// endpointSliceLister is able to list/get endpoint slices and is populated
 	// by the shared informer passed to NewController
 	endpointSliceLister discoverylisters.EndpointSliceLister
@@ -151,6 +128,7 @@ type Controller struct {
 	// repair contains a controller that keeps in sync OVN and Kubernetes services
 	repair *repair
 
+	nodeInformer coreinformers.NodeInformer
 	// nodeTracker
 	nodeTracker *nodeTracker
 
@@ -185,11 +163,36 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	defer utilruntime.HandleCrash()
 	defer c.queue.ShutDown()
 
+	c.useLBGroups = useLBGroups
+	c.useTemplates = useTemplates
+
 	klog.Infof("Starting controller %s", controllerName)
 	defer klog.Infof("Shutting down controller %s", controllerName)
 
-	c.useLBGroups = useLBGroups
-	c.useTemplates = useTemplates
+	klog.Info("Setting up event handlers for services")
+	_, err := c.serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+		AddFunc:    c.onServiceAdd,
+		UpdateFunc: c.onServiceUpdate,
+		DeleteFunc: c.onServiceDelete,
+	}))
+	if err != nil {
+		return err
+	}
+
+	klog.Info("Setting up event handlers for endpoint slices")
+	_, err = c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+		AddFunc:    c.onEndpointSliceAdd,
+		UpdateFunc: c.onEndpointSliceUpdate,
+		DeleteFunc: c.onEndpointSliceDelete,
+	}))
+	if err != nil {
+		return err
+	}
+
+	err = c.nodeTracker.Start(c.nodeInformer)
+	if err != nil {
+		return err
+	}
 
 	// Wait for the caches to be synced
 	klog.Info("Waiting for informer caches to sync")

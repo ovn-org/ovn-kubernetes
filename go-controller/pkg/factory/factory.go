@@ -1074,8 +1074,16 @@ func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
 	return wf.informers[ServiceType].inf
 }
 
+func (wf *WatchFactory) ServiceCoreInformer() v1coreinformers.ServiceInformer {
+	return wf.iFactory.Core().V1().Services()
+}
+
 func (wf *WatchFactory) EndpointSliceInformer() cache.SharedIndexInformer {
 	return wf.informers[EndpointSliceType].inf
+}
+
+func (wf *WatchFactory) EndpointSliceCoreInformer() discoveryinformers.EndpointSliceInformer {
+	return wf.iFactory.Discovery().V1().EndpointSlices()
 }
 
 func (wf *WatchFactory) EgressQoSInformer() egressqosinformer.EgressQoSInformer {
