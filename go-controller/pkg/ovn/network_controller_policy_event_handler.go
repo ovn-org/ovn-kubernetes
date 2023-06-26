@@ -2,11 +2,10 @@ package ovn
 
 import (
 	"fmt"
-	"reflect"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"reflect"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -27,7 +26,8 @@ import (
 func (bnc *BaseNetworkController) newNetpolRetryFramework(
 	objectType reflect.Type,
 	syncFunc func([]interface{}) error,
-	extraParameters interface{}) *retry.RetryFramework {
+	extraParameters interface{},
+	stopChan <-chan struct{}) *retry.RetryFramework {
 	eventHandler := &networkControllerPolicyEventHandler{
 		objType:         objectType,
 		watchFactory:    bnc.watchFactory,
@@ -42,7 +42,7 @@ func (bnc *BaseNetworkController) newNetpolRetryFramework(
 		EventHandler:           eventHandler,
 	}
 	return retry.NewRetryFramework(
-		bnc.stopChan,
+		stopChan,
 		bnc.wg,
 		bnc.watchFactory,
 		resourceHandler,
