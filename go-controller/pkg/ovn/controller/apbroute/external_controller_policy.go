@@ -193,7 +193,6 @@ func (m *externalPolicyManager) processReconciliationWithNamespace(nsName string
 	if err != nil {
 		return err
 	}
-	// remove pod gw IPs that are no longer valid
 	allProcessedGWIPs := map[ktypes.NamespacedName]*gatewayInfo{}
 	// Consolidate all dynamic gateway IPs from the policies into a single map
 	for _, pp := range processedPolicies {
@@ -201,32 +200,83 @@ func (m *externalPolicyManager) processReconciliationWithNamespace(nsName string
 			allProcessedGWIPs[k] = v
 		}
 	}
-	newGateways, invalidGWIPs, ipsToKeep := m.calculateDynamicGateways(allProcessedGWIPs, cacheInfo.DynamicGateways)
+	newDynamicGateways, invalidGWIPs, ipsToKeep := m.calculateDynamicGateways(allProcessedGWIPs, cacheInfo.DynamicGateways)
+	// Consolidate all static gateway IPs from the policies into a single set
+	allStaticGWIPs := make(gatewayInfoList, 0)
+	for _, pp := range processedPolicies {
+		allStaticGWIPs = append(allStaticGWIPs, pp.staticGateways...)
+	}
+	newStaticGateways, invalidStaticGWIPs, staticIPsToKeep := m.calculateStaticGateways(allStaticGWIPs, cacheInfo.StaticGateways)
+
 	// delete all invalid GW IP references in the NorthBoundDB (master controller) or conntrack (node_controller)
-	err = m.netClient.deleteGatewayIPs(nsName, invalidGWIPs, ipsToKeep)
+	// provide all valid IPs, static as well as dynamic, since conntrack is using a white listed approach when deleting entries
+	err = m.netClient.deleteGatewayIPs(nsName, invalidGWIPs.Union(invalidStaticGWIPs), ipsToKeep.Union(staticIPsToKeep))
 	if err != nil {
 		return err
 	}
-	// proceed to add the GW IPs again
-	for _, gatewayInfo := range newGateways {
+
+	// proceed to add the dynamic GW IPs
+	for _, gatewayInfo := range newDynamicGateways {
 		err = m.addGWRoutesForNamespace(nsName, gatewayInfoList{gatewayInfo})
 		if err != nil {
 			return err
 		}
 	}
-	cacheInfo.DynamicGateways = newGateways
+	// add the static GW IPs
+	err = m.addGWRoutesForNamespace(nsName, newStaticGateways)
+	if err != nil {
+		return err
+	}
+	// Update namespace cacheInfo with the new static and dynamic gateways
+	cacheInfo.StaticGateways = newStaticGateways
+	cacheInfo.DynamicGateways = newDynamicGateways
 	return nil
 }
 
+func (m *externalPolicyManager) calculateStaticGateways(allProcessedGWIPs, cachedStaticGWInfo gatewayInfoList) (gatewayInfoList, sets.Set[string], sets.Set[string]) {
+	klog.V(5).InfoS("Processed static policies: %+v", allProcessedGWIPs)
+	ipsToKeep := sets.New[string]()
+	invalidGWIPs := sets.New[string]()
+	newGateways := make(gatewayInfoList, 0)
+
+	for _, gwInfo := range allProcessedGWIPs {
+		info := newGatewayInfo(sets.New[string](), gwInfo.BFDEnabled)
+		for ip := range gwInfo.Gateways.items {
+			if !cachedStaticGWInfo.HasIP(ip) {
+				klog.V(5).InfoS("PP to cacheInfo: static GW IP %s not found in namespace cache ", ip)
+				invalidGWIPs.Insert(ip)
+				continue
+			}
+			ipsToKeep.Insert(ip)
+			info.Gateways.items.Insert(ip)
+		}
+		if info.Gateways.items.Len() > 0 {
+			newGateways = append(newGateways, info)
+		}
+	}
+
+	// Compare all elements in the cacheInfo map against the consolidated map: those that are not in the consolidated map are to be deleted.
+	// The previous loop covers for the static IPs that exist in both slices but contain different gateway infos, and thus to be deleted
+	for _, cachedInfo := range cachedStaticGWInfo {
+		for ip := range cachedInfo.Gateways.items {
+			if !allProcessedGWIPs.HasIP(ip) {
+				klog.V(5).InfoS("CacheInfo-> static GW IP %v not found in processed policies", ip)
+				invalidGWIPs.Insert(ip)
+			}
+		}
+	}
+	return newGateways, invalidGWIPs, ipsToKeep
+}
+
 func (m *externalPolicyManager) calculateDynamicGateways(allProcessedGWIPs, cachedDynamicGWInfo map[ktypes.NamespacedName]*gatewayInfo) (map[ktypes.NamespacedName]*gatewayInfo, sets.Set[string], sets.Set[string]) {
-	klog.V(5).InfoS("Processed policies: %+v", allProcessedGWIPs)
+	klog.V(5).InfoS("Processed dynamic policies: %+v", allProcessedGWIPs)
 	// In order to delete the invalid GWs, the logic has to collect all the valid GW IPs as well as the invalid ones.
 	// This is due to implementation requirements by the network clients: for the NB interaction (master controller), only the invalid GWs is needed
 	// but when interacting with the conntrack (node controller), it requires to use only the valid GWs due to a white listing approach
 	// (delete any entry that does not reference any of these IPs) when deleting its entries.
 	ipsToKeep := sets.New[string]()
 	invalidGWIPs := sets.New[string]()
-	// this map will be used to store all valid gateway info references as they are processed in the next two loop.
+	// this map will be used to store all valid gateway info references as they are processed in the next two loops.
 	newGateways := map[ktypes.NamespacedName]*gatewayInfo{}
 	for k, v1 := range allProcessedGWIPs {
 		v2, ok := cachedDynamicGWInfo[k]
@@ -249,7 +299,6 @@ func (m *externalPolicyManager) calculateDynamicGateways(allProcessedGWIPs, cach
 			// IP not found in the processed policies, it means the pod gateway information is no longer applicable
 			klog.V(5).InfoS("CacheInfo-> GW IP %+v not found in processed policies", k)
 			invalidGWIPs.Insert(v.Gateways.UnsortedList()...)
-			continue
 		}
 	}
 	return newGateways, invalidGWIPs, ipsToKeep

@@ -30,6 +30,15 @@ func (m *externalPolicyManager) syncPod(pod *v1.Pod, podLister corev1listers.Pod
 	if pErr != nil {
 		return pErr
 	}
+	if policies.Len() == 0 {
+		// this is not a gateway pod
+		cacheInfo, found := m.getNamespaceInfoFromCache(pod.Namespace)
+		if found {
+			// its namespace is a target for policies.
+			policies = policies.Union(cacheInfo.Policies)
+			m.unlockNamespaceInfoCache(pod.Namespace)
+		}
+	}
 	klog.V(4).InfoS("Processing gateway pod %s/%s with matching policies %+v", pod.Namespace, pod.Name, policies.UnsortedList())
 	for policyName := range policies {
 		klog.V(5).InfoS("Queueing policy %s", policyName)
