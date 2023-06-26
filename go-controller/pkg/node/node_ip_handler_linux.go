@@ -10,11 +10,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/vishvananda/netlink"
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -235,7 +238,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	}
 
 	// update k8s.ovn.org/host-addresses
-	if err = util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
+	if err = c.updateHostAddresses(node); err != nil {
 		return err
 	}
 
@@ -263,6 +266,21 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 		return err
 	}
 	return nil
+}
+
+func (c *addressManager) updateHostAddresses(node *kapi.Node) error {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		// For DPU mode, here we need to use the DPU host's IP address which is the tenant cluster's
+		// host internal IP address instead.
+		nodeAddrStr, err := util.GetNodePrimaryIP(node)
+		if err != nil {
+			return err
+		}
+		nodeAddrSet := sets.New[string](nodeAddrStr)
+		return util.SetNodeHostAddresses(c.nodeAnnotator, nodeAddrSet)
+	}
+
+	return util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses)
 }
 
 func (c *addressManager) assignAddresses(nodeHostAddresses sets.Set[string]) bool {
