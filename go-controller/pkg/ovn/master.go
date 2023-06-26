@@ -606,12 +606,12 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 
 	staleNodes := sets.NewString()
 	for _, nodeSwitch := range nodeSwitches {
-		if !foundNodes.Has(nodeSwitch.Name) {
+		if nodeSwitch.Name != types.TransitSwitch && !foundNodes.Has(nodeSwitch.Name) {
 			staleNodes.Insert(nodeSwitch.Name)
 		}
 	}
 
-	// Find stale external logical swiches, based on well known prefix and node name
+	// Find stale external logical switches, based on well known prefix and node name
 	lookupExtSwFunction := func(item *nbdb.LogicalSwitch) bool {
 		nodeName := strings.TrimPrefix(item.Name, types.ExternalSwitchPrefix)
 		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
