@@ -49,22 +49,73 @@ var (
 	err                error
 )
 
+func createTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
+	nbGlobal := &nbdb.NBGlobal{Name: zone}
+	ops, err := nbClient.Create(nbGlobal)
+	if err != nil {
+		return err
+	}
+
+	_, err = nbClient.Transact(context.Background(), ops...)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func deleteTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
+	p := func(nbGlobal *nbdb.NBGlobal) bool {
+		return true
+	}
+
+	ops, err := nbClient.WhereCache(p).Delete()
+	if err != nil {
+		return err
+	}
+
+	_, err = nbClient.Transact(context.Background(), ops...)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func initController(k8sObjects, routePolicyObjects []runtime.Object) {
+	var nbZoneFailed bool
 	stopChan = make(chan struct{})
 	fakeClient = fake.NewSimpleClientset(k8sObjects...)
 	fakeRouteClient = adminpolicybasedrouteclient.NewSimpleClientset(routePolicyObjects...)
 	iFactory, err = factory.NewMasterWatchFactory(&util.OVNMasterClientset{KubeClient: fakeClient})
 	Expect(err).NotTo(HaveOccurred())
 	iFactory.Start()
-	externalController, err = NewExternalMasterController(controllerName, fakeClient,
+	// Try to get the NBZone.  If there is an error, create NB_Global record.
+	// Otherwise NewController() will return error since it
+	// calls util.GetNBZone().
+	_, err = util.GetNBZone(nbClient)
+	if err != nil {
+		nbZoneFailed = true
+		err = createTestNBGlobal(nbClient, "global")
+		Expect(err).NotTo(HaveOccurred())
+	}
+	externalController, err = NewExternalMasterController(fakeClient,
 		fakeRouteClient,
 		stopChan,
 		iFactory.PodCoreInformer(),
 		iFactory.NamespaceInformer(),
 		iFactory.NodeCoreInformer().Lister(),
 		nbClient,
-		addressset.NewFakeAddressSetFactory(controllerName))
+		addressset.NewFakeAddressSetFactory(apbControllerName))
 	Expect(err).NotTo(HaveOccurred())
+
+	if nbZoneFailed {
+		// Delete the NBGlobal row as this function created it.  Otherwise many tests would fail while
+		// checking the expectedData in the NBDB.
+		err = deleteTestNBGlobal(nbClient, "global")
+		Expect(err).NotTo(HaveOccurred())
+	}
+
 	mgr = externalController.mgr
 	go func() {
 		externalController.Run(5)

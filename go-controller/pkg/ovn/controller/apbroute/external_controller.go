@@ -199,9 +199,6 @@ type externalPolicyManager struct {
 	// the north bound is used by the master controller to add and delete the logical static routes, whilst the conntrack is used by the node controller to ensure that the ECMP entries are removed
 	// when a gateway IP is no longer an egress access point.
 	netClient networkClient
-	// flag used to determine if the repair() function has completed populating the policy route cache.
-	routePolicyCachePopulated      bool
-	mutexRoutePolicyCachePopulated *sync.Mutex
 }
 
 func newExternalPolicyManager(
@@ -212,29 +209,16 @@ func newExternalPolicyManager(
 	netClient networkClient) *externalPolicyManager {
 
 	m := externalPolicyManager{
-		stopCh:                         stopCh,
-		routeLister:                    routeLister,
-		podLister:                      podLister,
-		namespaceLister:                namespaceLister,
-		namespaceInfoSyncCache:         syncmap.NewSyncMap[*namespaceInfo](),
-		routePolicySyncCache:           syncmap.NewSyncMap[*routeInfo](),
-		netClient:                      netClient,
-		mutexRoutePolicyCachePopulated: &sync.Mutex{},
+		stopCh:                 stopCh,
+		routeLister:            routeLister,
+		podLister:              podLister,
+		namespaceLister:        namespaceLister,
+		namespaceInfoSyncCache: syncmap.NewSyncMap[*namespaceInfo](),
+		routePolicySyncCache:   syncmap.NewSyncMap[*routeInfo](),
+		netClient:              netClient,
 	}
 
 	return &m
-}
-
-func (m *externalPolicyManager) setRoutePolicyCacheAsPopulated() {
-	m.mutexRoutePolicyCachePopulated.Lock()
-	defer m.mutexRoutePolicyCachePopulated.Unlock()
-	m.routePolicyCachePopulated = true
-}
-
-func (m *externalPolicyManager) isRoutePolicyCachePopulated() bool {
-	m.mutexRoutePolicyCachePopulated.Lock()
-	defer m.mutexRoutePolicyCachePopulated.Unlock()
-	return m.routePolicyCachePopulated
 }
 
 // getRoutePolicyFromCache retrieves the cached value of the policy if it exists in the cache, as well as locking the key in case it exists.
@@ -353,19 +337,6 @@ func (m *externalPolicyManager) getAllRoutePolicies() ([]*adminpolicybasedroutea
 		routePolicies []*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute
 		err           error
 	)
-	// avoid hitting the informer if the route policies have already been cached during the execution of the repair() function.
-	if m.isRoutePolicyCachePopulated() {
-		keys := m.routePolicySyncCache.GetKeys()
-		for _, policyName := range keys {
-			rp, found, markedForDelete := m.getRoutePolicyFromCache(policyName)
-			// ignore route policies that have been marked for deletion. They will soon be parted from this cluster.
-			if !found || (found && markedForDelete) {
-				continue
-			}
-			routePolicies = append(routePolicies, &rp)
-		}
-		return routePolicies, nil
-	}
 
 	routePolicies, err = m.routeLister.List(labels.Everything())
 	if err != nil {

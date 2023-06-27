@@ -173,11 +173,6 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromPolicyRules
 		if err != nil {
 			return nil, err
 		}
-		// store the policy manifest in the routePolicy cache to avoid hitting the informer every time the annotation logic recalls all the gw IPs from the CRs.
-		err = c.mgr.storeRoutePolicyInCache(policy)
-		if err != nil {
-			return nil, err
-		}
 		nsList, err := c.mgr.listNamespacesBySelector(p.targetNamespacesSelector)
 		if err != nil {
 			return nil, err
@@ -213,8 +208,6 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromPolicyRules
 		}
 
 	}
-	// flag the route policy cache as populated so that the logic to retrieve the dynamic and static gw IPs from the annotation side can use the cache instead of hitting the informer.
-	c.mgr.setRoutePolicyCacheAsPopulated()
 	return clusterRouteCache, nil
 }
 
