@@ -7,7 +7,7 @@ import (
 
 var _ = ginkgo.Describe("OVS CPU affinity pinning", func() {
 
-	f := newPrivelegedTestFramework("ovspinning")
+	f := wrappedTestFramework("ovspinning")
 
 	ginkgo.It("can be enabled on specific nodes by creating enable_dynamic_cpu_affinity file", func() {
 

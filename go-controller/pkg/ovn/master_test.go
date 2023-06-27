@@ -1652,6 +1652,12 @@ func TestController_syncNodes(t *testing.T) {
 	node1Name := "node1"
 	nodeRmName := "deleteMeNode"
 
+	transitSwitch := nbdb.LogicalSwitch{
+		Name:        types.TransitSwitch,
+		UUID:        types.TransitSwitch + "-UUID",
+		OtherConfig: map[string]string{"subnet": "1.2.3.4/24"},
+	}
+
 	tests := []struct {
 		name         string
 		initialNBDB  []libovsdbtest.TestData
@@ -1739,6 +1745,20 @@ func TestController_syncNodes(t *testing.T) {
 				},
 			},
 			expectedNBDB: []libovsdbtest.TestData{},
+		},
+		{
+			name: "make sure transit switch is never removed",
+			initialNBDB: []libovsdbtest.TestData{
+				&transitSwitch,
+				// left-over external logical switch
+				&nbdb.LogicalSwitch{
+					Name: types.ExternalSwitchPrefix + nodeRmName,
+					UUID: types.ExternalSwitchPrefix + nodeRmName + "-UUID",
+				},
+			},
+			expectedNBDB: []libovsdbtest.TestData{
+				&transitSwitch,
+			},
 		},
 		{
 			name: "removes stale chassis and chassis private",
