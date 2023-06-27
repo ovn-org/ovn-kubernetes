@@ -38,7 +38,7 @@ import (
 
 const (
 	Chain          = "OVN-KUBE-EGRESS-SVC" // called from nat-POSTROUTING
-	IPRulePriority = 5000                  // the priority of the ip rules created by the controller
+	IPRulePriority = 5000                  // the priority of the ip rules created by the controller. Egress IP priority is 6000.
 )
 
 type Controller struct {
