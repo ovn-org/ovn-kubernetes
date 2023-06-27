@@ -1660,7 +1660,7 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 
 func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig,
-	watchFactory factory.NodeWatchFactory, routeManager *routemanager.RouteManager) (*gateway, error) {
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
@@ -1891,7 +1891,7 @@ func svcToCookie(namespace string, name string, token string, port int32) (strin
 	return fmt.Sprintf("0x%x", h.Sum64()), nil
 }
 
-func addMasqueradeRoute(routeManager *routemanager.RouteManager, netIfaceName, nodeName string, ifAddrs []*net.IPNet, watchFactory factory.NodeWatchFactory) error {
+func addMasqueradeRoute(routeManager *routemanager.Controller, netIfaceName, nodeName string, ifAddrs []*net.IPNet, watchFactory factory.NodeWatchFactory) error {
 	var ipv4, ipv6 net.IP
 	findIPs := func(ips []net.IP) error {
 		var err error
@@ -1957,10 +1957,10 @@ func addMasqueradeRoute(routeManager *routemanager.RouteManager, netIfaceName, n
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv4)
 
 		routes = append(routes, routemanager.Route{
-			GWIP:   nil,
+			GwIP:   nil,
 			Subnet: masqIPNet,
 			MTU:    mtu,
-			SRCIP:  ipv4,
+			SrcIP:  ipv4,
 		})
 	}
 
@@ -1969,14 +1969,14 @@ func addMasqueradeRoute(routeManager *routemanager.RouteManager, netIfaceName, n
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv6)
 
 		routes = append(routes, routemanager.Route{
-			GWIP:   nil,
+			GwIP:   nil,
 			Subnet: masqIPNet,
 			MTU:    mtu,
-			SRCIP:  ipv6,
+			SrcIP:  ipv6,
 		})
 	}
 	if len(routes) > 0 {
-		routeManager.Add(routemanager.RoutesPerLink{netIfaceLink, routes})
+		routeManager.Add(routemanager.RoutesPerLink{Link: netIfaceLink, Routes: routes})
 	}
 
 	return nil

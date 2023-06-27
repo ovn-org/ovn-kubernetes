@@ -269,18 +269,17 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(), EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}, existingNode.Name)
 	waiter := newStartupWaiter()
 	wg := &sync.WaitGroup{}
-	rm := routemanager.NewRouteManager(true, 10*time.Second)
+	rm := routemanager.NewController()
 	stopCh := make(chan struct{})
 	defer func() {
 		close(stopCh)
 		wg.Wait()
 	}()
-
 	wg.Add(1)
 	go testNS.Do(func(netNS ns.NetNS) error {
 		defer wg.Done()
 		defer GinkgoRecover()
-		rm.Run(stopCh)
+		rm.Run(stopCh, 10*time.Second)
 		return nil
 	})
 
@@ -363,13 +362,12 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(), EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}, existingNode.Name)
 	waiter := newStartupWaiter()
 	wg := &sync.WaitGroup{}
-	rm := routemanager.NewRouteManager(true, 10*time.Second)
+	rm := routemanager.NewController()
 	stopCh := make(chan struct{})
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		rm.Run(stopCh)
-	}()
+	go testNS.Do(func(netNS ns.NetNS) error {
+		rm.Run(stopCh, 10*time.Second)
+		return nil
+	})
 	defer func() {
 		close(stopCh)
 		wg.Wait()
@@ -452,13 +450,13 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 	wg := &sync.WaitGroup{}
-	rm := routemanager.NewRouteManager(true, 10*time.Second)
+	rm := routemanager.NewController()
 	stopCh := make(chan struct{})
 	wg.Add(1)
 	go testNS.Do(func(netNS ns.NetNS) error {
 		defer wg.Done()
 		defer GinkgoRecover()
-		rm.Run(stopCh)
+		rm.Run(stopCh, 10*time.Second)
 		return nil
 	})
 	defer func() {

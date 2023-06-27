@@ -175,7 +175,7 @@ func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
 	return tearDownInterfaceIPConfig(mpcfg.link, ipt4, ipt6)
 }
 
-func setupManagementPortIPFamilyConfig(routeManager *routemanager.RouteManager, mpcfg *managementPortConfig, cfg *managementPortIPFamilyConfig) ([]string, error) {
+func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mpcfg *managementPortConfig, cfg *managementPortIPFamilyConfig) ([]string, error) {
 	var warnings []string
 	var err error
 	var exists bool
@@ -205,10 +205,10 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.RouteManager, 
 			subnet, cfg.gwIP, mpcfg.ifName))
 		subnetCopy := *subnet
 		routes = append(routes, routemanager.Route{
-			GWIP:   cfg.gwIP,
+			GwIP:   cfg.gwIP,
 			Subnet: &subnetCopy,
 			MTU:    config.Default.RoutableMTU,
-			SRCIP:  nil,
+			SrcIP:  nil,
 		})
 	}
 	if len(routes) > 0 {
@@ -284,7 +284,7 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.RouteManager, 
 	return warnings, nil
 }
 
-func setupManagementPortConfig(routeManager *routemanager.RouteManager, cfg *managementPortConfig) ([]string, error) {
+func setupManagementPortConfig(routeManager *routemanager.Controller, cfg *managementPortConfig) ([]string, error) {
 	var warnings, allWarnings []string
 	var err error
 
@@ -303,7 +303,7 @@ func setupManagementPortConfig(routeManager *routemanager.RouteManager, cfg *man
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(routeManager *routemanager.RouteManager, interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
+func createPlatformManagementPort(routeManager *routemanager.Controller, interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
 	var cfg *managementPortConfig
 	var err error
 
@@ -485,7 +485,7 @@ func DelMgtPortIptRules() {
 // 1. route entries to cluster CIDR and service CIDR through management port
 // 2. ARP entry for the node subnet's gateway ip
 // 3. IPtables chain and rule for SNATing packets entering the logical topology
-func checkManagementPortHealth(routeManager *routemanager.RouteManager, cfg *managementPortConfig) {
+func checkManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) {
 	warnings, err := setupManagementPortConfig(routeManager, cfg)
 	for _, warning := range warnings {
 		klog.Warningf(warning)

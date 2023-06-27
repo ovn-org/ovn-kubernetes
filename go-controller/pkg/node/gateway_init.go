@@ -299,7 +299,7 @@ func getInterfaceByIP(ip net.IP) (string, error) {
 }
 
 // configureSvcRouteViaInterface routes svc traffic through the provided interface
-func configureSvcRouteViaInterface(routeManager *routemanager.RouteManager, iface string, gwIPs []net.IP) error {
+func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface string, gwIPs []net.IP) error {
 	link, err := util.LinkSetUp(iface)
 	if err != nil {
 		return fmt.Errorf("unable to get link for %s, error: %v", iface, err)
@@ -320,14 +320,14 @@ func configureSvcRouteViaInterface(routeManager *routemanager.RouteManager, ifac
 		subnetCopy := *subnet
 		gwIPCopy := gwIP[0]
 		routes = append(routes, routemanager.Route{
-			GWIP:   gwIPCopy,
+			GwIP:   gwIPCopy,
 			Subnet: &subnetCopy,
 			MTU:    mtu,
-			SRCIP:  nil,
+			SrcIP:  nil,
 		})
 	}
 	if len(routes) > 0 {
-		routeManager.Add(routemanager.RoutesPerLink{link, routes})
+		routeManager.Add(routemanager.RoutesPerLink{Link: link, Routes: routes})
 	}
 	return nil
 }

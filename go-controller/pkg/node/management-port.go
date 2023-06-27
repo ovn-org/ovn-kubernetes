@@ -21,10 +21,10 @@ import (
 type ManagementPort interface {
 	// Create Management port, use annotator to update node annotation with management port details
 	// and waiter to set up condition to wait on for management port creation
-	Create(routeManager *routemanager.RouteManager, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error)
+	Create(routeManager *routemanager.Controller, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error)
 	// CheckManagementPortHealth checks periodically for management port health until stopChan is posted
 	// or closed and reports any warnings/errors to log
-	CheckManagementPortHealth(routeManager *routemanager.RouteManager, cfg *managementPortConfig, stopChan chan struct{})
+	CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig, stopChan chan struct{})
 	// Currently, the management port(s) that doesn't have an assignable IP address are the following cases:
 	//   - Full mode with HW backed device (e.g. Virtual Function Representor).
 	//   - DPU mode with Virtual Function Representor.
@@ -76,7 +76,7 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 	}
 }
 
-func (mp *managementPort) Create(routeManager *routemanager.RouteManager, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPort) Create(routeManager *routemanager.Controller, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
 		if err := syncMgmtPortInterface(mp.hostSubnets, mgmtPortName, true); err != nil {
 			return nil, fmt.Errorf("failed to sync management port: %v", err)
@@ -122,7 +122,7 @@ func (mp *managementPort) Create(routeManager *routemanager.RouteManager, nodeAn
 	return cfg, nil
 }
 
-func (mp *managementPort) CheckManagementPortHealth(routeManager *routemanager.RouteManager, cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPort) CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig, stopChan chan struct{}) {
 	go wait.Until(
 		func() {
 			checkManagementPortHealth(routeManager, cfg)
