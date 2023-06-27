@@ -24,6 +24,7 @@ import (
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
+	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
@@ -399,11 +400,15 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	wf := &WatchFactory{
 		iFactory:             informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
+		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
 	}
 
 	if err := egressserviceapi.AddToScheme(egressservicescheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -483,6 +488,12 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 
 	if config.OVNKubernetesFeature.EnableEgressService {
 		wf.informers[EgressServiceType], err = newInformer(EgressServiceType, wf.egressServiceFactory.K8s().V1().EgressServices().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
 		if err != nil {
 			return nil, err
 		}
@@ -1174,6 +1185,10 @@ func (wf *WatchFactory) ANPInformer() anpinformer.AdminNetworkPolicyInformer {
 
 func (wf *WatchFactory) BANPInformer() anpinformer.BaselineAdminNetworkPolicyInformer {
 	return wf.anpFactory.Policy().V1alpha1().BaselineAdminNetworkPolicies()
+}
+
+func (wf *WatchFactory) EgressIPInformer() egressipinformer.EgressIPInformer {
+	return wf.eipFactory.K8s().V1().EgressIPs()
 }
 
 // withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the
