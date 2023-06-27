@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
@@ -1659,7 +1660,7 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 
 func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig,
-	watchFactory factory.NodeWatchFactory, routeManager *routeManager) (*gateway, error) {
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.RouteManager) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
@@ -1890,7 +1891,7 @@ func svcToCookie(namespace string, name string, token string, port int32) (strin
 	return fmt.Sprintf("0x%x", h.Sum64()), nil
 }
 
-func addMasqueradeRoute(routeManager *routeManager, netIfaceName, nodeName string, ifAddrs []*net.IPNet, watchFactory factory.NodeWatchFactory) error {
+func addMasqueradeRoute(routeManager *routemanager.RouteManager, netIfaceName, nodeName string, ifAddrs []*net.IPNet, watchFactory factory.NodeWatchFactory) error {
 	var ipv4, ipv6 net.IP
 	findIPs := func(ips []net.IP) error {
 		var err error
@@ -1950,16 +1951,16 @@ func addMasqueradeRoute(routeManager *routeManager, netIfaceName, nodeName strin
 		return fmt.Errorf("unable to find shared gw bridge interface: %s", netIfaceName)
 	}
 	mtu := 0
-	var routes []route
+	var routes []routemanager.Route
 	if ipv4 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String()))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv4)
 
-		routes = append(routes, route{
-			gwIP:   nil,
-			subnet: masqIPNet,
-			mtu:    mtu,
-			srcIP:  ipv4,
+		routes = append(routes, routemanager.Route{
+			GWIP:   nil,
+			Subnet: masqIPNet,
+			MTU:    mtu,
+			SRCIP:  ipv4,
 		})
 	}
 
@@ -1967,15 +1968,15 @@ func addMasqueradeRoute(routeManager *routeManager, netIfaceName, nodeName strin
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/128", config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String()))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv6)
 
-		routes = append(routes, route{
-			gwIP:   nil,
-			subnet: masqIPNet,
-			mtu:    mtu,
-			srcIP:  ipv6,
+		routes = append(routes, routemanager.Route{
+			GWIP:   nil,
+			Subnet: masqIPNet,
+			MTU:    mtu,
+			SRCIP:  ipv6,
 		})
 	}
 	if len(routes) > 0 {
-		routeManager.add(routesPerLink{netIfaceLink, routes})
+		routeManager.Add(routemanager.RoutesPerLink{netIfaceLink, routes})
 	}
 
 	return nil

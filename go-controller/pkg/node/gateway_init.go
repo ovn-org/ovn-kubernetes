@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -298,13 +299,13 @@ func getInterfaceByIP(ip net.IP) (string, error) {
 }
 
 // configureSvcRouteViaInterface routes svc traffic through the provided interface
-func configureSvcRouteViaInterface(routeManager *routeManager, iface string, gwIPs []net.IP) error {
+func configureSvcRouteViaInterface(routeManager *routemanager.RouteManager, iface string, gwIPs []net.IP) error {
 	link, err := util.LinkSetUp(iface)
 	if err != nil {
 		return fmt.Errorf("unable to get link for %s, error: %v", iface, err)
 	}
 
-	var routes []route
+	var routes []routemanager.Route
 	for _, subnet := range config.Kubernetes.ServiceCIDRs {
 		gwIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(subnet), gwIPs)
 		if err != nil {
@@ -318,15 +319,15 @@ func configureSvcRouteViaInterface(routeManager *routeManager, iface string, gwI
 		}
 		subnetCopy := *subnet
 		gwIPCopy := gwIP[0]
-		routes = append(routes, route{
-			gwIP:   gwIPCopy,
-			subnet: &subnetCopy,
-			mtu:    mtu,
-			srcIP:  nil,
+		routes = append(routes, routemanager.Route{
+			GWIP:   gwIPCopy,
+			Subnet: &subnetCopy,
+			MTU:    mtu,
+			SRCIP:  nil,
 		})
 	}
 	if len(routes) > 0 {
-		routeManager.add(routesPerLink{link, routes})
+		routeManager.Add(routemanager.RoutesPerLink{link, routes})
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
@@ -174,7 +175,7 @@ func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
 	return tearDownInterfaceIPConfig(mpcfg.link, ipt4, ipt6)
 }
 
-func setupManagementPortIPFamilyConfig(routeManager *routeManager, mpcfg *managementPortConfig, cfg *managementPortIPFamilyConfig) ([]string, error) {
+func setupManagementPortIPFamilyConfig(routeManager *routemanager.RouteManager, mpcfg *managementPortConfig, cfg *managementPortIPFamilyConfig) ([]string, error) {
 	var warnings []string
 	var err error
 	var exists bool
@@ -190,7 +191,7 @@ func setupManagementPortIPFamilyConfig(routeManager *routeManager, mpcfg *manage
 		return warnings, err
 	}
 
-	var routes []route
+	var routes []routemanager.Route
 	for _, subnet := range cfg.allSubnets {
 		exists, err = util.LinkRouteExists(mpcfg.link, cfg.gwIP, subnet)
 		if err != nil {
@@ -203,15 +204,15 @@ func setupManagementPortIPFamilyConfig(routeManager *routeManager, mpcfg *manage
 		warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
 			subnet, cfg.gwIP, mpcfg.ifName))
 		subnetCopy := *subnet
-		routes = append(routes, route{
-			gwIP:   cfg.gwIP,
-			subnet: &subnetCopy,
-			mtu:    config.Default.RoutableMTU,
-			srcIP:  nil,
+		routes = append(routes, routemanager.Route{
+			GWIP:   cfg.gwIP,
+			Subnet: &subnetCopy,
+			MTU:    config.Default.RoutableMTU,
+			SRCIP:  nil,
 		})
 	}
 	if len(routes) > 0 {
-		routeManager.add(routesPerLink{mpcfg.link, routes})
+		routeManager.Add(routemanager.RoutesPerLink{Link: mpcfg.link, Routes: routes})
 	}
 
 	// Add a neighbour entry on the K8s node to map routerIP with routerMAC. This is
@@ -283,7 +284,7 @@ func setupManagementPortIPFamilyConfig(routeManager *routeManager, mpcfg *manage
 	return warnings, nil
 }
 
-func setupManagementPortConfig(routeManager *routeManager, cfg *managementPortConfig) ([]string, error) {
+func setupManagementPortConfig(routeManager *routemanager.RouteManager, cfg *managementPortConfig) ([]string, error) {
 	var warnings, allWarnings []string
 	var err error
 
@@ -302,7 +303,7 @@ func setupManagementPortConfig(routeManager *routeManager, cfg *managementPortCo
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(routeManager *routeManager, interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
+func createPlatformManagementPort(routeManager *routemanager.RouteManager, interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
 	var cfg *managementPortConfig
 	var err error
 
@@ -484,7 +485,7 @@ func DelMgtPortIptRules() {
 // 1. route entries to cluster CIDR and service CIDR through management port
 // 2. ARP entry for the node subnet's gateway ip
 // 3. IPtables chain and rule for SNATing packets entering the logical topology
-func checkManagementPortHealth(routeManager *routeManager, cfg *managementPortConfig) {
+func checkManagementPortHealth(routeManager *routemanager.RouteManager, cfg *managementPortConfig) {
 	warnings, err := setupManagementPortConfig(routeManager, cfg)
 	for _, warning := range warnings {
 		klog.Warningf(warning)

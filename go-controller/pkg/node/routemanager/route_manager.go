@@ -1,4 +1,4 @@
-package node
+package routemanager
 
 import (
 	"fmt"
@@ -12,32 +12,32 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-type routeManager struct {
+type RouteManager struct {
 	// log all route netlink events received
 	logRouteChanges bool
 	// period for which we want to check that the routes we manage are applied. This is needed for the rare case
 	// we miss a route event.
 	syncPeriod time.Duration
-	store      map[string]routesPerLink // key is link name
-	addRouteCh chan routesPerLink
-	delRouteCh chan routesPerLink
+	store      map[string]RoutesPerLink // key is link name
+	addRouteCh chan RoutesPerLink
+	delRouteCh chan RoutesPerLink
 }
 
-// newRouteManager manages routes which include adding and deletion of routes. It also manages restoration of managed routes.
-// Begin managing routes by calling run() to start the manager.
+// NewRouteManager manages routes which include adding and deletion of routes. It also manages restoration of managed routes.
+// Begin managing routes by calling Run() to start the manager.
 // Routes should be added via add(route) and deletion via del(route) functions only.
 // All other functions are used internally.
-func newRouteManager(logRouteChanges bool, syncPeriod time.Duration) *routeManager {
-	return &routeManager{
+func NewRouteManager(logRouteChanges bool, syncPeriod time.Duration) *RouteManager {
+	return &RouteManager{
 		logRouteChanges: logRouteChanges,
 		syncPeriod:      syncPeriod,
-		store:           make(map[string]routesPerLink),
-		addRouteCh:      make(chan routesPerLink, 5),
-		delRouteCh:      make(chan routesPerLink, 5),
+		store:           make(map[string]RoutesPerLink),
+		addRouteCh:      make(chan RoutesPerLink, 5),
+		delRouteCh:      make(chan RoutesPerLink, 5),
 	}
 }
 
-func (rm *routeManager) run(stopCh <-chan struct{}) {
+func (rm *RouteManager) Run(stopCh <-chan struct{}) {
 	var err error
 	var subscribed bool
 	var routeEventCh chan netlink.RouteUpdate
@@ -79,15 +79,15 @@ func (rm *routeManager) run(stopCh <-chan struct{}) {
 	}
 }
 
-func (rm *routeManager) add(rl routesPerLink) {
+func (rm *RouteManager) Add(rl RoutesPerLink) {
 	rm.addRouteCh <- rl
 }
 
-func (rm *routeManager) del(rl routesPerLink) {
+func (rm *RouteManager) Del(rl RoutesPerLink) {
 	rm.delRouteCh <- rl
 }
 
-func (rm *routeManager) addRoutesPerLink(rl routesPerLink) error {
+func (rm *RouteManager) addRoutesPerLink(rl RoutesPerLink) error {
 	klog.Infof("Route Manager: attempting to add routes for link: %s", rl.String())
 	if err := rl.validate(); err != nil {
 		return fmt.Errorf("failed to validate addition of new routes for link (%s): %v", rl.String(), err)
@@ -102,14 +102,14 @@ func (rm *routeManager) addRoutesPerLink(rl routesPerLink) error {
 	return nil
 }
 
-func (rm *routeManager) delRoutesPerLink(rl routesPerLink) error {
+func (rm *RouteManager) delRoutesPerLink(rl RoutesPerLink) error {
 	klog.Infof("Route Manager: attempting to delete routes for link: %s", rl.String())
 	if err := rl.validate(); err != nil {
 		return fmt.Errorf("failed to validate route for link (%s): %v", rl.String(), err)
 	}
-	var deletedRoutes []route
-	for _, r := range rl.routes {
-		if err := rm.netlinkDelRoute(rl.link, r.subnet); err != nil {
+	var deletedRoutes []Route
+	for _, r := range rl.Routes {
+		if err := rm.netlinkDelRoute(rl.Link, r.Subnet); err != nil {
 			return err
 		}
 		deletedRoutes = append(deletedRoutes, r)
@@ -121,12 +121,12 @@ func (rm *routeManager) delRoutesPerLink(rl routesPerLink) error {
 	}
 	routesPerLinkFound, ok := rm.store[infName]
 	if !ok {
-		routesPerLinkFound = routesPerLink{rl.link, []route{}}
+		routesPerLinkFound = RoutesPerLink{rl.Link, []Route{}}
 	}
 	if len(deletedRoutes) > 0 {
 		routesPerLinkFound.delRoutes(deletedRoutes)
 	}
-	if len(routesPerLinkFound.routes) == 0 {
+	if len(routesPerLinkFound.Routes) == 0 {
 		delete(rm.store, infName)
 	} else {
 		rm.store[infName] = routesPerLinkFound
@@ -137,7 +137,7 @@ func (rm *routeManager) delRoutesPerLink(rl routesPerLink) error {
 
 // processNetlinkEvent will log new and deleted routes if logRouteChanges is true. It will also check if a deleted route
 // is managed by route manager and if so, determine if a sync is needed to restore any managed routes.
-func (rm *routeManager) processNetlinkEvent(ru netlink.RouteUpdate) error {
+func (rm *RouteManager) processNetlinkEvent(ru netlink.RouteUpdate) error {
 	if ru.Type == unix.RTM_NEWROUTE {
 		// An event resulting from `ip route change` will be seen as type RTM_NEWROUTE event and therefore this function will only
 		// log the changes and not attempt to restore the change. This will be accomplished by the sync function.
@@ -168,8 +168,8 @@ func (rm *routeManager) processNetlinkEvent(ru netlink.RouteUpdate) error {
 
 	var syncNeeded bool
 	var syncReason string
-	for _, managedRoute := range rl.routes {
-		for _, routeEvent := range rlEvent.routes {
+	for _, managedRoute := range rl.Routes {
+		for _, routeEvent := range rlEvent.Routes {
 			if managedRoute.equal(routeEvent) {
 				syncNeeded = true
 				syncReason = fmt.Sprintf("managed route was modified: %s", managedRoute.string())
@@ -185,16 +185,16 @@ func (rm *routeManager) processNetlinkEvent(ru netlink.RouteUpdate) error {
 	return nil
 }
 
-func (rm *routeManager) applyRoutesPerLink(rl routesPerLink) error {
-	for _, r := range rl.routes {
-		if err := rm.applyRoute(rl.link, r.gwIP, r.subnet, r.mtu, r.srcIP); err != nil {
+func (rm *RouteManager) applyRoutesPerLink(rl RoutesPerLink) error {
+	for _, r := range rl.Routes {
+		if err := rm.applyRoute(rl.Link, r.GWIP, r.Subnet, r.MTU, r.SRCIP); err != nil {
 			return fmt.Errorf("failed to apply route (%s) because of error: %v", r.string(), err)
 		}
 	}
 	return nil
 }
 
-func (rm *routeManager) applyRoute(link netlink.Link, gwIP net.IP, subnet *net.IPNet, mtu int, src net.IP) error {
+func (rm *RouteManager) applyRoute(link netlink.Link, gwIP net.IP, subnet *net.IPNet, mtu int, src net.IP) error {
 	filterRoute, filterMask := filterRouteByDst(link, subnet)
 	nlRoutes, err := netlink.RouteListFiltered(getNetlinkIPFamily(gwIP), filterRoute, filterMask)
 	if err != nil {
@@ -217,7 +217,7 @@ func (rm *routeManager) applyRoute(link netlink.Link, gwIP net.IP, subnet *net.I
 	return nil
 }
 
-func (rm *routeManager) netlinkAddRoute(link netlink.Link, gwIP net.IP, subnet *net.IPNet, mtu int, srcIP net.IP) error {
+func (rm *RouteManager) netlinkAddRoute(link netlink.Link, gwIP net.IP, subnet *net.IPNet, mtu int, srcIP net.IP) error {
 	newNlRoute := &netlink.Route{
 		Dst:       subnet,
 		LinkIndex: link.Attrs().Index,
@@ -237,7 +237,7 @@ func (rm *routeManager) netlinkAddRoute(link netlink.Link, gwIP net.IP, subnet *
 	return nil
 }
 
-func (rm *routeManager) netlinkDelRoute(link netlink.Link, subnet *net.IPNet) error {
+func (rm *RouteManager) netlinkDelRoute(link netlink.Link, subnet *net.IPNet) error {
 	// List routes for the link in the default routing table
 	nlRoutes, err := netlink.RouteList(link, netlink.FAMILY_ALL)
 	if err != nil {
@@ -268,7 +268,7 @@ func (rm *routeManager) netlinkDelRoute(link netlink.Link, subnet *net.IPNet) er
 	return nil
 }
 
-func (rm *routeManager) addRoutesPerLinkStore(rl routesPerLink) error {
+func (rm *RouteManager) addRoutesPerLinkStore(rl RoutesPerLink) error {
 	infName, err := rl.getLinkName()
 	if err != nil {
 		return fmt.Errorf("failed to add route for link (%s) to store because we could not get link name", rl.String())
@@ -278,10 +278,10 @@ func (rm *routeManager) addRoutesPerLinkStore(rl routesPerLink) error {
 		rm.store[infName] = rl
 		return nil
 	}
-	newRoutes := make([]route, 0)
-	for _, newRoute := range rl.routes {
+	newRoutes := make([]Route, 0)
+	for _, newRoute := range rl.Routes {
 		var found bool
-		for _, managedRoute := range managedRl.routes {
+		for _, managedRoute := range managedRl.Routes {
 			if managedRoute.equal(newRoute) {
 				found = true
 				break
@@ -295,21 +295,21 @@ func (rm *routeManager) addRoutesPerLinkStore(rl routesPerLink) error {
 		klog.Infof("Route Manager: nothing to process for new route for link as it is already managed: %s", rl.String())
 		return nil
 	}
-	managedRl.routes = append(managedRl.routes, newRoutes...)
+	managedRl.Routes = append(managedRl.Routes, newRoutes...)
 	rm.store[infName] = managedRl
 	return nil
 }
 
 // sync will iterate through all links routes seen on a node and ensure any route manager managed routes are applied. Any additional
 // routes for this link are preserved. sync only inspects routes for links which we managed and ignore routes for non-managed links.
-func (rm *routeManager) sync() {
+func (rm *RouteManager) sync() {
 	for infName, rl := range rm.store {
-		activeNlRoutes, err := netlink.RouteList(rl.link, nl.FAMILY_ALL)
+		activeNlRoutes, err := netlink.RouteList(rl.Link, nl.FAMILY_ALL)
 		if err != nil {
 			klog.Errorf("Route Manager: failed to list routes for link %q: %w", infName, err)
 			continue
 		}
-		var activeRoutes []route
+		var activeRoutes []Route
 		for _, activeNlRoute := range activeNlRoutes {
 			activeRoute, err := convertNetlinkRouteToRoutesPerLink(activeNlRoute)
 			if err != nil {
@@ -317,11 +317,11 @@ func (rm *routeManager) sync() {
 					activeRoute.String(), err)
 				continue
 			}
-			activeRoutes = append(activeRoutes, activeRoute.routes...)
+			activeRoutes = append(activeRoutes, activeRoute.Routes...)
 		}
 		var syncNeeded bool
 		var syncReason string
-		for _, expectedRoute := range rl.routes {
+		for _, expectedRoute := range rl.Routes {
 			var found bool
 			for _, activeRoute := range activeRoutes {
 				if activeRoute.equal(expectedRoute) {
@@ -343,47 +343,47 @@ func (rm *routeManager) sync() {
 	}
 }
 
-type routesPerLink struct {
-	link   netlink.Link
-	routes []route
+type RoutesPerLink struct {
+	Link   netlink.Link
+	Routes []Route
 }
 
-func (rl routesPerLink) validate() error {
-	if rl.link == nil || rl.link.Attrs() == nil || rl.link.Attrs().Name == "" {
+func (rl RoutesPerLink) validate() error {
+	if rl.Link == nil || rl.Link.Attrs() == nil || rl.Link.Attrs().Name == "" {
 		return fmt.Errorf("link must be valid")
 	}
-	if len(rl.routes) == 0 {
+	if len(rl.Routes) == 0 {
 		return fmt.Errorf("route must have a least one route entry")
 	}
-	for _, r := range rl.routes {
-		if r.subnet == nil || r.subnet.String() == "<nil>" {
+	for _, r := range rl.Routes {
+		if r.Subnet == nil || r.Subnet.String() == "<nil>" {
 			return fmt.Errorf("invalid subnet for route entry")
 		}
 	}
 	return nil
 }
 
-func (rl routesPerLink) getLinkName() (string, error) {
-	if rl.link == nil || rl.link.Attrs() == nil || rl.link.Attrs().Name == "" {
-		return "", fmt.Errorf("unable to get link name from: '%+v'", rl.link)
+func (rl RoutesPerLink) getLinkName() (string, error) {
+	if rl.Link == nil || rl.Link.Attrs() == nil || rl.Link.Attrs().Name == "" {
+		return "", fmt.Errorf("unable to get link name from: '%+v'", rl.Link)
 	}
-	return rl.link.Attrs().Name, nil
+	return rl.Link.Attrs().Name, nil
 }
 
-func (rl routesPerLink) String() string {
+func (rl RoutesPerLink) String() string {
 	var routes string
-	for i, r := range rl.routes {
+	for i, r := range rl.Routes {
 		routes = fmt.Sprintf("%s Route %d: %q", routes, i+1, r.string())
 	}
-	return fmt.Sprintf("Route(s) for link name: %q, with %d routes: %s", rl.link.Attrs().Name, len(rl.routes), routes)
+	return fmt.Sprintf("Route(s) for link name: %q, with %d routes: %s", rl.Link.Attrs().Name, len(rl.Routes), routes)
 }
 
-func (rl *routesPerLink) delRoutes(delRoutes []route) {
+func (rl *RoutesPerLink) delRoutes(delRoutes []Route) {
 	if len(delRoutes) == 0 {
 		return
 	}
-	routes := make([]route, 0)
-	for _, existingRoute := range rl.routes {
+	routes := make([]Route, 0)
+	for _, existingRoute := range rl.Routes {
 		var found bool
 		for _, delRoute := range delRoutes {
 			if existingRoute.equal(delRoute) {
@@ -394,82 +394,82 @@ func (rl *routesPerLink) delRoutes(delRoutes []route) {
 			routes = append(routes, existingRoute)
 		}
 	}
-	rl.routes = routes
+	rl.Routes = routes
 }
 
-type route struct {
-	gwIP   net.IP
-	subnet *net.IPNet
-	mtu    int
-	srcIP  net.IP
+type Route struct {
+	GWIP   net.IP
+	Subnet *net.IPNet
+	MTU    int
+	SRCIP  net.IP
 }
 
-func (r route) equal(r2 route) bool {
-	if r.mtu != r2.mtu {
+func (r Route) equal(r2 Route) bool {
+	if r.MTU != r2.MTU {
 		return false
 	}
-	if r.subnet.String() != r2.subnet.String() {
+	if r.Subnet.String() != r2.Subnet.String() {
 		return false
 	}
-	if r.gwIP.String() != r2.gwIP.String() {
+	if r.GWIP.String() != r2.GWIP.String() {
 		return false
 	}
-	if r.srcIP.String() != r2.srcIP.String() {
+	if r.SRCIP.String() != r2.SRCIP.String() {
 		return false
 	}
 	return true
 }
 
-func (r route) string() string {
+func (r Route) string() string {
 	var s string
-	if r.subnet != nil {
-		s = fmt.Sprintf("Subnet: %s", r.subnet.String())
+	if r.Subnet != nil {
+		s = fmt.Sprintf("Subnet: %s", r.Subnet.String())
 	}
-	if r.mtu != 0 {
-		s = fmt.Sprintf("%s MTU: %d ", s, r.mtu)
+	if r.MTU != 0 {
+		s = fmt.Sprintf("%s MTU: %d ", s, r.MTU)
 	}
-	if len(r.srcIP) > 0 {
-		s = fmt.Sprintf("%s Source IP: %q ", s, r.srcIP.String())
+	if len(r.SRCIP) > 0 {
+		s = fmt.Sprintf("%s Source IP: %q ", s, r.SRCIP.String())
 	}
-	if len(r.gwIP) > 0 {
-		s = fmt.Sprintf("%s Gateway IP: %q", s, r.gwIP.String())
+	if len(r.GWIP) > 0 {
+		s = fmt.Sprintf("%s Gateway IP: %q", s, r.GWIP.String())
 	}
 	return s
 }
 
-func convertRouteUpdateToRoutesPerLink(ru netlink.RouteUpdate) (routesPerLink, error) {
+func convertRouteUpdateToRoutesPerLink(ru netlink.RouteUpdate) (RoutesPerLink, error) {
 	link, err := netlink.LinkByIndex(ru.LinkIndex)
 	if err != nil {
 		return routesPerLink{}, fmt.Errorf("failed to get link by index from route update (%v): %w", ru, err)
 	}
 
-	return routesPerLink{
-		link: link,
-		routes: []route{
+	return RoutesPerLink{
+		Link: link,
+		Routes: []Route{
 			{
-				gwIP:   ru.Gw,
-				subnet: ru.Dst,
-				mtu:    ru.MTU,
-				srcIP:  ru.Src,
+				GWIP:   ru.Gw,
+				Subnet: ru.Dst,
+				MTU:    ru.MTU,
+				SRCIP:  ru.Src,
 			},
 		},
 	}, nil
 }
 
-func convertNetlinkRouteToRoutesPerLink(nlRoute netlink.Route) (routesPerLink, error) {
+func convertNetlinkRouteToRoutesPerLink(nlRoute netlink.Route) (RoutesPerLink, error) {
 	link, err := netlink.LinkByIndex(nlRoute.LinkIndex)
 	if err != nil {
-		return routesPerLink{}, fmt.Errorf("failed to get link by index (%d) from route (%s): %w", nlRoute.LinkIndex,
+		return RoutesPerLink{}, fmt.Errorf("failed to get link by index (%d) from route (%s): %w", nlRoute.LinkIndex,
 			nlRoute.String(), err)
 	}
-	return routesPerLink{
-		link: link,
-		routes: []route{
+	return RoutesPerLink{
+		Link: link,
+		Routes: []Route{
 			{
-				gwIP:   nlRoute.Gw,
-				subnet: nlRoute.Dst,
-				mtu:    nlRoute.MTU,
-				srcIP:  nlRoute.Src,
+				GWIP:   nlRoute.Gw,
+				Subnet: nlRoute.Dst,
+				MTU:    nlRoute.MTU,
+				SRCIP:  nlRoute.Src,
 			},
 		},
 	}, nil

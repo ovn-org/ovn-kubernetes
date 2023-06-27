@@ -1,4 +1,4 @@
-package node
+package routemanager
 
 import (
 	"net"
@@ -15,7 +15,7 @@ import (
 )
 
 var _ = ginkgo.Describe("Route Manager", func() {
-	var rm *routeManager
+	var rm *RouteManager
 	var stopCh chan struct{}
 	var wg *sync.WaitGroup
 	var testNS ns.NetNS
@@ -50,7 +50,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 		stopCh = make(chan struct{})
 		syncPeriod := 10 * time.Millisecond
 		logAllActivity := true
-		rm = newRouteManager(logAllActivity, syncPeriod)
+		rm = NewRouteManager(logAllActivity, syncPeriod)
 		err = testNS.Do(func(netNS ns.NetNS) error {
 			defer ginkgo.GinkgoRecover()
 			loLink, err = netlink.LinkByName(loLinkName)
@@ -78,7 +78,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer wg.Done()
 			defer ginkgo.GinkgoRecover()
-			rm.run(stopCh)
+			rm.Run(stopCh)
 			return nil
 		})
 	})
@@ -93,13 +93,13 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 	ginkgo.Context("del route", func() {
 		ginkgo.It("del route", func() {
-			r := route{nil, altSubnet, 0, nil}
-			rl := routesPerLink{loLink, []route{r}}
-			rm.add(rl)
+			r := Route{nil, altSubnet, 0, nil}
+			rl := RoutesPerLink{loLink, []Route{r}}
+			rm.Add(rl)
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeTrue())
-			rm.del(rl)
+			rm.Del(rl)
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeFalse())
@@ -109,36 +109,36 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 	ginkgo.Context("add route", func() {
 		ginkgo.It("applies route with subnet, gateway IP, src IP, MTU", func() {
-			r := route{loGWIP, loSubnet, loMTU, loIP}
-			rl := routesPerLink{loLink, []route{r}}
-			rm.add(rl)
+			r := Route{loGWIP, loSubnet, loMTU, loIP}
+			rl := RoutesPerLink{loLink, []Route{r}}
+			rm.Add(rl)
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeTrue())
 		})
 
 		ginkgo.It("applies route with subnets, gateway IP, src IP", func() {
-			r := route{loGWIP, loSubnet, 0, loIP}
-			rl := routesPerLink{loLink, []route{r}}
-			rm.add(rl)
+			r := Route{loGWIP, loSubnet, 0, loIP}
+			rl := RoutesPerLink{loLink, []Route{r}}
+			rm.Add(rl)
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeTrue())
 		})
 
 		ginkgo.It("applies route with subnets, gateway IP", func() {
-			r := route{loGWIP, loSubnet, 0, nil}
-			rl := routesPerLink{loLink, []route{r}}
-			rm.add(rl)
+			r := Route{loGWIP, loSubnet, 0, nil}
+			rl := RoutesPerLink{loLink, []Route{r}}
+			rm.Add(rl)
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeTrue())
 		})
 
 		ginkgo.It("applies route with subnets", func() {
-			r := route{nil, loSubnet, 0, nil}
-			rl := routesPerLink{loLink, []route{r}}
-			rm.add(rl)
+			r := Route{nil, loSubnet, 0, nil}
+			rl := RoutesPerLink{loLink, []Route{r}}
+			rm.Add(rl)
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeTrue())
@@ -146,9 +146,9 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("route exists, has different mtu and is updated", func() {
 			// route already exists for default mtu - no need to add it
-			r := route{nil, loSubnet, loAlternativeMTU, nil}
-			rl := routesPerLink{loLink, []route{r}}
-			rm.add(rl)
+			r := Route{nil, loSubnet, loAlternativeMTU, nil}
+			rl := RoutesPerLink{loLink, []Route{r}}
+			rm.Add(rl)
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeTrue())
@@ -156,9 +156,9 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("route exists, has different src and is updated", func() {
 			// route already exists for src ip - no need to add it
-			r := route{nil, loSubnet, 0, loIPDiff}
-			rl := routesPerLink{loLink, []route{r}}
-			rm.add(rl)
+			r := Route{nil, loSubnet, 0, loIPDiff}
+			rl := RoutesPerLink{loLink, []Route{r}}
+			rm.Add(rl)
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeTrue())
@@ -167,8 +167,8 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 	ginkgo.Context("runtime sync", func() {
 		ginkgo.It("reapplies managed route that was removed (gw IP, mtu, src IP)", func() {
-			r := route{loGWIP, loSubnet, loMTU, loIP}
-			rm.add(routesPerLink{loLink, []route{r}})
+			r := Route{loGWIP, loSubnet, loMTU, loIP}
+			rm.Add(RoutesPerLink{loLink, []Route{r}})
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeTrue())
@@ -184,8 +184,8 @@ var _ = ginkgo.Describe("Route Manager", func() {
 		})
 
 		ginkgo.It("reapplies managed route that was removed (mtu, src IP)", func() {
-			r := route{nil, loSubnet, loMTU, loIP}
-			rm.add(routesPerLink{loLink, []route{r}})
+			r := Route{nil, loSubnet, loMTU, loIP}
+			rm.Add(RoutesPerLink{loLink, []Route{r}})
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeTrue())
@@ -201,8 +201,8 @@ var _ = ginkgo.Describe("Route Manager", func() {
 		})
 
 		ginkgo.It("reapplies managed route that was removed because link is down", func() {
-			r := route{nil, loSubnet, loMTU, loIP}
-			rm.add(routesPerLink{loLink, []route{r}})
+			r := Route{nil, loSubnet, loMTU, loIP}
+			rm.Add(RoutesPerLink{loLink, []Route{r}})
 			gomega.Eventually(func() bool {
 				return doesRouteEntryExist(testNS, loLink, r)
 			}, time.Second).Should(gomega.BeTrue())
@@ -218,7 +218,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 	})
 })
 
-func doesRouteEntryExist(targetNs ns.NetNS, link netlink.Link, reCandidate route) bool {
+func doesRouteEntryExist(targetNs ns.NetNS, link netlink.Link, reCandidate Route) bool {
 	nlRoutesFound, err := getRouteList(targetNs, link, netlink.FAMILY_ALL)
 	if err != nil {
 		return false
@@ -229,10 +229,10 @@ func doesRouteEntryExist(targetNs ns.NetNS, link netlink.Link, reCandidate route
 		if err != nil {
 			return false
 		}
-		if len(routeFound.routes) == 0 {
+		if len(routeFound.Routes) == 0 {
 			return false
 		}
-		r := routeFound.routes[0] // always only one RE
+		r := routeFound.Routes[0] // always only one RE
 		if r.equal(reCandidate) {
 			return true
 		}

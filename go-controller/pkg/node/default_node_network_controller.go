@@ -32,6 +32,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	retry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -96,7 +97,7 @@ type DefaultNodeNetworkController struct {
 
 	// Node healthcheck server for cloud load balancers
 	healthzServer *proxierHealthUpdater
-	routeManager  *routeManager
+	routeManager  *routemanager.RouteManager
 
 	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
 	retryNamespaces *retry.RetryFramework
@@ -116,7 +117,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 			stopChan:                        stopChan,
 			wg:                              wg,
 		},
-		routeManager: newRouteManager(true, 2*time.Minute),
+		routeManager: routemanager.NewRouteManager(true, 2*time.Minute),
 	}
 }
 
@@ -568,7 +569,7 @@ func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
 }
 
 func createNodeManagementPorts(node *kapi.Node, nodeAnnotator kube.Annotator, waiter *startupWaiter,
-	subnets []*net.IPNet, routeManager *routeManager) ([]managementPortEntry, *managementPortConfig, error) {
+	subnets []*net.IPNet, routeManager *routemanager.RouteManager) ([]managementPortEntry, *managementPortConfig, error) {
 	netdevName, rep, err := getMgmtPortAndRepName(node)
 	if err != nil {
 		return nil, nil, err
@@ -688,7 +689,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	nc.wg.Add(1)
 	go func() {
 		defer nc.wg.Done()
-		nc.routeManager.run(nc.stopChan)
+		nc.routeManager.Run(nc.stopChan)
 	}()
 	if node, err = nc.Kube.GetNode(nc.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
@@ -990,7 +991,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 						return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
 					}
 					var gwIP net.IP
-					var routes []route
+					var routes []routemanager.Route
 					for _, subnet := range config.Kubernetes.ServiceCIDRs {
 						if utilnet.IsIPv4CIDR(subnet) {
 							gwIP = mgmtPortConfig.ipv4.gwIP
@@ -998,14 +999,14 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 							gwIP = mgmtPortConfig.ipv6.gwIP
 						}
 						subnet := *subnet
-						routes = append(routes, route{
-							gwIP:   gwIP,
-							subnet: &subnet,
-							mtu:    config.Default.RoutableMTU,
-							srcIP:  nil,
+						routes = append(routes, routemanager.Route{
+							GWIP:   gwIP,
+							Subnet: &subnet,
+							MTU:    config.Default.RoutableMTU,
+							SRCIP:  nil,
 						})
 					}
-					nc.routeManager.add(routesPerLink{link, routes})
+					nc.routeManager.Add(routemanager.RoutesPerLink{Link: link, Routes: routes})
 				}
 			}
 		}
@@ -1365,11 +1366,11 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 	return nil
 }
 
-func configureSvcRouteViaBridge(routeManager *routeManager, bridge string) error {
+func configureSvcRouteViaBridge(routeManager *routemanager.RouteManager, bridge string) error {
 	return configureSvcRouteViaInterface(routeManager, bridge, DummyNextHopIPs())
 }
 
-func upgradeServiceRoute(routeManager *routeManager, bridgeName string) error {
+func upgradeServiceRoute(routeManager *routemanager.RouteManager, bridgeName string) error {
 	klog.Info("Updating K8S Service route")
 	// Flush old routes
 	link, err := util.LinkSetUp(types.K8sMgmtIntfName)
@@ -1378,7 +1379,7 @@ func upgradeServiceRoute(routeManager *routeManager, bridgeName string) error {
 	}
 	for _, serviceCIDR := range config.Kubernetes.ServiceCIDRs {
 		serviceCIDR := *serviceCIDR
-		routeManager.add(routesPerLink{link, []route{{subnet: &serviceCIDR}}})
+		routeManager.Add(routemanager.RoutesPerLink{Link: link, Routes: []routemanager.Route{{Subnet: &serviceCIDR}}})
 	}
 
 	// add route via OVS bridge
