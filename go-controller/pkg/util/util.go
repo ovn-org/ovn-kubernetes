@@ -15,7 +15,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/urfave/cli/v2"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -53,6 +52,23 @@ func StringArg(context *cli.Context, name string) (string, error) {
 		return "", fmt.Errorf("argument --%s should be non-null", name)
 	}
 	return val, nil
+}
+
+// GetIPNetFullMask returns an IPNet object for IPV4 or IPV6 address with a full subnet mask
+func GetIPNetFullMask(ipStr string) (*net.IPNet, error) {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return nil, fmt.Errorf("failed to parse IP %q", ipStr)
+	}
+	mask := GetIPFullMask(ip)
+	// mask will be replaced
+	ip, ipNet, err := net.ParseCIDR(fmt.Sprintf("%s/32", ipStr))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse IP %q: %v", ipStr, err)
+	}
+	ipNet.Mask = mask
+	ipNet.IP = ip
+	return ipNet, nil
 }
 
 // GetIPFullMaskString returns /32 if ip is IPV4 family and /128 if ip is IPV6 family
@@ -120,7 +136,7 @@ func GetNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 // GetNodeAddresses returns all of the node's IPv4 and/or IPv6 annotated
 // addresses as requested. Note that nodes not annotated will be ignored.
 func GetNodeAddresses(ipv4, ipv6 bool, nodes ...*v1.Node) (ipsv4 []net.IP, ipsv6 []net.IP, err error) {
-	allips := sets.Set[string]{}
+	allCIDRs := sets.Set[string]{}
 	for _, node := range nodes {
 		ips, err := ParseNodeHostAddresses(node)
 		if IsAnnotationNotSetError(err) {
@@ -129,18 +145,20 @@ func GetNodeAddresses(ipv4, ipv6 bool, nodes ...*v1.Node) (ipsv4 []net.IP, ipsv6
 		if err != nil {
 			return nil, nil, err
 		}
-		allips = allips.Insert(ips.UnsortedList()...)
+		allCIDRs = allCIDRs.Insert(ips.UnsortedList()...)
 	}
 
-	for _, ip := range allips.UnsortedList() {
-		ip := utilnet.ParseIPSloppy(ip)
+	for _, cidr := range allCIDRs.UnsortedList() {
+		ip, _, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get parse CIDR %v: %w", cidr, err)
+		}
 		if ipv4 && utilnet.IsIPv4(ip) {
 			ipsv4 = append(ipsv4, ip)
 		} else if ipv6 && utilnet.IsIPv6(ip) {
 			ipsv6 = append(ipsv6, ip)
 		}
 	}
-
 	return
 }
 

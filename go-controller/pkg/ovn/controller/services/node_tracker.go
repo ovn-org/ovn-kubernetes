@@ -249,8 +249,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		}
 		chassisID = gwConf.ChassisID
 	}
-
-	hostAddresses, err := util.ParseNodeHostAddresses(node)
+	hostAddresses, err := util.ParseNodeHostAddressesDropNetMask(node)
 	if err != nil {
 		klog.Warningf("Failed to get node host addresses for [%s]: %s", node.Name, err.Error())
 		hostAddresses = sets.New[string]()

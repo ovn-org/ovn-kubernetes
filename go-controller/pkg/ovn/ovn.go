@@ -355,7 +355,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 	} else if hostSubnets != nil {
 		var hostAddrs sets.Set[string]
 		if config.Gateway.Mode == config.GatewayModeShared {
-			hostAddrs, err = util.ParseNodeHostAddresses(node)
+			hostAddrs, err = util.ParseNodeHostAddressesDropNetMask(node)
 			if err != nil && !util.IsAnnotationNotSetError(err) {
 				return fmt.Errorf("failed to get host addresses for node: %s: %v", node.Name, err)
 			}

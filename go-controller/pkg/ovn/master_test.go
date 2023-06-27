@@ -76,7 +76,9 @@ const (
 	ovnNodeID = "k8s.ovn.org/node-id"
 
 	// ovnNodeGRLRPAddr is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.5/24)
-	ovnNodeGRLRPAddr = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
+	ovnNodeGRLRPAddr     = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
+	ovnHostAddr          = "k8s.ovn.org/host-addresses"
+	ovnNodePrimaryIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 )
 
 func (n tNode) k8sNode(nodeID string) v1.Node {
@@ -84,8 +86,10 @@ func (n tNode) k8sNode(nodeID string) v1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: n.Name,
 			Annotations: map[string]string{
-				ovnNodeID:        nodeID,
-				ovnNodeGRLRPAddr: "{\"ipv4\": \"100.64.0." + nodeID + "/16\"}",
+				ovnNodeID:            nodeID,
+				ovnNodeGRLRPAddr:     "{\"ipv4\": \"100.64.0." + nodeID + "/16\"}",
+				ovnHostAddr:          fmt.Sprintf("[\"%s\"]", fmt.Sprintf("%s/24", n.NodeIP)),
+				ovnNodePrimaryIfAddr: fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", fmt.Sprintf("%s/24", n.NodeIP), ""),
 			},
 		},
 		Status: kapi.NodeStatus{
@@ -1041,7 +1045,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		nodeHostAddrs = sets.New(node1.NodeIP)
+		nodeHostAddrs = sets.New(fmt.Sprintf("%s/24", node1.NodeIP))
 		err = util.SetNodeHostAddresses(nodeAnnotator, nodeHostAddrs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = nodeAnnotator.Run()
@@ -1101,7 +1105,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			clusterSubnets := startFakeController(oc, wg)
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, sets.New(node1.NodeIP))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			retry.InitRetryObjWithAdd(testNode, testNode.Name, oc.retryNodes)
 			gomega.Expect(retry.RetryObjsLen(oc.retryNodes)).To(gomega.Equal(1))
@@ -1161,7 +1165,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = oc.syncNodeManagementPort(node, []*net.IPNet{subnet})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+			err = oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, []*net.IPNet{subnet}, sets.New(node1.NodeIP))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			ginkgo.By("Stale route should have been removed")
 
@@ -1192,7 +1196,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			clusterSubnets := startFakeController(oc, wg)
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, sets.New(node1.NodeIP))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			skipSnat := false
@@ -1261,7 +1265,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 
 			// ensure the stale SNAT's are cleaned up
 			gomega.Expect(oc.StartServiceController(wg, false)).To(gomega.Succeed())
-			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, sets.New(node1.NodeIP))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedNBDatabaseState = append(expectedNBDatabaseState,

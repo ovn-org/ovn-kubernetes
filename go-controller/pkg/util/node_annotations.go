@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strconv"
 
+	"github.com/gaissmai/cidrtree"
 	corev1 "k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -706,6 +707,29 @@ func ParseNodeHostAddresses(node *kapi.Node) (sets.Set[string], error) {
 	return sets.New(cfg...), nil
 }
 
+// ParseNodeHostAddressesDropNetMask returns the parsed host addresses found on a nodes annotation. Removes the mask.
+func ParseNodeHostAddressesDropNetMask(node *kapi.Node) (sets.Set[string], error) {
+	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, node.Name)
+	}
+
+	var cfg []string
+	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal host addresses annotation %s for node %q: %v",
+			addrAnnotation, node.Name, err)
+	}
+
+	for i, cidr := range cfg {
+		ip, _, err := net.ParseCIDR(cidr)
+		if err != nil || ip == nil {
+			return nil, fmt.Errorf("failed to parse node host address: %v", err)
+		}
+		cfg[i] = ip.String()
+	}
+	return sets.New(cfg...), nil
+}
+
 func ParseNodeHostAddressesList(node *kapi.Node) ([]string, error) {
 	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
 	if !ok {
@@ -817,7 +841,12 @@ func GetNonOVNNetworkContainingIP(node *v1.Node, ip net.IP) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get host-addresses annotation for node %s: %v", node.Name, err)
 	}
-	lpmTree := cidrtree.New(makeCIDRs(networks...)...)
+	cidrs, err := makeCIDRs(networks...)
+	if err != nil {
+		return "", fmt.Errorf("failed to determine non-OVN managed network for node %s that may host IP %s: %w",
+			node.Name, ip.String(), err)
+	}
+	lpmTree := cidrtree.New(cidrs...)
 	addr, err := netip.ParseAddr(ip.String())
 	if err != nil {
 		return "", fmt.Errorf("failed to parse egress IP %s: %v", ip.String(), err)
@@ -1021,4 +1050,15 @@ func NodeNetworkIDAnnotationChanged(oldNode, newNode *corev1.Node, netName strin
 	oldNodeNetID, _ := ParseNetworkIDAnnotation(oldNode, netName)
 	newNodeNetID, _ := ParseNetworkIDAnnotation(newNode, netName)
 	return oldNodeNetID != newNodeNetID
+}
+
+func makeCIDRs(s ...string) (cidrs []netip.Prefix, err error) {
+	for _, cidrString := range s {
+		prefix, err := netip.ParsePrefix(cidrString)
+		if err != nil {
+			return nil, err
+		}
+		cidrs = append(cidrs, prefix)
+	}
+	return cidrs, nil
 }
