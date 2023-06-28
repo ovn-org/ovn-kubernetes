@@ -3101,6 +3101,19 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
 
 				expectedNatLogicalPort := "k8s-node2"
+				expectedNAT := &nbdb.NAT{
+					UUID:       "egressip-nat-UUID",
+					LogicalIP:  podV6IP,
+					ExternalIP: egressIP.String(),
+					ExternalIDs: map[string]string{
+						"name": egressIPName,
+					},
+					Type:        nbdb.NATTypeSNAT,
+					LogicalPort: &expectedNatLogicalPort,
+					Options: map[string]string{
+						"stateless": "false",
+					},
+				}
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.EgressIPReroutePriority,
@@ -3122,19 +3135,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
 						Networks: []string{nodeLogicalRouterIfAddrV6},
 					},
-					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID",
-						LogicalIP:  podV6IP,
-						ExternalIP: egressIP.String(),
-						ExternalIDs: map[string]string{
-							"name": egressIPName,
-						},
-						Type:        nbdb.NATTypeSNAT,
-						LogicalPort: &expectedNatLogicalPort,
-						Options: map[string]string{
-							"stateless": "false",
-						},
-					},
+					expectedNAT,
 					&nbdb.LogicalRouter{
 						Name: ovntypes.GWRouterPrefix + node1Name,
 						UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
@@ -3169,6 +3170,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				fakeOvn.patchEgressIPObj(node2Name, updatedEgressIP.String())
+
+				expectedNAT.ExternalIP = updatedEgressIP.String()
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(func() []string {
