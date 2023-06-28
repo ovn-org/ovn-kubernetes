@@ -11,7 +11,7 @@ import (
 
 var registerClusterManagerBaseMetrics sync.Once
 
-// MetricMasterLeader identifies whether this instance of ovnkube-master is a leader or not
+// MetricClusterManagerLeader identifies whether this instance of ovnkube-cluster-manager is a leader or not
 var MetricClusterManagerLeader = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemClusterManager,

@@ -421,7 +421,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	// Services should be started after nodes to prevent LB churn
 	err := oc.StartServiceController(oc.wg, true)
 	endSvc := time.Since(startSvc)
-	metrics.MetricMasterSyncDuration.WithLabelValues("service").Set(endSvc.Seconds())
+	metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("service").Set(endSvc.Seconds())
 	if err != nil {
 		return err
 	}
@@ -519,7 +519,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	end := time.Since(start)
 	klog.Infof("Completing all the Watchers took %v", end)
-	metrics.MetricMasterSyncDuration.WithLabelValues("all watchers").Set(end.Seconds())
+	metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("all watchers").Set(end.Seconds())
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		klog.Infof("Starting unidling controllers")
@@ -556,7 +556,7 @@ func WithSyncDurationMetric(resourceName string, f func() error) error {
 	start := time.Now()
 	defer func() {
 		end := time.Since(start)
-		metrics.MetricMasterSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
+		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
 	}()
 	return f()
 }
@@ -565,7 +565,7 @@ func WithSyncDurationMetricNoError(resourceName string, f func()) {
 	start := time.Now()
 	defer func() {
 		end := time.Since(start)
-		metrics.MetricMasterSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
+		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
 	}()
 	f()
 }

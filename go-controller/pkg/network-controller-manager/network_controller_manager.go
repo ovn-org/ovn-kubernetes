@@ -241,8 +241,8 @@ func (cm *networkControllerManager) configureSvcTemplateSupport() {
 }
 
 func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
-	metrics.RegisterMasterPerformance(cm.nbClient)
-	metrics.RegisterMasterFunctional()
+	metrics.RegisterOVNKubeControllerPerformance(cm.nbClient)
+	metrics.RegisterOVNKubeControllerFunctional()
 	metrics.RunTimestamp(stopChan, cm.sbClient, cm.nbClient)
 	metrics.MonitorIPSec(cm.nbClient)
 }
