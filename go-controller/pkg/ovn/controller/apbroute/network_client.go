@@ -529,7 +529,7 @@ func (nb *northBoundClient) deletePodGWRoute(routeInfo *ExternalRouteInfo, podIP
 	node := util.GetWorkerFromGatewayRouter(gr)
 	// The gw is deleted from the routes cache after this func is called, length 1
 	// means it is the last gw for the pod and the hybrid route policy should be deleted.
-	if entry := routeInfo.PodExternalRoutes[podIP]; len(entry) == 1 {
+	if entry := routeInfo.PodExternalRoutes[podIP]; len(entry) <= 1 {
 		if err := nb.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
 			return fmt.Errorf("unable to delete hybrid route policy for pod %s: err: %v", routeInfo.PodName, err)
 		}
