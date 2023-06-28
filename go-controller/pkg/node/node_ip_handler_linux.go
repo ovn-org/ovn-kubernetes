@@ -6,6 +6,7 @@ package node
 import (
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -327,13 +328,31 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 
 // updateOVNEncapIP updates encap IP to OVS when the node primary IP changed.
 func (c *addressManager) updateOVNEncapIPAndReconnect() {
-	cmd := []string{
+	checkCmd := []string{
+		"get",
+		"Open_vSwitch",
+		".",
+		"external_ids:ovn-encap-ip",
+	}
+	encapIP, stderr, err := util.RunOVSVsctl(checkCmd...)
+	if err != nil {
+		klog.Warningf("Unable to retrieve configured ovn-encap-ip from OVS: %v, %q", err, stderr)
+	} else {
+		encapIP = strings.TrimSuffix(encapIP, "\n")
+		if len(encapIP) > 0 && c.nodePrimaryAddr.String() == encapIP {
+			klog.V(4).Infof("Will not update encap IP, value: %s is the already configured", c.nodePrimaryAddr)
+			return
+		}
+	}
+
+	confCmd := []string{
 		"set",
 		"Open_vSwitch",
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-ip=%s", c.nodePrimaryAddr),
 	}
-	_, stderr, err := util.RunOVSVsctl(cmd...)
+
+	_, stderr, err = util.RunOVSVsctl(confCmd...)
 	if err != nil {
 		klog.Errorf("Error setting OVS encap IP: %v  %q", err, stderr)
 		return
