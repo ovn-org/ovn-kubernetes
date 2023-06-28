@@ -267,7 +267,7 @@ func (c *ExternalGatewayNodeController) processNextPolicyWorkItem(wg *sync.WaitG
 	defer c.routeQueue.Done(key)
 
 	klog.V(4).Infof("Processing policy %s", key)
-	_, err := c.mgr.syncRoutePolicy(key.(string), c.routeQueue)
+	_, err := c.mgr.syncRoutePolicy(key.(string))
 	if err != nil {
 		klog.Errorf("Failed to sync APB policy %s: %v", key, err)
 	}
@@ -456,7 +456,7 @@ func (c *ExternalGatewayNodeController) processNextPodWorkItem(wg *sync.WaitGrou
 	defer c.podQueue.Done(obj)
 
 	p := obj.(*v1.Pod)
-	err := c.mgr.syncPod(p, c.podLister, c.routeQueue)
+	err := c.mgr.syncPod(p, c.routeQueue)
 	if err != nil {
 		if c.podQueue.NumRequeues(obj) < maxRetries {
 			klog.V(4).Infof("Error found while processing pod %s/%s:%v", p.Namespace, p.Name, err)

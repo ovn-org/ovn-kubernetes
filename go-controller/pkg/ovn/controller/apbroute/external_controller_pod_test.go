@@ -2,77 +2,81 @@ package apbroute
 
 import (
 	"context"
-	"reflect"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 	"strconv"
 	"time"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-var _ = Describe("OVN External Gateway policy", func() {
+var _ = Describe("OVN External Gateway pod", func() {
 
 	var (
-		namespaceDefault = &corev1.Namespace{
-			ObjectMeta: v1.ObjectMeta{Name: "default",
-				Labels: map[string]string{"name": "default"}}}
-		namespaceTest = &corev1.Namespace{
-			ObjectMeta: v1.ObjectMeta{Name: "test",
-				Labels: map[string]string{"name": "test", "match": "test", "multiple": "true"}},
+		gatewayNamespaceName  = "gateway"
+		gatewayNamespaceMatch = map[string]string{"name": gatewayNamespaceName}
+
+		targetNamespaceName   = "target1"
+		targetNamespaceName2  = "target2"
+		targetNamespaceLabel  = "target"
+		targetNamespace1Match = map[string]string{"name": targetNamespaceName}
+		targetNamespace2Match = map[string]string{"name": targetNamespaceName2}
+
+		namespaceGW = &corev1.Namespace{
+			ObjectMeta: v1.ObjectMeta{Name: gatewayNamespaceName,
+				Labels: gatewayNamespaceMatch}}
+		namespaceTarget = &corev1.Namespace{
+			ObjectMeta: v1.ObjectMeta{Name: targetNamespaceName,
+				Labels: map[string]string{"name": targetNamespaceName, "match": targetNamespaceLabel}},
 		}
-		namespaceTest2 = &corev1.Namespace{
-			ObjectMeta: v1.ObjectMeta{Name: "test2",
-				Labels: map[string]string{"name": "test2", "match": "test2", "multiple": "true"}},
+		targetPod1 = newPod("pod_target1", namespaceTarget.Name, "192.169.10.1",
+			map[string]string{"key": "pod", "name": "pod_target1"})
+
+		namespaceTarget2 = &corev1.Namespace{
+			ObjectMeta: v1.ObjectMeta{Name: targetNamespaceName2,
+				Labels: map[string]string{"name": targetNamespaceName2, "match": targetNamespaceLabel}},
 		}
+		targetPod2 = newPod("pod_target2", namespaceTarget2.Name, "192.169.10.2",
+			map[string]string{"key": "pod", "name": "pod_target2"})
 
 		dynamicPolicy = newPolicy(
 			"dynamic",
-			&v1.LabelSelector{MatchLabels: map[string]string{"name": "test"}},
+			&v1.LabelSelector{MatchLabels: targetNamespace2Match},
 			nil,
-			&v1.LabelSelector{MatchLabels: map[string]string{"name": "default"}},
+			&v1.LabelSelector{MatchLabels: gatewayNamespaceMatch},
 			&v1.LabelSelector{MatchLabels: map[string]string{"key": "pod"}},
 			false,
 		)
 
-		dynamicPolicyForTest2Only = newPolicy(
-			"policyForTest2",
-			&v1.LabelSelector{MatchLabels: map[string]string{"match": "test2"}},
+		dynamicPolicyDiffTargetNS = newPolicy(
+			"dynamic2",
+			&v1.LabelSelector{MatchLabels: targetNamespace1Match},
 			nil,
-			&v1.LabelSelector{MatchLabels: map[string]string{"name": "default"}},
-			&v1.LabelSelector{MatchLabels: map[string]string{"duplicated": "true"}},
-			false,
-		)
-
-		overlappingPolicy = newPolicy(
-			"overlapping",
-			&v1.LabelSelector{MatchLabels: map[string]string{"match": "test"}},
-			nil,
-			&v1.LabelSelector{MatchLabels: map[string]string{"name": "default"}},
-			&v1.LabelSelector{MatchLabels: map[string]string{"duplicated": "true"}},
-			false,
-		)
-
-		multipleNamespacesPolicy = newPolicy(
-			"multipleNamespaces",
-			&v1.LabelSelector{MatchLabels: map[string]string{"multiple": "true"}},
-			nil,
-			&v1.LabelSelector{MatchLabels: map[string]string{"name": "default"}},
+			&v1.LabelSelector{MatchLabels: gatewayNamespaceMatch},
 			&v1.LabelSelector{MatchLabels: map[string]string{"key": "pod"}},
 			false,
 		)
 
-		pod1 = newPod("pod_1", "default", "192.168.10.1", map[string]string{"key": "pod", "name": "pod1", "duplicated": "true"})
-		pod2 = newPod("pod_2", "default", "192.168.20.1", map[string]string{"key": "pod", "name": "pod2"})
-		pod3 = newPod("pod_3", "default", "192.168.30.1", map[string]string{"key": "pod", "name": "pod3"})
+		dynamicPolicyDiffTargetNSAndPodSel = newPolicy(
+			"dynamic2",
+			&v1.LabelSelector{MatchLabels: targetNamespace1Match},
+			nil,
+			&v1.LabelSelector{MatchLabels: gatewayNamespaceMatch},
+			&v1.LabelSelector{MatchLabels: map[string]string{"duplicated": "true"}},
+			false,
+		)
+
+		pod1 = newPod("pod_1", namespaceGW.Name, "192.168.10.1", map[string]string{"key": "pod", "name": "pod1", "duplicated": "true"})
+		pod2 = newPod("pod_2", namespaceGW.Name, "192.168.20.1", map[string]string{"key": "pod", "name": "pod2"})
+		pod3 = newPod("pod_3", namespaceGW.Name, "192.168.30.1", map[string]string{"key": "pod", "name": "pod3"})
+
+		namespaceTargetWithPod, namespaceTargetWithoutPod, namespaceTarget2WithPod, namespaceGWWithPod, namespaceGWWithoutPod *namespaceWithPods
 	)
 	AfterEach(func() {
 		nbsbCleanup.Cleanup()
@@ -91,358 +95,299 @@ var _ = Describe("OVN External Gateway policy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		stopChan = make(chan struct{})
 
+		namespaceTargetWithPod = newNamespaceWithPods(namespaceTarget.Name, targetPod1)
+		namespaceTargetWithoutPod = newNamespaceWithPods(namespaceTarget.Name)
+		namespaceTarget2WithPod = newNamespaceWithPods(namespaceTarget2.Name, targetPod2)
+		//namespaceTarget2WithoutPod = newNamespaceWithPods(namespaceTarget2.Name)
+		namespaceGWWithPod = newNamespaceWithPods(namespaceGW.Name, pod1)
+		namespaceGWWithoutPod = newNamespaceWithPods(namespaceGW.Name)
+
 	})
 
 	var _ = Context("When adding a new pod", func() {
 
-		It("processes the pod that is a pod gateway with multiples matching policies each in a different namespaces", func() {
+		It("processes the pod that is a pod gateway with multiples matching policies", func() {
+			initController([]runtime.Object{namespaceGW, namespaceTarget, namespaceTarget2, targetPod1, targetPod2},
+				[]runtime.Object{dynamicPolicy, dynamicPolicyDiffTargetNS})
 
-			initController([]runtime.Object{namespaceDefault, namespaceTest, namespaceTest2}, []runtime.Object{multipleNamespacesPolicy})
-			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(2))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(
-				Equal(
-					&namespaceInfo{
-						Policies:        sets.New(multipleNamespacesPolicy.Name),
-						StaticGateways:  gatewayInfoList{},
-						DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-					}))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(
-				Equal(
-					&namespaceInfo{
-						Policies:        sets.New(multipleNamespacesPolicy.Name),
-						StaticGateways:  gatewayInfoList{},
-						DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-					}))
+			expectedPolicy1, expectedRefs1 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
+
+			expectedPolicy2, expectedRefs2 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
+
+			eventuallyExpectNumberOfPolicies(2)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNS.Name, expectedPolicy2, expectedRefs2)
+
 			_, err := fakeClient.CoreV1().Pods(pod1.Namespace).Create(context.Background(), pod1, v1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(
-				Equal(
-					&namespaceInfo{
-						Policies:       sets.New(multipleNamespacesPolicy.Name),
-						StaticGateways: gatewayInfoList{},
-						DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-							{Namespace: "default", Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
-						},
-					}))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(
-				Equal(
-					&namespaceInfo{
-						Policies:       sets.New(multipleNamespacesPolicy.Name),
-						StaticGateways: gatewayInfoList{},
-						DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-							{Namespace: "default", Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
-						}}))
+
+			expectedPolicy1, expectedRefs1 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			expectedPolicy2, expectedRefs2 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(2)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNS.Name, expectedPolicy2, expectedRefs2)
 
 		})
 
 		It("processes the pod that has no policy match", func() {
 			noMatchPolicy := newPolicy(
 				"noMatchPolicy",
-				&v1.LabelSelector{MatchLabels: map[string]string{"match": "test"}},
+				&v1.LabelSelector{MatchLabels: targetNamespace1Match},
 				nil,
-				&v1.LabelSelector{MatchLabels: map[string]string{"name": "default"}},
+				&v1.LabelSelector{MatchLabels: gatewayNamespaceMatch},
 				&v1.LabelSelector{MatchLabels: map[string]string{"key": "nomatch"}},
 				false,
 			)
-			initController([]runtime.Object{namespaceDefault, namespaceTest}, []runtime.Object{noMatchPolicy})
-			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
+			initController([]runtime.Object{namespaceGW, namespaceTarget}, []runtime.Object{noMatchPolicy})
+
+			expectedPolicy, expectedRefs := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(noMatchPolicy.Name, expectedPolicy, expectedRefs)
+
 			_, err := fakeClient.CoreV1().Pods(pod1.Namespace).Create(context.Background(), pod1, v1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(1))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(
-				Equal(
-					&namespaceInfo{
-						Policies:        sets.New(noMatchPolicy.Name),
-						StaticGateways:  gatewayInfoList{},
-						DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-					}))
+			//  make sure pod event is handled
+			time.Sleep(100 * time.Millisecond)
 
-		})
-
-		It("processes a pod gateway that matches a two policies to the same target namespace", func() {
-
-			initController([]runtime.Object{namespaceDefault, namespaceTest, namespaceTest2}, []runtime.Object{overlappingPolicy, dynamicPolicy})
-			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(2))
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(1))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(
-				Equal(
-					&namespaceInfo{
-						Policies:        sets.New(overlappingPolicy.Name, dynamicPolicy.Name),
-						StaticGateways:  gatewayInfoList{},
-						DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-					}))
-			_, err := fakeClient.CoreV1().Pods(pod1.Namespace).Create(context.Background(), pod1, v1.CreateOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(
-				Equal(
-					&namespaceInfo{
-						Policies:       sets.New(overlappingPolicy.Name, dynamicPolicy.Name),
-						StaticGateways: gatewayInfoList{},
-						DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-							{Namespace: "default", Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
-						}}))
-
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(noMatchPolicy.Name, expectedPolicy, expectedRefs)
 		})
 	})
 
 	var _ = Context("When deleting a pod", func() {
-		It("deletes a pod gateway that matches two policies, each targeting a different namespace", func() {
-			dynamicPolicyTest2 := newPolicy(
-				"dynamicTest2",
-				&v1.LabelSelector{MatchLabels: map[string]string{"name": "test2"}},
+
+		It("deletes a pod gateway that matches two policies", func() {
+			initController([]runtime.Object{namespaceGW, namespaceTarget, namespaceTarget2, targetPod1, targetPod2, pod1},
+				[]runtime.Object{dynamicPolicy, dynamicPolicyDiffTargetNS})
+
+			expectedPolicy1, expectedRefs1 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
 				nil,
-				&v1.LabelSelector{MatchLabels: map[string]string{"name": "default"}},
-				&v1.LabelSelector{MatchLabels: map[string]string{"key": "pod"}},
-				false,
-			)
-			initController([]runtime.Object{namespaceDefault, namespaceTest, namespaceTest2, pod1}, []runtime.Object{dynamicPolicyTest2, dynamicPolicy})
-			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(2))
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(2))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: pod1.Namespace, Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicyTest2.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: pod1.Namespace, Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			expectedPolicy2, expectedRefs2 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(2)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNS.Name, expectedPolicy2, expectedRefs2)
+
 			deletePod(pod1, fakeClient)
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(2))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5, 1).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:        sets.New(dynamicPolicy.Name),
-					StaticGateways:  gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-				}, cmpOpts...))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:        sets.New(dynamicPolicyTest2.Name),
-					StaticGateways:  gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-				}, cmpOpts...))
+
+			expectedPolicy1, expectedRefs1 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
+
+			expectedPolicy2, expectedRefs2 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
+
+			eventuallyExpectNumberOfPolicies(2)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNS.Name, expectedPolicy2, expectedRefs2)
 		})
 
-		It("deletes a pod that does not match any policy", func() {
+		It("deletes a gateway pod that does not match any policy", func() {
 			noMatchPolicy := newPolicy(
-				"nomatch",
-				&v1.LabelSelector{MatchLabels: map[string]string{"match": "test"}},
+				"noMatchPolicy",
+				&v1.LabelSelector{MatchLabels: targetNamespace1Match},
 				nil,
-				&v1.LabelSelector{MatchLabels: map[string]string{"name": "default"}},
+				&v1.LabelSelector{MatchLabels: gatewayNamespaceMatch},
 				&v1.LabelSelector{MatchLabels: map[string]string{"key": "nomatch"}},
 				false,
 			)
-			initController([]runtime.Object{namespaceDefault, namespaceTest, pod1}, []runtime.Object{noMatchPolicy})
-			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(1))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:        sets.New(noMatchPolicy.Name),
-					StaticGateways:  gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-				}, cmpOpts...))
+			initController([]runtime.Object{namespaceGW, namespaceTarget, pod1}, []runtime.Object{noMatchPolicy})
+
+			expectedPolicy, expectedRefs := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithoutPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(noMatchPolicy.Name, expectedPolicy, expectedRefs)
+
 			deletePod(pod1, fakeClient)
-			Eventually(func() bool {
-				_, err := fakeClient.CoreV1().Pods(pod1.Namespace).Get(context.Background(), pod1.Name, v1.GetOptions{})
-				return apierrors.IsNotFound(err)
-			}).Should(BeTrue())
-			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(1))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:        sets.New(noMatchPolicy.Name),
-					StaticGateways:  gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-				}, cmpOpts...))
+			//  make sure pod event is handled
+			time.Sleep(100 * time.Millisecond)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(noMatchPolicy.Name, expectedPolicy, expectedRefs)
 		})
 
-		It("deletes a pod gateway that is one of two pods that matches two policies to the same target namespace", func() {
-			initController([]runtime.Object{namespaceDefault, namespaceTest, pod1, pod2}, []runtime.Object{overlappingPolicy, dynamicPolicy})
-			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(2))
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(1))
+		It("deletes a pod gateway that is one of two pods that matches two policies", func() {
+			initController([]runtime.Object{namespaceGW, namespaceTarget, namespaceTarget2, targetPod1, targetPod2, pod1, pod2},
+				[]runtime.Object{dynamicPolicy, dynamicPolicyDiffTargetNS})
+			namespaceGWWith2Pods := newNamespaceWithPods(namespaceGW.Name, pod1, pod2)
+			expectedPolicy1, expectedRefs1 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWith2Pods}, false)
+
+			expectedPolicy2, expectedRefs2 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWith2Pods}, false)
+
+			eventuallyExpectNumberOfPolicies(2)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNS.Name, expectedPolicy2, expectedRefs2)
+
 			deletePod(pod1, fakeClient)
 
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(overlappingPolicy.Name, dynamicPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: pod2.Namespace, Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
+			namespaceGWWith1Pod := newNamespaceWithPods(namespaceGW.Name, pod2)
+
+			expectedPolicy1, expectedRefs1 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWith1Pod}, false)
+
+			expectedPolicy2, expectedRefs2 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWith1Pod}, false)
+
+			eventuallyExpectNumberOfPolicies(2)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNS.Name, expectedPolicy2, expectedRefs2)
 		})
 	})
 
 	var _ = Context("When updating a pod", func() {
 		It("updates an existing pod gateway to match an additional new policy to a new target namespace", func() {
-			unmatchPod := newPod("unmatchPod", "default", "192.168.100.1", map[string]string{"name": "unmatchPod"})
-			initController([]runtime.Object{namespaceDefault, namespaceTest, unmatchPod}, []runtime.Object{dynamicPolicy})
-			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(1))
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(1))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:        sets.New(dynamicPolicy.Name),
-					StaticGateways:  gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-				}, cmpOpts...))
+			unmatchPod := newPod("unmatchPod", namespaceGW.Name, "192.168.100.1", map[string]string{"name": "unmatchPod"})
+
+			initController([]runtime.Object{namespaceTarget2, namespaceGW, targetPod2, unmatchPod}, []runtime.Object{dynamicPolicy})
+			expectedPolicy, expectedRefs := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy, expectedRefs)
+
 			updatePodLabels(unmatchPod, pod1.Labels, fakeClient)
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: unmatchPod.Namespace, Name: unmatchPod.Name}: newGatewayInfo(sets.New(unmatchPod.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
-		})
+			expectedPolicy, expectedRefs = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{newNamespaceWithPods(namespaceGW.Name, unmatchPod)}, false)
 
-		It("updates an existing pod gateway to match a new policy that targets the same namespace", func() {
-
-			initController([]runtime.Object{namespaceDefault, namespaceTest, pod2}, []runtime.Object{overlappingPolicy, dynamicPolicy})
-			Eventually(func() []string { return listRoutePolicyInCache() }, 5).Should(HaveLen(2))
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(1))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicy.Name, overlappingPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: pod2.Namespace, Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
-			updatePodLabels(pod2, map[string]string{"duplicated": "true"}, fakeClient)
-			// Wait for 2 second to ensure that the pod changed have been reconciled. We are doing this because the outcome of the change should not impact the list of dynamic IPs and
-			// there is no way to know which of the policies apply specifically to the pod.
-			Eventually(func() bool {
-				p, err := fakeClient.CoreV1().Pods(pod2.Namespace).Get(context.TODO(), pod2.Name, v1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				return reflect.DeepEqual(p.Labels, map[string]string{"duplicated": "true"})
-			}, 2, 2).Should(BeTrue())
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicy.Name, overlappingPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: pod2.Namespace, Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy, expectedRefs)
 		})
 
 		It("updates an existing pod gateway to match a new policy that targets a different namespace", func() {
+			initController([]runtime.Object{namespaceGW, namespaceTarget, namespaceTarget2, targetPod1, targetPod2, pod2, pod3},
+				[]runtime.Object{dynamicPolicyDiffTargetNSAndPodSel, dynamicPolicy})
 
-			initController([]runtime.Object{namespaceDefault, namespaceTest, namespaceTest2, pod2, pod3}, []runtime.Object{dynamicPolicyForTest2Only, dynamicPolicy})
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(2))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: pod2.Namespace, Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
-						{Namespace: pod3.Namespace, Name: pod3.Name}: newGatewayInfo(sets.New(pod3.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:        sets.New(dynamicPolicyForTest2Only.Name),
-					StaticGateways:  gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-				}, cmpOpts...))
+			expectedPolicy1, expectedRefs1 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{newNamespaceWithPods(namespaceGW.Name, pod2, pod3)}, false)
+			expectedPolicy2, expectedRefs2 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
+
+			eventuallyExpectNumberOfPolicies(2)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNSAndPodSel.Name, expectedPolicy2, expectedRefs2)
+
 			updatePodLabels(pod2, map[string]string{"duplicated": "true"}, fakeClient)
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: pod3.Namespace, Name: pod3.Name}: newGatewayInfo(sets.New(pod3.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicyForTest2Only.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: pod2.Namespace, Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
+
+			expectedPolicy1, expectedRefs1 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{newNamespaceWithPods(namespaceGW.Name, pod3)}, false)
+			expectedPolicy2, expectedRefs2 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{newNamespaceWithPods(namespaceGW.Name, pod2)}, false)
+
+			eventuallyExpectNumberOfPolicies(2)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNSAndPodSel.Name, expectedPolicy2, expectedRefs2)
 		})
 		It("updates an existing pod gateway to match no policies", func() {
-			initController([]runtime.Object{namespaceDefault, namespaceTest, pod1, pod2}, []runtime.Object{dynamicPolicy})
-			Eventually(func() []string { return listRoutePolicyInCache() }, time.Minute).Should(HaveLen(1))
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(1))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: "default", Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
-						{Namespace: "default", Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
+			initController([]runtime.Object{namespaceGW, namespaceTarget2, targetPod2, pod1, pod2}, []runtime.Object{dynamicPolicy})
+			expectedPolicy, expectedRefs := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{newNamespaceWithPods(namespaceGW.Name, pod1, pod2)}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy, expectedRefs)
+
 			updatePodLabels(pod1, map[string]string{}, fakeClient)
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: "default", Name: pod2.Name}: newGatewayInfo(sets.New(pod2.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
+
+			expectedPolicy, expectedRefs = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{newNamespaceWithPods(namespaceGW.Name, pod2)}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy, expectedRefs)
 		})
 
 		It("updates a pod to match a policy to a single namespace", func() {
-			initController([]runtime.Object{namespaceDefault, namespaceTest, namespaceTest2, pod1}, []runtime.Object{dynamicPolicyForTest2Only, dynamicPolicy})
-			Eventually(func() []string { return listNamespaceInfo() }, 5).Should(HaveLen(2))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: pod1.Namespace, Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicyForTest2Only.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: pod1.Namespace, Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
+			initController([]runtime.Object{namespaceGW, namespaceTarget, namespaceTarget2, targetPod1, targetPod2, pod1},
+				[]runtime.Object{dynamicPolicyDiffTargetNSAndPodSel, dynamicPolicy})
+
+			expectedPolicy1, expectedRefs1 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+			expectedPolicy2, expectedRefs2 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(2)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNSAndPodSel.Name, expectedPolicy2, expectedRefs2)
+
 			updatePodLabels(pod1, map[string]string{"key": "pod"}, fakeClient)
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:       sets.New(dynamicPolicy.Name),
-					StaticGateways: gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{
-						{Namespace: "default", Name: pod1.Name}: newGatewayInfo(sets.New(pod1.Status.PodIPs[0].IP), false),
-					},
-				}, cmpOpts...))
-			Eventually(func() *namespaceInfo { return getNamespaceInfo(namespaceTest2.Name) }, 5).Should(BeComparableTo(
-				&namespaceInfo{
-					Policies:        sets.New(dynamicPolicyForTest2Only.Name),
-					StaticGateways:  gatewayInfoList{},
-					DynamicGateways: map[types.NamespacedName]*gatewayInfo{},
-				}, cmpOpts...))
+
+			expectedPolicy2, expectedRefs2 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
+
+			eventuallyExpectNumberOfPolicies(2)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNSAndPodSel.Name, expectedPolicy2, expectedRefs2)
 		})
 
 	})
 })
 
 func deletePod(pod *corev1.Pod, fakeClient *fake.Clientset) {
-
 	err = fakeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, v1.DeleteOptions{})
 	Expect(err).NotTo(HaveOccurred())
 }
 
 func updatePodLabels(pod *corev1.Pod, newLabels map[string]string, fakeClient *fake.Clientset) {
-
 	p, err := fakeClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, v1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	incrementResourceVersion(p)

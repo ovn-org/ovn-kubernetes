@@ -21,7 +21,7 @@ import (
 type managedGWIPs struct {
 	namespacedName ktypes.NamespacedName
 	nodeName       string
-	gwList         gatewayInfoList
+	gwList         *gatewayInfoList
 }
 
 func (c *ExternalGatewayMasterController) Repair() {
@@ -168,38 +168,33 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromPolicyRules
 	}
 
 	for _, policy := range externalRoutePolicies {
-		p, err := c.mgr.processExternalRoutePolicy(policy)
+		p, err := c.mgr.convertCRToCacheEntry(policy, false)
 		if err != nil {
 			return nil, err
 		}
-		nsList, err := c.mgr.listNamespacesBySelector(p.targetNamespacesSelector)
-		if err != nil {
-			return nil, err
+		allGWIPs := newGatewayInfoList()
+		allGWIPs.InsertOverwrite(p.staticGateways.Elems()...)
+		for _, gw := range p.dynamicGateways.Elems() {
+			allGWIPs.InsertOverwrite(gw)
 		}
-		allGWIPs := make(gatewayInfoList, 0)
-		allGWIPs = append(allGWIPs, p.staticGateways...)
-		for _, gw := range p.dynamicGateways {
-			allGWIPs = append(allGWIPs, gw)
-		}
-		for _, ns := range nsList {
-			nsPods, err := c.podLister.Pods(ns.Name).List(labels.Everything())
-			if err != nil {
-				return nil, err
-			}
-			for _, nsPod := range nsPods {
+		for _, targetPods := range p.targetNamespacesWithPods {
+			for _, targetPod := range targetPods {
 				// Ignore completed pods, host networked pods, pods not scheduled
-				if util.PodWantsHostNetwork(nsPod) || util.PodCompleted(nsPod) || !util.PodScheduled(nsPod) {
+				if util.PodWantsHostNetwork(targetPod) || util.PodCompleted(targetPod) || !util.PodScheduled(targetPod) {
 					continue
 				}
-				for _, podIP := range nsPod.Status.PodIPs {
-					podIPStr := utilnet.ParseIPSloppy(podIP.IP).String()
-					clusterRouteCache[podIPStr] = &managedGWIPs{namespacedName: ktypes.NamespacedName{Namespace: nsPod.Namespace, Name: nsPod.Name}, nodeName: nsPod.Spec.NodeName, gwList: make(gatewayInfoList, 0)}
-					for _, gwInfo := range allGWIPs {
+				for _, targetPodIP := range targetPod.Status.PodIPs {
+					podIPStr := utilnet.ParseIPSloppy(targetPodIP.IP).String()
+					clusterRouteCache[podIPStr] = &managedGWIPs{
+						namespacedName: ktypes.NamespacedName{Namespace: targetPod.Namespace, Name: targetPod.Name},
+						nodeName:       targetPod.Spec.NodeName,
+						gwList:         newGatewayInfoList()}
+					for _, gwInfo := range allGWIPs.Elems() {
 						for _, gw := range gwInfo.Gateways.UnsortedList() {
 							if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIPStr) {
 								continue
 							}
-							clusterRouteCache[podIPStr].gwList = append(clusterRouteCache[podIPStr].gwList, gwInfo)
+							clusterRouteCache[podIPStr].gwList.InsertOverwrite(gwInfo)
 						}
 					}
 				}
@@ -210,9 +205,9 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromPolicyRules
 	return clusterRouteCache, nil
 }
 
-func (c *ExternalGatewayMasterController) processOVNRoute(ovnRoute *ovnRoute, gwList gatewayInfoList, podIP string, managedIPGWInfo *managedGWIPs) bool {
+func (c *ExternalGatewayMasterController) processOVNRoute(ovnRoute *ovnRoute, gwList *gatewayInfoList, podIP string, managedIPGWInfo *managedGWIPs) bool {
 	// podIP exists, check if route matches
-	for _, gwInfo := range gwList {
+	for _, gwInfo := range gwList.Elems() {
 		for _, clusterNextHop := range gwInfo.Gateways.UnsortedList() {
 			if ovnRoute.nextHop == clusterNextHop {
 				// populate the externalGWInfo cache with this pair podIP->next Hop IP.
@@ -291,6 +286,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 	return clusterRouteCache, nil
 }
 
+// TODO figure out why targetNamespace is not used
 func populateManagedGWIPsCacheInNamespace(targetNamespace string, gwInfo *gatewayInfo, cache map[string]*managedGWIPs, podList []*v1.Pod) {
 	for _, gwIP := range gwInfo.Gateways.UnsortedList() {
 		for _, pod := range podList {
@@ -309,7 +305,7 @@ func populateManagedGWIPsCacheInNamespace(targetNamespace string, gwInfo *gatewa
 						nodeName:       pod.Spec.NodeName,
 					}
 				}
-				cache[podIPStr].gwList = append(cache[podIPStr].gwList, newGatewayInfo(sets.New(gwIP), gwInfo.BFDEnabled))
+				cache[podIPStr].gwList.InsertOverwrite(newGatewayInfo(sets.New(gwIP), gwInfo.BFDEnabled))
 			}
 		}
 	}

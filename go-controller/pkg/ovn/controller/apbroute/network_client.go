@@ -11,7 +11,6 @@ import (
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -31,8 +30,8 @@ import (
 )
 
 type networkClient interface {
-	deleteGatewayIPs(namespaceName string, toBeDeletedGWIPs, toBeKept sets.Set[string]) error
-	addGatewayIPs(pod *v1.Pod, egress gatewayInfoList) error
+	deleteGatewayIPs(podNsName ktypes.NamespacedName, toBeDeletedGWIPs, toBeKept sets.Set[string]) error
+	addGatewayIPs(pod *v1.Pod, egress *gatewayInfoList) error
 }
 
 type northBoundClient struct {
@@ -124,8 +123,8 @@ func (nb *northBoundClient) delAllLegacyHybridRoutePolicies() error {
 // deleteGatewayIPs handles deleting static routes for pods on a specific GR.
 // If a set of gateways is given, only routes for that gateway are deleted. If no gateways
 // are given, all routes for the namespace are deleted.
-func (nb *northBoundClient) deleteGatewayIPs(namespace string, toBeDeletedGWIPs, _ sets.Set[string]) error {
-	for _, routeInfo := range nb.getRouteInfosForNamespace(namespace) {
+func (nb *northBoundClient) deleteGatewayIPs(podNsName ktypes.NamespacedName, toBeDeletedGWIPs, _ sets.Set[string]) error {
+	for _, routeInfo := range nb.getRouteInfosForPod(podNsName) {
 		// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
 		if err := nb.deletePodGWRoutes(routeInfo, toBeDeletedGWIPs); err != nil {
 			return err
@@ -173,14 +172,14 @@ func (nb *northBoundClient) deletePodGWRoutes(routeInfo *ExternalRouteInfo, toBe
 	return nil
 }
 
-// getRouteInfosForNamespace returns all routeInfos for a specific namespace
-func (nb *northBoundClient) getRouteInfosForNamespace(namespace string) []*ExternalRouteInfo {
+// getRouteInfosForPod returns all routeInfos for a specific namespace
+func (nb *northBoundClient) getRouteInfosForPod(podNsName ktypes.NamespacedName) []*ExternalRouteInfo {
 	nb.exGWCacheMutex.RLock()
 	defer nb.exGWCacheMutex.RUnlock()
 
 	routes := make([]*ExternalRouteInfo, 0)
 	for namespacedName, routeInfo := range nb.externalGWCache {
-		if namespacedName.Namespace == namespace {
+		if namespacedName == podNsName {
 			routes = append(routes, routeInfo)
 		}
 	}
@@ -188,7 +187,7 @@ func (nb *northBoundClient) getRouteInfosForNamespace(namespace string) []*Exter
 	return routes
 }
 
-func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress gatewayInfoList) error {
+func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress *gatewayInfoList) error {
 	if util.PodCompleted(pod) || util.PodWantsHostNetwork(pod) {
 		return nil
 	}
@@ -214,7 +213,7 @@ func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress gatewayInfoList) e
 		}
 	}
 	podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-	return nb.addGWRoutesForPod(egress, podIPs, podNsName, pod.Spec.NodeName)
+	return nb.addGWRoutesForPod(egress.Elems(), podIPs, podNsName, pod.Spec.NodeName)
 }
 
 // deletePodSNAT removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
@@ -723,12 +722,12 @@ func getHybridRouteAddrSetDbIDs(nodeName, controller string) *libovsdbops.DbObje
 		})
 }
 
-func (c *conntrackClient) deleteGatewayIPs(namespaceName string, _, toBeKept sets.Set[string]) error {
+func (c *conntrackClient) deleteGatewayIPs(podNsName ktypes.NamespacedName, _, toBeKept sets.Set[string]) error {
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
 	var wg sync.WaitGroup
 	wg.Add(len(toBeKept))
 	validMACs := sync.Map{}
-	klog.V(4).Infof("Keeping conntrack entries in namespace %s with gateway IPs %s", namespaceName, strings.Join(sets.List(toBeKept), ","))
+	klog.V(4).Infof("Keeping conntrack entries for pod %s with gateway IPs %s", podNsName, strings.Join(sets.List(toBeKept), ","))
 	for gwIP := range toBeKept {
 		go func(gwIP string) {
 			defer wg.Done()
@@ -765,32 +764,29 @@ func (c *conntrackClient) deleteGatewayIPs(namespaceName string, _, toBeKept set
 		validNextHopMACs = append(validNextHopMACs, []byte("does-not-contain-anything"))
 	}
 
-	pods, err := c.podLister.List(labels.Everything())
+	pod, err := c.podLister.Pods(podNsName.Namespace).Get(podNsName.Name)
 	if err != nil {
 		return fmt.Errorf("unable to get pods from informer: %v", err)
 	}
 
 	var errs []error
-	for _, pod := range pods {
-		pod := pod
-		podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
-		if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
-			errs = append(errs, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
-		}
-		for _, podIP := range podIPs { // flush conntrack only for UDP
-			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
-			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
-			err := util.DeleteConntrack(podIP.String(), 0, v1.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod with IP %s: %v", podIP.String(), err))
-				continue
-			}
+	podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+	if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
+		errs = append(errs, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
+	}
+	for _, podIP := range podIPs { // flush conntrack only for UDP
+		// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
+		// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
+		err := util.DeleteConntrack(podIP.String(), 0, v1.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod with IP %s: %v", podIP.String(), err))
+			continue
 		}
 	}
 	return kerrors.NewAggregate(errs)
 }
 
 // addGatewayIPs is a NOP (no operation) in the conntrack client as it does not add any entry to the conntrack table.
-func (c *conntrackClient) addGatewayIPs(pod *v1.Pod, egress gatewayInfoList) error {
+func (c *conntrackClient) addGatewayIPs(pod *v1.Pod, egress *gatewayInfoList) error {
 	return nil
 }
