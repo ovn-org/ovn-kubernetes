@@ -219,6 +219,7 @@ egressip-node-healthcheck-port=1234
 enable-multi-network=false
 enable-multi-networkpolicy=false
 enable-interconnect=false
+enable-multi-external-gateway=false
 `
 
 	var newData string
@@ -317,6 +318,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeFalse())
+			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeFalse())
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
@@ -555,6 +557,7 @@ var _ = Describe("Config Operations", func() {
 			"enable-multi-network=true",
 			"enable-multi-networkpolicy=true",
 			"enable-interconnect=true",
+			"enable-multi-external-gateway=true",
 			"zone=foo",
 		)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -634,6 +637,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(1234))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeTrue())
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
@@ -724,6 +728,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeTrue())
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
@@ -786,6 +791,7 @@ var _ = Describe("Config Operations", func() {
 			"-enable-multi-network=true",
 			"-enable-multi-networkpolicy=true",
 			"-enable-interconnect=true",
+			"-enable-multi-external-gateway=true",
 			"-healthz-bind-address=0.0.0.0:4321",
 			"-zone=bar",
 		}

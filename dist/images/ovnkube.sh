@@ -84,6 +84,7 @@ fi
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 # OVN_DISABLE_FORWARDING - disable forwarding on OVNK controlled interfaces
+# OVN_ENABLE_MULTI_EXTERNAL_GATEWAY - enable multi external gateway for ovn-kubernetes
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -239,6 +240,8 @@ ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
 ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE:-false}
 #OVN_ENABLE_INTERCONNECT - enable interconnect with multiple zones
 ovn_enable_interconnect=${OVN_ENABLE_INTERCONNECT:-false}
+#OVN_ENABLE_MULTI_EXTERNAL_GATEWAY - enable multi external gateway
+ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY:-false}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -1125,6 +1128,12 @@ ovn-master() {
   fi
   echo "ovn_stateless_netpol_enable_flag: ${ovn_stateless_netpol_enable_flag}"
 
+  ovnkube_enable_multi_external_gateway_flag=
+  if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
+	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
+  fi
+  echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
+
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
     init_node_flags="--init-node ${K8S_NODE} --nodeport"
@@ -1165,6 +1174,7 @@ ovn-master() {
     ${ovnkube_metrics_scale_enable_flag} \
     ${multi_network_enabled_flag} \
     ${ovn_stateless_netpol_enable_flag} \
+    ${ovnkube_enable_multi_external_gateway_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
@@ -1332,6 +1342,12 @@ ovnkube-controller() {
   fi
   echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
 
+  ovnkube_enable_multi_external_gateway_flag=
+  if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
+	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
+  fi
+  echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
+
   echo "=============== ovnkube-controller ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-ovnkube-controller ${K8S_NODE} \
@@ -1361,6 +1377,7 @@ ovnkube-controller() {
     ${ovnkube_config_duration_enable_flag} \
     ${multi_network_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
+    ${ovnkube_enable_multi_external_gateway_flag} \
     --zone ${ovn_zone} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
@@ -1445,6 +1462,12 @@ ovn-cluster-manager() {
   fi
   echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
 
+  ovnkube_enable_multi_external_gateway_flag=
+  if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
+	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
+  fi
+  echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
+
   echo "=============== ovn-cluster-manager ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-cluster-manager ${K8S_NODE} \
@@ -1465,6 +1488,7 @@ ovn-cluster-manager() {
     ${multi_network_enabled_flag} \
     ${egressservice_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
+    ${ovnkube_enable_multi_external_gateway_flag} \
     --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
@@ -1726,6 +1750,12 @@ ovn-node() {
   ovn_zone=$(get_node_zone)
   echo "ovnkube-node's configured zone is ${ovn_zone}"
 
+  ovnkube_enable_multi_external_gateway_flag=
+  if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
+	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
+  fi
+  echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
+
   if [[ $ovn_nbdb != "local" ]]; then
       ovn_dbs="--nb-address=${ovn_nbdb}"
   fi
@@ -1776,6 +1806,7 @@ ovn-node() {
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
      ${ovnkube_node_mode_flag} \
     ${egress_interface} \
+    ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_enable_interconnect_flag} \
     --zone ${ovn_zone} \
     --host-network-namespace ${ovn_host_network_namespace} \

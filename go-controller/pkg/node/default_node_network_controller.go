@@ -936,11 +936,13 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			c.Run(1)
 		}()
 	}
-	nc.wg.Add(1)
-	go func() {
-		defer nc.wg.Done()
-		nc.apbExternalRouteNodeController.Run(1)
-	}()
+	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
+		nc.wg.Add(1)
+		go func() {
+			defer nc.wg.Done()
+			nc.apbExternalRouteNodeController.Run(1)
+		}()
+	}
 
 	nc.wg.Add(1)
 	go func() {
