@@ -514,11 +514,13 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}()
 	}
 
-	oc.wg.Add(1)
-	go func() {
-		defer oc.wg.Done()
-		oc.apbExternalRouteController.Run(1)
-	}()
+	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			oc.apbExternalRouteController.Run(1)
+		}()
+	}
 
 	end := time.Since(start)
 	klog.Infof("Completing all the Watchers took %v", end)

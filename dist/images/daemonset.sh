@@ -300,6 +300,9 @@ while [ "$1" != "" ]; do
   --enable-interconnect)
     OVN_ENABLE_INTERCONNECT=$VALUE
     ;;
+  --enable-multi-external-gateway)
+    OVN_ENABLE_MULTI_EXTERNAL_GATEWAY=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -456,6 +459,8 @@ ovnkube_compact_mode_enable=${COMPACT_MODE:-"false"}
 echo "ovnkube_compact_mode_enable: ${ovnkube_compact_mode_enable}"
 ovn_enable_interconnect=${OVN_ENABLE_INTERCONNECT}
 echo "ovn_enable_interconnect: ${ovn_enable_interconnect}"
+ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY}
+echo "ovn_enable_multi_external_gateway: ${ovn_enable_multi_external_gateway}"
 
 ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
@@ -498,6 +503,7 @@ ovn_image=${ovnkube_image} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
@@ -572,6 +578,7 @@ ovn_image=${ovnkube_image} \
   ovn_stateless_netpol_enable=${ovn_netpol_acl_enable} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${ovnkube_image} \
@@ -603,6 +610,7 @@ ovn_image=${ovnkube_image} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   j2 ../templates/ovnkube-control-plane.yaml.j2 -o ${output_dir}/ovnkube-control-plane.yaml
 
 ovn_image=${image} \
@@ -683,6 +691,7 @@ ovn_image=${ovnkube_image} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   j2 ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
 
 ovn_image=${ovnkube_image} \
@@ -734,6 +743,7 @@ ovn_image=${ovnkube_image} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   j2 ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
 
 ovn_image=${image} \
