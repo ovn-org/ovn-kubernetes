@@ -498,6 +498,11 @@ func (c *Controller) repairIPTables(v4EpsToServices, v6EpsToServices map[string]
 		// and update the cache accordingly
 		rulesToDel := []string{}
 		for _, rule := range snatRules {
+			if rule == fmt.Sprintf("-N %s", Chain) {
+				// Ignore chain creation rule
+				continue
+			}
+
 			parsed, err := parseIPTRule(rule)
 			if err != nil {
 				// the rule is malformed
