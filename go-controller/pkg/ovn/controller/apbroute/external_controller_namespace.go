@@ -4,6 +4,7 @@ import (
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -22,14 +23,10 @@ func (m *externalPolicyManager) syncNamespace(namespace *v1.Namespace, routeQueu
 			func(key string) error {
 				ri, found := m.routePolicySyncCache.Load(policyName)
 				if found {
-					targetNsList, err := m.listNamespacesBySelector(&ri.policy.Spec.From.NamespaceSelector)
-					if err != nil {
-						return err
-					}
-					for _, targetNS := range targetNsList {
-						if targetNS.Name == namespace.Name {
-							keysToBeQueued.Insert(policyName)
-						}
+					nsSel, _ := metav1.LabelSelectorAsSelector(&ri.policy.Spec.From.NamespaceSelector)
+					if nsSel.Matches(labels.Set(namespace.Labels)) {
+						keysToBeQueued.Insert(policyName)
+						return nil
 					}
 					for _, hop := range ri.policy.Spec.NextHops.DynamicHops {
 						gwNs, err := m.listNamespacesBySelector(hop.NamespaceSelector)
@@ -39,6 +36,7 @@ func (m *externalPolicyManager) syncNamespace(namespace *v1.Namespace, routeQueu
 						for _, ns := range gwNs {
 							if ns.Name == namespace.Name {
 								keysToBeQueued.Insert(policyName)
+								return nil
 							}
 						}
 					}
