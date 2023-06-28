@@ -48,8 +48,6 @@ type ExternalGatewayMasterController struct {
 	stopCh               <-chan struct{}
 
 	// route policies
-
-	// routerInformer v1apbinformer.AdminPolicyBasedExternalRouteInformer
 	routeLister adminpolicybasedroutelisters.AdminPolicyBasedExternalRouteLister
 	routeSynced cache.InformerSynced
 	routeQueue  workqueue.RateLimitingInterface
@@ -175,7 +173,7 @@ func NewExternalMasterController(
 
 func (c *ExternalGatewayMasterController) Run(threadiness int) {
 	defer utilruntime.HandleCrash()
-	klog.Infof("Starting Admin Policy Based Route Controller")
+	klog.V(4).InfoS("Starting Admin Policy Based Route Controller")
 
 	c.routePolicyInformer.Start(c.stopCh)
 
@@ -199,10 +197,9 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 	}
 	syncWg.Wait()
 
-	klog.Infof("Repairing Admin Policy Based External Route Services")
+	klog.V(4).InfoS("Repairing Admin Policy Based External Route Services")
 	c.repair()
 
-	startWg := &sync.WaitGroup{}
 	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
 		for _, workerFn := range []func(*sync.WaitGroup){
@@ -213,10 +210,8 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 			// detects namespace changes and applies polices that match the namespace selector in the `From` policy field
 			c.runNamespaceWorker,
 		} {
-			startWg.Add(1)
 			wg.Add(1)
 			go func(fn func(*sync.WaitGroup)) {
-				startWg.Done()
 				defer wg.Done()
 				wait.Until(func() {
 					fn(wg)
@@ -224,7 +219,6 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 			}(workerFn)
 		}
 	}
-	startWg.Wait()
 
 	// wait until we're told to stop
 	<-c.stopCh
@@ -245,87 +239,47 @@ func (c *ExternalGatewayMasterController) processNextPolicyWorkItem(wg *sync.Wai
 	wg.Add(1)
 	defer wg.Done()
 
-	obj, shutdown := c.routeQueue.Get()
+	key, shutdown := c.routeQueue.Get()
 
 	if shutdown {
 		return false
 	}
 
-	defer c.routeQueue.Done(obj)
+	defer c.routeQueue.Done(key)
 
-	item := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
-	klog.Infof("Processing policy %s", item.Name)
-	err := c.syncRoutePolicy(item)
+	klog.V(4).InfoS("Processing policy %s", key)
+	policy, err := c.mgr.syncRoutePolicy(key.(string), c.routeQueue)
 	if err != nil {
-		if c.routeQueue.NumRequeues(item) < maxRetries {
-			klog.V(2).InfoS("Error found while processing policy: %w", err)
-			c.routeQueue.AddRateLimited(item)
+		klog.Errorf("Failed to sync APB policy %s: %v", key, err)
+	}
+	// capture the error from processing the sync in the statuses message field
+	err = c.updateStatusAPBExternalRoute(policy, err)
+	if err != nil {
+		if c.routeQueue.NumRequeues(key) < maxRetries {
+			klog.V(4).InfoS("Error found while processing policy %s: %w", key, err)
+			c.routeQueue.AddRateLimited(key)
 			return true
 		}
-		klog.Warningf("Dropping policy %q out of the queue: %w", item.Name, err)
+		klog.Warningf("Dropping policy %q out of the queue: %w", key, err)
 		utilruntime.HandleError(err)
 	}
-	c.routeQueue.Forget(obj)
+	c.routeQueue.Forget(key)
 	return true
 }
 
-func (c *ExternalGatewayMasterController) syncRoutePolicy(routePolicy *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) error {
-	_, err := c.routeLister.Get(routePolicy.Name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	if apierrors.IsNotFound(err) {
-		// DELETE use case
-		klog.Infof("Deleting policy %s", routePolicy.Name)
-		err = c.mgr.processDeletePolicy(routePolicy.Name)
-		if err != nil {
-			return fmt.Errorf("failed to delete Admin Policy Based External Route %s:%w", routePolicy.Name, err)
-		}
-		klog.Infof("Policy %s deleted", routePolicy.Name)
-		return nil
-	}
-	currentPolicy, found, markedForDeletion := c.mgr.getRoutePolicyFromCache(routePolicy.Name)
-	if markedForDeletion {
-		klog.Warningf("Attempting to add or update route policy %s when it has been marked for deletion. Skipping...", routePolicy.Name)
-		return nil
-	}
-	if !found {
-		// ADD use case
-		klog.Infof("Adding policy %s", routePolicy.Name)
-		pp, err := c.mgr.processAddPolicy(routePolicy)
-		newErr := c.updateStatusAPBExternalRoute(routePolicy.Name, pp, err)
-		if err != nil {
-			return fmt.Errorf("failed to create Admin Policy Based External Route %s:%w", routePolicy.Name, err)
-		}
-		if newErr != nil {
-			return fmt.Errorf("failed to update status in Admin Policy Based External Route %s:%w", routePolicy.Name, newErr)
-		}
-		return nil
-	}
-	// UPDATE use case
-	klog.Infof("Updating policy %s", routePolicy.Name)
-	pp, err := c.mgr.processUpdatePolicy(&currentPolicy, routePolicy)
-	newErr := c.updateStatusAPBExternalRoute(routePolicy.Name, pp, err)
-	if err != nil {
-		return fmt.Errorf("failed to update Admin Policy Based External Route %s:%w", routePolicy.Name, err)
-	}
-	if newErr != nil {
-		return fmt.Errorf("failed to update status in Admin Policy Based External Route %s:%w", routePolicy.Name, newErr)
-	}
-	return nil
-}
-
 func (c *ExternalGatewayMasterController) onPolicyAdd(obj interface{}) {
-	policy, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	_, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
 	if !ok {
 		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{}, obj))
 		return
 	}
-	if policy == nil {
-		utilruntime.HandleError(errors.New("invalid Admin Policy Based External Route provided to onPolicyAdd()"))
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	c.routeQueue.Add(policy)
+	klog.V(4).Infof("Adding policy %s", key)
+	c.routeQueue.Add(key)
 }
 
 func (c *ExternalGatewayMasterController) onPolicyUpdate(oldObj, newObj interface{}) {
@@ -348,26 +302,33 @@ func (c *ExternalGatewayMasterController) onPolicyUpdate(oldObj, newObj interfac
 		return
 	}
 
-	c.routeQueue.Add(newObj)
+	key, err := cache.MetaNamespaceKeyFunc(newObj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", newObj, err))
+	}
+	c.routeQueue.Add(key)
 }
 
 func (c *ExternalGatewayMasterController) onPolicyDelete(obj interface{}) {
-	policy, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+	_, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
 	if !ok {
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 		if !ok {
 			utilruntime.HandleError(fmt.Errorf("couldn't get object from tomstone %#v", obj))
 			return
 		}
-		policy, ok = tombstone.Obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
+		_, ok = tombstone.Obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
 		if !ok {
 			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not an Admin Policy Based External Route %#v", tombstone.Obj))
 			return
 		}
 	}
-	if policy != nil {
-		c.routeQueue.Add(policy)
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		return
 	}
+	c.routeQueue.Add(key)
 }
 
 func (c *ExternalGatewayMasterController) onNamespaceAdd(obj interface{}) {
@@ -441,10 +402,10 @@ func (c *ExternalGatewayMasterController) processNextNamespaceWorkItem(wg *sync.
 
 	defer c.namespaceQueue.Done(obj)
 
-	err := c.syncNamespace(obj.(*v1.Namespace))
+	err := c.mgr.syncNamespace(obj.(*v1.Namespace), c.routeQueue)
 	if err != nil {
 		if c.namespaceQueue.NumRequeues(obj) < maxRetries {
-			klog.V(2).InfoS("Error found while processing namespace %s:%w", obj.(*v1.Namespace), err)
+			klog.V(4).InfoS("Error found while processing namespace %s:%w", obj.(*v1.Namespace), err)
 			c.namespaceQueue.AddRateLimited(obj)
 			return true
 		}
@@ -453,53 +414,6 @@ func (c *ExternalGatewayMasterController) processNextNamespaceWorkItem(wg *sync.
 	}
 	c.namespaceQueue.Forget(obj)
 	return true
-}
-
-func (c *ExternalGatewayMasterController) syncNamespace(namespace *v1.Namespace) error {
-	_, err := c.namespaceLister.Get(namespace.Name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	if apierrors.IsNotFound(err) || !namespace.DeletionTimestamp.IsZero() {
-		// DELETE use case
-		klog.Infof("Deleting namespace reference %s", namespace.Name)
-		return c.mgr.processDeleteNamespace(namespace.Name)
-	}
-	matches, err := c.mgr.getPoliciesForNamespace(namespace.Name)
-	if err != nil {
-		return err
-	}
-	cacheInfo, found := c.mgr.getNamespaceInfoFromCache(namespace.Name)
-	if !found && len(matches) == 0 {
-		// it's not a namespace being cached already and it is not a target for policies, nothing to do
-		return nil
-	}
-
-	defer c.mgr.unlockNamespaceInfoCache(namespace.Name)
-	if found && cacheInfo.markForDelete {
-		// namespace exists and has been marked for deletion, this means there should be an event to complete deleting the namespace.
-		// wait for the namespace to be deleted before recreating it in the cache.
-		return fmt.Errorf("cannot add namespace %s because it is currently being deleted", namespace.Name)
-	}
-
-	if !found {
-		// ADD use case
-		// new namespace or namespace updated its labels and now match a routing policy
-		cacheInfo = c.mgr.newNamespaceInfoInCache(namespace.Name)
-		cacheInfo.Policies = matches
-		return c.mgr.processAddNamespace(namespace, cacheInfo)
-	}
-
-	if !cacheInfo.Policies.Equal(matches) {
-		// UPDATE use case
-		// policies differ, need to reconcile them
-		err = c.mgr.processUpdateNamespace(namespace.Name, cacheInfo.Policies, matches, cacheInfo)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	return nil
 }
 
 func (c *ExternalGatewayMasterController) onPodAdd(obj interface{}) {
@@ -580,10 +494,10 @@ func (c *ExternalGatewayMasterController) processNextPodWorkItem(wg *sync.WaitGr
 	defer c.podQueue.Done(obj)
 
 	p := obj.(*v1.Pod)
-	err := c.syncPod(p)
+	err := c.mgr.syncPod(p, c.podLister, c.routeQueue)
 	if err != nil {
 		if c.podQueue.NumRequeues(obj) < maxRetries {
-			klog.V(2).InfoS("Error found while processing pod %s/%s:%w", p.Namespace, p.Name, err)
+			klog.V(4).InfoS("Error found while processing pod %s/%s:%w", p.Namespace, p.Name, err)
 			c.podQueue.AddRateLimited(obj)
 			return true
 		}
@@ -595,37 +509,15 @@ func (c *ExternalGatewayMasterController) processNextPodWorkItem(wg *sync.WaitGr
 	return true
 }
 
-func (c *ExternalGatewayMasterController) syncPod(pod *v1.Pod) error {
-
-	_, err := c.podLister.Pods(pod.Namespace).Get(pod.Name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
+// updateStatusAPBExternalRoute updates the CR with the current status of the CR instance, including errors captured while processing the CR during its lifetime
+func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(externalRoutePolicy *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, processedError error) error {
+	if externalRoutePolicy == nil {
+		// policy doesnt exist anymore, nothing to do
+		return nil
 	}
-	namespaces := c.mgr.filterNamespacesUsingPodGateway(ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name})
-	klog.Infof("Processing pod %s/%s", pod.Namespace, pod.Name)
-	if apierrors.IsNotFound(err) || !pod.DeletionTimestamp.IsZero() {
-		// DELETE case
-		if namespaces.Len() == 0 {
-			// nothing to do, this pod is not a gateway pod
-			return nil
-		}
-		klog.Infof("Deleting pod gateway %s/%s", pod.Namespace, pod.Name)
-		return c.mgr.processDeletePod(pod, namespaces)
-	}
-	if namespaces.Len() == 0 {
-		// ADD case: new pod or existing pod that is not a gateway pod and could now be one.
-		klog.Infof("Adding pod %s/%s", pod.Namespace, pod.Name)
-		return c.mgr.processAddPod(pod)
-	}
-	// UPDATE case
-	klog.Infof("Updating pod gateway %s/%s", pod.Namespace, pod.Name)
-	return c.mgr.processUpdatePod(pod, namespaces)
-}
 
-func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(routeName string, processedPolicy *routePolicy, processedError error) error {
-
-	routePolicy, err := c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), routeName, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
+	processedPolicy, err := c.mgr.processExternalRoutePolicy(externalRoutePolicy)
+	if err != nil {
 		return err
 	}
 
@@ -638,12 +530,20 @@ func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(routeName
 			gwIPs = gwIPs.Insert(dynamic.Gateways.UnsortedList()...)
 		}
 	}
+	// retrieve the policy for update
+	routePolicy, err := c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), externalRoutePolicy.Name, metav1.GetOptions{})
+	if err != nil && apierrors.IsNotFound(err) {
+		return processedError
+	}
+	if err != nil {
+		return err
+	}
 	updateStatus(routePolicy, strings.Join(sets.List(gwIPs), ","), processedError)
 	_, err = c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().UpdateStatus(context.TODO(), routePolicy, metav1.UpdateOptions{})
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
-	return nil
+	return processedError
 }
 
 func (c *ExternalGatewayMasterController) GetDynamicGatewayIPsForTargetNamespace(namespaceName string) (sets.Set[string], error) {
@@ -663,5 +563,5 @@ func updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute,
 	route.Status.LastTransitionTime = metav1.Time{Time: time.Now()}
 	route.Status.Status = adminpolicybasedrouteapi.SuccessStatus
 	route.Status.Messages = append(route.Status.Messages, fmt.Sprintf("Configured external gateway IPs: %s", gwIPs))
-	klog.Infof("Updating Admin Policy Based External Route %s with Status: %s, Message: %s", route.Name, route.Status.Status, route.Status.Messages[len(route.Status.Messages)-1])
+	klog.V(4).InfoS("Updating Admin Policy Based External Route %s with Status: %s, Message: %s", route.Name, route.Status.Status, route.Status.Messages[len(route.Status.Messages)-1])
 }

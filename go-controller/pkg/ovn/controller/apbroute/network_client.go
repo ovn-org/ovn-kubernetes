@@ -256,7 +256,7 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddr
 	routesAdded := 0
 	portPrefix, err := nb.extSwitchPrefix(node)
 	if err != nil {
-		klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
+		klog.Warningf("Failed to find ext switch prefix for %s %v", node, err)
 		return err
 	}
 
@@ -442,7 +442,7 @@ func (nb *northBoundClient) updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP
 
 	portPrefix, err := nb.extSwitchPrefix(nodeName)
 	if err != nil {
-		klog.Infof("Failed to find ext switch prefix for %s %v", nodeName, err)
+		klog.Warningf("Failed to find ext switch prefix for %s %v", nodeName, err)
 		return err
 	}
 	if bfdEnabled {
@@ -727,7 +727,7 @@ func (c *conntrackClient) deleteGatewayIPs(namespaceName string, _, toBeKept set
 	var wg sync.WaitGroup
 	wg.Add(len(toBeKept))
 	validMACs := sync.Map{}
-	klog.Infof("Keeping conntrack entries in namespace %s with gateway IPs %s", namespaceName, strings.Join(sets.List(toBeKept), ","))
+	klog.V(4).InfoS("Keeping conntrack entries in namespace %s with gateway IPs %s", namespaceName, strings.Join(sets.List(toBeKept), ","))
 	for gwIP := range toBeKept {
 		go func(gwIP string) {
 			defer wg.Done()
