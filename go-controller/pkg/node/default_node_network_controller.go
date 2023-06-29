@@ -304,8 +304,14 @@ func setupOVNNode(node *kapi.Node) error {
 		// make this node/chassis as an interconnect gateway.
 		fmt.Sprintf("external_ids:ovn-is-interconn=%s", strconv.FormatBool(config.OVNKubernetesFeature.EnableInterconnect)),
 		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
-		fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
 		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
+	}
+
+	if !config.OVNKubernetesFeature.EnableInterconnect {
+		klog.Infof("SURYA")
+		setExternalIdsCmd = append(setExternalIdsCmd,
+			fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
+		)
 	}
 
 	if config.Default.LFlowCacheLimit > 0 {
@@ -614,6 +620,16 @@ func getOVNSBZone() (string, error) {
 	return dbZone, nil
 }
 
+// getOVNSBZoneSyncedOption returns the zone name stored in the Southbound db.
+func getOVNSBZoneSyncedOption() (string, error) {
+	dbZone, _, err := util.RunOVNSbctl("get", "SB_Global", ".", "options:synced-zone")
+	if err != nil {
+		return "", err
+	}
+
+	return dbZone, nil
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
@@ -629,6 +645,41 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	var level klog.Level
 	if err := level.Set("5"); err != nil {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
+	}
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		klog.Infof("SURYA")
+		nc.wg.Add(1)
+		go func() {
+			defer nc.wg.Done()
+			var err1 error
+			var zone string
+			start := time.Now()
+			err = wait.PollUntilContextTimeout(context.Background(), 5*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+				zone, err1 = getOVNSBZoneSyncedOption()
+				if err1 != nil {
+					err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+					return false, nil
+				}
+				return true, nil
+			})
+	
+			if err != nil {
+				klog.Errorf("timed out waiting for the synced-zone option for zone %s to appear, err : %v, %v", zone, err, err1)
+			}
+			// it has been 5 mins; so its now or never to remove the wait from ovn-controller -> we shouldn't wait any longer
+			// CNO sets this in ovn-controller container
+			setExternalIdsCmd := []string{
+				"set",
+				"Open_vSwitch",
+				".",
+				fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
+			}
+			_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
+			if err != nil {
+				klog.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
+			}
+			klog.Infof("Removing wait config from ovn-controller took: %v", time.Since(start))
+		}()
 	}
 	nc.wg.Add(1)
 	go func() {
@@ -651,21 +702,26 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// Make sure that the node zone matches with the Southbound db zone.
 	// Wait for 300s before giving up
 	var sbZone string
+	var err1 error
+	start := time.Now()
 	err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
-		sbZone, err = getOVNSBZone()
-		if err != nil {
-			return false, fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+		sbZone, err1 = getOVNSBZone()
+		if err1 != nil {
+			err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+			return false, nil
 		}
 
 		if config.Default.Zone != sbZone {
-			return false, fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
+			err1 = fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
+			return false, nil
 		}
 		return true, nil
 	})
 
 	if err != nil {
-		return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err : %w", config.Default.Zone, err)
+		return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err : %v, %v", config.Default.Zone, err, err1)
 	}
+	klog.Infof("SBDB zone sync took: %s", time.Since(start))
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
@@ -762,7 +818,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// Wait for management port and gateway resources to be created by the master
 	klog.Infof("Waiting for gateway and management port readiness...")
-	start := time.Now()
+	start = time.Now()
 	if err := waiter.Wait(); err != nil {
 		return err
 	}

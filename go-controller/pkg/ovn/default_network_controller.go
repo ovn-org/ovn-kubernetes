@@ -549,6 +549,12 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Now that we are done setting up things, let's signal ovnkube-node that it can remove
+	// ofctrl-wait-before-clear from ovn-controller
+	if err := util.SetNBZoneOption(oc.nbClient, oc.zone); err != nil {
+		return fmt.Errorf("unable to set option in the NB Global database for zone %s: err: %v", oc.zone, err)
+	}
+
 	return nil
 }
 

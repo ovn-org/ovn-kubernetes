@@ -431,3 +431,16 @@ func GetNBZone(nbClient libovsdbclient.Client) (string, error) {
 
 	return nbGlobal.Name, nil
 }
+
+// SetNBZoneOption sets the zone-name to ensure ovnkube-controller has populated all
+// the resources correctly into the database. This will act as a signal for ovnkube-node
+// to remove the external_ids:ovn-ofctrl-wait-before-clear from the ovn-controller
+func SetNBZoneOption(nbClient libovsdbclient.Client, zone string) error {
+	nbGlobal := nbdb.NBGlobal{
+		Options: map[string]string{"synced-zone": zone},
+	}
+	if err := libovsdbops.UpdateNBGlobalSetOptions(nbClient, &nbGlobal); err != nil {
+		return fmt.Errorf("unable to update NB global options synced-zone for zone %s; err: %v", zone, err)
+	}
+	return nil
+}
