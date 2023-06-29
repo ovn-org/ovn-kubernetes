@@ -3,6 +3,7 @@ package zoneinterconnect
 import (
 	"context"
 	"fmt"
+	"net"
 	"sort"
 
 	"github.com/onsi/ginkgo"
@@ -267,13 +268,14 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 	const (
 		clusterIPNet   string = "10.1.0.0"
 		clusterCIDR    string = clusterIPNet + "/16"
+		clusterv6CIDR  string = "aef0::/48"
 		joinSubnetCIDR string = "100.64.0.0/16/19"
 		vlanID                = 1024
 	)
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
-		//gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -378,7 +380,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode2)
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
@@ -392,6 +394,91 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 			err := app.Run([]string{
 				app.Name,
 				"-cluster-subnets=" + clusterCIDR,
+				"-init-cluster-manager",
+				"-zone-join-switch-subnets=" + joinSubnetCIDR,
+				"-enable-interconnect",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("Basic checks in dual-stack", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: initialNBDB,
+					SBData: initialSBDB,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(config.IPv4Mode).To(gomega.BeTrue())
+				gomega.Expect(config.IPv6Mode).To(gomega.BeTrue())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+				libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(libovsdbOvnSBClient.Connected()).To(gomega.BeTrue())
+				gomega.Expect(libovsdbOvnNBClient.Connected()).To(gomega.BeTrue())
+
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
+				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Set annotations to include ipv6 to node3 (remote zone)
+				node3Ipv4Subnet := "10.244.4.0/24"
+				_, node3Ipv4SubnetNet, err := net.ParseCIDR(node3Ipv4Subnet)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				node3Ipv4SubnetPrefix := node3Ipv4SubnetNet.IP.String() + "/24"
+				node3TransitIpv4 := "168.254.0.4"
+				node3Ipv6Subnet := "aef0:0:0:4::2895/64"
+				_, node3Ipv6SubnetNet, err := net.ParseCIDR(node3Ipv6Subnet)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				node3Ipv6SubnetPrefix := node3Ipv6SubnetNet.IP.String() + "/64"
+				node3TransitIpv6 := "fd97::4"
+
+				testNode3.Annotations[ovnNodeSubnetsAnnotation] = "{\"default\":[\"" + node3Ipv4Subnet + "\", \"" + node3Ipv6Subnet + "\"]}"
+				testNode3.Annotations[ovnTransitSwitchPortAddrAnnotation] = "{\"ipv4\":\"" + node3TransitIpv4 + "/16\", \"ipv6\":\"" + node3TransitIpv6 + "/64\"}"
+
+				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				r := nbdb.LogicalRouter{
+					Name: getNetworkScopedName(types.DefaultNetworkName, types.OVNClusterRouter),
+				}
+				clusterRouter, err := libovsdbops.GetLogicalRouter(libovsdbOvnNBClient, &r)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Make sure cluster router now has an static route for the remote node's ipv4 and ipv6
+				staticIpv4RouteFound := false
+				staticIpv6RouteFound := false
+				for _, srUUID := range clusterRouter.StaticRoutes {
+					newPredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+						return item.UUID == srUUID
+					}
+					sr, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(libovsdbOvnNBClient, newPredicate)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(sr).Should(gomega.HaveLen(1), "The static route should have been found by uuid")
+					if sr[0].IPPrefix == node3Ipv4SubnetPrefix && sr[0].Nexthop == node3TransitIpv4 {
+						staticIpv4RouteFound = true
+					} else if sr[0].IPPrefix == node3Ipv6SubnetPrefix && sr[0].Nexthop == node3TransitIpv6 {
+						staticIpv6RouteFound = true
+					}
+				}
+				gomega.Expect(staticIpv4RouteFound).To(gomega.BeTrue())
+				gomega.Expect(staticIpv6RouteFound).To(gomega.BeTrue())
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR + "," + clusterv6CIDR,
+				"-k8s-service-cidr=10.96.0.0/16,fd00:10:96::/112",
 				"-init-cluster-manager",
 				"-zone-join-switch-subnets=" + joinSubnetCIDR,
 				"-enable-interconnect",
@@ -414,7 +501,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode2)
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
@@ -464,7 +551,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode2)
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
@@ -579,7 +666,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode2)
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"}, Topology: types.Layer3Topology})
@@ -617,7 +704,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode2)
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"}, Topology: types.Layer3Topology})
@@ -675,7 +762,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 					},
 				}
 
-				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode2)
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
@@ -763,7 +850,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 					},
 				}
 
-				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode2)
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)

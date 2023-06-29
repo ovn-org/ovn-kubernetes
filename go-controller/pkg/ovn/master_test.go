@@ -912,9 +912,10 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 	)
 
 	const (
-		clusterIPNet string = "10.1.0.0"
-		clusterCIDR  string = clusterIPNet + "/16"
-		vlanID              = 1024
+		clusterIPNet  string = "10.1.0.0"
+		clusterCIDR   string = clusterIPNet + "/16"
+		clusterv6CIDR string = "aef0::/48"
+		vlanID               = 1024
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -1566,7 +1567,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Ensure that the node's switch is eventually created once the annotations
-			// are reconiled by the network cluster controller
+			// are reconciled by the network cluster controller
 			newNodeLS := &nbdb.LogicalSwitch{Name: newNode.Name}
 			gomega.Eventually(func() error {
 				_, err := libovsdbops.GetLogicalSwitch(nbClient, newNodeLS)
@@ -1579,6 +1580,69 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		err := app.Run([]string{
 			app.Name,
 			"-cluster-subnets=" + clusterCIDR,
+			"--init-gateways",
+			"--nodeport",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	ginkgo.It("reconciles node host subnets after single-stack to dual-stack upgrade", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Expect(config.IPv4Mode).To(gomega.BeTrue())
+			gomega.Expect(config.IPv6Mode).To(gomega.BeTrue())
+
+			newNodeIpv4Subnet := "10.1.1.0/24"
+			newNode := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "newNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets":                   fmt.Sprintf("{\"default\":[\"%s\"]}", newNodeIpv4Subnet),
+						"k8s.ovn.org/node-chassis-id":                "2",
+						"k8s.ovn.org/node-gateway-router-lrp-ifaddr": "{\"ipv4\":\"100.64.0.2/16\"}",
+					},
+				},
+			}
+
+			_, err = kubeFakeClient.CoreV1().Nodes().Create(context.TODO(), newNode, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			startFakeController(oc, wg)
+
+			// Simulate the ClusterManager reconciling the node annotations to dual-stack
+			newNode, err = kubeFakeClient.CoreV1().Nodes().Get(context.TODO(), newNode.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			newNodeIpv6SubnetPrefix := "aef0:0:0:2::"
+			newNodeIpv6Subnet := newNodeIpv6SubnetPrefix + "2895/64"
+			newNode.Annotations["k8s.ovn.org/node-subnets"] = fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", newNodeIpv4Subnet, newNodeIpv6Subnet)
+			_, err = kubeFakeClient.CoreV1().Nodes().Update(context.TODO(), newNode, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Ensure that the node's switch is eventually created once the annotations
+			// are reconciled by the network cluster controller
+			gomega.Eventually(func() bool {
+				newNodeLS, err := libovsdbops.GetLogicalSwitch(nbClient, &nbdb.LogicalSwitch{Name: newNode.Name})
+				if err != nil {
+					return false
+				}
+				if newNodeLS.OtherConfig["subnet"] != newNodeIpv4Subnet {
+					return false
+				}
+				if newNodeLS.OtherConfig["ipv6_prefix"] != newNodeIpv6SubnetPrefix {
+					return false
+				}
+				return true
+			}, 10).Should(gomega.BeTrue())
+
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR + "," + clusterv6CIDR,
+			"-k8s-service-cidr=10.96.0.0/16,fd00:10:96::/112",
 			"--init-gateways",
 			"--nodeport",
 		})
