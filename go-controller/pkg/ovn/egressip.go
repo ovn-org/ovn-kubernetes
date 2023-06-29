@@ -543,7 +543,7 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 		remainingAssignments = statusAssignments
 		podState = &podAssignmentState{
 			egressIPName:         name,
-			egressStatuses:       make(map[egressipv1.EgressIPStatusItem]string),
+			egressStatuses:       egressStatuses{make(map[egressipv1.EgressIPStatusItem]string)},
 			standbyEgressIPNames: sets.New[string](),
 		}
 		oc.eIPC.podAssignment[podKey] = podState
@@ -552,7 +552,7 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 		// podState.egressIPName can be empty if no re-routes were found in
 		// syncPodAssignmentCache for the existing pod, we will treat this case as a new add
 		for _, status := range statusAssignments {
-			if _, exists := podState.egressStatuses[status]; !exists {
+			if exists := podState.egressStatuses.contains(status); !exists {
 				remainingAssignments = append(remainingAssignments, status)
 			}
 		}
@@ -582,7 +582,7 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 				if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod, podIPs); err != nil {
 					return fmt.Errorf("unable to create egressip configuration for pod %s/%s/%v, err: %w", pod.Namespace, pod.Name, podIPs, err)
 				}
-				podState.egressStatuses[status] = ""
+				podState.egressStatuses.statusMap[status] = ""
 				return nil
 			}
 			return oc.eIPC.nodeZoneState.DoWithLock(pod.Spec.NodeName, func(key string) error {
@@ -590,7 +590,7 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 				if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod, podIPs); err != nil {
 					return fmt.Errorf("unable to create egressip configuration for pod %s/%s/%v, err: %w", pod.Namespace, pod.Name, podIPs, err)
 				}
-				podState.egressStatuses[status] = ""
+				podState.egressStatuses.statusMap[status] = ""
 				return nil
 			})
 		})
@@ -630,7 +630,7 @@ func (oc *DefaultNetworkController) deleteEgressIPAssignments(name string, statu
 				podStatus.standbyEgressIPNames.Delete(name)
 				continue
 			}
-			if _, ok := podStatus.egressStatuses[statusToRemove]; !ok {
+			if ok := podStatus.egressStatuses.contains(statusToRemove); !ok {
 				// we can continue here since this pod was not managed by this statusToRemove
 				continue
 			}
@@ -648,13 +648,13 @@ func (oc *DefaultNetworkController) deleteEgressIPAssignments(name string, statu
 				if err = oc.eIPC.addExternalGWPodSNAT(podNamespace, podName, statusToRemove); err != nil {
 					return err
 				}
-				delete(podStatus.egressStatuses, statusToRemove)
+				podStatus.egressStatuses.delete(statusToRemove)
 				return nil
 			})
 			if err != nil {
 				return err
 			}
-			if len(podStatus.egressStatuses) == 0 && len(podStatus.standbyEgressIPNames) == 0 {
+			if len(podStatus.egressStatuses.statusMap) == 0 && len(podStatus.standbyEgressIPNames) == 0 {
 				// pod could be managed by more than one egressIP
 				// so remove the podKey from cache only if we are sure
 				// there are no more egressStatuses managing this pod
@@ -666,7 +666,7 @@ func (oc *DefaultNetworkController) deleteEgressIPAssignments(name string, statu
 					return fmt.Errorf("cannot delete egressPodIPs for the pod %s from the address set: err: %v", podKey, err)
 				}
 				delete(oc.eIPC.podAssignment, podKey)
-			} else if len(podStatus.egressStatuses) == 0 && len(podStatus.standbyEgressIPNames) > 0 {
+			} else if len(podStatus.egressStatuses.statusMap) == 0 && len(podStatus.standbyEgressIPNames) > 0 {
 				klog.V(2).Infof("Pod %s has standby egress IP %+v", podKey, podStatus.standbyEgressIPNames.UnsortedList())
 				podStatus.egressIPName = "" // we have deleted the current egressIP that was managing the pod
 				if err := oc.addStandByEgressIPAssignment(podKey, podStatus); err != nil {
@@ -727,7 +727,7 @@ func (oc *DefaultNetworkController) deletePodEgressIPAssignments(name string, st
 		return err
 	}
 	for _, statusToRemove := range statusesToRemove {
-		if _, ok := podStatus.egressStatuses[statusToRemove]; !ok {
+		if ok := podStatus.egressStatuses.contains(statusToRemove); !ok {
 			// we can continue here since this pod was not managed by this statusToRemove
 			continue
 		}
@@ -738,14 +738,14 @@ func (oc *DefaultNetworkController) deletePodEgressIPAssignments(name string, st
 				if err := oc.eIPC.deletePodEgressIPAssignment(name, statusToRemove, pod, podIPs); err != nil {
 					return err
 				}
-				delete(podStatus.egressStatuses, statusToRemove)
+				podStatus.egressStatuses.delete(statusToRemove)
 				return nil
 			}
 			return oc.eIPC.nodeZoneState.DoWithLock(pod.Spec.NodeName, func(key string) error {
 				if err := oc.eIPC.deletePodEgressIPAssignment(name, statusToRemove, pod, podIPs); err != nil {
 					return err
 				}
-				delete(podStatus.egressStatuses, statusToRemove)
+				podStatus.egressStatuses.delete(statusToRemove)
 				return nil
 			})
 		})
@@ -755,7 +755,7 @@ func (oc *DefaultNetworkController) deletePodEgressIPAssignments(name string, st
 	}
 	// Delete the key if there are no more status assignments to keep
 	// for the pod.
-	if len(podStatus.egressStatuses) == 0 {
+	if len(podStatus.egressStatuses.statusMap) == 0 {
 		// pod could be managed by more than one egressIP
 		// so remove the podKey from cache only if we are sure
 		// there are no more egressStatuses managing this pod
@@ -910,7 +910,7 @@ func (oc *DefaultNetworkController) syncPodAssignmentCache(egressIPCache map[str
 			podState, ok := oc.eIPC.podAssignment[podKey]
 			if !ok {
 				podState = &podAssignmentState{
-					egressStatuses:       make(map[egressipv1.EgressIPStatusItem]string),
+					egressStatuses:       egressStatuses{make(map[egressipv1.EgressIPStatusItem]string)},
 					standbyEgressIPNames: sets.New[string](),
 				}
 			}
@@ -1337,6 +1337,34 @@ func InitClusterEgressPolicies(nbClient libovsdbclient.Client, addressSetFactory
 	return nil
 }
 
+type statusMap map[egressipv1.EgressIPStatusItem]string
+
+type egressStatuses struct {
+	statusMap
+}
+
+func (e egressStatuses) contains(potentialStatus egressipv1.EgressIPStatusItem) bool {
+	// handle the case where the all of the status fields are populated
+	if _, exists := e.statusMap[potentialStatus]; exists {
+		return true
+	}
+	// handle the case where not network is populated. This may occur if an EIP obj was considered by a cluster
+	// manager egress IP controller that did not support the network field
+	potentialStatus.Network = ""
+	if _, exists := e.statusMap[potentialStatus]; exists {
+		return true
+	}
+	return false
+}
+
+func (e egressStatuses) delete(deleteStatus egressipv1.EgressIPStatusItem) {
+	delete(e.statusMap, deleteStatus)
+	// also remove any keys without networks set. This is may occur when upgrading from a version that didn't set the
+	// network field
+	deleteStatus.Network = ""
+	delete(e.statusMap, deleteStatus)
+}
+
 // podAssignmentState keeps track of which egressIP object is serving
 // the related pod.
 // NOTE: At a given time only one object will be configured. This is
@@ -1345,7 +1373,9 @@ type podAssignmentState struct {
 	// the name of the egressIP object that is currently serving this pod
 	egressIPName string
 	// the list of egressIPs within the above egressIP object that are serving this pod
-	egressStatuses map[egressipv1.EgressIPStatusItem]string
+
+	egressStatuses
+
 	// list of other egressIP object names that also match this pod but are on standby
 	standbyEgressIPNames sets.Set[string]
 }
@@ -1356,9 +1386,9 @@ func (pas *podAssignmentState) Clone() *podAssignmentState {
 		egressIPName:         pas.egressIPName,
 		standbyEgressIPNames: pas.standbyEgressIPNames.Clone(),
 	}
-	clone.egressStatuses = make(map[egressipv1.EgressIPStatusItem]string, len(pas.egressStatuses))
-	for k, v := range pas.egressStatuses {
-		clone.egressStatuses[k] = v
+	clone.egressStatuses = egressStatuses{make(map[egressipv1.EgressIPStatusItem]string, len(pas.egressStatuses.statusMap))}
+	for k, v := range pas.statusMap {
+		clone.statusMap[k] = v
 	}
 	return clone
 }
@@ -1413,7 +1443,7 @@ func (oc *DefaultNetworkController) addStandByEgressIPAssignment(podKey string, 
 	}
 
 	podState := &podAssignmentState{
-		egressStatuses:       make(map[egressipv1.EgressIPStatusItem]string),
+		egressStatuses:       egressStatuses{make(map[egressipv1.EgressIPStatusItem]string)},
 		standbyEgressIPNames: podStatus.standbyEgressIPNames,
 	}
 	oc.eIPC.podAssignment[podKey] = podState
