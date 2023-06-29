@@ -300,24 +300,31 @@ func (cm *networkControllerManager) initDefaultNetworkController() error {
 func (cm *networkControllerManager) Start(ctx context.Context) error {
 	klog.Info("Starting the network controller manager")
 
-	// Make sure that the NCM zone matches with the Noruthbound db zone.
+	// Make sure that the NCM zone matches with the Northbound db zone.
 	// Wait for 300s before giving up
+	maxTimeout := 300 * time.Second
+	klog.Infof("Waiting up to %s for NBDB zone to match: %s", maxTimeout, config.Default.Zone)
+	start := time.Now()
 	var zone string
-	err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
-		zone, err := util.GetNBZone(cm.nbClient)
-		if err != nil {
-			return false, fmt.Errorf("error getting the zone name from the OVN Northbound db : %w", err)
+	var err1 error
+	err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+		zone, err1 = util.GetNBZone(cm.nbClient)
+		if err1 != nil {
+			return false, nil
 		}
 
 		if config.Default.Zone != zone {
-			return false, fmt.Errorf("network controller manager zone %s mismatch with the Northbound db zone %s", config.Default.Zone, zone)
+			err1 = fmt.Errorf("config zone %s different from NBDB zone %s", config.Default.Zone, zone)
+			return false, nil
 		}
 		return true, nil
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to start default network controller - OVN Nortboubd db zone %s doesn't match with the configured zone %s : err - %w", zone, config.Default.Zone, err)
+		return fmt.Errorf("failed to start default network controller - OVN NBDB zone %s does not match the configured zone %q: errors: %v, %v",
+			zone, config.Default.Zone, err, err1)
 	}
+	klog.Infof("NBDB zone sync took: %s", time.Since(start))
 
 	cm.configureMetrics(cm.stopChan)
 

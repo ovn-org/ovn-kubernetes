@@ -142,7 +142,7 @@ func setOvsVSwitchdCPUAffinity() error {
 		return fmt.Errorf("can't retrieve ovs-vswitchd PID: %w", err)
 	}
 
-	klog.V(5).Info("Managing ovs-vswitchd[%s] daemon CPU affinity", ovsVSwitchdPID)
+	klog.V(5).Infof("Managing ovs-vswitchd[%s] daemon CPU affinity", ovsVSwitchdPID)
 	return setProcessCPUAffinity(ovsVSwitchdPID)
 }
 
@@ -178,7 +178,7 @@ func setProcessCPUAffinity(targetPIDStr string) error {
 	}
 
 	if currentProcessCPUs == targetProcessCPUs {
-		klog.V(5).Info("Process[%d] CPU affinity already match current process's affinity %s", targetPID, printCPUSet(currentProcessCPUs))
+		klog.V(5).Infof("Process[%d] CPU affinity already match current process's affinity %s", targetPID, printCPUSet(currentProcessCPUs))
 		return nil
 	}
 
