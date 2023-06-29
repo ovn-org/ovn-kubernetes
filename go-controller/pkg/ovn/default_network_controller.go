@@ -391,7 +391,10 @@ func (oc *DefaultNetworkController) Init() error {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
-
+	// Sync external gateway routes. External gateway are set via Admin Policy Based External Route CRs.
+	// So execute an individual sync method at startup to cleanup any difference
+	klog.V(4).InfoS("Cleaning External Gateway ECMP routes")
+	WithSyncDurationMetricNoError("external gateway routes", oc.apbExternalRouteController.Repair)
 	return nil
 }
 

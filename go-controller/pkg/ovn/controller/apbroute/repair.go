@@ -24,7 +24,7 @@ type managedGWIPs struct {
 	gwList         gatewayInfoList
 }
 
-func (c *ExternalGatewayMasterController) repair() {
+func (c *ExternalGatewayMasterController) Repair() {
 	start := time.Now()
 	defer func() {
 		klog.V(4).InfoS("Syncing exgw routes took %v", time.Since(start))

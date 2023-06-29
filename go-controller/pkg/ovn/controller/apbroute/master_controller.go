@@ -197,9 +197,6 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 	}
 	syncWg.Wait()
 
-	klog.V(4).InfoS("Repairing Admin Policy Based External Route Services")
-	c.repair()
-
 	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
 		for _, workerFn := range []func(*sync.WaitGroup){
