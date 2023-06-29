@@ -7,7 +7,14 @@ concurrency: commands-${{ github.ref }}
 
 jobs:
   retest:
-    if: github.event.issue.pull_request
+    if: |
+      github.event.issue.pull_request && 
+      (
+        contains(github.event.comment.body, '/retest') || 
+        contains(github.event.comment.body, '/retest-failed') || 
+        contains(github.event.comment.body, '/cancel') || 
+        contains(github.event.comment.body, '/help')
+      ) 
     runs-on: ubuntu-latest
     steps:
       - name: Check out code

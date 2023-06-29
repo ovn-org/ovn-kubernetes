@@ -1119,6 +1119,122 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			})
+			ginkgo.It(fmt.Sprintf("correctly deletes object that failed to be created, gateway mode %s", gwMode), func() {
+				config.Gateway.Mode = gwMode
+				app.Action = func(ctx *cli.Context) error {
+					namespace1 := *newNamespace("namespace1")
+					egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+						{
+							Type: "Deny",
+							To: egressfirewallapi.EgressFirewallDestination{
+								// wrong CIDR format, creation will fail
+								CIDRSelector: "1.2.3.4",
+							},
+						},
+					})
+					startOvn(dbSetup, []v1.Namespace{namespace1}, nil)
+
+					_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
+						Create(context.TODO(), egressFirewall, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					// creation will fail, check retry object exists
+					efKey, err := retry.GetResourceKey(egressFirewall)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					retry.CheckRetryObjectEventually(efKey, true, fakeOVN.controller.retryEgressFirewalls)
+
+					// delete wrong object
+					err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
+						Delete(context.TODO(), egressFirewall.Name, metav1.DeleteOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					// retry object should not be present
+					gomega.Eventually(func() bool {
+						return retry.CheckRetryObj(efKey, fakeOVN.controller.retryEgressFirewalls)
+					}, time.Second).Should(gomega.BeFalse())
+
+					return nil
+				}
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			})
+			ginkgo.It(fmt.Sprintf("correctly cleans up object that failed to be created, gateway mode %s", gwMode), func() {
+				config.Gateway.Mode = gwMode
+				app.Action = func(ctx *cli.Context) error {
+					namespace1 := *newNamespace("namespace1")
+					egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+						{
+							Type: "Deny",
+							To: egressfirewallapi.EgressFirewallDestination{
+								CIDRSelector: "1.2.3.4/23",
+							},
+						},
+						{
+							Type: "Deny",
+							To: egressfirewallapi.EgressFirewallDestination{
+								DNSName: "a.b.c",
+							},
+						},
+					})
+					startOvn(dbSetup, []v1.Namespace{namespace1}, nil)
+
+					// dns-based rule creation will fail, because addressset factory is nil
+					fakeOVN.controller.egressFirewallDNS = &EgressDNS{
+						dnsEntries:        make(map[string]*dnsEntry),
+						addressSetFactory: nil,
+
+						added:    make(chan struct{}),
+						deleted:  make(chan string, 1),
+						stopChan: make(chan struct{}),
+					}
+
+					_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
+						Create(context.TODO(), egressFirewall, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					// creation will fail, check retry object exists
+					efKey, err := retry.GetResourceKey(egressFirewall)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					retry.CheckRetryObjectEventually(efKey, true, fakeOVN.controller.retryEgressFirewalls)
+
+					// check first acl was successfully created
+					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
+					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
+					acl := libovsdbops.BuildACL(
+						getACLName(dbIDs),
+						nbdb.ACLDirectionToLport,
+						t.EgressFirewallStartPriority,
+						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
+						nbdb.ACLActionDrop,
+						t.OvnACLLoggingMeter,
+						"",
+						false,
+						dbIDs.GetExternalIDs(),
+						nil,
+					)
+					acl.UUID = "acl-UUID"
+					clusterPortGroup.ACLs = []string{acl.UUID}
+					expectedDatabaseState := append(initialData, acl)
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+					// delete wrong object
+					err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
+						Delete(context.TODO(), egressFirewall.Name, metav1.DeleteOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					// retry object should not be present
+					gomega.Eventually(func() bool {
+						return retry.CheckRetryObj(efKey, fakeOVN.controller.retryEgressFirewalls)
+					}, time.Second).Should(gomega.BeFalse())
+
+					// check created acl will be cleaned up on delete
+					// acl will be dereferenced, but not deleted by the test server
+					clusterPortGroup.ACLs = []string{}
+					expectedDatabaseState = append(initialData, acl)
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+					return nil
+				}
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			})
 		})
 	}
 })

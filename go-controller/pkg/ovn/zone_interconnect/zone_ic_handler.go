@@ -274,6 +274,7 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 			"interconn-ts":             zic.networkTransitSwitchName,
 			"requested-tnl-key":        strconv.Itoa(transitSwitchTunnelKey),
 			"mcast_snoop":              "true",
+			"mcast_querier":            "false",
 			"mcast_flood_unregistered": "true",
 		},
 	}
@@ -346,6 +347,7 @@ func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.N
 			"interconn-ts":             zic.networkTransitSwitchName,
 			"requested-tnl-key":        strconv.Itoa(transitSwitchTunnelKey),
 			"mcast_snoop":              "true",
+			"mcast_querier":            "false",
 			"mcast_flood_unregistered": "true",
 		},
 	}

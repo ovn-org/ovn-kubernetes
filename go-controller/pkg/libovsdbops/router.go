@@ -1005,7 +1005,10 @@ func GetRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (
 	nats := []*nbdb.NAT{}
 	for _, uuid := range r.Nat {
 		nat, err := GetNAT(nbClient, &nbdb.NAT{UUID: uuid})
-		if err != nil && err != libovsdbclient.ErrNotFound {
+		if err == libovsdbclient.ErrNotFound {
+			continue
+		}
+		if err != nil {
 			return nil, fmt.Errorf("failed to lookup NAT entry with uuid: %s, error: %w", uuid, err)
 		}
 		nats = append(nats, nat)

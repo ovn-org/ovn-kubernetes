@@ -27,7 +27,7 @@ type managedGWIPs struct {
 func (c *ExternalGatewayMasterController) repair() {
 	start := time.Now()
 	defer func() {
-		klog.Infof("Syncing exgw routes took %v", time.Since(start))
+		klog.V(4).InfoS("Syncing exgw routes took %v", time.Since(start))
 	}()
 
 	// migration from LGW to SGW mode
@@ -109,19 +109,18 @@ func (c *ExternalGatewayMasterController) repair() {
 		}
 	}
 
-	klog.Infof("OVN ECMP route cache is: %+v", ovnRouteCache)
-	klog.Infof("Cluster ECMP route cache is: %+v", policyGWIPsMap)
+	klog.V(4).InfoS("OVN ECMP route cache is: %+v", ovnRouteCache)
+	klog.V(4).InfoS("Cluster ECMP route cache is: %+v", policyGWIPsMap)
 
 	// iterate through ovn routes and remove any stale entries
 	for podIP, ovnRoutes := range ovnRouteCache {
 		podHasAnyECMPRoutes := false
 		for _, ovnRoute := range ovnRoutes {
 			if !ovnRoute.shouldExist {
-				klog.Infof("Found stale exgw ecmp route, podIP: %s, nexthop: %s, router: %s",
+				klog.V(4).InfoS("Found stale exgw ecmp route, podIP: %s, nexthop: %s, router: %s",
 					podIP, ovnRoute.nextHop, ovnRoute.router)
 				lrsr := nbdb.LogicalRouterStaticRoute{UUID: ovnRoute.uuid}
 				err := c.nbClient.deleteLogicalRouterStaticRoutes(ovnRoute.router, &lrsr)
-				// err :=
 				if err != nil {
 					klog.Errorf("Error deleting static route %s from router %s: %v", ovnRoute.uuid, ovnRoute.router, err)
 				}
@@ -133,7 +132,7 @@ func (c *ExternalGatewayMasterController) repair() {
 				// the default bridge to a new secondary bridge (or vice versa)
 				prefix, err := c.nbClient.extSwitchPrefix(node)
 				if err != nil {
-					// we shouldn't continue in this case, because we cant be sure this is a route we want to remove
+					// We shouldn't continue in this case, because we cant be sure this is a route we want to remove
 					klog.Errorf("Cannot sync exgw bfd: %+v, unable to determine exgw switch prefix: %v",
 						ovnRoute, err)
 				} else {
@@ -188,7 +187,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromPolicyRules
 				return nil, err
 			}
 			for _, nsPod := range nsPods {
-				// ignore completed pods, host networked pods, pods not scheduled
+				// Ignore completed pods, host networked pods, pods not scheduled
 				if util.PodWantsHostNetwork(nsPod) || util.PodCompleted(nsPod) || !util.PodScheduled(nsPod) {
 					continue
 				}
