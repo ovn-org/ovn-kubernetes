@@ -183,7 +183,9 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
 	if err != nil {
-		return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w", pod.Namespace, pod.Name, err)
+		// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
+		return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w",
+			pod.Namespace, pod.Name, ovntypes.NewSuppressedError(err))
 	}
 
 	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {

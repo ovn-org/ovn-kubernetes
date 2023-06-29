@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 const RetryObjInterval = 30 * time.Second
@@ -288,9 +289,13 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 		if r.ResourceHandler.NeedsUpdateDuringRetry && entry.config != nil && entry.newObj != nil {
 			klog.Infof("%v retry: updating object %s", r.ResourceHandler.ObjType, objKey)
 			if err := r.ResourceHandler.UpdateResource(entry.config, entry.newObj, true); err != nil {
-				klog.Infof("%v retry update failed for %s, will try again later: %v", r.ResourceHandler.ObjType, objKey, err)
 				entry.timeStamp = time.Now()
 				entry.failedAttempts++
+				if entry.failedAttempts >= MaxFailedAttempts {
+					klog.Errorf("Retry update failed final attempt for %s %s: error: %v", r.ResourceHandler.ObjType, objKey, err)
+				} else {
+					klog.Infof("%v retry update failed for %s, will try again later: %v", r.ResourceHandler.ObjType, objKey, err)
+				}
 				return
 			}
 			// successfully cleaned up new and old object, remove it from the retry cache
@@ -307,11 +312,15 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 					return
 				}
 				if err := r.ResourceHandler.DeleteResource(entry.oldObj, entry.config); err != nil {
-					klog.Infof("Retry delete failed for %s %s, will try again later: %v",
-						r.ResourceHandler.ObjType, objKey, err)
-
 					entry.timeStamp = time.Now()
 					entry.failedAttempts++
+					if entry.failedAttempts >= MaxFailedAttempts {
+						klog.Errorf("Retry delete failed final attempt for %s %s: error: %v", r.ResourceHandler.ObjType, objKey, err)
+					} else {
+						klog.Infof("Retry delete failed for %s %s, will try again later: %v",
+							r.ResourceHandler.ObjType, objKey, err)
+					}
+
 					return
 				}
 				// successfully cleaned up old object, remove it from the retry cache
@@ -327,9 +336,13 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 					return
 				}
 				if err := r.ResourceHandler.AddResource(entry.newObj, true); err != nil {
-					klog.Infof("Retry add failed for %s %s, will try again later: %v", r.ResourceHandler.ObjType, objKey, err)
 					entry.timeStamp = time.Now()
 					entry.failedAttempts++
+					if entry.failedAttempts >= MaxFailedAttempts {
+						klog.Errorf("Retry add failed final attempt for %s %s: error: %v", r.ResourceHandler.ObjType, objKey, err)
+					} else {
+						klog.Infof("Retry add failed for %s %s, will try again later: %v", r.ResourceHandler.ObjType, objKey, err)
+					}
 					return
 				}
 				// successfully cleaned up new object, remove it from the retry cache
@@ -490,8 +503,12 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					}
 					start := time.Now()
 					if err := r.ResourceHandler.AddResource(obj, false); err != nil {
-						klog.Errorf("Failed to create %s %s, error: %v", r.ResourceHandler.ObjType, key, err)
-						r.ResourceHandler.RecordErrorEvent(obj, "ErrorAddingResource", err)
+						if !ovntypes.IsSuppressedError(err) {
+							klog.Errorf("Failed to create %s %s, error: %v", r.ResourceHandler.ObjType, key, err)
+							r.ResourceHandler.RecordErrorEvent(obj, "ErrorAddingResource", err)
+						} else {
+							klog.Infof("Failed to create %s %s, error: %v", r.ResourceHandler.ObjType, key, err)
+						}
 						r.increaseFailedAttemptsCounter(retryObj)
 						return
 					}
@@ -624,9 +641,14 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					if r.ResourceHandler.HasUpdateFunc {
 						// if this resource type has an update func, just call the update function
 						if err := r.ResourceHandler.UpdateResource(old, latest, found); err != nil {
-							klog.Errorf("Failed to update %s, old=%s, new=%s, error: %v",
-								r.ResourceHandler.ObjType, oldKey, newKey, err)
-							r.ResourceHandler.RecordErrorEvent(latest, "ErrorUpdatingResource", err)
+							if !ovntypes.IsSuppressedError(err) {
+								klog.Errorf("Failed to update %s, old=%s, new=%s, error: %v",
+									r.ResourceHandler.ObjType, oldKey, newKey, err)
+								r.ResourceHandler.RecordErrorEvent(latest, "ErrorUpdatingResource", err)
+							} else {
+								klog.Infof("Failed to update %s, old=%s, new=%s, error: %v",
+									r.ResourceHandler.ObjType, oldKey, newKey, err)
+							}
 							var retryEntry *retryObjEntry
 							if r.ResourceHandler.NeedsUpdateDuringRetry {
 								retryEntry = r.initRetryObjWithUpdate(old, latest, key)
@@ -638,11 +660,16 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 						}
 					} else { // we previously deleted old object, now let's add the new one
 						if err := r.ResourceHandler.AddResource(latest, false); err != nil {
-							r.ResourceHandler.RecordErrorEvent(latest, "ErrorAddingResource", err)
 							retryEntry := r.initRetryObjWithAdd(latest, key)
 							r.increaseFailedAttemptsCounter(retryEntry)
-							klog.Errorf("Failed to add %s %s, during update: %v",
-								r.ResourceHandler.ObjType, newKey, err)
+							if !ovntypes.IsSuppressedError(err) {
+								klog.Errorf("Failed to add %s %s, during update: %v",
+									r.ResourceHandler.ObjType, newKey, err)
+								r.ResourceHandler.RecordErrorEvent(latest, "ErrorAddingResource", err)
+							} else {
+								klog.Infof("Failed to add %s %s, during update: %v",
+									r.ResourceHandler.ObjType, newKey, err)
+							}
 							return
 						}
 					}
