@@ -4199,20 +4199,22 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					recordedEvent := <-fakeOvn.fakeRecorder.Events
 					gomega.Expect(recordedEvent).To(gomega.ContainSubstring("EgressIP object egressip-2 will not be configured for pod egressip-namespace_egress-pod since another egressIP object egressip is serving it, this is undefined"))
 
-					pas := getPodAssignmentState(&egressPod1)
-					gomega.Expect(pas).NotTo(gomega.BeNil())
-
-					assginedEIP := egressIPs1[0]
-					gomega.Expect(pas.egressIPName).To(gomega.Equal(egressIPName))
-					eip1Obj, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					gomega.Expect(pas.egressStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
-					gomega.Expect(pas.standbyEgressIPNames.Has(egressIPName2)).To(gomega.BeTrue())
+					assignedEIP := egressIPs1[0]
+					var pas *podAssignmentState
+					gomega.Eventually(func(g gomega.Gomega) {
+						pas = getPodAssignmentState(&egressPod1)
+						g.Expect(pas).NotTo(gomega.BeNil())
+						g.Expect(pas.egressIPName).To(gomega.Equal(egressIPName))
+						eip1Obj, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
+						g.Expect(err).NotTo(gomega.HaveOccurred())
+						g.Expect(pas.egressStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
+						g.Expect(pas.standbyEgressIPNames.Has(egressIPName2)).To(gomega.BeTrue())
+					}).Should(gomega.Succeed())
 
 					podEIPSNAT := &nbdb.NAT{
 						UUID:       "egressip-nat-UUID1",
 						LogicalIP:  egressPodIP[0].String(),
-						ExternalIP: assginedEIP,
+						ExternalIP: assignedEIP,
 						ExternalIDs: map[string]string{
 							"name": pas.egressIPName,
 						},
@@ -4386,15 +4388,18 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
 
 					// check the state of the cache for podKey
-					pas = getPodAssignmentState(&egressPod1)
-					gomega.Expect(pas).NotTo(gomega.BeNil())
-
-					gomega.Expect(pas.egressIPName).To(gomega.Equal(egressIPName))
-					eip1Obj, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					gomega.Expect(pas.egressStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
-					gomega.Expect(pas.egressStatuses[eip1Obj.Status.Items[1]]).To(gomega.Equal(""))
-					gomega.Expect(pas.standbyEgressIPNames.Has(egressIPName2)).To(gomega.BeTrue())
+					var eip1Obj *egressipv1.EgressIP
+					gomega.Eventually(func(g gomega.Gomega) {
+						pas = getPodAssignmentState(&egressPod1)
+						g.Expect(pas).NotTo(gomega.BeNil())
+						g.Expect(pas.egressIPName).To(gomega.Equal(egressIPName))
+						eip1Obj, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
+						g.Expect(err).NotTo(gomega.HaveOccurred())
+						g.Expect(pas.egressStatuses).To(gomega.HaveLen(2))
+						g.Expect(pas.egressStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
+						g.Expect(pas.egressStatuses[eip1Obj.Status.Items[1]]).To(gomega.Equal(""))
+						g.Expect(pas.standbyEgressIPNames.Has(egressIPName2)).To(gomega.BeTrue())
+					}).Should(gomega.Succeed())
 
 					// let's test syncPodAssignmentCache works as expected! Nuke the podAssignment cache first
 					fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
@@ -4422,12 +4427,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Delete(context.TODO(), egressIPName2, metav1.DeleteOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					gomega.Eventually(func() bool {
-						pas := getPodAssignmentState(&egressPod1)
-						gomega.Expect(pas).NotTo(gomega.BeNil())
-						return pas.standbyEgressIPNames.Has(egressIPName2)
-					}).Should(gomega.BeFalse())
-					gomega.Expect(getPodAssignmentState(&egressPod1).egressIPName).To(gomega.Equal(egressIPName))
+					gomega.Eventually(func(g gomega.Gomega) {
+						pas = getPodAssignmentState(&egressPod1)
+						g.Expect(pas).NotTo(gomega.BeNil())
+						g.Expect(pas.egressIPName).To(gomega.Equal(egressIPName))
+						eip1Obj, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
+						g.Expect(err).NotTo(gomega.HaveOccurred())
+						g.Expect(pas.egressStatuses).To(gomega.HaveLen(2))
+						g.Expect(pas.egressStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
+						g.Expect(pas.egressStatuses[eip1Obj.Status.Items[1]]).To(gomega.Equal(""))
+						g.Expect(pas.standbyEgressIPNames.Has(egressIPName2)).To(gomega.BeFalse())
+					}).Should(gomega.Succeed())
 
 					// add back the standby egressIP object
 					_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP2, metav1.CreateOptions{})
@@ -4445,12 +4455,18 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIPName2, status)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					gomega.Eventually(func() bool {
-						pas := getPodAssignmentState(&egressPod1)
-						gomega.Expect(pas).NotTo(gomega.BeNil())
-						return pas.standbyEgressIPNames.Has(egressIPName2)
-					}).Should(gomega.BeTrue())
-					gomega.Expect(getPodAssignmentState(&egressPod1).egressIPName).To(gomega.Equal(egressIPName))
+					gomega.Eventually(func(g gomega.Gomega) {
+						pas = getPodAssignmentState(&egressPod1)
+						g.Expect(pas).NotTo(gomega.BeNil())
+						g.Expect(pas.egressIPName).To(gomega.Equal(egressIPName))
+						eip1Obj, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
+						g.Expect(err).NotTo(gomega.HaveOccurred())
+						g.Expect(pas.egressStatuses).To(gomega.HaveLen(2))
+						g.Expect(pas.egressStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
+						g.Expect(pas.egressStatuses[eip1Obj.Status.Items[1]]).To(gomega.Equal(""))
+						g.Expect(pas.standbyEgressIPNames.Has(egressIPName2)).To(gomega.BeTrue())
+					}).Should(gomega.Succeed())
+
 					gomega.Eventually(func() string {
 						return <-fakeOvn.fakeRecorder.Events
 					}).Should(gomega.ContainSubstring("EgressIP object egressip-2 will not be configured for pod egressip-namespace_egress-pod since another egressIP object egressip is serving it, this is undefined"))
@@ -4464,7 +4480,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					eIPUpdate, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					ipOnNode1 := assginedEIP
+					ipOnNode1 := assignedEIP
 					var ipOnNode2 string
 					if ipOnNode1 == egressIP1 {
 						ipOnNode2 = egressIP2
@@ -4506,24 +4522,32 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
 					}
 
-					gomega.Eventually(func() bool {
-						pas := getPodAssignmentState(&egressPod1)
-						gomega.Expect(pas).NotTo(gomega.BeNil())
-						return pas.standbyEgressIPNames.Has(egressIPName2)
-					}).Should(gomega.BeTrue())
-					gomega.Expect(getPodAssignmentState(&egressPod1).egressIPName).To(gomega.Equal(egressIPName))
+					gomega.Eventually(func(g gomega.Gomega) {
+						pas = getPodAssignmentState(&egressPod1)
+						g.Expect(pas).NotTo(gomega.BeNil())
+						g.Expect(pas.egressIPName).To(gomega.Equal(egressIPName))
+						eip1Obj, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
+						g.Expect(err).NotTo(gomega.HaveOccurred())
+						g.Expect(pas.egressStatuses).To(gomega.HaveLen(1))
+						g.Expect(pas.egressStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
+						g.Expect(pas.standbyEgressIPNames.Has(egressIPName2)).To(gomega.BeTrue())
+					}).Should(gomega.Succeed())
 
 					// delete the first egressIP object and make sure the cache is updated
 					err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Delete(context.TODO(), egressIPName, metav1.DeleteOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// ensure standby takes over and we do the setup for it in OVN DB
-					gomega.Eventually(func() bool {
-						pas := getPodAssignmentState(&egressPod1)
-						gomega.Expect(pas).NotTo(gomega.BeNil())
-						return pas.standbyEgressIPNames.Has(egressIPName2)
-					}).Should(gomega.BeFalse())
-					gomega.Expect(getPodAssignmentState(&egressPod1).egressIPName).To(gomega.Equal(egressIPName2))
+					gomega.Eventually(func(g gomega.Gomega) {
+						pas = getPodAssignmentState(&egressPod1)
+						g.Expect(pas).NotTo(gomega.BeNil())
+						g.Expect(pas.egressIPName).To(gomega.Equal(egressIPName2))
+						eip1Obj, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP2.Name, metav1.GetOptions{})
+						g.Expect(err).NotTo(gomega.HaveOccurred())
+						g.Expect(pas.egressStatuses).To(gomega.HaveLen(1))
+						g.Expect(pas.egressStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
+						g.Expect(pas.standbyEgressIPNames).To(gomega.BeEmpty())
+					}).Should(gomega.Succeed())
 
 					finalDatabaseStatewithPod = expectedDatabaseStatewithPod
 					finalDatabaseStatewithPod = append(expectedDatabaseStatewithPod, podLSP)
@@ -4576,9 +4600,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// we don't have any egressIPs, so cache is nil
-					gomega.Eventually(func() bool {
-						return getPodAssignmentState(&egressPod1) != nil
-					}).Should(gomega.BeFalse())
+					gomega.Expect(getPodAssignmentState(&egressPod1)).To(gomega.BeNil())
 
 					return nil
 				}
