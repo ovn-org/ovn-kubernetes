@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -770,10 +769,11 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 		backendName      = "lb-backend-pod"
 		endpointHTTPPort = 80
 		loadBalancerYaml = "loadbalancer.yaml"
-		namespaceName    = "default"
 		svcIP            = "192.168.10.0"
 		clientContainer  = "lbclient"
 		routerContainer  = "frr"
+		connectTimeout   = 2
+		maxTimeout       = 120
 	)
 
 	var (
@@ -859,19 +859,20 @@ spec:
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		framework.Logf("Create the Load Balancer configuration")
-		framework.RunKubectlOrDie("default", "create", "-f", loadBalancerYaml)
+		framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", loadBalancerYaml)
 
 	})
 
-	ginkgo.AfterEach(func() {
-		framework.Logf("Delete the Load Balancer configuration")
-		framework.RunKubectlOrDie("default", "delete", "-f", loadBalancerYaml)
-		defer func() {
-			if err := os.Remove(loadBalancerYaml); err != nil {
-				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+	curlInContainerRetriable := func(clientContainer, targetHost string, targetPort int32, endPoint string, connectTimeout, maxTimeout int) wait.ConditionFunc {
+		return func() (bool, error) {
+			_, err := curlInContainer(clientContainer, targetHost, endpointHTTPPort, "big.iso -o big.iso", connectTimeout, maxTimeout)
+			if err != nil {
+				framework.Logf("failed to curl load balancer service: %v", err)
+				return false, nil
 			}
-		}()
-	})
+			return true, nil
+		}
+	}
 
 	ginkgo.It("Should ensure connectivity works on an external service when mtu changes in intermediate node", func() {
 		err := framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*180)
@@ -997,6 +998,8 @@ spec:
 
 	ginkgo.It("Should ensure load balancer service works with pmtu", func() {
 
+		namespaceName := f.Namespace.Name
+
 		err := framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*120)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 
@@ -1007,7 +1010,10 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " from backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		err = wait.PollImmediate(
+			retryInterval,
+			retryTimeout+maxTimeout,
+			curlInContainerRetriable(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", connectTimeout, maxTimeout))
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		ginkgo.By("change MTU on intermediary router to force icmp related packets")
@@ -1022,11 +1028,16 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " from backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		err = wait.PollImmediate(
+			retryInterval,
+			retryTimeout+maxTimeout,
+			curlInContainerRetriable(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", connectTimeout, maxTimeout))
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 	})
 
 	ginkgo.It("Should ensure load balancer service works with 0 node ports when ETP=local", func() {
+
+		namespaceName := f.Namespace.Name
 
 		err := framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*120)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an enpoint, err: %v", svcName, err))
@@ -1048,21 +1059,24 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " from backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		err = wait.PollImmediate(
+			retryInterval,
+			retryTimeout+maxTimeout,
+			curlInContainerRetriable(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", connectTimeout, maxTimeout))
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		ginkgo.By("patching service " + svcName + " to allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
 
-		err = patchServiceBoolValue(f.ClientSet, svcName, "default", "/spec/allocateLoadBalancerNodePorts", false)
+		err = patchServiceBoolValue(f.ClientSet, svcName, namespaceName, "/spec/allocateLoadBalancerNodePorts", false)
 		framework.ExpectNoError(err)
 
-		output := framework.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.allocateLoadBalancerNodePorts}'")
+		output := framework.RunKubectlOrDie(namespaceName, "get", "svc", svcName, "-o=jsonpath='{.spec.allocateLoadBalancerNodePorts}'")
 		framework.ExpectEqual(output, "'false'")
 
-		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/externalTrafficPolicy", "Local")
+		err = patchServiceStringValue(f.ClientSet, svcName, namespaceName, "/spec/externalTrafficPolicy", "Local")
 		framework.ExpectNoError(err)
 
-		output = framework.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.externalTrafficPolicy}'")
+		output = framework.RunKubectlOrDie(namespaceName, "get", "svc", svcName, "-o=jsonpath='{.spec.externalTrafficPolicy}'")
 		framework.ExpectEqual(output, "'Local'")
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
@@ -1074,7 +1088,10 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " from backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		err = wait.PollImmediate(
+			retryInterval,
+			retryTimeout+maxTimeout,
+			curlInContainerRetriable(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", connectTimeout, maxTimeout))
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-ETP"))
@@ -1083,7 +1100,7 @@ spec:
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
 		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
-		framework.RunKubectlOrDie("default", "scale", "deployment", backendName, "--replicas=3")
+		framework.RunKubectlOrDie(namespaceName, "scale", "deployment", backendName, "--replicas=3")
 		err = framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, svcName, 3, time.Second, time.Second*120)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 
@@ -1096,7 +1113,10 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " from backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		err = wait.PollImmediate(
+			retryInterval,
+			retryTimeout+maxTimeout,
+			curlInContainerRetriable(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", connectTimeout, maxTimeout))
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-ETP"))

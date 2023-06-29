@@ -427,14 +427,15 @@ func isNeighborEntryStable(clientContainer, targetHost string, iterations int) b
 // curlInContainer leverages a container running the netexec command to send a request to a target running
 // netexec on the given target host / protocol / port.
 // Returns a pair of either result, nil or "", error in case of an error.
-func curlInContainer(clientContainer, targetHost string, targetPort int32, endPoint string, maxTime int) (string, error) {
+func curlInContainer(clientContainer, targetHost string, targetPort int32, endPoint string, connectTimeout, maxTime int) (string, error) {
 	cmd := []string{containerRuntime, "exec", clientContainer}
 	if utilnet.IsIPv6String(targetHost) {
 		targetHost = fmt.Sprintf("[%s]", targetHost)
 	}
 
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
-	curlCommand := strings.Split(fmt.Sprintf("curl --max-time %d http://%s:%d/%s",
+	curlCommand := strings.Split(fmt.Sprintf("curl  --connect-timeout %d --max-time %d http://%s:%d/%s",
+		connectTimeout,
 		maxTime,
 		targetHost,
 		targetPort,
