@@ -78,7 +78,7 @@ spec:
 			false: "update the IP address first, kubelet later",
 		}
 
-		f = newPrivelegedTestFramework(namespacePrefix)
+		f = wrappedTestFramework(namespacePrefix)
 	)
 
 	BeforeEach(func() {

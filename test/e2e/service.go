@@ -680,7 +680,7 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
 		nodeIP          string
 	)
 
-	f := newPrivelegedTestFramework(svcName)
+	f := wrappedTestFramework(svcName)
 	hairpinPodSel := map[string]string{"hairpinbackend": "true"}
 
 	ginkgo.BeforeEach(func() {
@@ -776,7 +776,7 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 		backendNodeName string
 	)
 
-	f := newPrivelegedTestFramework(svcName)
+	f := wrappedTestFramework(svcName)
 	ginkgo.BeforeEach(func() {
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 2)
 		framework.ExpectNoError(err)

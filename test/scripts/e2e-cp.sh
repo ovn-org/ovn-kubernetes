@@ -63,7 +63,7 @@ if [ "$OVN_GATEWAY_MODE" == "shared" ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
     SKIPPED_TESTS+="|"
   fi
-  SKIPPED_TESTS+="Should ensure load balancer service|[LGW]"
+  SKIPPED_TESTS+="Should ensure load balancer service|LGW"
 fi
 
 # skipping the egress ip legacy health check test because it requires two
@@ -95,6 +95,16 @@ if [ "${WHAT}" != "${MULTI_NODE_ZONES_TESTS}" ]; then
   fi
   SKIPPED_TESTS+="Multi node zones interconnect"
 fi
+
+# Only run external gateway tests if they are explicitly requested
+EXTERNAL_GATEWAY_TESTS="External Gateway"
+if [ "${WHAT}" != "${EXTERNAL_GATEWAY_TESTS}" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="External Gateway"
+fi
+
 
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote

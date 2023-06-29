@@ -9,8 +9,10 @@ import (
 	"github.com/onsi/ginkgo"
 	ginkgotable "github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/gomega"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
@@ -3099,6 +3101,19 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
 
 				expectedNatLogicalPort := "k8s-node2"
+				expectedNAT := &nbdb.NAT{
+					UUID:       "egressip-nat-UUID",
+					LogicalIP:  podV6IP,
+					ExternalIP: egressIP.String(),
+					ExternalIDs: map[string]string{
+						"name": egressIPName,
+					},
+					Type:        nbdb.NATTypeSNAT,
+					LogicalPort: &expectedNatLogicalPort,
+					Options: map[string]string{
+						"stateless": "false",
+					},
+				}
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.EgressIPReroutePriority,
@@ -3120,19 +3135,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
 						Networks: []string{nodeLogicalRouterIfAddrV6},
 					},
-					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID",
-						LogicalIP:  podV6IP,
-						ExternalIP: egressIP.String(),
-						ExternalIDs: map[string]string{
-							"name": egressIPName,
-						},
-						Type:        nbdb.NATTypeSNAT,
-						LogicalPort: &expectedNatLogicalPort,
-						Options: map[string]string{
-							"stateless": "false",
-						},
-					},
+					expectedNAT,
 					&nbdb.LogicalRouter{
 						Name: ovntypes.GWRouterPrefix + node1Name,
 						UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
@@ -3167,6 +3170,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				fakeOvn.patchEgressIPObj(node2Name, updatedEgressIP.String())
+
+				expectedNAT.ExternalIP = updatedEgressIP.String()
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(func() []string {
@@ -3896,15 +3901,27 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					return len(egressPod1.Annotations)
 				}, 5).Should(gomega.Equal(0))
 
+				_, err = libovsdbops.GetLogicalSwitchPort(fakeOvn.controller.nbClient, &nbdb.LogicalSwitchPort{Name: podLSP.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 				// Delete the pod to trigger the cleanup failure
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod1.Namespace).Delete(context.TODO(),
 					egressPod1.Name, metav1.DeleteOptions{})
+
 				// internally we have an error:
 				// E1006 12:51:59.594899 2500972 obj_retry.go:1517] Failed to delete *factory.egressIPPod egressip-namespace/egress-pod, error: pod egressip-namespace/egress-pod: no pod IPs found
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// notice that pod objects aren't cleaned up yet since deletion failed!
-				// even the LSP sticks around for 60 seconds
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
+
+				// expect pod's port to have been gone, while egressIPPod still being present
+				gomega.Eventually(func() error {
+					_, err := libovsdbops.GetLogicalSwitchPort(fakeOvn.controller.nbClient, &nbdb.LogicalSwitchPort{Name: podLSP.Name})
+					if err != nil {
+						return err
+					}
+					return nil
+
+				}, 5).Should(gomega.Equal(libovsdbclient.ErrNotFound))
+
 				// egressIP cache is stale in the sense the podKey has not been deleted since deletion failed
 				pas := getPodAssignmentState(egressPod1)
 				gomega.Expect(pas).NotTo(gomega.BeNil())

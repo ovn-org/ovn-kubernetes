@@ -91,7 +91,6 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) checkMode(restore bool) (s
 		portMaster = getTemplateContainerEnv(ovnNamespace, "deployment/ovnkube-master", "ovnkube-master", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
 	}
 
-
 	wantLegacy := (h.Legacy && !restore) || (h.modeWasLegacy && restore)
 	isLegacy := portNode == "" || portNode == OVN_EGRESSIP_LEGACY_HEALTHCHECK_PORT_ENV
 	outOfSync := portNode != portMaster
@@ -375,7 +374,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		return statuses
 	}
 
-	f := newPrivelegedTestFramework(egressIPName)
+	f := wrappedTestFramework(egressIPName)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -414,6 +413,12 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 			targetNode.nodeIP, _ = createClusterExternalContainer(targetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
 			deniedTargetNode.nodeIP, _ = createClusterExternalContainer(deniedTargetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
 		}
+
+		// ensure all nodes are ready and reachable
+		for _, node := range nodes.Items {
+			setNodeReady(node.Name, true)
+			setNodeReachable(node.Name, true)
+		}
 	})
 
 	ginkgo.AfterEach(func() {
@@ -423,6 +428,12 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		framework.RunKubectlOrDie("default", "label", "node", egress2Node.name, "k8s.ovn.org/egress-assignable-")
 		deleteClusterExternalContainer(targetNode.name)
 		deleteClusterExternalContainer(deniedTargetNode.name)
+
+		// ensure all nodes are ready and reachable
+		for _, node := range []string{egress1Node.name, egress2Node.name} {
+			setNodeReady(node, true)
+			setNodeReachable(node, true)
+		}
 	})
 
 	// Validate the egress IP by creating a httpd container on the kind networking
@@ -733,15 +744,15 @@ spec:
 
 		ginkgo.By("6. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String()}))
-		framework.ExpectNoError(err, "Step 5. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP, failed: %v", err)
+		framework.ExpectNoError(err, "Step 6. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP, failed: %v", err)
 
 		ginkgo.By("7. Check connectivity from pod to another node primary IP and verify that the srcIP is the expected nodeIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(hostNetPod, pod1Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
-		framework.ExpectNoError(err, "Step 6. Check connectivity from pod to another node and verify that the srcIP is the expected nodeIP, failed: %v", err)
+		framework.ExpectNoError(err, "Step 7. Check connectivity from pod to another node primary IP and verify that the srcIP is the expected nodeIP, failed: %v", err)
 
 		ginkgo.By("8. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected nodeIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(otherHostNetPodIP, pod1Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
-		framework.ExpectNoError(err, "Step 6. Check connectivity from pod to another node and verify that the srcIP is the expected nodeIP, failed: %v", err)
+		framework.ExpectNoError(err, "Step 8. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected nodeIP, failed: %v", err)
 
 		ginkgo.By("9. Add the \"k8s.ovn.org/egress-assignable\" label to egress2Node")
 		framework.AddOrUpdateLabelOnNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
@@ -770,7 +781,7 @@ spec:
 
 		ginkgo.By("14. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected nodeIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(otherHostNetPodIP, pod1Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
-		framework.ExpectNoError(err, "Step 14. Check connectivity from pod to another node and verify that the srcIP is the expected nodeIP, failed: %v", err)
+		framework.ExpectNoError(err, "Step 14. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected nodeIP, failed: %v", err)
 
 		ginkgo.By("15. Create second pod not matching the EgressIP: running on egress1Node")
 		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, map[string]string{})
@@ -800,11 +811,11 @@ spec:
 
 		ginkgo.By("19. Check connectivity from second pod to another node primary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted unless node is egressNode)")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(hostNetPod, pod2Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
-		framework.ExpectNoError(err, "Step 16. Check connectivity from second pod to another node and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted unless node is egressNode), failed: %v", err)
+		framework.ExpectNoError(err, "Step 19. Check connectivity from second pod to another node and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted unless node is egressNode), failed: %v", err)
 
 		ginkgo.By("20. Check connectivity from second pod to another node secondary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted unless node is egressNode)")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(otherHostNetPodIP, pod2Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
-		framework.ExpectNoError(err, "Step 20. Check connectivity from second pod to another node and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted unless node is egressNode), failed: %v", err)
+		framework.ExpectNoError(err, "Step 20. Check connectivity from second pod to another node secondary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted unless node is egressNode), failed: %v", err)
 	})
 
 	// Validate the egress IP with stateful sets or pods recreated with same name
@@ -1334,14 +1345,18 @@ spec:
 		ginkgo.By("3. Create one pod matching the EgressIP")
 		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
 
-		ginkgo.By("4. Make egress node 1 unreachable")
+		ginkgo.By(fmt.Sprintf("4. Make egress node: %s unreachable", node1))
 		setNodeReachable(node1, false)
 
-		ginkgo.By("5. Check that egress IP has been moved to other node 2 with the \"k8s.ovn.org/egress-assignable\" label")
+		otherNode := egress1Node.name
+		if node1 == egress1Node.name {
+			otherNode = egress2Node.name
+		}
+		ginkgo.By(fmt.Sprintf("5. Check that egress IP has been moved to other node: %s with the \"k8s.ovn.org/egress-assignable\" label", otherNode))
 		var node2 string
 		statuses = verifyEgressIPStatusLengthEquals(1, func(statuses []egressIPStatus) bool {
 			node2 = statuses[0].Node
-			return node2 != node1
+			return node2 == otherNode
 		})
 
 		ginkgo.By("6. Check connectivity from pod to an external \"node\" and verify that the IP is the egress IP")
@@ -1432,7 +1447,7 @@ spec:
 	// The IP allowed by the egress firewall rule should work, the other not.
 
 	/* This test does the following:
-	   0. Add the "k8s.ovn.org/egress-assignable" label to one nodes
+	   0. Add the "k8s.ovn.org/egress-assignable" label to one node
 	   1. Create an EgressIP object with one egress IP defined
 	   2. Create an EgressFirewall object with one allow rule and one "block-all" rule defined
 	   3. Create two pods matching both egress firewall and egress IP

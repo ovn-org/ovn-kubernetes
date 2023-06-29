@@ -61,7 +61,7 @@ func init() {
 	}
 }
 
-// gatewayTestIPs collects all the addresses required for a external gateway
+// gatewayTestIPs collects all the addresses required for an external gateway
 // test.
 type gatewayTestIPs struct {
 	gatewayIPs []string
@@ -70,7 +70,7 @@ type gatewayTestIPs struct {
 	targetIPs  []string
 }
 
-var _ = ginkgo.Describe("External Gateway test suite", func() {
+var _ = ginkgo.Describe("External Gateway", func() {
 
 	var _ = ginkgo.Context("With annotations", func() {
 
@@ -1033,11 +1033,6 @@ var _ = ginkgo.Describe("External Gateway test suite", func() {
 			f := wrappedTestFramework(svcname)
 
 			ginkgo.BeforeEach(func() {
-				if isInterconnectEnabled() {
-					skipper.Skipf(
-						"APB External Route is not yet supported with multiple zones interconnect deployment",
-					)
-				}
 				clientSet = f.ClientSet // so it can be used in AfterEach
 				// retrieve worker node names
 				nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
@@ -1184,11 +1179,6 @@ var _ = ginkgo.Describe("External Gateway test suite", func() {
 			var addressesv4, addressesv6 gatewayTestIPs
 
 			ginkgo.BeforeEach(func() {
-				if isInterconnectEnabled() {
-					skipper.Skipf(
-						"APB External Route is not yet supported with multiple zones interconnect deployment",
-					)
-				}
 				// retrieve worker node names
 				nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
 				framework.ExpectNoError(err)
@@ -1335,11 +1325,6 @@ var _ = ginkgo.Describe("External Gateway test suite", func() {
 			)
 
 			ginkgo.BeforeEach(func() {
-				if isInterconnectEnabled() {
-					skipper.Skipf(
-						"APB External Route is not yet supported with multiple zones interconnect deployment",
-					)
-				}
 				clientSet = f.ClientSet // so it can be used in AfterEach
 				// retrieve worker node names
 				nodes, err = e2enode.GetBoundedReadySchedulableNodes(clientSet, 3)
@@ -1561,11 +1546,6 @@ var _ = ginkgo.Describe("External Gateway test suite", func() {
 				f := wrappedTestFramework(svcname)
 
 				ginkgo.BeforeEach(func() {
-					if isInterconnectEnabled() {
-						skipper.Skipf(
-							"APB External Route is not yet supported with multiple zones interconnect deployment",
-						)
-					}
 					clientSet = f.ClientSet // so it can be used in AfterEach
 					// retrieve worker node names
 					nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
@@ -1766,11 +1746,6 @@ var _ = ginkgo.Describe("External Gateway test suite", func() {
 				var addressesv4, addressesv6 gatewayTestIPs
 
 				ginkgo.BeforeEach(func() {
-					if isInterconnectEnabled() {
-						skipper.Skipf(
-							"APB External Route is not yet supported with multiple zones interconnect deployment",
-						)
-					}
 					nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
 					framework.ExpectNoError(err)
 					if len(nodes.Items) < 3 {
@@ -1978,11 +1953,6 @@ var _ = ginkgo.Describe("External Gateway test suite", func() {
 			f := wrappedTestFramework(svcname)
 
 			ginkgo.BeforeEach(func() {
-				if isInterconnectEnabled() {
-					skipper.Skipf(
-						"APB External Route is not yet supported with multiple zones interconnect deployment",
-					)
-				}
 				clientSet = f.ClientSet // so it can be used in AfterEach
 				// retrieve worker node names
 				nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
@@ -2133,11 +2103,6 @@ var _ = ginkgo.Describe("External Gateway test suite", func() {
 			)
 
 			ginkgo.BeforeEach(func() {
-				if isInterconnectEnabled() {
-					skipper.Skipf(
-						"APB External Route is not yet supported with multiple zones interconnect deployment",
-					)
-				}
 				clientSet = f.ClientSet // so it can be used in AfterEach
 				// retrieve worker node names
 				nodes, err = e2enode.GetBoundedReadySchedulableNodes(clientSet, 3)

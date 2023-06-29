@@ -204,6 +204,14 @@ func (oc *DefaultNetworkController) addExternalGWsForNamespace(egress gatewayInf
 	return oc.addGWRoutesForNamespace(namespace, egress)
 }
 
+func (oc *DefaultNetworkController) isPodInLocalZone(pod *kapi.Pod) (bool, error) {
+	node, err := oc.watchFactory.GetNode(pod.Spec.NodeName)
+	if err != nil {
+		return false, err
+	}
+	return util.GetNodeZone(node) == oc.zone, nil
+}
+
 // addGWRoutesForNamespace handles adding routes for all existing pods in namespace
 func (oc *DefaultNetworkController) addGWRoutesForNamespace(namespace string, egress gatewayInfo) error {
 	existingPods, err := oc.watchFactory.GetPods(namespace)
@@ -231,7 +239,7 @@ func (oc *DefaultNetworkController) addGWRoutesForNamespace(namespace string, eg
 		if config.Gateway.DisableSNATMultipleGWs {
 			// delete all perPodSNATs (if this pod was controlled by egressIP controller, it will stop working since
 			// a pod cannot be used for multiple-external-gateways and egressIPs at the same time)
-			if err = deletePodSNAT(oc.nbClient, pod.Spec.NodeName, []*net.IPNet{}, podIPs); err != nil {
+			if err = oc.deletePodSNAT(pod.Spec.NodeName, []*net.IPNet{}, podIPs); err != nil {
 				klog.Error(err.Error())
 			}
 		}
@@ -306,11 +314,22 @@ func (oc *DefaultNetworkController) deleteLogicalRouterStaticRoute(podIP, mask, 
 
 // deletePodGWRoute deletes all associated gateway routing resources for one
 // pod gateway route
+// this MUST be called with a lock on routeInfo
 func (oc *DefaultNetworkController) deletePodGWRoute(routeInfo *apbroutecontroller.ExternalRouteInfo, podIP, gw, gr string) error {
 	if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
 		return nil
 	}
-
+	pod, err := oc.watchFactory.PodCoreInformer().Lister().Pods(routeInfo.PodName.Namespace).Get(routeInfo.PodName.Name)
+	if err == nil {
+		local, err := oc.isPodInLocalZone(pod)
+		if err != nil {
+			return err
+		}
+		if !local {
+			klog.V(4).InfoS("Not deleting exgw routes for pod %s not in the local zone %s", routeInfo.PodName, oc.zone)
+			return nil
+		}
+	}
 	mask := util.GetIPFullMask(podIP)
 	if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
 		return fmt.Errorf("unable to delete pod %s ECMP route to GR %s, GW: %s: %w",
@@ -463,6 +482,20 @@ func (oc *DefaultNetworkController) deleteGWRoutesForPod(name ktypes.NamespacedN
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
 func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*net.IPNet, podNsName ktypes.NamespacedName, node string) error {
+	pod, err := oc.watchFactory.PodCoreInformer().Lister().Pods(podNsName.Namespace).Get(podNsName.Name)
+	if err != nil {
+		return err
+	}
+
+	local, err := oc.isPodInLocalZone(pod)
+	if err != nil {
+		return err
+	}
+	if !local {
+		klog.V(4).InfoS("Not adding exgw routes for pod %s not in the local zone %s", podNsName, oc.zone)
+		return nil
+	}
+
 	gr := util.GetGatewayRouterFromNode(node)
 
 	routesAdded := 0
@@ -478,6 +511,7 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 		return fmt.Errorf("failed to ensure routeInfo for %s, error: %v", podNsName, err)
 	}
 	defer routeInfo.Unlock()
+
 	for _, podIPNet := range podIfAddrs {
 		for _, gateway := range gateways {
 			// TODO (trozet): use the go bindings here and batch commands
@@ -516,6 +550,30 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 	if routesAdded < 1 {
 		return fmt.Errorf("gateway specified for namespace %s with gateway addresses %v but no valid routes exist for pod: %s",
 			podNsName.Namespace, podIfAddrs, podNsName.Name)
+	}
+	return nil
+}
+
+// deletePodSNAT removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
+// used when disableSNATMultipleGWs=true
+func (oc *DefaultNetworkController) deletePodSNAT(nodeName string, extIPs, podIPNets []*net.IPNet) error {
+
+	node, err := oc.watchFactory.NodeCoreInformer().Lister().Get(nodeName)
+	if err != nil {
+		return err
+	}
+	if util.GetNodeZone(node) != oc.zone {
+		klog.V(4).InfoS("Node %s is not in the local zone %s", nodeName, oc.zone)
+		return nil
+	}
+	ops, err := deletePodSNATOps(oc.nbClient, nil, nodeName, extIPs, podIPNets)
+	if err != nil {
+		return err
+	}
+
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s: %w", types.GWRouterPrefix+nodeName, err)
 	}
 	return nil
 }
@@ -560,21 +618,6 @@ func getExternalIPsGR(watchFactory *factory.WatchFactory, nodeName string) ([]*n
 		return nil, fmt.Errorf("unable to parse node L3 gw annotation: %v", err)
 	}
 	return l3GWConfig.IPAddresses, nil
-}
-
-// deletePodSNAT removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
-// used when disableSNATMultipleGWs=true
-func deletePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs, podIPNets []*net.IPNet) error {
-	ops, err := deletePodSNATOps(nbClient, nil, nodeName, extIPs, podIPNets)
-	if err != nil {
-		return err
-	}
-
-	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s: %w", types.GWRouterPrefix+nodeName, err)
-	}
-	return nil
 }
 
 // deletePodSNATOps creates ovsdb operation that removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides

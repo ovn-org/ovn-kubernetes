@@ -37,6 +37,7 @@ type networkClient interface {
 type northBoundClient struct {
 	routeLister adminpolicybasedroutelisters.AdminPolicyBasedExternalRouteLister
 	nodeLister  corev1listers.NodeLister
+	podLister   corev1listers.PodLister
 	// NorthBound client interface
 	nbClient libovsdbclient.Client
 
@@ -44,6 +45,9 @@ type northBoundClient struct {
 	addressSetFactory addressset.AddressSetFactory
 	externalGWCache   map[ktypes.NamespacedName]*ExternalRouteInfo
 	exGWCacheMutex    *sync.RWMutex
+	controllerName    string
+
+	zone string
 }
 
 type conntrackClient struct {
@@ -61,6 +65,15 @@ func (nb *northBoundClient) findLogicalRoutersWithPredicate(p func(item *nbdb.Lo
 	return libovsdbops.FindLogicalRoutersWithPredicate(nb.nbClient, p)
 }
 
+// When IC is enabled, isNodeInLocalZone returns whether the provided node is in a zone local to the zone controller
+func (nb *northBoundClient) isPodInLocalZone(pod *v1.Pod) (bool, error) {
+	node, err := nb.nodeLister.Get(pod.Spec.NodeName)
+	if err != nil {
+		return false, err
+	}
+	return util.GetNodeZone(node) == nb.zone, nil
+}
+
 // delAllHybridRoutePolicies deletes all the 501 hybrid-route-policies that
 // force pod egress traffic to be rerouted to a gateway router for local gateway mode.
 // Called when migrating to SGW from LGW.
@@ -76,7 +89,7 @@ func (nb *northBoundClient) delAllHybridRoutePolicies() error {
 
 	// nuke all the address-sets.
 	// if we fail to remove LRP's above, we don't attempt to remove ASes due to dependency constraints.
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetHybridNodeRoute, controllerName, nil)
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetHybridNodeRoute, nb.controllerName, nil)
 	asPred := libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, nil)
 	err = libovsdbops.DeleteAddressSetsWithPredicate(nb.nbClient, asPred)
 	if err != nil {
@@ -112,26 +125,43 @@ func (nb *northBoundClient) delAllLegacyHybridRoutePolicies() error {
 // are given, all routes for the namespace are deleted.
 func (nb *northBoundClient) deleteGatewayIPs(namespace string, toBeDeletedGWIPs, _ sets.Set[string]) error {
 	for _, routeInfo := range nb.getRouteInfosForNamespace(namespace) {
-		routeInfo.Lock()
-		if routeInfo.Deleted {
-			routeInfo.Unlock()
-			continue
+		// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
+		if err := nb.deletePodGWRoutes(routeInfo, toBeDeletedGWIPs); err != nil {
+			return err
 		}
-		for podIP, routes := range routeInfo.PodExternalRoutes {
-			for gw, gr := range routes {
-				if toBeDeletedGWIPs.Has(gw) {
-					// we cannot delete an external gateway IP from the north bound if it's also being provided by an external gateway annotation or if it is also
-					// defined by a coexisting policy in the same namespace
-					if err := nb.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
-						// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
-						routeInfo.Unlock()
-						return fmt.Errorf("delete pod GW route failed: %w", err)
-					}
-					delete(routes, gw)
+	}
+	return nil
+}
+
+// deletePodGWRoutes removes known exgw routes for a pod via routeInfo for a list of given GW IPs
+func (nb *northBoundClient) deletePodGWRoutes(routeInfo *ExternalRouteInfo, toBeDeletedGWIPs sets.Set[string]) error {
+	routeInfo.Lock()
+	defer routeInfo.Unlock()
+	if routeInfo.Deleted {
+		return nil
+	}
+	pod, err := nb.podLister.Pods(routeInfo.PodName.Namespace).Get(routeInfo.PodName.Name)
+	if err == nil {
+		local, err := nb.isPodInLocalZone(pod)
+		if err != nil {
+			return err
+		}
+		if !local {
+			klog.V(4).InfoS("APB will not delete exgw routes for pod %s not in the local zone %s", routeInfo.PodName, nb.zone)
+			return nil
+		}
+	}
+	for podIP, routes := range routeInfo.PodExternalRoutes {
+		for gw, gr := range routes {
+			if toBeDeletedGWIPs.Has(gw) {
+				// we cannot delete an external gateway IP from the north bound if it's also being provided by an external gateway annotation or if it is also
+				// defined by a coexisting policy in the same namespace
+				if err := nb.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
+					return fmt.Errorf("APB delete pod GW route failed: %w", err)
 				}
+				delete(routes, gw)
 			}
 		}
-		routeInfo.Unlock()
 	}
 	return nil
 }
@@ -184,6 +214,14 @@ func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress gatewayInfoList) e
 // if allSNATs flag is set, then all the SNATs (including against egressIPs if any) for that pod will be deleted
 // used when disableSNATMultipleGWs=true
 func (nb *northBoundClient) deletePodSNAT(nodeName string, extIPs, podIPNets []*net.IPNet) error {
+	node, err := nb.nodeLister.Get(nodeName)
+	if err != nil {
+		return err
+	}
+	if util.GetNodeZone(node) != nb.zone {
+		klog.V(4).InfoS("Node %s is not in the local zone %s", nodeName, nb.zone)
+		return nil
+	}
 	nats, err := buildPodSNAT(extIPs, podIPNets)
 	if err != nil {
 		return err
@@ -200,12 +238,25 @@ func (nb *northBoundClient) deletePodSNAT(nodeName string, extIPs, podIPNets []*
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
 func (nb *northBoundClient) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*net.IPNet, podNsName ktypes.NamespacedName, node string) error {
+	pod, err := nb.podLister.Pods(podNsName.Namespace).Get(podNsName.Name)
+	if err != nil {
+		return err
+	}
+	local, err := nb.isPodInLocalZone(pod)
+	if err != nil {
+		return err
+	}
+	if !local {
+		klog.V(4).InfoS("APB will not add exgw routes for pod %s not in the local zone %s", podNsName, nb.zone)
+		return nil
+	}
+
 	gr := util.GetGatewayRouterFromNode(node)
 
 	routesAdded := 0
 	portPrefix, err := nb.extSwitchPrefix(node)
 	if err != nil {
-		klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
+		klog.Warningf("Failed to find ext switch prefix for %s %v", node, err)
 		return err
 	}
 
@@ -261,7 +312,7 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddr
 func (nb *northBoundClient) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Add podIP to the node's address_set.
-		asIndex := getHybridRouteAddrSetDbIDs(node, controllerName)
+		asIndex := getHybridRouteAddrSetDbIDs(node, nb.controllerName)
 		as, err := nb.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot ensure that addressSet for node %s exists %v", node, err)
@@ -391,7 +442,7 @@ func (nb *northBoundClient) updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP
 
 	portPrefix, err := nb.extSwitchPrefix(nodeName)
 	if err != nil {
-		klog.Infof("Failed to find ext switch prefix for %s %v", nodeName, err)
+		klog.Warningf("Failed to find ext switch prefix for %s %v", nodeName, err)
 		return err
 	}
 	if bfdEnabled {
@@ -534,7 +585,7 @@ func (nb *northBoundClient) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr s
 func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Delete podIP from the node's address_set.
-		asIndex := getHybridRouteAddrSetDbIDs(node, controllerName)
+		asIndex := getHybridRouteAddrSetDbIDs(node, nb.controllerName)
 		as, err := nb.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
@@ -676,7 +727,7 @@ func (c *conntrackClient) deleteGatewayIPs(namespaceName string, _, toBeKept set
 	var wg sync.WaitGroup
 	wg.Add(len(toBeKept))
 	validMACs := sync.Map{}
-	klog.Infof("Keeping conntrack entries in namespace %s with gateway IPs %s", namespaceName, strings.Join(sets.List(toBeKept), ","))
+	klog.V(4).InfoS("Keeping conntrack entries in namespace %s with gateway IPs %s", namespaceName, strings.Join(sets.List(toBeKept), ","))
 	for gwIP := range toBeKept {
 		go func(gwIP string) {
 			defer wg.Done()
