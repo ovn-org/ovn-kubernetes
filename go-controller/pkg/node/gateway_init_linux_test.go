@@ -27,7 +27,6 @@ import (
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
@@ -280,8 +279,13 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			sharedGw.Start()
-
+			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
+			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
+			//sharedGw.Start()
+			sharedGw.nodeIPManager.sync()
+			// we cannot start openflow manager directly because it spawns a go routine
+			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
+			sharedGw.openflowManager.syncFlows()
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0
 			l, err := netlink.LinkByName("breth0")
@@ -422,7 +426,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		util.SetSriovnetOpsInst(sriovnetMock)
 		sriovnetMock.On("GetRepresentorPortFlavour", hostRep).Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_PF), nil)
 		sriovnetMock.On("GetRepresentorPeerMacAddress", hostRep).Return(ovntest.MustParseMAC(hostMAC), nil)
-
 		// exec Mocks
 		fexec := ovntest.NewLooseCompareFakeExec()
 		// gatewayInitInternal
@@ -561,7 +564,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Output: "7",
 		})
 		// syncServices()
-
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -624,7 +626,8 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 
 		ifAddrs := ovntest.MustParseIPNets(hostCIDR)
 		ifAddrs[0].IP = ovntest.MustParseIP(dpuIP)
-
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
 		rm := routemanager.NewController()
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
@@ -633,7 +636,9 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			wg.Done()
 			return nil
 		})
-
+		// FIXME(mk): starting the gateaway causing go routines to be spawned within sub functions and therefore they escape the
+		// netns we wanted to set it to originally here. Refactor test cases to not spawn a go routine or just fake out everything
+		// and remove need to create netns
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
@@ -648,7 +653,13 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			sharedGw.Start()
+			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
+			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
+			//sharedGw.Start()
+			sharedGw.nodeIPManager.sync()
+			// we cannot start openflow manager directly because it spawns a go routine
+			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
+			sharedGw.openflowManager.syncFlows()
 
 			// check that the masquerade route was not added
 			l, err := netlink.LinkByName(brphys)
@@ -733,7 +744,8 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
-
+		ip, ipnet, err := net.ParseCIDR(hostIP + "/24")
+		ipnet.IP = ip
 		cnnci := NewCommonNodeNetworkControllerInfo(nil, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName)
 		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
 		// must run route manager manually which is usually started with nc.Start()
@@ -1041,8 +1053,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
-			wg.Wait()
 			wf.Shutdown()
+			wg.Wait()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1056,12 +1068,12 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
+		ip, ipNet, _ := net.ParseCIDR(eth0CIDR)
+		ipNet.IP = ip
 		rm := routemanager.NewController()
-		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
 			rm.Run(stop, 10*time.Second)
-			wg.Done()
 			return nil
 		})
 		err = testNS.Do(func(ns.NetNS) error {
@@ -1078,7 +1090,13 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			localGw.Start()
+			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
+			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
+			// localGw.Start()
+			localGw.nodeIPManager.sync()
+			// we cannot start openflow manager directly because it spawns a go routine
+			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
+			localGw.openflowManager.syncFlows()
 
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0
