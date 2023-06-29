@@ -9,5 +9,5 @@ import (
 
 func TestNodeSuite(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Network Controller Manager Suite")
+	RunSpecs(t, "ovnkube controller suite")
 }

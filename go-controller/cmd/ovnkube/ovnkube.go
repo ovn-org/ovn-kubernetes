@@ -178,10 +178,10 @@ func setupPIDFile(pidfile string) error {
 
 // ovnkubeRunMode object stores the run mode of the ovnkube
 type ovnkubeRunMode struct {
-	networkControllerManager bool // network controller manager (--init-network-controller-manager or --init-master) is enabled
-	clusterManager           bool // cluster manager (--init-cluster-manager or --init-master) is enabled
-	node                     bool // node (--init-node) is enabled
-	cleanupNode              bool // cleanup (--cleanup-node) is enabled
+	ovnkubeController bool // ovnkube controller (--init-ovnkube-controller or --init-master) is enabled
+	clusterManager    bool // cluster manager (--init-cluster-manager or --init-master) is enabled
+	node              bool // node (--init-node) is enabled
+	cleanupNode       bool // cleanup (--cleanup-node) is enabled
 
 	// Along with the run mode, an identity is provided that uniquely identifies
 	// this instance vs other instances that might be running in the cluster.
@@ -193,22 +193,22 @@ type ovnkubeRunMode struct {
 // determineOvnkubeRunMode determines the run modes of ovnkube
 // based on the init flags set.  It is possible to run ovnkube in
 // multiple modes.  Allowed multiple modes are:
-//   - master (controller manager + cluster manager) + node
-//   - network controller manager + cluster manager
-//   - network controller manager + node
+//   - master (ovnkube controller + cluster manager) + node
+//   - ovnkube controller + cluster manager
+//   - ovnkube controller + node
 func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
 	mode := &ovnkubeRunMode{}
 
 	master := ctx.String("init-master")
 	cm := ctx.String("init-cluster-manager")
-	nm := ctx.String("init-network-controller-manager")
+	ovnkController := ctx.String("init-ovnkube-controller")
 	node := ctx.String("init-node")
 	cleanup := ctx.String("cleanup-node")
 
 	if master != "" {
-		// If init-master is set, then both network controller manager and cluster manager
+		// If init-master is set, then both ovnkube controller and cluster manager
 		// are enabled
-		mode.networkControllerManager = true
+		mode.ovnkubeController = true
 		mode.clusterManager = true
 	}
 
@@ -216,8 +216,8 @@ func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
 		mode.clusterManager = true
 	}
 
-	if nm != "" {
-		mode.networkControllerManager = true
+	if ovnkController != "" {
+		mode.ovnkubeController = true
 	}
 
 	if node != "" {
@@ -228,19 +228,19 @@ func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
 		mode.cleanupNode = true
 	}
 
-	if mode.cleanupNode && (mode.clusterManager || mode.networkControllerManager || mode.node) {
+	if mode.cleanupNode && (mode.clusterManager || mode.ovnkubeController || mode.node) {
 		return nil, fmt.Errorf("cannot run cleanup-node mode along with any other mode")
 	}
 
-	if !mode.clusterManager && !mode.networkControllerManager && !mode.node && !mode.cleanupNode {
+	if !mode.clusterManager && !mode.ovnkubeController && !mode.node && !mode.cleanupNode {
 		return nil, fmt.Errorf("need to specify a mode for ovnkube")
 	}
 
-	if !mode.networkControllerManager && mode.clusterManager && mode.node {
+	if !mode.ovnkubeController && mode.clusterManager && mode.node {
 		return nil, fmt.Errorf("cannot run in both cluster manager and node mode")
 	}
 
-	identities := sets.NewString(master, cm, nm, node, cleanup)
+	identities := sets.NewString(master, cm, ovnkController, node, cleanup)
 	identities.Delete("")
 	if identities.Len() != 1 {
 		return nil, fmt.Errorf("provided no identity or different identities for different modes")
@@ -297,7 +297,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	}
 
 	// no need for leader election in node mode
-	if !runMode.clusterManager && !runMode.networkControllerManager {
+	if !runMode.clusterManager && !runMode.ovnkubeController {
 		return runOvnKube(ctx.Context, runMode, ovnClientset, eventRecorder)
 	}
 
@@ -309,10 +309,10 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	var haConfig *config.HAConfig
 	var name string
 	switch {
-	case runMode.networkControllerManager && runMode.clusterManager:
+	case runMode.ovnkubeController && runMode.clusterManager:
 		metrics.RegisterClusterManagerBase()
 		fallthrough
-	case runMode.networkControllerManager:
+	case runMode.ovnkubeController:
 		metrics.RegisterMasterBase()
 		haConfig = &config.MasterHA
 		name = networkControllerManagerLockName()
@@ -419,9 +419,9 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	var masterWatchFactory *factory.WatchFactory
 	var err error
 
-	if runMode.networkControllerManager {
+	if runMode.ovnkubeController {
 		// create factory and start the controllers asked for
-		masterWatchFactory, err = factory.NewNCMWatchFactory(ovnClientset.GetNetworkControllerManagerClientset())
+		masterWatchFactory, err = factory.NewOVNKubeControllerWatchFactory(ovnClientset.GetOVNKubeControllerClientset())
 		if err != nil {
 			return err
 		}
@@ -430,7 +430,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 	if runMode.clusterManager {
 		var clusterManagerWatchFactory *factory.WatchFactory
-		if runMode.networkControllerManager {
+		if runMode.ovnkubeController {
 			// if CM and NCM modes are enabled, then we should call the combo mode - NewMasterWatchFactory
 			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
 			if err != nil {
@@ -460,7 +460,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		metrics.MetricClusterManagerReadyDuration.Set(time.Since(startTime).Seconds())
 	}
 
-	if runMode.networkControllerManager {
+	if runMode.ovnkubeController {
 		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 
 		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
@@ -478,7 +478,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		}
 		err = cm.Start(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to start network controller manager: %w", err)
+			return fmt.Errorf("failed to start ovnkube controller: %w", err)
 		}
 		defer cm.Stop()
 
@@ -489,11 +489,11 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	if runMode.node {
 		var nodeWatchFactory factory.NodeWatchFactory
 
-		if runMode.networkControllerManager && runMode.clusterManager {
+		if runMode.ovnkubeController && runMode.clusterManager {
 			// masterWatchFactory would be initialized as NewMasterWatchFactory already, let's use that
 			nodeWatchFactory = masterWatchFactory
-		} else if runMode.networkControllerManager {
-			// masterWatchFactory would be initialized as NewNCMWatchFactory, let's change that
+		} else if runMode.ovnkubeController {
+			// masterWatchFactory would be initialized as NewOVNKubeControllerWatchFactory, let's change that
 			// if Node and NCM modes are enabled, then we should call the combo mode - NewMasterWatchFactory
 			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
 			if err != nil {
@@ -516,7 +516,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		metrics.RegisterNodeMetrics()
 		ncm, err := controllerManager.NewNodeNetworkControllerManager(ovnClientset, nodeWatchFactory, runMode.identity, eventRecorder)
 		if err != nil {
-			return fmt.Errorf("failed to create ovnkube node network controller manager: %w", err)
+			return fmt.Errorf("failed to create ovnkube node ovnkube controller: %w", err)
 		}
 		err = ncm.Start(ctx)
 		if err != nil {
@@ -549,7 +549,7 @@ type ovnkubeMasterMetrics struct {
 }
 
 func (m ovnkubeMasterMetrics) On(string) {
-	if m.runMode.networkControllerManager {
+	if m.runMode.ovnkubeController {
 		metrics.MetricMasterLeader.Set(1)
 	}
 	if m.runMode.clusterManager {
@@ -558,7 +558,7 @@ func (m ovnkubeMasterMetrics) On(string) {
 }
 
 func (m ovnkubeMasterMetrics) Off(string) {
-	if m.runMode.networkControllerManager {
+	if m.runMode.ovnkubeController {
 		metrics.MetricMasterLeader.Set(0)
 	}
 	if m.runMode.clusterManager {

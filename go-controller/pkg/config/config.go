@@ -239,7 +239,7 @@ type DefaultConfig struct {
 	// the kernel network stack. This requires a new-enough kernel (5.15 or RHEL 8.5).
 	EnableUDPAggregation bool `gcfg:"enable-udp-aggregation"`
 
-	// Zone name to which ovnkube-node/ovnkube-network-controller-manager belongs to
+	// Zone name to which ovnkube-node/ovnkube-controller belongs to
 	Zone string `gcfg:"zone"`
 }
 
@@ -651,15 +651,15 @@ var CommonFlags = []cli.Flag{
 	// Mode flags
 	&cli.StringFlag{
 		Name:  "init-master",
-		Usage: "initialize master (both cluster-manager and network-controller-manager), requires the hostname as argument",
+		Usage: "initialize master (both cluster-manager and ovnkube-controller), requires the hostname as argument",
 	},
 	&cli.StringFlag{
 		Name:  "init-cluster-manager",
-		Usage: "initialize cluster manager (but not network-controller-manager), requires the hostname as argument",
+		Usage: "initialize cluster manager (but not ovnkube-controller), requires the hostname as argument",
 	},
 	&cli.StringFlag{
-		Name:  "init-network-controller-manager",
-		Usage: "initialize network-controller-manager (but not cluster-manager), requires the hostname as argument",
+		Name:  "init-ovnkube-controller",
+		Usage: "initialize ovnkube-controller (but not cluster-manager), requires the hostname as argument",
 	},
 	&cli.StringFlag{
 		Name:  "init-node",
@@ -840,7 +840,7 @@ var CommonFlags = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name:        "zone",
-		Usage:       "zone name to which ovnkube-node/ovnkube-network-controller-manager belongs to",
+		Usage:       "zone name to which ovnkube-node/ovnkube-controller belongs to",
 		Value:       Default.Zone,
 		Destination: &cliConfig.Default.Zone,
 	},
