@@ -292,10 +292,15 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 	ipBlocks := []string{}
 	for _, peer := range peers {
 		// follow the algorithm from setupGressPolicy
+		podSelector := peer.PodSelector
+		if podSelector == nil {
+			// nil pod selector is equivalent to empty pod selector, which selects all
+			podSelector = &metav1.LabelSelector{}
+		}
 		podSel, _ := metav1.LabelSelectorAsSelector(peer.PodSelector)
 		nsSel, _ := metav1.LabelSelectorAsSelector(peer.NamespaceSelector)
 		if !((peer.PodSelector == nil || podSel.Empty()) && (peer.NamespaceSelector == nil || !nsSel.Empty())) {
-			peerIndex := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace), controllerName)
+			peerIndex := getPodSelectorAddrSetDbIDs(getPodSelectorKey(podSelector, peer.NamespaceSelector, namespace), controllerName)
 			asv4, _ := addressset.GetHashNamesForAS(peerIndex)
 			hashedASNames = append(hashedASNames, asv4)
 		}
@@ -1792,6 +1797,57 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					[]*knet.NetworkPolicy{networkPolicy1, networkPolicy2}, nil, []string{}, nil,
 					initialDB.NBData)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+
+				return nil
+			}
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+
+		ginkgo.It("references all namespace address sets for empty namespace selector, even if they don't have pods (HostNetworkNamespace)", func() {
+			app.Action = func(ctx *cli.Context) error {
+				hostNamespaceName := "host-network"
+				config.Kubernetes.HostNetworkNamespace = hostNamespaceName
+				hostNamespace := *newNamespace(hostNamespaceName)
+
+				namespace1 := *newNamespace(namespaceName1)
+				nPodTest := getTestPod(namespace1.Name, nodeName)
+				networkPolicy := newNetworkPolicy(netPolicyName1, namespaceName1, metav1.LabelSelector{}, []knet.NetworkPolicyIngressRule{
+					{
+						From: []knet.NetworkPolicyPeer{{
+							NamespaceSelector: &metav1.LabelSelector{},
+						}},
+					},
+				}, nil)
+				startOvn(initialDB, []v1.Namespace{namespace1, hostNamespace}, []knet.NetworkPolicy{*networkPolicy},
+					[]testPod{nPodTest}, nil)
+
+				// emulate namespace handler adding management IPs for this address set
+				// we could let controller do that, but that would require adding nodes with their annotations
+				dbIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetNamespace, fakeOvn.controller.controllerName,
+					map[libovsdbops.ExternalIDKey]string{
+						libovsdbops.ObjectNameKey: hostNamespaceName,
+					})
+				// random set of IPs
+				hostNamespaceAddrSet, err := fakeOvn.asf.GetAddressSet(dbIDs)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// emulate management IP being added to the hostNetwork address set, but no pods in that namespace
+				err = hostNamespaceAddrSet.SetIPs([]net.IP{net.ParseIP("10.244.0.2")})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// create networkPolicy, check db
+				_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
+					Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectAddressSetWithIPs(hostNamespaceName, []string{"10.244.0.2"})
+
+				gressPolicyExpectedData := getPolicyData(networkPolicy, []string{nPodTest.portUUID},
+					[]string{hostNamespace.Name}, nil)
+				defaultDenyExpectedData := getDefaultDenyData(networkPolicy, []string{nPodTest.portUUID})
+				expectedData := getUpdatedInitialDB([]testPod{nPodTest})
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				return nil
 			}
