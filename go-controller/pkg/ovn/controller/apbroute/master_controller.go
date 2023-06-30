@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"strings"
 	"sync"
@@ -561,4 +562,29 @@ func updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute,
 	route.Status.Status = adminpolicybasedrouteapi.SuccessStatus
 	route.Status.Messages = append(route.Status.Messages, fmt.Sprintf("Configured external gateway IPs: %s", gwIPs))
 	klog.V(4).InfoS("Updating Admin Policy Based External Route %s with Status: %s, Message: %s", route.Name, route.Status.Status, route.Status.Messages[len(route.Status.Messages)-1])
+}
+
+// AddHybridRoutePolicyForPod exposes the function addHybridRoutePolicyForPod
+func (c *ExternalGatewayMasterController) AddHybridRoutePolicyForPod(podIP net.IP, node string) error {
+	return c.nbClient.addHybridRoutePolicyForPod(podIP, node)
+}
+
+// DelHybridRoutePolicyForPod exposes the function delHybridRoutePolicyForPod
+func (c *ExternalGatewayMasterController) DelHybridRoutePolicyForPod(podIP net.IP, node string) error {
+	return c.nbClient.delHybridRoutePolicyForPod(podIP, node)
+}
+
+// DelAllHybridRoutePolicies exposes the function delAllHybridRoutePolicies
+func (c *ExternalGatewayMasterController) DelAllHybridRoutePolicies() error {
+	return c.nbClient.delAllHybridRoutePolicies()
+}
+
+// DelAllLegacyHybridRoutePolicies exposes the function delAllLegacyHybridRoutePolicies
+func (c *ExternalGatewayMasterController) DelAllLegacyHybridRoutePolicies() error {
+	return c.nbClient.delAllLegacyHybridRoutePolicies()
+}
+
+// DeletePodSNAT exposes the function deletePodSNAT
+func (c *ExternalGatewayMasterController) DeletePodSNAT(nodeName string, extIPs, podIPNets []*net.IPNet) error {
+	return c.nbClient.deletePodSNAT(nodeName, extIPs, podIPNets)
 }
