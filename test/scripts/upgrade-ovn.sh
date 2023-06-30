@@ -65,7 +65,7 @@ kubectl_wait_deployment(){
     READY_REPLICAS=$(run_kubectl get deployments.apps $1 -n ovn-kubernetes -o=jsonpath='{.status.readyReplicas}')
     echo "CURRENT READY REPLICAS: $READY_REPLICAS, CURRENT DESIRED REPLICAS: $DESIRED_REPLICAS for the Deployment $1"
     if [[ $READY_REPLICAS -eq $DESIRED_REPLICAS ]]; then
-      UP_TO_DATE_REPLICAS=$(run_kubectl get deployments.apps ovnkube-master -n ovn-kubernetes -o=jsonpath='{.status.updatedReplicas}')
+      UP_TO_DATE_REPLICAS=$(run_kubectl get deployments.apps ovnkube-control-plane -n ovn-kubernetes -o=jsonpath='{.status.updatedReplicas}')
       echo "CURRENT UP TO DATE REPLICAS: $UP_TO_DATE_REPLICAS for the Deployment $1"
       if [[ $READY_REPLICAS -eq $UP_TO_DATE_REPLICAS ]]; then
         break
@@ -109,12 +109,11 @@ kubectl_wait_for_upgrade(){
     count=0
     while [ $count -lt 5 ];
     do
-        echo "waiting for ovnkube-master, ovnkube-node, ovnkube-db to have new image, ${OVN_IMAGE}, sleeping 30 seconds"
+        echo "waiting for ovnkube-control-plane, ovnkube-node, ovnkube-zone-controller to have new image, ${OVN_IMAGE}, sleeping 30 seconds"
         sleep 30
         count=$(run_kubectl get pods -n ovn-kubernetes -o=jsonpath='{range .items[*]}{"\n"}{.metadata.name}{":\t"}{range .spec.containers[*]}{.image}{", "}{end}{end}'|grep -c ${OVN_IMAGE})
         echo "Currently count is $count, expected 5"
     done;
-
 }
 
 create_ovn_kube_manifests() {
@@ -197,6 +196,11 @@ set_default_ovn_manifest_params() {
   fi
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
+
+
+  # IC parameters for multizone
+  OVN_ENABLE_INTERCONNECT=true
+  KIND_NUM_NODES_PER_ZONE=1
 }
 
 print_ovn_manifest_params() {
@@ -259,10 +263,11 @@ KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn} # Set default values
 
 # setup env needed for regenerating ovn resources from the checked-out branch
 # this will use the new OVN image as well: ovn-daemonset-f:pr
-set_default_ovn_manifest_params
+
+set_default_ovn_manifest_params  ### Apply multizone parameters here
 print_ovn_manifest_params
 
-# create upgraded OVN manifests from checked-out branch
+# create upgraded OVN manifests from checked-out branch  #### will create multizone manifests
 set_cluster_cidr_ip_families
 create_ovn_kube_manifests
 install_ovn_image
@@ -279,37 +284,33 @@ kubectl_wait_daemonset ovnkube-node
 
 run_kubectl get all -n ovn-kubernetes
 CURRENT_REPLICAS_OVNKUBE_DB=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-db -o=jsonpath='{.spec.replicas}')
-run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=0
+## Do not scale down to 0 the replicas, let the rolling update do its job
+# run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=0
 
-# install updated ovnkube-db daemonset
-if [ "$OVN_HA" == true ]; then
-  run_kubectl apply -f ovnkube-db-raft.yaml
-else
-  run_kubectl apply -f ovnkube-db.yaml
-fi
 
-run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=$CURRENT_REPLICAS_OVNKUBE_DB
-kubectl_wait_deployment ovnkube-db
+## Single-zone -> multizone: remove ovnkube-zone-controller
+run_kubectl delete ds -n ovn-kubernetes ovnkube-zone-controller
 
-CURRENT_REPLICAS_OVNKUBE_MASTER=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-master -o=jsonpath='{.spec.replicas}')
+CURRENT_REPLICAS_OVNKUBE_CONTROL_PLANE=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-control-plane -o=jsonpath='{.spec.replicas}')
 
 # scaling down replica before changing image briefly helps get around an issue seen with KIND
-# The issue was sometimes the KIND cluster won't scale down the ovnkube-master pod in time
+# The issue was sometimes the KIND cluster won't scale down the ovnkube-control-plane pod in time
 # and the new pod with the new image would be stuck in "Pending" state
-run_kubectl scale deploy -n ovn-kubernetes ovnkube-master --replicas=0
+## Do not scale down to 0 the replicas, let the rolling update do its job
+# run_kubectl scale deploy -n ovn-kubernetes ovnkube-control-plane --replicas=0
 
-# install updated ovnkube-master deployment
-run_kubectl apply -f ovnkube-master.yaml
+# install updated ovnkube-control-plane deployment
+run_kubectl apply -f ovnkube-control-plane.yaml
 
 popd
 
-run_kubectl scale deploy -n ovn-kubernetes ovnkube-master --replicas=$CURRENT_REPLICAS_OVNKUBE_MASTER
-kubectl_wait_deployment ovnkube-master
+run_kubectl scale deploy -n ovn-kubernetes ovnkube-control-plane --replicas=$CURRENT_REPLICAS_OVNKUBE_CONTROL_PLANE
+kubectl_wait_deployment ovnkube-control-plane
 kubectl_wait_for_upgrade
 
 run_kubectl describe ds ovnkube-node -n ovn-kubernetes
 
-run_kubectl describe deployments.apps ovnkube-master -n ovn-kubernetes
+run_kubectl describe deployments.apps ovnkube-control-plane -n ovn-kubernetes
 
 KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 MASTER_NODES=$(kubectl get nodes -l node-role.kubernetes.io/control-plane -o name)
