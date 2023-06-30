@@ -866,10 +866,12 @@ func pokeIPTableRules(clientContainer, pattern string) int {
 	cmd = append(cmd, ipTCommand...)
 	iptRules, err := runCommand(cmd...)
 	framework.ExpectNoError(err, "failed to get iptable rules from node %s", clientContainer)
+	framework.Logf("DEBUG: Dumping IPTRules %v", iptRules)
 	numOfMatchRules := 0
 	for _, iptRule := range strings.Split(iptRules, "\n") {
 		match := strings.Contains(iptRule, pattern)
 		if match {
+			framework.Logf("DEBUG: Matched rule %s for pattern %s", iptRule, pattern)
 			numOfMatchRules++
 		}
 	}

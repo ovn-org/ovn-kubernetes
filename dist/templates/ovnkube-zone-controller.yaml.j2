@@ -1,7 +1,7 @@
 ---
 # ovnkube-zone-controller
 # daemonset version 3
-# starts zone controller daemons - ovn dbs, ovn-northd and ovnkube-network-controller-manager containers
+# starts zone controller daemons - ovn dbs, ovn-northd and ovnkube-controller containers
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -257,7 +257,7 @@ spec:
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
-        command: ["/root/ovnkube.sh", "ovn-network-controller-manager"]
+        command: ["/root/ovnkube.sh", "ovnkube-controller"]
 
         securityContext:
           runAsUser: 0

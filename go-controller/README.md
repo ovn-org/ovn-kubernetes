@@ -39,11 +39,11 @@ Usage:
   -cluster-subnets string
      cluster wide IP subnet to use (default: 11.11.0.0/16)
   -init-master string
-     initialize master which enables both cluster manager (allocates node subnets) and network controller manager (which watches pods/nodes/services/policies and creates OVN db resources), requires the hostname as argument
+     initialize master which enables both cluster manager (allocates node subnets) and ovnkube controller (which watches pods/nodes/services/policies and creates OVN db resources), requires the hostname as argument
   -init-cluster-manager string
      initialize cluster manager that watches nodes (allocates subnet for each node from the cluster-subnets), requires the hostname as argument and doesn't connect to the OVN dbs.
-  -init-network-controller-manager string
-     initialize network-controller-manager (which watches pods/nodes/services/policies and create OVN db resources), requires the hostname as argument.
+  -init-ovnkube-controller string
+     initialize ovnkube-controller (which watches pods/nodes/services/policies and create OVN db resources), requires the hostname as argument.
   -init-node string
      initialize node, requires the name that node is registered with in kubernetes cluster
   -cleanup-node string
@@ -154,7 +154,7 @@ server-cacert=path/to/server-ca.crt
 
 ## Example
 
-#### Initialize the master (both cluster manager and network controller manager)
+#### Initialize the master (both cluster manager and ovnkube controller)
 
 ```
 ovnkube --init-master <master-host-name> \
@@ -165,14 +165,14 @@ ovnkube --init-master <master-host-name> \
 ```
 
 The aforementioned master ovnkube controller will enable both the cluster manager (which watches nodes and allocates node subnets)
-and network controller manager which initialize the central master logical router and establish the watcher loops for the following:
+and ovnkube controller which initialize the central master logical router and establish the watcher loops for the following:
  - nodes: as new nodes are born and init-node is called, the logical switches will be created automatically by giving out IPAM for the respective nodes
  - pods: as new pods are born, allocate the logical port with dynamic addressing from the switch it belongs to
  - services/endpoints: as new endpoints of services are born, create/update the logical load balancer on all logical switches
  - network policies and a few other k8s resources
 
 
-#### Initialize the cluster manager and network controller manager separately
+#### Initialize the cluster manager and ovnkube controller separately
 
 ```
 ovnkube --init-cluster-manager <master-host-name> \
@@ -186,14 +186,14 @@ The aforementioned ovnkube cluster manager will establish the watcher loops for 
  - nodes: as new nodes are born and init-node is called, the subnet IPAM is allocated for the respective nodes
 
 ```
-ovnkube --init-network-controller-manager <master-host-name> \
+ovnkube --init-ovnkube-controller <master-host-name> \
 	--k8s-cacert <path to the cacert file> \
 	--k8s-token <token string for authentication with kube apiserver> \
 	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443> \
 	--cluster-subnets <cidr representing the global pod network e.g. 192.168.0.0/16>
 ```
 
-The aforementioned ovnkube network controller manager will initialize the central master logical router and establish the watcher loops for the following:
+The aforementioned ovnkube controller will initialize the central master logical router and establish the watcher loops for the following:
  - nodes: as new nodes are born and init-node is called, the logical switches will be created automatically by giving out IPAM for the respective nodes
  - pods: as new pods are born, allocate the logical port with dynamic addressing from the switch it belongs to
  - services/endpoints: as new endpoints of services are born, create/update the logical load balancer on all logical switches
