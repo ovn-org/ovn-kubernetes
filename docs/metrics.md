@@ -18,6 +18,7 @@ Measurement accuracy can be impacted by other parallel processing that might be 
 This list is to help notify if there are additions, changes or removals to metrics. Latest changes are at the top of this list.
 
 - Effect of OVN IC architecture:
+  - Move all the metrics from subsystem "ovnkube-master" to subsystem "ovnkube-controller". The non-IC and IC deployments will each continue to have their ovnkube-master and ovnkube-controller containers running inside the ovnkube-master and ovnkube-controller pods. The metrics scraping should work seemlessly. See https://github.com/ovn-org/ovn-kubernetes/pull/3723 for details
   - Move the following metrics from subsystem "master" to subsystem "clustermanager". Therefore, the follow metrics are renamed.
     - `ovnkube_master_num_v4_host_subnets` -> `ovnkube_clustermanager_num_v4_host_subnets`
     - `ovnkube_master_num_v6_host_subnets` -> `ovnkube_clustermanager_num_v6_host_subnets`
