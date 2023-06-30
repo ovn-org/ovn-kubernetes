@@ -106,7 +106,7 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 		iFactory.NamespaceInformer(),
 		iFactory.NodeCoreInformer().Lister(),
 		nbClient,
-		addressset.NewFakeAddressSetFactory(apbControllerName))
+		addressset.NewFakeAddressSetFactory(ControllerName))
 	Expect(err).NotTo(HaveOccurred())
 
 	if nbZoneFailed {

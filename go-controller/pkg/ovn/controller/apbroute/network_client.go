@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -141,6 +142,11 @@ func (nb *northBoundClient) deletePodGWRoutes(routeInfo *ExternalRouteInfo, toBe
 		return nil
 	}
 	pod, err := nb.podLister.Pods(routeInfo.PodName.Namespace).Get(routeInfo.PodName.Name)
+	var deletedPod bool
+	if err != nil && apierrors.IsNotFound(err) {
+		// Mark this routeInfo as deleted
+		deletedPod = true
+	}
 	if err == nil {
 		local, err := nb.isPodInLocalZone(pod)
 		if err != nil {
@@ -153,7 +159,7 @@ func (nb *northBoundClient) deletePodGWRoutes(routeInfo *ExternalRouteInfo, toBe
 	}
 	for podIP, routes := range routeInfo.PodExternalRoutes {
 		for gw, gr := range routes {
-			if toBeDeletedGWIPs.Has(gw) {
+			if toBeDeletedGWIPs.Has(gw) || deletedPod {
 				// we cannot delete an external gateway IP from the north bound if it's also being provided by an external gateway annotation or if it is also
 				// defined by a coexisting policy in the same namespace
 				if err := nb.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
@@ -163,6 +169,7 @@ func (nb *northBoundClient) deletePodGWRoutes(routeInfo *ExternalRouteInfo, toBe
 			}
 		}
 	}
+	routeInfo.Deleted = deletedPod
 	return nil
 }
 

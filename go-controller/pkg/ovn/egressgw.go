@@ -427,7 +427,7 @@ func (oc *DefaultNetworkController) deleteGWRoutesForNamespace(namespace string,
 	if err != nil {
 		return err
 	}
-	policyGWIPs.Union(policyStaticGWIPs)
+	policyGWIPs = policyGWIPs.Union(policyStaticGWIPs)
 	for _, routeInfo := range oc.getRouteInfosForNamespace(namespace) {
 		routeInfo.Lock()
 		if routeInfo.Deleted {
@@ -459,6 +459,16 @@ func (oc *DefaultNetworkController) deleteGWRoutesForPod(name ktypes.NamespacedN
 	}
 	defer routeInfo.Unlock()
 
+	policyGWIPs, err := oc.apbExternalRouteController.GetDynamicGatewayIPsForTargetNamespace(name.Namespace)
+	if err != nil {
+		return err
+	}
+	policyStaticGWIPs, err := oc.apbExternalRouteController.GetStaticGatewayIPsForTargetNamespace(name.Namespace)
+	if err != nil {
+		return err
+	}
+	policyGWIPs = policyGWIPs.Union(policyStaticGWIPs)
+
 	for _, podIPNet := range podIPNets {
 		podIP := podIPNet.IP.String()
 		routes, ok := routeInfo.PodExternalRoutes[podIP]
@@ -470,11 +480,13 @@ func (oc *DefaultNetworkController) deleteGWRoutesForPod(name ktypes.NamespacedN
 			continue
 		}
 		for gw, gr := range routes {
-			if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
-				// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
-				return fmt.Errorf("delete pod GW route failed: %w", err)
+			if !policyGWIPs.Has(gw) {
+				if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
+					// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
+					return fmt.Errorf("delete pod GW route failed: %w", err)
+				}
+				delete(routes, gw)
 			}
-			delete(routes, gw)
 		}
 	}
 	return nil
@@ -510,6 +522,16 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 	if err != nil {
 		return fmt.Errorf("failed to ensure routeInfo for %s, error: %v", podNsName, err)
 	}
+	policyGWIPs, err := oc.apbExternalRouteController.GetDynamicGatewayIPsForTargetNamespace(podNsName.Namespace)
+	if err != nil {
+		return err
+	}
+	policyStaticGWIPs, err := oc.apbExternalRouteController.GetStaticGatewayIPsForTargetNamespace(podNsName.Namespace)
+	if err != nil {
+		return err
+	}
+	policyGWIPs = policyGWIPs.Union(policyStaticGWIPs)
+
 	defer routeInfo.Unlock()
 
 	for _, podIPNet := range podIfAddrs {
@@ -521,7 +543,8 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 				podIP := podIPNet.IP.String()
 				for _, gw := range gws {
 					// if route was already programmed, skip it
-					if foundGR, ok := routeInfo.PodExternalRoutes[podIP][gw]; ok && foundGR == gr {
+					foundGR, ok := routeInfo.PodExternalRoutes[podIP][gw]
+					if (ok && foundGR == gr) || policyGWIPs.Has(gw) {
 						routesAdded++
 						continue
 					}
