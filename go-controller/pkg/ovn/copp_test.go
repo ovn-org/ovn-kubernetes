@@ -128,7 +128,8 @@ func TestEnsureDefaultCOPP(t *testing.T) {
 			desc:      "cleans multiple empty-name default COPPs and adds named COPP",
 			expectErr: false,
 			initialNbdb: libovsdbtest.TestSetup{
-				NBData: multipleEmptyCOPPNameNBData,
+				IgnoreConstraints: true,
+				NBData:            multipleEmptyCOPPNameNBData,
 			},
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: expectedNBData,
@@ -138,7 +139,8 @@ func TestEnsureDefaultCOPP(t *testing.T) {
 			desc:      "cleans multiple empty-name default COPPs when named COPP exists",
 			expectErr: false,
 			initialNbdb: libovsdbtest.TestSetup{
-				NBData: multipleEmptyAndNamedCOPPNBData,
+				IgnoreConstraints: true,
+				NBData:            multipleEmptyAndNamedCOPPNBData,
 			},
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: expectedNBData,
