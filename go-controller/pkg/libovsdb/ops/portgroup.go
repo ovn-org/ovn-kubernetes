@@ -296,3 +296,14 @@ func DeletePortGroupsWithPredicateOps(nbClient libovsdbclient.Client, ops []libo
 	m := newModelClient(nbClient)
 	return m.DeleteOps(ops, opModel)
 }
+
+// DeletePortGroupsWithPredicate deletes the port groups based on the provided predicate
+func DeletePortGroupsWithPredicate(nbClient libovsdbclient.Client, p portGroupPredicate) error {
+	ops, err := DeletePortGroupsWithPredicateOps(nbClient, nil, p)
+	if err != nil {
+		return err
+	}
+
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
+}

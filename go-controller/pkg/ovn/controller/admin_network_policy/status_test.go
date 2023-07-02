@@ -79,23 +79,23 @@ var initialBANP = anpapi.BaselineAdminNetworkPolicy{
 	},
 }
 
-func newANPController() (*Controller, error) {
+func newANPController(initANPs anpapi.AdminNetworkPolicyList, initBANPs anpapi.BaselineAdminNetworkPolicyList) (*Controller, error) {
+	return newANPControllerWithDBSetup(libovsdbtest.TestSetup{}, initANPs, initBANPs)
+}
+
+func newANPControllerWithDBSetup(dbSetup libovsdbtest.TestSetup, initANPs anpapi.AdminNetworkPolicyList, initBANPs anpapi.BaselineAdminNetworkPolicyList) (*Controller, error) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
 	config.PrepareTestConfig()
 	config.OVNKubernetesFeature.EnableAdminNetworkPolicy = true
-	nbClient, _, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{}, nil)
+	nbClient, _, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
 	if err != nil {
 		return nil, err
 	}
 	fakeClient := &util.OVNClientset{
 		KubeClient: fake.NewSimpleClientset(),
 		ANPClient: anpfake.NewSimpleClientset(
-			&anpapi.AdminNetworkPolicyList{
-				Items: []anpapi.AdminNetworkPolicy{initialANP},
-			},
-			&anpapi.BaselineAdminNetworkPolicyList{
-				Items: []anpapi.BaselineAdminNetworkPolicy{initialBANP},
-			},
+			&initANPs,
+			&initBANPs,
 		),
 	}
 	watcher, err := factory.NewMasterWatchFactory(fakeClient.GetMasterClientset())
@@ -148,7 +148,14 @@ func TestAddOrUpdateAdminNetworkPolicyStatus(t *testing.T) {
 	message := "you know nothing jon snow"
 	zone := "targaryen"
 	g := gomega.NewGomegaWithT(t)
-	controller, err := newANPController()
+	controller, err := newANPController(
+		anpapi.AdminNetworkPolicyList{
+			Items: []anpapi.AdminNetworkPolicy{initialANP},
+		},
+		anpapi.BaselineAdminNetworkPolicyList{
+			Items: []anpapi.BaselineAdminNetworkPolicy{initialBANP},
+		},
+	)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	err = controller.updateANPStatusToNotReady(&initialANP, zone, message)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
