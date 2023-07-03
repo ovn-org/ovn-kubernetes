@@ -84,6 +84,22 @@ const (
 	// ovnkube-node gets the node's zone from the OVN Southbound database.
 	ovnNodeZoneName = "k8s.ovn.org/zone-name"
 
+	/** HACK BEGIN **/
+	// TODO(tssurya): Remove this annotation a few months from now (when one or two release jump
+	// upgrades are done). This has been added only to minimize disruption for upgrades when
+	// moving to interconnect=true.
+	// We want the legacy ovnkube-master to wait for remote ovnkube-node to
+	// signal it using "k8s.ovn.org/remote-zone-migrated" annotation before
+	// considering a node as remote when we upgrade from "global" (1 zone IC)
+	// zone to multi-zone. This is so that network disruption for the existing workloads
+	// is negligible and until the point where ovnkube-node flips the switch to connect
+	// to the new SBDB, it would continue talking to the legacy RAFT ovnkube-sbdb to ensure
+	// OVN/OVS flows are intact.
+	// ovnNodeMigratedZoneName is the zone to which the node belongs to. It is set by ovnkube-node.
+	// ovnkube-node gets the node's zone from the OVN Southbound database.
+	ovnNodeMigratedZoneName = "k8s.ovn.org/remote-zone-migrated"
+	/** HACK END **/
+
 	// ovnTransitSwitchPortAddr is the annotation to store the node Transit switch port ips.
 	// It is set by cluster manager.
 	ovnTransitSwitchPortAddr = "k8s.ovn.org/node-transit-switch-port-ifaddr"
@@ -725,6 +741,21 @@ func NodeIDAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 func SetNodeZone(nodeAnnotator kube.Annotator, zoneName string) error {
 	return nodeAnnotator.Set(ovnNodeZoneName, zoneName)
 }
+
+/** HACK BEGIN **/
+// TODO(tssurya): Remove this a few months from now
+// SetNodeZoneMigrated sets the node's zone in the 'ovnNodeMigratedZoneName' node annotation.
+func SetNodeZoneMigrated(nodeAnnotator kube.Annotator, zoneName string) error {
+	return nodeAnnotator.Set(ovnNodeMigratedZoneName, zoneName)
+}
+
+// HasNodeMigratedZone returns true if node has its ovnNodeMigratedZoneName set already
+func HasNodeMigratedZone(node *kapi.Node) bool {
+	_, ok := node.Annotations[ovnNodeMigratedZoneName]
+	return ok
+}
+
+/** HACK END **/
 
 // GetNodeZone returns the zone of the node set in the 'ovnNodeZoneName' node annotation.
 // If the annotation is not set, it returns the 'default' zone name.
