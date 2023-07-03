@@ -24,6 +24,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -257,7 +258,7 @@ func (c *ExternalGatewayMasterController) processNextPolicyWorkItem(wg *sync.Wai
 		klog.Errorf("Failed to sync APB policy %s: %v", key, err)
 	}
 	// capture the error from processing the sync in the statuses message field
-	// TODO this will post many statuses, often the same
+	//TODO decide how to merge statuses from multiple ovnkube-controllers
 	statusErr := c.updateStatusAPBExternalRoute(key.(string), gwIPs, err)
 	if statusErr != nil {
 		klog.Warningf("Failed to update AdminPolicyBasedExternalRoutes %s status: %v", key, statusErr)
@@ -527,21 +528,26 @@ func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(policyNam
 		return nil
 	}
 
-	// retrieve the policy for update
-	routePolicy, err := c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), policyName, metav1.GetOptions{})
-
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// policy doesn't exist, no need to update status
-			return nil
+	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
+		routePolicy, err := c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), policyName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// policy doesn't exist, no need to update status
+				return nil
+			}
+			return err
 		}
-		return err
-	}
 
-	updateStatus(routePolicy, strings.Join(sets.List(gwIPs), ","), processedError)
-	_, err = c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().UpdateStatus(context.TODO(), routePolicy, metav1.UpdateOptions{})
-	if !apierrors.IsNotFound(err) {
-		return err
+		updateStatus(routePolicy, strings.Join(sets.List(gwIPs), ","), processedError)
+
+		_, err = c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().UpdateStatus(context.TODO(), routePolicy, metav1.UpdateOptions{})
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		return nil
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update AdminPolicyBasedExternalRoutes %s status: %v", policyName, resultErr)
 	}
 	return nil
 }
