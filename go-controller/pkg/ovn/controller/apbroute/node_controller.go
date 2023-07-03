@@ -134,25 +134,25 @@ func NewExternalNodeController(
 
 func (c *ExternalGatewayNodeController) Run(threadiness int) {
 	defer utilruntime.HandleCrash()
-	klog.V(4).InfoS("Starting Admin Policy Based Route Node Controller")
+	klog.V(4).Info("Starting Admin Policy Based Route Node Controller")
 
 	c.routePolicyInformer.Start(c.stopCh)
 
 	if !cache.WaitForNamedCacheSync("apbexternalroutenamespaces", c.stopCh, c.namespaceSynced) {
 		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.V(4).InfoS("Synchronization failed")
+		klog.V(4).Info("Synchronization failed")
 		return
 	}
 
 	if !cache.WaitForNamedCacheSync("apbexternalroutepods", c.stopCh, c.podSynced) {
 		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.V(4).InfoS("Synchronization failed")
+		klog.V(4).Info("Synchronization failed")
 		return
 	}
 
 	if !cache.WaitForNamedCacheSync("adminpolicybasedexternalroutes", c.stopCh, c.routeSynced) {
 		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.V(4).InfoS("Synchronization failed")
+		klog.V(4).Info("Synchronization failed")
 		return
 	}
 
@@ -270,14 +270,14 @@ func (c *ExternalGatewayNodeController) processNextPolicyWorkItem(wg *sync.WaitG
 	}
 	defer c.routeQueue.Done(key)
 
-	klog.V(4).InfoS("Processing policy %s", key)
+	klog.V(4).Infof("Processing policy %s", key)
 	_, err := c.mgr.syncRoutePolicy(key.(string), c.routeQueue)
 	if err != nil {
 		klog.Errorf("Failed to sync APB policy %s: %v", key, err)
 	}
 	if err != nil {
 		if c.routeQueue.NumRequeues(key) < maxRetries {
-			klog.V(4).InfoS("Error found while processing policy %s: %w", key, err)
+			klog.V(4).Infof("Error found while processing policy %s: %v", key, err)
 			c.routeQueue.AddRateLimited(key)
 			return true
 		}
@@ -372,7 +372,7 @@ func (c *ExternalGatewayNodeController) processNextNamespaceWorkItem(wg *sync.Wa
 	err := c.mgr.syncNamespace(obj.(*v1.Namespace), c.routeQueue)
 	if err != nil {
 		if c.namespaceQueue.NumRequeues(obj) < maxRetries {
-			klog.V(4).InfoS("Error found while processing namespace %s:%w", obj.(*v1.Namespace), err)
+			klog.V(4).Infof("Error found while processing namespace %s:%v", obj.(*v1.Namespace), err)
 			c.namespaceQueue.AddRateLimited(obj)
 			return true
 		}
@@ -463,7 +463,7 @@ func (c *ExternalGatewayNodeController) processNextPodWorkItem(wg *sync.WaitGrou
 	err := c.mgr.syncPod(p, c.podLister, c.routeQueue)
 	if err != nil {
 		if c.podQueue.NumRequeues(obj) < maxRetries {
-			klog.V(4).InfoS("Error found while processing pod %s/%s:%w", p.Namespace, p.Name, err)
+			klog.V(4).Infof("Error found while processing pod %s/%s:%v", p.Namespace, p.Name, err)
 			c.podQueue.AddRateLimited(obj)
 			return true
 		}

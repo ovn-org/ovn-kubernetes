@@ -90,7 +90,7 @@ func (m *externalPolicyManager) removePolicyFromNamespace(targetNamespace string
 		return err
 	}
 
-	klog.V(4).InfoS("Deleting APB policy %s in namespace cache %s", policy.Name, targetNamespace)
+	klog.V(4).Infof("Deleting APB policy %s in namespace cache %s", policy.Name, targetNamespace)
 	cacheInfo.Policies = cacheInfo.Policies.Delete(policy.Name)
 	if len(cacheInfo.Policies) == 0 {
 		m.namespaceInfoSyncCache.Delete(targetNamespace)

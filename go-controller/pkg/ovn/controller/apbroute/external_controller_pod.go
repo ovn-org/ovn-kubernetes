@@ -39,9 +39,9 @@ func (m *externalPolicyManager) syncPod(pod *v1.Pod, podLister corev1listers.Pod
 			m.unlockNamespaceInfoCache(pod.Namespace)
 		}
 	}
-	klog.V(4).InfoS("Processing gateway pod %s/%s with matching policies %+v", pod.Namespace, pod.Name, policies.UnsortedList())
+	klog.V(4).Infof("Processing gateway pod %s/%s with matching policies %+v", pod.Namespace, pod.Name, policies.UnsortedList())
 	for policyName := range policies {
-		klog.V(5).InfoS("Queueing policy %s", policyName)
+		klog.V(5).Infof("Queueing policy %s", policyName)
 		routeQueue.Add(policyName)
 	}
 
@@ -101,13 +101,13 @@ func (m *externalPolicyManager) listPoliciesUsingPodGateway(key ktypes.Namespace
 		return nil, err
 	}
 	for _, p := range policies {
-		klog.V(5).InfoS("Checking for policy %s to have pod %s", p.Name, key)
+		klog.V(5).Infof("Checking for policy %s to have pod %s", p.Name, key)
 		pp, err := m.processExternalRoutePolicy(p)
 		if err != nil {
 			return nil, err
 		}
 		if _, found := pp.dynamicGateways[key]; found {
-			klog.V(5).InfoS("Policy %s has pod %s", p.Name, key)
+			klog.V(5).Infof("Policy %s has pod %s", p.Name, key)
 			ret = append(ret, p)
 		}
 
