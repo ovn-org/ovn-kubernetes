@@ -326,7 +326,7 @@ func (oc *DefaultNetworkController) deletePodGWRoute(routeInfo *apbroutecontroll
 			return err
 		}
 		if !local {
-			klog.V(4).InfoS("Not deleting exgw routes for pod %s not in the local zone %s", routeInfo.PodName, oc.zone)
+			klog.V(4).Infof("Not deleting exgw routes for pod %s not in the local zone %s", routeInfo.PodName, oc.zone)
 			return nil
 		}
 	}
@@ -504,7 +504,7 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 		return err
 	}
 	if !local {
-		klog.V(4).InfoS("Not adding exgw routes for pod %s not in the local zone %s", podNsName, oc.zone)
+		klog.V(4).Infof("Not adding exgw routes for pod %s not in the local zone %s", podNsName, oc.zone)
 		return nil
 	}
 
@@ -586,7 +586,7 @@ func (oc *DefaultNetworkController) deletePodSNAT(nodeName string, extIPs, podIP
 		return err
 	}
 	if util.GetNodeZone(node) != oc.zone {
-		klog.V(4).InfoS("Node %s is not in the local zone %s", nodeName, oc.zone)
+		klog.V(4).Infof("Node %s is not in the local zone %s", nodeName, oc.zone)
 		return nil
 	}
 	ops, err := deletePodSNATOps(oc.nbClient, nil, nodeName, extIPs, podIPNets)

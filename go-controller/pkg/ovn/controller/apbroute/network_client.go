@@ -153,7 +153,7 @@ func (nb *northBoundClient) deletePodGWRoutes(routeInfo *ExternalRouteInfo, toBe
 			return err
 		}
 		if !local {
-			klog.V(4).InfoS("APB will not delete exgw routes for pod %s not in the local zone %s", routeInfo.PodName, nb.zone)
+			klog.V(4).Infof("APB will not delete exgw routes for pod %s not in the local zone %s", routeInfo.PodName, nb.zone)
 			return nil
 		}
 	}
@@ -226,7 +226,7 @@ func (nb *northBoundClient) deletePodSNAT(nodeName string, extIPs, podIPNets []*
 		return err
 	}
 	if util.GetNodeZone(node) != nb.zone {
-		klog.V(4).InfoS("Node %s is not in the local zone %s", nodeName, nb.zone)
+		klog.V(4).Infof("Node %s is not in the local zone %s", nodeName, nb.zone)
 		return nil
 	}
 	nats, err := buildPodSNAT(extIPs, podIPNets)
@@ -254,7 +254,7 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddr
 		return err
 	}
 	if !local {
-		klog.V(4).InfoS("APB will not add exgw routes for pod %s not in the local zone %s", podNsName, nb.zone)
+		klog.V(4).Infof("APB will not add exgw routes for pod %s not in the local zone %s", podNsName, nb.zone)
 		return nil
 	}
 
@@ -734,7 +734,7 @@ func (c *conntrackClient) deleteGatewayIPs(namespaceName string, _, toBeKept set
 	var wg sync.WaitGroup
 	wg.Add(len(toBeKept))
 	validMACs := sync.Map{}
-	klog.V(4).InfoS("Keeping conntrack entries in namespace %s with gateway IPs %s", namespaceName, strings.Join(sets.List(toBeKept), ","))
+	klog.V(4).Infof("Keeping conntrack entries in namespace %s with gateway IPs %s", namespaceName, strings.Join(sets.List(toBeKept), ","))
 	for gwIP := range toBeKept {
 		go func(gwIP string) {
 			defer wg.Done()
