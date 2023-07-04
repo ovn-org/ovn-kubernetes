@@ -25,6 +25,14 @@ type Allocator interface {
 	AllocateNextIPs(name string) ([]*net.IPNet, error)
 	ReleaseIPs(name string, ips []*net.IPNet) error
 	ConditionalIPRelease(name string, ips []*net.IPNet, predicate func() (bool, error)) (bool, error)
+	ForSubnet(name string) NamedAllocator
+}
+
+// NamedAllocator manages the allocation of IPs within a specific subnet
+type NamedAllocator interface {
+	AllocateIPs(ips []*net.IPNet) error
+	AllocateNextIPs() ([]*net.IPNet, error)
+	ReleaseIPs(ips []*net.IPNet) error
 }
 
 // ErrSubnetNotFound is used to inform the subnet is not being managed
@@ -321,4 +329,32 @@ func (allocator *allocator) ConditionalIPRelease(name string, ips []*net.IPNet, 
 	}
 
 	return false, nil
+}
+
+// ForSubnet returns an IP allocator for the specified subnet
+func (allocator *allocator) ForSubnet(name string) NamedAllocator {
+	return &IPAllocator{
+		name:      name,
+		allocator: allocator,
+	}
+}
+
+type IPAllocator struct {
+	allocator *allocator
+	name      string
+}
+
+// AllocateIPs allocates the requested IPs
+func (ipAllocator *IPAllocator) AllocateIPs(ips []*net.IPNet) error {
+	return ipAllocator.allocator.AllocateIPs(ipAllocator.name, ips)
+}
+
+// AllocateNextIPs allocates the next available IPs
+func (ipAllocator *IPAllocator) AllocateNextIPs() ([]*net.IPNet, error) {
+	return ipAllocator.allocator.AllocateNextIPs(ipAllocator.name)
+}
+
+// ReleaseIPs release the provided IPs
+func (ipAllocator *IPAllocator) ReleaseIPs(ips []*net.IPNet) error {
+	return ipAllocator.allocator.ReleaseIPs(ipAllocator.name, ips)
 }

@@ -43,6 +43,11 @@ var (
 	ErrAllocated = errors.New("provided IP is already allocated")
 )
 
+// IsErrAllocated returns true if err is of type ErrAllocated
+func IsErrAllocated(err error) bool {
+	return errors.Is(err, ErrAllocated)
+}
+
 type ErrNotInRange struct {
 	ValidRange string
 }

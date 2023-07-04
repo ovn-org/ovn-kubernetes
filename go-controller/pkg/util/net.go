@@ -304,6 +304,20 @@ func ContainsCIDR(ipnet1, ipnet2 *net.IPNet) bool {
 	return mask1 <= mask2 && ipnet1.Contains(ipnet2.IP)
 }
 
+// ParseIPNets parses the provided string formatted CIDRs
+func ParseIPNets(strs []string) ([]*net.IPNet, error) {
+	ipnets := make([]*net.IPNet, len(strs))
+	for i := range strs {
+		ip, ipnet, err := utilnet.ParseCIDRSloppy(strs[i])
+		if err != nil {
+			return nil, err
+		}
+		ipnet.IP = ip
+		ipnets[i] = ipnet
+	}
+	return ipnets, nil
+}
+
 // GenerateRandMAC generates a random unicast and locally administered MAC address.
 // LOOTED FROM https://github.com/cilium/cilium/blob/v1.12.6/pkg/mac/mac.go#L106
 func GenerateRandMAC() (net.HardwareAddr, error) {
@@ -316,6 +330,16 @@ func GenerateRandMAC() (net.HardwareAddr, error) {
 	buf[0] = (buf[0] | 0x02) & 0xfe
 
 	return buf, nil
+}
+
+// CopyIPNets copies the provided slice of IPNet
+func CopyIPNets(ipnets []*net.IPNet) []*net.IPNet {
+	copy := make([]*net.IPNet, len(ipnets))
+	for i := range ipnets {
+		ipnet := *ipnets[i]
+		copy[i] = &ipnet
+	}
+	return copy
 }
 
 // IPsToNetworkIPs returns the network CIDRs of the provided IP CIDRs

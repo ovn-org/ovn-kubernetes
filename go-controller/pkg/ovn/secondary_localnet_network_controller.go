@@ -2,6 +2,9 @@ package ovn
 
 import (
 	"context"
+	"sync"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -9,7 +12,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"sync"
 
 	"k8s.io/klog/v2"
 )
@@ -48,6 +50,12 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 			},
 		},
 	}
+
+	podAnnotationAllocator := pod.NewPodAnnotationAllocator(
+		netInfo,
+		cnci.watchFactory.PodCoreInformer().Lister(),
+		cnci.kube)
+	oc.podAnnotationAllocator = podAnnotationAllocator
 
 	// disable multicast support for secondary networks
 	// TBD: changes needs to be made to support multicast in secondary networks

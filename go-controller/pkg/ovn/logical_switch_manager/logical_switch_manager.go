@@ -148,3 +148,8 @@ func (manager *LogicalSwitchManager) ReleaseIPs(switchName string, ipnets []*net
 func (manager *LogicalSwitchManager) ConditionalIPRelease(switchName string, ipnets []*net.IPNet, predicate func() (bool, error)) (bool, error) {
 	return manager.allocator.ConditionalIPRelease(switchName, ipnets, predicate)
 }
+
+// ForSubnet return an IP allocator for the specified switch
+func (manager *LogicalSwitchManager) ForSwitch(switchName string) subnet.NamedAllocator {
+	return manager.allocator.ForSubnet(switchName)
+}
