@@ -322,7 +322,7 @@ func (m *externalPolicyManager) processStaticHopsGatewayInformation(hops []*admi
 	for _, h := range hops {
 		ip := net.ParseIP(h.IP)
 		if ip == nil {
-			return nil, fmt.Errorf("could not parse routing external gw annotation value '%s'", h.IP)
+			return nil, fmt.Errorf("could not parse routing static gw annotation value '%s'", h.IP)
 		}
 		gwList.InsertOverwrite(gateway_info.NewGatewayInfo(sets.New(ip.String()), h.BFDEnabled))
 	}

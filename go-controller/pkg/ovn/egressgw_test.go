@@ -2480,6 +2480,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.RunAPBExternalPolicyController()
+
 				asIndex := getHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				asv4, _ := addressset.GetHashNamesForAS(asIndex)
 				nbWithLRP := []libovsdbtest.TestData{
@@ -2536,7 +2538,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				}
 
-				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
+				gomega.Eventually(func() string {
+					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
+				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(nbWithLRP))
 
 				ginkgo.By("Removing the namespace annotation")
@@ -2545,7 +2549,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(nbWithLRP))
-
+				checkAPBRouteStatus(fakeOvn, "policy", false)
 				return nil
 			}
 
