@@ -99,6 +99,7 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 		err = createTestNBGlobal(nbClient, "global")
 		Expect(err).NotTo(HaveOccurred())
 	}
+	controllerName := "test-controller"
 	externalController, err = NewExternalMasterController(fakeClient,
 		fakeRouteClient,
 		stopChan,
@@ -106,7 +107,8 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 		iFactory.NamespaceInformer(),
 		iFactory.NodeCoreInformer().Lister(),
 		nbClient,
-		addressset.NewFakeAddressSetFactory(ControllerName))
+		addressset.NewFakeAddressSetFactory(controllerName),
+		controllerName)
 	Expect(err).NotTo(HaveOccurred())
 
 	if nbZoneFailed {
