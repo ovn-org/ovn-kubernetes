@@ -596,3 +596,11 @@ func (c *ExternalGatewayMasterController) DelAllLegacyHybridRoutePolicies() erro
 func (c *ExternalGatewayMasterController) DeletePodSNAT(nodeName string, extIPs, podIPNets []*net.IPNet) error {
 	return c.nbClient.deletePodSNAT(nodeName, extIPs, podIPNets)
 }
+
+func (c *ExternalGatewayMasterController) GetAPBRoutePolicyStatus(policyName string) (*adminpolicybasedrouteapi.AdminPolicyBasedRouteStatus, error) {
+	pol, err := c.routeLister.Get(policyName)
+	if err != nil {
+		return nil, err
+	}
+	return &pol.Status, nil
+}

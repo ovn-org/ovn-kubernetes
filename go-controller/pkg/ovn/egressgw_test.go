@@ -1549,6 +1549,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					fakeOvn.RunAPBExternalPolicyController()
 
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1563,6 +1564,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					gomega.Eventually(func() string {
 						return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)[util.ExternalGatewayPodIPsAnnotation]
 					}).Should(gomega.Equal(expectedNamespaceAnnotation))
+					for _, apbRoutePolicy := range apbExternalRouteCRList.Items {
+						checkAPBRouteStatus(fakeOvn, apbRoutePolicy.Name, false)
+					}
 					return nil
 				}
 
@@ -1722,7 +1726,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				"",
 				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{},
 			),
-			table.Entry("No BFD and with overlapping APB External Route CR should keep the annotation unchanged", false,
+			table.Entry("No BFD and with overlapping APB External Route CR and annotation", false,
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
@@ -1787,23 +1791,13 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						UUID: "node2",
 						Name: "node2",
 					},
-					&nbdb.LogicalRouterStaticRoute{
-						UUID:       "static-route-1-UUID",
-						IPPrefix:   "10.128.1.3/32",
-						Nexthop:    "9.0.0.1",
-						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-						OutputPort: &logicalRouterPort,
-						Options: map[string]string{
-							"ecmp_symmetric_reply": "true",
-						},
-					},
 					&nbdb.LogicalRouter{
 						UUID:         "GR_node1-UUID",
 						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID"},
+						StaticRoutes: []string{},
 					},
 				},
-				"9.0.0.1",
+				"",
 				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 					Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
 						newPolicy("policy",

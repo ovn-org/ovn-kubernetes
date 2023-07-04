@@ -3062,3 +3062,21 @@ func (o *FakeOVN) RunAPBExternalPolicyController() {
 	err = o.controller.apbExternalRouteController.Run(o.controller.wg, 5)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred())
 }
+
+func checkAPBRouteStatus(fakeOVN *FakeOVN, policyName string, expectFailure bool) {
+	var status *adminpolicybasedrouteapi.AdminPolicyBasedRouteStatus
+	var err error
+	// first fetch status, if it is empty policy may not be handled yet
+	gomega.Eventually(func() bool {
+		status, err = fakeOVN.controller.apbExternalRouteController.GetAPBRoutePolicyStatus(policyName)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		return status.Status != ""
+	}).Should(gomega.BeTrue())
+
+	// as soon as status is set, it should match expected status, without extra retries
+	expectedStatus := adminpolicybasedrouteapi.SuccessStatus
+	if expectFailure {
+		expectedStatus = adminpolicybasedrouteapi.FailStatus
+	}
+	gomega.Expect(status.Status).To(gomega.Equal(expectedStatus))
+}
