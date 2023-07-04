@@ -11,6 +11,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -83,6 +84,10 @@ const (
 	// ovnNodeZoneName is the zone to which the node belongs to. It is set by ovnkube-node.
 	// ovnkube-node gets the node's zone from the OVN Southbound database.
 	ovnNodeZoneName = "k8s.ovn.org/zone-name"
+
+	// ovnNodeMigratedZoneName is the zone to which the node belongs to. It is set by ovnkube-node.
+	// ovnkube-node gets the node's zone from the OVN Southbound database.
+	ovnNodeMigratedZoneName = "k8s.ovn.org/remote-zone-migrated"
 
 	// ovnTransitSwitchPortAddr is the annotation to store the node Transit switch port ips.
 	// It is set by cluster manager.
@@ -720,6 +725,21 @@ func GetNodeID(node *kapi.Node) int {
 func NodeIDAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[ovnNodeID] != newNode.Annotations[ovnNodeID]
 }
+
+// SetNodeZone sets the node's zone in the 'ovnNodeZoneName' node annotation.
+func SetNodeZoneMigrated(nodeAnnotator kube.Annotator, zoneName string) error {
+	return nodeAnnotator.Set(ovnNodeMigratedZoneName, zoneName)
+}
+
+// HasNodeMigratedZone returns true if node is remote
+func HasNodeMigratedZone(node *kapi.Node) bool {
+	zoneName, ok := node.Annotations[ovnNodeMigratedZoneName]
+	if ok {
+		klog.Infof("SURYA %v", zoneName)
+	}
+	return ok
+}
+
 
 // SetNodeZone sets the node's zone in the 'ovnNodeZoneName' node annotation.
 func SetNodeZone(nodeAnnotator kube.Annotator, zoneName string) error {

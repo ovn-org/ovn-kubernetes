@@ -744,5 +744,10 @@ func (bnc *BaseNetworkController) GetLocalZoneNodes() ([]*kapi.Node, error) {
 
 // isLocalZoneNode returns true if the node is part of the local zone.
 func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
+	/** HACK BEGIN **/
+	if bnc.zone == types.OvnDefaultZone {
+		return !util.HasNodeMigratedZone(node)
+	}
+	/** HACK END **/
 	return util.GetNodeZone(node) == bnc.zone
 }

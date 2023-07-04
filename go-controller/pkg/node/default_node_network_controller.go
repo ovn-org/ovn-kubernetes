@@ -646,6 +646,15 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := level.Set("5"); err != nil {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
+	nc.wg.Add(1)
+	go func() {
+		defer nc.wg.Done()
+		nc.routeManager.run(nc.stopChan)
+	}()
+	if node, err = nc.Kube.GetNode(nc.name); err != nil {
+		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
+	}
+	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		klog.Infof("SURYA")
 		nc.wg.Add(1)
@@ -679,17 +688,12 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				klog.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
 			}
 			klog.Infof("Removing wait config from ovn-controller took: %v", time.Since(start))
+			if err := util.SetNodeZoneMigrated(nodeAnnotator, zone); err != nil {
+				klog.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
+			}
+			klog.Infof("ovnkube-node finished annotating node with remote-zone-migrated; took: %v", time.Since(start))
 		}()
 	}
-	nc.wg.Add(1)
-	go func() {
-		defer nc.wg.Done()
-		nc.routeManager.run(nc.stopChan)
-	}()
-	if node, err = nc.Kube.GetNode(nc.name); err != nil {
-		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
-	}
-
 	nodeAddrStr, err := util.GetNodePrimaryIP(node)
 	if err != nil {
 		return err
@@ -734,6 +738,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		klog.Infof("Finished setting DBAuth took: %v", time.Since(start))
 	}
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
@@ -766,7 +771,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 	waiter := newStartupWaiter()
 
 	// Use the device from environment when the DP resource name is specified.
@@ -815,6 +819,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := nodeAnnotator.Run(); err != nil {
 		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
 	}
+	klog.Infof("Adding the annotation took: %v", time.Since(start))
 
 	// Wait for management port and gateway resources to be created by the master
 	klog.Infof("Waiting for gateway and management port readiness...")
