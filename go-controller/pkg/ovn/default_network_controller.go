@@ -393,7 +393,7 @@ func (oc *DefaultNetworkController) Init() error {
 	}
 	// Sync external gateway routes. External gateway are set via Admin Policy Based External Route CRs.
 	// So execute an individual sync method at startup to cleanup any difference
-	klog.V(4).InfoS("Cleaning External Gateway ECMP routes")
+	klog.V(4).Info("Cleaning External Gateway ECMP routes")
 	WithSyncDurationMetricNoError("external gateway routes", oc.apbExternalRouteController.Repair)
 	return nil
 }
@@ -401,7 +401,7 @@ func (oc *DefaultNetworkController) Init() error {
 // Run starts the actual watching.
 func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	oc.syncPeriodic()
-	klog.Infof("Starting all the Watchers...")
+	klog.Info("Starting all the Watchers...")
 	start := time.Now()
 
 	// WatchNamespaces() should be started first because it has no other

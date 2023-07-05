@@ -150,7 +150,7 @@ func (nadController *NetAttachDefinitionController) start() error {
 		return fmt.Errorf("failed to sync all existing NAD entries: %v", err)
 	}
 
-	klog.Info("Starting workers for %s NAD controller", nadController.name)
+	klog.Infof("Starting workers for %s NAD controller", nadController.name)
 	for i := 0; i < numberOfWorkers; i++ {
 		nadController.wg.Add(1)
 		go func() {
