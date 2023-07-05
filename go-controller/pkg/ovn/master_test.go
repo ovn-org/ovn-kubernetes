@@ -297,7 +297,23 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 }
 */
 
-func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup, node *tNode) []libovsdbtest.TestData {
+func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
+	expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup,
+	node *tNode) []libovsdbtest.TestData {
+	return addNodeLogicalFlowsHelper(testData, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup,
+		expectedClusterPortGroup, node, false)
+}
+
+func addNodeLogicalFlowsWithServiceController(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
+	expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup,
+	node *tNode, svcTemplateSupport bool) []libovsdbtest.TestData {
+	return addNodeLogicalFlowsHelper(testData, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup,
+		expectedClusterPortGroup, node, svcTemplateSupport)
+}
+
+func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
+	expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup,
+	node *tNode, serviceControllerEnabled bool) []libovsdbtest.TestData {
 
 	lrpName := types.RouterToSwitchPrefix + node.Name
 	chassisName := node.SystemID
@@ -314,6 +330,15 @@ func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRou
 		Networks:       []string{node.NodeGWIP},
 		GatewayChassis: []string{chassisName + "-UUID"},
 	})
+	if serviceControllerEnabled {
+		testData = append(testData, &nbdb.ChassisTemplateVar{
+			UUID:    chassisName + "ChassisTemplateVar-UUID",
+			Chassis: chassisName,
+			Variables: map[string]string{
+				"NODEIP_IPv4_0": node.NodeIP,
+			},
+		})
+	}
 
 	expectedOVNClusterRouter.Ports = append(expectedOVNClusterRouter.Ports, types.RouterToSwitchPrefix+node.Name+"-UUID")
 
@@ -1048,7 +1073,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 
 		oc.SCTPSupport = true
 
-		expectedNBDatabaseState = addNodeLogicalFlows(nil, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
+		expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
+			expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
 	})
 
 	ginkgo.AfterEach(func() {
