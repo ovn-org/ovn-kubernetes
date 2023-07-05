@@ -38,7 +38,6 @@ import (
 const (
 	resyncInterval = 0
 	maxRetries     = 15
-	ControllerName = "apb-external-route-controller"
 )
 
 // Admin Policy Based Route services
@@ -83,6 +82,7 @@ func NewExternalMasterController(
 	nodeLister corev1listers.NodeLister,
 	nbClient libovsdbclient.Client,
 	addressSetFactory addressset.AddressSetFactory,
+	controllerName string,
 ) (*ExternalGatewayMasterController, error) {
 
 	routePolicyInformer := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
@@ -101,7 +101,7 @@ func NewExternalMasterController(
 		addressSetFactory: addressSetFactory,
 		externalGWCache:   externalGWCache,
 		exGWCacheMutex:    exGWCacheMutex,
-		controllerName:    ControllerName,
+		controllerName:    controllerName,
 		zone:              zone,
 	}
 
