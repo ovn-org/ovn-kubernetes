@@ -79,6 +79,7 @@ var _ = Describe("OVN External Gateway pod", func() {
 		namespaceTargetWithPod, namespaceTargetWithoutPod, namespaceTarget2WithPod, namespaceGWWithPod, namespaceGWWithoutPod *namespaceWithPods
 	)
 	AfterEach(func() {
+		shutdownController()
 		nbsbCleanup.Cleanup()
 	})
 

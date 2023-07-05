@@ -96,7 +96,8 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 	fakeRouteClient = adminpolicybasedrouteclient.NewSimpleClientset(routePolicyObjects...)
 	iFactory, err = factory.NewMasterWatchFactory(&util.OVNMasterClientset{KubeClient: fakeClient})
 	Expect(err).NotTo(HaveOccurred())
-	iFactory.Start()
+	err = iFactory.Start()
+	Expect(err).NotTo(HaveOccurred())
 	// Try to get the NBZone.  If there is an error, create NB_Global record.
 	// Otherwise NewController() will return error since it
 	// calls util.GetNBZone().
@@ -127,6 +128,18 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 	wg = &sync.WaitGroup{}
 	err = externalController.Run(wg, 5)
 	Expect(err).NotTo(HaveOccurred())
+}
+
+func shutdownController() {
+	if iFactory != nil {
+		iFactory.Shutdown()
+	}
+	if stopChan != nil {
+		close(stopChan)
+	}
+	if wg != nil {
+		wg.Wait()
+	}
 }
 
 func eventuallyExpectNumberOfPolicies(n int) {
@@ -210,7 +223,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 		namespaceTargetWithPod, namespaceTarget2WithPod, namespaceTarget2WithoutPod, namespaceGWWithPod *namespaceWithPods
 	)
 	AfterEach(func() {
-		close(stopChan)
+		shutdownController()
 		nbsbCleanup.Cleanup()
 	})
 
