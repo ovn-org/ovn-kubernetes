@@ -461,12 +461,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		if err := WithSyncDurationMetric("egress ip", oc.WatchEgressIP); err != nil {
 			return err
 		}
-		if config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout == 0 {
-			klog.V(2).Infof("EgressIP node reachability check disabled")
-		} else if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort != 0 {
-			klog.Infof("EgressIP node reachability enabled and using gRPC port %d",
-				config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
-		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
