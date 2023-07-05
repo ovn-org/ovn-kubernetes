@@ -32,7 +32,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
+var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 	const (
 		namespaceName = "namespace1"
 	)
