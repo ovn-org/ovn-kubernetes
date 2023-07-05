@@ -334,7 +334,10 @@ var _ = Describe("OVN External Gateway namespace", func() {
 			Eventually(func() []string { return listNamespaceInfo() }, time.Hour).Should(HaveLen(1))
 			Eventually(func() int {
 				nsInfo := getNamespaceInfo(namespaceTest.Name)
-				return len(nsInfo.DynamicGateways)
+				if nsInfo != nil {
+					return len(nsInfo.DynamicGateways)
+				}
+				return 0
 			}, 5).Should(Equal(1))
 		})
 
