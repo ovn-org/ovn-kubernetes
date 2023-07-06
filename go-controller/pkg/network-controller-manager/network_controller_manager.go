@@ -177,7 +177,7 @@ func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	return nil
 }
 
-// NewNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
+// NewNetworkControllerManager creates a new ovnkube controller manager to manage all the controller for all networks
 func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, wf *factory.WatchFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
 	recorder record.EventRecorder, wg *sync.WaitGroup) (*networkControllerManager, error) {
@@ -296,11 +296,11 @@ func (cm *networkControllerManager) initDefaultNetworkController() error {
 	return nil
 }
 
-// Start the network controller manager
+// Start the ovnkube controller
 func (cm *networkControllerManager) Start(ctx context.Context) error {
-	klog.Info("Starting the network controller manager")
+	klog.Info("Starting the ovnkube controller")
 
-	// Make sure that the NCM zone matches with the Northbound db zone.
+	// Make sure that the ovnkube-controller zone matches with the Northbound db zone.
 	// Wait for 300s before giving up
 	maxTimeout := 300 * time.Second
 	klog.Infof("Waiting up to %s for NBDB zone to match: %s", maxTimeout, config.Default.Zone)
@@ -321,7 +321,7 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to start default network controller - OVN NBDB zone %s does not match the configured zone %q: errors: %v, %v",
+		return fmt.Errorf("failed to start default ovnkube-controller - OVN NBDB zone %s does not match the configured zone %q: errors: %v, %v",
 			zone, config.Default.Zone, err, err1)
 	}
 	klog.Infof("NBDB zone sync took: %s", time.Since(start))

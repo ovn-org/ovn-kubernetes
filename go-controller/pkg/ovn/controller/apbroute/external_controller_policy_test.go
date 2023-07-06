@@ -8,7 +8,6 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -420,7 +419,6 @@ var _ = Describe("OVN External Gateway policy", func() {
 			p.Spec.From.NamespaceSelector = v1.LabelSelector{MatchLabels: namespaceTest2.Labels}
 			p.Generation++
 			lastUpdate := p.Status.LastTransitionTime
-			klog.Info("TROZET BEFORE UPDATE")
 			_, err = fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Update(context.Background(), p, v1.UpdateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() v1.Time {

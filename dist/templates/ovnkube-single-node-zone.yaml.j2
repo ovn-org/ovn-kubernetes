@@ -241,7 +241,7 @@ spec:
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
-        command: ["/root/ovnkube.sh", "ovn-network-controller-manager"]
+        command: ["/root/ovnkube.sh", "ovnkube-controller"]
 
         securityContext:
           runAsUser: 0

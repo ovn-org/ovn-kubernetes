@@ -76,7 +76,7 @@ kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
 
 # Run ovnkube-master deployment
-# To run ovnkube-master deployment with both cluster manager and network controller manager as one container)
+# To run ovnkube-master deployment with both cluster manager and ovnkube controller as one container)
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-master.yaml
 
 # Run ovnkube daemonset for nodes

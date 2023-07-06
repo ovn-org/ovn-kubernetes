@@ -88,7 +88,7 @@ type NetAttachDefinitionController struct {
 	// key is nadName, value is BasicNetInfo
 	perNADNetInfo *syncmap.SyncMap[util.BasicNetInfo]
 	// controller for all networks, key is netName of net-attach-def, value is networkNADInfo
-	// this map is updated either at the very beginning of network controller manager when initializing the
+	// this map is updated either at the very beginning of ovnkube controller when initializing the
 	// default controller or when net-attach-def is added/deleted. All these are serialized by syncmap lock
 	perNetworkNADInfo *syncmap.SyncMap[*networkNADInfo]
 }

@@ -212,6 +212,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 			framework.ExpectNoError(err)
 
 			var wg sync.WaitGroup
+			done := make(chan struct{})
 			wg.Add(1)
 			go func() {
 				defer ginkgo.GinkgoRecover()
@@ -219,11 +220,13 @@ var _ = ginkgo.Describe("Unidling", func() {
 
 				time.Sleep(time.Second)
 				createBackend(f, serviceName, namespace, node, jig.Labels, port)
+				close(done)
 			}()
 			wg.Wait()
 
 			// Connecting to the service should work at the first attempt
 			gomega.Expect(checkService(clientPod, cmd)).To(gomega.Equal(works))
+			<-done
 		})
 	})
 
