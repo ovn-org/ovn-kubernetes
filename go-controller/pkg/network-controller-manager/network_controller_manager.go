@@ -241,8 +241,8 @@ func (cm *networkControllerManager) configureSvcTemplateSupport() {
 }
 
 func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
-	metrics.RegisterMasterPerformance(cm.nbClient)
-	metrics.RegisterMasterFunctional()
+	metrics.RegisterOVNKubeControllerPerformance(cm.nbClient)
+	metrics.RegisterOVNKubeControllerFunctional()
 	metrics.RunTimestamp(stopChan, cm.sbClient, cm.nbClient)
 	metrics.MonitorIPSec(cm.nbClient)
 }
@@ -312,7 +312,6 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 		if err1 != nil {
 			return false, nil
 		}
-
 		if config.Default.Zone != zone {
 			err1 = fmt.Errorf("config zone %s different from NBDB zone %s", config.Default.Zone, zone)
 			return false, nil
@@ -325,6 +324,36 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 			zone, config.Default.Zone, err, err1)
 	}
 	klog.Infof("NBDB zone sync took: %s", time.Since(start))
+
+	err = cm.watchFactory.Start()
+	if err != nil {
+		return err
+	}
+
+	// Wait for one node to have the zone we want to manage, otherwise there is no point in configuring NBDB.
+	// Really this covers a use case where a node is going from local -> remote, but has not yet annotated itself.
+	// In this case ovnkube-controller on this remote node will treat the node as remote, and then once the annotation
+	// appears will convert it to local, which may or may not clean up DB resources correctly.
+	klog.Infof("Waiting up to %s for a node to have %q zone", maxTimeout, config.Default.Zone)
+	start = time.Now()
+	err = wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+		nodes, err := cm.watchFactory.GetNodes()
+		if err != nil {
+			klog.Errorf("Unable to get nodes from informer while waiting for node zone sync")
+			return false, nil
+		}
+		for _, node := range nodes {
+			if util.GetNodeZone(node) == config.Default.Zone {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start default network controller - while waiting for any node to have zone: %q, error: %v",
+			config.Default.Zone, err)
+	}
+	klog.Infof("Waiting for node in zone sync took: %s", time.Since(start))
 
 	cm.configureMetrics(cm.stopChan)
 
@@ -347,11 +376,6 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 		metrics.GetConfigDurationRecorder().Run(cm.nbClient, cm.kube, 10, time.Second*5, cm.stopChan)
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
-
-	err = cm.watchFactory.Start()
-	if err != nil {
-		return err
-	}
 
 	err = cm.initDefaultNetworkController()
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"strings"
 	"sync"
@@ -35,9 +36,9 @@ import (
 )
 
 const (
-	resyncInterval    = 0
-	maxRetries        = 15
-	apbControllerName = "apb-external-route-controller"
+	resyncInterval = 0
+	maxRetries     = 15
+	ControllerName = "apb-external-route-controller"
 )
 
 // Admin Policy Based Route services
@@ -100,7 +101,7 @@ func NewExternalMasterController(
 		addressSetFactory: addressSetFactory,
 		externalGWCache:   externalGWCache,
 		exGWCacheMutex:    exGWCacheMutex,
-		controllerName:    apbControllerName,
+		controllerName:    ControllerName,
 		zone:              zone,
 	}
 
@@ -173,7 +174,7 @@ func NewExternalMasterController(
 
 func (c *ExternalGatewayMasterController) Run(threadiness int) {
 	defer utilruntime.HandleCrash()
-	klog.V(4).InfoS("Starting Admin Policy Based Route Controller")
+	klog.V(4).Info("Starting Admin Policy Based Route Controller")
 
 	c.routePolicyInformer.Start(c.stopCh)
 
@@ -196,9 +197,6 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 		}(se.resourceName, se.syncFn)
 	}
 	syncWg.Wait()
-
-	klog.V(4).InfoS("Repairing Admin Policy Based External Route Services")
-	c.repair()
 
 	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
@@ -247,7 +245,7 @@ func (c *ExternalGatewayMasterController) processNextPolicyWorkItem(wg *sync.Wai
 
 	defer c.routeQueue.Done(key)
 
-	klog.V(4).InfoS("Processing policy %s", key)
+	klog.V(4).Infof("Processing policy %s", key)
 	policy, err := c.mgr.syncRoutePolicy(key.(string), c.routeQueue)
 	if err != nil {
 		klog.Errorf("Failed to sync APB policy %s: %v", key, err)
@@ -256,7 +254,7 @@ func (c *ExternalGatewayMasterController) processNextPolicyWorkItem(wg *sync.Wai
 	err = c.updateStatusAPBExternalRoute(policy, err)
 	if err != nil {
 		if c.routeQueue.NumRequeues(key) < maxRetries {
-			klog.V(4).InfoS("Error found while processing policy %s: %w", key, err)
+			klog.V(4).Infof("Error found while processing policy %s: %w", key, err)
 			c.routeQueue.AddRateLimited(key)
 			return true
 		}
@@ -405,7 +403,7 @@ func (c *ExternalGatewayMasterController) processNextNamespaceWorkItem(wg *sync.
 	err := c.mgr.syncNamespace(obj.(*v1.Namespace), c.routeQueue)
 	if err != nil {
 		if c.namespaceQueue.NumRequeues(obj) < maxRetries {
-			klog.V(4).InfoS("Error found while processing namespace %s:%w", obj.(*v1.Namespace), err)
+			klog.V(4).Infof("Error found while processing namespace %s:%w", obj.(*v1.Namespace), err)
 			c.namespaceQueue.AddRateLimited(obj)
 			return true
 		}
@@ -497,7 +495,7 @@ func (c *ExternalGatewayMasterController) processNextPodWorkItem(wg *sync.WaitGr
 	err := c.mgr.syncPod(p, c.podLister, c.routeQueue)
 	if err != nil {
 		if c.podQueue.NumRequeues(obj) < maxRetries {
-			klog.V(4).InfoS("Error found while processing pod %s/%s:%w", p.Namespace, p.Name, err)
+			klog.V(4).Infof("Error found while processing pod %s/%s:%v", p.Namespace, p.Name, err)
 			c.podQueue.AddRateLimited(obj)
 			return true
 		}
@@ -563,5 +561,30 @@ func updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute,
 	route.Status.LastTransitionTime = metav1.Time{Time: time.Now()}
 	route.Status.Status = adminpolicybasedrouteapi.SuccessStatus
 	route.Status.Messages = append(route.Status.Messages, fmt.Sprintf("Configured external gateway IPs: %s", gwIPs))
-	klog.V(4).InfoS("Updating Admin Policy Based External Route %s with Status: %s, Message: %s", route.Name, route.Status.Status, route.Status.Messages[len(route.Status.Messages)-1])
+	klog.V(4).Infof("Updating Admin Policy Based External Route %s with Status: %s, Message: %s", route.Name, route.Status.Status, route.Status.Messages[len(route.Status.Messages)-1])
+}
+
+// AddHybridRoutePolicyForPod exposes the function addHybridRoutePolicyForPod
+func (c *ExternalGatewayMasterController) AddHybridRoutePolicyForPod(podIP net.IP, node string) error {
+	return c.nbClient.addHybridRoutePolicyForPod(podIP, node)
+}
+
+// DelHybridRoutePolicyForPod exposes the function delHybridRoutePolicyForPod
+func (c *ExternalGatewayMasterController) DelHybridRoutePolicyForPod(podIP net.IP, node string) error {
+	return c.nbClient.delHybridRoutePolicyForPod(podIP, node)
+}
+
+// DelAllHybridRoutePolicies exposes the function delAllHybridRoutePolicies
+func (c *ExternalGatewayMasterController) DelAllHybridRoutePolicies() error {
+	return c.nbClient.delAllHybridRoutePolicies()
+}
+
+// DelAllLegacyHybridRoutePolicies exposes the function delAllLegacyHybridRoutePolicies
+func (c *ExternalGatewayMasterController) DelAllLegacyHybridRoutePolicies() error {
+	return c.nbClient.delAllLegacyHybridRoutePolicies()
+}
+
+// DeletePodSNAT exposes the function deletePodSNAT
+func (c *ExternalGatewayMasterController) DeletePodSNAT(nodeName string, extIPs, podIPNets []*net.IPNet) error {
+	return c.nbClient.deletePodSNAT(nodeName, extIPs, podIPNets)
 }

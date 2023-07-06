@@ -301,9 +301,9 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		return runOvnKube(ctx.Context, runMode, ovnClientset, eventRecorder)
 	}
 
-	// Register prometheus metrics that do not depend on becoming ovnkube-master
-	// leader and get the proper HA config depending on the mode. For network
-	// manager mode or combined cluster and network manager modes (the classic
+	// Register prometheus metrics that do not depend on becoming ovnkube-controller
+	// leader and get the proper HA config depending on the mode. For ovnkube
+	// controller mode or combined cluster manager and ovnkube-controller modes (the classic
 	// master mode), the master HA config applies. For cluster manager
 	// standalone mode, the cluster manager HA config applies.
 	var haConfig *config.HAConfig
@@ -313,7 +313,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		metrics.RegisterClusterManagerBase()
 		fallthrough
 	case runMode.ovnkubeController:
-		metrics.RegisterMasterBase()
+		metrics.RegisterOVNKubeControllerBase()
 		haConfig = &config.MasterHA
 		name = networkControllerManagerLockName()
 	case runMode.clusterManager:
@@ -483,7 +483,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		defer cm.Stop()
 
 		// record delay until ready
-		metrics.MetricMasterReadyDuration.Set(time.Since(startTime).Seconds())
+		metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
 	}
 
 	if runMode.node {
@@ -544,22 +544,22 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	return nil
 }
 
-type ovnkubeMasterMetrics struct {
+type leaderMetrics struct {
 	runMode *ovnkubeRunMode
 }
 
-func (m ovnkubeMasterMetrics) On(string) {
+func (m leaderMetrics) On(string) {
 	if m.runMode.ovnkubeController {
-		metrics.MetricMasterLeader.Set(1)
+		metrics.MetricOVNKubeControllerLeader.Set(1)
 	}
 	if m.runMode.clusterManager {
 		metrics.MetricClusterManagerLeader.Set(1)
 	}
 }
 
-func (m ovnkubeMasterMetrics) Off(string) {
+func (m leaderMetrics) Off(string) {
 	if m.runMode.ovnkubeController {
-		metrics.MetricMasterLeader.Set(0)
+		metrics.MetricOVNKubeControllerLeader.Set(0)
 	}
 	if m.runMode.clusterManager {
 		metrics.MetricClusterManagerLeader.Set(0)
@@ -571,7 +571,7 @@ type ovnkubeMetricsProvider struct {
 }
 
 func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
-	return &ovnkubeMasterMetrics{p.runMode}
+	return &leaderMetrics{p.runMode}
 }
 
 func networkControllerManagerLockName() string {
