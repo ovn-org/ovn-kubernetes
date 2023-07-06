@@ -892,8 +892,13 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
 		} else {
 			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
-			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true
-			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode)
+			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
+			// Also check if node subnet changed, so static routes are properly set
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged(oldNode, newNode)
+			if syncZoneIC {
+				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up.",
+					newNode.Name, util.GetNodeZone(newNode))
+			}
 			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
 
