@@ -89,7 +89,7 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
 		Options: map[string]string{
-			"network_name": oc.GetNetworkScopedName(types.LocalNetBridgeName),
+			"network_name": oc.GetNetworkName(),
 		},
 	}
 	intVlanID := int(oc.Vlan())

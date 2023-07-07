@@ -32,7 +32,7 @@ func getNetCIDRSubnet(netCIDR string) (string, error) {
 	return "", fmt.Errorf("invalid network cidr: %q", netCIDR)
 }
 
-type networkAttachmentConfig struct {
+type networkAttachmentConfigParams struct {
 	cidr         string
 	excludeCIDRs []string
 	namespace    string
@@ -42,11 +42,18 @@ type networkAttachmentConfig struct {
 	vlanID       int
 }
 
-func (nac networkAttachmentConfig) attachmentName() string {
-	if nac.networkName != "" {
-		return nac.networkName
+type networkAttachmentConfig struct {
+	networkAttachmentConfigParams
+}
+
+func newNetworkAttachmentConfig(params networkAttachmentConfigParams) networkAttachmentConfig {
+	networkAttachmentConfig := networkAttachmentConfig{
+		networkAttachmentConfigParams: params,
 	}
-	return uniqueNadName(nac.name)
+	if networkAttachmentConfig.networkName == "" {
+		networkAttachmentConfig.networkName = uniqueNadName(networkAttachmentConfig.name)
+	}
+	return networkAttachmentConfig
 }
 
 func uniqueNadName(originalNetName string) string {
@@ -69,7 +76,7 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
         "vlanID": %d
 }
 `,
-		config.attachmentName(),
+		config.networkName,
 		config.topology,
 		config.cidr,
 		strings.Join(config.excludeCIDRs, ","),
@@ -181,13 +188,15 @@ func connectToServer(clientPodConfig podConfiguration, serverIP string, port int
 }
 
 func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topology, cidr string) networkAttachmentConfig {
-	return networkAttachmentConfig{
-		cidr:        cidr,
-		name:        name,
-		namespace:   namespace,
-		networkName: networkName,
-		topology:    topology,
-	}
+	return newNetworkAttachmentConfig(
+		networkAttachmentConfigParams{
+			cidr:        cidr,
+			name:        name,
+			namespace:   namespace,
+			networkName: networkName,
+			topology:    topology,
+		},
+	)
 }
 
 func configurePodStaticIP(podNamespace string, podName string, staticIP string) error {
