@@ -114,5 +114,4 @@ require (
 replace (
 	github.com/Microsoft/hcsshim => github.com/Microsoft/hcsshim v0.8.20
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
-	github.com/vishvananda/netlink => github.com/jcaamano/netlink v1.1.1-0.20220831114501-3a761ed61db6
 )

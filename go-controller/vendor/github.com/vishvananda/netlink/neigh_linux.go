@@ -24,7 +24,11 @@ const (
 	NDA_MASTER
 	NDA_LINK_NETNSID
 	NDA_SRC_VNI
-	NDA_MAX = NDA_SRC_VNI
+	NDA_PROTOCOL
+	NDA_NH_ID
+	NDA_FDB_EXT_ATTRS
+	NDA_FLAGS_EXT
+	NDA_MAX = NDA_FLAGS_EXT
 )
 
 // Neighbor Cache Entry States.
@@ -42,11 +46,19 @@ const (
 
 // Neighbor Flags
 const (
-	NTF_USE    = 0x01
-	NTF_SELF   = 0x02
-	NTF_MASTER = 0x04
-	NTF_PROXY  = 0x08
-	NTF_ROUTER = 0x80
+	NTF_USE         = 0x01
+	NTF_SELF        = 0x02
+	NTF_MASTER      = 0x04
+	NTF_PROXY       = 0x08
+	NTF_EXT_LEARNED = 0x10
+	NTF_OFFLOADED   = 0x20
+	NTF_STICKY      = 0x40
+	NTF_ROUTER      = 0x80
+)
+
+// Extended Neighbor Flags
+const (
+	NTF_EXT_MANAGED = 0x00000001
 )
 
 // Ndmsg is for adding, removing or receiving information about a neighbor table entry
@@ -162,9 +174,14 @@ func neighHandle(neigh *Neigh, req *nl.NetlinkRequest) error {
 	if neigh.LLIPAddr != nil {
 		llIPData := nl.NewRtAttr(NDA_LLADDR, neigh.LLIPAddr.To4())
 		req.AddData(llIPData)
-	} else if neigh.Flags != NTF_PROXY || neigh.HardwareAddr != nil {
+	} else if neigh.HardwareAddr != nil {
 		hwData := nl.NewRtAttr(NDA_LLADDR, []byte(neigh.HardwareAddr))
 		req.AddData(hwData)
+	}
+
+	if neigh.FlagsExt != 0 {
+		flagsExtData := nl.NewRtAttr(NDA_FLAGS_EXT, nl.Uint32Attr(uint32(neigh.FlagsExt)))
+		req.AddData(flagsExtData)
 	}
 
 	if neigh.Vlan != 0 {
@@ -305,6 +322,8 @@ func NeighDeserialize(m []byte) (*Neigh, error) {
 			} else {
 				neigh.HardwareAddr = net.HardwareAddr(attr.Value)
 			}
+		case NDA_FLAGS_EXT:
+			neigh.FlagsExt = int(native.Uint32(attr.Value[0:4]))
 		case NDA_VLAN:
 			neigh.Vlan = int(native.Uint16(attr.Value[0:2]))
 		case NDA_VNI:
@@ -351,10 +370,9 @@ func NeighSubscribeWithOptions(ch chan<- NeighUpdate, done <-chan struct{}, opti
 func neighSubscribeAt(newNs, curNs netns.NsHandle, ch chan<- NeighUpdate, done <-chan struct{}, cberr func(error), listExisting bool) error {
 	s, err := nl.SubscribeAt(newNs, curNs, unix.NETLINK_ROUTE, unix.RTNLGRP_NEIGH)
 	makeRequest := func(family int) error {
-		req := pkgHandle.newNetlinkRequest(unix.RTM_GETNEIGH,
-			unix.NLM_F_DUMP)
-		infmsg := nl.NewIfInfomsg(family)
-		req.AddData(infmsg)
+		req := pkgHandle.newNetlinkRequest(unix.RTM_GETNEIGH, unix.NLM_F_DUMP)
+		ndmsg := &Ndmsg{Family: uint8(family)}
+		req.AddData(ndmsg)
 		if err := s.Send(req); err != nil {
 			return err
 		}
@@ -408,12 +426,12 @@ func neighSubscribeAt(newNs, curNs netns.NsHandle, ch chan<- NeighUpdate, done <
 					continue
 				}
 				if m.Header.Type == unix.NLMSG_ERROR {
-					error := int32(native.Uint32(m.Data[0:4]))
-					if error == 0 {
+					nError := int32(native.Uint32(m.Data[0:4]))
+					if nError == 0 {
 						continue
 					}
 					if cberr != nil {
-						cberr(syscall.Errno(-error))
+						cberr(syscall.Errno(-nError))
 					}
 					return
 				}
