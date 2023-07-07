@@ -3,6 +3,7 @@ package cni
 import (
 	"fmt"
 	"net"
+	"time"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -252,7 +253,8 @@ func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeA
 	var response *Response
 	var err, err1 error
 
-	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
+	klog.Infof("%+v CNI %s starting", request, request.Command)
+	start := time.Now()
 	switch request.Command {
 	case CNIAdd:
 		response, err = request.cmdAdd(kubeAuth, clientset)
@@ -273,8 +275,8 @@ func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeA
 		}
 	}
 
-	klog.Infof("%s %s finished CNI request %+v, result %q, err %v",
-		request, request.Command, request, string(resultForLogging), err)
+	klog.Infof("%+v CNI %s finished in %v, result %q, err %v",
+		request, request.Command, time.Since(start), string(resultForLogging), err)
 
 	if err != nil {
 		// Prefix errors with request info for easier failure debugging
