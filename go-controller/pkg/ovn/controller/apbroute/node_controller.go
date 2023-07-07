@@ -54,7 +54,7 @@ type ExternalGatewayNodeController struct {
 	ExternalGWCache map[ktypes.NamespacedName]*ExternalRouteInfo
 	ExGWCacheMutex  *sync.RWMutex
 
-	routePolicyInformer adminpolicybasedrouteinformer.SharedInformerFactory
+	routePolicyFactory adminpolicybasedrouteinformer.SharedInformerFactory
 
 	mgr *externalPolicyManager
 }
@@ -67,14 +67,14 @@ func NewExternalNodeController(
 ) (*ExternalGatewayNodeController, error) {
 
 	namespaceLister := namespaceInformer.Lister()
-	routePolicyInformer := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
-	externalRouteInformer := routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes()
+	routePolicyFactory := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
+	externalRouteInformer := routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes()
 
 	c := &ExternalGatewayNodeController{
-		stopCh:              stopCh,
-		routePolicyInformer: routePolicyInformer,
-		routeLister:         routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
-		routeSynced:         routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes().Informer().HasSynced,
+		stopCh:             stopCh,
+		routePolicyFactory: routePolicyFactory,
+		routeLister:        routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
+		routeSynced:        routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer().HasSynced,
 		routeQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 			"apbexternalroutes",
@@ -95,7 +95,7 @@ func NewExternalNodeController(
 			stopCh,
 			podInformer.Lister(),
 			namespaceInformer.Lister(),
-			routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
+			routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
 			&conntrackClient{podLister: podInformer.Lister()}),
 	}
 
@@ -136,7 +136,7 @@ func (c *ExternalGatewayNodeController) Run(threadiness int) {
 	defer utilruntime.HandleCrash()
 	klog.V(4).Info("Starting Admin Policy Based Route Node Controller")
 
-	c.routePolicyInformer.Start(c.stopCh)
+	c.routePolicyFactory.Start(c.stopCh)
 
 	if !cache.WaitForNamedCacheSync("apbexternalroutenamespaces", c.stopCh, c.namespaceSynced) {
 		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))

@@ -68,7 +68,7 @@ type ExternalGatewayMasterController struct {
 	ExternalGWCache map[ktypes.NamespacedName]*ExternalRouteInfo
 	ExGWCacheMutex  *sync.RWMutex
 
-	routePolicyInformer adminpolicybasedrouteinformer.SharedInformerFactory
+	routePolicyFactory adminpolicybasedrouteinformer.SharedInformerFactory
 
 	mgr      *externalPolicyManager
 	nbClient *northBoundClient
@@ -85,8 +85,8 @@ func NewExternalMasterController(
 	addressSetFactory addressset.AddressSetFactory,
 ) (*ExternalGatewayMasterController, error) {
 
-	routePolicyInformer := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
-	externalRouteInformer := routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes()
+	routePolicyFactory := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
+	externalRouteInformer := routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes()
 	externalGWCache := make(map[ktypes.NamespacedName]*ExternalRouteInfo)
 	exGWCacheMutex := &sync.RWMutex{}
 	zone, err := util.GetNBZone(nbClient)
@@ -127,15 +127,15 @@ func NewExternalMasterController(
 			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 			"apbexternalroutenamespaces",
 		),
-		ExternalGWCache:     externalGWCache,
-		ExGWCacheMutex:      exGWCacheMutex,
-		routePolicyInformer: routePolicyInformer,
-		nbClient:            nbCli,
+		ExternalGWCache:    externalGWCache,
+		ExGWCacheMutex:     exGWCacheMutex,
+		routePolicyFactory: routePolicyFactory,
+		nbClient:           nbCli,
 		mgr: newExternalPolicyManager(
 			stopCh,
 			podInformer.Lister(),
 			namespaceInformer.Lister(),
-			routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
+			routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
 			nbCli),
 	}
 
@@ -176,7 +176,7 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 	defer utilruntime.HandleCrash()
 	klog.V(4).Info("Starting Admin Policy Based Route Controller")
 
-	c.routePolicyInformer.Start(c.stopCh)
+	c.routePolicyFactory.Start(c.stopCh)
 
 	syncWg := &sync.WaitGroup{}
 
