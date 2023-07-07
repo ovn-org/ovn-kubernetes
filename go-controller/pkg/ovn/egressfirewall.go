@@ -285,13 +285,19 @@ func (oc *DefaultNetworkController) deleteEgressFirewall(egressFirewallObj *egre
 	return nil
 }
 
-func (oc *DefaultNetworkController) updateEgressFirewallStatusWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
+func (oc *DefaultNetworkController) updateEgressFirewallStatusWithRetry(egressFirewall *egressfirewallapi.EgressFirewall) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return oc.kube.UpdateEgressFirewall(egressfirewall)
+		ef, err := oc.watchFactory.GetEgressFirewall(egressFirewall.Namespace, egressFirewall.Name)
+		if err != nil {
+			return err
+		}
+		c := ef.DeepCopy()
+		c.Status.Status = egressFirewall.Status.Status
+		return oc.kube.UpdateEgressFirewall(c)
 	})
 	if retryErr != nil {
 		return fmt.Errorf("error in updating status on EgressFirewall %s/%s: %v",
-			egressfirewall.Namespace, egressfirewall.Name, retryErr)
+			egressFirewall.Namespace, egressFirewall.Name, retryErr)
 	}
 	return nil
 }
