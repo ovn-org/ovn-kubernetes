@@ -148,8 +148,8 @@ func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.
 	}
 	podsIps := []net.IP{}
 	for _, pod := range pods {
-		// we don't handle HostNetworked or completed pods
-		if !util.PodWantsHostNetwork(pod) && !util.PodCompleted(pod) {
+		// we don't handle HostNetworked or completed pods or not-scheduled pods or remote-zone pods
+		if !util.PodWantsHostNetwork(pod) && !util.PodCompleted(pod) && util.PodScheduled(pod) && oc.isPodScheduledinLocalZone(pod) {
 			podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
 			if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
 				return nil, nil, err
@@ -210,8 +210,8 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 		"egressqosnodes",
 	)
 	_, err = nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    oc.onEgressQoSNodeAdd, // we only care about new logical switches being added
-		UpdateFunc: func(o, n interface{}) {},
+		AddFunc:    oc.onEgressQoSNodeAdd,    // we only care about new logical switches being added
+		UpdateFunc: oc.onEgressQoSNodeUpdate, // we care about node's zone changes so that if add event didn't do anything update can take care of it
 		DeleteFunc: func(obj interface{}) {},
 	})
 	if err != nil {
@@ -635,7 +635,7 @@ func (oc *DefaultNetworkController) egressQoSSwitches() ([]string, error) {
 	// Find all node switches
 	p := func(item *nbdb.LogicalSwitch) bool {
 		// Ignore external and Join switches(both legacy and current)
-		return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join" || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
+		return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == types.OVNJoinSwitch || item.Name == types.TransitSwitch || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
 	}
 
 	nodeLocalSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
@@ -786,6 +786,21 @@ func (oc *DefaultNetworkController) onEgressQoSPodAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
+	pod := obj.(*kapi.Pod)
+	// only process this pod if it is local to this zone
+	if !oc.isPodScheduledinLocalZone(pod) {
+		// NOTE: This means we don't handle the case where pod goes from
+		// being local to remote. So far there is no use case for this to happen.
+		// Also when we think about a pod going from local to remote - what does that mean?
+		// It means the node on which the pod lived suddenly stopped being local to this zone
+		// That either means node changed zones - which will involve a full delete and recreate
+		// the OVN objects in a new zone's DB and/or node is gone etc. All those scenarios don't
+		// need this controller to take any action.
+		// NOTE2: During upgrades when the legacy ovnkube-master is still running it will detect
+		// nodes have gone remote which for this feature means deleting the switches totally and
+		// based on OVN db schema this will remove all referenced QoS rules created on the switch
+		return // not local to this zone, nothing to do; no-op
+	}
 	oc.egressQoSPodQueue.Add(key)
 }
 
@@ -803,8 +818,15 @@ func (oc *DefaultNetworkController) onEgressQoSPodUpdate(oldObj, newObj interfac
 	newPodLabels := labels.Set(newPod.Labels)
 	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, oc.NetInfo)
 	newPodIPs, _ := util.GetPodIPsOfNetwork(newPod, oc.NetInfo)
+	isOldPodLocal := oc.isPodScheduledinLocalZone(oldPod)
+	isNewPodLocal := oc.isPodScheduledinLocalZone(newPod)
+	oldPodCompleted := util.PodCompleted(oldPod)
+	newPodCompleted := util.PodCompleted(newPod)
 	if labels.Equals(oldPodLabels, newPodLabels) &&
-		len(oldPodIPs) == len(newPodIPs) {
+		len(oldPodIPs) == len(newPodIPs) &&
+		// NOTE: We only expect remote pods to become local when they are scheduled; not vice versa
+		isOldPodLocal == isNewPodLocal &&
+		oldPodCompleted == newPodCompleted {
 		return
 	}
 
@@ -822,6 +844,21 @@ func (oc *DefaultNetworkController) onEgressQoSPodDelete(obj interface{}) {
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
+	}
+	pod := obj.(*kapi.Pod)
+	// only process this pod if it is local to this zone
+	if !oc.isPodScheduledinLocalZone(pod) {
+		// NOTE: This means we don't handle the case where pod goes from
+		// being local to remote. So far there is no use case for this to happen.
+		// Also when we think about a pod going from local to remote - what does that mean?
+		// It means the node on which the pod lived suddenly stopped being local to this zone
+		// That either means node changed zones - which will involve a full delete and recreate
+		// the OVN objects in a new zone's DB and/or node is gone etc. All those scenarios don't
+		// need this controller to take any action.
+		// NOTE2: During upgrades when the legacy ovnkube-master is still running it will detect
+		// nodes have gone remote which for this feature means deleting the switches totally and
+		// based on OVN db schema this will remove all referenced QoS rules created on the switch
+		return // not local to this zone, nothing to do; no-op
 	}
 	oc.egressQoSPodQueue.Add(key)
 }
@@ -864,6 +901,39 @@ func (oc *DefaultNetworkController) onEgressQoSNodeAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
+	node := obj.(*kapi.Node)
+	if util.GetNodeZone(node) != oc.zone {
+		return
+	}
+	oc.egressQoSNodeQueue.Add(key)
+}
+
+// onEgressQoSNodeUpdate queues the node for processing if it changed zones
+func (oc *DefaultNetworkController) onEgressQoSNodeUpdate(oldObj, newObj interface{}) {
+	oldNode := oldObj.(*kapi.Node)
+	newNode := newObj.(*kapi.Node)
+	if oldNode.ResourceVersion == newNode.ResourceVersion ||
+		!newNode.GetDeletionTimestamp().IsZero() {
+		return
+	}
+	// During a nodeAdd event, the ovnkube-node can take some time to add the zone
+	// annotation to the node, during that interim time we might consider the node
+	// as remote and hence the addNode event might not do anything. So we need to
+	// watch for node updates. We also ensure we only process local node zones by
+	// comparing to the controller's zone. That will cover the remote->local case.
+	// The local->remote case is not covered or handled here because in that
+	// scenario the addUpdateRemoteNodeEvent function which calls the cleanupNodeResources
+	// will just cleanup the switch resource for the node.
+	oldNodeZone := util.GetNodeZone(oldNode)
+	newNodeZone := util.GetNodeZone(newNode)
+	if oldNodeZone == newNodeZone || newNodeZone != oc.zone {
+		return
+	}
+	key, err := cache.MetaNamespaceKeyFunc(newObj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", newObj, err))
+		return
+	}
 	oc.egressQoSNodeQueue.Add(key)
 }
 
@@ -887,7 +957,7 @@ func (oc *DefaultNetworkController) processNextEgressQoSNodeWorkItem(wg *sync.Wa
 		return true
 	}
 
-	utilruntime.HandleError(fmt.Errorf("%v failed with : %v", key, err))
+	utilruntime.HandleError(fmt.Errorf("%v failed with: %v", key, err))
 
 	if oc.egressQoSNodeQueue.NumRequeues(key) < maxEgressQoSRetries {
 		oc.egressQoSNodeQueue.AddRateLimited(key)

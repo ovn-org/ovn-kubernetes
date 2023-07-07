@@ -26,7 +26,7 @@ import (
 
 const (
 	MetricOvnkubeNamespace               = "ovnkube"
-	MetricOvnkubeSubsystemMaster         = "master"
+	MetricOvnkubeSubsystemController     = "controller"
 	MetricOvnkubeSubsystemClusterManager = "clustermanager"
 	MetricOvnkubeSubsystemNode           = "node"
 	MetricOvnNamespace                   = "ovn"

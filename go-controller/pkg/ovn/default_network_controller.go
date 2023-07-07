@@ -391,14 +391,17 @@ func (oc *DefaultNetworkController) Init() error {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
-
+	// Sync external gateway routes. External gateway are set via Admin Policy Based External Route CRs.
+	// So execute an individual sync method at startup to cleanup any difference
+	klog.V(4).Info("Cleaning External Gateway ECMP routes")
+	WithSyncDurationMetricNoError("external gateway routes", oc.apbExternalRouteController.Repair)
 	return nil
 }
 
 // Run starts the actual watching.
 func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	oc.syncPeriodic()
-	klog.Infof("Starting all the Watchers...")
+	klog.Info("Starting all the Watchers...")
 	start := time.Now()
 
 	// WatchNamespaces() should be started first because it has no other
@@ -421,7 +424,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	// Services should be started after nodes to prevent LB churn
 	err := oc.StartServiceController(oc.wg, true)
 	endSvc := time.Since(startSvc)
-	metrics.MetricMasterSyncDuration.WithLabelValues("service").Set(endSvc.Seconds())
+	metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("service").Set(endSvc.Seconds())
 	if err != nil {
 		return err
 	}
@@ -519,7 +522,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	end := time.Since(start)
 	klog.Infof("Completing all the Watchers took %v", end)
-	metrics.MetricMasterSyncDuration.WithLabelValues("all watchers").Set(end.Seconds())
+	metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("all watchers").Set(end.Seconds())
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		klog.Infof("Starting unidling controllers")
@@ -556,7 +559,7 @@ func WithSyncDurationMetric(resourceName string, f func() error) error {
 	start := time.Now()
 	defer func() {
 		end := time.Since(start)
-		metrics.MetricMasterSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
+		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
 	}()
 	return f()
 }
@@ -565,7 +568,7 @@ func WithSyncDurationMetricNoError(resourceName string, f func()) {
 	start := time.Now()
 	defer func() {
 		end := time.Since(start)
-		metrics.MetricMasterSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
+		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
 	}()
 	f()
 }
@@ -889,8 +892,13 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
 		} else {
 			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
-			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true
-			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode)
+			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
+			// Also check if node subnet changed, so static routes are properly set
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged(oldNode, newNode)
+			if syncZoneIC {
+				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up.",
+					newNode.Name, util.GetNodeZone(newNode))
+			}
 			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
 

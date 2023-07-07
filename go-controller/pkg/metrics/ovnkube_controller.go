@@ -34,7 +34,7 @@ import (
 // metric on the fly when metrics are scraped.
 var metricNbE2eTimestamp = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "nb_e2e_timestamp",
 	Help:      "The current e2e-timestamp value as written to the northbound database"},
 )
@@ -54,7 +54,7 @@ var metricDbTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 // completing its logical switch port configuration.
 var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "pod_creation_latency_seconds",
 	Help:      "The duration between a pod being scheduled and completing its logical switch port configuration",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
@@ -63,7 +63,7 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 // metricOvnCliLatency is the duration to execute OVN commands using CLI tools ovn-nbctl or ovn-sbctl.
 var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "ovn_cli_latency_seconds",
 	Help:      "The latency of various OVN commands. Currently, ovn-nbctl and ovn-sbctl",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
@@ -74,7 +74,7 @@ var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 // MetricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
 var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "resource_update_total",
 	Help:      "The number of times a given resource event (add, update, or delete) has been handled"},
 	[]string{
@@ -87,7 +87,7 @@ var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 // This measures the latency for all of the handlers for a given resource.
 var MetricResourceAddLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "resource_add_latency_seconds",
 	Help:      "The duration to process all handlers for a given resource event - add.",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
@@ -97,7 +97,7 @@ var MetricResourceAddLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 // This measures the latency for all of the handlers for a given resource.
 var MetricResourceUpdateLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "resource_update_latency_seconds",
 	Help:      "The duration to process all handlers for a given resource event - update.",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
@@ -107,7 +107,7 @@ var MetricResourceUpdateLatency = prometheus.NewHistogram(prometheus.HistogramOp
 // This measures the latency for all of the handlers for a given resource.
 var MetricResourceDeleteLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "resource_delete_latency_seconds",
 	Help:      "The duration to process all handlers for a given resource event - delete.",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
@@ -116,7 +116,7 @@ var MetricResourceDeleteLatency = prometheus.NewHistogram(prometheus.HistogramOp
 // MetricRequeueServiceCount is the number of times a particular service has been requeued.
 var MetricRequeueServiceCount = prometheus.NewCounter(prometheus.CounterOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "requeue_service_total",
 	Help:      "A metric that captures the number of times a service is requeued after failing to sync with OVN"},
 )
@@ -124,7 +124,7 @@ var MetricRequeueServiceCount = prometheus.NewCounter(prometheus.CounterOpts{
 // MetricSyncServiceCount is the number of times a particular service has been synced.
 var MetricSyncServiceCount = prometheus.NewCounter(prometheus.CounterOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "sync_service_total",
 	Help:      "A metric that captures the number of times a service is synced with OVN load balancers"},
 )
@@ -132,41 +132,41 @@ var MetricSyncServiceCount = prometheus.NewCounter(prometheus.CounterOpts{
 // MetricSyncServiceLatency is the time taken to sync a service with the OVN load balancers.
 var MetricSyncServiceLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "sync_service_latency_seconds",
 	Help:      "The latency of syncing a service with the OVN load balancers",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
 )
 
-var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
+var MetricOVNKubeControllerReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "ready_duration_seconds",
-	Help:      "The duration for the master to get to ready state",
+	Help:      "The duration for the ovnkube-controller to get to ready state",
 })
 
-// MetricMasterSyncDuration is the time taken to complete initial Watch for different resource.
+// MetricOVNKubeControllerSyncDuration is the time taken to complete initial Watch for different resource.
 // Resource name is in the label.
-var MetricMasterSyncDuration = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+var MetricOVNKubeControllerSyncDuration = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "sync_duration_seconds",
 	Help:      "The duration to sync and setup all handlers for a given resource"},
 	[]string{
 		"resource_name",
 	})
 
-// MetricMasterLeader identifies whether this instance of ovnkube-master is a leader or not
-var MetricMasterLeader = prometheus.NewGauge(prometheus.GaugeOpts{
+// MetricOVNKubeControllerLeader identifies whether this instance of ovnkube-controller is a leader or not
+var MetricOVNKubeControllerLeader = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "leader",
-	Help:      "Identifies whether the instance of ovnkube-master is a leader(1) or not(0).",
+	Help:      "Identifies whether the instance of ovnkube-controller is a leader(1) or not(0).",
 })
 
 var metricEgressIPAssignLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "egress_ips_assign_latency_seconds",
 	Help:      "The latency of egress IP assignment to ovn nb database",
 	Buckets:   prometheus.ExponentialBuckets(.001, 2, 15),
@@ -174,7 +174,7 @@ var metricEgressIPAssignLatency = prometheus.NewHistogram(prometheus.HistogramOp
 
 var metricEgressIPUnassignLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "egress_ips_unassign_latency_seconds",
 	Help:      "The latency of egress IP unassignment from ovn nb database",
 	Buckets:   prometheus.ExponentialBuckets(.001, 2, 15),
@@ -182,7 +182,7 @@ var metricEgressIPUnassignLatency = prometheus.NewHistogram(prometheus.Histogram
 
 var metricNetpolEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "network_policy_event_latency_seconds",
 	Help:      "The latency of full network policy event handling (create, delete)",
 	Buckets:   prometheus.ExponentialBuckets(.004, 2, 15)},
@@ -192,7 +192,7 @@ var metricNetpolEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOp
 
 var metricNetpolLocalPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "network_policy_local_pod_event_latency_seconds",
 	Help:      "The latency of local pod events handling (add, delete)",
 	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
@@ -202,7 +202,7 @@ var metricNetpolLocalPodEventLatency = prometheus.NewHistogramVec(prometheus.His
 
 var metricNetpolPeerNamespaceEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "network_policy_peer_namespace_event_latency_seconds",
 	Help:      "The latency of peer namespace events handling (add, delete)",
 	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
@@ -212,7 +212,7 @@ var metricNetpolPeerNamespaceEventLatency = prometheus.NewHistogramVec(prometheu
 
 var metricPodSelectorAddrSetPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "pod_selector_address_set_pod_event_latency_seconds",
 	Help:      "The latency of peer pod events handling (add, delete)",
 	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
@@ -222,7 +222,7 @@ var metricPodSelectorAddrSetPodEventLatency = prometheus.NewHistogramVec(prometh
 
 var metricPodSelectorAddrSetNamespaceEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "pod_selector_address_set_namespace_event_latency_seconds",
 	Help:      "The latency of peer namespace events handling (add, delete)",
 	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
@@ -232,7 +232,7 @@ var metricPodSelectorAddrSetNamespaceEventLatency = prometheus.NewHistogramVec(p
 
 var metricPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "pod_event_latency_seconds",
 	Help:      "The latency of pod events handling (add, update, delete)",
 	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
@@ -242,28 +242,28 @@ var metricPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 
 var metricEgressFirewallRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "num_egress_firewall_rules",
 	Help:      "The number of egress firewall rules defined"},
 )
 
 var metricIPsecEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "ipsec_enabled",
 	Help:      "Specifies whether IPSec is enabled for this cluster(1) or not enabled for this cluster(0)",
 })
 
 var metricEgressRoutingViaHost = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "egress_routing_via_host",
 	Help:      "Specifies whether egress gateway mode is via host networking stack(1) or not(0)",
 })
 
 var metricEgressFirewallCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "num_egress_firewalls",
 	Help:      "The number of egress firewall policies",
 })
@@ -271,7 +271,7 @@ var metricEgressFirewallCount = prometheus.NewGauge(prometheus.GaugeOpts{
 // metricFirstSeenLSPLatency is the time between a pod first seen in OVN-Kubernetes and its Logical Switch Port is created
 var metricFirstSeenLSPLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "pod_first_seen_lsp_created_duration_seconds",
 	Help:      "The duration between a pod first observed in OVN-Kubernetes and Logical Switch Port created",
 	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
@@ -279,7 +279,7 @@ var metricFirstSeenLSPLatency = prometheus.NewHistogram(prometheus.HistogramOpts
 
 var metricLSPPortBindingLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "pod_lsp_created_port_binding_duration_seconds",
 	Help:      "The duration between a pods Logical Switch Port created and port binding observed in cache",
 	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
@@ -287,7 +287,7 @@ var metricLSPPortBindingLatency = prometheus.NewHistogram(prometheus.HistogramOp
 
 var metricPortBindingChassisLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "pod_port_binding_port_binding_chassis_duration_seconds",
 	Help:      "The duration between a pods port binding observed and port binding chassis update observed in cache",
 	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
@@ -295,7 +295,7 @@ var metricPortBindingChassisLatency = prometheus.NewHistogram(prometheus.Histogr
 
 var metricPortBindingUpLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "pod_port_binding_chassis_port_binding_up_duration_seconds",
 	Help:      "The duration between a pods port binding chassis update and port binding up observed in cache",
 	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
@@ -303,7 +303,7 @@ var metricPortBindingUpLatency = prometheus.NewHistogram(prometheus.HistogramOpt
 
 var metricNetworkProgramming prometheus.ObserverVec = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "network_programming_duration_seconds",
 	Help: "The duration to apply network configuration for a kind (e.g. pod, service, networkpolicy). " +
 		"Configuration includes add, update and delete events for each kind.",
@@ -318,7 +318,7 @@ var metricNetworkProgramming prometheus.ObserverVec = prometheus.NewHistogramVec
 
 var metricNetworkProgrammingOVN = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
+	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "network_programming_ovn_duration_seconds",
 	Help:      "The duration for OVN to apply network configuration",
 	Buckets: merge(
@@ -333,16 +333,16 @@ const (
 	globalOptionsProbeIntervalField = "northd_probe_interval"
 )
 
-// RegisterMasterBase registers ovnkube master base metrics with the Prometheus registry.
+// RegisterOVNKubeControllerBase registers ovnkube controller base metrics with the Prometheus registry.
 // This function should only be called once.
-func RegisterMasterBase() {
-	prometheus.MustRegister(MetricMasterLeader)
-	prometheus.MustRegister(MetricMasterReadyDuration)
-	prometheus.MustRegister(MetricMasterSyncDuration)
+func RegisterOVNKubeControllerBase() {
+	prometheus.MustRegister(MetricOVNKubeControllerLeader)
+	prometheus.MustRegister(MetricOVNKubeControllerReadyDuration)
+	prometheus.MustRegister(MetricOVNKubeControllerSyncDuration)
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnkubeNamespace,
-			Subsystem: MetricOvnkubeSubsystemMaster,
+			Subsystem: MetricOvnkubeSubsystemController,
 			Name:      "build_info",
 			Help: "A metric with a constant '1' value labeled by version, revision, branch, " +
 				"and go version from which ovnkube was built and when and who built it",
@@ -359,8 +359,8 @@ func RegisterMasterBase() {
 	))
 }
 
-// RegisterMasterPerformance registers metrics that help us understand ovnkube-master performance. Call once after LE is won.
-func RegisterMasterPerformance(nbClient libovsdbclient.Client) {
+// RegisterOVNKubeControllerPerformance registers metrics that help us understand ovnkube-controller performance. Call once after LE is won.
+func RegisterOVNKubeControllerPerformance(nbClient libovsdbclient.Client) {
 	// No need to unregister because process exits when leadership is lost.
 	prometheus.MustRegister(metricPodCreationLatency)
 	prometheus.MustRegister(MetricResourceUpdateCount)
@@ -373,7 +373,7 @@ func RegisterMasterPerformance(nbClient libovsdbclient.Client) {
 	prometheus.MustRegister(metricOvnCliLatency)
 	// This is set to not create circular import between metrics and util package
 	util.MetricOvnCliLatency = metricOvnCliLatency
-	registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
+	registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemController)
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
@@ -387,9 +387,9 @@ func RegisterMasterPerformance(nbClient libovsdbclient.Client) {
 	))
 }
 
-// RegisterMasterFunctional is a collection of metrics that help us understand ovnkube-master functions. Call once after
+// RegisterOVNKubeControllerFunctional is a collection of metrics that help us understand ovnkube-controller functions. Call once after
 // LE is won.
-func RegisterMasterFunctional() {
+func RegisterOVNKubeControllerFunctional() {
 	// No need to unregister because process exits when leadership is lost.
 	if config.Metrics.EnableScaleMetrics {
 		klog.Infof("Scale metrics are enabled")
@@ -425,7 +425,7 @@ func RunTimestamp(stopChan <-chan struct{}, sbClient, nbClient libovsdbclient.Cl
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnkubeNamespace,
-			Subsystem: MetricOvnkubeSubsystemMaster,
+			Subsystem: MetricOvnkubeSubsystemController,
 			Name:      "sb_e2e_timestamp",
 			Help:      "The current e2e-timestamp value as observed in the southbound database",
 		}, func() float64 {
@@ -836,7 +836,7 @@ type ovnMeasurement struct {
 	nbCfg int
 }
 
-// measurement stores a measurement attempt through OVN-Kubernetes master and optionally OVN
+// measurement stores a measurement attempt through OVN-Kubernetes controller and optionally OVN
 type measurement struct {
 	// kubernetes kind e.g. pod or service
 	kind string
@@ -897,7 +897,7 @@ func (cr *ConfigDurationRecorder) Run(nbClient libovsdbclient.Client, kube kube.
 	// ** configuration duration recorder - intro **
 	// We measure the duration to configure whatever k8 kind (pod, services, etc.) object and optionally its application
 	// to all nodes. Metrics record this duration. This will give a rough upper bound of how long it takes OVN-Kubernetes
-	// master container (CMS) and optionally (if AddOVN is called), OVN to configure all nodes under its control.
+	// controller container (CMS) and optionally (if AddOVN is called), OVN to configure all nodes under its control.
 	// Not every attempt to record will result in a measurement if argument k > 0. The measurement rate is proportional to
 	// the number of nodes, N and argument k. 1 out of every N*k attempted measurements will succeed.
 
@@ -1190,7 +1190,7 @@ func (cr *ConfigDurationRecorder) processMeasurements(period time.Duration, upda
 			}
 			ovnKDelta = m.endTimestamp.Sub(m.startTimestamp).Seconds()
 			metricNetworkProgramming.With(prometheus.Labels{"kind": m.kind}).Observe(ovnKDelta)
-			klog.V(5).Infof("Config duration recorder: kind/namespace/name %s. OVN-Kubernetes master took %v"+
+			klog.V(5).Infof("Config duration recorder: kind/namespace/name %s. OVN-Kubernetes controller took %v"+
 				" seconds. No OVN measurement.", kindNamespaceName, ovnKDelta)
 			delete(cr.measurements, kindNamespaceName)
 			cr.measurementsMu.Unlock()
@@ -1214,7 +1214,7 @@ func (cr *ConfigDurationRecorder) processMeasurements(period time.Duration, upda
 				if len(m.ovnMeasurements) == 0 {
 					ovnKDelta = m.endTimestamp.Sub(m.startTimestamp).Seconds()
 					metricNetworkProgramming.With(prometheus.Labels{"kind": m.kind}).Observe(ovnKDelta)
-					klog.V(5).Infof("Config duration recorder: kind/namespace/name %s. OVN-Kubernetes master"+
+					klog.V(5).Infof("Config duration recorder: kind/namespace/name %s. OVN-Kubernetes controller"+
 						" took %v seconds. No OVN measurement.", kindNamespaceName, ovnKDelta)
 					delete(cr.measurements, kindNamespaceName)
 					continue
@@ -1230,7 +1230,7 @@ func (cr *ConfigDurationRecorder) processMeasurements(period time.Duration, upda
 				ovnDelta = calculateOVNDuration(m.ovnMeasurements)
 				metricNetworkProgramming.With(prometheus.Labels{"kind": m.kind}).Observe(ovnKDelta + ovnDelta)
 				metricNetworkProgrammingOVN.Observe(ovnDelta)
-				klog.V(5).Infof("Config duration recorder: kind/namespace/name %s. OVN-Kubernetes master took"+
+				klog.V(5).Infof("Config duration recorder: kind/namespace/name %s. OVN-Kubernetes controller took"+
 					" %v seconds. OVN took %v seconds. Total took %v seconds", kindNamespaceName, ovnKDelta,
 					ovnDelta, ovnDelta+ovnKDelta)
 				delete(cr.measurements, kindNamespaceName)

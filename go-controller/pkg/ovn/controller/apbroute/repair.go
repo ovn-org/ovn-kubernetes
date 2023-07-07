@@ -24,10 +24,10 @@ type managedGWIPs struct {
 	gwList         gatewayInfoList
 }
 
-func (c *ExternalGatewayMasterController) repair() {
+func (c *ExternalGatewayMasterController) Repair() {
 	start := time.Now()
 	defer func() {
-		klog.V(4).InfoS("Syncing exgw routes took %v", time.Since(start))
+		klog.V(4).Infof("Syncing exgw routes took %v", time.Since(start))
 	}()
 
 	// migration from LGW to SGW mode
@@ -109,15 +109,15 @@ func (c *ExternalGatewayMasterController) repair() {
 		}
 	}
 
-	klog.V(4).InfoS("OVN ECMP route cache is: %+v", ovnRouteCache)
-	klog.V(4).InfoS("Cluster ECMP route cache is: %+v", policyGWIPsMap)
+	klog.V(4).Infof("OVN ECMP route cache is: %+v", ovnRouteCache)
+	klog.V(4).Infof("Cluster ECMP route cache is: %+v", policyGWIPsMap)
 
 	// iterate through ovn routes and remove any stale entries
 	for podIP, ovnRoutes := range ovnRouteCache {
 		podHasAnyECMPRoutes := false
 		for _, ovnRoute := range ovnRoutes {
 			if !ovnRoute.shouldExist {
-				klog.V(4).InfoS("Found stale exgw ecmp route, podIP: %s, nexthop: %s, router: %s",
+				klog.V(4).Infof("Found stale exgw ecmp route, podIP: %s, nexthop: %s, router: %s",
 					podIP, ovnRoute.nextHop, ovnRoute.router)
 				lrsr := nbdb.LogicalRouterStaticRoute{UUID: ovnRoute.uuid}
 				err := c.nbClient.deleteLogicalRouterStaticRoutes(ovnRoute.router, &lrsr)
