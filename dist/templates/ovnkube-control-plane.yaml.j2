@@ -160,6 +160,8 @@ spec:
               key: host_network_namespace
         - name: OVN_ENABLE_INTERCONNECT
           value: "{{ ovn_enable_interconnect }}"
+        - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
+          value: "{{ ovn_enable_multi_external_gateway }}"
       # end of container
 
       volumes:

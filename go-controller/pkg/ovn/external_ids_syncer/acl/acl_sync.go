@@ -91,7 +91,7 @@ func (syncer *aclSyncer) SyncACLs(existingNodes *v1.NodeList) error {
 	if err != nil {
 		return fmt.Errorf("failed to update stale default deny netpol ACLs: %w", err)
 	}
-	klog.Infof("Found %d stale default deny netpol ACLs", len(gressPolicyACLs))
+	klog.Infof("Found %d stale default deny netpol ACLs", len(defaultDenyACLs))
 	updatedACLs = append(updatedACLs, defaultDenyACLs...)
 
 	egressFirewallACLs := syncer.updateStaleEgressFirewallACLs(legacyACLs)
@@ -363,7 +363,10 @@ func (syncer *aclSyncer) updateStaleDefaultDenyNetpolACLs(legacyACLs []*nbdb.ACL
 	deleteOps []libovsdb.Operation, err error) {
 	for _, acl := range legacyACLs {
 		// sync default Deny policies
-		if acl.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == "" {
+		// defaultDenyPolicyTypeACLExtIdKey ExternalID was used by default deny and multicast acls,
+		// but multicast acls have specific DefaultMcast priority, filter them out.
+		if acl.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == "" || acl.Priority == types.DefaultMcastDenyPriority ||
+			acl.Priority == types.DefaultMcastAllowPriority {
 			// not default deny policy
 			continue
 		}

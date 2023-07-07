@@ -2,7 +2,7 @@
 
 This section describes how an OVN overlay network is setup on Openshift 3.10 and later.
 It explains the various components and how they come together to establish the OVN overlay network.
-People that are interested in understatnding how the ovn cni plugin is installed will find this useful.
+People that are interested in understanding how the ovn cni plugin is installed will find this useful.
 
 As of OCP-3.10, the Openshift overlay network is managed using daemonsets. The ovs/ovn components are
 built into a Docker image that has all of the needed packages. Daemonsets are deployed on the nodes
@@ -22,7 +22,7 @@ nodes to specify where the daemonsets run.
 
 Both daemonsets use the same docker image. Configuration is passed from the daemonset to the
 image using environment variables and mounting directories from the host. The environment
-variables at set from a configmap that is created during installation. The image includes
+variables are set from a configmap that is created during installation. The image includes
 an control script that is the entrypoint for the container, ovnkube and the openvswitch and
 ovn rpms.
 
@@ -133,7 +133,7 @@ copies files into them.  In particular it copies in the entrypoint script, ovnku
 # docker tag ovn-kube netdev22:5000/ovn-kube:latest
 # docker push netdev22:5000/ovn-kube:latest
 ```
-The image is taged and pushed to a docker repository. This example uses the
+The image is tagged and pushed to a docker repository. This example uses the
 local development docker repo, netdev22:5000
 
 NOTE: At present go_controller is built and the resultant files are copied
@@ -146,6 +146,7 @@ from openvswitch-ovn-kubernetes rpm.
 There are three sources of configuration information in the daemonsets:
 
 1. /etc/origin/node/ files
+
 These files are installed by the Openshift install and are in the node daemonset
 which mounts them on the host. The ovn deamonsets mount them in the pod.
 

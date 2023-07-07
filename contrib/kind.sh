@@ -853,7 +853,8 @@ create_ovn_kube_manifests() {
     --multi-network-enable="${ENABLE_MULTI_NET}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
     --compact-mode="${OVN_COMPACT_MODE}" \
-    --enable-interconnect="${OVN_ENABLE_INTERCONNECT}"
+    --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
+    --enable-multi-external-gateway=true
   popd
 }
 
