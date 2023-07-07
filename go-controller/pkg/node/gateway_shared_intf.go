@@ -316,6 +316,9 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 			fmt.Sprintf("cookie=%s, priority=110, table=7, actions=output:%s",
 				etpSvcOpenFlowCookie, npw.ofportPhys))
 	} else if config.Gateway.Mode == config.GatewayModeShared {
+		// add the ICMP Fragmentation flow for shared gateway mode.
+		icmpFlow := npw.generateICMPFragmentationFlow(nwDst, externalIPOrLBIngressIP, cookie)
+		externalIPFlows = append(externalIPFlows, icmpFlow)
 		// case2 (see function description for details)
 		externalIPFlows = append(externalIPFlows,
 			// table=0, matches on service traffic towards externalIP or LB ingress and sends it to OVN pipeline
@@ -371,6 +374,23 @@ func (npw *nodePortWatcher) generateArpBypassFlow(protocol string, ipAddr string
 	}
 
 	return arpFlow
+}
+
+func (npw *nodePortWatcher) generateICMPFragmentationFlow(nwDst, ipAddr string, cookie string) string {
+	// we send any ICMP destination unreachable, fragmentation needed to the OVN pipeline too so that
+	// path MTU discovery continues to work.
+	icmpMatch := "icmp"
+	icmpType := 3
+	icmpCode := 4
+	if utilnet.IsIPv6String(ipAddr) {
+		icmpMatch = "icmp6"
+		icmpType = 2
+		icmpCode = 0
+	}
+	icmpFragmentationFlow := fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, icmp_type=%d, "+
+		"icmp_code=%d, actions=output:%s",
+		cookie, npw.ofportPhys, icmpMatch, nwDst, ipAddr, icmpType, icmpCode, npw.ofportPatch)
+	return icmpFragmentationFlow
 }
 
 // getAndDeleteServiceInfo returns the serviceConfig for a service and if it exists and then deletes the entry
