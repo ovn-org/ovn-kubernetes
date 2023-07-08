@@ -359,6 +359,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
 	EnableInterconnect              bool `gcfg:"enable-interconnect"`
+	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -970,6 +971,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use EgressService CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressService,
 		Value:       OVNKubernetesFeature.EnableEgressService,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-multi-external-gateway",
+		Usage:       "Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiExternalGateway,
+		Value:       OVNKubernetesFeature.EnableMultiExternalGateway,
 	},
 }
 

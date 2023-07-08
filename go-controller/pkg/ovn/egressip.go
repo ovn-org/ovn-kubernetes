@@ -327,6 +327,12 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 		oldPod = old
 		namespace, err = oc.watchFactory.GetNamespace(oldPod.Namespace)
 		if err != nil {
+			// when the whole namespace gets removed, we can ignore the NotFound error here
+			// any potential configuration will get removed in reconcileEgressIPNamespace
+			if new == nil && apierrors.IsNotFound(err) {
+				klog.V(5).Infof("Namespace %s no longer exists for the deleted pod: %s", oldPod.Namespace, oldPod.Name)
+				return nil
+			}
 			return err
 		}
 	}

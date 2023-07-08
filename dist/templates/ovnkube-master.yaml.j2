@@ -279,6 +279,8 @@ spec:
           value: "{{ ovn_acl_logging_rate_limit }}"
         - name: OVN_STATELESS_NETPOL_ENABLE
           value: "{{ ovn_stateless_netpol_enable }}"
+        - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
+          value: "{{ ovn_enable_multi_external_gateway }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:
