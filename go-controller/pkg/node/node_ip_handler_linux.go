@@ -154,7 +154,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 
 		subscribed, addrChan, err := subscribe()
 		if err != nil {
-			klog.Error("Error during netlink subscribe for IP Manager: %v", err)
+			klog.Errorf("Error during netlink subscribe for IP Manager: %v", err)
 		}
 
 		for {
@@ -163,7 +163,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 				addressSyncTimer.Reset(30 * time.Second)
 				if !ok {
 					if subscribed, addrChan, err = subscribe(); err != nil {
-						klog.Error("Error during netlink re-subscribe due to channel closing for IP Manager: %v", err)
+						klog.Errorf("Error during netlink re-subscribe due to channel closing for IP Manager: %v", err)
 					}
 					continue
 				}
@@ -189,7 +189,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 					c.sync()
 				} else {
 					if subscribed, addrChan, err = subscribe(); err != nil {
-						klog.Error("Error during netlink re-subscribe for IP Manager: %v", err)
+						klog.Errorf("Error during netlink re-subscribe for IP Manager: %v", err)
 					}
 				}
 			case <-stopChan:
