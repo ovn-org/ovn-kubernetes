@@ -8,6 +8,7 @@ import (
 	"k8s.io/klog/v2"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -93,20 +94,29 @@ func (sncm *secondaryNetworkClusterManager) Stop() {
 // interface function.  This function is called by the net-attach-def controller when
 // a layer2 or layer3 secondary network is created.  Layer2 type is not handled here.
 func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
-	topoType := nInfo.TopologyType()
-	if topoType == ovntypes.Layer3Topology {
-		networkId, err := sncm.networkIDAllocator.allocateID(nInfo.GetNetworkName())
-		if err != nil {
-			return nil, fmt.Errorf("failed to create NetworkController for secondary layer3 network %s : %w", nInfo.GetNetworkName(), err)
-		}
-
-		sncc := newNetworkClusterController(nInfo.GetNetworkName(), networkId, nInfo.Subnets(),
-			sncm.ovnClient, sncm.watchFactory, false, nInfo)
-		return sncc, nil
+	if !sncm.isTopologyManaged(nInfo) {
+		return nil, nad.ErrNetworkControllerTopologyNotManaged
 	}
 
-	// Secondary network cluster manager doesn't manage other topology types
-	return nil, nad.ErrNetworkControllerTopologyNotManaged
+	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
+
+	networkId, err := sncm.networkIDAllocator.allocateID(nInfo.GetNetworkName())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create NetworkController for secondary layer3 network %s : %w", nInfo.GetNetworkName(), err)
+	}
+
+	sncc := newNetworkClusterController(networkId, nInfo, sncm.ovnClient, sncm.watchFactory)
+	return sncc, nil
+}
+
+func (sncm *secondaryNetworkClusterManager) isTopologyManaged(nInfo util.NetInfo) bool {
+	switch nInfo.TopologyType() {
+	case ovntypes.Layer3Topology:
+		return true
+	case ovntypes.LocalnetTopology:
+		return config.OVNKubernetesFeature.EnableInterconnect && len(nInfo.Subnets()) > 0
+	}
+	return false
 }
 
 // CleanupDeletedNetworks implements the networkAttachDefController.NetworkControllerManager
@@ -163,6 +173,5 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(allController
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) nad.NetworkController {
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
-	return newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, nil, sncm.ovnClient, sncm.watchFactory,
-		false, netInfo)
+	return newNetworkClusterController(util.InvalidNetworkID, netInfo, sncm.ovnClient, sncm.watchFactory)
 }

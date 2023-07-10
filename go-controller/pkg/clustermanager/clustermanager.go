@@ -15,7 +15,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -49,8 +48,7 @@ type ClusterManager struct {
 // NewClusterManager creates a new cluster manager to manage the cluster nodes.
 func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
 	identity string, wg *sync.WaitGroup, recorder record.EventRecorder) (*ClusterManager, error) {
-	defaultNetClusterController := newNetworkClusterController(ovntypes.DefaultNetworkName, defaultNetworkID, config.Default.ClusterSubnets,
-		ovnClient, wf, config.HybridOverlay.Enabled, &util.DefaultNetInfo{})
+	defaultNetClusterController := newNetworkClusterController(defaultNetworkID, &util.DefaultNetInfo{}, ovnClient, wf)
 
 	zoneClusterController, err := newZoneClusterController(ovnClient, wf)
 	if err != nil {

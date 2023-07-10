@@ -108,7 +108,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 				)
 
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -244,7 +244,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 				)
 
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -388,7 +388,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -532,7 +532,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -691,7 +691,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 							},
 						},
 					)
-					t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+					t.populateLogicalSwitchCache(fakeOvn)
 
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
@@ -906,7 +906,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 					)
 					config.IPv6Mode = true
-					t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+					t.populateLogicalSwitchCache(fakeOvn)
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1054,7 +1054,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 							},
 						},
 					)
-					t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+					t.populateLogicalSwitchCache(fakeOvn)
 
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
@@ -1260,7 +1260,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1415,7 +1415,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1570,7 +1570,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 				injectNode(fakeOvn)
 				err = fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1728,7 +1728,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 							},
 						},
 					)
-					t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+					t.populateLogicalSwitchCache(fakeOvn)
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1944,7 +1944,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -2071,7 +2071,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -2199,7 +2199,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -2476,7 +2476,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 				)
 
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchPods()

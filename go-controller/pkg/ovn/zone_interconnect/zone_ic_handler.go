@@ -627,7 +627,7 @@ func (zic *ZoneInterconnectHandler) getStaticRoutes(ipPrefixes []*net.IPNet, nex
 			}
 			p := ""
 			if fullMask {
-				p = prefix.IP.String() + util.GetIPFullMask(prefix.IP.String())
+				p = prefix.IP.String() + util.GetIPFullMaskString(prefix.IP.String())
 			} else {
 				p = prefix.String()
 			}

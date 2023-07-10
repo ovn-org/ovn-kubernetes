@@ -75,8 +75,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ncc := newNetworkClusterController(ovntypes.DefaultNetworkName, defaultNetworkID, config.Default.ClusterSubnets,
-					fakeClient, f, false, &util.DefaultNetInfo{})
+				ncc := newNetworkClusterController(defaultNetworkID, &util.DefaultNetInfo{}, fakeClient, f)
 				ncc.Start(ctx.Context)
 				defer ncc.Stop()
 
@@ -124,8 +123,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ncc := newNetworkClusterController(ovntypes.DefaultNetworkName, defaultNetworkID, config.Default.ClusterSubnets,
-					fakeClient, f, false, &util.DefaultNetInfo{})
+				ncc := newNetworkClusterController(defaultNetworkID, &util.DefaultNetInfo{}, fakeClient, f)
 				ncc.Start(ctx.Context)
 				defer ncc.Stop()
 
@@ -176,8 +174,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ncc := newNetworkClusterController(ovntypes.DefaultNetworkName, defaultNetworkID, config.Default.ClusterSubnets,
-					fakeClient, f, false, &util.DefaultNetInfo{})
+				ncc := newNetworkClusterController(defaultNetworkID, &util.DefaultNetInfo{}, fakeClient, f)
 				ncc.Start(ctx.Context)
 				defer ncc.Stop()
 

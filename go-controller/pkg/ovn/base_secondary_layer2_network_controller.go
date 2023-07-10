@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	iputils "github.com/containernetworking/plugins/pkg/ip"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -298,21 +297,8 @@ func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchNa
 		return nil, fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
 	}
 
-	if err = oc.lsManager.AddSwitch(switchName, logicalSwitch.UUID, hostSubnets); err != nil {
+	if err = oc.lsManager.AddOrUpdateSwitch(switchName, hostSubnets, excludeSubnets...); err != nil {
 		return nil, err
-	}
-
-	// FIXME: allocate IP ranges when https://github.com/ovn-org/ovn-kubernetes/issues/3369 is fixed
-	for _, excludeSubnet := range excludeSubnets {
-		for excludeIP := excludeSubnet.IP; excludeSubnet.Contains(excludeIP); excludeIP = iputils.NextIP(excludeIP) {
-			var ipMask net.IPMask
-			if excludeIP.To4() != nil {
-				ipMask = net.CIDRMask(32, 32)
-			} else {
-				ipMask = net.CIDRMask(128, 128)
-			}
-			_ = oc.lsManager.AllocateIPs(switchName, []*net.IPNet{{IP: excludeIP, Mask: ipMask}})
-		}
 	}
 
 	return &logicalSwitch, nil

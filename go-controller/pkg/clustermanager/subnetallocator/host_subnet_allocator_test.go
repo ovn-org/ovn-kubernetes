@@ -6,8 +6,13 @@ import (
 	"reflect"
 	"testing"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func rangesFromStrings(ranges []string, networkLens []int) ([]config.CIDRNetworkEntry, error) {
@@ -203,25 +208,39 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sna := NewHostSubnetAllocator()
-
 			ranges, err := rangesFromStrings(tt.networkRanges, tt.networkLens)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := sna.InitRanges(ranges); err != nil {
+			config.Default.ClusterSubnets = ranges
+
+			netInfo, err := util.NewNetInfo(
+				&ovncnitypes.NetConf{
+					NetConf: cnitypes.NetConf{Name: types.DefaultNetworkName},
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			sna := &HostSubnetAllocator{
+				netInfo:                netInfo,
+				clusterSubnetAllocator: NewSubnetAllocator(),
+			}
+
+			if err := sna.InitRanges(); err != nil {
 				t.Fatalf("Failed to initialize network ranges: %v", err)
 			}
 
 			if tt.alreadyOwned != nil {
-				err = sna.MarkSubnetsAllocated(tt.alreadyOwned.owner, ovntest.MustParseIPNets(tt.alreadyOwned.subnet)...)
+				err := sna.clusterSubnetAllocator.MarkAllocatedNetworks(tt.alreadyOwned.owner, ovntest.MustParseIPNets(tt.alreadyOwned.subnet)...)
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
 
 			// test network allocation works correctly
-			got, allocated, err := sna.AllocateNodeSubnets("testnode", tt.existingNets, tt.configIPv4, tt.configIPv6)
+			got, allocated, err := sna.allocateNodeSubnets(sna.clusterSubnetAllocator, "testnode", tt.existingNets, tt.configIPv4, tt.configIPv6)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Controller.addNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -244,7 +263,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 
 			// Ensure an already owned subnet isn't touched
 			if tt.alreadyOwned != nil {
-				err = sna.MarkSubnetsAllocated("blahblah", ovntest.MustParseIPNets(tt.alreadyOwned.subnet)...)
+				err = sna.clusterSubnetAllocator.MarkAllocatedNetworks("blahblah", ovntest.MustParseIPNets(tt.alreadyOwned.subnet)...)
 				if err == nil {
 					t.Fatal("Expected subnet to already be allocated by a different node")
 				}
@@ -258,153 +277,49 @@ func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sna := NewHostSubnetAllocator()
-	if err := sna.InitRanges(ranges); err != nil {
+	config.Default.ClusterSubnets = ranges
+
+	netInfo, err := util.NewNetInfo(
+		&ovncnitypes.NetConf{
+			NetConf: cnitypes.NetConf{Name: types.DefaultNetworkName},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sna := &HostSubnetAllocator{
+		netInfo:                netInfo,
+		clusterSubnetAllocator: NewSubnetAllocator(),
+	}
+
+	if err := sna.InitRanges(); err != nil {
 		t.Fatalf("Failed to initialize network ranges: %v", err)
 	}
 
 	// Mark all v6 subnets already allocated to force an error in AllocateNodeSubnets()
-	if err := sna.MarkSubnetsAllocated("blah", ovntest.MustParseIPNet("2000::/127")); err != nil {
-		t.Fatalf("MarkSubnetsAllocated() expected no error but got: %v", err)
+	if err := sna.clusterSubnetAllocator.MarkAllocatedNetworks("blah", ovntest.MustParseIPNet("2000::/127")); err != nil {
+		t.Fatalf("MarkAllocatedNetworks() expected no error but got: %v", err)
 	}
 
 	// test network allocation works correctly
-	_, v4usedBefore, _, v6usedBefore := sna.base.Usage()
-	got, allocated, err := sna.AllocateNodeSubnets("testNode", nil, true, true)
+	_, v4usedBefore, _, v6usedBefore := sna.clusterSubnetAllocator.Usage()
+	got, allocated, err := sna.allocateNodeSubnets(sna.clusterSubnetAllocator, "testNode", nil, true, true)
 	if err == nil {
-		t.Fatalf("AllocateNodeSubnets() expected error but got success")
+		t.Fatalf("allocateNodeSubnets() expected error but got success")
 	}
 	if got != nil {
-		t.Fatalf("AllocateNodeSubnets() expected no existing host subnets, got %v", got)
+		t.Fatalf("allocateNodeSubnets() expected no existing host subnets, got %v", got)
 	}
 	if allocated != nil {
-		t.Fatalf("AllocateNodeSubnets() expected no allocated subnets, got %v", allocated)
+		t.Fatalf("allocateNodeSubnets() expected no allocated subnets, got %v", allocated)
 	}
 
-	_, v4usedAfter, _, v6usedAfter := sna.base.Usage()
+	_, v4usedAfter, _, v6usedAfter := sna.clusterSubnetAllocator.Usage()
 	if v4usedAfter != v4usedBefore {
 		t.Fatalf("Expected %d v4 allocated subnets, but got %d", v4usedBefore, v4usedAfter)
 	}
 	if v6usedAfter != v6usedBefore {
 		t.Fatalf("Expected %d v6 allocated subnets, but got %d", v6usedBefore, v6usedAfter)
-	}
-}
-
-func ipnetStringsToSlice(strings []string) ([]*net.IPNet, error) {
-	slice := make([]*net.IPNet, 0, len(strings))
-	for _, s := range strings {
-		_, subnet, err := net.ParseCIDR(s)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing subnet %s", s)
-		}
-		slice = append(slice, subnet)
-	}
-	return slice, nil
-}
-
-func TestController_markSubnetsAllocated(t *testing.T) {
-	tests := []struct {
-		name          string
-		networkRanges []string
-		networkLens   []int
-		markedSubnets []string
-		secondSubnets []string
-		wantErr       bool
-	}{
-		{
-			name:          "IPv4 no conflict",
-			networkRanges: []string{"172.16.0.0/16"},
-			networkLens:   []int{24},
-			markedSubnets: []string{"172.16.0.0/24"},
-			secondSubnets: []string{"172.16.1.0/24"},
-			wantErr:       false,
-		},
-		{
-			name:          "IPv4 conflict",
-			networkRanges: []string{"172.16.0.0/16"},
-			networkLens:   []int{24},
-			markedSubnets: []string{"172.16.0.0/24"},
-			secondSubnets: []string{"172.16.0.0/24"},
-			wantErr:       true,
-		},
-		{
-			name:          "IPv6 no conflict",
-			networkRanges: []string{"2001:db2::/56"},
-			networkLens:   []int{64},
-			markedSubnets: []string{"2001:db2:0:1::/64"},
-			secondSubnets: []string{"2001:db2:0:2::/64"},
-			wantErr:       false,
-		},
-		{
-			name:          "IPv6 conflict",
-			networkRanges: []string{"2001:db2::/56"},
-			networkLens:   []int{64},
-			markedSubnets: []string{"2001:db2::/64"},
-			secondSubnets: []string{"2001:db2::/64"},
-			wantErr:       true,
-		},
-		{
-			name:          "dual-stack no conflict",
-			networkRanges: []string{"2001:db2::/56", "172.16.0.0/16"},
-			networkLens:   []int{64, 24},
-			markedSubnets: []string{"2001:db2:0:1::/64", "172.16.0.0/24"},
-			secondSubnets: []string{"2001:db2:0:2::/64", "172.16.1.0/24"},
-			wantErr:       false,
-		},
-		{
-			name:          "dual-stack v4 conflict",
-			networkRanges: []string{"2001:db2::/56", "172.16.0.0/16"},
-			networkLens:   []int{64, 24},
-			markedSubnets: []string{"2001:db2:0:1::/64", "172.16.0.0/24"},
-			secondSubnets: []string{"2001:db2:0:2::/64", "172.16.0.0/24"},
-			wantErr:       true,
-		},
-		{
-			name:          "dual-stack v6 conflict",
-			networkRanges: []string{"2001:db2::/56", "172.16.0.0/16"},
-			networkLens:   []int{64, 24},
-			markedSubnets: []string{"2001:db2:0:1::/64", "172.16.0.0/24"},
-			secondSubnets: []string{"2001:db2:0:1::/64", "172.16.1.0/24"},
-			wantErr:       true,
-		},
-		{
-			name:          "dual-stack both conflict",
-			networkRanges: []string{"2001:db2::/56", "172.16.0.0/16"},
-			networkLens:   []int{64, 24},
-			markedSubnets: []string{"2001:db2:0:1::/64", "172.16.0.0/24"},
-			secondSubnets: []string{"2001:db2:0:1::/64", "172.16.0.0/24"},
-			wantErr:       true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sna := NewHostSubnetAllocator()
-
-			ranges, err := rangesFromStrings(tt.networkRanges, tt.networkLens)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := sna.InitRanges(ranges); err != nil {
-				t.Fatalf("Failed to initialize network ranges: %v", err)
-			}
-
-			subnets, err := ipnetStringsToSlice(tt.markedSubnets)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := sna.MarkSubnetsAllocated("node1", subnets...); err != nil {
-				t.Fatalf("Failed to mark allocated subnets: %v", err)
-			}
-
-			subnets, err = ipnetStringsToSlice(tt.secondSubnets)
-			if err != nil {
-				t.Fatal(err)
-			}
-			err = sna.MarkSubnetsAllocated("node2", subnets...)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("Mark second subnets allocated error %v, wantErr %v", err, tt.wantErr)
-			}
-		})
 	}
 }

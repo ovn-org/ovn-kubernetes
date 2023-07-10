@@ -82,7 +82,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			},
 		)
 		for _, testPod := range pods {
-			testPod.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, nodeName))
+			testPod.populateLogicalSwitchCache(fakeOvn)
 		}
 		var err error
 		if namespaces != nil {

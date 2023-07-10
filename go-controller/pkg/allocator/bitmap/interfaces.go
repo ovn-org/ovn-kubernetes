@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package allocator
+package bitmap
 
 // Interface manages the allocation of items out of a range. Interface
 // should be threadsafe.

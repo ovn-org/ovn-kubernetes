@@ -8,9 +8,12 @@ import (
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	v1 "k8s.io/api/core/v1"
+	listers "k8s.io/client-go/listers/core/v1"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -73,6 +76,10 @@ type PodRoute struct {
 	Dest *net.IPNet
 	// NextHop is the IP address of the next hop for traffic destined for Dest
 	NextHop net.IP
+}
+
+func (r PodRoute) String() string {
+	return fmt.Sprintf("%s %s", r.Dest, r.NextHop)
 }
 
 // Internal struct used to marshal PodAnnotation to the pod annotation
@@ -259,7 +266,7 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod, nInfo NetInfo) ([]*net.IPNet, error) {
 	for _, podIP := range podIPs {
 		ipNet := net.IPNet{
 			IP:   podIP,
-			Mask: GetFullNetMask(podIP),
+			Mask: GetIPFullMask(podIP),
 		}
 		ips = append(ips, &ipNet)
 	}
@@ -378,4 +385,154 @@ func GetK8sPodAllNetworkSelections(pod *v1.Pod) ([]*nadapi.NetworkSelectionEleme
 		networks = []*nadapi.NetworkSelectionElement{}
 	}
 	return networks, nil
+}
+
+// UpdatePodAnnotationWithRetry updates the pod annotation on the pod retrying
+// on conflict
+func UpdatePodAnnotationWithRetry(podLister listers.PodLister, kube kube.Interface, pod *v1.Pod, podAnnotation *PodAnnotation, nadName string) error {
+	updatePodAnnotationNoRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
+		var err error
+		pod.Annotations, err = MarshalPodAnnotation(pod.Annotations, podAnnotation, nadName)
+		if err != nil {
+			return nil, nil, err
+		}
+		return pod, nil, nil
+	}
+
+	return UpdatePodWithRetryOrRollback(
+		podLister,
+		kube,
+		pod,
+		updatePodAnnotationNoRollback,
+	)
+}
+
+// IsValidPodAnnotation tests whether the PodAnnotation is valid, currently true
+// for any PodAnnotation with a MAC which is the only thing required to attach a
+// pod.
+func IsValidPodAnnotation(podAnnotation *PodAnnotation) bool {
+	return podAnnotation != nil && len(podAnnotation.MAC) > 0
+}
+
+func joinSubnetToRoute(isIPv6 bool, gatewayIP net.IP) PodRoute {
+	joinSubnet := config.Gateway.V4JoinSubnet
+	if isIPv6 {
+		joinSubnet = config.Gateway.V6JoinSubnet
+	}
+	_, subnet, err := net.ParseCIDR(joinSubnet)
+	if err != nil {
+		// Join subnet should have been validated already by config
+		panic(fmt.Sprintf("Failed to parse join subnet %q: %v", joinSubnet, err))
+	}
+
+	return PodRoute{
+		Dest:    subnet,
+		NextHop: gatewayIP,
+	}
+}
+
+// addRoutesGatewayIP updates the provided pod annotation for the provided pod
+// with the gateways derived from the allocated IPs
+func AddRoutesGatewayIP(
+	netinfo NetInfo,
+	pod *v1.Pod,
+	podAnnotation *PodAnnotation,
+	network *nadapi.NetworkSelectionElement) error {
+
+	// generate the nodeSubnets from the allocated IPs
+	nodeSubnets := IPsToNetworkIPs(podAnnotation.IPs...)
+
+	if netinfo.IsSecondary() {
+		// for secondary network, see if its network-attachment's annotation has default-route key.
+		// If present, then we need to add default route for it
+		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
+		topoType := netinfo.TopologyType()
+		switch topoType {
+		case types.Layer2Topology, types.LocalnetTopology:
+			// no route needed for directly connected subnets
+			return nil
+		case types.Layer3Topology:
+			for _, podIfAddr := range podAnnotation.IPs {
+				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+				nodeSubnet, err := MatchFirstIPNetFamily(isIPv6, nodeSubnets)
+				if err != nil {
+					return err
+				}
+				gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
+				for _, clusterSubnet := range netinfo.Subnets() {
+					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+						podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
+							Dest:    clusterSubnet.CIDR,
+							NextHop: gatewayIPnet.IP,
+						})
+					}
+				}
+			}
+			return nil
+		}
+		return fmt.Errorf("topology type %s not supported", topoType)
+	}
+
+	// if there are other network attachments for the pod, then check if those network-attachment's
+	// annotation has default-route key. If present, then we need to skip adding default route for
+	// OVN interface
+	networks, err := GetK8sPodAllNetworkSelections(pod)
+	if err != nil {
+		return fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
+			pod.Namespace, pod.Name, err)
+	}
+	otherDefaultRouteV4 := false
+	otherDefaultRouteV6 := false
+	for _, network := range networks {
+		for _, gatewayRequest := range network.GatewayRequest {
+			if utilnet.IsIPv6(gatewayRequest) {
+				otherDefaultRouteV6 = true
+			} else {
+				otherDefaultRouteV4 = true
+			}
+		}
+	}
+
+	for _, podIfAddr := range podAnnotation.IPs {
+		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+		nodeSubnet, err := MatchFirstIPNetFamily(isIPv6, nodeSubnets)
+		if err != nil {
+			return err
+		}
+
+		gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
+
+		// Ensure default pod network traffic always goes to OVN
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+				podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
+					Dest:    clusterSubnet.CIDR,
+					NextHop: gatewayIPnet.IP,
+				})
+			}
+		}
+
+		// Ensure default service network traffic always goes to OVN
+		for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
+			if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
+				podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
+					Dest:    serviceSubnet,
+					NextHop: gatewayIPnet.IP,
+				})
+			}
+		}
+
+		otherDefaultRoute := otherDefaultRouteV4
+		if isIPv6 {
+			otherDefaultRoute = otherDefaultRouteV6
+		}
+		if !otherDefaultRoute {
+			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
+		}
+
+		// Ensure default join subnet traffic always goes to OVN
+		podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(isIPv6, gatewayIPnet.IP))
+	}
+
+	return nil
 }

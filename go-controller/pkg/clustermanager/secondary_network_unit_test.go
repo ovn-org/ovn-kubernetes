@@ -224,7 +224,7 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				// So testing the cleanup one at a time.
 				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				oc := newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, nil, sncm.ovnClient, sncm.watchFactory, false, netInfo)
+				oc := newNetworkClusterController(util.InvalidNetworkID, netInfo, sncm.ovnClient, sncm.watchFactory)
 				nadControllers := []nad.NetworkController{oc}
 
 				err = sncm.CleanupDeletedNetworks(nadControllers)

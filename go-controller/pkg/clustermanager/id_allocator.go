@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	bitmapallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
+	bitmapallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/bitmap"
 )
 
 const (
