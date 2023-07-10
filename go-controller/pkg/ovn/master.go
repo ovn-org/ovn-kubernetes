@@ -17,9 +17,11 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/pkg/errors"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -758,6 +760,7 @@ type nodeSyncs struct {
 	syncGw                bool
 	syncHo                bool
 	syncZoneIC            bool
+	syncMigratablePods    bool
 }
 
 func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
@@ -890,6 +893,15 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			}
 		}
 	}
+
+	if nSyncs.syncMigratablePods {
+		if err := oc.allocateSyncMigratablePodIPs(node); err != nil {
+			errs = append(errs, err)
+			oc.syncMigratablePodsFailed.Store(node.Name, true)
+		} else {
+			oc.syncMigratablePodsFailed.Delete(node.Name)
+		}
+	}
 	return kerrors.NewAggregate(errs)
 }
 
@@ -1003,4 +1015,10 @@ func (oc *DefaultNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs()
 	}
 
 	return gwLRPIPs, nil
+}
+func (oc *DefaultNetworkController) allocateSyncMigratablePodIPs(node *kapi.Node) error {
+	allocatePodIPsOnSwitchWrapFn := func(liveMigratablePod *kapi.Pod, liveMigratablePodAnnotation *util.PodAnnotation, switchName, nadName string) (string, error) {
+		return oc.allocatePodIPsOnSwitch(liveMigratablePod, liveMigratablePodAnnotation, switchName, nadName)
+	}
+	return kubevirt.AllocateSyncMigratablePodsIPsOnNode(oc.watchFactory, oc.lsManager, node.Name, ovntypes.DefaultNetworkName, allocatePodIPsOnSwitchWrapFn)
 }

@@ -222,3 +222,71 @@ func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.Namespac
 	}
 	return nil
 }
+
+// FindLiveMigratablePods will return all the pods with a `vm.kubevirt.io`
+// label filtered by `kubevirt.io/allow-pod-bridge-network-live-migration`
+// annotation
+func FindLiveMigratablePods(watchFactory *factory.WatchFactory) ([]*corev1.Pod, error) {
+	vmPods, err := watchFactory.GetAllPodsBySelector(
+		metav1.LabelSelector{
+			MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key:      kubevirtv1.VirtualMachineNameLabel,
+				Operator: metav1.LabelSelectorOpExists,
+			}},
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed looking for live migratable pods: %v", err)
+	}
+	liveMigratablePods := []*corev1.Pod{}
+	for _, vmPod := range vmPods {
+		if IsPodLiveMigratable(vmPod) {
+			liveMigratablePods = append(liveMigratablePods, vmPod)
+		}
+	}
+	return liveMigratablePods, nil
+}
+
+// AllowPodBridgeNetworkLiveMigrationAnnotation will refill ip pool in
+// case the node has take over the vm subnet for live migrated vms
+func allocateSyncMigratablePodIPs(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, nodeName, nadName string, pod *corev1.Pod, allocatePodIPsOnSwitch func(*corev1.Pod, *util.PodAnnotation, string, string) (string, error)) error {
+	isStale, err := IsMigratedSourcePodStale(watchFactory, pod)
+	if err != nil {
+		return err
+	}
+
+	// We care only for Running virt-launcher pods
+	if isStale {
+		return nil
+	}
+
+	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	if err != nil {
+		return nil
+	}
+	switchName, zoneContainsPodSubnet := ZoneContainsPodSubnet(lsManager, annotation)
+	// If this zone do not own the subnet or the node that is passed
+	// do not match the switch, they should not be deallocated
+	if !zoneContainsPodSubnet || (nodeName != "" && switchName != nodeName) {
+		return nil
+	}
+	if _, err := allocatePodIPsOnSwitch(pod, annotation, nadName, switchName); err != nil {
+		return err
+	}
+	return nil
+}
+
+// AllowPodBridgeNetworkLiveMigrationAnnotation will refill ip pool in
+// case the node has take over the vm subnet for live migrated vms
+func AllocateSyncMigratablePodsIPsOnNode(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, nodeName, nadName string, allocatePodIPsOnSwitch func(*corev1.Pod, *util.PodAnnotation, string, string) (string, error)) error {
+	liveMigratablePods, err := FindLiveMigratablePods(watchFactory)
+	if err != nil {
+		return err
+	}
+	for _, liveMigratablePod := range liveMigratablePods {
+		if err := allocateSyncMigratablePodIPs(watchFactory, lsManager, nodeName, nadName, liveMigratablePod, allocatePodIPsOnSwitch); err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -941,6 +941,16 @@ func (wf *WatchFactory) GetPodsBySelector(namespace string, labelSelector metav1
 	return podLister.Pods(namespace).List(selector)
 }
 
+// GetAllPodsBySelector returns all the pods in all namespace by the label selector
+func (wf *WatchFactory) GetAllPodsBySelector(labelSelector metav1.LabelSelector) ([]*kapi.Pod, error) {
+	podLister := wf.informers[PodType].lister.(listers.PodLister)
+	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
+	if err != nil {
+		return nil, err
+	}
+	return podLister.List(selector)
+}
+
 // GetNodes returns the node specs of all the nodes
 func (wf *WatchFactory) GetNodes() ([]*kapi.Node, error) {
 	return wf.ListNodes(labels.Everything())
