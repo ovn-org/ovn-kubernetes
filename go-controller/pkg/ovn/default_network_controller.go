@@ -143,7 +143,7 @@ type DefaultNetworkController struct {
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, err error) (*DefaultNetworkController, error) {
+func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil)
@@ -312,7 +312,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = oc.Init(); err != nil {
+	if err = oc.Init(ctx); err != nil {
 		return err
 	}
 
@@ -334,7 +334,7 @@ func (oc *DefaultNetworkController) Stop() {
 // TODO: Verify that the cluster was not already called with a different global subnet
 //
 //	If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
-func (oc *DefaultNetworkController) Init() error {
+func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
@@ -383,9 +383,15 @@ func (oc *DefaultNetworkController) Init() error {
 		oc.routerLoadBalancerGroupUUID = loadBalancerGroup.UUID
 	}
 
+	networkID := util.InvalidNetworkID
 	nodeNames := []string{}
 	for _, node := range existingNodes.Items {
 		nodeNames = append(nodeNames, node.Name)
+
+		if config.OVNKubernetesFeature.EnableInterconnect && networkID == util.InvalidNetworkID {
+			// get networkID from any node in the cluster
+			networkID, _ = util.ParseNetworkIDAnnotation(&node, oc.zoneICHandler.GetNetworkName())
+		}
 	}
 	if err := oc.SetupMaster(nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
@@ -395,6 +401,22 @@ func (oc *DefaultNetworkController) Init() error {
 	// So execute an individual sync method at startup to cleanup any difference
 	klog.V(4).Info("Cleaning External Gateway ECMP routes")
 	WithSyncDurationMetricNoError("external gateway routes", oc.apbExternalRouteController.Repair)
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		// if networkID is invalid, then we didn't find it on the initial node list.
+		// cluster-manager could still be starting and assigning, so execute full Init to search
+		if networkID == util.InvalidNetworkID {
+			if err := oc.zoneICHandler.Init(oc.kube, ctx); err != nil {
+				return err
+			}
+		} else {
+			// we already found the networkID, no need to search
+			if err := oc.zoneICHandler.EnsureTransitSwitch(networkID); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 

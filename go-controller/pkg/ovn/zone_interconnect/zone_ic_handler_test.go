@@ -384,6 +384,8 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
+				err = zoneICHandler.EnsureTransitSwitch(0)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
@@ -425,6 +427,8 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
+				err = zoneICHandler.EnsureTransitSwitch(0)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
@@ -505,6 +509,8 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
+				err = zoneICHandler.EnsureTransitSwitch(0)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
@@ -555,6 +561,8 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
+				err = zoneICHandler.EnsureTransitSwitch(0)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
@@ -672,6 +680,8 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"}, Topology: types.Layer3Topology})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				zoneICHandler := NewZoneInterconnectHandler(netInfo, libovsdbOvnNBClient, libovsdbOvnSBClient)
+				err = zoneICHandler.EnsureTransitSwitch(1)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = checkInterconnectResources("global", "blue", libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
@@ -710,6 +720,8 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"}, Topology: types.Layer3Topology})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				zoneICHandler := NewZoneInterconnectHandler(netInfo, libovsdbOvnNBClient, libovsdbOvnSBClient)
+				err = zoneICHandler.EnsureTransitSwitch(1)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = checkInterconnectResources("global", "blue", libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
@@ -767,6 +779,9 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
 				gomega.Expect(zoneICHandler).NotTo(gomega.BeNil())
+
+				err = zoneICHandler.EnsureTransitSwitch(0)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				err = zoneICHandler.AddLocalZoneNode(&testNode4)
 				gomega.Expect(err).To(gomega.HaveOccurred(), "failed to get node id for node - node4")
@@ -855,6 +870,9 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 
 				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient)
 				gomega.Expect(zoneICHandler).NotTo(gomega.BeNil())
+
+				err = zoneICHandler.EnsureTransitSwitch(0)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				err = zoneICHandler.AddRemoteZoneNode(&testNode4)
 				gomega.Expect(err).To(gomega.HaveOccurred(), "failed to get node id for node - node4")
