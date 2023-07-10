@@ -163,7 +163,7 @@ func (d *DNS) getIPsAndMinTTL(domain string) ([]net.IP, time.Duration, error) {
 				dnsOps.SetQuestion(msg, dnsOps.Fqdn(domain), recordType)
 				in_TCP, _, err := dnsOps.Exchange(c, msg, dialServer)
 				if err != nil {
-					klog.Warning("Failed to fall back to TCP to get untruncated DNS results: for domain %s, err: %v", domain, err)
+					klog.Warningf("Failed to fall back to TCP to get untruncated DNS results: for domain %s, err: %v", domain, err)
 				} else {
 					in = in_TCP
 
