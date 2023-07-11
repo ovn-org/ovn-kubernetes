@@ -27,6 +27,19 @@ type dhcpConfigs struct {
 	V6 *nbdb.DHCPOptions
 }
 
+func EnsureDHCPOptions(controllerName string, nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod, ovnPodAnnotation *util.PodAnnotation, lsp *nbdb.LogicalSwitchPort) error {
+	hostname := pod.GetName()
+	dhcpConfig, err := composeDHCPConfigs(watchFactory, controllerName, pod.Namespace, hostname, ovnPodAnnotation.IPs)
+	if err != nil {
+		return fmt.Errorf("failed composing DHCP options: %v", err)
+	}
+
+	if err := libovsdbops.CreateOrUpdateDhcpOptions(nbClient, lsp, dhcpConfig.V4, dhcpConfig.V6); err != nil {
+		return fmt.Errorf("failed creation or updating OVN operations to add DHCP options: %v", err)
+	}
+	return nil
+}
+
 func EnsureDHCPOptionsForVM(controllerName string, nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod, ovnPodAnnotation *util.PodAnnotation, lsp *nbdb.LogicalSwitchPort) error {
 	if !IsPodLiveMigratable(pod) {
 		return nil

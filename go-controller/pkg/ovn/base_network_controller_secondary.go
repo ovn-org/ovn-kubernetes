@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"net"
 	"reflect"
 	"time"
@@ -323,6 +324,15 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	}
 	txOkCallBack()
 	bsnc.podRecorder.AddLSP(pod.UID, bsnc.NetInfo)
+
+	if bsnc.IsSecondary() &&
+		(bsnc.TopologyType() == types.Layer2Topology || bsnc.TopologyType() == types.LocalnetTopology) &&
+		len(bsnc.Subnets()) > 0 {
+		klog.Infof("creating DHCP options for %s/%s", pod.GetNamespace(), pod.GetName())
+		if err := kubevirt.EnsureDHCPOptions(bsnc.controllerName, bsnc.nbClient, bsnc.watchFactory, pod, podAnnotation, lsp); err != nil {
+			return fmt.Errorf("failed to create DHCP options for %s: %v", pod.GetName(), err)
+		}
+	}
 
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {
