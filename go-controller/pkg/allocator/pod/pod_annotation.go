@@ -10,6 +10,7 @@ import (
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -75,10 +76,84 @@ func allocatePodAnnotation(
 	podAnnotation *util.PodAnnotation,
 	err error) {
 
+	// no id allocation
+	var idAllocator id.NamedAllocator
+
 	allocateToPodWithRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
 		var rollback func()
 		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
+			idAllocator,
+			netInfo,
+			pod,
+			network,
+			reallocateIP)
+		return pod, rollback, err
+	}
+
+	err = util.UpdatePodWithRetryOrRollback(
+		podLister,
+		kube,
+		pod,
+		allocateToPodWithRollback,
+	)
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return pod, podAnnotation, nil
+}
+
+// AllocatePodAnnotationWithTunnelID allocates the PodAnnotation which includes
+// IPs, a mac address, routes, gateways and a tunnel ID. Returns the allocated
+// pod annotation and the updated pod. Returns a nil pod and the existing
+// PodAnnotation if no updates are warranted to the pod.
+//
+// The allocation can be requested through the network selection element or
+// derived from the allocator provided IPs. If the requested IPs cannot be
+// honored, a new set of IPs will be allocated unless reallocateIP is set to
+// false.
+func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
+	ipAllocator subnet.NamedAllocator,
+	idAllocator id.NamedAllocator,
+	pod *v1.Pod,
+	network *nadapi.NetworkSelectionElement,
+	reallocateIP bool) (
+	*v1.Pod,
+	*util.PodAnnotation,
+	error) {
+
+	return allocatePodAnnotationWithTunnelID(
+		allocator.podLister,
+		allocator.kube,
+		ipAllocator,
+		idAllocator,
+		allocator.netInfo,
+		pod,
+		network,
+		reallocateIP,
+	)
+}
+
+func allocatePodAnnotationWithTunnelID(
+	podLister listers.PodLister,
+	kube kube.Interface,
+	ipAllocator subnet.NamedAllocator,
+	idAllocator id.NamedAllocator,
+	netInfo util.NetInfo,
+	pod *v1.Pod,
+	network *nadapi.NetworkSelectionElement,
+	reallocateIP bool) (
+	updatedPod *v1.Pod,
+	podAnnotation *util.PodAnnotation,
+	err error) {
+
+	allocateToPodWithRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
+		var rollback func()
+		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+			ipAllocator,
+			idAllocator,
 			netInfo,
 			pod,
 			network,
@@ -101,14 +176,15 @@ func allocatePodAnnotation(
 }
 
 // allocatePodAnnotationWithRollback allocates the PodAnnotation which includes
-// IPs, a mac address, routes and gateways. Returns the allocated pod annotation
-// and a pod with that annotation set. Returns a nil pod and the existing
+// IPs, a mac address, routes, gateways and an ID. Returns the allocated pod
+// annotation and a pod with that annotation set. Returns a nil pod and the existing
 // PodAnnotation if no updates are warranted to the pod.
 
-// The allocation can be requested through the network selection element or
-// derived from the allocator provided IPs. If no IP allocation is required, set
-// allocateIP to false. If the requested IPs cannot be honored, a new set of IPs
-// will be allocated unless reallocateIP is set to false.
+// The allocation of network information can be requested through the network
+// selection element or derived from the allocator provided IPs. If no IP
+// allocation is required, set allocateIP to false. If the requested IPs cannot
+// be honored, a new set of IPs will be allocated unless reallocateIP is set to
+// false.
 
 // A rollback function is returned to rollback the IP allocation if there was
 // any.
@@ -118,6 +194,7 @@ func allocatePodAnnotation(
 // information from it as a side-effect.
 func allocatePodAnnotationWithRollback(
 	ipAllocator subnet.NamedAllocator,
+	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
@@ -138,7 +215,13 @@ func allocatePodAnnotationWithRollback(
 	// assigned via the IPAM manager. Note we are using a named return variable
 	// for defer to work correctly.
 	var releaseIPs []*net.IPNet
+	var releaseID int
 	rollback = func() {
+		if releaseID != 0 {
+			idAllocator.ReleaseID()
+			klog.V(5).Infof("Released ID %d", releaseID)
+			releaseID = 0
+		}
 		if len(releaseIPs) == 0 {
 			return
 		}
@@ -157,6 +240,36 @@ func allocatePodAnnotationWithRollback(
 		}
 	}()
 
+	podAnnotation, _ = util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	if podAnnotation == nil {
+		podAnnotation = &util.PodAnnotation{}
+	}
+
+	// work on a tentative pod annotation based on the existing one
+	tentative := &util.PodAnnotation{
+		IPs:      podAnnotation.IPs,
+		MAC:      podAnnotation.MAC,
+		TunnelID: podAnnotation.TunnelID,
+	}
+
+	hasIDAllocation := util.DoesNetworkRequireTunnelIDs(netInfo)
+	needsID := tentative.TunnelID == 0 && hasIDAllocation
+
+	if hasIDAllocation {
+		if needsID {
+			tentative.TunnelID, err = idAllocator.AllocateID()
+		} else {
+			err = idAllocator.ReserveID(tentative.TunnelID)
+		}
+
+		if err != nil {
+			err = fmt.Errorf("failed to assign pod id for %s: %w", podDesc, err)
+			return
+		}
+
+		releaseID = tentative.TunnelID
+	}
+
 	hasIPAM := util.DoesNetworkRequireIPAM(netInfo)
 	hasIPRequest := network != nil && len(network.IPRequest) > 0
 	hasStaticIPRequest := hasIPRequest && !reallocateIP
@@ -170,20 +283,9 @@ func allocatePodAnnotationWithRollback(
 		return
 	}
 
-	podAnnotation, _ = util.UnmarshalPodAnnotation(pod.Annotations, nadName)
-	if podAnnotation == nil {
-		podAnnotation = &util.PodAnnotation{}
-	}
-
-	// work on a tentative pod annotation based on the existing one
-	tentative := &util.PodAnnotation{
-		IPs: podAnnotation.IPs,
-		MAC: podAnnotation.MAC,
-	}
-
 	// we need to update the annotation if it is missing IPs or MAC
-	needsAnnotationUpdate := len(tentative.IPs) == 0 && (hasIPAM || hasIPRequest)
-	needsAnnotationUpdate = needsAnnotationUpdate || len(tentative.MAC) == 0
+	needsIPOrMAC := len(tentative.IPs) == 0 && (hasIPAM || hasIPRequest)
+	needsIPOrMAC = needsIPOrMAC || len(tentative.MAC) == 0
 	reallocateOnNonStaticIPRequest := len(tentative.IPs) == 0 && hasIPRequest && !hasStaticIPRequest
 
 	if len(tentative.IPs) == 0 {
@@ -198,13 +300,13 @@ func allocatePodAnnotationWithRollback(
 	if hasIPAM {
 		if len(tentative.IPs) > 0 {
 			if err = ipAllocator.AllocateIPs(tentative.IPs); err != nil && !ip.IsErrAllocated(err) {
-				err = fmt.Errorf("failed to ensure requested or annotated IPs %v for pod %s: %w",
+				err = fmt.Errorf("failed to ensure requested or annotated IPs %v for %s: %w",
 					util.StringSlice(tentative.IPs), podDesc, err)
 				if !reallocateOnNonStaticIPRequest {
 					return
 				}
 				klog.Warning(err.Error())
-				needsAnnotationUpdate = true
+				needsIPOrMAC = true
 				tentative.IPs = nil
 			}
 
@@ -220,7 +322,7 @@ func allocatePodAnnotationWithRollback(
 		if len(tentative.IPs) == 0 {
 			tentative.IPs, err = ipAllocator.AllocateNextIPs()
 			if err != nil {
-				err = fmt.Errorf("failed to assign pod addresses for pod %s: %w", podDesc, err)
+				err = fmt.Errorf("failed to assign pod addresses for %s: %w", podDesc, err)
 				return
 			}
 
@@ -229,7 +331,7 @@ func allocatePodAnnotationWithRollback(
 		}
 	}
 
-	if needsAnnotationUpdate {
+	if needsIPOrMAC {
 		// handle mac address
 		if network != nil && network.MacRequest != "" {
 			tentative.MAC, err = net.ParseMAC(network.MacRequest)
@@ -247,7 +349,11 @@ func allocatePodAnnotationWithRollback(
 		if err != nil {
 			return
 		}
+	}
 
+	needsAnnotationUpdate := needsIPOrMAC || needsID
+
+	if needsAnnotationUpdate {
 		updatedPod = pod
 		updatedPod.Annotations, err = util.MarshalPodAnnotation(updatedPod.Annotations, tentative, nadName)
 		podAnnotation = tentative

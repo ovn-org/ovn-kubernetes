@@ -68,6 +68,9 @@ type PodAnnotation struct {
 	Gateways []net.IP
 	// Routes are additional routes to add to the pod's network namespace
 	Routes []PodRoute
+
+	// TunnelID assigned to each pod for layer2 secondary networks
+	TunnelID int
 }
 
 // PodRoute describes any routes to be added to the pod's network namespace
@@ -91,6 +94,8 @@ type podAnnotation struct {
 
 	IP      string `json:"ip_address,omitempty"`
 	Gateway string `json:"gateway_ip,omitempty"`
+
+	TunnelID int `json:"tunnel_id,omitempty"`
 }
 
 // Internal struct used to marshal PodRoute to the pod annotation
@@ -109,7 +114,8 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 		return nil, err
 	}
 	pa := podAnnotation{
-		MAC: podInfo.MAC.String(),
+		TunnelID: podInfo.TunnelID,
+		MAC:      podInfo.MAC.String(),
 	}
 
 	if len(podInfo.IPs) == 1 {
@@ -183,7 +189,9 @@ func UnmarshalPodAnnotation(annotations map[string]string, nadName string) (*Pod
 
 	a := &tempA
 
-	podAnnotation := &PodAnnotation{}
+	podAnnotation := &PodAnnotation{
+		TunnelID: a.TunnelID,
+	}
 	podAnnotation.MAC, err = net.ParseMAC(a.MAC)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse pod MAC %q: %v", a.MAC, err)

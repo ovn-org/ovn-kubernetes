@@ -11,9 +11,11 @@ import (
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -21,27 +23,45 @@ import (
 	"github.com/onsi/gomega"
 )
 
-type allocatorStub struct {
+type ipAllocatorStub struct {
 	netxtIPs         []*net.IPNet
 	allocateIPsError error
 	releasedIPs      []*net.IPNet
 }
 
-func (a *allocatorStub) AllocateIPs(ips []*net.IPNet) error {
+func (a *ipAllocatorStub) AllocateIPs(ips []*net.IPNet) error {
 	return a.allocateIPsError
 }
 
-func (a *allocatorStub) AllocateNextIPs() ([]*net.IPNet, error) {
+func (a *ipAllocatorStub) AllocateNextIPs() ([]*net.IPNet, error) {
 	return a.netxtIPs, nil
 }
 
-func (a *allocatorStub) ReleaseIPs(ips []*net.IPNet) error {
+func (a *ipAllocatorStub) ReleaseIPs(ips []*net.IPNet) error {
 	a.releasedIPs = ips
 	return nil
 }
 
-func (a *allocatorStub) IsErrAllocated(err error) bool {
+func (a *ipAllocatorStub) IsErrAllocated(err error) bool {
 	return errors.Is(err, ipam.ErrAllocated)
+}
+
+type idAllocatorStub struct {
+	nextID         int
+	reserveIDError error
+	releasedID     bool
+}
+
+func (a *idAllocatorStub) AllocateID() (int, error) {
+	return a.nextID, nil
+}
+
+func (a *idAllocatorStub) ReserveID(id int) error {
+	return a.reserveIDError
+}
+
+func (a *idAllocatorStub) ReleaseID() {
+	a.releasedID = true
 }
 
 func Test_allocatePodAnnotationWithRollback(t *testing.T) {
@@ -58,6 +78,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 
 	type args struct {
 		ipAllocator subnet.NamedAllocator
+		idAllocator id.NamedAllocator
 		network     *nadapi.NetworkSelectionElement
 		reallocate  bool
 	}
@@ -65,6 +86,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		name                      string
 		args                      args
 		ipam                      bool
+		idAllocation              bool
 		podAnnotation             *util.PodAnnotation
 		invalidNetworkAnnotation  bool
 		wantUpdatedPod            bool
@@ -72,6 +94,8 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		wantPodAnnotation         *util.PodAnnotation
 		wantReleasedIPs           []*net.IPNet
 		wantReleasedIPsOnRollback []*net.IPNet
+		wantReleaseID             bool
+		wantRelasedIDOnRollback   bool
 		wantErr                   bool
 	}{
 		{
@@ -100,7 +124,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network: &nadapi.NetworkSelectionElement{
 					IPRequest: []string{"192.168.0.4/24"},
 				},
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
@@ -119,7 +143,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					IPRequest:      []string{"192.168.0.4/24"},
 					GatewayRequest: ovntest.MustParseIPs("192.168.0.1"),
 				},
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
@@ -149,7 +173,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			name: "expect new IP",
 			ipam: true,
 			args: args{
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
@@ -177,7 +201,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
 			},
 			args: args{
-				ipAllocator: &allocatorStub{},
+				ipAllocator: &ipAllocatorStub{},
 			},
 			wantPodAnnotation: &util.PodAnnotation{
 				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
@@ -195,7 +219,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
 			},
 			args: args{
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					allocateIPsError: ipam.ErrAllocated,
 				},
 			},
@@ -214,7 +238,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
 			},
 			args: args{
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					allocateIPsError: errors.New("Allocate IPs failed"),
 				},
 			},
@@ -230,7 +254,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network: &nadapi.NetworkSelectionElement{
 					IPRequest: []string{"192.168.0.4/24"},
 				},
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
@@ -258,7 +282,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network: &nadapi.NetworkSelectionElement{
 					IPRequest: []string{"192.168.0.4/24"},
 				},
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					netxtIPs:         ovntest.MustParseIPNets("192.168.0.3/24"),
 					allocateIPsError: ipam.ErrAllocated,
 				},
@@ -286,7 +310,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network: &nadapi.NetworkSelectionElement{
 					IPRequest: []string{"192.168.0.4/24"},
 				},
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					netxtIPs:         ovntest.MustParseIPNets("192.168.0.3/24"),
 					allocateIPsError: errors.New("Allocate IPs failed"),
 				},
@@ -313,7 +337,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network: &nadapi.NetworkSelectionElement{
 					IPRequest: []string{"ivalid"},
 				},
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
@@ -327,7 +351,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network: &nadapi.NetworkSelectionElement{
 					MacRequest: "ivalid",
 				},
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
@@ -343,7 +367,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network: &nadapi.NetworkSelectionElement{
 					MacRequest: requestedMAC,
 				},
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
@@ -368,15 +392,97 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			ipam: true,
 			args: args{
 				network: &nadapi.NetworkSelectionElement{
-					MacRequest: "ivalid",
+					MacRequest: "invalid",
 				},
-				ipAllocator: &allocatorStub{
+				ipAllocator: &ipAllocatorStub{
 					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			invalidNetworkAnnotation: true,
 			wantErr:                  true,
 			wantReleasedIPs:          ovntest.MustParseIPNets("192.168.0.3/24"),
+		},
+		{
+			// on networks with ID allocation, expect allocated ID
+			name:         "expect ID allocation",
+			idAllocation: true,
+			args: args{
+				idAllocator: &idAllocatorStub{
+					nextID: 100,
+				},
+			},
+			podAnnotation: &util.PodAnnotation{
+				MAC: randomMac,
+			},
+			wantPodAnnotation: &util.PodAnnotation{
+				MAC:      randomMac,
+				TunnelID: 100,
+			},
+			wantUpdatedPod:          true,
+			wantRelasedIDOnRollback: true,
+		},
+		{
+			// on networks with ID allocation, already allocated, expect
+			// allocated ID
+			name:         "expect already allocated ID",
+			idAllocation: true,
+			args: args{
+				idAllocator: &idAllocatorStub{},
+			},
+			podAnnotation: &util.PodAnnotation{
+				MAC:      randomMac,
+				TunnelID: 200,
+			},
+			wantPodAnnotation: &util.PodAnnotation{
+				MAC:      randomMac,
+				TunnelID: 200,
+			},
+			wantRelasedIDOnRollback: true,
+		},
+		{
+			// ID allocation error
+			name:         "expect ID allocation error",
+			idAllocation: true,
+			args: args{
+				idAllocator: &idAllocatorStub{
+					reserveIDError: errors.New("ID allocation error"),
+				},
+			},
+			podAnnotation: &util.PodAnnotation{
+				MAC:      randomMac,
+				TunnelID: 200,
+			},
+			wantErr: true,
+		},
+		{
+			// ID allocation error
+			name:         "expect ID allocation error",
+			idAllocation: true,
+			args: args{
+				idAllocator: &idAllocatorStub{
+					reserveIDError: errors.New("ID allocation error"),
+				},
+			},
+			podAnnotation: &util.PodAnnotation{
+				MAC:      randomMac,
+				TunnelID: 200,
+			},
+			wantErr: true,
+		},
+		{
+			// expect ID release on error
+			name:         "expect error, release ID",
+			idAllocation: true,
+			args: args{
+				network: &nadapi.NetworkSelectionElement{
+					MacRequest: "invalid",
+				},
+				idAllocator: &idAllocatorStub{
+					nextID: 300,
+				},
+			},
+			wantErr:       true,
+			wantReleaseID: true,
 		},
 	}
 	for _, tt := range tests {
@@ -395,10 +501,10 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			var netInfo util.NetInfo
 			netInfo = &util.DefaultNetInfo{}
 			nadName := types.DefaultNetworkName
-			if !tt.ipam {
+			if !tt.ipam || tt.idAllocation {
 				nadName = util.GetNADName(network.Namespace, network.Name)
 				netInfo, err = util.NewNetInfo(&ovncnitypes.NetConf{
-					Topology: types.LocalnetTopology,
+					Topology: types.Layer2Topology,
 					NetConf: cnitypes.NetConf{
 						Name: network.Name,
 					},
@@ -408,6 +514,8 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					t.Fatalf("failed to create NetInfo: %v", err)
 				}
 			}
+
+			config.OVNKubernetesFeature.EnableInterconnect = tt.idAllocation
 
 			pod := &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
@@ -430,6 +538,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 
 			pod, podAnnotation, rollback, err := allocatePodAnnotationWithRollback(
 				tt.args.ipAllocator,
+				tt.args.idAllocator,
 				netInfo,
 				pod,
 				network,
@@ -437,13 +546,27 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			)
 
 			if tt.args.ipAllocator != nil {
-				releasedIPs := tt.args.ipAllocator.(*allocatorStub).releasedIPs
-				g.Expect(releasedIPs).To(gomega.Equal(tt.wantReleasedIPs), "Release on error behaved unexpectedly")
-				tt.args.ipAllocator.(*allocatorStub).releasedIPs = nil
+				releasedIPs := tt.args.ipAllocator.(*ipAllocatorStub).releasedIPs
+				g.Expect(releasedIPs).To(gomega.Equal(tt.wantReleasedIPs), "Release IP on error behaved unexpectedly")
+				tt.args.ipAllocator.(*ipAllocatorStub).releasedIPs = nil
+			}
 
-				rollback()
-				releasedIPs = tt.args.ipAllocator.(*allocatorStub).releasedIPs
-				g.Expect(releasedIPs).To(gomega.Equal(tt.wantReleasedIPsOnRollback), "Release on rollback behaved unexpectedly")
+			if tt.args.idAllocator != nil {
+				releasedID := tt.args.idAllocator.(*idAllocatorStub).releasedID
+				g.Expect(releasedID).To(gomega.Equal(tt.wantReleaseID), "Release ID on error behaved unexpectedly")
+				tt.args.idAllocator.(*idAllocatorStub).releasedID = false
+			}
+
+			rollback()
+
+			if tt.args.ipAllocator != nil {
+				releasedIPs := tt.args.ipAllocator.(*ipAllocatorStub).releasedIPs
+				g.Expect(releasedIPs).To(gomega.Equal(tt.wantReleasedIPsOnRollback), "Release IP on rollback behaved unexpectedly")
+			}
+
+			if tt.args.idAllocator != nil {
+				releasedID := tt.args.idAllocator.(*idAllocatorStub).releasedID
+				g.Expect(releasedID).To(gomega.Equal(tt.wantRelasedIDOnRollback), "Release ID on rollback behaved unexpectedly")
 			}
 
 			if tt.wantErr {

@@ -42,7 +42,7 @@ type networkClusterController struct {
 	// unique id of the network
 	networkID int
 
-	podIPAllocator      *pod.PodIPAllocator
+	podAllocator        *pod.PodAllocator
 	hostSubnetAllocator *subnetallocator.HostSubnetAllocator
 
 	util.NetInfo
@@ -67,18 +67,22 @@ func newNetworkClusterController(networkID int, netInfo util.NetInfo, ovnClient 
 		ncc.hostSubnetAllocator = subnetallocator.NewHostSubnetAllocator(networkID, netInfo, wf.NodeCoreInformer().Lister(), kube)
 	}
 
-	if ncc.hasPodIPAllocation() {
-		ncc.podIPAllocator = pod.NewPodIPAllocator(netInfo, wf.PodCoreInformer().Lister(), kube)
+	if ncc.hasPodAllocation() {
+		ncc.podAllocator = pod.NewPodAllocator(netInfo, wf.PodCoreInformer().Lister(), kube)
 	}
 
 	ncc.initRetryFramework()
 	return ncc
 }
 
-func (ncc *networkClusterController) hasPodIPAllocation() bool {
-	// we only do pod IP allocation on L2 topologies with IPAM on interconnect
+func (ncc *networkClusterController) hasPodAllocation() bool {
+	// we only do pod allocation on L2 topologies with interconnect
 	switch ncc.TopologyType() {
-	case types.Layer2Topology, types.LocalnetTopology:
+	case types.Layer2Topology:
+		// We need to allocate the PodAnnotation
+		return config.OVNKubernetesFeature.EnableInterconnect
+	case types.LocalnetTopology:
+		// We need to allocate the PodAnnotation if there is IPAM
 		return config.OVNKubernetesFeature.EnableInterconnect && len(ncc.Subnets()) > 0
 	}
 	return false
@@ -94,7 +98,7 @@ func (ncc *networkClusterController) initRetryFramework() {
 		ncc.retryNodes = ncc.newRetryFramework(factory.NodeType, true)
 	}
 
-	if ncc.hasPodIPAllocation() {
+	if ncc.hasPodAllocation() {
 		ncc.retryPods = ncc.newRetryFramework(factory.PodType, true)
 	}
 }
@@ -117,8 +121,8 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 		ncc.nodeHandler = nodeHandler
 	}
 
-	if ncc.hasPodIPAllocation() {
-		err := ncc.podIPAllocator.InitRanges()
+	if ncc.hasPodAllocation() {
+		err := ncc.podAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}
@@ -196,7 +200,7 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
 		}
-		err := h.ncc.podIPAllocator.Reconcile(nil, pod)
+		err := h.ncc.podAllocator.Reconcile(nil, pod)
 		if err != nil {
 			klog.Infof("Pod add failed for %s/%s, will try again later: %v",
 				pod.Namespace, pod.Name, err)
@@ -233,7 +237,7 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		if !ok {
 			return fmt.Errorf("could not cast %T new object to *corev1.Pod", newObj)
 		}
-		err := h.ncc.podIPAllocator.Reconcile(old, new)
+		err := h.ncc.podAllocator.Reconcile(old, new)
 		if err != nil {
 			klog.Infof("Pod update failed for %s/%s, will try again later: %v",
 				new.Namespace, new.Name, err)
@@ -263,7 +267,7 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
 		}
-		err := h.ncc.podIPAllocator.Reconcile(pod, nil)
+		err := h.ncc.podAllocator.Reconcile(pod, nil)
 		if err != nil {
 			klog.Infof("Pod delete failed for %s/%s, will try again later: %v",
 				pod.Namespace, pod.Name, err)
@@ -287,7 +291,7 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 	} else {
 		switch h.objType {
 		case factory.PodType:
-			syncFunc = h.ncc.podIPAllocator.Sync
+			syncFunc = h.ncc.podAllocator.Sync
 		case factory.NodeType:
 			syncFunc = h.ncc.hostSubnetAllocator.Sync
 
