@@ -156,8 +156,6 @@ func defaultNetworkBridgeMapping() BridgeMapping {
 }
 
 func bridgeMapping(physnet, ovsBridge string) BridgeMapping {
-	physnet = strings.ReplaceAll(physnet, "-", ".")
-	physnet = strings.ReplaceAll(physnet, "/", ".")
 	return BridgeMapping{
 		physnet:   physnet,
 		ovsBridge: ovsBridge,
