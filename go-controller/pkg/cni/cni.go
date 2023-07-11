@@ -144,7 +144,11 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 		return nil, err
 	}
 
-	podInterfaceInfo.SkipIPConfig = kubevirt.IsPodLiveMigratable(pod)
+	if pr.netName == types.DefaultNetworkName {
+		podInterfaceInfo.SkipIPConfig = kubevirt.IsPodLiveMigratable(pod)
+	} else {
+		podInterfaceInfo.SkipIPConfig = pr.shouldSkipPodIPConfig()
+	}
 
 	response := &Response{KubeAuth: kubeAuth}
 	if !config.UnprivilegedMode {
@@ -157,6 +161,12 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	}
 
 	return response, nil
+}
+
+func (pr *PodRequest) shouldSkipPodIPConfig() bool {
+	return pr.CNIConf != nil &&
+		(pr.CNIConf.Topology == types.Layer2Topology || pr.CNIConf.Topology == types.LocalnetTopology) &&
+		pr.CNIConf.Subnets != ""
 }
 
 func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
