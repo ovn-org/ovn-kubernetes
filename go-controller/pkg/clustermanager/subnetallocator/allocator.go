@@ -14,9 +14,10 @@ var ErrSubnetAllocatorFull = fmt.Errorf("no subnets available.")
 type SubnetAllocator interface {
 	AddNetworkRange(network *net.IPNet, hostSubnetLen int) error
 	MarkAllocatedNetworks(string, ...*net.IPNet) error
-	// Usage returns the number of available and used v4 subnets, and
-	// the number of available and used v6 subnets
-	Usage() (uint64, uint64, uint64, uint64)
+	// Usage returns the number of used/allocated v4 and v6 subnets
+	Usage() (uint64, uint64)
+	// Count returns the number available (both used and unused) v4 and v6 subnets
+	Count() (uint64, uint64)
 	AllocateNetworks(string) ([]*net.IPNet, error)
 	AllocateIPv4Network(string) (*net.IPNet, error)
 	AllocateIPv6Network(string) (*net.IPNet, error)
@@ -40,21 +41,28 @@ func NewSubnetAllocator() SubnetAllocator {
 	return &BaseSubnetAllocator{}
 }
 
-// Usage returns the number of allocated and used IPv4 subnets, and the number
-// of allocated and used IPv6 subnets.
-func (sna *BaseSubnetAllocator) Usage() (uint64, uint64, uint64, uint64) {
-	var v4count, v4used, v6count, v6used uint64
+// Usage returns the number of used/allocated v4 and v6 subnets
+func (sna *BaseSubnetAllocator) Usage() (uint64, uint64) {
+	var v4used, v6used uint64
 	for _, snr := range sna.v4ranges {
-		c, u := snr.usage()
-		v4count = v4count + c
-		v4used = v4used + u
+		v4used = v4used + snr.usage()
 	}
 	for _, snr := range sna.v6ranges {
-		c, u := snr.usage()
-		v6count = v6count + c
-		v6used = v6used + u
+		v6used = v6used + snr.usage()
 	}
-	return v4count, v4used, v6count, v6used
+	return v4used, v6used
+}
+
+// Count returns the number of available (both used and unused) v4 and v6 subnets
+func (sna *BaseSubnetAllocator) Count() (uint64, uint64) {
+	var v4count, v6count uint64
+	for _, snr := range sna.v4ranges {
+		v4count = v4count + snr.count()
+	}
+	for _, snr := range sna.v6ranges {
+		v6count = v6count + snr.count()
+	}
+	return v4count, v6count
 }
 
 // AddNetworkRange makes the given range available for allocation and returns
@@ -302,10 +310,15 @@ func newSubnetAllocatorRange(network *net.IPNet, hostSubnetLen int) (*subnetAllo
 	return snr, nil
 }
 
-// usage returns the number of available subnets and the number of allocated subnets
-func (snr *subnetAllocatorRange) usage() (uint64, uint64) {
+// usage returns the number of used/allocated subnets
+func (snr *subnetAllocatorRange) usage() uint64 {
+	return uint64(snr.used)
+}
+
+// count returns the number of available subnets (both used and unused)
+func (snr *subnetAllocatorRange) count() uint64 {
 	var one uint64 = 1
-	return one << snr.subnetBits, uint64(snr.used)
+	return one << snr.subnetBits
 }
 
 type alreadyOwnedError struct {

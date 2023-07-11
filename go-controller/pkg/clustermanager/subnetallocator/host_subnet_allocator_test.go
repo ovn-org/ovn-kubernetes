@@ -303,7 +303,7 @@ func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
 	}
 
 	// test network allocation works correctly
-	_, v4usedBefore, _, v6usedBefore := sna.clusterSubnetAllocator.Usage()
+	v4usedBefore, v6usedBefore := sna.clusterSubnetAllocator.Usage()
 	got, allocated, err := sna.allocateNodeSubnets(sna.clusterSubnetAllocator, "testNode", nil, true, true)
 	if err == nil {
 		t.Fatalf("allocateNodeSubnets() expected error but got success")
@@ -315,7 +315,7 @@ func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
 		t.Fatalf("allocateNodeSubnets() expected no allocated subnets, got %v", allocated)
 	}
 
-	_, v4usedAfter, _, v6usedAfter := sna.clusterSubnetAllocator.Usage()
+	v4usedAfter, v6usedAfter := sna.clusterSubnetAllocator.Usage()
 	if v4usedAfter != v4usedBefore {
 		t.Fatalf("Expected %d v4 allocated subnets, but got %d", v4usedBefore, v4usedAfter)
 	}
