@@ -1047,25 +1047,25 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 	return nil
 }
 
-// syncEgressIPs This method takes care syncing stale data in the egress ip status
-// with cloud private ip config upon master reboot cases. cloud private ip config
-// entry would have been deleted when master was down whereas egress ip status
-// was not updated for the deleted entry in an error scenario. Hence this method
-// ensures egress ip status is upto date with available cloud private ip config
-// entry.
-func (eIPC *egressIPClusterController) syncEgressIPs(ips []interface{}) error {
+// syncCloudPrivateIPConfigs This method takes care syncing stale data in the
+// egress ip status with cloud private ip config upon master reboot cases.
+// cloud private ip config entry would have been deleted when master was down
+// whereas egress ip status was not updated for the deleted entry in an error
+// scenario. Hence this method ensures egress ip status is upto date with
+// available cloud private ip config entry.
+func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interface{}) error {
 	if !util.PlatformTypeIsEgressIPCloudProvider() {
 		return nil
 	}
-	cloudPrivateIPConfigMap, err := eIPC.getCloudPrivateIPConfigMap()
+	cloudPrivateIPConfigMap, err := eIPC.getCloudPrivateIPConfigMap(objs)
 	if err != nil {
-		return fmt.Errorf("syncEgressIPs unable to get cloud private ip config: %w", err)
+		return fmt.Errorf("syncCloudPrivateIPConfigs unable to get cloud private ip config: %w", err)
 	}
-	egressIPs, err := eIPC.kube.GetEgressIPs()
+	egressIPs, err := eIPC.watchFactory.GetEgressIPs()
 	if err != nil {
-		return fmt.Errorf("syncEgressIPs unable to get Egress IPs: %w", err)
+		return fmt.Errorf("syncCloudPrivateIPConfigs unable to get Egress IPs: %w", err)
 	}
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
 		updatedStatus := []egressipv1.EgressIPStatusItem{}
 		cloudPrivateIPNotFoundOrInvalid := false
 		for _, status := range egressIP.Status.Items {
@@ -1083,7 +1083,7 @@ func (eIPC *egressIPClusterController) syncEgressIPs(ips []interface{}) error {
 			// object with updated status.
 			err = eIPC.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus)
 			if err != nil {
-				return fmt.Errorf("syncEgressIPs unable to update EgressIP status: %w", err)
+				return fmt.Errorf("syncCloudPrivateIPConfigs unable to update EgressIP status: %w", err)
 			}
 		}
 	}
@@ -1093,13 +1093,14 @@ func (eIPC *egressIPClusterController) syncEgressIPs(ips []interface{}) error {
 // getCloudPrivateIPConfigMap returns cloud private ip config map cotaining ip address the key and
 // assigned node node name as the value. This method is intended to be invoked only in the case of
 // cloud environment.
-func (eIPC *egressIPClusterController) getCloudPrivateIPConfigMap() (map[string]string, error) {
+func (eIPC *egressIPClusterController) getCloudPrivateIPConfigMap(objs []interface{}) (map[string]string, error) {
 	cloudPrivateIPConfigMap := make(map[string]string)
-	cloudPrivateIPConfigs, err := eIPC.kube.GetCloudPrivateIPConfigs()
-	if err != nil {
-		return nil, err
-	}
-	for _, cloudPrivateIPConfig := range cloudPrivateIPConfigs.Items {
+	for _, obj := range objs {
+		cloudPrivateIPConfig, ok := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		if !ok {
+			klog.Errorf("Could not cast %T object to *ocpcloudnetworkapi.CloudPrivateIPConfig", obj)
+			continue
+		}
 		cloudPrivateIPConfigMap[cloudPrivateIPConfig.Name] = cloudPrivateIPConfig.Status.Node
 	}
 	return cloudPrivateIPConfigMap, nil

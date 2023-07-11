@@ -2255,8 +2255,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				_, err = fakeClusterManagerOVN.eIPC.WatchCloudPrivateIPConfig()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// Since there is no assignment of cloud private ip for one of the egress ip.
-				// syncEgressIPs removes stale entry from egress ip object status and check
-				// if that is done properly or not.
+				// syncCloudPrivateIPConfigs removes stale entry from egress ip object status
+				// and check if that is done properly or not.
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				egressIPs, nodes := getEgressIPStatus(egressIPName)
 				gomega.Expect(nodes[0]).To(gomega.Equal(node2.name))
