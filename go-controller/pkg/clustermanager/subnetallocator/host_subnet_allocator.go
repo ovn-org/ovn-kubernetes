@@ -81,7 +81,7 @@ func (sna *HostSubnetAllocator) hasHybridOverlayAllocation() bool {
 func (sna *HostSubnetAllocator) recordSubnetCount() {
 	// only for the default network
 	if !sna.netInfo.IsSecondary() {
-		v4count, _, v6count, _ := sna.clusterSubnetAllocator.Usage()
+		v4count, v6count := sna.clusterSubnetAllocator.Count()
 		metrics.RecordSubnetCount(float64(v4count), float64(v6count))
 	}
 }
@@ -89,8 +89,8 @@ func (sna *HostSubnetAllocator) recordSubnetCount() {
 func (sna *HostSubnetAllocator) recordSubnetUsage() {
 	// only for the default network
 	if !sna.netInfo.IsSecondary() {
-		v4count, _, v6count, _ := sna.clusterSubnetAllocator.Usage()
-		metrics.RecordSubnetUsage(float64(v4count), float64(v6count))
+		v4used, v6used := sna.clusterSubnetAllocator.Usage()
+		metrics.RecordSubnetUsage(float64(v4used), float64(v6used))
 	}
 }
 
