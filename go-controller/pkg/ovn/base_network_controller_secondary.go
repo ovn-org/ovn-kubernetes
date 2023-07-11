@@ -11,6 +11,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -20,6 +21,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 func (bsnc *BaseSecondaryNetworkController) getPortInfoForSecondaryNetwork(pod *kapi.Pod) map[string]*lpInfo {
@@ -324,6 +326,14 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	txOkCallBack()
 	bsnc.podRecorder.AddLSP(pod.UID, bsnc.NetInfo)
 
+	if bsnc.IsSecondary() &&
+		(bsnc.TopologyType() == types.Layer2Topology || bsnc.TopologyType() == types.LocalnetTopology) &&
+		len(bsnc.Subnets()) > 0 {
+		if err := bsnc.createDHCPOptionsForVM(pod, lsp); err != nil {
+			return err
+		}
+	}
+
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {
 		return fmt.Errorf("UUID is empty from LSP: %+v", *lsp)
@@ -335,6 +345,14 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		metrics.RecordPodCreated(pod, bsnc.NetInfo)
 	}
 	return nil
+}
+
+func (bsnc *BaseSecondaryNetworkController) secondaryNetworkDHCPOptions(hostName string) []kubevirt.Option {
+	opts := []kubevirt.Option{kubevirt.WithHostname(hostName)}
+	if bsnc.MTU() != 0 {
+		return []kubevirt.Option{kubevirt.WithMTU(bsnc.MTU())}
+	}
+	return opts
 }
 
 // removePodForSecondaryNetwork tried to tear down a pod. It returns nil on success and error on failure;
@@ -376,6 +394,10 @@ func (bsnc *BaseSecondaryNetworkController) removeLocalZonePodForSecondaryNetwor
 		bsnc.logicalPortCache.remove(pod, nadName)
 		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfoMap[nadName], nadName)
 		if err != nil {
+			return err
+		}
+
+		if err := kubevirt.DeleteDHCPOptions(bsnc.nbClient, pod); err != nil {
 			return err
 		}
 
@@ -567,4 +589,48 @@ func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Op
 		return ops, fmt.Errorf("failed to get ops to delete address set of network %s", netName)
 	}
 	return ops, nil
+}
+
+func (bsnc *BaseSecondaryNetworkController) createDHCPOptionsForVM(pod *kapi.Pod, lsp *nbdb.LogicalSwitchPort) error {
+	cidr := bsnc.Subnets()[0]
+	if len(bsnc.Subnets()) > 1 {
+		klog.Warningf(
+			"this controller manages more than one subnet. Only processing sticky IPAM for: %s",
+			cidr.CIDR.String(),
+		)
+	}
+	if !utilnet.IsIPv4CIDR(cidr.CIDR) {
+		return fmt.Errorf(
+			"sticky IPAM for secondary networks only supported for IPv4. CIDR: %s",
+			cidr.CIDR.String(),
+		)
+	} else if cidr.CIDR == nil {
+		klog.Warningf(
+			"could not retrieve CIDR for pod: %s/%s on network %q",
+			pod.GetNamespace(),
+			pod.GetName(),
+			bsnc.GetNetworkName(),
+		)
+	}
+	cidrStr := cidr.CIDR.String()
+	klog.Infof("creating DHCP options for CIDR: %s; pod: %s/%s", cidrStr, pod.Namespace, pod.Name)
+
+	vmName := kubevirt.ExtractVMNameFromPod(pod)
+	if vmName == nil {
+		return fmt.Errorf("failed to extract the virtual machine name from pod %s/%s", pod.Namespace, pod.Name)
+	}
+	if err := kubevirt.EnsureDHCPOptions(
+		bsnc.nbClient,
+		bsnc.controllerName,
+		*vmName,
+		&kubevirt.DHCPOptionRequest{
+			Cidr:    *cidr.CIDR,
+			Options: bsnc.secondaryNetworkDHCPOptions(vmName.Name),
+		},
+		nil,
+		lsp,
+	); err != nil {
+		return fmt.Errorf("failed to provision DHCP options for %s: %v", pod.GetName(), err)
+	}
+	return nil
 }

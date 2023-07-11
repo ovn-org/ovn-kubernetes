@@ -27,51 +27,78 @@ type dhcpConfigs struct {
 	V6 *nbdb.DHCPOptions
 }
 
-func EnsureDHCPOptionsForMigratablePod(controllerName string, nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod, ips []*net.IPNet, lsp *nbdb.LogicalSwitchPort) error {
-	vmKey := ExtractVMNameFromPod(pod)
-	if vmKey == nil {
-		return fmt.Errorf("missing vm label at pod %s/%s", pod.Namespace, pod.Name)
+type Option func(option *nbdb.DHCPOptions)
+
+type DHCPOptionRequest struct {
+	Cidr    net.IPNet
+	Options []Option
+}
+
+func newDHCPOptionsForVM(controllerName string, vmName ktypes.NamespacedName, cidr *net.IPNet, opts ...Option) *nbdb.DHCPOptions {
+	serverID := ARPProxyIPv4
+	if utilnet.IsIPv6CIDR(cidr) {
+		serverID = ARPProxyIPv6
 	}
-	dhcpConfigs, err := composeDHCPConfigs(watchFactory, controllerName, *vmKey, ips)
-	if err != nil {
-		return fmt.Errorf("failed composing DHCP options: %v", err)
+	dhcpOption := initDHCPOptions(
+		controllerName,
+		vmName,
+		&nbdb.DHCPOptions{
+			Cidr:    cidr.String(),
+			Options: mandatoryDHCPOptions(serverID),
+		},
+	)
+	for _, opt := range opts {
+		opt(dhcpOption)
 	}
-	err = libovsdbops.CreateOrUpdateDhcpOptions(nbClient, lsp, dhcpConfigs.V4, dhcpConfigs.V6)
-	if err != nil {
+	return dhcpOption
+}
+
+func mandatoryDHCPOptions(serverIP string) map[string]string {
+	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv4)).String()
+	return map[string]string{
+		"server_id":  serverIP,
+		"server_mac": serverMAC,
+		"lease_time": fmt.Sprintf("%d", dhcpLeaseTime),
+	}
+}
+
+func WithDNSServer(serverIP string) Option {
+	return func(option *nbdb.DHCPOptions) {
+		option.Options["dns_server"] = serverIP
+	}
+}
+
+func WithGateway(gwIP string) Option {
+	return func(option *nbdb.DHCPOptions) {
+		option.Options["router"] = gwIP
+	}
+}
+
+func WithMTU(mtu int) Option {
+	return func(option *nbdb.DHCPOptions) {
+		option.Options["mtu"] = fmt.Sprintf("%d", mtu)
+	}
+}
+
+func WithHostname(hostname string) Option {
+	return func(option *nbdb.DHCPOptions) {
+		option.Options["hostname"] = fmt.Sprintf("%q", hostname)
+	}
+}
+
+func EnsureDHCPOptions(nbClient libovsdbclient.Client, controllerName string, vmName ktypes.NamespacedName, v4Req *DHCPOptionRequest, v6Req *DHCPOptionRequest, lsp *nbdb.LogicalSwitchPort) error {
+	v4DHCPConfig := newDHCPOptionsForVM(controllerName, vmName, &v4Req.Cidr, v4Req.Options...)
+	var v6DHCPConfig *nbdb.DHCPOptions
+	if v6Req != nil {
+		v6DHCPConfig = newDHCPOptionsForVM(controllerName, vmName, &v6Req.Cidr, v6Req.Options...)
+	}
+	if err := libovsdbops.CreateOrUpdateDhcpOptions(nbClient, lsp, v4DHCPConfig, v6DHCPConfig); err != nil {
 		return fmt.Errorf("failed creation or updating OVN operations to add DHCP options: %v", err)
 	}
 	return nil
 }
 
-func composeDHCPConfigs(k8scli *factory.WatchFactory, controllerName string, vmKey ktypes.NamespacedName, podIPs []*net.IPNet) (*dhcpConfigs, error) {
-	if len(podIPs) == 0 {
-		return nil, fmt.Errorf("missing podIPs to compose dhcp options")
-	}
-	if vmKey.Name == "" {
-		return nil, fmt.Errorf("missing vmName to compose dhcp options")
-	}
-
-	dnsServerIPv4, dnsServerIPv6, err := retrieveDNSServiceClusterIPs(k8scli)
-	if err != nil {
-		return nil, fmt.Errorf("failed retrieving dns service cluster ip: %v", err)
-	}
-
-	dhcpConfigs := &dhcpConfigs{}
-	for _, ip := range podIPs {
-		_, cidr, err := net.ParseCIDR(ip.String())
-		if err != nil {
-			return nil, fmt.Errorf("failed converting podIPs to cidr to configure dhcp: %v", err)
-		}
-		if utilnet.IsIPv4CIDR(cidr) {
-			dhcpConfigs.V4 = ComposeDHCPv4Options(cidr.String(), dnsServerIPv4, controllerName, vmKey)
-		} else if utilnet.IsIPv6CIDR(cidr) {
-			dhcpConfigs.V6 = ComposeDHCPv6Options(cidr.String(), dnsServerIPv6, controllerName, vmKey)
-		}
-	}
-	return dhcpConfigs, nil
-}
-
-func retrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string, error) {
+func RetrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string, error) {
 	dnsServer, err := k8scli.GetService(config.Kubernetes.DNSServiceNamespace, config.Kubernetes.DNSServiceName)
 	if err != nil {
 		return "", "", err
@@ -88,45 +115,19 @@ func retrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string,
 	return clusterIPv4, clusterIPv6, nil
 }
 
-func ComposeDHCPv4Options(cidr, dnsServer, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
-	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv4)).String()
-	dhcpOptions := &nbdb.DHCPOptions{
-		Cidr: cidr,
-		Options: map[string]string{
-			"lease_time": fmt.Sprintf("%d", dhcpLeaseTime),
-			"router":     ARPProxyIPv4,
-			"dns_server": dnsServer,
-			"server_id":  ARPProxyIPv4,
-			"server_mac": serverMAC,
-			"hostname":   fmt.Sprintf("%q", vmKey.Name),
-		},
-	}
-	return composeDHCPOptions(controllerName, vmKey, dhcpOptions)
-}
-
-func ComposeDHCPv6Options(cidr, dnsServer, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
-	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv6)).String()
-	dhcpOptions := &nbdb.DHCPOptions{
-		Cidr: cidr,
-		Options: map[string]string{
-			"server_id": serverMAC,
-		},
-	}
-	if dnsServer != "" {
-		dhcpOptions.Options["dns_server"] = dnsServer
-	}
-	return composeDHCPOptions(controllerName, vmKey, dhcpOptions)
-}
-
-func composeDHCPOptions(controllerName string, vmKey ktypes.NamespacedName, dhcpOptions *nbdb.DHCPOptions) *nbdb.DHCPOptions {
-	dhcpvOptionsDbObjectID := libovsdbops.NewDbObjectIDs(libovsdbops.VirtualMachineDHCPOptions, controllerName,
-		map[libovsdbops.ExternalIDKey]string{
-			libovsdbops.ObjectNameKey: vmKey.String(),
-			libovsdbops.CIDRKey:       strings.ReplaceAll(dhcpOptions.Cidr, ":", "."),
-		})
+func initDHCPOptions(controllerName string, vmKey ktypes.NamespacedName, dhcpOptions *nbdb.DHCPOptions) *nbdb.DHCPOptions {
+	dhcpvOptionsDbObjectID := DHCPOptionsKeyForVMs(controllerName, vmKey, dhcpOptions.Cidr)
 	dhcpOptions.ExternalIDs = dhcpvOptionsDbObjectID.GetExternalIDs()
 	dhcpOptions.ExternalIDs[OvnZoneExternalIDKey] = OvnLocalZone
 	return dhcpOptions
+}
+
+func DHCPOptionsKeyForVMs(controllerName string, vmKey ktypes.NamespacedName, cidr string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.VirtualMachineDHCPOptions, controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: vmKey.String(),
+			libovsdbops.CIDRKey:       strings.ReplaceAll(cidr, ":", "."),
+		})
 }
 
 func DeleteDHCPOptions(nbClient libovsdbclient.Client, pod *corev1.Pod) error {

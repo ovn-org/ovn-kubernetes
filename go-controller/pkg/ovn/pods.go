@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	utilnet "k8s.io/utils/net"
 	"net"
 	"sync/atomic"
 	"time"
@@ -272,7 +273,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	if kubevirt.IsPodLiveMigratable(pod) {
-		if err := kubevirt.EnsureDHCPOptionsForMigratablePod(oc.controllerName, oc.nbClient, oc.watchFactory, pod, podAnnotation.IPs, lsp); err != nil {
+		if err := oc.createDHCPOptionsForVM(pod, podAnnotation.IPs, lsp); err != nil {
 			return err
 		}
 	}
@@ -317,4 +318,43 @@ func (oc *DefaultNetworkController) allocateSyncMigratablePodIPsOnZone(vms map[k
 	}
 
 	return vms, expectedLogicalPortName, podAnnotation, nil
+}
+
+func (oc *DefaultNetworkController) createDHCPOptionsForVM(pod *kapi.Pod, podIPs []*net.IPNet, lsp *nbdb.LogicalSwitchPort) error {
+	vmName := kubevirt.ExtractVMNameFromPod(pod)
+	if vmName == nil {
+		return fmt.Errorf("failed to extract the virtual machine name from pod %s/%s", pod.Namespace, pod.Name)
+	}
+
+	dnsServerIPv4, dnsServerIPv6, err := kubevirt.RetrieveDNSServiceClusterIPs(oc.watchFactory)
+	if err != nil {
+		return fmt.Errorf("failed retrieving dns service cluster ip: %v", err)
+	}
+
+	var v4DHCPReq, v6DHCPReq *kubevirt.DHCPOptionRequest
+	for _, ip := range podIPs {
+		_, cidr, err := net.ParseCIDR(ip.String())
+		if err != nil {
+			return fmt.Errorf("failed converting podIPs to cidr to configure dhcp: %v", err)
+		}
+		if utilnet.IsIPv4CIDR(cidr) {
+			v4DHCPReq = &kubevirt.DHCPOptionRequest{
+				Cidr: *cidr,
+				Options: []kubevirt.Option{
+					kubevirt.WithHostname(vmName.Name),
+					kubevirt.WithDNSServer(dnsServerIPv4),
+					kubevirt.WithGateway(kubevirt.ARPProxyIPv4),
+				},
+			}
+		} else if utilnet.IsIPv6CIDR(cidr) {
+			v6DHCPReq = &kubevirt.DHCPOptionRequest{
+				Cidr: *cidr,
+			}
+			if dnsServerIPv6 != "" {
+				v6DHCPReq.Options = append(v6DHCPReq.Options, kubevirt.WithDNSServer(dnsServerIPv6))
+			}
+		}
+	}
+
+	return kubevirt.EnsureDHCPOptions(oc.nbClient, oc.controllerName, *vmName, v4DHCPReq, v6DHCPReq, lsp)
 }
