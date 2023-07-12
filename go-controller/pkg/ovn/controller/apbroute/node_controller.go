@@ -36,19 +36,19 @@ type ExternalGatewayNodeController struct {
 	// route policies
 
 	// routerInformer v1apbinformer.AdminPolicyBasedExternalRouteInformer
-	routeLister adminpolicybasedroutelisters.AdminPolicyBasedExternalRouteLister
-	routeSynced cache.InformerSynced
-	routeQueue  workqueue.RateLimitingInterface
+	routeLister   adminpolicybasedroutelisters.AdminPolicyBasedExternalRouteLister
+	routeInformer cache.SharedIndexInformer
+	routeQueue    workqueue.RateLimitingInterface
 
 	// Pods
-	podLister corev1listers.PodLister
-	podSynced cache.InformerSynced
-	podQueue  workqueue.RateLimitingInterface
+	podLister   corev1listers.PodLister
+	podInformer cache.SharedIndexInformer
+	podQueue    workqueue.RateLimitingInterface
 
 	// Namespaces
-	namespaceQueue  workqueue.RateLimitingInterface
-	namespaceLister corev1listers.NamespaceLister
-	namespaceSynced cache.InformerSynced
+	namespaceQueue    workqueue.RateLimitingInterface
+	namespaceLister   corev1listers.NamespaceLister
+	namespaceInformer cache.SharedIndexInformer
 
 	//external gateway caches
 	//make them public so that they can be used by the annotation logic to lock on namespaces and share the same external route information
@@ -74,20 +74,20 @@ func NewExternalNodeController(
 	c := &ExternalGatewayNodeController{
 		stopCh:             stopCh,
 		routePolicyFactory: routePolicyFactory,
-		routeLister:        routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
-		routeSynced:        routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer().HasSynced,
+		routeLister:        externalRouteInformer.Lister(),
+		routeInformer:      externalRouteInformer.Informer(),
 		routeQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 			"apbexternalroutes",
 		),
-		podLister: podInformer.Lister(),
-		podSynced: podInformer.Informer().HasSynced,
+		podLister:   podInformer.Lister(),
+		podInformer: podInformer.Informer(),
 		podQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 			"apbexternalroutepods",
 		),
-		namespaceLister: namespaceLister,
-		namespaceSynced: namespaceInformer.Informer().HasSynced,
+		namespaceLister:   namespaceLister,
+		namespaceInformer: namespaceInformer.Informer(),
 		namespaceQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 			"apbexternalroutenamespaces",
@@ -100,54 +100,53 @@ func NewExternalNodeController(
 			&conntrackClient{podLister: podInformer.Lister()}),
 	}
 
-	_, err := namespaceInformer.Informer().AddEventHandler(
-		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-			AddFunc:    c.onNamespaceAdd,
-			UpdateFunc: c.onNamespaceUpdate,
-			DeleteFunc: c.onNamespaceDelete,
-		}))
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = podInformer.Informer().AddEventHandler(
-		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-			AddFunc:    c.onPodAdd,
-			UpdateFunc: c.onPodUpdate,
-			DeleteFunc: c.onPodDelete,
-		}))
-	if err != nil {
-		return nil, err
-	}
-	_, err = externalRouteInformer.Informer().AddEventHandler(
-		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-			AddFunc:    c.onPolicyAdd,
-			UpdateFunc: c.onPolicyUpdate,
-			DeleteFunc: c.onPolicyDelete,
-		}))
-	if err != nil {
-		return nil, err
-	}
-
 	return c, nil
-
 }
 
 func (c *ExternalGatewayNodeController) Run(wg *sync.WaitGroup, threadiness int) error {
 	defer utilruntime.HandleCrash()
 	klog.V(4).Info("Starting Admin Policy Based Route Node Controller")
 
+	_, err := c.namespaceInformer.AddEventHandler(
+		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.onNamespaceAdd,
+			UpdateFunc: c.onNamespaceUpdate,
+			DeleteFunc: c.onNamespaceDelete,
+		}))
+	if err != nil {
+		return err
+	}
+
+	_, err = c.podInformer.AddEventHandler(
+		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.onPodAdd,
+			UpdateFunc: c.onPodUpdate,
+			DeleteFunc: c.onPodDelete,
+		}))
+	if err != nil {
+		return err
+	}
+	_, err = c.routeInformer.AddEventHandler(
+		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.onPolicyAdd,
+			UpdateFunc: c.onPolicyUpdate,
+			DeleteFunc: c.onPolicyDelete,
+		}))
+	if err != nil {
+		return err
+	}
+
 	c.routePolicyFactory.Start(c.stopCh)
 
-	if !util.WaitForNamedCacheSyncWithTimeout("apbexternalroutenamespaces", c.stopCh, c.namespaceSynced) {
+	if !util.WaitForNamedCacheSyncWithTimeout("apbexternalroutenamespaces", c.stopCh, c.namespaceInformer.HasSynced) {
 		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !util.WaitForNamedCacheSyncWithTimeout("apbexternalroutepods", c.stopCh, c.podSynced) {
+	if !util.WaitForNamedCacheSyncWithTimeout("apbexternalroutepods", c.stopCh, c.podInformer.HasSynced) {
 		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !util.WaitForNamedCacheSyncWithTimeout("adminpolicybasedexternalroutes", c.stopCh, c.routeSynced) {
+	if !util.WaitForNamedCacheSyncWithTimeout("adminpolicybasedexternalroutes", c.stopCh, c.routeInformer.HasSynced) {
 		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 

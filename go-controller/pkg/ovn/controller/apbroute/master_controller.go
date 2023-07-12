@@ -50,19 +50,19 @@ type ExternalGatewayMasterController struct {
 	stopCh               <-chan struct{}
 
 	// route policies
-	routeLister adminpolicybasedroutelisters.AdminPolicyBasedExternalRouteLister
-	routeSynced cache.InformerSynced
-	routeQueue  workqueue.RateLimitingInterface
+	routeLister   adminpolicybasedroutelisters.AdminPolicyBasedExternalRouteLister
+	routeInformer cache.SharedIndexInformer
+	routeQueue    workqueue.RateLimitingInterface
 
 	// Pods
-	podLister corev1listers.PodLister
-	podSynced cache.InformerSynced
-	podQueue  workqueue.RateLimitingInterface
+	podLister   corev1listers.PodLister
+	podInformer cache.SharedIndexInformer
+	podQueue    workqueue.RateLimitingInterface
 
 	// Namespaces
-	namespaceQueue  workqueue.RateLimitingInterface
-	namespaceLister corev1listers.NamespaceLister
-	namespaceSynced cache.InformerSynced
+	namespaceQueue    workqueue.RateLimitingInterface
+	namespaceLister   corev1listers.NamespaceLister
+	namespaceInformer cache.SharedIndexInformer
 
 	// External gateway caches
 	// Make them public so that they can be used by the annotation logic to lock on namespaces and share the same external route information
@@ -111,19 +111,19 @@ func NewExternalMasterController(
 		apbRoutePolicyClient: apbRoutePolicyClient,
 		stopCh:               stopCh,
 		routeLister:          externalRouteInformer.Lister(),
-		routeSynced:          externalRouteInformer.Informer().HasSynced,
+		routeInformer:        externalRouteInformer.Informer(),
 		routeQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 			"adminpolicybasedexternalroutes",
 		),
-		podLister: podInformer.Lister(),
-		podSynced: podInformer.Informer().HasSynced,
+		podLister:   podInformer.Lister(),
+		podInformer: podInformer.Informer(),
 		podQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 			"apbexternalroutepods",
 		),
-		namespaceLister: namespaceInformer.Lister(),
-		namespaceSynced: namespaceInformer.Informer().HasSynced,
+		namespaceLister:   namespaceInformer.Lister(),
+		namespaceInformer: namespaceInformer.Informer(),
 		namespaceQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 			"apbexternalroutenamespaces",
@@ -139,43 +139,41 @@ func NewExternalMasterController(
 			routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
 			nbCli),
 	}
+	return c, nil
+}
 
-	_, err = namespaceInformer.Informer().AddEventHandler(
+func (c *ExternalGatewayMasterController) Run(wg *sync.WaitGroup, threadiness int) error {
+	defer utilruntime.HandleCrash()
+	klog.V(4).Info("Starting Admin Policy Based Route Controller")
+
+	_, err := c.namespaceInformer.AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.onNamespaceAdd,
 			UpdateFunc: c.onNamespaceUpdate,
 			DeleteFunc: c.onNamespaceDelete,
 		}))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	_, err = podInformer.Informer().AddEventHandler(
+	_, err = c.podInformer.AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.onPodAdd,
 			UpdateFunc: c.onPodUpdate,
 			DeleteFunc: c.onPodDelete,
 		}))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	_, err = externalRouteInformer.Informer().AddEventHandler(
+	_, err = c.routeInformer.AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.onPolicyAdd,
 			UpdateFunc: c.onPolicyUpdate,
 			DeleteFunc: c.onPolicyDelete,
 		}))
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	return c, nil
-
-}
-
-func (c *ExternalGatewayMasterController) Run(wg *sync.WaitGroup, threadiness int) error {
-	defer utilruntime.HandleCrash()
-	klog.V(4).Info("Starting Admin Policy Based Route Controller")
 
 	c.routePolicyFactory.Start(c.stopCh)
 
@@ -185,9 +183,9 @@ func (c *ExternalGatewayMasterController) Run(wg *sync.WaitGroup, threadiness in
 		resourceName string
 		syncFn       cache.InformerSynced
 	}{
-		{"apbexternalroutenamespaces", c.namespaceSynced},
-		{"apbexternalroutepods", c.podSynced},
-		{"adminpolicybasedexternalroutes", c.routeSynced},
+		{"apbexternalroutenamespaces", c.namespaceInformer.HasSynced},
+		{"apbexternalroutepods", c.podInformer.HasSynced},
+		{"adminpolicybasedexternalroutes", c.routeInformer.HasSynced},
 	} {
 		syncWg.Add(1)
 		go func(resourceName string, syncFn cache.InformerSynced) {
