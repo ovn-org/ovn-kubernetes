@@ -189,6 +189,7 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 							Name: "node1",
 							Annotations: map[string]string{
 								"k8s.ovn.org/node-subnets": "{\"default\":[\"10.244.0.0/24\"],\"blue\":[\"192.168.0.0/24\"],\"red\":[\"192.169.0.0/24\"]}",
+								"k8s.ovn.org/network-ids":  "{\"default\":\"0\",\"blue\":\"1\",\"red\":\"2\"}",
 							},
 						},
 					},
@@ -197,6 +198,7 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 							Name: "node2",
 							Annotations: map[string]string{
 								"k8s.ovn.org/node-subnets": "{\"default\":[\"10.244.1.0/24\"],\"blue\":[\"192.168.1.0/24\"],\"red\":[\"192.169.1.0/24\"]}",
+								"k8s.ovn.org/network-ids":  "{\"default\":\"0\",\"blue\":\"1\",\"red\":\"2\"}",
 							},
 						},
 					},
@@ -205,6 +207,7 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 							Name: "node3",
 							Annotations: map[string]string{
 								"k8s.ovn.org/node-subnets": "{\"default\":[\"10.244.2.0/24\"],\"blue\":[\"192.168.2.0/24\"],\"red\":[\"192.169.2.0/24\"]}",
+								"k8s.ovn.org/network-ids":  "{\"default\":\"0\",\"blue\":\"1\",\"red\":\"2\"}",
 							},
 						},
 					},
@@ -225,7 +228,52 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				var expectBlueCleanup, expectRedCleanup bool
+				checkNodeAnnotations := func() error {
+					for _, n := range nodes {
+						updatedNode, err := f.GetNode(n.Name)
+						if err != nil {
+							return err
+						}
+
+						_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, ovntypes.DefaultNetworkName)
+						if err != nil {
+							return err
+						}
+						_, err = util.ParseNetworkIDAnnotation(updatedNode, ovntypes.DefaultNetworkName)
+						if err != nil {
+							return err
+						}
+
+						_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, "blue")
+						if err == nil && expectBlueCleanup {
+							return fmt.Errorf("unexpected subnet annotation presence for network blue on node %s: expected %v got %v", updatedNode.Name, !expectBlueCleanup, err == nil)
+						}
+
+						_, err = util.ParseNetworkIDAnnotation(updatedNode, "blue")
+						if err == nil && expectBlueCleanup {
+							return fmt.Errorf("unexpected network ID annotation presence for network blue on node %s: expected %v got %v", updatedNode.Name, !expectBlueCleanup, err == nil)
+						}
+
+						_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, "red")
+						if err == nil && expectRedCleanup {
+							return fmt.Errorf("unexpected subnet annotation presence for network red on node %s: expected %v got %v", updatedNode.Name, !expectRedCleanup, err == nil)
+						}
+
+						_, err = util.ParseNetworkIDAnnotation(updatedNode, "red")
+						if err == nil && expectRedCleanup {
+							return fmt.Errorf("unexpected network ID annotation presence for network red on node %s: expected %v got %v", updatedNode.Name, !expectRedCleanup, err == nil)
+						}
+					}
+					return nil
+				}
+
+				gomega.Eventually(checkNodeAnnotations).ShouldNot(gomega.HaveOccurred())
+
 				sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				err = sncm.init()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Create a fake nad controller for blue network so that the red network gets cleared
@@ -236,64 +284,33 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				// So testing the cleanup one at a time.
 				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				oc := newNetworkClusterController(util.InvalidNetworkID, netInfo, sncm.ovnClient, sncm.watchFactory)
-				nadControllers := []nad.NetworkController{oc}
 
+				namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
+				oc := newNetworkClusterController(namedIDAllocator, netInfo, sncm.ovnClient, sncm.watchFactory)
+				err = oc.init()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				nadControllers := []nad.NetworkController{oc}
 				err = sncm.CleanupDeletedNetworks(nadControllers)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				gomega.Eventually(func() error {
-					for _, n := range nodes {
-						updatedNode, err := f.GetNode(n.Name)
-						if err != nil {
-							return err
-						}
-
-						_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, ovntypes.DefaultNetworkName)
-						if err != nil {
-							return err
-						}
-
-						_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, "blue")
-						if err != nil {
-							return fmt.Errorf("expected subnet annotation for network blue on node %s to not have been cleaned up", updatedNode.Name)
-						}
-						_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, "red")
-						if err == nil {
-							return fmt.Errorf("expected subnet annotation for network red on node %s to have been cleaned up", updatedNode.Name)
-						}
-					}
-					return nil
-				}).ShouldNot(gomega.HaveOccurred())
+				// Clean up the red network
+				expectBlueCleanup = false
+				expectRedCleanup = true
+				gomega.Eventually(checkNodeAnnotations).ShouldNot(gomega.HaveOccurred())
+				err = sncm.networkIDAllocator.ReserveID("was_red_network_id_released", 2)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Now call CleanupDeletedNetworks() with empty nad controllers.
 				// Blue network should also be cleared.
 				err = sncm.CleanupDeletedNetworks([]nad.NetworkController{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				gomega.Eventually(func() error {
-					for _, n := range nodes {
-						updatedNode, err := f.GetNode(n.Name)
-						if err != nil {
-							return err
-						}
-
-						_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, ovntypes.DefaultNetworkName)
-						if err != nil {
-							return err
-						}
-
-						_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, "blue")
-						if err == nil {
-							return fmt.Errorf("expected subnet annotation for network blue on node %s to have been cleaned up", updatedNode.Name)
-						}
-						_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, "red")
-						if err == nil {
-							return fmt.Errorf("expected subnet annotation for network red on node %s to have been cleaned up", updatedNode.Name)
-						}
-					}
-					return nil
-				}).ShouldNot(gomega.HaveOccurred())
+				expectBlueCleanup = true
+				expectRedCleanup = true
+				gomega.Eventually(checkNodeAnnotations).ShouldNot(gomega.HaveOccurred())
+				err = sncm.networkIDAllocator.ReserveID("was_blue_network_id_released", 1)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				return nil
 			}
@@ -303,6 +320,5 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
-
 	})
 })
