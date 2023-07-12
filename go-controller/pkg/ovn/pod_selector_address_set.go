@@ -38,7 +38,8 @@ type PodSelectorAddressSet struct {
 	backRefs map[string]bool
 
 	// handler is either pod or namespace handler
-	handler *factory.Handler
+	nsHandler  *factory.Handler
+	podHandler *factory.Handler
 
 	podSelector       labels.Selector
 	namespaceSelector labels.Selector
@@ -51,6 +52,8 @@ type PodSelectorAddressSet struct {
 
 	// handlerResources holds the data that is used and updated by the handlers.
 	handlerResources *PodSelectorAddrSetHandlerInfo
+
+	stopChan chan struct{}
 }
 
 // EnsurePodSelectorAddressSet returns address set for requested (podSelector, namespaceSelector, namespace).
@@ -158,6 +161,9 @@ func (bnc *BaseNetworkController) DeletePodSelectorAddressSet(addrSetKey, backRe
 
 func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 	// create pod handler resources before starting the handlers
+	if psas.stopChan == nil {
+		psas.stopChan = util.GetChildStopChan(bnc.stopChan)
+	}
 	if psas.handlerResources == nil {
 		as, err := bnc.addressSetFactory.NewAddressSet(psas.addrSetDbIDs, nil)
 		if err != nil {
@@ -173,11 +179,12 @@ func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 			netInfo:           bnc.NetInfo,
 			ipv4Mode:          ipv4Mode,
 			ipv6Mode:          ipv6Mode,
+			stopChan:          psas.stopChan,
 		}
 	}
 
 	var err error
-	if psas.handler == nil {
+	if psas.nsHandler == nil && psas.podHandler == nil {
 		if psas.namespace != "" {
 			// static namespace
 			if psas.podSelector.Empty() {
@@ -209,6 +216,11 @@ func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 
 func (psas *PodSelectorAddressSet) destroy(bnc *BaseNetworkController) error {
 	klog.Infof("Deleting shared address set for pod selector %s", psas.key)
+	if psas.stopChan != nil {
+		close(psas.stopChan)
+		psas.stopChan = nil
+	}
+
 	psas.needsCleanup = true
 	if psas.handlerResources != nil {
 		err := psas.handlerResources.destroy(bnc)
@@ -216,9 +228,13 @@ func (psas *PodSelectorAddressSet) destroy(bnc *BaseNetworkController) error {
 			return fmt.Errorf("failed to delete handler resources: %w", err)
 		}
 	}
-	if psas.handler != nil {
-		bnc.watchFactory.RemovePodHandler(psas.handler)
-		psas.handler = nil
+	if psas.podHandler != nil {
+		bnc.watchFactory.RemovePodHandler(psas.podHandler)
+		psas.podHandler = nil
+	}
+	if psas.nsHandler != nil {
+		bnc.watchFactory.RemoveNamespaceHandler(psas.nsHandler)
+		psas.nsHandler = nil
 	}
 	psas.needsCleanup = false
 	return nil
@@ -236,14 +252,15 @@ func (bnc *BaseNetworkController) addPodSelectorHandler(psAddrSet *PodSelectorAd
 	retryFramework := bnc.newNetpolRetryFramework(
 		factory.AddressSetPodSelectorType,
 		syncFunc,
-		podHandlerResources)
+		podHandlerResources,
+		psAddrSet.stopChan)
 
 	podHandler, err := retryFramework.WatchResourceFiltered(namespace, podSelector)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for addPodSelectorHandler: %v", err)
 		return err
 	}
-	psAddrSet.handler = podHandler
+	psAddrSet.podHandler = podHandler
 	return nil
 }
 
@@ -258,6 +275,7 @@ func (bnc *BaseNetworkController) addNamespacedPodSelectorHandler(psAddrSet *Pod
 		factory.AddressSetNamespaceAndPodSelectorType,
 		nil,
 		psAddrSet.handlerResources,
+		psAddrSet.stopChan,
 	)
 	namespaceHandler, err := retryFramework.WatchResourceFiltered("", psAddrSet.namespaceSelector)
 	if err != nil {
@@ -265,7 +283,7 @@ func (bnc *BaseNetworkController) addNamespacedPodSelectorHandler(psAddrSet *Pod
 		return err
 	}
 
-	psAddrSet.handler = namespaceHandler
+	psAddrSet.nsHandler = namespaceHandler
 	return nil
 }
 
@@ -301,6 +319,8 @@ type PodSelectorAddrSetHandlerInfo struct {
 	netInfo  util.NetInfo
 	ipv4Mode bool
 	ipv6Mode bool
+
+	stopChan chan struct{}
 }
 
 // idempotent
@@ -535,6 +555,7 @@ func (bnc *BaseNetworkController) handleNamespaceAddUpdate(podHandlerInfo *PodSe
 		factory.AddressSetPodSelectorType,
 		syncFunc,
 		podHandlerInfo,
+		podHandlerInfo.stopChan,
 	)
 	// syncFunc and factory.AddressSetPodSelectorType add event handler also take np.RLock,
 	// and will be called form the same thread. The same thread shouldn't take the same rlock twice.

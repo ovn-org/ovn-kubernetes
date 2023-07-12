@@ -10,6 +10,7 @@ import (
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -287,6 +288,15 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		syncZoneICFailed:            sync.Map{},
 		zoneICHandler:               zoneICHandler,
 	}
+
+	if oc.handlesPodIPAllocation() {
+		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
+			netInfo,
+			cnci.watchFactory.PodCoreInformer().Lister(),
+			cnci.kube)
+		oc.podAnnotationAllocator = podAnnotationAllocator
+	}
+
 	// disable multicast support for secondary networks
 	// TBD: changes needs to be made to support multicast in secondary networks
 	oc.multicastSupport = false

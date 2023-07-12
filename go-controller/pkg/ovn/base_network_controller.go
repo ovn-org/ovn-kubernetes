@@ -11,6 +11,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -95,6 +96,9 @@ type BaseNetworkController struct {
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager
+
+	// An utility to allocate the PodAnnotation to pods
+	podAnnotationAllocator *pod.PodAnnotationAllocator
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
@@ -387,7 +391,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	}
 
 	// Add the switch to the logical switch cache
-	return bnc.lsManager.AddSwitch(logicalSwitch.Name, logicalSwitch.UUID, hostSubnets)
+	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets)
 }
 
 // UpdateNodeAnnotationWithRetry update node's annotation with the given node annotations.
@@ -694,7 +698,7 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr 
 }
 
 func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
-	return !((bnc.TopologyType() == types.Layer2Topology || bnc.TopologyType() == types.LocalnetTopology) && len(bnc.Subnets()) == 0)
+	return util.DoesNetworkRequireIPAM(bnc.NetInfo)
 }
 
 func (bnc *BaseNetworkController) buildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL) *nbdb.PortGroup {

@@ -55,17 +55,25 @@ func allocateExpected(sna SubnetAllocator, n int, expected ...string) error {
 	return nil
 }
 
-func allocateNotExpected(sna SubnetAllocator, n int) error {
+func allocateNotExpected(sna SubnetAllocator, v4n, v6n int) error {
 	if sns, err := sna.AllocateNetworks(testNodeName); err == nil {
-		return fmt.Errorf("unexpectedly succeeded in allocating %s (sns=%v)", networkID(n), sns)
+		return fmt.Errorf("unexpectedly succeeded in allocating v4=%s, v6=%s (sns=%v)", networkID(v4n), networkID(v6n), sns)
 	} else if err != ErrSubnetAllocatorFull {
 		return fmt.Errorf("returned error was not ErrSubnetAllocatorFull (%v)", err)
+	}
+
+	v4used, v6used := sna.Usage()
+	if v4n >= 0 && v4used != uint64(v4n) {
+		return fmt.Errorf("expected %d available v4 subnets but got %d", v4n, v4used)
+	}
+	if v6n >= 0 && v6used != uint64(v6n) {
+		return fmt.Errorf("expected %d available v6 subnets but got %d", v6n, v6used)
 	}
 	return nil
 }
 
 func expectNumSubnets(t *testing.T, sna SubnetAllocator, v4expected, v6expected uint64) error {
-	v4count, _, v6count, _ := sna.Usage()
+	v4count, v6count := sna.Count()
 	if v4count != v4expected {
 		return fmt.Errorf("expected %d available v4 subnets but got %d", v4expected, v4count)
 	}
@@ -90,7 +98,7 @@ func TestAllocateSubnetIPv4(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := allocateNotExpected(sna, 256); err != nil {
+	if err := allocateNotExpected(sna, 256, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -142,7 +150,7 @@ func TestAllocateSubnetLargeHostBitsIPv4(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := allocateNotExpected(sna, 64); err != nil {
+	if err := allocateNotExpected(sna, 64, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -285,7 +293,7 @@ func TestAllocateSubnetNoSubnetBitsIPv4(t *testing.T) {
 	if err := allocateExpected(sna, 0, "10.1.0.0/16"); err != nil {
 		t.Fatal(err)
 	}
-	if err := allocateNotExpected(sna, 1); err != nil {
+	if err := allocateNotExpected(sna, 1, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -300,7 +308,7 @@ func TestAllocateSubnetNoSubnetBitsIPv6(t *testing.T) {
 	if err := allocateExpected(sna, 0, "fd01::/64"); err != nil {
 		t.Fatal(err)
 	}
-	if err := allocateNotExpected(sna, 1); err != nil {
+	if err := allocateNotExpected(sna, 0, 1); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -501,7 +509,7 @@ func TestMultipleSubnets(t *testing.T) {
 		}
 	}
 
-	if err := allocateNotExpected(sna, 8); err != nil {
+	if err := allocateNotExpected(sna, 8, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -519,7 +527,7 @@ func TestMultipleSubnets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := allocateNotExpected(sna, -1); err != nil {
+	if err := allocateNotExpected(sna, -1, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -555,7 +563,7 @@ func TestDualStack(t *testing.T) {
 		}
 	}
 
-	if err := allocateNotExpected(sna, 8); err != nil {
+	if err := allocateNotExpected(sna, 8, 8); err != nil {
 		t.Fatal(err)
 	}
 
@@ -577,7 +585,7 @@ func TestDualStack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := allocateNotExpected(sna, -1); err != nil {
+	if err := allocateNotExpected(sna, -1, -1); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -60,7 +60,7 @@ func (bsnc *BaseSecondaryNetworkController) shouldApplyMultiPolicy(mpolicy *mnpa
 	return false
 }
 
-func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy) *knet.NetworkPolicy {
+func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy, allowPeerSelectors bool) (*knet.NetworkPolicy, error) {
 	var policy knet.NetworkPolicy
 	var ipb *knet.IPBlock
 
@@ -80,6 +80,9 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy) *knet.
 		}
 		ingress.From = make([]knet.NetworkPolicyPeer, len(mingress.From))
 		for j, mfrom := range mingress.From {
+			if !allowPeerSelectors && isPeerSelector(mfrom) {
+				return nil, fmt.Errorf("invalid ingress peer %v in multi-network policy %s; IPAM-less networks can only have `ipBlock` peers", mfrom, mpolicy.Name)
+			}
 			ipb = nil
 			if mfrom.IPBlock != nil {
 				ipb = &knet.IPBlock{CIDR: mfrom.IPBlock.CIDR, Except: mfrom.IPBlock.Except}
@@ -104,6 +107,9 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy) *knet.
 		}
 		egress.To = make([]knet.NetworkPolicyPeer, len(megress.To))
 		for j, mto := range megress.To {
+			if !allowPeerSelectors && isPeerSelector(mto) {
+				return nil, fmt.Errorf("invalid egress peer %v in multi-network policy %s; IPAM-less networks can only have `ipBlock` peers", mto, mpolicy.Name)
+			}
 			ipb = nil
 			if mto.IPBlock != nil {
 				ipb = &knet.IPBlock{CIDR: mto.IPBlock.CIDR, Except: mto.IPBlock.Except}
@@ -120,27 +126,14 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy) *knet.
 	for i, mpolicytype := range mpolicy.Spec.PolicyTypes {
 		policy.Spec.PolicyTypes[i] = knet.PolicyType(mpolicytype)
 	}
-	return &policy
+	return &policy, nil
 }
 
 func (bnc *BaseNetworkController) convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy) (*knet.NetworkPolicy, error) {
-	if !bnc.doesNetworkRequireIPAM() {
-		var peers []mnpapi.MultiNetworkPolicyPeer
-		for _, rule := range mpolicy.Spec.Ingress {
-			peers = append(peers, rule.From...)
-		}
-		for _, rule := range mpolicy.Spec.Egress {
-			peers = append(peers, rule.To...)
-		}
-		for _, peer := range peers {
-			if doesPeerRequireNetworkIPAM(peer) {
-				return nil, fmt.Errorf("invalid peer %v in multi-network policy %s; IPAM-less networks can only have `ipBlock` peers", peer, mpolicy.Name)
-			}
-		}
-	}
-	return convertMultiNetPolicyToNetPolicy(mpolicy), nil
+	allowPeerSelectors := bnc.doesNetworkRequireIPAM()
+	return convertMultiNetPolicyToNetPolicy(mpolicy, allowPeerSelectors)
 }
 
-func doesPeerRequireNetworkIPAM(peer mnpapi.MultiNetworkPolicyPeer) bool {
+func isPeerSelector(peer mnpapi.MultiNetworkPolicyPeer) bool {
 	return peer.PodSelector != nil || peer.NamespaceSelector != nil
 }

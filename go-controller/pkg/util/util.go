@@ -1,6 +1,7 @@
 package util
 
 import (
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -59,8 +60,8 @@ func StringArg(context *cli.Context, name string) (string, error) {
 	return val, nil
 }
 
-// GetIPFullMask returns /32 if ip is IPV4 family and /128 if ip is IPV6 family
-func GetIPFullMask(ip string) string {
+// GetIPFullMaskString returns /32 if ip is IPV4 family and /128 if ip is IPV6 family
+func GetIPFullMaskString(ip string) string {
 	const (
 		// IPv4FullMask is the maximum prefix mask for an IPv4 address
 		IPv4FullMask = "/32"
@@ -74,19 +75,13 @@ func GetIPFullMask(ip string) string {
 	return IPv4FullMask
 }
 
-// GetFullNetMask returns a 32 bit netmask for IPv4 addresses and a 128 bit netmask for IPv6 addresses
-func GetFullNetMask(ip net.IP) net.IPMask {
-	const (
-		// IPv4FullMask is the maximum prefix mask for an IPv4 address
-		IPv4FullMask = 32
-		// IPv6FullMask is the maximum prefix mask for an IPv6 address
-		IPv6FullMask = 128
-	)
-
+// GetIPFullMask returns a full IPv4 IPMask if ip is IPV4 family or a full IPv6
+// IPMask otherwise
+func GetIPFullMask(ip net.IP) net.IPMask {
 	if utilnet.IsIPv6(ip) {
-		return net.CIDRMask(IPv6FullMask, IPv6FullMask)
+		return net.CIDRMask(128, 128)
 	}
-	return net.CIDRMask(IPv4FullMask, IPv4FullMask)
+	return net.CIDRMask(32, 32)
 }
 
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
@@ -180,38 +175,38 @@ type annotationNotSetError struct {
 	msg string
 }
 
-func (anse annotationNotSetError) Error() string {
+func (anse *annotationNotSetError) Error() string {
 	return anse.msg
 }
 
 // newAnnotationNotSetError returns an error for an annotation that is not set
 func newAnnotationNotSetError(format string, args ...interface{}) error {
-	return annotationNotSetError{msg: fmt.Sprintf(format, args...)}
+	return &annotationNotSetError{msg: fmt.Sprintf(format, args...)}
 }
 
 // IsAnnotationNotSetError returns true if the error indicates that an annotation is not set
 func IsAnnotationNotSetError(err error) bool {
-	_, ok := err.(annotationNotSetError)
-	return ok
+	var annotationNotSetError *annotationNotSetError
+	return errors.As(err, &annotationNotSetError)
 }
 
 type annotationAlreadySetError struct {
 	msg string
 }
 
-func (aase annotationAlreadySetError) Error() string {
+func (aase *annotationAlreadySetError) Error() string {
 	return aase.msg
 }
 
 // newAnnotationAlreadySetError returns an error for an annotation that is not set
 func newAnnotationAlreadySetError(format string, args ...interface{}) error {
-	return annotationAlreadySetError{msg: fmt.Sprintf(format, args...)}
+	return &annotationAlreadySetError{msg: fmt.Sprintf(format, args...)}
 }
 
 // IsAnnotationAlreadySetError returns true if the error indicates that an annotation is already set
 func IsAnnotationAlreadySetError(err error) bool {
-	_, ok := err.(annotationAlreadySetError)
-	return ok
+	var annotationAlreadySetError *annotationAlreadySetError
+	return errors.As(err, &annotationAlreadySetError)
 }
 
 // HashforOVN hashes the provided input to make it a valid addressSet or portGroup name.
@@ -430,4 +425,14 @@ func GetNBZone(nbClient libovsdbclient.Client) (string, error) {
 	}
 
 	return nbGlobal.Name, nil
+}
+
+// StringSlice converts to a slice of the string representation of the input
+// items
+func StringSlice[T fmt.Stringer](items []T) []string {
+	s := make([]string, len(items))
+	for i := range items {
+		s[i] = items[i].String()
+	}
+	return s
 }
