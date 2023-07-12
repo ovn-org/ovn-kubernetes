@@ -389,10 +389,6 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		return bsnc.removeLocalZonePodForSecondaryNetwork(pod, portInfoMap)
 	}
 
-	if err := kubevirt.DeleteDHCPOptions(bsnc.controllerName, bsnc.nbClient, pod, bsnc.GetNetworkName()); err != nil {
-		return err
-	}
-
 	// For remote pods, we just need to remove the pod IPs from the pod namespace address set
 	return bsnc.removeRemoteZonePodFromNamespaceAddressSet(pod)
 }

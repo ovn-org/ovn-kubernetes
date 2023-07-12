@@ -157,7 +157,7 @@ func CleanUpForVM(controllerName string, nbClient libovsdbclient.Client, watchFa
 		return nil
 	}
 
-	if err := DeleteDHCPOptions(controllerName, nbClient, pod, networkName); err != nil {
+	if err := DeleteDHCPOptionsForVM(controllerName, nbClient, pod, networkName); err != nil {
 		return err
 	}
 	if err := DeleteRoutingForMigratedPod(nbClient, pod); err != nil {

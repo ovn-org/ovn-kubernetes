@@ -215,7 +215,7 @@ func EnsureRemoteZonePodAddressesToNodeRoute(controllerName string, watchFactory
 	}
 	// DHCPOptions are only needed at the node is running the VM
 	// at that's the local zone node not the remote zone
-	if err := DeleteDHCPOptions(controllerName, nbClient, pod, nadName); err != nil {
+	if err := DeleteDHCPOptionsForVM(controllerName, nbClient, pod, nadName); err != nil {
 		return err
 	}
 

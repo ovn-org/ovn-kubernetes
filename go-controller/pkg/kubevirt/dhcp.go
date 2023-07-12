@@ -195,7 +195,7 @@ func VMDHCPOptionsKey(controllerName string, namespace string, vmName string, ci
 		})
 }
 
-func DeleteDHCPOptions(controllerName string, nbClient libovsdbclient.Client, pod *corev1.Pod, nadName string) error {
+func DeleteDHCPOptionsForVM(controllerName string, nbClient libovsdbclient.Client, pod *corev1.Pod, nadName string) error {
 	vmKey := ExtractVMNameFromPod(pod)
 	if vmKey == nil {
 		return nil
@@ -217,4 +217,8 @@ func DeleteDHCPOptions(controllerName string, nbClient libovsdbclient.Client, po
 		}
 	}
 	return nil
+}
+
+func DeleteSecondaryNetworkDHCPOptions(nbClient libovsdbclient.Client, dhcpOptions *nbdb.DHCPOptions) error {
+	return libovsdbops.DeleteDHCPOptions(nbClient, dhcpOptions)
 }
