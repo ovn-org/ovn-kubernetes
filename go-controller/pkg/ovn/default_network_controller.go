@@ -34,7 +34,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/informers"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -97,8 +96,6 @@ type DefaultNetworkController struct {
 
 	// Controller used to handle the admin policy based external route resources
 	apbExternalRouteController *apbroutecontroller.ExternalGatewayMasterController
-	// svcFactory used to handle service related events
-	svcFactory informers.SharedInformerFactory
 
 	egressFirewallDNS *EgressDNS
 
@@ -156,7 +153,14 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
 	}
-	svcController, svcFactory, err := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
+
+	svcController, err := svccontroller.NewController(
+		cnci.client, cnci.nbClient,
+		cnci.watchFactory.ServiceCoreInformer(),
+		cnci.watchFactory.EndpointSliceCoreInformer(),
+		cnci.watchFactory.NodeCoreInformer(),
+		cnci.recorder,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)
 	}
@@ -213,7 +217,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		switchLoadBalancerGroupUUID:  "",
 		routerLoadBalancerGroupUUID:  "",
 		svcController:                svcController,
-		svcFactory:                   svcFactory,
 		zoneICHandler:                zoneICHandler,
 		zoneChassisHandler:           zoneChassisHandler,
 		apbExternalRouteController:   apbExternalRouteController,
@@ -418,9 +421,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	startSvc := time.Now()
-	// Start service watch factory and sync services
-	oc.svcFactory.Start(oc.stopChan)
-
 	// Services should be started after nodes to prevent LB churn
 	err := oc.StartServiceController(oc.wg, true)
 	endSvc := time.Since(startSvc)

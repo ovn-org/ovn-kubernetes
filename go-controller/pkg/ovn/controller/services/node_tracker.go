@@ -92,12 +92,15 @@ func (ni *nodeInfo) nodeSubnets() []net.IPNet {
 	return out
 }
 
-func newNodeTracker(nodeInformer coreinformers.NodeInformer, zone string) (*nodeTracker, error) {
-	nt := &nodeTracker{
-		nodes: map[string]nodeInfo{},
-		zone:  zone,
+func newNodeTracker(zone string, resyncFn func(nodes []nodeInfo)) *nodeTracker {
+	return &nodeTracker{
+		nodes:    map[string]nodeInfo{},
+		zone:     zone,
+		resyncFn: resyncFn,
 	}
+}
 
+func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) error {
 	_, err := nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node, ok := obj.(*v1.Node)
@@ -152,10 +155,7 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer, zone string) (*node
 			nt.removeNodeWithServiceReSync(node.Name)
 		},
 	}))
-	if err != nil {
-		return nil, err
-	}
-	return nt, nil
+	return err
 
 }
 

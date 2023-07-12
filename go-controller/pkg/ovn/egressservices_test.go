@@ -1506,7 +1506,6 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 })
 
 func (o *FakeOVN) InitAndRunEgressSVCController(tweak ...func(*DefaultNetworkController)) {
-	o.controller.svcFactory.Start(o.stopChan)
 	c, err := o.controller.InitEgressServiceZoneController()
 	gomega.Expect(err).ToNot(gomega.HaveOccurred())
 	o.controller.egressSvcController = c
