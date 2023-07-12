@@ -651,20 +651,23 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// Make sure that the node zone matches with the Southbound db zone.
 	// Wait for 300s before giving up
 	var sbZone string
+	var err1 error
 	err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		sbZone, err = getOVNSBZone()
 		if err != nil {
-			return false, fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+			err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+			return false, nil
 		}
 
 		if config.Default.Zone != sbZone {
-			return false, fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
+			err1 = fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
+			return false, nil
 		}
 		return true, nil
 	})
 
 	if err != nil {
-		return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err : %w", config.Default.Zone, err)
+		return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err: %v, err1: %v", config.Default.Zone, err, err1)
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
