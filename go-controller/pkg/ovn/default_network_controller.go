@@ -488,11 +488,9 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		oc.wg.Add(1)
-		go func() {
-			defer oc.wg.Done()
-			oc.runEgressQoSController(1, oc.stopChan)
-		}()
+		if err = oc.runEgressQoSController(oc.wg, 1, oc.stopChan); err != nil {
+			return err
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
@@ -501,19 +499,15 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 			return fmt.Errorf("unable to create new egress service controller while creating new default network controller: %w", err)
 		}
 		oc.egressSvcController = c
-		oc.wg.Add(1)
-		go func() {
-			defer oc.wg.Done()
-			oc.egressSvcController.Run(1)
-		}()
+		if err = oc.egressSvcController.Run(oc.wg, 1); err != nil {
+			return err
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
-		oc.wg.Add(1)
-		go func() {
-			defer oc.wg.Done()
-			oc.apbExternalRouteController.Run(1)
-		}()
+		if err = oc.apbExternalRouteController.Run(oc.wg, 1); err != nil {
+			return err
+		}
 	}
 
 	end := time.Since(start)

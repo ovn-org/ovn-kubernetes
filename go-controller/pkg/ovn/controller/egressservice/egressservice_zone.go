@@ -194,33 +194,25 @@ func NewController(
 	return c, nil
 }
 
-func (c *Controller) Run(threadiness int) {
+func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 	defer utilruntime.HandleCrash()
 
 	klog.Infof("Starting Egress Services Controller")
 
-	if !cache.WaitForNamedCacheSync("egressservices", c.stopCh, c.egressServiceSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices", c.stopCh, c.egressServiceSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressservices_services", c.stopCh, c.servicesSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_services", c.stopCh, c.servicesSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressservices_endpointslices", c.stopCh, c.endpointSlicesSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_endpointslices", c.stopCh, c.endpointSlicesSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressservices_nodes", c.stopCh, c.nodesSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_nodes", c.stopCh, c.nodesSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
 	klog.Infof("Repairing Egress Services")
@@ -234,7 +226,6 @@ func (c *Controller) Run(threadiness int) {
 		klog.Errorf("Failed to init Egress Services cluster policies: %v", err)
 	}
 
-	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
@@ -255,14 +246,19 @@ func (c *Controller) Run(threadiness int) {
 		}()
 	}
 
-	// wait until we're told to stop
-	<-c.stopCh
+	// add shutdown goroutine waiting for c.stopCh
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// wait until we're told to stop
+		<-c.stopCh
 
-	klog.Infof("Shutting down Egress Services controller")
-	c.egressServiceQueue.ShutDown()
-	c.nodesQueue.ShutDown()
+		klog.Infof("Shutting down Egress Services controller")
+		c.egressServiceQueue.ShutDown()
+		c.nodesQueue.ShutDown()
+	}()
 
-	wg.Wait()
+	return nil
 }
 
 // This takes care of syncing stale data which we might have in OVN if

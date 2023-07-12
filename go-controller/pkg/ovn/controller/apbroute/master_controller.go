@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -172,14 +173,14 @@ func NewExternalMasterController(
 
 }
 
-func (c *ExternalGatewayMasterController) Run(threadiness int) {
+func (c *ExternalGatewayMasterController) Run(wg *sync.WaitGroup, threadiness int) error {
 	defer utilruntime.HandleCrash()
 	klog.V(4).Info("Starting Admin Policy Based Route Controller")
 
 	c.routePolicyFactory.Start(c.stopCh)
 
 	syncWg := &sync.WaitGroup{}
-
+	syncErrs := []error{}
 	for _, se := range []struct {
 		resourceName string
 		syncFn       cache.InformerSynced
@@ -191,14 +192,16 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 		syncWg.Add(1)
 		go func(resourceName string, syncFn cache.InformerSynced) {
 			defer syncWg.Done()
-			if !cache.WaitForNamedCacheSync(resourceName, c.stopCh, syncFn) {
-				utilruntime.HandleError(fmt.Errorf("timed out waiting for %q caches to sync", resourceName))
+			if !util.WaitForNamedCacheSyncWithTimeout(resourceName, c.stopCh, syncFn) {
+				syncErrs = append(syncErrs, fmt.Errorf("timed out waiting for %q caches to sync", resourceName))
 			}
 		}(se.resourceName, se.syncFn)
 	}
 	syncWg.Wait()
+	if len(syncErrs) != 0 {
+		return kerrors.NewAggregate(syncErrs)
+	}
 
-	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
 		for _, workerFn := range []func(*sync.WaitGroup){
 			// processes route policies
@@ -218,14 +221,19 @@ func (c *ExternalGatewayMasterController) Run(threadiness int) {
 		}
 	}
 
-	// wait until we're told to stop
-	<-c.stopCh
+	// add shutdown goroutine waiting for c.stopCh
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// wait until we're told to stop
+		<-c.stopCh
 
-	c.podQueue.ShutDown()
-	c.routeQueue.ShutDown()
-	c.namespaceQueue.ShutDown()
+		c.podQueue.ShutDown()
+		c.routeQueue.ShutDown()
+		c.namespaceQueue.ShutDown()
+	}()
 
-	wg.Wait()
+	return nil
 }
 
 func (c *ExternalGatewayMasterController) runPolicyWorker(wg *sync.WaitGroup) {

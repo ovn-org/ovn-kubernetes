@@ -265,11 +265,8 @@ var _ = Describe("Egress Service Operations", func() {
 				c, err := egressservice.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
 					wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
 				Expect(err).ToNot(HaveOccurred())
-				fakeOvnNode.wg.Add(1)
-				go func() {
-					defer fakeOvnNode.wg.Done()
-					c.Run(1)
-				}()
+				err = c.Run(fakeOvnNode.wg, 1)
+				Expect(err).ToNot(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -377,11 +374,8 @@ var _ = Describe("Egress Service Operations", func() {
 				c, err := egressservice.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
 					wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
 				Expect(err).ToNot(HaveOccurred())
-				fakeOvnNode.wg.Add(1)
-				go func() {
-					defer fakeOvnNode.wg.Done()
-					c.Run(1)
-				}()
+				err = c.Run(fakeOvnNode.wg, 1)
+				Expect(err).ToNot(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -524,11 +518,8 @@ var _ = Describe("Egress Service Operations", func() {
 				c, err := egressservice.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
 					wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
 				Expect(err).ToNot(HaveOccurred())
-				fakeOvnNode.wg.Add(1)
-				go func() {
-					defer fakeOvnNode.wg.Done()
-					c.Run(1)
-				}()
+				err = c.Run(fakeOvnNode.wg, 1)
+				Expect(err).ToNot(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -677,11 +668,8 @@ var _ = Describe("Egress Service Operations", func() {
 				c, err := egressservice.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
 					wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
 				Expect(err).ToNot(HaveOccurred())
-				fakeOvnNode.wg.Add(1)
-				go func() {
-					defer fakeOvnNode.wg.Done()
-					c.Run(1)
-				}()
+				err = c.Run(fakeOvnNode.wg, 1)
+				Expect(err).ToNot(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {

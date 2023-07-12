@@ -193,7 +193,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 
 	// Wait for the caches to be synced
 	klog.Info("Waiting for informer caches to sync")
-	if !cache.WaitForNamedCacheSync(controllerName, stopCh, c.servicesSynced, c.endpointSlicesSynced, c.nodesSynced) {
+	if !util.WaitForNamedCacheSyncWithTimeout(controllerName, stopCh, c.servicesSynced, c.endpointSlicesSynced, c.nodesSynced) {
 		return fmt.Errorf("error syncing cache")
 	}
 

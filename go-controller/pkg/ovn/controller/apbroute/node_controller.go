@@ -25,6 +25,7 @@ import (
 
 	adminpolicybasedroutelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/listers/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // Admin Policy Based Route Node controller
@@ -132,31 +133,24 @@ func NewExternalNodeController(
 
 }
 
-func (c *ExternalGatewayNodeController) Run(threadiness int) {
+func (c *ExternalGatewayNodeController) Run(wg *sync.WaitGroup, threadiness int) error {
 	defer utilruntime.HandleCrash()
 	klog.V(4).Info("Starting Admin Policy Based Route Node Controller")
 
 	c.routePolicyFactory.Start(c.stopCh)
 
-	if !cache.WaitForNamedCacheSync("apbexternalroutenamespaces", c.stopCh, c.namespaceSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.V(4).Info("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("apbexternalroutenamespaces", c.stopCh, c.namespaceSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("apbexternalroutepods", c.stopCh, c.podSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.V(4).Info("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("apbexternalroutepods", c.stopCh, c.podSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("adminpolicybasedexternalroutes", c.stopCh, c.routeSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.V(4).Info("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("adminpolicybasedexternalroutes", c.stopCh, c.routeSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
@@ -190,15 +184,18 @@ func (c *ExternalGatewayNodeController) Run(threadiness int) {
 		}()
 	}
 
-	// wait until we're told to stop
-	<-c.stopCh
+	// add shutdown goroutine waiting for c.stopCh
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// wait until we're told to stop
+		<-c.stopCh
 
-	c.podQueue.ShutDown()
-	c.routeQueue.ShutDown()
-	c.namespaceQueue.ShutDown()
-
-	wg.Wait()
-
+		c.podQueue.ShutDown()
+		c.routeQueue.ShutDown()
+		c.namespaceQueue.ShutDown()
+	}()
+	return nil
 }
 
 func (c *ExternalGatewayNodeController) onNamespaceAdd(obj interface{}) {

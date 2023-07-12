@@ -8,6 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -201,7 +204,7 @@ func (e *eventHandler) Run(threadiness int, stopCh <-chan struct{}) error {
 
 	klog.Infof("Waiting for %s informer caches to sync", e.name)
 	// wait for caches to be in sync before we start the workers
-	if ok := cache.WaitForCacheSync(stopCh, e.informer.HasSynced); !ok {
+	if ok := WaitForCacheSyncWithTimeout(stopCh, e.informer.HasSynced); !ok {
 		return fmt.Errorf("failed to wait for %s caches to sync", e.name)
 	}
 
@@ -355,4 +358,8 @@ func (e *eventHandler) syncHandler(key string) error {
 	}
 	// call the eventHandler's add function in the case of add/update
 	return e.add(obj)
+}
+
+func WaitForCacheSyncWithTimeout(stopCh <-chan struct{}, cacheSyncs ...cache.InformerSynced) bool {
+	return cache.WaitForCacheSync(util.GetChildStopChanWithTimeout(stopCh, types.InformerSyncTimeout), cacheSyncs...)
 }

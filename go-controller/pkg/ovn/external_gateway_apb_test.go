@@ -3054,9 +3054,6 @@ func deleteNamespace(namespaceName string, fakeClient kubernetes.Interface) {
 
 func (o *FakeOVN) RunAPBExternalPolicyController() {
 	o.controller.apbExternalRouteController.Repair()
-	o.controller.wg.Add(1)
-	go func() {
-		defer o.controller.wg.Done()
-		o.controller.apbExternalRouteController.Run(5)
-	}()
+	err := o.controller.apbExternalRouteController.Run(o.controller.wg, 5)
+	gomega.Expect(err).ToNot(gomega.HaveOccurred())
 }

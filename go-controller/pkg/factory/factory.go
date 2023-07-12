@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
@@ -301,14 +303,14 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 // Start starts the factory and begins processing events
 func (wf *WatchFactory) Start() error {
 	wf.iFactory.Start(wf.stopChan)
-	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
+	for oType, synced := range waitForCacheSyncWithTimeout(wf.iFactory, wf.stopChan) {
 		if !synced {
 			return fmt.Errorf("error in syncing cache for %v informer", oType)
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP && wf.eipFactory != nil {
 		wf.eipFactory.Start(wf.stopChan)
-		for oType, synced := range wf.eipFactory.WaitForCacheSync(wf.stopChan) {
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.eipFactory, wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -316,7 +318,7 @@ func (wf *WatchFactory) Start() error {
 	}
 	if config.OVNKubernetesFeature.EnableEgressFirewall && wf.efFactory != nil {
 		wf.efFactory.Start(wf.stopChan)
-		for oType, synced := range wf.efFactory.WaitForCacheSync(wf.stopChan) {
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.efFactory, wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -324,7 +326,7 @@ func (wf *WatchFactory) Start() error {
 	}
 	if util.PlatformTypeIsEgressIPCloudProvider() && wf.cpipcFactory != nil {
 		wf.cpipcFactory.Start(wf.stopChan)
-		for oType, synced := range wf.cpipcFactory.WaitForCacheSync(wf.stopChan) {
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.cpipcFactory, wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -332,7 +334,7 @@ func (wf *WatchFactory) Start() error {
 	}
 	if config.OVNKubernetesFeature.EnableEgressQoS && wf.egressQoSFactory != nil {
 		wf.egressQoSFactory.Start(wf.stopChan)
-		for oType, synced := range wf.egressQoSFactory.WaitForCacheSync(wf.stopChan) {
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.egressQoSFactory, wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -341,7 +343,7 @@ func (wf *WatchFactory) Start() error {
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() && wf.mnpFactory != nil {
 		wf.mnpFactory.Start(wf.stopChan)
-		for oType, synced := range wf.mnpFactory.WaitForCacheSync(wf.stopChan) {
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.mnpFactory, wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -350,7 +352,7 @@ func (wf *WatchFactory) Start() error {
 
 	if config.OVNKubernetesFeature.EnableEgressService && wf.egressServiceFactory != nil {
 		wf.egressServiceFactory.Start(wf.stopChan)
-		for oType, synced := range wf.egressServiceFactory.WaitForCacheSync(wf.stopChan) {
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.egressServiceFactory, wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -1167,4 +1169,12 @@ func WithUpdateHandlingForObjReplace(funcs cache.ResourceEventHandler) cache.Res
 			funcs.OnDelete(obj)
 		},
 	}
+}
+
+type waitForCacheSyncer interface {
+	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
+}
+
+func waitForCacheSyncWithTimeout(factory waitForCacheSyncer, stopCh <-chan struct{}) map[reflect.Type]bool {
+	return factory.WaitForCacheSync(util.GetChildStopChanWithTimeout(stopCh, types.InformerSyncTimeout))
 }
