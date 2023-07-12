@@ -37,7 +37,6 @@ import (
 func getPodAnnotations(fakeClient kubernetes.Interface, namespace, name string) string {
 	pod, err := fakeClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	fmt.Printf("########### %s\n", pod.Annotations)
 	return pod.Annotations[util.OvnPodAnnotationName]
 }
 
