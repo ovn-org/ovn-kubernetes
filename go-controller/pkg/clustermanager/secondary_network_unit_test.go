@@ -147,6 +147,8 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				config.Kubernetes.HostNetworkNamespace = ""
 
+				config.OVNKubernetesFeature.EnableMultiNetwork = true
+				config.OVNKubernetesFeature.EnableInterconnect = true
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = f.Start()
@@ -156,9 +158,19 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer2Topology})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				config.OVNKubernetesFeature.EnableInterconnect = false
 				nc, err := sncm.NewNetworkController(netInfo)
 				gomega.Expect(err).To(gomega.Equal(nad.ErrNetworkControllerTopologyNotManaged))
 				gomega.Expect(nc).To(gomega.BeNil())
+
+				config.OVNKubernetesFeature.EnableInterconnect = true
+				nc, err = sncm.NewNetworkController(netInfo)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(nc).NotTo(gomega.BeNil())
+
+				err = nc.Start(ctx.Context)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				return nil
 			}
@@ -224,7 +236,7 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				// So testing the cleanup one at a time.
 				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				oc := newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, nil, sncm.ovnClient, sncm.watchFactory, false, netInfo)
+				oc := newNetworkClusterController(util.InvalidNetworkID, netInfo, sncm.ovnClient, sncm.watchFactory)
 				nadControllers := []nad.NetworkController{oc}
 
 				err = sncm.CleanupDeletedNetworks(nadControllers)

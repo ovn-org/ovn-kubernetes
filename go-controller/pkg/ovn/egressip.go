@@ -2074,11 +2074,9 @@ func DeleteLegacyDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, no
 }
 
 func buildSNATFromEgressIPStatus(podIP net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) (*nbdb.NAT, error) {
-	podIPStr := podIP.String()
-	mask := util.GetIPFullMask(podIPStr)
-	_, logicalIP, err := net.ParseCIDR(podIPStr + mask)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse podIP: %s, error: %v", podIP.String(), err)
+	logicalIP := &net.IPNet{
+		IP:   podIP,
+		Mask: util.GetIPFullMask(podIP),
 	}
 	externalIP := net.ParseIP(status.EgressIP)
 	logicalPort := types.K8sPrefix + status.Node

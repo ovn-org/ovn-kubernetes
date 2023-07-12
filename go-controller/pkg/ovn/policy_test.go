@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"sort"
 	"strconv"
 	"time"
@@ -681,7 +682,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			},
 		)
 		for _, testPod := range pods {
-			testPod.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, nodeName))
+			testPod.populateLogicalSwitchCache(fakeOvn)
 		}
 		var err error
 		if namespaces != nil {
@@ -1851,6 +1852,47 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				return nil
 			}
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+
+		ginkgo.It("cleans up retryFramework resources", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace(namespaceName1)
+				namespace1.Labels = map[string]string{"name": "label1"}
+				networkPolicy := newNetworkPolicy(netPolicyName2, namespace1.Name, metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{{
+						From: []knet.NetworkPolicyPeer{{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: namespace1.Labels,
+							}},
+						}},
+					}, nil)
+				startOvn(initialDB, []v1.Namespace{namespace1}, nil, nil, nil)
+
+				goroutinesNumInit := runtime.NumGoroutine()
+				fmt.Printf("goroutinesNumInit %v", goroutinesNumInit)
+				// network policy will create 1 watchFactory for local pods selector, and 1 peer namespace selector
+				// that gives us 2 retryFrameworks, so 2 periodicallyRetryResources goroutines.
+				// The networkPolicy itself will create one child stopChannel, that is one more goroutine.
+				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
+					Create(context.TODO(), networkPolicy, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() int {
+					return runtime.NumGoroutine()
+				}).Should(gomega.Equal(goroutinesNumInit + 3))
+
+				// Delete network policy
+				err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
+					Delete(context.TODO(), networkPolicy.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// expect goroutines number to get back
+				gomega.Eventually(func() int {
+					return runtime.NumGoroutine()
+				}).Should(gomega.Equal(goroutinesNumInit))
+
+				return nil
+			}
+
 			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 		})
 	})

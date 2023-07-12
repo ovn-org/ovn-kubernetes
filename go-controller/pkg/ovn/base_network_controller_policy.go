@@ -15,6 +15,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -182,6 +184,8 @@ type networkPolicy struct {
 	// or this value will be set to true and handler can't proceed.
 	// Use networkPolicy.RLock to read this field and hold it for the whole event handling.
 	deleted bool
+
+	stopChan chan struct{}
 }
 
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
@@ -818,7 +822,8 @@ func (bnc *BaseNetworkController) addLocalPodHandler(policy *knet.NetworkPolicy,
 		syncFunc,
 		&NetworkPolicyExtraParameters{
 			np: np,
-		})
+		},
+		np.stopChan)
 
 	podHandler, err := retryLocalPods.WatchResourceFiltered(policy.Namespace, sel)
 	if err != nil {
@@ -1013,6 +1018,10 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 		// since pod handlers take np.RLock
 		np.Unlock()
 		npLocked = false
+
+		if np.stopChan == nil {
+			np.stopChan = util.GetChildStopChan(bnc.stopChan)
+		}
 
 		// 6. Start peer handlers to update all allow rules first
 		for _, handler := range policyHandlers {
@@ -1440,6 +1449,7 @@ func (bnc *BaseNetworkController) addPeerNamespaceHandler(
 		factory.PeerNamespaceSelectorType,
 		syncFunc,
 		&NetworkPolicyExtraParameters{gp: gress, np: np},
+		np.stopChan,
 	)
 
 	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", sel)
@@ -1453,6 +1463,11 @@ func (bnc *BaseNetworkController) addPeerNamespaceHandler(
 }
 
 func (bnc *BaseNetworkController) shutdownHandlers(np *networkPolicy) {
+	if np.stopChan != nil {
+		close(np.stopChan)
+		np.stopChan = nil
+	}
+
 	if np.localPodHandler != nil {
 		bnc.watchFactory.RemovePodHandler(np.localPodHandler)
 		np.localPodHandler = nil

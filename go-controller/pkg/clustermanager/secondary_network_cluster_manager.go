@@ -7,7 +7,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -28,19 +30,19 @@ type secondaryNetworkClusterManager struct {
 	ovnClient     *util.OVNClusterManagerClientset
 	watchFactory  *factory.WatchFactory
 	// networkIDAllocator is used to allocate a unique ID for each secondary layer3 network
-	networkIDAllocator *idAllocator
+	networkIDAllocator id.Allocator
 }
 
 func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset,
 	wf *factory.WatchFactory, recorder record.EventRecorder) (*secondaryNetworkClusterManager, error) {
 	klog.Infof("Creating secondary network cluster manager")
-	networkIDAllocator, err := NewIDAllocator("NetworkIDs", maxSecondaryNetworkIDs)
+	networkIDAllocator, err := id.NewIDAllocator("NetworkIDs", maxSecondaryNetworkIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create an IdAllocator for the secondary network ids, err: %v", err)
 	}
 
 	// Reserve the id 0 for the default network.
-	if err := networkIDAllocator.reserveID("default", defaultNetworkID); err != nil {
+	if err := networkIDAllocator.ReserveID("default", defaultNetworkID); err != nil {
 		return nil, fmt.Errorf("idAllocator failed to reserve defaultNetworkID %d", defaultNetworkID)
 	}
 	sncm := &secondaryNetworkClusterManager{
@@ -77,7 +79,7 @@ func (sncm *secondaryNetworkClusterManager) Start() error {
 				// two networks have the same id. We will resync the node
 				// annotations correctly when the network controller
 				// is created.
-				_ = sncm.networkIDAllocator.reserveID(networkName, id)
+				_ = sncm.networkIDAllocator.ReserveID(networkName, id)
 			}
 		}
 	}
@@ -90,23 +92,39 @@ func (sncm *secondaryNetworkClusterManager) Stop() {
 }
 
 // NewNetworkController implements the networkAttachDefController.NetworkControllerManager
-// interface function.  This function is called by the net-attach-def controller when
-// a layer2 or layer3 secondary network is created.  Layer2 type is not handled here.
+// interface function. This function is called by the net-attach-def controller when
+// a secondary network is created.
 func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
-	topoType := nInfo.TopologyType()
-	if topoType == ovntypes.Layer3Topology {
-		networkId, err := sncm.networkIDAllocator.allocateID(nInfo.GetNetworkName())
-		if err != nil {
-			return nil, fmt.Errorf("failed to create NetworkController for secondary layer3 network %s : %w", nInfo.GetNetworkName(), err)
-		}
-
-		sncc := newNetworkClusterController(nInfo.GetNetworkName(), networkId, nInfo.Subnets(),
-			sncm.ovnClient, sncm.watchFactory, false, nInfo)
-		return sncc, nil
+	if !sncm.isTopologyManaged(nInfo) {
+		return nil, nad.ErrNetworkControllerTopologyNotManaged
 	}
 
-	// Secondary network cluster manager doesn't manage other topology types
-	return nil, nad.ErrNetworkControllerTopologyNotManaged
+	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
+
+	networkId, err := sncm.networkIDAllocator.AllocateID(nInfo.GetNetworkName())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create NetworkController for secondary layer3 network %s : %w", nInfo.GetNetworkName(), err)
+	}
+
+	sncc := newNetworkClusterController(networkId, nInfo, sncm.ovnClient, sncm.watchFactory)
+	return sncc, nil
+}
+
+func (sncm *secondaryNetworkClusterManager) isTopologyManaged(nInfo util.NetInfo) bool {
+	switch nInfo.TopologyType() {
+	case ovntypes.Layer3Topology:
+		// we need to allocate subnets to each node regardless of configuration
+		return true
+	case ovntypes.Layer2Topology:
+		// for IC, pod IPs and tunnel IDs need to be allocated
+		// in non IC config, this is done from ovnkube-master network controller
+		return config.OVNKubernetesFeature.EnableInterconnect
+	case ovntypes.LocalnetTopology:
+		// for IC, pod IPs need to be allocated
+		// in non IC config, this is done from ovnkube-master network controller
+		return config.OVNKubernetesFeature.EnableInterconnect && len(nInfo.Subnets()) > 0
+	}
+	return false
 }
 
 // CleanupDeletedNetworks implements the networkAttachDefController.NetworkControllerManager
@@ -163,6 +181,5 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(allController
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) nad.NetworkController {
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
-	return newNetworkClusterController(netInfo.GetNetworkName(), util.InvalidNetworkID, nil, sncm.ovnClient, sncm.watchFactory,
-		false, netInfo)
+	return newNetworkClusterController(util.InvalidNetworkID, netInfo, sncm.ovnClient, sncm.watchFactory)
 }

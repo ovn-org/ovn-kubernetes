@@ -107,7 +107,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -244,7 +244,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -390,7 +390,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -555,7 +555,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							},
 						},
 					)
-					t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+					t.populateLogicalSwitchCache(fakeOvn)
 
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
@@ -717,7 +717,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					)
 					config.IPv6Mode = true
-					t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+					t.populateLogicalSwitchCache(fakeOvn)
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -833,7 +833,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							},
 						},
 					)
-					t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+					t.populateLogicalSwitchCache(fakeOvn)
 
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
@@ -1043,8 +1043,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+				t.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1205,8 +1205,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+				t.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1373,8 +1373,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+				t.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 				injectNode(fakeOvn)
 				err = fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1542,8 +1542,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						apbExternalRouteCRList,
 					)
-					t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-					fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+					t.populateLogicalSwitchCache(fakeOvn)
+					fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1875,8 +1875,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+				t.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2008,8 +2008,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+				t.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2148,7 +2148,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					},
 				)
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -2314,7 +2314,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -2479,7 +2479,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()

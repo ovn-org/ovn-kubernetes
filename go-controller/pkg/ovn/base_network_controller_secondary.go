@@ -379,6 +379,11 @@ func (bsnc *BaseSecondaryNetworkController) removeLocalZonePodForSecondaryNetwor
 			return err
 		}
 
+		// do not release IP address if this controller does not handle IP allocation
+		if !bsnc.handlesPodIPAllocation() {
+			continue
+		}
+
 		// do not release IP address unless we have validated no other pod is using it
 		if pInfo == nil {
 			continue
@@ -426,7 +431,7 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 				}
 				continue
 			}
-			if bsnc.doesNetworkRequireIPAM() {
+			if bsnc.doesNetworkRequireIPAM() && bsnc.handlesPodIPAllocation() {
 				expectedLogicalPortName, err := bsnc.allocatePodIPs(pod, annotations, nadName)
 				if err != nil {
 					return err

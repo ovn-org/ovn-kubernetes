@@ -35,7 +35,7 @@ func setupUnderlay(ovsPods []v1.Pod, portName string, nadConfig networkAttachmen
 		if err := configureBridgeMappings(
 			ovsPod.Name,
 			defaultNetworkBridgeMapping(),
-			bridgeMapping(nadConfig.attachmentName(), bridgeName),
+			bridgeMapping(nadConfig.networkName, bridgeName),
 		); err != nil {
 			return err
 		}

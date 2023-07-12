@@ -1169,8 +1169,19 @@ docker_create_second_disconnected_interface() {
   local bridge_name="${1:-kindexgw}"
   echo "bridge: $bridge_name"
 
+  if [ "${OCI_BIN}" = "podman" ]; then
+    # docker and podman do different things with the --internal parameter:
+    # - docker installs iptables rules to drop traffic on a different subnet
+    #   than the bridge and we don't want that.
+    # - podman does not set the bridge as default gateway and we want that.
+    # So we need it with podman but not with docker. Neither allows us to create
+    # a bridge network without IPAM which would be ideal, so perhaps the best
+    # option would be a manual setup.
+    local podman_params="--internal"
+  fi
+
   # Create the network without subnets; ignore if already exists.
-  "$OCI_BIN" network create --internal --driver=bridge "$bridge_name" || true
+  "$OCI_BIN" network create --driver=bridge ${podman_params-} "$bridge_name" || true
 
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do

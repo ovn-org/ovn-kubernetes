@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ipallocator
+package ip
 
 import (
 	"errors"
@@ -22,7 +22,7 @@ import (
 	"math/big"
 	"net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
+	allocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/bitmap"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -35,12 +35,18 @@ type Interface interface {
 	ForEach(func(net.IP))
 	CIDR() net.IPNet
 	Has(ip net.IP) bool
+	Reserved(ip net.IP) bool
 }
 
 var (
 	ErrFull      = errors.New("range is full")
 	ErrAllocated = errors.New("provided IP is already allocated")
 )
+
+// IsErrAllocated returns true if err is of type ErrAllocated
+func IsErrAllocated(err error) bool {
+	return errors.Is(err, ErrAllocated)
+}
 
 type ErrNotInRange struct {
 	ValidRange string
@@ -197,6 +203,17 @@ func (r *Range) Has(ip net.IP) bool {
 	}
 
 	return r.alloc.Has(offset)
+}
+
+// Reserved returns true if the provided IP can't be allocated. This is *only*
+// true for the network and broadcast addresses.
+func (r *Range) Reserved(ip net.IP) bool {
+	if !r.net.Contains(ip) {
+		return false
+	}
+
+	offset := calculateIPOffset(r.base, ip)
+	return offset == -1 || offset == r.max
 }
 
 // contains returns true and the offset if the ip is in the range, and false

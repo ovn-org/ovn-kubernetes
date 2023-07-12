@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
@@ -46,6 +47,14 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 				},
 			},
 		},
+	}
+
+	if oc.handlesPodIPAllocation() {
+		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
+			netInfo,
+			cnci.watchFactory.PodCoreInformer().Lister(),
+			cnci.kube)
+		oc.podAnnotationAllocator = podAnnotationAllocator
 	}
 
 	// disable multicast support for secondary networks
