@@ -328,9 +328,26 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	if bsnc.IsSecondary() &&
 		(bsnc.TopologyType() == types.Layer2Topology || bsnc.TopologyType() == types.LocalnetTopology) &&
 		len(bsnc.Subnets()) > 0 {
-		klog.Infof("creating DHCP options for %s/%s", pod.GetNamespace(), pod.GetName())
-		if err := kubevirt.EnsureDHCPOptions(bsnc.controllerName, bsnc.nbClient, bsnc.watchFactory, pod, podAnnotation, lsp); err != nil {
-			return fmt.Errorf("failed to create DHCP options for %s: %v", pod.GetName(), err)
+
+		for _, cidr := range bsnc.Subnets() {
+			if cidr.CIDR == nil {
+				klog.Warningf(
+					"could not retrieve CIDR for pod: %s/%s on network %q",
+					pod.GetNamespace(),
+					pod.GetName(),
+					bsnc.GetNetworkName(),
+				)
+				continue
+			}
+			cidrStr := cidr.CIDR.String()
+			klog.Infof("creating DHCP options for CIDR: %s; pod: %s/%s", cidrStr, pod.GetNamespace(), pod.GetName())
+			if err := kubevirt.EnsureDHCPOptions(
+				bsnc.dhcpOptionsForSecondaryNetwork(cidrStr),
+				bsnc.nbClient,
+				lsp,
+			); err != nil {
+				return fmt.Errorf("failed to create DHCP options for %s: %v", pod.GetName(), err)
+			}
 		}
 	}
 
@@ -347,6 +364,20 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	return nil
 }
 
+func (bsnc *BaseSecondaryNetworkController) dhcpOptionsForSecondaryNetwork(cidr string) *nbdb.DHCPOptions {
+	var opts []kubevirt.Option
+	if bsnc.MTU() != 0 {
+		opts = append(opts, kubevirt.WithMTU(bsnc.MTU()))
+	}
+	dhcp4Options := kubevirt.NewDHCPv4Option(
+		cidr,
+		kubevirt.ARPProxyIPv4,
+		kubevirt.SecondaryNetworkDHCPKey(cidr, bsnc.GetNetworkName(), bsnc.controllerName),
+		opts...,
+	).V4
+	return dhcp4Options
+}
+
 // removePodForSecondaryNetwork tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *kapi.Pod, portInfoMap map[string]*lpInfo) error {
@@ -356,6 +387,10 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 
 	if bsnc.isPodScheduledinLocalZone(pod) {
 		return bsnc.removeLocalZonePodForSecondaryNetwork(pod, portInfoMap)
+	}
+
+	if err := kubevirt.DeleteDHCPOptions(bsnc.controllerName, bsnc.nbClient, pod, bsnc.GetNetworkName()); err != nil {
+		return err
 	}
 
 	// For remote pods, we just need to remove the pod IPs from the pod namespace address set

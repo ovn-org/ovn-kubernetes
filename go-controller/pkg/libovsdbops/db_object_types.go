@@ -27,6 +27,7 @@ const (
 	NetpolNodeOwnerType         ownerType = "NetpolNode"
 	NetpolNamespaceOwnerType    ownerType = "NetpolNamespace"
 	VirtualMachineOwnerType     ownerType = "VirtualMachine"
+	SecondaryNetworkOwnerType   ownerType = "SecondaryNetwork"
 
 	// owner extra IDs, make sure to define only 1 ExternalIDKey for every string value
 	PriorityKey           ExternalIDKey = "priority"
@@ -40,6 +41,7 @@ const (
 	RuleIndex             ExternalIDKey = "rule-index"
 	VirtualMachineKey     ExternalIDKey = types.OvnK8sPrefix + "/vm"
 	NamespaceKey          ExternalIDKey = types.OvnK8sPrefix + "/namespace"
+	SecondaryNetworkKey   ExternalIDKey = types.OvnK8sPrefix + "/network"
 )
 
 // ObjectIDsTypes should only be created here
@@ -173,4 +175,12 @@ var VirtualMachineDHCPOptions = newObjectIDsType(dhcpOptions, VirtualMachineOwne
 	VirtualMachineKey,
 	// Also differente namespace so we have on DHCPOption per LSP
 	NamespaceKey,
+})
+
+var SecondaryNetworkDHCPOptions = newObjectIDsType(dhcpOptions, SecondaryNetworkOwnerType, []ExternalIDKey{
+	// cidr
+	ObjectNameKey,
+	// We can have multiple disconnected networks with the same CIDR, but with
+	// different network names.
+	SecondaryNetworkKey,
 })
