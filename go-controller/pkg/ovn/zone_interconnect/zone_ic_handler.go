@@ -503,6 +503,21 @@ func (zic *ZoneInterconnectHandler) setRemotePortBindingChassis(nodeName, portNa
 		Name:     chassisId,
 	}
 
+	// the chassis is created in NBDB by ovnk and takes some time to propagate. Let's make sure it exists before we try
+	// to set the port binding
+	maxTimeout := 10 * time.Second
+	var err1 error
+	err := wait.PollUntilContextTimeout(context.TODO(), 50*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+		if _, err1 = libovsdbops.GetChassis(zic.sbClient, &chassis); err1 != nil {
+			return false, nil
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to find chassis after %s: %w, %v", maxTimeout, err, err1)
+	}
+
 	if err := libovsdbops.UpdatePortBindingSetChassis(zic.sbClient, &remotePort, &chassis); err != nil {
 		return fmt.Errorf("failed to update chassis %s for remote port %s, error: %w", nodeName, portName, err)
 	}
