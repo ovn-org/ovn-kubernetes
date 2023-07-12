@@ -515,7 +515,19 @@ func (zic *ZoneInterconnectHandler) setRemotePortBindingChassis(nodeName, portNa
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to find chassis after %s: %w, %v", maxTimeout, err, err1)
+		return fmt.Errorf("failed to find chassis: %s, after %s: %w, %v", chassis.Hostname, maxTimeout, err, err1)
+	}
+
+	// Similarly wait for the port binding to exist
+	err = wait.PollUntilContextTimeout(context.TODO(), 50*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+		if _, err1 = libovsdbops.GetPortBinding(zic.sbClient, &remotePort); err1 != nil {
+			return false, nil
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to find port binding: %s, after %s: %w, %v", remotePort.LogicalPort, maxTimeout, err, err1)
 	}
 
 	if err := libovsdbops.UpdatePortBindingSetChassis(zic.sbClient, &remotePort, &chassis); err != nil {
