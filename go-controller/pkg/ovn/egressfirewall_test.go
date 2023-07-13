@@ -1204,7 +1204,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						dnsEntries:        make(map[string]*dnsEntry),
 						addressSetFactory: nil,
 
-						added:    make(chan struct{}),
+						added:    make(chan struct{}, 1),
 						deleted:  make(chan string, 1),
 						stopChan: make(chan struct{}),
 					}
