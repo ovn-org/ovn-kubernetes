@@ -44,7 +44,9 @@ func UpdatePodWithRetryOrRollback(podLister listers.PodLister, kube kube.Interfa
 		}
 
 		updated = true
-		err = kube.UpdatePod(pod)
+		// It is possible to update the pod annotations using status subresource
+		// because changes to metadata via status subresource are not restricted pods.
+		err = kube.UpdatePodStatus(pod)
 		if err != nil && rollback != nil {
 			rollback()
 		}

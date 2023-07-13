@@ -61,10 +61,9 @@ func (oc *DefaultNetworkController) cleanTopologyAnnotation() error {
 				return err
 			}
 			if _, ok := node.Annotations[anno]; ok {
-				newNode := node.DeepCopy()
-				delete(newNode.Annotations, anno)
 				klog.Infof("Deleting topology annotation from node %s", node.Name)
-				return oc.kube.PatchNode(node, newNode)
+				// Setting the annotation value to nil removes it
+				return oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{anno: nil})
 			}
 			return nil
 		})

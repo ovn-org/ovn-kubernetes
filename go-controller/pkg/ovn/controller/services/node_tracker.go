@@ -217,7 +217,7 @@ func (nt *nodeTracker) removeNode(nodeName string) {
 	delete(nt.nodes, nodeName)
 }
 
-// UpdateNode is called when a node's gateway router / switch / IPs have changed
+// updateNode is called when a node's gateway router / switch / IPs have changed
 // The switch exists when the HostSubnet annotation is set.
 // The gateway router will exist sometime after the L3Gateway annotation is set.
 func (nt *nodeTracker) updateNode(node *v1.Node) {
