@@ -1869,6 +1869,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					}, nil)
 				startOvn(initialDB, []v1.Namespace{namespace1}, nil, nil, nil)
 
+				// let the system settle down before counting goroutines
+				time.Sleep(100 * time.Millisecond)
 				goroutinesNumInit := runtime.NumGoroutine()
 				fmt.Printf("goroutinesNumInit %v", goroutinesNumInit)
 				// network policy will create 1 watchFactory for local pods selector, and 1 peer namespace selector

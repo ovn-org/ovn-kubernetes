@@ -476,6 +476,8 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			MatchLabels: map[string]string{"key": "value"},
 		}
 
+		// let the system settle down before counting goroutines
+		time.Sleep(100 * time.Millisecond)
 		goroutinesNumInit := runtime.NumGoroutine()
 		// namespace selector will be run because it is not empty.
 		// one namespace should match the label and start a pod watchFactory.
