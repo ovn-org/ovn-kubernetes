@@ -199,6 +199,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			wg:                          defaultWg,
 			localZoneNodes:              &sync.Map{},
 			zoneICHandler:               zoneICHandler,
+			cancelableCtx:               util.NewCancelableContext(),
 		},
 		externalGWCache: apbExternalRouteController.ExternalGWCache,
 		exGWCacheMutex:  apbExternalRouteController.ExGWCacheMutex,
@@ -322,6 +323,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
 	close(oc.stopChan)
+	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 }
 

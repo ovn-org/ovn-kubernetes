@@ -54,7 +54,7 @@ type PodSelectorAddressSet struct {
 	// handlerResources holds the data that is used and updated by the handlers.
 	handlerResources *PodSelectorAddrSetHandlerInfo
 
-	stopChan chan struct{}
+	cancelableContext *util.CancelableContext
 }
 
 // EnsurePodSelectorAddressSet returns address set for requested (podSelector, namespaceSelector, namespace).
@@ -162,8 +162,9 @@ func (bnc *BaseNetworkController) DeletePodSelectorAddressSet(addrSetKey, backRe
 
 func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 	// create pod handler resources before starting the handlers
-	if psas.stopChan == nil {
-		psas.stopChan = util.GetChildStopChan(bnc.stopChan)
+	if psas.cancelableContext == nil {
+		cancelableContext := util.NewCancelableContextChild(bnc.cancelableCtx)
+		psas.cancelableContext = &cancelableContext
 	}
 	if psas.handlerResources == nil {
 		as, err := bnc.addressSetFactory.NewAddressSet(psas.addrSetDbIDs, nil)
@@ -180,7 +181,7 @@ func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 			netInfo:           bnc.NetInfo,
 			ipv4Mode:          ipv4Mode,
 			ipv6Mode:          ipv6Mode,
-			stopChan:          psas.stopChan,
+			stopChan:          psas.cancelableContext.Done(),
 		}
 	}
 
@@ -217,9 +218,9 @@ func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 
 func (psas *PodSelectorAddressSet) destroy(bnc *BaseNetworkController) error {
 	klog.Infof("Deleting shared address set for pod selector %s", psas.key)
-	if psas.stopChan != nil {
-		close(psas.stopChan)
-		psas.stopChan = nil
+	if psas.cancelableContext != nil {
+		psas.cancelableContext.Cancel()
+		psas.cancelableContext = nil
 	}
 
 	psas.needsCleanup = true
@@ -254,7 +255,7 @@ func (bnc *BaseNetworkController) addPodSelectorHandler(psAddrSet *PodSelectorAd
 		factory.AddressSetPodSelectorType,
 		syncFunc,
 		podHandlerResources,
-		psAddrSet.stopChan)
+		psAddrSet.cancelableContext.Done())
 
 	podHandler, err := retryFramework.WatchResourceFiltered(namespace, podSelector)
 	if err != nil {
@@ -276,7 +277,7 @@ func (bnc *BaseNetworkController) addNamespacedPodSelectorHandler(psAddrSet *Pod
 		factory.AddressSetNamespaceAndPodSelectorType,
 		nil,
 		psAddrSet.handlerResources,
-		psAddrSet.stopChan,
+		psAddrSet.cancelableContext.Done(),
 	)
 	namespaceHandler, err := retryFramework.WatchResourceFiltered("", psAddrSet.namespaceSelector)
 	if err != nil {
@@ -321,7 +322,7 @@ type PodSelectorAddrSetHandlerInfo struct {
 	ipv4Mode bool
 	ipv6Mode bool
 
-	stopChan chan struct{}
+	stopChan <-chan struct{}
 }
 
 // idempotent

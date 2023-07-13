@@ -141,6 +141,11 @@ type BaseNetworkController struct {
 	// waitGroup per-Controller
 	wg *sync.WaitGroup
 
+	// some downstream components need to stop on their own or when the network
+	// controller is stopped
+	// use a chain of cancelable contexts for this
+	cancelableCtx util.CancelableContext
+
 	// List of nodes which belong to the local zone (stored as a sync map)
 	// If the map is nil, it means the controller is not tracking the node events
 	// and all the nodes are considered as local zone nodes.
