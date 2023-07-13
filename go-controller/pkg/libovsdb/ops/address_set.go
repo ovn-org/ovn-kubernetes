@@ -59,8 +59,8 @@ func GetAddressSet(nbClient libovsdbclient.Client, as *nbdb.AddressSet) (*nbdb.A
 	return found[0], nil
 }
 
-// CreateAddressSets creates the provided address sets
-func CreateAddressSets(nbClient libovsdbclient.Client, addrSets ...*nbdb.AddressSet) error {
+// CreateAddressSetsOps creates the create-ops for the provided address sets
+func CreateAddressSetsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, addrSets ...*nbdb.AddressSet) ([]libovsdb.Operation, error) {
 	opModels := make([]operationModel, 0, len(addrSets))
 	for i := range addrSets {
 		as := addrSets[i]
@@ -74,7 +74,17 @@ func CreateAddressSets(nbClient libovsdbclient.Client, addrSets ...*nbdb.Address
 	}
 
 	m := newModelClient(nbClient)
-	_, err := m.CreateOrUpdate(opModels...)
+	return m.CreateOrUpdateOps(ops, opModels...)
+}
+
+// CreateAddressSets creates the provided address sets
+func CreateAddressSets(nbClient libovsdbclient.Client, addrSets ...*nbdb.AddressSet) error {
+	ops, err := CreateAddressSetsOps(nbClient, nil, addrSets...)
+	if err != nil {
+		return err
+	}
+
+	_, err = TransactAndCheck(nbClient, ops)
 	return err
 }
 

@@ -31,6 +31,10 @@ type AddressSetFactory interface {
 	// and contains the given IPs, or an error. Internally it creates
 	// an address set for IPv4 and IPv6 each.
 	NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, error)
+	// NewAddressSetOps returns a new object that implements AddressSet
+	// and contains the given IPs, or an error. Internally it creates
+	// ops to create an address set for IPv4 and IPv6 each.
+	NewAddressSetOps(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, []ovsdb.Operation, error)
 	// EnsureAddressSet makes sure that an address set object exists in ovn
 	// with the given dbIDs.
 	EnsureAddressSet(dbIDs *libovsdbops.DbObjectIDs) (AddressSet, error)
@@ -85,10 +89,25 @@ var _ AddressSetFactory = &ovnAddressSetFactory{}
 // and contains the given IPs, or an error. Internally it creates
 // an address set for IPv4 and IPv6 each.
 func (asf *ovnAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, error) {
-	if err := asf.validateDbIDs(dbIDs); err != nil {
-		return nil, fmt.Errorf("failed to create address set: %w", err)
+	as, ops, err := asf.NewAddressSetOps(dbIDs, ips)
+	if err != nil {
+		return nil, err
 	}
-	return asf.ensureOvnAddressSets(ips, dbIDs, true)
+	_, err = libovsdbops.TransactAndCheck(asf.nbClient, ops)
+	if err != nil {
+		return nil, err
+	}
+	return as, nil
+}
+
+// NewAddressSetOps returns a new object that implements AddressSet
+// and contains the given IPs, or an error. Internally it creates
+// address set ops for IPv4 and IPv6 each.
+func (asf *ovnAddressSetFactory) NewAddressSetOps(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, []ovsdb.Operation, error) {
+	if err := asf.validateDbIDs(dbIDs); err != nil {
+		return nil, nil, fmt.Errorf("failed to create address set ops: %w", err)
+	}
+	return asf.ensureOvnAddressSetsOps(ips, dbIDs, true)
 }
 
 // EnsureAddressSet makes sure that an address set object exists in ovn
@@ -97,7 +116,15 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(dbIDs *libovsdbops.DbObjectIDs
 	if err := asf.validateDbIDs(dbIDs); err != nil {
 		return nil, fmt.Errorf("failed to ensure address set: %w", err)
 	}
-	return asf.ensureOvnAddressSets(nil, dbIDs, false)
+	as, ops, err := asf.ensureOvnAddressSetsOps(nil, dbIDs, false)
+	if err != nil {
+		return nil, err
+	}
+	_, err = libovsdbops.TransactAndCheck(asf.nbClient, ops)
+	if err != nil {
+		return nil, err
+	}
+	return as, nil
 }
 
 func getDbIDsWithIPFamily(dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *libovsdbops.DbObjectIDs {
@@ -196,8 +223,8 @@ func (asf *ovnAddressSetFactory) DestroyAddressSet(dbIDs *libovsdbops.DbObjectID
 
 // if updateAS is false, ips will be ignored, only empty address sets will be created or existing address sets will
 // be returned
-func (asf *ovnAddressSetFactory) ensureOvnAddressSets(ips []net.IP, dbIDs *libovsdbops.DbObjectIDs,
-	updateAS bool) (*ovnAddressSets, error) {
+func (asf *ovnAddressSetFactory) ensureOvnAddressSetsOps(ips []net.IP, dbIDs *libovsdbops.DbObjectIDs,
+	updateAS bool) (*ovnAddressSets, []ovsdb.Operation, error) {
 	var (
 		v4set, v6set *ovnAddressSet
 		v4IPs, v6IPs []net.IP
@@ -206,20 +233,20 @@ func (asf *ovnAddressSetFactory) ensureOvnAddressSets(ips []net.IP, dbIDs *libov
 	if ips != nil {
 		v4IPs, v6IPs = splitIPsByFamily(ips)
 	}
-
+	var ops []ovsdb.Operation
 	if asf.ipv4Mode {
-		v4set, err = asf.ensureOvnAddressSet(v4IPs, dbIDs, ipv4InternalID, updateAS)
+		v4set, ops, err = asf.ensureOvnAddressSetOps(v4IPs, dbIDs, ipv4InternalID, updateAS, ops)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if asf.ipv6Mode {
-		v6set, err = asf.ensureOvnAddressSet(v6IPs, dbIDs, ipv6InternalID, updateAS)
+		v6set, ops, err = asf.ensureOvnAddressSetOps(v6IPs, dbIDs, ipv6InternalID, updateAS, ops)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return asf.newOvnAddressSets(v4set, v6set, dbIDs), nil
+	return asf.newOvnAddressSets(v4set, v6set, dbIDs), ops, nil
 }
 
 func buildAddressSet(dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *nbdb.AddressSet {
@@ -242,32 +269,32 @@ func (asf *ovnAddressSetFactory) newOvnAddressSet(addrSet *nbdb.AddressSet) *ovn
 	}
 }
 
-func (asf *ovnAddressSetFactory) ensureOvnAddressSet(ips []net.IP, dbIDs *libovsdbops.DbObjectIDs,
-	ipFamily string, updateAS bool) (*ovnAddressSet, error) {
+func (asf *ovnAddressSetFactory) ensureOvnAddressSetOps(ips []net.IP, dbIDs *libovsdbops.DbObjectIDs,
+	ipFamily string, updateAS bool, ops []ovsdb.Operation) (*ovnAddressSet, []ovsdb.Operation, error) {
 	addrSet := buildAddressSet(dbIDs, ipFamily)
 	var err error
 	if updateAS {
 		// overwrite ips, EnsureAddressSet doesn't do that
 		uniqIPs := ipsToStringUnique(ips)
 		addrSet.Addresses = uniqIPs
-		err = libovsdbops.CreateOrUpdateAddressSets(asf.nbClient, addrSet)
+		ops, err = libovsdbops.CreateOrUpdateAddressSetsOps(asf.nbClient, ops, addrSet)
 	} else {
-		err = libovsdbops.CreateAddressSets(asf.nbClient, addrSet)
+		ops, err = libovsdbops.CreateAddressSetsOps(asf.nbClient, ops, addrSet)
 	}
 
 	// UUID should always be set if no error, check anyway
-	if err != nil || addrSet.UUID == "" {
+	if err != nil {
 		// NOTE: While ovsdb transactions get serialized by libovsdb, the decision to create vs. update
 		// the address set takes place before that serialization is done. Because of that, it is feasible
 		// that one of the go threads attempting to call this routine at the same time will fail.
 		// This is described in https://bugzilla.redhat.com/show_bug.cgi?id=2108026 . While we could
 		// handle that failure here by retrying, a higher level retry (see retry_obj.go) is already
 		// present in the codepath, so no additional handling for that condition has been added here.
-		return nil, fmt.Errorf("failed to create or update address set %+v: %w", addrSet, err)
+		return nil, nil, fmt.Errorf("failed to create or update address set ops %+v: %w", addrSet, err)
 	}
 	as := asf.newOvnAddressSet(addrSet)
 	klog.V(5).Infof("New(%s) with %v", asDetail(as), ips)
-	return as, nil
+	return as, ops, nil
 }
 
 func (asf *ovnAddressSetFactory) validateDbIDs(dbIDs *libovsdbops.DbObjectIDs) error {

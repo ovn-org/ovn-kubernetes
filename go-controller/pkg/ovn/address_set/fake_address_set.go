@@ -68,6 +68,29 @@ func (f *FakeAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ip
 	return set, nil
 }
 
+// NewAddressSetOps returns a new address set object
+func (f *FakeAddressSetFactory) NewAddressSetOps(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, []ovsdb.Operation, error) {
+	if f.errOnNextNewAddrSet {
+		f.errOnNextNewAddrSet = false
+		return nil, nil, fmt.Errorf(FakeASFError)
+	}
+	if err := f.asf.validateDbIDs(dbIDs); err != nil {
+		return nil, nil, fmt.Errorf("failed to create address set: %w", err)
+	}
+	f.Lock()
+	defer f.Unlock()
+	name := getOvnAddressSetsName(dbIDs)
+
+	_, ok := f.sets[name]
+	gomega.Expect(ok).To(gomega.BeFalse(), fmt.Sprintf("new address set %s already exists", name))
+	set, err := f.newFakeAddressSets(ips, dbIDs, f.removeAddressSet)
+	if err != nil {
+		return nil, nil, err
+	}
+	f.sets[name] = set
+	return set, nil, nil
+}
+
 // EnsureAddressSet returns set object
 func (f *FakeAddressSetFactory) EnsureAddressSet(dbIDs *libovsdbops.DbObjectIDs) (AddressSet, error) {
 	if err := f.asf.validateDbIDs(dbIDs); err != nil {
