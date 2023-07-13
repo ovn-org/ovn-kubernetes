@@ -242,13 +242,16 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			e.Run(1, stopChan)
 		}()
 
-		wait.PollImmediate(
+		err = wait.PollUntilContextTimeout(
+			context.Background(),
 			500*time.Millisecond,
 			5*time.Second,
-			func() (bool, error) {
+			true,
+			func(context.Context) (done bool, err error) {
 				return e.Synced(), nil
 			},
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() (bool, error) {
 			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
