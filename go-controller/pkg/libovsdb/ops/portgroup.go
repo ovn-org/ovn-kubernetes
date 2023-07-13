@@ -188,6 +188,28 @@ func AddACLsToPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 	return m.CreateOrUpdateOps(ops, opModel)
 }
 
+// UpdatePortGroupSetACLsOps updates the provided ACLs on the provided port group and
+// returns the corresponding ops. It entirely replaces the existing ACLs on the PG with
+// the newly provided list
+func UpdatePortGroupSetACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, name string, acls []*nbdb.ACL) ([]libovsdb.Operation, error) {
+	pg := nbdb.PortGroup{
+		Name: name,
+		ACLs: make([]string, 0, len(acls)),
+	}
+	for _, acl := range acls {
+		pg.ACLs = append(pg.ACLs, acl.UUID)
+	}
+	opModel := operationModel{
+		Model:          &pg,
+		OnModelUpdates: []interface{}{&pg.ACLs},
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+
+	m := newModelClient(nbClient)
+	return m.CreateOrUpdateOps(ops, opModel)
+}
+
 // DeleteACLsFromPortGroupOps removes the provided ACLs from the provided port
 // group and returns the corresponding ops
 func DeleteACLsFromPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, name string, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
