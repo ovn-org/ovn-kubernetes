@@ -12,6 +12,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -37,7 +38,7 @@ func (zch *ZoneChassisHandler) AddLocalZoneNode(node *corev1.Node) error {
 	return nil
 }
 
-// AddRemoteZoneNode creates the remote chassis for the remote zone node node in the SB DB or marks
+// AddRemoteZoneNode creates the remote chassis for the remote zone node in the SB DB or marks
 // the entry as remote if it was local chassis earlier.
 func (zch *ZoneChassisHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	if err := zch.createOrUpdateNodeChassis(node, true); err != nil {
@@ -112,7 +113,12 @@ func (zch *ZoneChassisHandler) createOrUpdateNodeChassis(node *corev1.Node, isRe
 	// Get the chassis id.
 	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
-		return fmt.Errorf("failed to parse node chassis-id for node - %s, error: %w", node.Name, err)
+		parsedErr := err
+		if isRemote {
+			parsedErr = ovntypes.NewSuppressedError(err)
+		}
+		return fmt.Errorf("failed to parse node chassis-id for node - %s, error: %w",
+			node.Name, parsedErr)
 	}
 
 	nodePrimaryIp, err := util.GetNodePrimaryIP(node)
