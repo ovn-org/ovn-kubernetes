@@ -146,6 +146,7 @@ func (o *FakeOVN) startWithDBSetup(dbSetup libovsdbtest.TestSetup, objects ...ru
 func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
 	close(o.stopChan)
+	o.controller.cancelableCtx.Cancel()
 	o.wg.Wait()
 	o.egressQoSWg.Wait()
 	o.egressSVCWg.Wait()

@@ -185,7 +185,7 @@ type networkPolicy struct {
 	// Use networkPolicy.RLock to read this field and hold it for the whole event handling.
 	deleted bool
 
-	stopChan chan struct{}
+	cancelableContext *util.CancelableContext
 }
 
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
@@ -823,7 +823,7 @@ func (bnc *BaseNetworkController) addLocalPodHandler(policy *knet.NetworkPolicy,
 		&NetworkPolicyExtraParameters{
 			np: np,
 		},
-		np.stopChan)
+		np.cancelableContext.Done())
 
 	podHandler, err := retryLocalPods.WatchResourceFiltered(policy.Namespace, sel)
 	if err != nil {
@@ -1019,8 +1019,9 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 		np.Unlock()
 		npLocked = false
 
-		if np.stopChan == nil {
-			np.stopChan = util.GetChildStopChan(bnc.stopChan)
+		if np.cancelableContext == nil {
+			cancelableContext := util.NewCancelableContextChild(bnc.cancelableCtx)
+			np.cancelableContext = &cancelableContext
 		}
 
 		// 6. Start peer handlers to update all allow rules first
@@ -1450,7 +1451,7 @@ func (bnc *BaseNetworkController) addPeerNamespaceHandler(
 		factory.PeerNamespaceSelectorType,
 		syncFunc,
 		&NetworkPolicyExtraParameters{gp: gress, np: np},
-		np.stopChan,
+		np.cancelableContext.Done(),
 	)
 
 	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", sel)
@@ -1464,9 +1465,9 @@ func (bnc *BaseNetworkController) addPeerNamespaceHandler(
 }
 
 func (bnc *BaseNetworkController) shutdownHandlers(np *networkPolicy) {
-	if np.stopChan != nil {
-		close(np.stopChan)
-		np.stopChan = nil
+	if np.cancelableContext != nil {
+		np.cancelableContext.Cancel()
+		np.cancelableContext = nil
 	}
 
 	if np.localPodHandler != nil {

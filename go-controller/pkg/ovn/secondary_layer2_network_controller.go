@@ -55,6 +55,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					stopChan:                    stopChan,
 					wg:                          &sync.WaitGroup{},
 					localZoneNodes:              &sync.Map{},
+					cancelableCtx:               util.NewCancelableContext(),
 				},
 			},
 		},
