@@ -933,18 +933,14 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		nc.wg.Add(1)
-		go func() {
-			defer nc.wg.Done()
-			c.Run(1)
-		}()
+		if err = c.Run(nc.wg, 1); err != nil {
+			return err
+		}
 	}
 	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
-		nc.wg.Add(1)
-		go func() {
-			defer nc.wg.Done()
-			nc.apbExternalRouteNodeController.Run(1)
-		}()
+		if err = nc.apbExternalRouteNodeController.Run(nc.wg, 1); err != nil {
+			return err
+		}
 	}
 
 	nc.wg.Add(1)

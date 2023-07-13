@@ -206,4 +206,8 @@ const (
 	// MaxLogicalPortTunnelKey is maximum tunnel key that can be requested for a
 	// Logical Switch or Router Port
 	MaxLogicalPortTunnelKey = 32767
+
+	// InformerSyncTimeout is used to wait from the initial informer cache sync.
+	// It allows ~4 list() retries with the default reflector exponential backoff config
+	InformerSyncTimeout = 20 * time.Second
 )

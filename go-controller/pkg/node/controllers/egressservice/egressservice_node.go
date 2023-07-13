@@ -166,36 +166,29 @@ func (c *Controller) onEgressServiceDelete(obj interface{}) {
 	c.egressServiceQueue.Add(key)
 }
 
-func (c *Controller) Run(threadiness int) {
+func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 	defer utilruntime.HandleCrash()
 
 	klog.Infof("Starting Egress Services Controller")
 
-	if !cache.WaitForNamedCacheSync("egressservices", c.stopCh, c.egressServiceSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices", c.stopCh, c.egressServiceSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressservices_services", c.stopCh, c.servicesSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_services", c.stopCh, c.servicesSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressservices_endpointslices", c.stopCh, c.endpointSlicesSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_endpointslices", c.stopCh, c.endpointSlicesSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
 	klog.Infof("Repairing Egress Services")
 	err := c.repair()
 	if err != nil {
-		klog.Errorf("Failed to repair Egress Services entries: %v", err)
+		return fmt.Errorf("failed to repair Egress Services entries: %v", err)
 	}
 
-	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
@@ -206,13 +199,18 @@ func (c *Controller) Run(threadiness int) {
 		}()
 	}
 
-	// wait until we're told to stop
-	<-c.stopCh
+	// add shutdown goroutine waiting for c.stopCh
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// wait until we're told to stop
+		<-c.stopCh
 
-	klog.Infof("Shutting down Egress Services controller")
-	c.egressServiceQueue.ShutDown()
+		klog.Infof("Shutting down Egress Services controller")
+		c.egressServiceQueue.ShutDown()
+	}()
 
-	wg.Wait()
+	return nil
 }
 
 // Removes stale iptables/ip rules, updates the controller cache with the correct existing ones.

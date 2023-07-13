@@ -820,11 +820,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 func (o *FakeOVN) InitAndRunEgressQoSController() {
 	klog.Warningf("#### [%p] INIT EgressQoS", o)
 	o.controller.initEgressQoSController(o.watcher.EgressQoSInformer(), o.watcher.PodCoreInformer(), o.watcher.NodeCoreInformer())
-	o.egressQoSWg.Add(1)
-	go func() {
-		defer o.egressQoSWg.Done()
-		o.controller.runEgressQoSController(1, o.stopChan)
-	}()
+	o.controller.runEgressQoSController(o.egressQoSWg, 1, o.stopChan)
 }
 
 func createNodeAndLS(fakeOVN *FakeOVN, name, zone string) (*v1.Node, *nbdb.LogicalSwitch, error) {

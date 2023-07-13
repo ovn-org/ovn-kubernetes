@@ -220,36 +220,29 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 	return nil
 }
 
-func (oc *DefaultNetworkController) runEgressQoSController(threadiness int, stopCh <-chan struct{}) {
+func (oc *DefaultNetworkController) runEgressQoSController(wg *sync.WaitGroup, threadiness int, stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 
 	klog.Infof("Starting EgressQoS Controller")
 
-	if !cache.WaitForNamedCacheSync("egressqosnodes", stopCh, oc.egressQoSNodeSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressqosnodes", stopCh, oc.egressQoSNodeSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressqospods", stopCh, oc.egressQoSPodSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressqospods", stopCh, oc.egressQoSPodSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressqos", stopCh, oc.egressQoSSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressqos", stopCh, oc.egressQoSSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
 	klog.Infof("Repairing EgressQoSes")
 	err := oc.repairEgressQoSes()
 	if err != nil {
-		klog.Errorf("Failed to delete stale EgressQoS entries: %v", err)
+		return fmt.Errorf("failed to delete stale EgressQoS entries: %v", err)
 	}
 
-	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
@@ -280,15 +273,20 @@ func (oc *DefaultNetworkController) runEgressQoSController(threadiness int, stop
 		}()
 	}
 
-	// wait until we're told to stop
-	<-stopCh
+	// add shutdown goroutine waiting for stopCh
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// wait until we're told to stop
+		<-stopCh
 
-	klog.Infof("Shutting down EgressQoS controller")
-	oc.egressQoSQueue.ShutDown()
-	oc.egressQoSPodQueue.ShutDown()
-	oc.egressQoSNodeQueue.ShutDown()
+		klog.Infof("Shutting down EgressQoS controller")
+		oc.egressQoSQueue.ShutDown()
+		oc.egressQoSPodQueue.ShutDown()
+		oc.egressQoSNodeQueue.ShutDown()
+	}()
 
-	wg.Wait()
+	return nil
 }
 
 // onEgressQoSAdd queues the EgressQoS for processing.
