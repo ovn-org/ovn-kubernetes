@@ -103,7 +103,11 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy", &metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}}, sets.NewString("9.0.0.1"), bfd, nil, nil, bfd, ""),
+							newPolicy(
+								"policy",
+								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
+								sets.NewString("9.0.0.1"),
+								bfd, nil, nil, bfd, ""),
 						},
 					},
 				)
@@ -3053,7 +3057,8 @@ func deleteNamespace(namespaceName string, fakeClient kubernetes.Interface) {
 }
 
 func (o *FakeOVN) RunAPBExternalPolicyController() {
-	o.controller.apbExternalRouteController.Repair()
-	err := o.controller.apbExternalRouteController.Run(o.controller.wg, 5)
+	err := o.controller.apbExternalRouteController.Repair()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	err = o.controller.apbExternalRouteController.Run(o.controller.wg, 5)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred())
 }
