@@ -472,20 +472,6 @@ func (_m *InterfaceOVN) UpdateEgressServiceStatus(namespace string, name string,
 	return r0
 }
 
-// UpdateNode provides a mock function with given fields: node
-func (_m *InterfaceOVN) UpdateNode(node *apicorev1.Node) error {
-	ret := _m.Called(node)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*apicorev1.Node) error); ok {
-		r0 = rf(node)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
 // UpdateNodeStatus provides a mock function with given fields: node
 func (_m *InterfaceOVN) UpdateNodeStatus(node *apicorev1.Node) error {
 	ret := _m.Called(node)
@@ -501,7 +487,7 @@ func (_m *InterfaceOVN) UpdateNodeStatus(node *apicorev1.Node) error {
 }
 
 // UpdatePod provides a mock function with given fields: pod
-func (_m *InterfaceOVN) UpdatePod(pod *apicorev1.Pod) error {
+func (_m *InterfaceOVN) UpdatePodStatus(pod *apicorev1.Pod) error {
 	ret := _m.Called(pod)
 
 	var r0 error

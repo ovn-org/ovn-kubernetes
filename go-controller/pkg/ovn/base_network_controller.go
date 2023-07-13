@@ -428,7 +428,9 @@ func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName 
 		for k, v := range nodeAnnotations {
 			cnode.Annotations[k] = v
 		}
-		return cnci.kube.UpdateNode(cnode)
+		// It is possible to update the node annotations using status subresource
+		// because changes to metadata via status subresource are not restricted for nodes.
+		return cnci.kube.UpdateNodeStatus(cnode)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation", nodeName)

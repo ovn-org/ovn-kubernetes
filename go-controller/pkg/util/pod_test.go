@@ -93,9 +93,9 @@ func TestUpdatePodWithAllocationOrRollback(t *testing.T) {
 			}
 
 			if tt.updatePodErr {
-				kubeMock.On("UpdatePod", pod).Return(errors.New("Update pod error"))
+				kubeMock.On("UpdatePodStatus", pod).Return(errors.New("Update pod error"))
 			} else if tt.expectUpdate {
-				kubeMock.On("UpdatePod", pod).Return(nil)
+				kubeMock.On("UpdatePodStatus", pod).Return(nil)
 			}
 
 			err := UpdatePodWithRetryOrRollback(podListerMock, kubeMock, &v1.Pod{}, allocate)
