@@ -1159,7 +1159,7 @@ func noAlternateProxySelector() func(options *metav1.ListOptions) {
 func WithUpdateHandlingForObjReplace(funcs cache.ResourceEventHandler) cache.ResourceEventHandlerFuncs {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			funcs.OnAdd(obj, true)
+			funcs.OnAdd(obj, false)
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldObj := old.(metav1.Object)
