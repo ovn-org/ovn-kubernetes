@@ -53,12 +53,14 @@ type NodeWatchFactory interface {
 
 	GetPods(namespace string) ([]*kapi.Pod, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
+	GetAllPods() ([]*kapi.Pod, error)
 	GetNamespaces() ([]*kapi.Namespace, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetNodes() ([]*kapi.Node, error)
 	ListNodes(selector labels.Selector) ([]*kapi.Node, error)
 
 	GetService(namespace, name string) (*kapi.Service, error)
+	GetServices() ([]*kapi.Service, error)
 	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 	GetEndpointSlice(namespace, name string) (*discovery.EndpointSlice, error)
 

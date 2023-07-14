@@ -214,6 +214,7 @@ func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
 // AddRemoteZoneNode creates the interconnect resources in OVN NBDB and SBDB for the remote zone node.
 // // See createRemoteZoneNodeResources() below for more details.
 func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
+	start := time.Now()
 	klog.Infof("Creating interconnect resources for remote zone node %s for the network %s", node.Name, zic.GetNetworkName())
 
 	nodeID := util.GetNodeID(node)
@@ -231,7 +232,7 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	if err := zic.createRemoteZoneNodeResources(node, nodeID, chassisId); err != nil {
 		return fmt.Errorf("creating interconnect resources for remote zone node %s for the network %s failed : err - %w", node.Name, zic.GetNetworkName(), err)
 	}
-
+	klog.Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
 	return nil
 }
 

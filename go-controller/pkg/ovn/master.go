@@ -894,6 +894,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 }
 
 func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIC bool) error {
+	start := time.Now()
 	// Check if the remote node is present in the local zone nodes.  If its present
 	// it means it moved from this controller zone to other remote zone. Cleanup the node
 	// from the local zone cache.
@@ -928,7 +929,7 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 			oc.syncZoneICFailed.Delete(node.Name)
 		}
 	}
-
+	klog.Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
 	return err
 }
 
