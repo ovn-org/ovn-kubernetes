@@ -2268,6 +2268,57 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("ensure egressIP status is in sync with empty cloud private ip config", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.OVNKubernetesFeature.EnableInterconnect = true
+				config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
+
+				egressIP1 := "192.168.126.101"
+				egressIP2 := "192.168.126.100"
+
+				node1 := setupNode(node1Name, []string{"192.168.126.12/24"}, map[string]string{egressIP1: egressIPName})
+				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, map[string]string{egressIP2: egressIPName})
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP1, egressIP2},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{
+							{
+								EgressIP: egressIP1,
+								Node:     node1.name,
+							},
+							{
+								EgressIP: egressIP2,
+								Node:     node2.name,
+							},
+						},
+					},
+				}
+				fakeClusterManagerOVN.start(
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+				)
+
+				fakeClusterManagerOVN.eIPC.allocator.cache[node1.name] = &node1
+				fakeClusterManagerOVN.eIPC.allocator.cache[node2.name] = &node2
+
+				_, err := fakeClusterManagerOVN.eIPC.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = fakeClusterManagerOVN.eIPC.WatchCloudPrivateIPConfig()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// Since there is no assignment of cloud private ip. syncCloudPrivateIPConfigs removes
+				// all entries from egress ip object status and check if that is done properly or not.
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("should not update valid assignment", func() {
 			app.Action = func(ctx *cli.Context) error {
 
