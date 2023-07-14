@@ -33,14 +33,20 @@ func getPortProtocol(proto v1.Protocol) string {
 }
 
 // getAdminNetworkPolicyPGName will return the hashed name and provided anp name as the port group name
-func getAdminNetworkPolicyPGName(name string) (hashedPGName, readablePGName string) {
+func getAdminNetworkPolicyPGName(name string, isBanp bool) (hashedPGName, readablePGName string) {
 	readablePortGroupName := fmt.Sprintf("ANP:%s", name)
+	if isBanp {
+		readablePortGroupName = fmt.Sprintf("BANP:%s", name)
+	}
 	return util.HashForOVN(readablePortGroupName), readablePortGroupName
 }
 
 // getANPRuleACLDbIDs will return the dbObjectIDs for a given rule's ACLs
-func getANPRuleACLDbIDs(name, gressPrefix, gressIndex, protocol, controller string) *libovsdbops.DbObjectIDs {
+func getANPRuleACLDbIDs(name, gressPrefix, gressIndex, protocol, controller string, isBanp bool) *libovsdbops.DbObjectIDs {
 	idType := libovsdbops.ACLAdminNetworkPolicy
+	if isBanp {
+		idType = libovsdbops.ACLBaselineAdminNetworkPolicy
+	}
 	return libovsdbops.NewDbObjectIDs(idType, controller, map[libovsdbops.ExternalIDKey]string{
 		libovsdbops.ObjectNameKey:      name,
 		libovsdbops.PolicyDirectionKey: gressPrefix,
@@ -67,9 +73,26 @@ func getACLActionForANPRule(action anpapi.AdminNetworkPolicyRuleAction) string {
 	return ovnACLAction
 }
 
+// getACLActionForBANPRule returns the corresponding OVN ACL action for a given BANP rule action
+func getACLActionForBANPRule(action anpapi.BaselineAdminNetworkPolicyRuleAction) string {
+	var ovnACLAction string
+	switch action {
+	case anpapi.BaselineAdminNetworkPolicyRuleActionAllow:
+		ovnACLAction = nbdb.ACLActionAllowRelated
+	case anpapi.BaselineAdminNetworkPolicyRuleActionDeny:
+		ovnACLAction = nbdb.ACLActionDrop
+	default:
+		panic(fmt.Sprintf("Failed to build BANP ACL: unknown acl action %s", action))
+	}
+	return ovnACLAction
+}
+
 // GetANPPeerAddrSetDbIDs will return the dbObjectIDs for a given rule's address-set
-func GetANPPeerAddrSetDbIDs(name, gressPrefix, gressIndex, controller string) *libovsdbops.DbObjectIDs {
+func GetANPPeerAddrSetDbIDs(name, gressPrefix, gressIndex, controller string, isBanp bool) *libovsdbops.DbObjectIDs {
 	idType := libovsdbops.AddressSetAdminNetworkPolicy
+	if isBanp {
+		idType = libovsdbops.AddressSetBaselineAdminNetworkPolicy
+	}
 	return libovsdbops.NewDbObjectIDs(idType, controller, map[libovsdbops.ExternalIDKey]string{
 		libovsdbops.ObjectNameKey:      name,
 		libovsdbops.PolicyDirectionKey: gressPrefix,
