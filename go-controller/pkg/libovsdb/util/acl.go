@@ -82,6 +82,9 @@ func GetACLName(dbIDs *libovsdbops.DbObjectIDs) string {
 	case t.IsSameType(libovsdbops.ACLAdminNetworkPolicy):
 		aclName = "ANP:" + dbIDs.GetObjectID(libovsdbops.ObjectNameKey) + ":" + dbIDs.GetObjectID(libovsdbops.PolicyDirectionKey) +
 			":" + dbIDs.GetObjectID(libovsdbops.GressIdxKey)
+	case t.IsSameType(libovsdbops.ACLBaselineAdminNetworkPolicy):
+		aclName = "BANP:" + dbIDs.GetObjectID(libovsdbops.ObjectNameKey) + ":" + dbIDs.GetObjectID(libovsdbops.PolicyDirectionKey) +
+			":" + dbIDs.GetObjectID(libovsdbops.GressIdxKey)
 	}
 	return fmt.Sprintf("%.63s", aclName)
 }
@@ -126,8 +129,20 @@ func BuildACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string
 func BuildANPACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string, aclT ACLPipelineType) *nbdb.ACL {
 	// TODO(tssurya): Logging related parameters are nil for now, will fix this in future PRs when I add support for ANP-Logging
 	anpACL := BuildACL(dbIDs, priority, match, action, nil, aclT)
-	anpACL.Tier = types.DefaultACLTier
+	anpACL.Tier = GetACLTier(dbIDs)
 	return anpACL
+}
+
+func GetACLTier(dbIDs *libovsdbops.DbObjectIDs) int {
+	t := dbIDs.GetIDsType()
+	switch {
+	case t.IsSameType(libovsdbops.ACLAdminNetworkPolicy):
+		return types.DefaultANPACLTier
+	case t.IsSameType(libovsdbops.ACLBaselineAdminNetworkPolicy):
+		return types.DefaultBANPACLTier
+	default:
+		return types.DefaultACLTier
+	}
 }
 
 func GetACLMatch(portGroupName, match string, aclDir ACLDirection) string {

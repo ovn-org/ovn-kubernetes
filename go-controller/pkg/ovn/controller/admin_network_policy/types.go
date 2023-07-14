@@ -13,11 +13,14 @@ import (
 // We will use priority range from 30000 (0) to 20000 (99) ACLs (both inclusive, note that these ACLs will be in tier1)
 // In order to support more in the future, we will need to fix priority range in OVS
 // See https://bugzilla.redhat.com/show_bug.cgi?id=2175752 for more details.
+// NOTE: A cluster can have only BANP at a given time as defined by upstream KEP.
 const (
 	ANPFlowStartPriority            = 30000
 	ANPMaxRulesPerObject            = 100
-	ANPExternalIDKey                = "AdminNetworkPolicy" // key set on port-groups to identify which ANP it belongs to
-	ovnkSupportedPriorityUpperBound = 99                   // corresponds to 20100 ACL priority
+	ANPExternalIDKey                = "AdminNetworkPolicy"         // key set on port-groups to identify which ANP it belongs to
+	ovnkSupportedPriorityUpperBound = 99                           // corresponds to 20100 ACL priority
+	BANPFlowPriority                = 1750                         // down to 1651 (both inclusive, note that these ACLs will be in tier3)
+	BANPExternalIDKey               = "BaselineAdminNetworkPolicy" // key set on port-groups to identify which BANP it belongs to
 )
 
 // TODO: Double check how empty selector means all labels match works
@@ -74,9 +77,10 @@ type gressRule struct {
 type adminNetworkPolicyState struct {
 	// name of the admin network policy (unique across cluster)
 	name string
-	// priority is anp.Spec.Priority
+	// priority is anp.Spec.Priority (since BANP does not have priority, we hardcode to 0)
 	anpPriority int32
 	// priority is the OVN priority equivalent of anp.Spec.Priority
+	// (since BANP does not have priority, we hardcode to BANPFlowPriority)
 	ovnPriority int32
 	// subject stores the objects needed to track .Spec.Subject changes
 	subject *adminNetworkPolicySubject
@@ -284,4 +288,102 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 		}
 	}
 	return anpRule, nil
+}
+
+// newBaselineAdminNetworkPolicyState takes the provided BANP API object and creates a new corresponding
+// adminNetworkPolicyState cache object for that API object.
+func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) (*adminNetworkPolicyState, error) {
+	banp := &adminNetworkPolicyState{
+		name:         raw.Name,
+		anpPriority:  0, // since BANP does not have priority, we hardcode to 0
+		ovnPriority:  BANPFlowPriority,
+		ingressRules: make([]*gressRule, 0),
+		egressRules:  make([]*gressRule, 0),
+	}
+	var err error
+	banp.subject, err = newAdminNetworkPolicySubject(raw.Spec.Subject)
+	if err != nil {
+		return nil, err
+	}
+	addErrors := errors.New("")
+	for i, rule := range raw.Spec.Ingress {
+		banpRule, err := newBaselineAdminNetworkPolicyIngressRule(rule, int32(i), BANPFlowPriority-int32(i))
+		if err != nil {
+			addErrors = errors.Wrapf(addErrors, "error: cannot create banp ingress Rule %d in ANP %s - %v",
+				i, raw.Name, err)
+			continue
+		}
+		banp.ingressRules = append(banp.ingressRules, banpRule)
+	}
+	for i, rule := range raw.Spec.Egress {
+		banpRule, err := newBaselineAdminNetworkPolicyEgressRule(rule, int32(i), BANPFlowPriority-int32(i))
+		if err != nil {
+			addErrors = errors.Wrapf(addErrors, "error: cannot create banp egress Rule %d in ANP %s - %v",
+				i, raw.Name, err)
+			continue
+		}
+		banp.egressRules = append(banp.egressRules, banpRule)
+	}
+
+	if addErrors.Error() == "" {
+		addErrors = nil
+	}
+	return banp, addErrors
+}
+
+// newBaselineAdminNetworkPolicyIngressRule takes the provided BANP API Ingress Rule and creates a new corresponding
+// gressRule cache object for that Rule.
+func newBaselineAdminNetworkPolicyIngressRule(raw anpapi.BaselineAdminNetworkPolicyIngressRule, index, priority int32) (*gressRule, error) {
+	banpRule := &gressRule{
+		name:        raw.Name,
+		priority:    priority,
+		gressIndex:  index,
+		action:      getACLActionForBANPRule(raw.Action),
+		gressPrefix: string(libovsdbutil.ACLIngress),
+		peers:       make([]*adminNetworkPolicyPeer, 0),
+		ports:       make([]*adminNetworkPolicyPort, 0),
+	}
+	for _, peer := range raw.From {
+		anpPeer, err := newAdminNetworkPolicyPeer(peer)
+		if err != nil {
+			return nil, err
+		}
+		banpRule.peers = append(banpRule.peers, anpPeer)
+	}
+	if raw.Ports != nil {
+		for _, port := range *raw.Ports {
+			anpPort := newAdminNetworkPolicyPort(port)
+			banpRule.ports = append(banpRule.ports, anpPort)
+		}
+	}
+
+	return banpRule, nil
+}
+
+// newBaselineAdminNetworkPolicyEgressRule takes the provided BANP API Egress Rule and creates a new corresponding
+// gressRule cache object for that Rule.
+func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPolicyEgressRule, index, priority int32) (*gressRule, error) {
+	banpRule := &gressRule{
+		name:        raw.Name,
+		priority:    priority,
+		gressIndex:  index,
+		action:      getACLActionForBANPRule(raw.Action),
+		gressPrefix: string(libovsdbutil.ACLEgress),
+		peers:       make([]*adminNetworkPolicyPeer, 0),
+		ports:       make([]*adminNetworkPolicyPort, 0),
+	}
+	for _, peer := range raw.To {
+		banpPeer, err := newAdminNetworkPolicyPeer(peer)
+		if err != nil {
+			return nil, err
+		}
+		banpRule.peers = append(banpRule.peers, banpPeer)
+	}
+	if raw.Ports != nil {
+		for _, port := range *raw.Ports {
+			banpPort := newAdminNetworkPolicyPort(port)
+			banpRule.ports = append(banpRule.ports, banpPort)
+		}
+	}
+	return banpRule, nil
 }

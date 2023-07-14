@@ -58,6 +58,10 @@ type Controller struct {
 	// This map tracks anp.Spec.Priority->anp.Name
 	anpPriorityMap map[int32]string
 
+	// banpCache contains the cloned value of BANP kapi
+	// This cache will always have only one entry since object is singleton in the cluster
+	banpCache *adminNetworkPolicyState
+
 	// queues for the CRDs where incoming work is placed to de-dup
 	anpQueue  workqueue.RateLimitingInterface
 	banpQueue workqueue.RateLimitingInterface
@@ -95,6 +99,7 @@ func NewController(
 		addressSetFactory: addressSetFactory,
 		anpCache:          make(map[string]*adminNetworkPolicyState),
 		anpPriorityMap:    make(map[int32]string),
+		banpCache:         &adminNetworkPolicyState{}, // safe to initialise pointer to empty struct than nil
 	}
 
 	klog.Info("Setting up event handlers for Admin Network Policy")

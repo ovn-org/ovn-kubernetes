@@ -10,10 +10,11 @@ const (
 
 const (
 	// owner types
-	EgressFirewallDNSOwnerType  ownerType = "EgressFirewallDNS"
-	EgressFirewallOwnerType     ownerType = "EgressFirewall"
-	EgressQoSOwnerType          ownerType = "EgressQoS"
-	AdminNetworkPolicyOwnerType ownerType = "AdminNetworkPolicy"
+	EgressFirewallDNSOwnerType          ownerType = "EgressFirewallDNS"
+	EgressFirewallOwnerType             ownerType = "EgressFirewall"
+	EgressQoSOwnerType                  ownerType = "EgressQoS"
+	AdminNetworkPolicyOwnerType         ownerType = "AdminNetworkPolicy"
+	BaselineAdminNetworkPolicyOwnerType ownerType = "BaselineAdminNetworkPolicy"
 	// NetworkPolicyOwnerType is deprecated for address sets, should only be used for sync.
 	// New owner of network policy address sets, is PodSelectorOwnerType.
 	NetworkPolicyOwnerType ownerType = "NetworkPolicy"
@@ -49,6 +50,16 @@ const (
 
 var AddressSetAdminNetworkPolicy = newObjectIDsType(addressSet, AdminNetworkPolicyOwnerType, []ExternalIDKey{
 	// anp name
+	ObjectNameKey,
+	// egress or ingress
+	PolicyDirectionKey,
+	// gress rule's index
+	GressIdxKey,
+	AddressSetIPFamilyKey,
+})
+
+var AddressSetBaselineAdminNetworkPolicy = newObjectIDsType(addressSet, BaselineAdminNetworkPolicyOwnerType, []ExternalIDKey{
+	// banp name
 	ObjectNameKey,
 	// egress or ingress
 	PolicyDirectionKey,
@@ -114,6 +125,17 @@ var AddressSetEgressService = newObjectIDsType(addressSet, EgressServiceOwnerTyp
 
 var ACLAdminNetworkPolicy = newObjectIDsType(acl, AdminNetworkPolicyOwnerType, []ExternalIDKey{
 	// anp name
+	ObjectNameKey,
+	// egress or ingress
+	PolicyDirectionKey,
+	// gress rule's index
+	GressIdxKey,
+	// gress rule's peer port's protocol index
+	PortPolicyProtocolKey,
+})
+
+var ACLBaselineAdminNetworkPolicy = newObjectIDsType(acl, BaselineAdminNetworkPolicyOwnerType, []ExternalIDKey{
+	// banp name
 	ObjectNameKey,
 	// egress or ingress
 	PolicyDirectionKey,
