@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -370,7 +371,8 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) addPods(pods ...*v1.Pod) error
 	for _, pod := range pods {
 		podIPs, err := util.GetPodIPsOfNetwork(pod, handlerInfo.netInfo)
 		if err != nil {
-			return err
+			// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
+			return ovntypes.NewSuppressedError(err)
 		}
 		ips = append(ips, podIPs...)
 	}
@@ -383,7 +385,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) deletePod(pod *v1.Pod) error {
 	if err != nil {
 		// if pod ips can't be fetched on delete, we don't expect that information about ips will ever be updated,
 		// therefore just log the error and return.
-		klog.Warningf("Could not find pod %s/%s IPs to delete from pod selector address set: %w", pod.Namespace, pod.Name, err)
+		klog.Warningf("Could not find pod %s/%s IPs to delete from pod selector address set: %v", pod.Namespace, pod.Name, err)
 		return nil
 	}
 	return handlerInfo.addressSet.DeleteIPs(ips)
@@ -467,7 +469,10 @@ func (bnc *BaseNetworkController) podSelectorPodNeedsDelete(pod *kapi.Pod, podHa
 	}
 	ips, err := util.GetPodIPsOfNetwork(pod, bnc.NetInfo)
 	if err != nil {
-		return "", fmt.Errorf("can't get pod IPs %s/%s: %w", pod.Namespace, pod.Name, err)
+		// if pod has no IP, nothing to do
+		klog.Warningf("Failed to get IPs of pod %s/%s during address_set pod selector removal: %v",
+			pod.Namespace, pod.Name, err)
+		return "", nil
 	}
 	// completed pod be deleted a long time ago, check if there is a new pod with that same ip
 	collidingPod, err := bnc.findPodWithIPAddresses(ips)
