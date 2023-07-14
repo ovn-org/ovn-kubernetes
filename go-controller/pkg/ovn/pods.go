@@ -28,49 +28,33 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 	// TBD: Before this succeeds, add Pod handler should not continue to allocate IPs for the new Pods.
 	expectedLogicalPorts := make(map[string]bool)
 	vms := make(map[ktypes.NamespacedName]bool)
+	var err error
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
 		if !ok {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
 
-		switchName := pod.Spec.NodeName
+		expectedLogicalPortName := ""
+		var annotations *util.PodAnnotation
 		if kubevirt.IsPodLiveMigratable(pod) {
-			isStale, err := kubevirt.IsMigratedSourcePodStale(oc.watchFactory, pod)
+			vms, expectedLogicalPortName, annotations, err = oc.allocateSyncMigratablePodIPsOnZone(vms, pod)
 			if err != nil {
 				return err
 			}
-			// The stale pods are "old" information from a live migration
-			// so it's not needed to be in sync
-			if isStale {
-				continue
-			}
-			vm := kubevirt.ExtractVMNameFromPod(pod)
-			if vm != nil {
-				vms[*vm] = oc.isPodScheduledinLocalZone(pod)
-			}
-			annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
+		} else if oc.isPodScheduledinLocalZone(pod) {
+			expectedLogicalPortName, annotations, err = oc.allocateSyncPodsIPs(pod)
 			if err != nil {
-				continue
+				return err
 			}
-			zoneContainsPodSubnet := false
-			switchName, zoneContainsPodSubnet = kubevirt.ZoneContainsPodSubnet(oc.lsManager, annotation)
-			// Don't allocate ip if this zone does not own the ip
-			if !zoneContainsPodSubnet {
-				continue
-			}
-		} else if !oc.isPodScheduledinLocalZone(pod) {
+		} else {
 			continue
 		}
 
-		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
-		if err != nil {
+		if annotations == nil {
 			continue
 		}
-		expectedLogicalPortName, err := oc.allocatePodIPsOnSwitch(pod, annotations, ovntypes.DefaultNetworkName, switchName)
-		if err != nil {
-			return err
-		}
+
 		if expectedLogicalPortName != "" {
 			expectedLogicalPorts[expectedLogicalPortName] = true
 		}
@@ -298,4 +282,39 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		metrics.RecordPodCreated(pod, oc.NetInfo)
 	}
 	return nil
+}
+
+func (oc *DefaultNetworkController) allocateSyncPodsIPs(pod *kapi.Pod) (string, *util.PodAnnotation, error) {
+	annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
+	if err != nil {
+		return "", nil, nil
+	}
+	expectedLogicalPortName, err := oc.allocatePodIPsOnSwitch(pod, annotations, ovntypes.DefaultNetworkName, pod.Spec.NodeName)
+	if err != nil {
+		return "", nil, err
+	}
+	return expectedLogicalPortName, annotations, nil
+}
+
+func (oc *DefaultNetworkController) allocateSyncMigratablePodIPsOnZone(vms map[ktypes.NamespacedName]bool, pod *kapi.Pod) (map[ktypes.NamespacedName]bool, string, *util.PodAnnotation, error) {
+	allocatePodIPsOnSwitchWrapFn := func(liveMigratablePod *kapi.Pod, liveMigratablePodAnnotation *util.PodAnnotation, switchName, nadName string) (string, error) {
+		return oc.allocatePodIPsOnSwitch(liveMigratablePod, liveMigratablePodAnnotation, switchName, nadName)
+	}
+	vmKey, expectedLogicalPortName, podAnnotation, err := kubevirt.AllocateSyncMigratablePodIPsOnZone(oc.watchFactory, oc.lsManager, ovntypes.DefaultNetworkName, pod, allocatePodIPsOnSwitchWrapFn)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// If there is a vmKey this VM is not stale so it should be in sync
+	if vmKey != nil {
+		vms[*vmKey] = oc.isPodScheduledinLocalZone(pod)
+	}
+
+	// For remote pods we the logical switch port is not present so
+	// empty expectedLogicalPortName is returned
+	if _, ok := oc.localZoneNodes.Load(pod.Spec.NodeName); !ok {
+		expectedLogicalPortName = ""
+	}
+
+	return vms, expectedLogicalPortName, podAnnotation, nil
 }
