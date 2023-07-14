@@ -168,20 +168,19 @@ func (c *Controller) Start(threadiness int) error {
 	defer utilruntime.HandleCrash()
 
 	klog.Infof("Starting Egress Services Controller")
-
-	if !cache.WaitForNamedCacheSync("egressservices", c.stopCh, c.egressServiceSynced) {
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices", c.stopCh, c.egressServiceSynced) {
 		return fmt.Errorf("timed out waiting for egressservice caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressservices_services", c.stopCh, c.servicesSynced) {
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_services", c.stopCh, c.servicesSynced) {
 		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressservices_endpointslices", c.stopCh, c.endpointSlicesSynced) {
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_endpointslices", c.stopCh, c.endpointSlicesSynced) {
 		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressservices_nodes", c.stopCh, c.nodesSynced) {
+	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_nodes", c.stopCh, c.nodesSynced) {
 		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 

@@ -2,6 +2,7 @@ package apbroute
 
 import (
 	"context"
+	"sync"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -40,6 +41,7 @@ var (
 	externalController *ExternalGatewayMasterController
 	iFactory           *factory.WatchFactory
 	stopChan           chan (struct{})
+	wg                 *sync.WaitGroup
 	initialDB          libovsdbtest.TestSetup
 	nbClient           libovsdbclient.Client
 	nbsbCleanup        *libovsdbtest.Context
@@ -117,9 +119,9 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 	}
 
 	mgr = externalController.mgr
-	go func() {
-		externalController.Run(5)
-	}()
+	wg = &sync.WaitGroup{}
+	err = externalController.Run(wg, 5)
+	Expect(err).NotTo(HaveOccurred())
 }
 
 var _ = Describe("OVN External Gateway policy", func() {

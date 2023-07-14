@@ -32,3 +32,22 @@ func UpdatePortBindingSetChassis(sbClient libovsdbclient.Client, portBinding *sb
 	_, err = m.CreateOrUpdate(opModel)
 	return err
 }
+
+// GetPortBinding looks up a portBinding in SBDB
+func GetPortBinding(sbClient libovsdbclient.Client, portBinding *sbdb.PortBinding) (*sbdb.PortBinding, error) {
+	found := []*sbdb.PortBinding{}
+	opModel := operationModel{
+		Model:          portBinding,
+		ExistingResult: &found,
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+
+	m := newModelClient(sbClient)
+	err := m.Lookup(opModel)
+	if err != nil {
+		return nil, err
+	}
+
+	return found[0], nil
+}

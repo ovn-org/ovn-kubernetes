@@ -34,7 +34,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/informers"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -97,8 +96,6 @@ type DefaultNetworkController struct {
 
 	// Controller used to handle the admin policy based external route resources
 	apbExternalRouteController *apbroutecontroller.ExternalGatewayMasterController
-	// svcFactory used to handle service related events
-	svcFactory informers.SharedInformerFactory
 
 	egressFirewallDNS *EgressDNS
 
@@ -143,7 +140,7 @@ type DefaultNetworkController struct {
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, err error) (*DefaultNetworkController, error) {
+func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil)
@@ -156,7 +153,14 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
 	}
-	svcController, svcFactory, err := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
+
+	svcController, err := svccontroller.NewController(
+		cnci.client, cnci.nbClient,
+		cnci.watchFactory.ServiceCoreInformer(),
+		cnci.watchFactory.EndpointSliceCoreInformer(),
+		cnci.watchFactory.NodeCoreInformer(),
+		cnci.recorder,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)
 	}
@@ -213,7 +217,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		switchLoadBalancerGroupUUID:  "",
 		routerLoadBalancerGroupUUID:  "",
 		svcController:                svcController,
-		svcFactory:                   svcFactory,
 		zoneICHandler:                zoneICHandler,
 		zoneChassisHandler:           zoneChassisHandler,
 		apbExternalRouteController:   apbExternalRouteController,
@@ -312,7 +315,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = oc.Init(); err != nil {
+	if err = oc.Init(ctx); err != nil {
 		return err
 	}
 
@@ -334,7 +337,7 @@ func (oc *DefaultNetworkController) Stop() {
 // TODO: Verify that the cluster was not already called with a different global subnet
 //
 //	If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
-func (oc *DefaultNetworkController) Init() error {
+func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
@@ -383,9 +386,15 @@ func (oc *DefaultNetworkController) Init() error {
 		oc.routerLoadBalancerGroupUUID = loadBalancerGroup.UUID
 	}
 
+	networkID := util.InvalidNetworkID
 	nodeNames := []string{}
 	for _, node := range existingNodes.Items {
 		nodeNames = append(nodeNames, node.Name)
+
+		if config.OVNKubernetesFeature.EnableInterconnect && networkID == util.InvalidNetworkID {
+			// get networkID from any node in the cluster
+			networkID, _ = util.ParseNetworkIDAnnotation(&node, oc.zoneICHandler.GetNetworkName())
+		}
 	}
 	if err := oc.SetupMaster(nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
@@ -395,6 +404,22 @@ func (oc *DefaultNetworkController) Init() error {
 	// So execute an individual sync method at startup to cleanup any difference
 	klog.V(4).Info("Cleaning External Gateway ECMP routes")
 	WithSyncDurationMetricNoError("external gateway routes", oc.apbExternalRouteController.Repair)
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		// if networkID is invalid, then we didn't find it on the initial node list.
+		// cluster-manager could still be starting and assigning, so execute full Init to search
+		if networkID == util.InvalidNetworkID {
+			if err := oc.zoneICHandler.Init(oc.kube, ctx); err != nil {
+				return err
+			}
+		} else {
+			// we already found the networkID, no need to search
+			if err := oc.zoneICHandler.EnsureTransitSwitch(networkID); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -418,9 +443,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	startSvc := time.Now()
-	// Start service watch factory and sync services
-	oc.svcFactory.Start(oc.stopChan)
-
 	// Services should be started after nodes to prevent LB churn
 	err := oc.StartServiceController(oc.wg, true)
 	endSvc := time.Since(startSvc)
@@ -488,11 +510,9 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		oc.wg.Add(1)
-		go func() {
-			defer oc.wg.Done()
-			oc.runEgressQoSController(1, oc.stopChan)
-		}()
+		if err = oc.runEgressQoSController(oc.wg, 1, oc.stopChan); err != nil {
+			return err
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
@@ -501,19 +521,15 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 			return fmt.Errorf("unable to create new egress service controller while creating new default network controller: %w", err)
 		}
 		oc.egressSvcController = c
-		oc.wg.Add(1)
-		go func() {
-			defer oc.wg.Done()
-			oc.egressSvcController.Run(1)
-		}()
+		if err = oc.egressSvcController.Run(oc.wg, 1); err != nil {
+			return err
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
-		oc.wg.Add(1)
-		go func() {
-			defer oc.wg.Done()
-			oc.apbExternalRouteController.Run(1)
-		}()
+		if err = oc.apbExternalRouteController.Run(oc.wg, 1); err != nil {
+			return err
+		}
 	}
 
 	end := time.Since(start)

@@ -42,7 +42,7 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 	}
 
 	// Reserve the id 0 for the default network.
-	if err := networkIDAllocator.ReserveID("default", defaultNetworkID); err != nil {
+	if err := networkIDAllocator.ReserveID(ovntypes.DefaultNetworkName, defaultNetworkID); err != nil {
 		return nil, fmt.Errorf("idAllocator failed to reserve defaultNetworkID %d", defaultNetworkID)
 	}
 	sncm := &secondaryNetworkClusterManager{
@@ -64,6 +64,15 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 func (sncm *secondaryNetworkClusterManager) Start() error {
 	klog.Infof("Starting secondary network cluster manager")
 
+	err := sncm.init()
+	if err != nil {
+		return err
+	}
+
+	return sncm.nadController.Start()
+}
+
+func (sncm *secondaryNetworkClusterManager) init() error {
 	// Reserve the network ids in the id allocator for the existing secondary layer3 networks.
 	nodes, err := sncm.watchFactory.GetNodes()
 	if err != nil {
@@ -83,7 +92,8 @@ func (sncm *secondaryNetworkClusterManager) Start() error {
 			}
 		}
 	}
-	return sncm.nadController.Start()
+
+	return nil
 }
 
 func (sncm *secondaryNetworkClusterManager) Stop() {
@@ -101,12 +111,8 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 
 	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
 
-	networkId, err := sncm.networkIDAllocator.AllocateID(nInfo.GetNetworkName())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create NetworkController for secondary layer3 network %s : %w", nInfo.GetNetworkName(), err)
-	}
-
-	sncc := newNetworkClusterController(networkId, nInfo, sncm.ovnClient, sncm.watchFactory)
+	namedIDAllocator := sncm.networkIDAllocator.ForName(nInfo.GetNetworkName())
+	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory)
 	return sncc, nil
 }
 
@@ -163,7 +169,11 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(allController
 				continue
 			}
 
-			oc := sncm.newDummyLayer3NetworkController(netName)
+			oc, err := sncm.newDummyLayer3NetworkController(netName)
+			if err != nil {
+				klog.Errorf("Failed to delete stale subnet annotation for network %s: %v", netName, err)
+				continue
+			}
 			staleNetworkControllers[netName] = oc
 		}
 	}
@@ -179,7 +189,10 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(allController
 }
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
-func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) nad.NetworkController {
+func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) (nad.NetworkController, error) {
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
-	return newNetworkClusterController(util.InvalidNetworkID, netInfo, sncm.ovnClient, sncm.watchFactory)
+	namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
+	nc := newNetworkClusterController(namedIDAllocator, netInfo, sncm.ovnClient, sncm.watchFactory)
+	err := nc.init()
+	return nc, err
 }

@@ -15,20 +15,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc_zone "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
-	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/informers"
-	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 )
@@ -190,7 +183,9 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
 	if err != nil {
-		return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w", pod.Namespace, pod.Name, err)
+		// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
+		return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w",
+			pod.Namespace, pod.Name, ovntypes.NewSuppressedError(err))
 	}
 
 	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
@@ -403,41 +398,6 @@ func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, recorder record.EventRecorder) (*svccontroller.Controller, informers.SharedInformerFactory, error) {
-	// Create our own informers to start compartmentalizing the code
-	// filter server side the things we don't care about
-	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	noHeadlessEndpoints, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	labelSelector := labels.NewSelector()
-	labelSelector = labelSelector.Add(*noProxyName, *noHeadlessEndpoints)
-
-	svcFactory := informers.NewSharedInformerFactoryWithOptions(client, 0,
-		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
-			options.LabelSelector = labelSelector.String()
-		}))
-
-	controller, err := svccontroller.NewController(
-		client,
-		nbClient,
-		svcFactory.Core().V1().Services(),
-		svcFactory.Discovery().V1().EndpointSlices(),
-		svcFactory.Core().V1().Nodes(),
-		recorder,
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-	return controller, svcFactory, nil
-}
-
 func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
 	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
 	wg.Add(1)
@@ -471,7 +431,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 
 	return egresssvc_zone.NewController(DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
 		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
-		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.svcFactory.Core().V1().Services(),
-		oc.svcFactory.Discovery().V1().EndpointSlices(),
-		oc.svcFactory.Core().V1().Nodes(), oc.zone)
+		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
+		oc.watchFactory.EndpointSliceCoreInformer(),
+		oc.watchFactory.NodeCoreInformer(), oc.zone)
 }

@@ -25,6 +25,7 @@ import (
 
 	adminpolicybasedroutelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/listers/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // Admin Policy Based Route Node controller
@@ -35,26 +36,26 @@ type ExternalGatewayNodeController struct {
 	// route policies
 
 	// routerInformer v1apbinformer.AdminPolicyBasedExternalRouteInformer
-	routeLister adminpolicybasedroutelisters.AdminPolicyBasedExternalRouteLister
-	routeSynced cache.InformerSynced
-	routeQueue  workqueue.RateLimitingInterface
+	routeLister   adminpolicybasedroutelisters.AdminPolicyBasedExternalRouteLister
+	routeInformer cache.SharedIndexInformer
+	routeQueue    workqueue.RateLimitingInterface
 
 	// Pods
-	podLister corev1listers.PodLister
-	podSynced cache.InformerSynced
-	podQueue  workqueue.RateLimitingInterface
+	podLister   corev1listers.PodLister
+	podInformer cache.SharedIndexInformer
+	podQueue    workqueue.RateLimitingInterface
 
 	// Namespaces
-	namespaceQueue  workqueue.RateLimitingInterface
-	namespaceLister corev1listers.NamespaceLister
-	namespaceSynced cache.InformerSynced
+	namespaceQueue    workqueue.RateLimitingInterface
+	namespaceLister   corev1listers.NamespaceLister
+	namespaceInformer cache.SharedIndexInformer
 
 	//external gateway caches
 	//make them public so that they can be used by the annotation logic to lock on namespaces and share the same external route information
 	ExternalGWCache map[ktypes.NamespacedName]*ExternalRouteInfo
 	ExGWCacheMutex  *sync.RWMutex
 
-	routePolicyInformer adminpolicybasedrouteinformer.SharedInformerFactory
+	routePolicyFactory adminpolicybasedrouteinformer.SharedInformerFactory
 
 	mgr *externalPolicyManager
 }
@@ -67,26 +68,26 @@ func NewExternalNodeController(
 ) (*ExternalGatewayNodeController, error) {
 
 	namespaceLister := namespaceInformer.Lister()
-	routePolicyInformer := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
-	externalRouteInformer := routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes()
+	routePolicyFactory := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
+	externalRouteInformer := routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes()
 
 	c := &ExternalGatewayNodeController{
-		stopCh:              stopCh,
-		routePolicyInformer: routePolicyInformer,
-		routeLister:         routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
-		routeSynced:         routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes().Informer().HasSynced,
+		stopCh:             stopCh,
+		routePolicyFactory: routePolicyFactory,
+		routeLister:        externalRouteInformer.Lister(),
+		routeInformer:      externalRouteInformer.Informer(),
 		routeQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 			"apbexternalroutes",
 		),
-		podLister: podInformer.Lister(),
-		podSynced: podInformer.Informer().HasSynced,
+		podLister:   podInformer.Lister(),
+		podInformer: podInformer.Informer(),
 		podQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 			"apbexternalroutepods",
 		),
-		namespaceLister: namespaceLister,
-		namespaceSynced: namespaceInformer.Informer().HasSynced,
+		namespaceLister:   namespaceLister,
+		namespaceInformer: namespaceInformer.Informer(),
 		namespaceQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 			"apbexternalroutenamespaces",
@@ -95,68 +96,60 @@ func NewExternalNodeController(
 			stopCh,
 			podInformer.Lister(),
 			namespaceInformer.Lister(),
-			routePolicyInformer.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
+			routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
 			&conntrackClient{podLister: podInformer.Lister()}),
 	}
 
-	_, err := namespaceInformer.Informer().AddEventHandler(
+	return c, nil
+}
+
+func (c *ExternalGatewayNodeController) Run(wg *sync.WaitGroup, threadiness int) error {
+	defer utilruntime.HandleCrash()
+	klog.V(4).Info("Starting Admin Policy Based Route Node Controller")
+
+	_, err := c.namespaceInformer.AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.onNamespaceAdd,
 			UpdateFunc: c.onNamespaceUpdate,
 			DeleteFunc: c.onNamespaceDelete,
 		}))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	_, err = podInformer.Informer().AddEventHandler(
+	_, err = c.podInformer.AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.onPodAdd,
 			UpdateFunc: c.onPodUpdate,
 			DeleteFunc: c.onPodDelete,
 		}))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	_, err = externalRouteInformer.Informer().AddEventHandler(
+	_, err = c.routeInformer.AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.onPolicyAdd,
 			UpdateFunc: c.onPolicyUpdate,
 			DeleteFunc: c.onPolicyDelete,
 		}))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return c, nil
+	c.routePolicyFactory.Start(c.stopCh)
 
-}
-
-func (c *ExternalGatewayNodeController) Run(threadiness int) {
-	defer utilruntime.HandleCrash()
-	klog.V(4).Info("Starting Admin Policy Based Route Node Controller")
-
-	c.routePolicyInformer.Start(c.stopCh)
-
-	if !cache.WaitForNamedCacheSync("apbexternalroutenamespaces", c.stopCh, c.namespaceSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.V(4).Info("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("apbexternalroutenamespaces", c.stopCh, c.namespaceInformer.HasSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("apbexternalroutepods", c.stopCh, c.podSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.V(4).Info("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("apbexternalroutepods", c.stopCh, c.podInformer.HasSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("adminpolicybasedexternalroutes", c.stopCh, c.routeSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.V(4).Info("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("adminpolicybasedexternalroutes", c.stopCh, c.routeInformer.HasSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
@@ -190,15 +183,18 @@ func (c *ExternalGatewayNodeController) Run(threadiness int) {
 		}()
 	}
 
-	// wait until we're told to stop
-	<-c.stopCh
+	// add shutdown goroutine waiting for c.stopCh
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// wait until we're told to stop
+		<-c.stopCh
 
-	c.podQueue.ShutDown()
-	c.routeQueue.ShutDown()
-	c.namespaceQueue.ShutDown()
-
-	wg.Wait()
-
+		c.podQueue.ShutDown()
+		c.routeQueue.ShutDown()
+		c.namespaceQueue.ShutDown()
+	}()
+	return nil
 }
 
 func (c *ExternalGatewayNodeController) onNamespaceAdd(obj interface{}) {
