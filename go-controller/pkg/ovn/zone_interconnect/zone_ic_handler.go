@@ -200,11 +200,18 @@ func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
 	klog.Infof("Creating interconnect resources for local zone node %s for the network %s", node.Name, zic.GetNetworkName())
 	nodeID := util.GetNodeID(node)
 	if nodeID == -1 {
+
+		klog.Infof("XXX AddLocalZoneNode failed for node %s for the network %s:  nodeID == -1", node.Name, zic.GetNetworkName())
+
+
 		// Don't consider this node as cluster-manager has not allocated node id yet.
 		return fmt.Errorf("failed to get node id for node - %s", node.Name)
 	}
 
 	if err := zic.createLocalZoneNodeResources(node, nodeID); err != nil {
+
+		klog.Infof("XXX AddLocalZoneNode failed createLocalZoneNodeResources for node %s for the network %s:  nodeID == -1", node.Name, zic.GetNetworkName())
+
 		return fmt.Errorf("creating interconnect resources for local zone node %s for the network %s failed : err - %w", node.Name, zic.GetNetworkName(), err)
 	}
 
@@ -220,16 +227,26 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	nodeID := util.GetNodeID(node)
 	if nodeID == -1 {
 		// Don't consider this node as cluster-manager has not allocated node id yet.
+
+		klog.Infof("XXX AddRemoteZoneNode failed for node %s for the network %s:  nodeID == -1", node.Name, zic.GetNetworkName())
+
+
 		return fmt.Errorf("failed to get node id for node - %s", node.Name)
 	}
 
 	// Get the chassis id.
 	chassisId, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
+
+		klog.Infof("XXX AddRemoteZoneNode failed ParseNodeChassisIDAnnotation for node %s for the network %s : %v", node.Name, zic.GetNetworkName(), err)
+
 		return fmt.Errorf("failed to parse node chassis-id for node - %s, error: %w", node.Name, types.NewSuppressedError(err))
 	}
 
 	if err := zic.createRemoteZoneNodeResources(node, nodeID, chassisId); err != nil {
+
+		klog.Infof("XXX AddRemoteZoneNode failed createRemoteZoneNodeResources for node %s for the network %s : %v", node.Name, zic.GetNetworkName(), err)
+
 		return fmt.Errorf("creating interconnect resources for remote zone node %s for the network %s failed : err - %w", node.Name, zic.GetNetworkName(), err)
 	}
 	klog.Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
@@ -238,7 +255,7 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 
 // DeleteNode deletes the local zone node or remote zone node resources
 func (zic *ZoneInterconnectHandler) DeleteNode(node *corev1.Node) error {
-	klog.Infof("Deleting interconnect resources for the node %s for the network %s", node.Name, zic.GetNetworkName())
+	klog.Infof("XXX Deleting interconnect resources for the node %s for the network %s", node.Name, zic.GetNetworkName())
 
 	return zic.cleanupNode(node.Name)
 }
@@ -451,6 +468,11 @@ func (zic *ZoneInterconnectHandler) cleanupNode(nodeName string) error {
 
 	// Delete any static routes in the cluster router for this node
 	p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+
+		if lrsr.ExternalIDs["ic-node"] == nodeName {
+			klog.Infof("XXX cleanupNode for %s going to clean route %s", nodeName, lrsr.IPPrefix)
+		}
+
 		return lrsr.ExternalIDs["ic-node"] == nodeName
 	}
 	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(zic.nbClient, zic.networkClusterRouterName, p); err != nil {
@@ -559,6 +581,9 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 				lrsr.Nexthop == nexthop &&
 				lrsr.ExternalIDs["ic-node"] == node.Name
 		}
+
+		klog.Infof("XXX addRemoteNodeStaticRoutes for %s going to add/update route %s", node.Name, prefix)
+
 		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(zic.nbClient, zic.networkClusterRouterName, &logicalRouterStaticRoute, p); err != nil {
 			return fmt.Errorf("failed to create static route: %w", err)
 		}
@@ -602,12 +627,19 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 
 // deleteLocalNodeStaticRoutes deletes the static routes added by the function addRemoteNodeStaticRoutes
 func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Node, nodeID int, nodeTransitSwitchPortIPs []*net.IPNet) error {
+
+
+	klog.Infof("XXX deleteLocalNodeStaticRoutes called for node %s", node.Name)
+
 	deleteRoute := func(prefix, nexthop string) error {
 		p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
 			return lrsr.IPPrefix == prefix &&
 				lrsr.Nexthop == nexthop &&
 				lrsr.ExternalIDs["ic-node"] == node.Name
 		}
+
+		klog.Infof("XXX deleteLocalNodeStaticRoutes called for node %s prefix %s nexthop %s", node.Name, prefix, nexthop)
+
 		if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(zic.nbClient, zic.networkClusterRouterName, p); err != nil {
 			return fmt.Errorf("failed to delete static route: %w", err)
 		}
@@ -623,6 +655,9 @@ func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Nod
 	for _, staticRoute := range nodeSubnetStaticRoutes {
 		// Possible optimization: Add all the routes in one transaction
 		if err := deleteRoute(staticRoute.prefix, staticRoute.nexthop); err != nil {
+
+			klog.Infof("XXX deleteLocalNodeStaticRoutes FAILED for node %s prefix %s nexthop %s", node.Name, staticRoute.prefix, staticRoute.nexthop)
+			
 			return fmt.Errorf("error deleting static route %s - %s from the router %s : %w", staticRoute.prefix, staticRoute.nexthop, zic.networkClusterRouterName, err)
 		}
 	}
@@ -636,6 +671,10 @@ func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Nod
 	// Clear the routes connecting to the GW Router for the default network
 	nodeGRPIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
 	if err != nil {
+
+		klog.Infof("XXX deleteLocalNodeStaticRoutes failed to parse node %s Gateway router LRP Addrs annotation %v", node.Name, err)
+
+
 		return fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err)
 	}
 
@@ -643,6 +682,9 @@ func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Nod
 	for _, staticRoute := range nodenodeGRPIPStaticRoutes {
 		// Possible optimization: Add all the routes in one transaction
 		if err := deleteRoute(staticRoute.prefix, staticRoute.nexthop); err != nil {
+
+			klog.Infof("XXX deleteLocalNodeStaticRoutes FAILED 2 for node %s prefix %s nexthop %s", node.Name, staticRoute.prefix, staticRoute.nexthop)
+
 			return fmt.Errorf("error deleting static route %s - %s from the router %s : %w", staticRoute.prefix, staticRoute.nexthop, zic.networkClusterRouterName, err)
 		}
 	}
