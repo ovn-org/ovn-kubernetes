@@ -10,6 +10,7 @@ import (
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute/gateway_info"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 
 	corev1 "k8s.io/api/core/v1"
@@ -103,18 +104,18 @@ func newNamespaceWithPods(nsName string, pods ...*corev1.Pod) *namespaceWithPods
 func expectedPolicyStateAndRefs(targetNamespaces []*namespaceWithPods, staticGWIPs []string,
 	dynamicGws []*namespaceWithPods, bfdEnabled bool) (*routePolicyState, *policyReferencedObjects) {
 	routeState := newRoutePolicyState()
-	staticGWs := newGatewayInfoList()
+	staticGWs := gateway_info.NewGatewayInfoList()
 	for _, ip := range staticGWIPs {
-		staticGWs.InsertOverwrite(newGatewayInfo(sets.New(ip), bfdEnabled))
+		staticGWs.InsertOverwrite(gateway_info.NewGatewayInfo(sets.New(ip), bfdEnabled))
 	}
-	dynamicGWs := newGatewayInfoList()
+	dynamicGWs := gateway_info.NewGatewayInfoList()
 	dynamicGWNamespaces := sets.Set[string]{}
 	dynamicGWPods := sets.Set[ktypes.NamespacedName]{}
 
 	for _, dynamicGWNamespace := range dynamicGws {
 		dynamicGWNamespaces.Insert(dynamicGWNamespace.nsName)
 		for _, pod := range dynamicGWNamespace.pods {
-			dynamicGWs.InsertOverwrite(newGatewayInfo(sets.New(pod.Status.PodIPs[0].IP), bfdEnabled))
+			dynamicGWs.InsertOverwrite(gateway_info.NewGatewayInfo(sets.New(pod.Status.PodIPs[0].IP), bfdEnabled))
 			dynamicGWPods.Insert(getPodNamespacedName(pod))
 		}
 	}

@@ -14,6 +14,7 @@ import (
 	"k8s.io/klog/v2"
 
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute/gateway_info"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -115,8 +116,8 @@ func (m *externalPolicyManager) updateRoutePolicy(existingPolicy *routePolicySta
 			// track which pods should be removed from targetPods
 			podsToDelete := []ktypes.NamespacedName{}
 			for podNamespacedName, existingPodConfig := range targetPods {
-				staticGWsToDelete := newGatewayInfoList()
-				dynamicGWsToDelete := newGatewayInfoList()
+				staticGWsToDelete := gateway_info.NewGatewayInfoList()
+				dynamicGWsToDelete := gateway_info.NewGatewayInfoList()
 
 				// Static Hops
 				// Find gateways that are present in the pod config, but not in the updatedPolicy
@@ -222,7 +223,7 @@ func (m *externalPolicyManager) updateRoutePolicy(existingPolicy *routePolicySta
 // applyPodConfig applies the gateway IPs derived from the processed policy to a pod and updates existingPodConfig.
 func (m *externalPolicyManager) applyPodConfig(pod *v1.Pod, existingPodConfig *podInfo, updatedPolicy *routePolicyConfig) error {
 	// update static gw
-	gwsToAdd := newGatewayInfoList()
+	gwsToAdd := gateway_info.NewGatewayInfoList()
 	for _, newGW := range updatedPolicy.staticGateways.Elems() {
 		if !existingPodConfig.StaticGateways.HasWithoutErr(newGW) {
 			gwsToAdd.InsertOverwrite(newGW)
@@ -237,7 +238,7 @@ func (m *externalPolicyManager) applyPodConfig(pod *v1.Pod, existingPodConfig *p
 		existingPodConfig.StaticGateways.InsertOverwrite(gwsToAdd.Elems()...)
 	}
 	// update dynamic gw
-	gwsToAdd = newGatewayInfoList()
+	gwsToAdd = gateway_info.NewGatewayInfoList()
 	for _, newGW := range updatedPolicy.dynamicGateways.Elems() {
 		if !existingPodConfig.DynamicGateways.HasWithoutErr(newGW) {
 			gwsToAdd.InsertOverwrite(newGW)
@@ -314,8 +315,8 @@ func (m *externalPolicyManager) calculateAnnotatedPodGatewayIPsForNamespace(targ
 	return gwIPs, nil
 }
 
-func (m *externalPolicyManager) processStaticHopsGatewayInformation(hops []*adminpolicybasedrouteapi.StaticHop) (*gatewayInfoList, error) {
-	gwList := newGatewayInfoList()
+func (m *externalPolicyManager) processStaticHopsGatewayInformation(hops []*adminpolicybasedrouteapi.StaticHop) (*gateway_info.GatewayInfoList, error) {
+	gwList := gateway_info.NewGatewayInfoList()
 
 	// collect all the static gateway information from the nextHops slice
 	for _, h := range hops {
@@ -323,14 +324,14 @@ func (m *externalPolicyManager) processStaticHopsGatewayInformation(hops []*admi
 		if ip == nil {
 			return nil, fmt.Errorf("could not parse routing external gw annotation value '%s'", h.IP)
 		}
-		gwList.InsertOverwrite(newGatewayInfo(sets.New(ip.String()), h.BFDEnabled))
+		gwList.InsertOverwrite(gateway_info.NewGatewayInfo(sets.New(ip.String()), h.BFDEnabled))
 	}
 	return gwList, nil
 }
 
-func (m *externalPolicyManager) processDynamicHopsGatewayInformation(hops []*adminpolicybasedrouteapi.DynamicHop) (*gatewayInfoList,
+func (m *externalPolicyManager) processDynamicHopsGatewayInformation(hops []*adminpolicybasedrouteapi.DynamicHop) (*gateway_info.GatewayInfoList,
 	sets.Set[string], sets.Set[ktypes.NamespacedName], error) {
-	podsInfo := newGatewayInfoList()
+	podsInfo := gateway_info.NewGatewayInfoList()
 	selectedNamespaces := sets.Set[string]{}
 	selectedPods := sets.Set[ktypes.NamespacedName]{}
 	for _, h := range hops {
@@ -364,7 +365,7 @@ func (m *externalPolicyManager) processDynamicHopsGatewayInformation(hops []*adm
 					continue
 				}
 				key := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-				podsInfo.InsertOverwrite(newGatewayInfo(foundGws, h.BFDEnabled))
+				podsInfo.InsertOverwrite(gateway_info.NewGatewayInfo(foundGws, h.BFDEnabled))
 				selectedPods.Insert(key)
 			}
 			selectedNamespaces.Insert(gwNamespace.Name)

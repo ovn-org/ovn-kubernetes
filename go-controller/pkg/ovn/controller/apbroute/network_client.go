@@ -25,13 +25,14 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute/gateway_info"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type networkClient interface {
 	deleteGatewayIPs(podNsName ktypes.NamespacedName, toBeDeletedGWIPs, toBeKept sets.Set[string]) error
-	addGatewayIPs(pod *v1.Pod, egress *gatewayInfoList) error
+	addGatewayIPs(pod *v1.Pod, egress *gateway_info.GatewayInfoList) error
 }
 
 type northBoundClient struct {
@@ -187,7 +188,7 @@ func (nb *northBoundClient) getRouteInfosForPod(podNsName ktypes.NamespacedName)
 	return routes
 }
 
-func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress *gatewayInfoList) error {
+func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress *gateway_info.GatewayInfoList) error {
 	if util.PodCompleted(pod) || util.PodWantsHostNetwork(pod) {
 		return nil
 	}
@@ -243,7 +244,7 @@ func (nb *northBoundClient) deletePodSNAT(nodeName string, extIPs, podIPNets []*
 }
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
-func (nb *northBoundClient) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*net.IPNet, podNsName ktypes.NamespacedName, node string) error {
+func (nb *northBoundClient) addGWRoutesForPod(gateways []*gateway_info.GatewayInfo, podIfAddrs []*net.IPNet, podNsName ktypes.NamespacedName, node string) error {
 	pod, err := nb.podLister.Pods(podNsName.Namespace).Get(podNsName.Name)
 	if err != nil {
 		return err
@@ -787,6 +788,6 @@ func (c *conntrackClient) deleteGatewayIPs(podNsName ktypes.NamespacedName, _, t
 }
 
 // addGatewayIPs is a NOP (no operation) in the conntrack client as it does not add any entry to the conntrack table.
-func (c *conntrackClient) addGatewayIPs(pod *v1.Pod, egress *gatewayInfoList) error {
+func (c *conntrackClient) addGatewayIPs(pod *v1.Pod, egress *gateway_info.GatewayInfoList) error {
 	return nil
 }

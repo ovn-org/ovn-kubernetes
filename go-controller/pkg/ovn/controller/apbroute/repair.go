@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute/gateway_info"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -23,7 +24,7 @@ import (
 type managedGWIPs struct {
 	namespacedName ktypes.NamespacedName
 	nodeName       string
-	gwList         *gatewayInfoList
+	gwList         *gateway_info.GatewayInfoList
 }
 
 func (c *ExternalGatewayMasterController) Repair() error {
@@ -209,9 +210,9 @@ func (c *ExternalGatewayMasterController) syncPoliciesWithoutCleanup() (map[stri
 						clusterRouteCache[podIPStr] = &managedGWIPs{
 							namespacedName: ktypes.NamespacedName{Namespace: targetPod.Namespace, Name: targetPod.Name},
 							nodeName:       targetPod.Spec.NodeName,
-							gwList:         newGatewayInfoList()}
+							gwList:         gateway_info.NewGatewayInfoList()}
 
-						allGWIPs := newGatewayInfoList()
+						allGWIPs := gateway_info.NewGatewayInfoList()
 						allGWIPs.InsertOverwrite(targetPodInfo.StaticGateways.Elems()...)
 						allGWIPs.InsertOverwrite(targetPodInfo.DynamicGateways.Elems()...)
 
@@ -236,7 +237,7 @@ func (c *ExternalGatewayMasterController) syncPoliciesWithoutCleanup() (map[stri
 	return clusterRouteCache, nil
 }
 
-func (c *ExternalGatewayMasterController) processOVNRoute(ovnRoute *ovnRoute, gwList *gatewayInfoList, podIP string,
+func (c *ExternalGatewayMasterController) processOVNRoute(ovnRoute *ovnRoute, gwList *gateway_info.GatewayInfoList, podIP string,
 	managedIPGWInfo *managedGWIPs, noDbChanges bool) bool {
 	// podIP exists, check if route matches
 	for _, gwInfo := range gwList.Elems() {
@@ -276,7 +277,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 			if _, ok := ns.Annotations[util.BfdAnnotation]; ok {
 				bfdEnabled = true
 			}
-			gwInfo := newGatewayInfo(ips, bfdEnabled)
+			gwInfo := gateway_info.NewGatewayInfo(ips, bfdEnabled)
 			nsPodList, err := c.podLister.Pods(ns.Name).List(labels.Everything())
 			if err != nil {
 				return nil, err
@@ -312,7 +313,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 		if _, ok := pod.Annotations[util.BfdAnnotation]; ok {
 			bfdEnabled = true
 		}
-		gwInfo := newGatewayInfo(foundGws, bfdEnabled)
+		gwInfo := gateway_info.NewGatewayInfo(foundGws, bfdEnabled)
 		for _, targetNs := range strings.Split(targetNamespaces, ",") {
 			nsPodList, err := c.podLister.Pods(targetNs).List(labels.Everything())
 			if err != nil {
@@ -325,7 +326,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 	return clusterRouteCache, nil
 }
 
-func populateManagedGWIPsCacheForPods(gwInfo *gatewayInfo, cache map[string]*managedGWIPs, podList []*v1.Pod) {
+func populateManagedGWIPsCacheForPods(gwInfo *gateway_info.GatewayInfo, cache map[string]*managedGWIPs, podList []*v1.Pod) {
 	for gwIP := range gwInfo.Gateways {
 		for _, pod := range podList {
 			// ignore completed pods, host networked pods, pods not scheduled
@@ -341,10 +342,10 @@ func populateManagedGWIPsCacheForPods(gwInfo *gatewayInfo, cache map[string]*man
 					cache[podIPStr] = &managedGWIPs{
 						namespacedName: ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name},
 						nodeName:       pod.Spec.NodeName,
-						gwList:         newGatewayInfoList(),
+						gwList:         gateway_info.NewGatewayInfoList(),
 					}
 				}
-				cache[podIPStr].gwList.InsertOverwrite(newGatewayInfo(sets.New(gwIP), gwInfo.BFDEnabled))
+				cache[podIPStr].gwList.InsertOverwrite(gateway_info.NewGatewayInfo(sets.New(gwIP), gwInfo.BFDEnabled))
 			}
 		}
 	}
