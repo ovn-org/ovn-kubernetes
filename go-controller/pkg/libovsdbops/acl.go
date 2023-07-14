@@ -3,6 +3,7 @@ package libovsdbops
 import (
 	"context"
 	"fmt"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
@@ -21,7 +22,7 @@ func GetACLName(acl *nbdb.ACL) string {
 
 func getACLMutableFields(acl *nbdb.ACL) []interface{} {
 	return []interface{}{&acl.Action, &acl.Direction, &acl.ExternalIDs, &acl.Log, &acl.Match, &acl.Meter,
-		&acl.Name, &acl.Options, &acl.Priority, &acl.Severity}
+		&acl.Name, &acl.Options, &acl.Priority, &acl.Severity, &acl.Tier}
 }
 
 type aclPredicate func(*nbdb.ACL) bool
@@ -63,7 +64,7 @@ func FindACLs(nbClient libovsdbclient.Client, acls []*nbdb.ACL) ([]*nbdb.ACL, er
 
 // BuildACL builds an ACL with empty optional properties unset
 func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string,
-	severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {
+	severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string, tier int) *nbdb.ACL {
 	name = fmt.Sprintf("%.63s", name)
 
 	var realName *string
@@ -89,6 +90,7 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 		Meter:       realMeter,
 		ExternalIDs: externalIds,
 		Options:     options,
+		Tier:        tier,
 	}
 
 	return acl

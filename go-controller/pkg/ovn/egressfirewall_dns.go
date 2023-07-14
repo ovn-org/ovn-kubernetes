@@ -64,7 +64,7 @@ func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerName
 		addressSetFactory: addressSetFactory,
 		controllerName:    controllerName,
 
-		added:          make(chan struct{}),
+		added:          make(chan struct{}, 1),
 		deleted:        make(chan string, 1),
 		stopChan:       make(chan struct{}),
 		controllerStop: controllerStop,

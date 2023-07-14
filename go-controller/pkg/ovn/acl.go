@@ -115,6 +115,7 @@ func BuildACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string
 		log,
 		externalIDs,
 		options,
+		types.DefaultACLTier,
 	)
 	return ACL
 }

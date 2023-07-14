@@ -344,7 +344,7 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
-	if err := oc.Init(); err != nil {
+	if err := oc.Init(ctx); err != nil {
 		return err
 	}
 
@@ -463,7 +463,12 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 	return err
 }
 
-func (oc *SecondaryLayer3NetworkController) Init() error {
+func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.zoneICHandler.Init(oc.kube, ctx); err != nil {
+			return err
+		}
+	}
 	_, err := oc.createOvnClusterRouter()
 	return err
 }

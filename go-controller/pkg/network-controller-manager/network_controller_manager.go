@@ -282,7 +282,11 @@ func (cm *networkControllerManager) newCommonNetworkControllerInfo() (*ovn.Commo
 
 // initDefaultNetworkController creates the controller for default network
 func (cm *networkControllerManager) initDefaultNetworkController() error {
-	defaultController, err := ovn.NewDefaultNetworkController(cm.newCommonNetworkControllerInfo())
+	cnci, err := cm.newCommonNetworkControllerInfo()
+	if err != nil {
+		return fmt.Errorf("failed to create common network controller info: %w", err)
+	}
+	defaultController, err := ovn.NewDefaultNetworkController(cnci)
 	if err != nil {
 		return err
 	}

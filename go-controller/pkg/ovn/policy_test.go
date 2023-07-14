@@ -108,6 +108,7 @@ func getDefaultDenyDataHelper(namespace string, policyTypeIngress, policyTypeEgr
 		map[string]string{
 			"apply-after-lb": "true",
 		},
+		types.DefaultACLTier,
 	)
 	egressDenyACL.UUID = aclIDs.String() + "-UUID"
 
@@ -125,6 +126,7 @@ func getDefaultDenyDataHelper(namespace string, policyTypeIngress, policyTypeEgr
 		map[string]string{
 			"apply-after-lb": "true",
 		},
+		types.DefaultACLTier,
 	)
 	egressAllowACL.UUID = aclIDs.String() + "-UUID"
 
@@ -141,6 +143,7 @@ func getDefaultDenyDataHelper(namespace string, policyTypeIngress, policyTypeEgr
 		shouldBeLogged,
 		aclIDs.GetExternalIDs(),
 		nil,
+		types.DefaultACLTier,
 	)
 	ingressDenyACL.UUID = aclIDs.String() + "-UUID"
 
@@ -156,6 +159,7 @@ func getDefaultDenyDataHelper(namespace string, policyTypeIngress, policyTypeEgr
 		false,
 		aclIDs.GetExternalIDs(),
 		nil,
+		types.DefaultACLTier,
 	)
 	ingressAllowACL.UUID = aclIDs.String() + "-UUID"
 
@@ -251,6 +255,7 @@ func getStaleDefaultACL(acls []*nbdb.ACL, namespace, policyName string) []*nbdb.
 		acl.Name = &staleName
 		acl.Options = nil
 		acl.Direction = nbdb.ACLDirectionToLport
+		acl.Tier = types.PlaceHolderACLTier
 	}
 	return acls
 }
@@ -335,6 +340,7 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 			shouldBeLogged,
 			dbIDs.GetExternalIDs(),
 			options,
+			types.DefaultACLTier,
 		)
 		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
@@ -353,6 +359,7 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 			shouldBeLogged,
 			dbIDs.GetExternalIDs(),
 			options,
+			types.DefaultACLTier,
 		)
 		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
@@ -370,6 +377,7 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 			shouldBeLogged,
 			dbIDs.GetExternalIDs(),
 			options,
+			types.DefaultACLTier,
 		)
 		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
@@ -393,6 +401,7 @@ func getStalePolicyACL(acls []*nbdb.ACL, policyNamespace, policyName string) []*
 		acl.Direction = nbdb.ACLDirectionToLport
 		sev := nbdb.ACLSeverityInfo
 		acl.Severity = &sev
+		acl.Tier = types.PlaceHolderACLTier
 	}
 	return acls
 }
@@ -495,6 +504,7 @@ func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
 		map[string]string{
 			"apply-after-lb": "true",
 		},
+		types.DefaultACLTier,
 	)
 	egressACL.UUID = "hairpinning-egress-UUID"
 	ingressIDs := fakeController.getNetpolDefaultACLDbIDs("Ingress")
@@ -509,6 +519,7 @@ func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
 		false,
 		ingressIDs.GetExternalIDs(),
 		nil,
+		types.DefaultACLTier,
 	)
 	ingressACL.UUID = "hairpinning-ingress-UUID"
 	clusterPortGroup.ACLs = []string{egressACL.UUID, ingressACL.UUID}
@@ -1869,6 +1880,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					}, nil)
 				startOvn(initialDB, []v1.Namespace{namespace1}, nil, nil, nil)
 
+				// let the system settle down before counting goroutines
+				time.Sleep(100 * time.Millisecond)
 				goroutinesNumInit := runtime.NumGoroutine()
 				fmt.Printf("goroutinesNumInit %v", goroutinesNumInit)
 				// network policy will create 1 watchFactory for local pods selector, and 1 peer namespace selector
@@ -2064,7 +2077,8 @@ func getAllowFromNodeExpectedACL(nodeName, mgmtIP string, logicalSwitch *nbdb.Lo
 		"",
 		false,
 		dbIDs.GetExternalIDs(),
-		nil)
+		nil,
+		types.DefaultACLTier)
 	nodeACL.UUID = dbIDs.String() + "-UUID"
 	if logicalSwitch != nil {
 		logicalSwitch.ACLs = []string{nodeACL.UUID}
@@ -2076,7 +2090,8 @@ func getAllowFromNodeStaleACL(nodeName, mgmtIP string, logicalSwitch *nbdb.Logic
 	acl := getAllowFromNodeExpectedACL(nodeName, mgmtIP, logicalSwitch, controllerName)
 	newName := ""
 	acl.Name = &newName
-
+	// re-setting the tier to 0 to test that the stale ACL gets updated to 2 eventually
+	acl.Tier = types.PlaceHolderACLTier
 	return acl
 }
 
@@ -2152,7 +2167,7 @@ var _ = ginkgo.Describe("OVN AllowFromNode ACL low-level operations", func() {
 			expectedData := []libovsdb.TestData{
 				logicalSwitch,
 				mgmtPort,
-				getAllowFromNodeExpectedACL(nodeName, mgmtIP, logicalSwitch, controllerName),
+				getAllowFromNodeExpectedACL(nodeName, mgmtIP, logicalSwitch, controllerName), // checks if tier get's updated from 0 to 2
 			}
 			gomega.Expect(nbClient).Should(libovsdb.HaveData(expectedData...))
 		})
@@ -2219,7 +2234,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		asMatch := asMatch(hashedASNames)
 		match := fmt.Sprintf("ip4.src == {%s} && outport == @%s", asMatch, pgName)
 		acl := libovsdbops.BuildACL(getACLName(aclIDs), nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match,
-			nbdb.ACLActionAllowRelated, types.OvnACLLoggingMeter, aclLogging.Allow, true, aclIDs.GetExternalIDs(), nil)
+			nbdb.ACLActionAllowRelated, types.OvnACLLoggingMeter, aclLogging.Allow, true, aclIDs.GetExternalIDs(), nil,
+			types.DefaultACLTier)
 		return acl
 	}
 

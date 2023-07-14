@@ -1,18 +1,22 @@
 package zoneinterconnect
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
@@ -130,6 +134,66 @@ func NewZoneInterconnectHandler(nInfo util.NetInfo, nbClient, sbClient libovsdbc
 	return zic
 }
 
+func (zic *ZoneInterconnectHandler) EnsureTransitSwitch(networkID int) error {
+	transitSwitchTunnelKey := BaseTransitSwitchTunnelKey + networkID
+	ts := &nbdb.LogicalSwitch{
+		Name: zic.networkTransitSwitchName,
+		OtherConfig: map[string]string{
+			"interconn-ts":             zic.networkTransitSwitchName,
+			"requested-tnl-key":        strconv.Itoa(transitSwitchTunnelKey),
+			"mcast_snoop":              "true",
+			"mcast_querier":            "false",
+			"mcast_flood_unregistered": "true",
+		},
+	}
+
+	// Create transit switch if it doesn't exist
+	if err := libovsdbops.CreateOrUpdateLogicalSwitch(zic.nbClient, ts); err != nil {
+		return fmt.Errorf("failed to create/update transit switch %s: %w", zic.networkTransitSwitchName, err)
+	}
+	return nil
+}
+
+// Init sets up the global transit switch required for interoperability with other zones
+// Must wait for network id to be annotated to this node by cluster manager
+func (zic *ZoneInterconnectHandler) Init(kube *kube.KubeOVN, ctx context.Context) error {
+
+	maxTimeout := 2 * time.Minute
+	networkID := util.InvalidNetworkID
+	var err1 error
+	start := time.Now()
+	err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+		nodes, err := kube.GetNodes()
+		if err != nil {
+			err1 = fmt.Errorf("failed to get nodes: %v", err)
+			return false, nil
+		}
+		for _, node := range nodes.Items {
+			networkID, err = util.ParseNetworkIDAnnotation(&node, zic.GetNetworkName())
+			if err != nil {
+				err1 = fmt.Errorf("failed to get the network id for the network %s on node %s: %v",
+					zic.GetNetworkName(), node.Name, err)
+			}
+		}
+		if networkID == util.InvalidNetworkID {
+			return false, err1
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to find network ID: %w, %v", err, err1)
+	}
+
+	if err := zic.EnsureTransitSwitch(networkID); err != nil {
+		return err
+	}
+
+	klog.Infof("Time taken to create transit switch: %s", time.Since(start))
+
+	return nil
+}
+
 // AddLocalZoneNode creates the interconnect resources in OVN NB DB for the local zone node.
 // See createLocalZoneNodeResources() below for more details.
 func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
@@ -147,9 +211,10 @@ func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
 	return nil
 }
 
-// AddRemoteZoneNode creates the interconnect resources in OVN NB DB for the remote zone node.
+// AddRemoteZoneNode creates the interconnect resources in OVN NBDB and SBDB for the remote zone node.
 // // See createRemoteZoneNodeResources() below for more details.
 func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
+	start := time.Now()
 	klog.Infof("Creating interconnect resources for remote zone node %s for the network %s", node.Name, zic.GetNetworkName())
 
 	nodeID := util.GetNodeID(node)
@@ -161,13 +226,13 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	// Get the chassis id.
 	chassisId, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
-		return fmt.Errorf("failed to parse node chassis-id for node - %s, error: %w", node.Name, err)
+		return fmt.Errorf("failed to parse node chassis-id for node - %s, error: %w", node.Name, types.NewSuppressedError(err))
 	}
 
 	if err := zic.createRemoteZoneNodeResources(node, nodeID, chassisId); err != nil {
 		return fmt.Errorf("creating interconnect resources for remote zone node %s for the network %s failed : err - %w", node.Name, zic.GetNetworkName(), err)
 	}
-
+	klog.Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
 	return nil
 }
 
@@ -256,32 +321,10 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 		return fmt.Errorf("failed to get the node transit switch port ips for node %s: %w", node.Name, err)
 	}
 
-	networkId, err := util.ParseNetworkIDAnnotation(node, zic.GetNetworkName())
-	if err != nil {
-		return fmt.Errorf("failed to get the network id for the network %s on node %s: %v", zic.GetNetworkName(), node.Name, err)
-	}
-
 	transitRouterPortMac := util.IPAddrToHWAddr(nodeTransitSwitchPortIPs[0].IP)
 	var transitRouterPortNetworks []string
 	for _, ip := range nodeTransitSwitchPortIPs {
 		transitRouterPortNetworks = append(transitRouterPortNetworks, ip.String())
-	}
-
-	transitSwitchTunnelKey := BaseTransitSwitchTunnelKey + networkId
-	ts := &nbdb.LogicalSwitch{
-		Name: zic.networkTransitSwitchName,
-		OtherConfig: map[string]string{
-			"interconn-ts":             zic.networkTransitSwitchName,
-			"requested-tnl-key":        strconv.Itoa(transitSwitchTunnelKey),
-			"mcast_snoop":              "true",
-			"mcast_querier":            "false",
-			"mcast_flood_unregistered": "true",
-		},
-	}
-
-	// Create transit switch if it doesn't exist
-	if err := libovsdbops.CreateOrUpdateLogicalSwitch(zic.nbClient, ts); err != nil {
-		return fmt.Errorf("failed to create/update transit switch %s: %w", zic.networkTransitSwitchName, err)
 	}
 
 	// Connect transit switch to the cluster router by creating a pair of logical switch port - logical router port
@@ -327,34 +370,12 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 //   - creates a logical port of type "remote" in the transit switch with the name as - <network_name>.tstor.<node_name>
 //     Eg. if the node name is ovn-worker and the network is default, the name would be - tstor.ovn-worker
 //     if the node name is ovn-worker and the network name is blue, the logical port name would be - blue.tstor.ovn-worker
-//   - binds the remote port to the node remote chassis
+//   - binds the remote port to the node remote chassis in SBDB
 //   - adds static routes for the remote node via the remote port ip in the ovn_cluster_router
 func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.Node, nodeID int, chassisId string) error {
 	nodeTransitSwitchPortIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
 	if err != nil || len(nodeTransitSwitchPortIPs) == 0 {
 		return fmt.Errorf("failed to get the node transit switch port Ips : %w", err)
-	}
-
-	networkId, err := util.ParseNetworkIDAnnotation(node, zic.GetNetworkName())
-	if err != nil {
-		return fmt.Errorf("failed to get the network id for the network %s on node %s: %v", zic.GetNetworkName(), node.Name, err)
-	}
-
-	transitSwitchTunnelKey := BaseTransitSwitchTunnelKey + networkId
-	ts := &nbdb.LogicalSwitch{
-		Name: zic.networkTransitSwitchName,
-		OtherConfig: map[string]string{
-			"interconn-ts":             zic.networkTransitSwitchName,
-			"requested-tnl-key":        strconv.Itoa(transitSwitchTunnelKey),
-			"mcast_snoop":              "true",
-			"mcast_querier":            "false",
-			"mcast_flood_unregistered": "true",
-		},
-	}
-
-	// Create transit switch if it doesn't exist
-	if err := libovsdbops.CreateOrUpdateLogicalSwitch(zic.nbClient, ts); err != nil {
-		return fmt.Errorf("failed to create/update transit switch %s: %w", zic.networkTransitSwitchName, err)
 	}
 
 	transitRouterPortMac := util.IPAddrToHWAddr(nodeTransitSwitchPortIPs[0].IP)
@@ -481,6 +502,33 @@ func (zic *ZoneInterconnectHandler) setRemotePortBindingChassis(nodeName, portNa
 	chassis := sbdb.Chassis{
 		Hostname: nodeName,
 		Name:     chassisId,
+	}
+
+	// the chassis is created in NBDB by ovnk and takes some time to propagate. Let's make sure it exists before we try
+	// to set the port binding
+	maxTimeout := 10 * time.Second
+	var err1 error
+	err := wait.PollUntilContextTimeout(context.TODO(), 50*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+		if _, err1 = libovsdbops.GetChassis(zic.sbClient, &chassis); err1 != nil {
+			return false, nil
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to find chassis: %s, after %s: %w, %v", chassis.Hostname, maxTimeout, err, err1)
+	}
+
+	// Similarly wait for the port binding to exist
+	err = wait.PollUntilContextTimeout(context.TODO(), 50*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+		if _, err1 = libovsdbops.GetPortBinding(zic.sbClient, &remotePort); err1 != nil {
+			return false, nil
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to find port binding: %s, after %s: %w, %v", remotePort.LogicalPort, maxTimeout, err, err1)
 	}
 
 	if err := libovsdbops.UpdatePortBindingSetChassis(zic.sbClient, &remotePort, &chassis); err != nil {
