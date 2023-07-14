@@ -296,5 +296,8 @@ for n in $NODES; do
   done
 done
 
+# force failure
+ls /tmp/does/not/exist/anywhere/and/should/make/test/fail
+
 # Give some time for everything to settle
 sleep 60
