@@ -23,7 +23,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 
 # Install tools that are required for building ovs/ovn.
 RUN INSTALL_PKGS=" \
-    python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+    python3-pip python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
     libpcap hostname util-linux\
     python3-openvswitch python3-pyOpenSSL \
     autoconf automake libtool g++ gcc fedora-packager rpmdevtools \
