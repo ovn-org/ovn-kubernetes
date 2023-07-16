@@ -535,8 +535,15 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIc bool) error {
 	_, present := oc.localZoneNodes.Load(node.Name)
 
+	klog.Infof("XXX addUpdateRemoteNodeEvent Node %q for network %s present: %v  syncZoneIc: %v enableIC: %v",
+		node.Name, oc.GetNetworkName(), present, syncZoneIc, config.OVNKubernetesFeature.EnableInterconnect)
+
 	if present {
 		if err := oc.deleteNodeEvent(node); err != nil {
+
+			klog.Infof("XXX addUpdateRemoteNodeEvent Node %q for network %s present FAILED %v",
+			node.Name, oc.GetNetworkName(), err)
+	
 			return err
 		}
 	}
@@ -544,7 +551,11 @@ func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *kapi.
 	var err error
 	if syncZoneIc && config.OVNKubernetesFeature.EnableInterconnect {
 		if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
+
 			err = fmt.Errorf("failed to add the remote zone node [%s] to the zone interconnect handler, err : %v", node.Name, err)
+
+			klog.Infof("XXX addUpdateRemoteNodeEvent failed to add the remote zone node [%s] to the zone interconnect handler, err : %v", node.Name, err)
+
 			oc.syncZoneICFailed.Store(node.Name, true)
 		} else {
 			oc.syncZoneICFailed.Delete(node.Name)
@@ -570,7 +581,7 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPN
 }
 
 func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) error {
-	klog.V(5).Infof("Deleting Node %q for network %s. Removing the node from "+
+	klog.Infof("XXX Deleting Node %q for network %s. Removing the node from "+
 		"various caches", node.Name, oc.GetNetworkName())
 
 	if err := oc.deleteNode(node.Name); err != nil {

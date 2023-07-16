@@ -730,7 +730,14 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
-		if h.oc.isLocalZoneNode(node) {
+
+		isLocal := h.oc.isLocalZoneNode(node) 
+		icEnabled := config.OVNKubernetesFeature.EnableInterconnect
+
+		klog.Infof("XXX ADD Node add for %s local: %v  icEnabled: %v", node.Name, isLocal, icEnabled)
+
+
+		if isLocal {
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
 				_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
@@ -747,16 +754,20 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 					hoSync,
 					zoneICSync}
 			} else {
-				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect}
+				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, icEnabled}
 			}
 
 			if err = h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
-				klog.Infof("Node add failed for %s, will try again later: %v",
+				klog.Infof("XXX Node add failed for %s, will try again later: %v",
 					node.Name, err)
 				return err
 			}
 		} else {
-			if err = h.oc.addUpdateRemoteNodeEvent(node, config.OVNKubernetesFeature.EnableInterconnect); err != nil {
+			if err = h.oc.addUpdateRemoteNodeEvent(node, icEnabled); err != nil {
+
+				klog.Infof("XXX Node REMOTE add failed for %s, will try again later: %v",
+					node.Name, err)
+
 				return err
 			}
 		}
@@ -872,6 +883,11 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		// |    remote          |      remote       |     Call addUpdateRemoteNodeEvent()             |
 		// |                    |                   |                                                 |
 		// |--------------------+-------------------+-------------------------------------------------+
+
+		klog.Infof("XXXYY UpdateResource Node %s local %v has new transit annotaions %v old transit: %v", newNode.Name, h.oc.isLocalZoneNode(newNode), 
+			util.GetTransitAnnotation(newNode), util.GetTransitAnnotation(oldNode))
+
+
 		if h.oc.isLocalZoneNode(newNode) {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -906,7 +922,16 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
 			// Also check if node subnet changed, so static routes are properly set
+
+			transitChanged := util.NodeTransitSwitchPortAddrAnnotationChanged(oldNode, newNode)
 			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged(oldNode, newNode)
+
+			klog.Infof("XXXYYY Node %s changed %v syncZoneIC %v transitChanged %v", newNode.Name, syncZoneIC, transitChanged)
+
+			if transitChanged && !syncZoneIC {
+				klog.Infof("XXXYYY DANGER DANGER DANGER Node %s syncZoneIC %v transitChanged %v", newNode.Name, syncZoneIC, transitChanged)
+			}
+
 			if syncZoneIC {
 				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up.",
 					newNode.Name, util.GetNodeZone(newNode))

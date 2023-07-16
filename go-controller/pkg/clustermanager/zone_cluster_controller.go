@@ -162,6 +162,8 @@ func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) er
 	if err != nil {
 		return fmt.Errorf("failed to allocate an id to the node %s : err - %w", node.Name, err)
 	}
+
+
 	klog.V(5).Infof("Allocated id %d to the node %s", allocatedNodeID, node.Name)
 	nodeAnnotations := util.UpdateNodeIDAnnotation(nil, allocatedNodeID)
 
@@ -181,6 +183,8 @@ func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) er
 			return fmt.Errorf("failed to generate gateway router port IPv6 address for node %s : err - %w", node.Name, err)
 		}
 	}
+
+
 
 	nodeAnnotations, err = util.CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotations, v4Addr, v6Addr)
 	if err != nil {
@@ -205,13 +209,23 @@ func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) er
 			}
 		}
 
+// XX
+
 		nodeAnnotations, err = util.CreateNodeTransitSwitchPortAddrAnnotation(nodeAnnotations, v4Addr, v6Addr)
 		if err != nil {
 			return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IPs, err : %w",
 				node.Name, err)
 		}
+
+
+		klog.Infof("XXXY Node %s now has transit annotations %q", node.Name, nodeAnnotations)
+
+
 	}
+
 	// TODO (numans)  If EnableInterconnect is false, clear the NodeTransitSwitchPortAddrAnnotation if set.
+
+
 
 	return zcc.kube.SetAnnotationsOnNode(node.Name, nodeAnnotations)
 }

@@ -900,9 +900,16 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 	// from the local zone cache.
 	_, present := oc.localZoneNodes.Load(node.Name)
 
+	klog.Infof("XXX addUpdateRemoteNodeEvent Node %q for network %s present: %v  syncZoneIc: %v ebabledIC: %v",
+		node.Name, oc.GetNetworkName(), present, syncZoneIC, config.OVNKubernetesFeature.EnableInterconnect)
+
+
 	if present {
-		klog.Infof("Node %q moved from the local zone %s to a remote zone %s. Cleaning the node resources", node.Name, oc.zone, util.GetNodeZone(node))
+		klog.Infof("XXX Node %q moved from the local zone %s to a remote zone %s. Cleaning the node resources", node.Name, oc.zone, util.GetNodeZone(node))
 		if err := oc.cleanupNodeResources(node.Name); err != nil {
+
+			klog.Infof("XXX addUpdateRemoteNodeEvent FAILED cleaning up the local resources for the remote node %s, err : %w", node.Name, err)
+
 			return fmt.Errorf("error cleaning up the local resources for the remote node %s, err : %w", node.Name, err)
 		}
 		oc.localZoneNodes.Delete(node.Name)
@@ -914,6 +921,10 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 		// the remote chassis for the remote zone node in the SB DB or mark
 		// the entry as remote if it was local chassis earlier
 		if err = oc.zoneChassisHandler.AddRemoteZoneNode(node); err != nil {
+
+			klog.Infof("XXX addUpdateRemoteNodeEvent failed adding or updating remote node chassis %s failed, err - %w", node.Name, err)
+
+
 			err = fmt.Errorf("adding or updating remote node chassis %s failed, err - %w", node.Name, err)
 			oc.syncZoneICFailed.Store(node.Name, true)
 			return err
@@ -922,14 +933,21 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 		// Call zone IC handler's AddRemoteZoneNode function to create
 		// interconnect resources in the OVN NBDB for this remote zone node.
 		// Also, create the remote port binding in SBDB
+
+		klog.Infof("XXX addUpdateRemoteNodeEvent Call zone IC handler's AddRemoteZoneNode function resources %s", node.Name)
+
 		if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
 			err = fmt.Errorf("adding or updating remote node IC resources %s failed, err - %w", node.Name, err)
+
+			klog.Infof("XXX addUpdateRemoteNodeEvent Call zone IC handler's AddRemoteZoneNode function resources %s failed, err - %w", node.Name, err)
+
+
 			oc.syncZoneICFailed.Store(node.Name, true)
 		} else {
 			oc.syncZoneICFailed.Delete(node.Name)
 		}
 	}
-	klog.Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
+	klog.Infof("XXX Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
 	return err
 }
 

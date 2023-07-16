@@ -464,6 +464,10 @@ func NodeTransitSwitchPortAddrAnnotationChanged(oldNode, newNode *corev1.Node) b
 	return oldNode.Annotations[ovnTransitSwitchPortAddr] != newNode.Annotations[ovnTransitSwitchPortAddr]
 }
 
+func GetTransitAnnotation(newNode *corev1.Node) string {
+	return newNode.Annotations[ovnTransitSwitchPortAddr]
+}
+
 const UnlimitedNodeCapacity = math.MaxInt32
 
 type ifAddr struct {

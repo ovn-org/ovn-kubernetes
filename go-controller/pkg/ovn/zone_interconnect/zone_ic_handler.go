@@ -222,7 +222,7 @@ func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
 // // See createRemoteZoneNodeResources() below for more details.
 func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	start := time.Now()
-	klog.Infof("Creating interconnect resources for remote zone node %s for the network %s", node.Name, zic.GetNetworkName())
+	klog.Infof("XXX Creating interconnect resources for remote zone node %s for the network %s", node.Name, zic.GetNetworkName())
 
 	nodeID := util.GetNodeID(node)
 	if nodeID == -1 {
