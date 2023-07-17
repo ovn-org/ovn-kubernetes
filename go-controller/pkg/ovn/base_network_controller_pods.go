@@ -402,7 +402,7 @@ func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, 
 // controller's zone.
 func (bnc *BaseNetworkController) ensurePodAnnotation(pod *kapi.Pod, nadName string) (*util.PodAnnotation, bool, error) {
 	if kubevirt.IsPodLiveMigratable(pod) {
-		podAnnotation, err := kubevirt.EnsurePodAnnotationForVM(bnc.watchFactory, bnc.kube, pod, bnc.NetInfo, nadName)
+		podAnnotation, err := kubevirt.EnsurePodAnnotationForVM(bnc.watchFactory, bnc.kube, pod, nadName)
 		if err != nil {
 			return nil, false, err
 		}
@@ -906,12 +906,23 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 		ipAllocator = bnc.lsManager.ForSwitch(switchName)
 	}
 
-	updatedPod, podAnnotation, err := bnc.podAnnotationAllocator.AllocatePodAnnotation(
-		ipAllocator,
-		pod,
-		network,
-		reallocate,
-	)
+	var podAnnotation *util.PodAnnotation
+	var updatedPod *kapi.Pod
+	if kubevirt.IsPodLiveMigratable(pod) {
+		podAnnotation, err = kubevirt.EnsurePodAnnotationForVM(bnc.watchFactory, bnc.kube, pod, nadName)
+		if err != nil && err.Error() != "not found live migration stale pods to read pod annotation" {
+			return nil, false, err
+		}
+	}
+
+	if podAnnotation == nil {
+		updatedPod, podAnnotation, err = bnc.podAnnotationAllocator.AllocatePodAnnotation(
+			ipAllocator,
+			pod,
+			network,
+			reallocate,
+		)
+	}
 
 	if err != nil {
 		return nil, false, err

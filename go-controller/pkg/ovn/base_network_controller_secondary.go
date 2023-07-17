@@ -397,7 +397,7 @@ func (bsnc *BaseSecondaryNetworkController) removeLocalZonePodForSecondaryNetwor
 			return err
 		}
 
-		if err := kubevirt.DeleteDHCPOptions(bsnc.nbClient, pod); err != nil {
+		if err := kubevirt.CleanUpLiveMigratablePod(bsnc.nbClient, bsnc.watchFactory, pod); err != nil {
 			return err
 		}
 
