@@ -28,7 +28,6 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -126,6 +125,12 @@ func newNode(nodeName, nodeIPv4 string) *v1.Node {
 					Status: v1.ConditionTrue,
 				},
 			},
+			Addresses: []v1.NodeAddress{
+				{
+					Type:    v1.NodeInternalIP,
+					Address: nodeIPv4,
+				},
+			},
 		},
 	}
 }
@@ -160,6 +165,7 @@ type portInfo struct {
 	podIP    string
 	podMAC   string
 	portName string
+	tunnelID int
 }
 
 func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC, namespace string) testPod {
@@ -233,14 +239,20 @@ func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
 }
 
 func (p testPod) getAnnotationsJson() string {
-	var routes []string
-	for _, r := range p.routes {
-		routes = append(routes, `{"dest":"`+r.Dest.String()+`","nextHop":"`+r.NextHop.String()+`"}`)
+	type podRoute struct {
+		Dest    string `json:"dest"`
+		NextHop string `json:"nextHop"`
 	}
-	routesJSON := ""
-	if len(routes) > 0 {
-		routesJSON = ",\n    \"routes\": [\n" + strings.Join(routes, ",") + "\n    ]"
+	type podAnnotation struct {
+		MAC      string     `json:"mac_address"`
+		IP       string     `json:"ip_address,omitempty"`
+		IPs      []string   `json:"ip_addresses"`
+		Gateway  string     `json:"gateway_ip,omitempty"`
+		Gateways []string   `json:"gateway_ips,omitempty"`
+		Routes   []podRoute `json:"routes,omitempty"`
+		TunnelID int        `json:"tunnel_id,omitempty"`
 	}
+
 	addresses := []string{}
 	for _, podIP := range strings.Split(p.podIP, " ") {
 		if utilnet.IsIPv4String(podIP) {
@@ -248,40 +260,54 @@ func (p testPod) getAnnotationsJson() string {
 		} else if utilnet.IsIPv6String(podIP) {
 			podIP += "/64"
 		}
-		addresses = append(addresses, `"`+podIP+`"`)
+		addresses = append(addresses, podIP)
 	}
+
 	nodeGWIPs := strings.Split(p.nodeGWIP, " ")
-	return fmt.Sprintf(`{
-  "default": {
-    "ip_addresses": [%s],
-    "mac_address": "%s",
-    "gateway_ips": ["%s"],
-    "ip_address": %s,
-    "gateway_ip": "%s"%s
-  }
-}`, strings.Join(addresses, ", "), p.podMAC, strings.Join(nodeGWIPs, `", "`), addresses[0], nodeGWIPs[0], routesJSON)
+
+	var routes []podRoute
+	for _, route := range p.routes {
+		routes = append(routes, podRoute{Dest: route.Dest.String(), NextHop: route.NextHop.String()})
+	}
+
+	podAnnotations := map[string]podAnnotation{
+		"default": {
+			MAC:      p.podMAC,
+			IP:       addresses[0],
+			IPs:      addresses,
+			Gateway:  nodeGWIPs[0],
+			Gateways: nodeGWIPs,
+			Routes:   routes,
+		},
+	}
+
+	for _, portInfos := range p.secondaryPodInfos {
+		for nad, portInfo := range portInfos.allportInfo {
+			ipPrefix := 24
+			if ovntest.MustParseIP(p.podIP).To4() == nil {
+				ipPrefix = 64
+			}
+			ip := fmt.Sprintf("%s/%d", portInfo.podIP, ipPrefix)
+			podAnnotation := podAnnotation{
+				MAC:      portInfo.podMAC,
+				IP:       ip,
+				IPs:      []string{ip},
+				TunnelID: portInfo.tunnelID,
+			}
+			podAnnotations[nad] = podAnnotation
+		}
+	}
+
+	bytes, err := json.Marshal(podAnnotations)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	return string(bytes)
 }
 
 func setPodAnnotations(podObj *v1.Pod, testPod testPod) {
-	podAnnot := map[string]string{
-		util.OvnPodAnnotationName: testPod.getAnnotationsJson(),
+	if podObj.Annotations == nil {
+		podObj.Annotations = map[string]string{}
 	}
-	podObj.Annotations = podAnnot
-}
-
-func getLogicalSwitchUUID(client libovsdbclient.Client, name string) string {
-	ctext, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
-	defer cancel()
-	lsl := []nbdb.LogicalSwitch{}
-	err := client.WhereCache(
-		func(ls *nbdb.LogicalSwitch) bool {
-			return ls.Name == name
-		}).List(ctext, &lsl)
-
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gomega.Expect(len(lsl)).To(gomega.Equal(1))
-	return lsl[0].UUID
-
+	podObj.Annotations[util.OvnPodAnnotationName] = testPod.getAnnotationsJson()
 }
 
 func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbtest.TestData {
