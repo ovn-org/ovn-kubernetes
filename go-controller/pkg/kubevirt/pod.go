@@ -175,7 +175,16 @@ func ExtractVMNameFromPod(pod *corev1.Pod) *ktypes.NamespacedName {
 	return &ktypes.NamespacedName{Namespace: pod.Namespace, Name: vmName}
 }
 
-func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod) error {
+type MigrationPodsCleanup func() error
+
+var NoCleanupToDo = func() error { return nil }
+
+func CleanUpLiveMigratablePod(
+	nbClient libovsdbclient.Client,
+	watchFactory *factory.WatchFactory,
+	pod *corev1.Pod,
+	furtherCleanup MigrationPodsCleanup,
+) error {
 	// This pod is not part of ip migration so we don't need to clean up
 	if !IsPodLiveMigratable(pod) {
 		return nil
@@ -193,10 +202,8 @@ func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *fact
 	if err := DeleteDHCPOptions(nbClient, pod); err != nil {
 		return err
 	}
-	if err := DeleteRoutingForMigratedPod(nbClient, pod); err != nil {
-		return err
-	}
-	return nil
+
+	return furtherCleanup()
 }
 
 func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool) error {

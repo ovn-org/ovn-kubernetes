@@ -397,7 +397,7 @@ func (bsnc *BaseSecondaryNetworkController) removeLocalZonePodForSecondaryNetwor
 			return err
 		}
 
-		if err := kubevirt.CleanUpLiveMigratablePod(bsnc.nbClient, bsnc.watchFactory, pod); err != nil {
+		if err := kubevirt.CleanUpLiveMigratablePod(bsnc.nbClient, bsnc.watchFactory, pod, kubevirt.NoCleanupToDo); err != nil {
 			return err
 		}
 
