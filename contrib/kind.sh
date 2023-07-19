@@ -137,6 +137,7 @@ usage() {
     echo "-el  | --ovn-empty-lb-events        Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
     echo "-ii  | --install-ingress            Flag to install Ingress Components."
     echo "                                    DEFAULT: Don't install ingress components."
+    echo "-mlb | --install-metallb            Install metallb to test service type LoadBalancer deployments"
     echo "-n4  | --no-ipv4                    Disable IPv4. DEFAULT: IPv4 Enabled."
     echo "-i6  | --ipv6                       Enable IPv6. DEFAULT: IPv6 Disabled."
     echo "-wk  | --num-workers                Number of worker nodes. DEFAULT: HA - 2 worker"

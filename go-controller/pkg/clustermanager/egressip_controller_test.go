@@ -8,6 +8,8 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	ocpconfigapi "github.com/openshift/api/config/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
@@ -89,6 +91,17 @@ func newNamespace(namespace string) *v1.Namespace {
 var egressPodLabel = map[string]string{"egress": "needed"}
 
 func newEgressIPMeta(name string) metav1.ObjectMeta {
+	return metav1.ObjectMeta{
+		UID:  k8stypes.UID(name),
+		Name: name,
+		Labels: map[string]string{
+			"name": name,
+		},
+	}
+}
+
+func newCloudPrivateIPConfigMeta(egressIP string) metav1.ObjectMeta {
+	name := ipStringToCloudPrivateIPConfigName(egressIP)
 	return metav1.ObjectMeta{
 		UID:  k8stypes.UID(name),
 		Name: name,
@@ -2186,6 +2199,122 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				return nil
 			}
 
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("ensure egressIP status is in sync with cloud private ip config", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.OVNKubernetesFeature.EnableInterconnect = true
+				config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
+
+				egressIP1 := "192.168.126.101"
+				egressIP2 := "192.168.126.100"
+
+				node1 := setupNode(node1Name, []string{"192.168.126.12/24"}, map[string]string{egressIP1: egressIPName})
+				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, map[string]string{egressIP2: egressIPName})
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP1, egressIP2},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{
+							{
+								EgressIP: egressIP1,
+								Node:     node1.name,
+							},
+							{
+								EgressIP: egressIP2,
+								Node:     node2.name,
+							},
+						},
+					},
+				}
+				cloudPrivateIPConfig := ocpcloudnetworkapi.CloudPrivateIPConfig{
+					ObjectMeta: newCloudPrivateIPConfigMeta(egressIP2),
+					Spec:       ocpcloudnetworkapi.CloudPrivateIPConfigSpec{Node: node2Name},
+					Status: ocpcloudnetworkapi.CloudPrivateIPConfigStatus{Node: node2Name,
+						Conditions: []metav1.Condition{{Status: metav1.ConditionTrue, Type: string(ocpcloudnetworkapi.Assigned)}}},
+				}
+				fakeClusterManagerOVN.start(
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&ocpcloudnetworkapi.CloudPrivateIPConfigList{
+						Items: []ocpcloudnetworkapi.CloudPrivateIPConfig{cloudPrivateIPConfig},
+					},
+				)
+
+				fakeClusterManagerOVN.eIPC.allocator.cache[node1.name] = &node1
+				fakeClusterManagerOVN.eIPC.allocator.cache[node2.name] = &node2
+
+				_, err := fakeClusterManagerOVN.eIPC.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = fakeClusterManagerOVN.eIPC.WatchCloudPrivateIPConfig()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// Since there is no assignment of cloud private ip for one of the egress ip.
+				// syncCloudPrivateIPConfigs removes stale entry from egress ip object status
+				// and check if that is done properly or not.
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
+				egressIPs, nodes := getEgressIPStatus(egressIPName)
+				gomega.Expect(nodes[0]).To(gomega.Equal(node2.name))
+				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP2))
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("ensure egressIP status is in sync with empty cloud private ip config", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.OVNKubernetesFeature.EnableInterconnect = true
+				config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
+
+				egressIP1 := "192.168.126.101"
+				egressIP2 := "192.168.126.100"
+
+				node1 := setupNode(node1Name, []string{"192.168.126.12/24"}, map[string]string{egressIP1: egressIPName})
+				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, map[string]string{egressIP2: egressIPName})
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP1, egressIP2},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{
+							{
+								EgressIP: egressIP1,
+								Node:     node1.name,
+							},
+							{
+								EgressIP: egressIP2,
+								Node:     node2.name,
+							},
+						},
+					},
+				}
+				fakeClusterManagerOVN.start(
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+				)
+
+				fakeClusterManagerOVN.eIPC.allocator.cache[node1.name] = &node1
+				fakeClusterManagerOVN.eIPC.allocator.cache[node2.name] = &node2
+
+				_, err := fakeClusterManagerOVN.eIPC.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = fakeClusterManagerOVN.eIPC.WatchCloudPrivateIPConfig()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// Since there is no assignment of cloud private ip. syncCloudPrivateIPConfigs removes
+				// all entries from egress ip object status and check if that is done properly or not.
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
+				return nil
+			}
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
