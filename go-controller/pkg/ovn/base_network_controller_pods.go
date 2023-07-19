@@ -973,8 +973,8 @@ func (bnc *BaseNetworkController) shouldReleaseDeletedPod(expectedSwitchName, sw
 		}
 
 		if !canRelease {
-			klog.Infof("Will not release IP address: %s for %s. Detected another pod using it."+
-				" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), podDesc)
+			klog.Infof("Will not release IP address: %s for %s. Detected another pod using it.",
+				util.JoinIPNetIPs(podIfAddrs, " "), podDesc)
 			return false, nil
 		}
 
