@@ -394,7 +394,7 @@ func (n *NodeController) createOrReplaceRoutes(mgmtPortLink netlink.Link, oldDRI
 				route := makeRoute(clusterEntry.CIDR, oldDRIP, mgmtPortLink)
 				err := util.GetNetLinkOps().RouteDel(route)
 				if err != nil && !os.IsExist(err) {
-					return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
+					return fmt.Errorf("failed to delete route for subnet %s via gateway %s: %v",
 						route.Dst, route.Gw, err)
 				}
 			}
@@ -408,7 +408,7 @@ func (n *NodeController) createOrReplaceRoutes(mgmtPortLink netlink.Link, oldDRI
 					route := makeRoute(subnet, n.drIP, mgmtPortLink)
 					err := util.GetNetLinkOps().RouteDel(route)
 					if err != nil && !os.IsExist(err) {
-						return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
+						return fmt.Errorf("failed to delete route for subnet %s via gateway %s: %v",
 							route.Dst, route.Gw, err)
 					}
 				}
