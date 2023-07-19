@@ -151,6 +151,11 @@ func (o *FakeOVN) shutdown() {
 	o.egressQoSWg.Wait()
 	o.egressSVCWg.Wait()
 	o.nbsbCleanup.Cleanup()
+	for _, ocInfo := range o.secondaryControllers {
+		close(ocInfo.bnc.stopChan)
+		ocInfo.bnc.cancelableCtx.Cancel()
+		ocInfo.bnc.wg.Wait()
+	}
 }
 
 func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
@@ -184,7 +189,9 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 		for _, node := range existingNodes.Items {
 			o.controller.localZoneNodes.Store(node.Name, true)
 			for _, secondaryController := range o.secondaryControllers {
-				secondaryController.bnc.localZoneNodes.Store(node.Name, true)
+				if secondaryController.bnc.localZoneNodes != nil {
+					secondaryController.bnc.localZoneNodes.Store(node.Name, true)
+				}
 			}
 		}
 	}
