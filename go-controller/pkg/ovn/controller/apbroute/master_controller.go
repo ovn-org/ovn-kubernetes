@@ -24,6 +24,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -252,12 +253,16 @@ func (c *ExternalGatewayMasterController) processNextPolicyWorkItem(wg *sync.Wai
 	defer c.routeQueue.Done(key)
 
 	klog.V(4).Infof("Processing policy %s", key)
-	policy, err := c.mgr.syncRoutePolicy(key.(string), c.routeQueue)
+	gwIPs, err := c.mgr.syncRoutePolicy(key.(string))
 	if err != nil {
 		klog.Errorf("Failed to sync APB policy %s: %v", key, err)
 	}
 	// capture the error from processing the sync in the statuses message field
-	err = c.updateStatusAPBExternalRoute(policy, err)
+	//TODO decide how to merge statuses from multiple ovnkube-controllers
+	statusErr := c.updateStatusAPBExternalRoute(key.(string), gwIPs, err)
+	if statusErr != nil {
+		klog.Warningf("Failed to update AdminPolicyBasedExternalRoutes %s status: %v", key, statusErr)
+	}
 	if err != nil {
 		if c.routeQueue.NumRequeues(key) < maxRetries {
 			klog.V(4).Infof("Error found while processing policy %s: %w", key, err)
@@ -297,10 +302,12 @@ func (c *ExternalGatewayMasterController) onPolicyUpdate(oldObj, newObj interfac
 		utilruntime.HandleError(fmt.Errorf("expecting %T but received %T", &adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{}, newObj))
 		return
 	}
+
 	if oldRoutePolicy == nil || newRoutePolicy == nil {
 		utilruntime.HandleError(errors.New("invalid Admin Policy Based External Route provided to onPolicyUpdate()"))
 		return
 	}
+
 	if oldRoutePolicy.Generation == newRoutePolicy.Generation ||
 		!newRoutePolicy.GetDeletionTimestamp().IsZero() {
 		return
@@ -498,7 +505,7 @@ func (c *ExternalGatewayMasterController) processNextPodWorkItem(wg *sync.WaitGr
 	defer c.podQueue.Done(obj)
 
 	p := obj.(*v1.Pod)
-	err := c.mgr.syncPod(p, c.podLister, c.routeQueue)
+	err := c.mgr.syncPod(p, c.routeQueue)
 	if err != nil {
 		if c.podQueue.NumRequeues(obj) < maxRetries {
 			klog.V(4).Infof("Error found while processing pod %s/%s:%v", p.Namespace, p.Name, err)
@@ -514,40 +521,35 @@ func (c *ExternalGatewayMasterController) processNextPodWorkItem(wg *sync.WaitGr
 }
 
 // updateStatusAPBExternalRoute updates the CR with the current status of the CR instance, including errors captured while processing the CR during its lifetime
-func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(externalRoutePolicy *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, processedError error) error {
-	if externalRoutePolicy == nil {
-		// policy doesnt exist anymore, nothing to do
+func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(policyName string, gwIPs sets.Set[string],
+	processedError error) error {
+	if gwIPs == nil {
+		// policy doesn't exist anymore, nothing to do
 		return nil
 	}
 
-	processedPolicy, err := c.mgr.processExternalRoutePolicy(externalRoutePolicy)
-	if err != nil {
-		return err
-	}
+	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
+		routePolicy, err := c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), policyName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// policy doesn't exist, no need to update status
+				return nil
+			}
+			return err
+		}
 
-	gwIPs := sets.New[string]()
-	if processedError == nil {
-		for _, static := range processedPolicy.staticGateways {
-			gwIPs = gwIPs.Insert(static.Gateways.UnsortedList()...)
+		updateStatus(routePolicy, strings.Join(sets.List(gwIPs), ","), processedError)
+
+		_, err = c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().UpdateStatus(context.TODO(), routePolicy, metav1.UpdateOptions{})
+		if !apierrors.IsNotFound(err) {
+			return err
 		}
-		for _, dynamic := range processedPolicy.dynamicGateways {
-			gwIPs = gwIPs.Insert(dynamic.Gateways.UnsortedList()...)
-		}
+		return nil
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update AdminPolicyBasedExternalRoutes %s status: %v", policyName, resultErr)
 	}
-	// retrieve the policy for update
-	routePolicy, err := c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), externalRoutePolicy.Name, metav1.GetOptions{})
-	if err != nil && apierrors.IsNotFound(err) {
-		return processedError
-	}
-	if err != nil {
-		return err
-	}
-	updateStatus(routePolicy, strings.Join(sets.List(gwIPs), ","), processedError)
-	_, err = c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().UpdateStatus(context.TODO(), routePolicy, metav1.UpdateOptions{})
-	if !apierrors.IsNotFound(err) {
-		return err
-	}
-	return processedError
+	return nil
 }
 
 func (c *ExternalGatewayMasterController) GetDynamicGatewayIPsForTargetNamespace(namespaceName string) (sets.Set[string], error) {
@@ -561,7 +563,7 @@ func (c *ExternalGatewayMasterController) GetStaticGatewayIPsForTargetNamespace(
 func updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, gwIPs string, err error) {
 	if err != nil {
 		route.Status.Status = adminpolicybasedrouteapi.FailStatus
-		route.Status.Messages = append(route.Status.Messages, "Failed to apply policy:%w", err.Error())
+		route.Status.Messages = append(route.Status.Messages, fmt.Sprintf("Failed to apply policy: %v", err.Error()))
 		return
 	}
 	route.Status.LastTransitionTime = metav1.Time{Time: time.Now()}
@@ -593,4 +595,12 @@ func (c *ExternalGatewayMasterController) DelAllLegacyHybridRoutePolicies() erro
 // DeletePodSNAT exposes the function deletePodSNAT
 func (c *ExternalGatewayMasterController) DeletePodSNAT(nodeName string, extIPs, podIPNets []*net.IPNet) error {
 	return c.nbClient.deletePodSNAT(nodeName, extIPs, podIPNets)
+}
+
+func (c *ExternalGatewayMasterController) GetAPBRoutePolicyStatus(policyName string) (*adminpolicybasedrouteapi.AdminPolicyBasedRouteStatus, error) {
+	pol, err := c.routeLister.Get(policyName)
+	if err != nil {
+		return nil, err
+	}
+	return &pol.Status, nil
 }

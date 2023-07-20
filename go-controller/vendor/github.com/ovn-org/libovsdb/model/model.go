@@ -96,3 +96,35 @@ type Mutation struct {
 	// Value to use in the mutation
 	Value interface{}
 }
+
+// CreateModel creates a new Model instance based on an OVSDB Row information
+func CreateModel(dbModel DatabaseModel, tableName string, row *ovsdb.Row, uuid string) (Model, error) {
+	if !dbModel.Valid() {
+		return nil, fmt.Errorf("database model not valid")
+	}
+
+	table := dbModel.Schema.Table(tableName)
+	if table == nil {
+		return nil, fmt.Errorf("table %s not found", tableName)
+	}
+	model, err := dbModel.NewModel(tableName)
+	if err != nil {
+		return nil, err
+	}
+	info, err := dbModel.NewModelInfo(model)
+	if err != nil {
+		return nil, err
+	}
+	err = dbModel.Mapper.GetRowData(row, info)
+	if err != nil {
+		return nil, err
+	}
+
+	if uuid != "" {
+		if err := info.SetField("_uuid", uuid); err != nil {
+			return nil, err
+		}
+	}
+
+	return model, nil
+}

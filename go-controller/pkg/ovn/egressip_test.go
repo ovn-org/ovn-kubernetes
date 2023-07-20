@@ -5477,7 +5477,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					&nbdb.LogicalRouter{
 						Name: ovntypes.GWRouterPrefix + node1.Name,
 						UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
-						Nat:  []string{"egressip-nat-UUID"},
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "UUID",

@@ -34,6 +34,9 @@ func UpdateExternalGatewayPodIPsAnnotation(k kube.Interface, namespace string, e
 
 func ParseRoutingExternalGWAnnotation(annotation string) (sets.Set[string], error) {
 	ipTracker := sets.New[string]()
+	if annotation == "" {
+		return ipTracker, nil
+	}
 	for _, v := range strings.Split(annotation, ",") {
 		parsedAnnotation := net.ParseIP(v)
 		if parsedAnnotation == nil {
