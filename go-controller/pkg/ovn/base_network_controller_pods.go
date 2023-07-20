@@ -300,7 +300,7 @@ func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP) (*k
 func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet) (bool, error) {
 	// in certain configurations IP allocation is handled by cluster manager so
 	// we can locally release the IPs without checking
-	if !bnc.handlesPodIPAllocation() {
+	if !bnc.allocatesPodAnnotation() {
 		return true, nil
 	}
 
@@ -546,6 +546,15 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 
 	// CNI depends on the flows from port security, delay setting it until end
 	lsp.PortSecurity = addresses
+
+	// On layer2 topology with interconnect, we need to add specific port config
+	if bnc.isLayer2Interconnect() {
+		isRemotePort := !bnc.isPodScheduledinLocalZone(pod)
+		err = bnc.zoneICHandler.AddTransitPortConfig(isRemotePort, podAnnotation, lsp)
+		if err != nil {
+			return nil, nil, nil, false, err
+		}
+	}
 
 	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(bnc.nbClient, nil, ls, lsp)
 	if err != nil {
@@ -872,7 +881,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 
 	// In certain configurations, pod IP allocation is handled from cluster
 	// manager so wait for it to allocate the IPs
-	if !bnc.handlesPodIPAllocation() {
+	if !bnc.allocatesPodAnnotation() {
 		podAnnotation, _ := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 		if !util.IsValidPodAnnotation(podAnnotation) {
 			return nil, false, fmt.Errorf("failed to get PodAnnotation for %s/%s/%s, cluster manager might have not allocated it yet",
@@ -932,11 +941,15 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 	return podAnnotation, false, nil
 }
 
-func (bnc *BaseNetworkController) handlesPodIPAllocation() bool {
-	// the controller is in charge of pod IP allocation except L2 topologies
-	// with IPAM on interconnect
+func (bnc *BaseNetworkController) allocatesPodAnnotation() bool {
 	switch bnc.NetInfo.TopologyType() {
-	case ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
+	case ovntypes.Layer2Topology:
+		// on layer2 topologies, cluster manager allocates tunnel IDs, allocates
+		// IPs if the network has IPAM, and sets the PodAnnotation
+		return !config.OVNKubernetesFeature.EnableInterconnect
+	case ovntypes.LocalnetTopology:
+		// on localnet topologies with IPAM, cluster manager allocates IPs and
+		// sets the PodAnnotation
 		return !config.OVNKubernetesFeature.EnableInterconnect || !bnc.doesNetworkRequireIPAM()
 	}
 	return true

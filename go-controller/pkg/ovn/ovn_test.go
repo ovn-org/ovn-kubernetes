@@ -146,10 +146,16 @@ func (o *FakeOVN) startWithDBSetup(dbSetup libovsdbtest.TestSetup, objects ...ru
 func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
 	close(o.stopChan)
+	o.controller.cancelableCtx.Cancel()
 	o.wg.Wait()
 	o.egressQoSWg.Wait()
 	o.egressSVCWg.Wait()
 	o.nbsbCleanup.Cleanup()
+	for _, ocInfo := range o.secondaryControllers {
+		close(ocInfo.bnc.stopChan)
+		ocInfo.bnc.cancelableCtx.Cancel()
+		ocInfo.bnc.wg.Wait()
+	}
 }
 
 func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
@@ -182,6 +188,11 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	if err == nil {
 		for _, node := range existingNodes.Items {
 			o.controller.localZoneNodes.Store(node.Name, true)
+			for _, secondaryController := range o.secondaryControllers {
+				if secondaryController.bnc.localZoneNodes != nil {
+					secondaryController.bnc.localZoneNodes.Store(node.Name, true)
+				}
+			}
 		}
 	}
 }

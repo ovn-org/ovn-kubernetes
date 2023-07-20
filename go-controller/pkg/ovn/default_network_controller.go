@@ -130,10 +130,6 @@ type DefaultNetworkController struct {
 	// connecting to the join switch
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet
 
-	// zoneICHandler creates the interconnect resources for local nodes and remote nodes.
-	// Interconnect resources are Transit switch and logical ports connecting this transit switch
-	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
-	zoneICHandler *zoneic.ZoneInterconnectHandler
 	// zoneChassisHandler handles the local node and remote nodes in creating or updating the chassis entries in the OVN Southbound DB.
 	// Please see zone_interconnect/chassis_handler.go for more details.
 	zoneChassisHandler *zoneic.ZoneChassisHandler
@@ -169,7 +165,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	var zoneICHandler *zoneic.ZoneInterconnectHandler
 	var zoneChassisHandler *zoneic.ZoneChassisHandler
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		zoneICHandler = zoneic.NewZoneInterconnectHandler(&util.DefaultNetInfo{}, cnci.nbClient, cnci.sbClient)
+		zoneICHandler = zoneic.NewZoneInterconnectHandler(&util.DefaultNetInfo{}, cnci.nbClient, cnci.sbClient, cnci.watchFactory)
 		zoneChassisHandler = zoneic.NewZoneChassisHandler(cnci.sbClient)
 	}
 	apbExternalRouteController, err := apbroutecontroller.NewExternalMasterController(
@@ -202,6 +198,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			stopChan:                    defaultStopChan,
 			wg:                          defaultWg,
 			localZoneNodes:              &sync.Map{},
+			zoneICHandler:               zoneICHandler,
+			cancelableCtx:               util.NewCancelableContext(),
 		},
 		externalGWCache: apbExternalRouteController.ExternalGWCache,
 		exGWCacheMutex:  apbExternalRouteController.ExGWCacheMutex,
@@ -218,7 +216,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		switchLoadBalancerGroupUUID:  "",
 		routerLoadBalancerGroupUUID:  "",
 		svcController:                svcController,
-		zoneICHandler:                zoneICHandler,
 		zoneChassisHandler:           zoneChassisHandler,
 		apbExternalRouteController:   apbExternalRouteController,
 	}
@@ -326,6 +323,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
 	close(oc.stopChan)
+	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 }
 
@@ -406,21 +404,6 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	klog.V(4).Info("Cleaning External Gateway ECMP routes")
 	if err := WithSyncDurationMetric("external gateway routes", oc.apbExternalRouteController.Repair); err != nil {
 		return err
-	}
-
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		// if networkID is invalid, then we didn't find it on the initial node list.
-		// cluster-manager could still be starting and assigning, so execute full Init to search
-		if networkID == util.InvalidNetworkID {
-			if err := oc.zoneICHandler.Init(oc.kube, ctx); err != nil {
-				return err
-			}
-		} else {
-			// we already found the networkID, no need to search
-			if err := oc.zoneICHandler.EnsureTransitSwitch(networkID); err != nil {
-				return err
-			}
-		}
 	}
 
 	return nil
