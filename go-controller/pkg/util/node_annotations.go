@@ -85,7 +85,7 @@ const (
 	ovnNodeZoneName = "k8s.ovn.org/zone-name"
 
 	/** HACK BEGIN **/
-	// TODO(tssurya): Remove this annotation a few months from now (when one or two release jump
+	// TODO(tssurya): Remove these two annotations a few months from now (when one or two release jump
 	// upgrades are done). This has been added only to minimize disruption for upgrades when
 	// moving to interconnect=true.
 	// We want the legacy ovnkube-master to wait for remote ovnkube-node to
@@ -98,6 +98,13 @@ const (
 	// ovnNodeMigratedZoneName is the zone to which the node belongs to. It is set by ovnkube-node.
 	// ovnkube-node gets the node's zone from the OVN Southbound database.
 	ovnNodeMigratedZoneName = "k8s.ovn.org/remote-zone-migrated"
+	// OvnNodeLegacySBDBBindingInfo is annotated by ovnkube-controller in phase1 of the
+	// IC=true upgrades so that the old datapath bindings can be propagated to the new IC DBs
+	// In phase2 ovnkube-node will read these bindings and store the uuids into local openvswitch
+	// so that the UUUIDs of the bindings do not change. This is necessary to ensure ovn-controller
+	// does not flush conntrack entries in all these snat/dnat zones that can lead to traffic
+	// disruption during upgrades. See https://bugzilla.redhat.com/show_bug.cgi?id=2224199 for details
+	OvnNodeLegacySBDBBindingInfo = "k8s.ovn.org/legacy-sbdb-binding-info"
 	/** HACK END **/
 
 	// ovnTransitSwitchPortAddr is the annotation to store the node Transit switch port ips.
@@ -753,6 +760,35 @@ func SetNodeZoneMigrated(nodeAnnotator kube.Annotator, zoneName string) error {
 func HasNodeMigratedZone(node *kapi.Node) bool {
 	_, ok := node.Annotations[ovnNodeMigratedZoneName]
 	return ok
+}
+
+// HasNodeLegacyBinding returns true if node has its OvnNodeLegacySBDBBindingInfo set already
+func HasNodeLegacyBinding(node *kapi.Node) bool {
+	_, ok := node.Annotations[OvnNodeLegacySBDBBindingInfo]
+	return ok
+}
+
+func ParseLegacyBindingAnnotation(nodeAnnotations map[string]string) (map[string]string, error) {
+	annotation, ok := nodeAnnotations[OvnNodeLegacySBDBBindingInfo]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find %q annotation", OvnNodeLegacySBDBBindingInfo)
+	}
+
+	legacySBDBBindings := map[string]string{}
+	legacySBDBBindingsInterface := make(map[string]string)
+	if err := json.Unmarshal([]byte(annotation), &legacySBDBBindingsInterface); err != nil {
+		return nil, fmt.Errorf("could not parse %q annotation %q : %v",
+			OvnNodeLegacySBDBBindingInfo, annotation, err)
+	}
+	for name, uuid := range legacySBDBBindingsInterface {
+		legacySBDBBindings[name] = uuid
+	}
+
+	if len(legacySBDBBindings) == 0 {
+		return nil, fmt.Errorf("unexpected empty %s annotation", OvnNodeLegacySBDBBindingInfo)
+	}
+
+	return legacySBDBBindings, nil
 }
 
 /** HACK END **/

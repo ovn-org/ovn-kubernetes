@@ -666,6 +666,44 @@ func portExists(namespace, name string) bool {
 	return err == nil && stderr == "" && stdout != ""
 }
 
+func setLegacyDatapathBinding(node *kapi.Node) error {
+	legacySBDBBindings, err := util.ParseLegacyBindingAnnotation(node.Annotations)
+	if err != nil {
+		return fmt.Errorf("unable to find legacy dapath bindings for node %s, err: %v", node.Name, err)
+	}
+	suffixes := []string{"_dnat", "_snat"}
+	for _, suffix := range suffixes {
+		for name, oldUUID := range legacySBDBBindings {
+			newUUID, stderr, err := util.RunOVNSbctl("--bare", "--columns",
+				"_uuid", "find", "datapath", "external_ids:name="+name)
+			if err != nil {
+				return fmt.Errorf("failed to get sbdb datapath binding for %s: stdout: %v, stderr: %v, error: %v", name, newUUID, stderr, err)
+			}
+			klog.Infof("Upgrade Hack: SBDB Binding for node - %s : stdout - %s : stderr - %s", name, newUUID, stderr)
+			oldVal, stderr, err := util.RunOVSVsctl("get", "bridge",
+				"br-int", "external_ids:ct-zone-"+oldUUID+suffix)
+			if err != nil {
+				return fmt.Errorf("failed to get value from bridge for %s/%s, stdout: %v, stderr: %v, "+
+					"error: %v", name, oldUUID, oldVal, stderr, err)
+			}
+			klog.Infof("Upgrade Hack: OVS Binding for node - %s : stdout - %s : stderr - %s", name, oldVal, stderr)
+			stdout, stderr, err := util.RunOVSVsctl("remove", "bridge", "br-int",
+				"external_ids", "ct-zone-"+oldUUID+suffix)
+			if err != nil {
+				return fmt.Errorf("failed to remove bridge value for %s/%s/%s, stdout: %v, stderr: %v, "+
+					"error: %v", name, oldUUID, newUUID, stdout, stderr, err)
+			}
+			stdout, stderr, err = util.RunOVSVsctl("set", "bridge", "br-int",
+				"external_ids:ct-zone-"+newUUID+suffix+"="+oldVal)
+			if err != nil {
+				return fmt.Errorf("failed to set bridge value for %s/%s/%s, stdout: %v, stderr: %v, "+
+					"error: %v", name, oldUUID, newUUID, stdout, stderr, err)
+			}
+		}
+	}
+	return nil
+}
+
 /** HACK END **/
 
 // Start learns the subnets assigned to it by the master controller
@@ -849,8 +887,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			if !syncNodes {
 				nodes, err := nc.Kube.GetNodes()
 				if err != nil {
-					err1 = fmt.Errorf("upgrade hack: error retrieving node %s: %v", nc.name, err)
-					return false, nil
+					klog.Exitf("Upgrade hack: error retrieving nodes: %v", err)
 				}
 				for _, node := range nodes.Items {
 					if nc.name != node.Name && util.GetNodeZone(&node) != config.Default.Zone {
@@ -917,6 +954,21 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			klog.Exitf("Upgrade hack: Timed out waiting for the remote ovnkube-controller to be ready even after 5 minutes, err : %v, %v", err, err1)
 		}
+		// Pause ovn-controller
+		_, stderr, err := util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "debug/pause")
+		if err != nil {
+			klog.Exitf("Upgrade hack: Failed to pause ovn-controller %v %q", err, stderr)
+		}
+		stdout, stderr, err := util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "debug/status")
+		if err != nil && stdout != "paused" {
+			klog.Exitf("Upgrade hack: Failed to pause ovn-controller %v %q %v", err, stderr, stdout)
+		}
+		klog.Infof("ovnkube-node %s paused ovn-controller at %v", nc.name, time.Now())
+		// Get the legacy datapath bindings for this node and set it on openvswitch
+		if err := setLegacyDatapathBinding(node); err != nil {
+			klog.Exitf("Upgrade hack: failed to set legacy datapath binding: %v", err)
+		}
+		klog.Infof("ovnkube-node %s finished setting datapath binding; took: %v", nc.name, time.Since(start))
 		if err := util.SetNodeZoneMigrated(nodeAnnotator, sbZone); err != nil {
 			klog.Exitf("Upgrade hack: failed to set node zone annotation for node %s: %w", nc.name, err)
 		}
@@ -930,6 +982,16 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			}
 		}
 		klog.Infof("Upgrade hack: ovnkube-node %s finished setting DB Auth; took: %v", nc.name, time.Since(start))
+		// Resume ovn-controller
+		_, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "debug/resume")
+		if err != nil {
+			klog.Exitf("Upgrade hack: Failed to resume ovn-controller %v %q", err, stderr)
+		}
+		stdout, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "debug/status")
+		if err != nil && stdout != "running" {
+			klog.Exitf("Upgrade hack: Failed to resume ovn-controller %v %q %v", err, stderr, stdout)
+		}
+		klog.Infof("ovnkube-node %s resumed ovn-controller at %v", nc.name, time.Now())
 	}
 	/** HACK END **/
 

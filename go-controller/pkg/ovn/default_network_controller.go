@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"reflect"
@@ -26,6 +27,7 @@ import (
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -563,6 +565,65 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	if err := oc.reportTopologyVersion(ctx); err != nil {
 		klog.Errorf("Failed to report topology version: %v", err)
 		return err
+	}
+
+	/** HACK BEGIN **/
+	// TODO(tssurya): Remove this HACK a few months from now. This is done specifically for IC upgrades
+	// Store the SBDB Datapath Bindings belonging to a) node switch b) external switch) c) join switch
+	// d) ovn-cluster-router e) gateway router of each node and annotate each node with this information
+	if config.OVNKubernetesFeature.EnableInterconnect && oc.zone == config.Default.Zone {
+		// should be done once in phase1
+		if err := oc.storeLegacyDatapathInfo(); err != nil {
+			return fmt.Errorf("unable to store legacy information required for IC upgrades")
+		}
+	}
+	/** HACK END **/
+
+	return nil
+}
+
+func (oc *DefaultNetworkController) storeLegacyDatapathInfo() error {
+	klog.Info("Upgrade hack: Gathering datapath binding info for each node...")
+	// It could take some time for the datapath to propagate to SBDB for northd, wait for some time
+	// in phase1 SBDB should already be populated but taking precaution
+	nodes, err := oc.watchFactory.GetNodes()
+	if err != nil {
+		return fmt.Errorf("upgrade hack: unable to fetch nodes in the cluster, err: %v", err)
+	}
+	for _, node := range nodes {
+		if util.HasNodeLegacyBinding(node) {
+			continue // this needs to be only once in life time; not on every restart
+		}
+		nameBindings := []string{
+			node.Name,                              // node-switch
+			types.ExternalSwitchPrefix + node.Name, // ext-node-switch
+			types.GWRouterPrefix + node.Name,       // gateway-router-node
+			types.OVNClusterRouter,                 // ovn-cluster-router
+			types.OVNJoinSwitch,                    // join switch
+		}
+		bindingInfo := make(map[string]string, 0)
+		var datapath *sbdb.DatapathBinding
+		// since this is happening in phase1 where SBDB is already present, northd should have already populated this information in SBDB
+		for _, nameBinding := range nameBindings {
+			p := func(item *sbdb.DatapathBinding) bool {
+				return item.ExternalIDs["name"] == nameBinding
+			}
+
+			if datapath, err = libovsdbops.GetDatapathBindingWithPredicate(oc.sbClient, p); err != nil {
+				return fmt.Errorf("upgrade hack: unable to fetch datapath binding for node %s's %s, err: %v", node.Name, nameBinding, err)
+			}
+			bindingInfo[nameBinding] = datapath.UUID
+		}
+		klog.Infof("Upgrade hack: Node %s has datapath bindings %+v", node.Name, bindingInfo)
+		bytes, err := json.Marshal(bindingInfo)
+		if err != nil {
+			return err
+		}
+		if err := oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{
+			util.OvnNodeLegacySBDBBindingInfo: string(bytes),
+		}); err != nil {
+			return fmt.Errorf("upgrade hack: failed to set node zone annotation for node %s: %w", node.Name, err)
+		}
 	}
 
 	return nil
