@@ -16,7 +16,7 @@ type UUID struct {
 // MarshalJSON will marshal an OVSDB style UUID to a JSON encoded byte array
 func (u UUID) MarshalJSON() ([]byte, error) {
 	var uuidSlice []string
-	err := u.validateUUID()
+	err := ValidateUUID(u.GoUUID)
 	if err == nil {
 		uuidSlice = []string{"uuid", u.GoUUID}
 	} else {
@@ -35,18 +35,25 @@ func (u *UUID) UnmarshalJSON(b []byte) (err error) {
 	return err
 }
 
-func (u UUID) validateUUID() error {
-	if len(u.GoUUID) != 36 {
+func ValidateUUID(uuid string) error {
+	if len(uuid) != 36 {
 		return fmt.Errorf("uuid exceeds 36 characters")
 	}
 
-	if !validUUID.MatchString(u.GoUUID) {
+	if !validUUID.MatchString(uuid) {
 		return fmt.Errorf("uuid does not match regexp")
 	}
 
 	return nil
 }
 
-func isNamed(uuid string) bool {
+func IsNamedUUID(uuid string) bool {
 	return len(uuid) > 0 && !validUUID.MatchString(uuid)
+}
+
+func IsValidUUID(uuid string) bool {
+	if err := ValidateUUID(uuid); err != nil {
+		return false
+	}
+	return true
 }

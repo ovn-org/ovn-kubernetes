@@ -56,6 +56,7 @@ type Client interface {
 	Close()
 	Schema() ovsdb.DatabaseSchema
 	Cache() *cache.TableCache
+	UpdateEndpoints([]string)
 	SetOption(Option) error
 	Connected() bool
 	DisconnectNotify() chan struct{}
@@ -103,6 +104,8 @@ type ovsdbClient struct {
 	shutdownMutex sync.Mutex
 
 	handlerShutdown *sync.WaitGroup
+
+	trafficSeen chan struct{}
 
 	logger *logr.Logger
 }
@@ -303,6 +306,10 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 	}
 
 	go o.handleDisconnectNotification()
+	if o.options.inactivityTimeout > 0 {
+		o.handlerShutdown.Add(1)
+		go o.handleInactivityProbes()
+	}
 	for _, db := range o.databases {
 		o.handlerShutdown.Add(1)
 		eventStopChan := make(chan struct{})
@@ -417,6 +424,9 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) (string, erro
 // Should only be called when the mutex is held
 func (o *ovsdbClient) createRPC2Client(conn net.Conn) {
 	o.stopCh = make(chan struct{})
+	if o.options.inactivityTimeout > 0 {
+		o.trafficSeen = make(chan struct{})
+	}
 	o.rpcClient = rpc2.NewClientWithCodec(jsonrpc.NewJSONCodec(conn))
 	o.rpcClient.SetBlocking(true)
 	o.rpcClient.Handle("echo", func(_ *rpc2.Client, args []interface{}, reply *[]interface{}) error {
@@ -444,7 +454,7 @@ func (o *ovsdbClient) isEndpointLeader(ctx context.Context) (bool, string, error
 		Table:   "Database",
 		Columns: []string{"name", "model", "leader", "sid"},
 	}
-	results, err := o.transact(ctx, serverDB, op)
+	results, err := o.transact(ctx, serverDB, true, op)
 	if err != nil {
 		return false, "", fmt.Errorf("could not check if server was leader: %w", err)
 	}
@@ -518,6 +528,40 @@ func (o *ovsdbClient) Cache() *cache.TableCache {
 	db.cacheMutex.RLock()
 	defer db.cacheMutex.RUnlock()
 	return db.cache
+}
+
+// UpdateEndpoints sets client endpoints
+// It is intended to be called at runtime
+func (o *ovsdbClient) UpdateEndpoints(endpoints []string) {
+	o.logger.V(3).Info("update endpoints", "endpoints", endpoints)
+	o.rpcMutex.Lock()
+	defer o.rpcMutex.Unlock()
+	if len(endpoints) == 0 {
+		endpoints = []string{defaultUnixEndpoint}
+	}
+	o.options.endpoints = endpoints
+	originEps := o.endpoints[:]
+	var newEps []*epInfo
+	activeIdx := -1
+	for i, address := range o.options.endpoints {
+		var serverID string
+		for j, origin := range originEps {
+			if address == origin.address {
+				if j == 0 {
+					activeIdx = i
+				}
+				serverID = origin.serverID
+				break
+			}
+		}
+		newEps = append(newEps, &epInfo{address: address, serverID: serverID})
+	}
+	o.endpoints = newEps
+	if activeIdx > 0 {
+		o.moveEndpointFirst(activeIdx)
+	} else if activeIdx == -1 {
+		o._disconnect()
+	}
 }
 
 // SetOption sets a new value for an option.
@@ -758,10 +802,10 @@ func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation
 		}
 	}
 	defer o.rpcMutex.RUnlock()
-	return o.transact(ctx, o.primaryDBName, operation...)
+	return o.transact(ctx, o.primaryDBName, false, operation...)
 }
 
-func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+func (o *ovsdbClient) transact(ctx context.Context, dbName string, skipChWrite bool, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
 	var reply []ovsdb.OperationResult
 	db := o.databases[dbName]
 	db.modelMutex.RLock()
@@ -788,6 +832,10 @@ func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...
 			return nil, ErrNotConnected
 		}
 		return nil, err
+	}
+
+	if !skipChWrite && o.trafficSeen != nil {
+		o.trafficSeen <- struct{}{}
 	}
 	return reply, nil
 }
@@ -854,8 +902,9 @@ func newMonitorRequest(data *mapper.Info, fields []string, conditions []ovsdb.Co
 	return &ovsdb.MonitorRequest{Columns: columns, Where: conditions, Select: ovsdb.NewDefaultMonitorSelect()}, nil
 }
 
-//gocyclo:ignore
 // monitor must only be called with a lock on monitorsMutex
+//
+//gocyclo:ignore
 func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconnecting bool, monitor *Monitor) error {
 	// if we're reconnecting, we already hold the rpcMutex
 	if !reconnecting {
@@ -1138,10 +1187,82 @@ func (o *ovsdbClient) handleClientErrors(stopCh <-chan struct{}) {
 	}
 }
 
+func (o *ovsdbClient) sendEcho(args []interface{}, reply *[]interface{}) *rpc2.Call {
+	o.rpcMutex.RLock()
+	defer o.rpcMutex.RUnlock()
+	if o.rpcClient == nil {
+		return nil
+	}
+	return o.rpcClient.Go("echo", args, reply, make(chan *rpc2.Call, 1))
+}
+
+func (o *ovsdbClient) handleInactivityProbes() {
+	defer o.handlerShutdown.Done()
+	echoReplied := make(chan string)
+	var lastEcho string
+	stopCh := o.stopCh
+	trafficSeen := o.trafficSeen
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-trafficSeen:
+			// We got some traffic from the server, restart our timer
+		case ts := <-echoReplied:
+			// Got a response from the server, check it against lastEcho; if same clear lastEcho; if not same Disconnect()
+			if ts != lastEcho {
+				o.Disconnect()
+				return
+			}
+			lastEcho = ""
+		case <-time.After(o.options.inactivityTimeout):
+			// If there's a lastEcho already, then we didn't get a server reply, disconnect
+			if lastEcho != "" {
+				o.Disconnect()
+				return
+			}
+			// Otherwise send an echo
+			thisEcho := fmt.Sprintf("%d", time.Now().UnixMicro())
+			args := []interface{}{"libovsdb echo", thisEcho}
+			var reply []interface{}
+			// Can't use o.Echo() because it blocks; we need the Call object direct from o.rpcClient.Go()
+			call := o.sendEcho(args, &reply)
+			if call == nil {
+				o.Disconnect()
+				return
+			}
+			lastEcho = thisEcho
+			go func() {
+				// Wait for the echo reply
+				select {
+				case <-stopCh:
+					return
+				case <-call.Done:
+					if call.Error != nil {
+						// RPC timeout; disconnect
+						o.logger.V(3).Error(call.Error, "server echo reply error")
+						o.Disconnect()
+					} else if !reflect.DeepEqual(args, reply) {
+						o.logger.V(3).Info("warning: incorrect server echo reply",
+							"expected", args, "reply", reply)
+						o.Disconnect()
+					} else {
+						// Otherwise stuff thisEcho into the echoReplied channel
+						echoReplied <- thisEcho
+					}
+				}
+			}()
+		}
+	}
+}
+
 func (o *ovsdbClient) handleDisconnectNotification() {
 	<-o.rpcClient.DisconnectNotify()
 	// close the stopCh, which will stop the cache event processor
 	close(o.stopCh)
+	if o.trafficSeen != nil {
+		close(o.trafficSeen)
+	}
 	o.metrics.numDisconnects.Inc()
 	// wait for client related handlers to shutdown
 	o.handlerShutdown.Wait()
@@ -1307,7 +1428,7 @@ func hasMonitors(db *database) bool {
 // We add this wrapper to allow users to access the API directly on the
 // client object
 
-//Get implements the API interface's Get function
+// Get implements the API interface's Get function
 func (o *ovsdbClient) Get(ctx context.Context, model model.Model) error {
 	primaryDB := o.primaryDB()
 	waitForCacheConsistent(ctx, primaryDB, o.logger, o.primaryDBName)
@@ -1315,12 +1436,12 @@ func (o *ovsdbClient) Get(ctx context.Context, model model.Model) error {
 	return primaryDB.api.Get(ctx, model)
 }
 
-//Create implements the API interface's Create function
+// Create implements the API interface's Create function
 func (o *ovsdbClient) Create(models ...model.Model) ([]ovsdb.Operation, error) {
 	return o.primaryDB().api.Create(models...)
 }
 
-//List implements the API interface's List function
+// List implements the API interface's List function
 func (o *ovsdbClient) List(ctx context.Context, result interface{}) error {
 	primaryDB := o.primaryDB()
 	waitForCacheConsistent(ctx, primaryDB, o.logger, o.primaryDBName)
@@ -1338,12 +1459,12 @@ func (o *ovsdbClient) WhereAny(m model.Model, conditions ...model.Condition) Con
 	return o.primaryDB().api.WhereAny(m, conditions...)
 }
 
-//WhereAll implements the API interface's WhereAll function
+// WhereAll implements the API interface's WhereAll function
 func (o *ovsdbClient) WhereAll(m model.Model, conditions ...model.Condition) ConditionalAPI {
 	return o.primaryDB().api.WhereAll(m, conditions...)
 }
 
-//WhereCache implements the API interface's WhereCache function
+// WhereCache implements the API interface's WhereCache function
 func (o *ovsdbClient) WhereCache(predicate interface{}) ConditionalAPI {
 	return o.primaryDB().api.WhereCache(predicate)
 }

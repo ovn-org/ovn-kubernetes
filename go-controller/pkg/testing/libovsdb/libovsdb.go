@@ -35,6 +35,11 @@ import (
 )
 
 type TestSetup struct {
+	// IgnoreConstraints, when true, ignores constraints validation errors
+	// when adding data to the database, allowing a testcase to force
+	// addition of invalid data (like duplicate indexes).
+	IgnoreConstraints bool
+
 	NBData []TestData
 	SBData []TestData
 }
@@ -42,7 +47,7 @@ type TestSetup struct {
 type TestData interface{}
 
 type clientBuilderFn func(config.OvnAuthConfig, *Context) (libovsdbclient.Client, error)
-type serverBuilderFn func(config.OvnAuthConfig, []TestData) (*TestOvsdbServer, error)
+type serverBuilderFn func(config.OvnAuthConfig, []TestData, bool) (*TestOvsdbServer, error)
 
 var validUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
@@ -96,7 +101,7 @@ func NewNBTestHarness(setup TestSetup, testCtx *Context) (libovsdbclient.Client,
 		testCtx = newContext()
 	}
 
-	client, server, err := newOVSDBTestHarness(setup.NBData, newNBServer, newNBClient, testCtx)
+	client, server, err := newOVSDBTestHarness(setup.NBData, setup.IgnoreConstraints, newNBServer, newNBClient, testCtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -111,7 +116,7 @@ func NewSBTestHarness(setup TestSetup, testCtx *Context) (libovsdbclient.Client,
 		testCtx = newContext()
 	}
 
-	client, server, err := newOVSDBTestHarness(setup.SBData, newSBServer, newSBClient, testCtx)
+	client, server, err := newOVSDBTestHarness(setup.SBData, setup.IgnoreConstraints, newSBServer, newSBClient, testCtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -120,13 +125,13 @@ func NewSBTestHarness(setup TestSetup, testCtx *Context) (libovsdbclient.Client,
 	return client, testCtx, err
 }
 
-func newOVSDBTestHarness(serverData []TestData, newServer serverBuilderFn, newClient clientBuilderFn, testCtx *Context) (libovsdbclient.Client, *TestOvsdbServer, error) {
+func newOVSDBTestHarness(serverData []TestData, ignoreConstraints bool, newServer serverBuilderFn, newClient clientBuilderFn, testCtx *Context) (libovsdbclient.Client, *TestOvsdbServer, error) {
 	cfg := config.OvnAuthConfig{
 		Scheme:  config.OvnDBSchemeUnix,
 		Address: "unix:" + tempOVSDBSocketFileName(),
 	}
 
-	s, err := newServer(cfg, serverData)
+	s, err := newServer(cfg, serverData, ignoreConstraints)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -177,91 +182,102 @@ func newSBClient(cfg config.OvnAuthConfig, testCtx *Context) (libovsdbclient.Cli
 	return sbClient, err
 }
 
-func newSBServer(cfg config.OvnAuthConfig, data []TestData) (*TestOvsdbServer, error) {
+func newSBServer(cfg config.OvnAuthConfig, data []TestData, ignoreConstraints bool) (*TestOvsdbServer, error) {
 	dbModel, err := sbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
 	schema := sbdb.Schema()
-	return newOVSDBServer(cfg, dbModel, schema, data)
+	return newOVSDBServer(cfg, dbModel, schema, data, ignoreConstraints)
 }
 
-func newNBServer(cfg config.OvnAuthConfig, data []TestData) (*TestOvsdbServer, error) {
+func newNBServer(cfg config.OvnAuthConfig, data []TestData, ignoreConstraints bool) (*TestOvsdbServer, error) {
 	dbModel, err := nbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
 	schema := nbdb.Schema()
-	return newOVSDBServer(cfg, dbModel, schema, data)
+	return newOVSDBServer(cfg, dbModel, schema, data, ignoreConstraints)
 }
 
-func testDataToRows(dbMod model.DatabaseModel, data []TestData, addRowFn func(string, string, *ovsdb.Row)) error {
+func testDataToOperations(dbMod model.DatabaseModel, data []TestData) ([]ovsdb.Operation, error) {
 	m := mapper.NewMapper(dbMod.Schema)
-	namedUUIDs := map[string]string{}
 	newData := copystructure.Must(copystructure.Copy(data)).([]TestData)
 
+	ops := make([]ovsdb.Operation, 0, len(newData))
 	for _, d := range newData {
 		tableName := dbMod.FindTable(reflect.TypeOf(d))
 		if tableName == "" {
-			return fmt.Errorf("object of type %s is not part of the DBModel", reflect.TypeOf(d))
-		}
-
-		var dupNamedUUID string
-		uuid, uuidf := getUUID(d)
-		replaceUUIDs(d, func(name string, field int) string {
-			uuid, ok := namedUUIDs[name]
-			if !ok {
-				return name
-			}
-			if field == uuidf {
-				// if we are replacing a model uuid, it's a dupe
-				dupNamedUUID = name
-				return name
-			}
-			return uuid
-		})
-		if dupNamedUUID != "" {
-			return fmt.Errorf("initial data contains duplicated named UUIDs %s", dupNamedUUID)
-		}
-		if uuid == "" {
-			uuid = guuid.NewString()
-		} else if !validUUID.MatchString(uuid) {
-			namedUUID := uuid
-			uuid = guuid.NewString()
-			namedUUIDs[namedUUID] = uuid
+			return nil, fmt.Errorf("object of type %s is not part of the DBModel", reflect.TypeOf(d))
 		}
 
 		info, err := mapper.NewInfo(tableName, dbMod.Schema.Table(tableName), d)
 		if err != nil {
-			return err
+			return nil, err
+		}
+
+		var realUUID, namedUUID string
+		if uuid, err := info.FieldByColumn("_uuid"); err == nil {
+			tmpUUID := uuid.(string)
+			if ovsdb.IsNamedUUID(tmpUUID) {
+				namedUUID = tmpUUID
+			} else if ovsdb.IsValidUUID(tmpUUID) {
+				realUUID = tmpUUID
+			}
+		} else {
+			return nil, err
 		}
 
 		row, err := m.NewRow(info)
 		if err != nil {
-			return err
+			return nil, err
+		}
+		// UUID is given in the operation, not the object
+		delete(row, "_uuid")
+
+		// Since we may be writing directly to the database we need to
+		// generate real UUIDs if the row didn't have one
+		if realUUID == "" {
+			realUUID = guuid.NewString()
 		}
 
-		addRowFn(tableName, uuid, &row)
+		ops = append(ops, ovsdb.Operation{
+			Op:       ovsdb.OperationInsert,
+			Table:    tableName,
+			Row:      row,
+			UUID:     realUUID,
+			UUIDName: namedUUID,
+		})
 	}
 
-	return nil
+	if ok := dbMod.Schema.ValidateOperations(ops...); !ok {
+		return nil, fmt.Errorf("operations invalid for database schema %q", dbMod.Schema.Name)
+	}
+
+	return ops, nil
 }
 
-func updateData(db database.Database, dbMod model.DatabaseModel, data []TestData) error {
-	updates := ovsdb.TableUpdates2{}
-
-	if err := testDataToRows(dbMod, data, func(tableName, uuid string, row *ovsdb.Row) {
-		if _, ok := updates[tableName]; !ok {
-			updates[tableName] = ovsdb.TableUpdate2{}
-		}
-		updates[tableName][uuid] = &ovsdb.RowUpdate2{Insert: row}
-	}); err != nil {
+func updateData(db database.Database, dbMod model.DatabaseModel, data []TestData, ignoreConstraints bool) error {
+	ops, err := testDataToOperations(dbMod, data)
+	if err != nil {
 		return err
 	}
 
-	uuid := guuid.New()
-	err := db.Commit(dbMod.Schema.Name, uuid, updates)
-	if err != nil {
+	t := database.NewTransaction(dbMod, dbMod.Schema.Name, db, nil)
+	res, updates := t.Transact(ops)
+
+	cr := make([]ovsdb.OperationResult, 0, len(res))
+	for _, r := range res {
+		cr = append(cr, *r)
+	}
+	if _, err := ovsdb.CheckOperationResults(cr, ops); err != nil {
+		// Return any error, but optionally ignore constraint violations if requested
+		_, isConstraintErr := err.(*ovsdb.ConstraintViolation)
+		if !isConstraintErr || !ignoreConstraints {
+			return fmt.Errorf("failed to insert test data %v: %v", ops, err)
+		}
+	}
+	if err := db.Commit(dbMod.Schema.Name, guuid.New(), updates); err != nil {
 		return fmt.Errorf("error populating server with initial data: %v", err)
 	}
 
@@ -274,7 +290,7 @@ type TestOvsdbServer struct {
 	dbMod model.DatabaseModel
 }
 
-func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) (*TestOvsdbServer, error) {
+func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData, ignoreConstraints bool) (*TestOvsdbServer, error) {
 	serverDBModel, err := serverdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
@@ -312,13 +328,13 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 			Sid:       &sid,
 		},
 	}
-	if err := updateData(db, servMod, serverData); err != nil {
+	if err := updateData(db, servMod, serverData, false); err != nil {
 		return nil, err
 	}
 
 	// Populate with testcase data
 	if len(data) > 0 {
-		if err := updateData(db, dbMod, data); err != nil {
+		if err := updateData(db, dbMod, data, ignoreConstraints); err != nil {
 			return nil, err
 		}
 	}
@@ -360,21 +376,9 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 // We must use the server's Transact() method to ensure updates are sent to clients
 // that may have already been created.
 func (t *TestOvsdbServer) CreateTestData(data []TestData) error {
-	var ops []ovsdb.Operation
-
-	if err := testDataToRows(t.dbMod, data, func(tableName, uuid string, row *ovsdb.Row) {
-		ops = append(ops, ovsdb.Operation{
-			Op:       ovsdb.OperationInsert,
-			Table:    tableName,
-			Row:      *row,
-			UUIDName: uuid,
-		})
-	}); err != nil {
+	ops, err := testDataToOperations(t.dbMod, data)
+	if err != nil {
 		return err
-	}
-
-	if ok := t.dbMod.Schema.ValidateOperations(ops...); !ok {
-		return fmt.Errorf("validation failed for the operation")
 	}
 
 	// Marshal Transact args to JSON
