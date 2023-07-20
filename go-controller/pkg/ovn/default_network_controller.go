@@ -404,7 +404,9 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	// Sync external gateway routes. External gateway are set via Admin Policy Based External Route CRs.
 	// So execute an individual sync method at startup to cleanup any difference
 	klog.V(4).Info("Cleaning External Gateway ECMP routes")
-	WithSyncDurationMetricNoError("external gateway routes", oc.apbExternalRouteController.Repair)
+	if err := WithSyncDurationMetric("external gateway routes", oc.apbExternalRouteController.Repair); err != nil {
+		return err
+	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		// if networkID is invalid, then we didn't find it on the initial node list.

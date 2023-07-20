@@ -32,9 +32,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
+var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 	const (
 		namespaceName = "namespace1"
+		policyName    = "policy"
 	)
 	var (
 		app     *cli.App
@@ -44,6 +45,48 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 		bfd2NamedUUID     = "bfd-2-UUID"
 		logicalRouterPort = "rtoe-GR_node1"
 	)
+
+	getStaticPolicy := func(bfd bool) adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute {
+		return newPolicy(
+			policyName,
+			&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
+			sets.NewString("9.0.0.1"),
+			bfd, nil, nil, false, "")
+	}
+
+	getStaticPolicy2IPs := func(bfd bool, ipv6 bool) adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute {
+		ips := sets.NewString("9.0.0.1", "9.0.0.2")
+		if ipv6 {
+			ips = sets.NewString("fd2e:6f44:5dd8::89", "fd2e:6f44:5dd8::76")
+		}
+		return newPolicy(
+			policyName,
+			&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
+			ips,
+			bfd, nil, nil, false, "")
+	}
+
+	getDynamicPolicy := func(bfd bool, targetNamespace, targetPod string) adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute {
+		return newPolicy(policyName,
+			&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
+			nil,
+			false,
+			&metav1.LabelSelector{MatchLabels: map[string]string{"name": targetNamespace}},
+			&metav1.LabelSelector{MatchLabels: map[string]string{"name": targetPod}},
+			bfd,
+			"")
+	}
+
+	getStaticDynamicPolicy := func(bfdStatic, bfdDynamic bool, targetNamespace, targetPod string) adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute {
+		return newPolicy(policyName,
+			&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
+			sets.NewString("9.0.0.1"),
+			bfdStatic,
+			&metav1.LabelSelector{MatchLabels: map[string]string{"name": targetNamespace}},
+			&metav1.LabelSelector{MatchLabels: map[string]string{"name": targetPod}},
+			bfdDynamic,
+			"")
+	}
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -103,7 +146,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy", &metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}}, sets.NewString("9.0.0.1"), bfd, nil, nil, bfd, ""),
+							getStaticPolicy(bfd),
 						},
 					},
 				)
@@ -119,6 +162,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 				return nil
 			}
 
@@ -239,7 +283,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy", &metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}}, sets.NewString("9.0.0.1"), bfd, nil, nil, bfd, ""),
+							getStaticPolicy(bfd),
 						},
 					},
 				)
@@ -254,7 +298,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 				fakeOvn.RunAPBExternalPolicyController()
 				ginkgo.By("Waiting for the policy to be processed")
 				gomega.Eventually(func() bool {
-					p, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.Background(), "policy", metav1.GetOptions{})
+					p, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.Background(), policyName, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					return !p.Status.LastTransitionTime.IsZero()
 				}).Should(gomega.BeTrue())
@@ -264,6 +308,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 				ginkgo.By("Validating the north bound DB has been updated with the new static route to the target pod")
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 				return nil
 			}
 
@@ -384,7 +429,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy", &metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}}, sets.NewString("9.0.0.1"), bfd, nil, nil, bfd, ""),
+							getStaticPolicy(bfd),
 						},
 					},
 				)
@@ -402,6 +447,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 				return nil
 			}
 
@@ -528,7 +574,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy", &metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}}, sets.NewString("9.0.0.1", "9.0.0.2"), bfd, nil, nil, bfd, ""),
+							getStaticPolicy2IPs(bfd, false),
 						},
 					},
 				)
@@ -543,6 +589,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 				return nil
 			}
 
@@ -703,17 +750,18 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(syncNB))
 
 					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-					p := newPolicy("policy", &metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}}, sets.NewString("9.0.0.1", "9.0.0.2"), bfd, nil, nil, bfd, "")
+					p := getStaticPolicy2IPs(bfd, false)
 					_, err = fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Create(context.Background(), &p, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Eventually(func() bool {
-						p, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.Background(), "policy", metav1.GetOptions{})
+						p, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.Background(), policyName, metav1.GetOptions{})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						return !p.Status.LastTransitionTime.IsZero()
 					}).Should(gomega.BeTrue())
 					deletePod(t.namespace, t.podName, fakeOvn.fakeClient.KubeClient)
 
 					gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(finalNB))
+					checkAPBRouteStatus(fakeOvn, policyName, false)
 					return nil
 				}
 				err := app.Run([]string{app.Name})
@@ -917,16 +965,17 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(syncNB))
 
 					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-					p := newPolicy("policy", &metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}}, sets.NewString("fd2e:6f44:5dd8::89", "fd2e:6f44:5dd8::76"), bfd, nil, nil, bfd, "")
+					p := getStaticPolicy2IPs(bfd, true)
 					_, err = fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Create(context.Background(), &p, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Eventually(func() bool {
-						p, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.Background(), "policy", metav1.GetOptions{})
+						p, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.Background(), policyName, metav1.GetOptions{})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						return !p.Status.LastTransitionTime.IsZero()
 					}).Should(gomega.BeTrue())
 					deletePod(t.namespace, t.podName, fakeOvn.fakeClient.KubeClient)
 					gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(finalNB))
+					checkAPBRouteStatus(fakeOvn, policyName, false)
 					return nil
 				}
 				err := app.Run([]string{app.Name})
@@ -1050,7 +1099,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 						&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 							Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-								newPolicy("policy", &metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}}, sets.NewString("9.0.0.1", "9.0.0.2"), bfd, nil, nil, bfd, ""),
+								getStaticPolicy2IPs(bfd, false),
 							},
 						},
 					)
@@ -1063,10 +1112,13 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					fakeOvn.RunAPBExternalPolicyController()
 
-					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
+					gomega.Eventually(func() string {
+						return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
+					}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
 					deleteNamespace(t.namespace, fakeOvn.fakeClient.KubeClient)
 					gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(finalNB))
+					checkAPBRouteStatus(fakeOvn, policyName, false)
 					return nil
 				}
 
@@ -1249,14 +1301,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy",
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
-								nil,
-								bfd,
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceX.Name}},
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": gwPod.Name}},
-								bfd,
-								""),
+							getDynamicPolicy(bfd, namespaceX.Name, gwPod.Name),
 						},
 					},
 				)
@@ -1268,7 +1313,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.RunAPBExternalPolicyController()
 				gomega.Eventually(func() bool {
-					p, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.Background(), "policy", metav1.GetOptions{})
+					p, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.Background(), policyName, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					return !p.Status.LastTransitionTime.IsZero()
 				}).Should(gomega.BeTrue())
@@ -1278,6 +1323,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 				gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 				return nil
 			}
 
@@ -1404,14 +1450,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy",
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
-								nil,
-								bfd,
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceX.Name}},
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": gwPod.Name}},
-								bfd,
-								""),
+							getDynamicPolicy(bfd, namespaceX.Name, gwPod.Name),
 						},
 					},
 				)
@@ -1426,6 +1465,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 				return nil
 			}
 
@@ -1559,7 +1599,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy",
+							newPolicy(policyName,
 								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
 								nil,
 								bfd,
@@ -1578,7 +1618,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.RunAPBExternalPolicyController()
 				gomega.Eventually(func() bool {
-					p, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.Background(), "policy", metav1.GetOptions{})
+					p, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.Background(), policyName, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					return !p.Status.LastTransitionTime.IsZero()
 				}).Should(gomega.BeTrue())
@@ -1587,6 +1627,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 				return nil
 			}
 
@@ -1716,15 +1757,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 						},
 						&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 							Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-								newPolicy("policy",
-									&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
-									nil,
-									bfd,
-									&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceX.Name}},
-									&metav1.LabelSelector{MatchLabels: map[string]string{"name": gwPod.Name}},
-									bfd,
-									"",
-								),
+								getDynamicPolicy(bfd, namespaceX.Name, gwPod.Name),
 							},
 						},
 					)
@@ -1746,6 +1779,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					gomega.Eventually(func() string {
 						return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)[util.ExternalGatewayPodIPsAnnotation]
 					}, 5).Should(gomega.Equal(""))
+					checkAPBRouteStatus(fakeOvn, policyName, false)
 					return nil
 				}
 
@@ -1932,15 +1966,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy",
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceT.Name}},
-								sets.NewString("9.0.0.1"),
-								true,
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceX.Name}},
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": gwPod.Name}},
-								false,
-								"",
-							),
+							getStaticDynamicPolicy(true, false, namespaceX.Name, gwPod.Name),
 						},
 					},
 				)
@@ -2009,6 +2035,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 				}
 				gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 				return nil
 			}
 
@@ -2059,15 +2086,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy",
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceT.Name}},
-								sets.NewString("9.0.0.1"),
-								false,
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceX.Name}},
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": gwPod.Name}},
-								true,
-								"",
-							),
+							getStaticDynamicPolicy(false, true, namespaceX.Name, gwPod.Name),
 						},
 					},
 				)
@@ -2137,6 +2156,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 				}
 
 				gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 				return nil
 			}
 
@@ -2235,14 +2255,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 				}))
 
-				p := newPolicy("policy",
-					&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceT.Name}},
-					sets.NewString("9.0.0.1"),
-					true,
-					nil,
-					nil,
-					false,
-					"")
+				p := getStaticPolicy(true)
 				_, err = fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Create(context.Background(), &p, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				ginkgo.By("Waiting for the policy to be processed")
@@ -2295,8 +2308,9 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 				}
 				gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(tempNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 
-				updatePolicy("policy",
+				updatePolicy(policyName,
 					&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceT.Name}},
 					sets.NewString("9.0.0.1"),
 					false,
@@ -2345,6 +2359,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 				}
 
 				gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 				return nil
 			}
 
@@ -2463,15 +2478,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
 						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy",
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceT.Name}},
-								sets.NewString("9.0.0.1"),
-								false,
-								nil,
-								nil,
-								false,
-								"",
-							),
+							getStaticPolicy(false),
 						},
 					},
 				)
@@ -2541,6 +2548,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 				gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(nbWithLRP))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 
 				deletePod(t.namespace, t.podName, fakeOvn.fakeClient.KubeClient)
 
@@ -2564,6 +2572,7 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 					},
 				}
 				gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(finalNB))
+				checkAPBRouteStatus(fakeOvn, policyName, false)
 
 				return nil
 			}
@@ -2973,7 +2982,8 @@ var _ = ginkgo.XDescribe("OVN for APB External Route Operations", func() {
 	})
 })
 
-func newPolicy(policyName string, fromNSSelector *metav1.LabelSelector, staticHopsGWIPs sets.String, bfdStatic bool, dynamicHopsNSSelector *metav1.LabelSelector, dynamicHopsPodSelector *metav1.LabelSelector, bfdDynamic bool, networkAttachementName string) adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute {
+func newPolicy(policyName string, fromNSSelector *metav1.LabelSelector, staticHopsGWIPs sets.String, bfdStatic bool,
+	dynamicHopsNSSelector *metav1.LabelSelector, dynamicHopsPodSelector *metav1.LabelSelector, bfdDynamic bool, networkAttachementName string) adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute {
 	p := adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
 		ObjectMeta: metav1.ObjectMeta{Name: policyName},
 		Spec: adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteSpec{
@@ -3053,7 +3063,26 @@ func deleteNamespace(namespaceName string, fakeClient kubernetes.Interface) {
 }
 
 func (o *FakeOVN) RunAPBExternalPolicyController() {
-	o.controller.apbExternalRouteController.Repair()
-	err := o.controller.apbExternalRouteController.Run(o.controller.wg, 5)
+	err := o.controller.apbExternalRouteController.Repair()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	err = o.controller.apbExternalRouteController.Run(o.controller.wg, 5)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+}
+
+func checkAPBRouteStatus(fakeOVN *FakeOVN, policyName string, expectFailure bool) {
+	var status *adminpolicybasedrouteapi.AdminPolicyBasedRouteStatus
+	var err error
+	// first fetch status, if it is empty policy may not be handled yet
+	gomega.Eventually(func() bool {
+		status, err = fakeOVN.controller.apbExternalRouteController.GetAPBRoutePolicyStatus(policyName)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		return status.Status != ""
+	}).Should(gomega.BeTrue())
+
+	// as soon as status is set, it should match expected status, without extra retries
+	expectedStatus := adminpolicybasedrouteapi.SuccessStatus
+	if expectFailure {
+		expectedStatus = adminpolicybasedrouteapi.FailStatus
+	}
+	gomega.Expect(status.Status).To(gomega.Equal(expectedStatus))
 }
