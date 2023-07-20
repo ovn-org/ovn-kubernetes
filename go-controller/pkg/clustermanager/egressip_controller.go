@@ -1067,18 +1067,20 @@ func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interfac
 	}
 	for _, egressIP := range egressIPs {
 		updatedStatus := []egressipv1.EgressIPStatusItem{}
-		cloudPrivateIPNotFoundOrInvalid := false
+		cloudPrivateIPNotFound := false
 		for _, status := range egressIP.Status.Items {
 			cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(status.EgressIP)
-			if nodeName, exists := cloudPrivateIPConfigMap[cloudPrivateIPConfigName]; exists && status.Node == nodeName {
+			if _, exists := cloudPrivateIPConfigMap[cloudPrivateIPConfigName]; exists {
 				updatedStatus = append(updatedStatus, status)
 			} else {
-				// Set cloudPrivateIPNotFoundOrInvalid flag to true because egress ip entry not found or not set with
-				// correct node name in cloud private ip config object.
-				cloudPrivateIPNotFoundOrInvalid = true
+				// Set cloudPrivateIPNotFoundOrInvalid flag to true because egress ip entry not found in
+				// cloud private ip config object. Note that the egress ip status might still reflect an
+				// old node assignment if the informer cache has old data, so do not invalidate if it is
+				// not the same node as the cloud private ip config assignment.
+				cloudPrivateIPNotFound = true
 			}
 		}
-		if cloudPrivateIPNotFoundOrInvalid {
+		if cloudPrivateIPNotFound {
 			// There could be one or more stale entry found in egress ip object, remove it by patching egressip
 			// object with updated status.
 			err = eIPC.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus)
