@@ -15,7 +15,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
@@ -306,24 +305,25 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	// controller mode or combined cluster manager and ovnkube-controller modes (the classic
 	// master mode), the master HA config applies. For cluster manager
 	// standalone mode, the cluster manager HA config applies.
-	var haConfig *config.HAConfig
-	var name string
+	//var haConfig *config.HAConfig
+	//var name string
 	switch {
 	case runMode.ovnkubeController && runMode.clusterManager:
 		metrics.RegisterClusterManagerBase()
 		fallthrough
 	case runMode.ovnkubeController:
 		metrics.RegisterOVNKubeControllerBase()
-		haConfig = &config.MasterHA
-		name = networkControllerManagerLockName()
+		//haConfig = &config.MasterHA
+		//name = networkControllerManagerLockName()
 	case runMode.clusterManager:
 		metrics.RegisterClusterManagerBase()
-		haConfig = &config.ClusterMgrHA
-		name = "ovn-kubernetes-cluster-manager"
+		//haConfig = &config.ClusterMgrHA
+		//name = "ovn-kubernetes-cluster-manager"
 	}
 
 	// Set up leader election process. Use lease resource lock as configmap and
 	// endpoint lock support has been removed from leader election library.
+	/*
 	rl, err := resourcelock.New(
 		resourcelock.LeasesResourceLock,
 		config.Kubernetes.OVNConfigNamespace,
@@ -398,6 +398,11 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	ovnKubeStopLock.Lock()
 	ovnKubeStopped = true
 	ovnKubeStopLock.Unlock()
+	*/
+	if err := runOvnKube(ctx.Context, runMode, ovnClientset, eventRecorder); err != nil {
+		klog.Error(err)
+		cancel()
+	}
 
 	return nil
 }
