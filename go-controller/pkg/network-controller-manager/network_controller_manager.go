@@ -68,9 +68,6 @@ func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo) (na
 	case ovntypes.Layer3Topology:
 		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo), nil
 	case ovntypes.Layer2Topology:
-		if config.OVNKubernetesFeature.EnableInterconnect {
-			return nil, fmt.Errorf("topology type %s not supported when Interconnect feature is enabled", topoType)
-		}
 		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo), nil
 	case ovntypes.LocalnetTopology:
 		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo), nil

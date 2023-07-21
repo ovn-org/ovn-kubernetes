@@ -28,7 +28,6 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -81,8 +80,12 @@ func newPodWithLabels(namespace, name, node, podIP string, additionalLabels map[
 
 func newPod(namespace, name, node, podIP string) *v1.Pod {
 	podIPs := []v1.PodIP{}
-	if podIP != "" {
-		podIPs = append(podIPs, v1.PodIP{IP: podIP})
+	ips := strings.Split(podIP, " ")
+	if len(ips) > 0 {
+		podIP = ips[0]
+		for _, ip := range ips {
+			podIPs = append(podIPs, v1.PodIP{IP: ip})
+		}
 	}
 	return &v1.Pod{
 		ObjectMeta: newPodMeta(namespace, name, nil),
@@ -122,6 +125,12 @@ func newNode(nodeName, nodeIPv4 string) *v1.Node {
 					Status: v1.ConditionTrue,
 				},
 			},
+			Addresses: []v1.NodeAddress{
+				{
+					Type:    v1.NodeInternalIP,
+					Address: nodeIPv4,
+				},
+			},
 		},
 	}
 }
@@ -156,16 +165,17 @@ type portInfo struct {
 	podIP    string
 	podMAC   string
 	portName string
+	tunnelID int
 }
 
-func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, namespace string) testPod {
+func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC, namespace string) testPod {
 	portName := util.GetLogicalPortName(namespace, podName)
 	to := testPod{
 		portUUID:          portName + "-UUID",
 		nodeSubnet:        nodeSubnet,
 		nodeMgtIP:         nodeMgtIP,
 		nodeGWIP:          nodeGWIP,
-		podIP:             podIP,
+		podIP:             podIPs,
 		podMAC:            podMAC,
 		portName:          portName,
 		nodeName:          nodeName,
@@ -174,28 +184,45 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 		secondaryPodInfos: map[string]*secondaryPodInfo{},
 	}
 
-	isIPv6 := ovntest.MustParseIP(podIP).To4() == nil
-
 	var routeSources []*net.IPNet
-	for _, subnet := range config.Default.ClusterSubnets {
-		if utilnet.IsIPv6CIDR(subnet.CIDR) == isIPv6 {
-			routeSources = append(routeSources, subnet.CIDR)
-		}
-	}
-	for _, sc := range config.Kubernetes.ServiceCIDRs {
-		if utilnet.IsIPv6CIDR(sc) == isIPv6 {
-			routeSources = append(routeSources, sc)
-		}
-	}
-	joinNet := config.Gateway.V4JoinSubnet
-	if isIPv6 {
-		joinNet = config.Gateway.V6JoinSubnet
-	}
-	routeSources = append(routeSources, ovntest.MustParseIPNet(joinNet))
+	for _, podIP := range strings.Split(podIPs, " ") {
+		isIPv6 := ovntest.MustParseIP(podIP).To4() == nil
 
-	gwip := ovntest.MustParseIP(nodeGWIP)
+		for _, subnet := range config.Default.ClusterSubnets {
+			if utilnet.IsIPv6CIDR(subnet.CIDR) == isIPv6 {
+				routeSources = append(routeSources, subnet.CIDR)
+			}
+		}
+		for _, sc := range config.Kubernetes.ServiceCIDRs {
+			if utilnet.IsIPv6CIDR(sc) == isIPv6 {
+				routeSources = append(routeSources, sc)
+			}
+		}
+		joinNet := config.Gateway.V4JoinSubnet
+		if isIPv6 {
+			joinNet = config.Gateway.V6JoinSubnet
+		}
+		routeSources = append(routeSources, ovntest.MustParseIPNet(joinNet))
+	}
+
+	gwIPs := strings.Split(nodeGWIP, " ")
+	var gwIPv4, gwIPv6 *net.IP
+	for _, gwIP := range gwIPs {
+		gwNetIP := ovntest.MustParseIP(gwIP)
+		isIPv6 := gwNetIP.To4() == nil
+		if isIPv6 {
+			gwIPv6 = &gwNetIP
+		} else {
+			gwIPv4 = &gwNetIP
+		}
+	}
 	for _, rs := range routeSources {
-		to.routes = append(to.routes, util.PodRoute{rs, gwip})
+		isIPv6 := ovntest.MustParseIPNet(rs.String()).IP.To4() == nil
+		gwIP := gwIPv4
+		if isIPv6 {
+			gwIP = gwIPv6
+		}
+		to.routes = append(to.routes, util.PodRoute{rs, *gwIP})
 	}
 
 	return to
@@ -203,56 +230,84 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 
 func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
 	gomega.Expect(p.nodeName).NotTo(gomega.Equal(""))
-	err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(p.nodeName, []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)})
+	subnets := []*net.IPNet{}
+	for _, subnet := range strings.Split(p.nodeSubnet, " ") {
+		subnets = append(subnets, ovntest.MustParseIPNet(subnet))
+	}
+	err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(p.nodeName, subnets)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
 func (p testPod) getAnnotationsJson() string {
-	var routes []string
-	for _, r := range p.routes {
-		routes = append(routes, `{"dest":"`+r.Dest.String()+`","nextHop":"`+r.NextHop.String()+`"}`)
+	type podRoute struct {
+		Dest    string `json:"dest"`
+		NextHop string `json:"nextHop"`
 	}
-	routesJSON := ""
-	if len(routes) > 0 {
-		routesJSON = ",\n    \"routes\": [\n" + strings.Join(routes, ",") + "\n    ]"
+	type podAnnotation struct {
+		MAC      string     `json:"mac_address"`
+		IP       string     `json:"ip_address,omitempty"`
+		IPs      []string   `json:"ip_addresses"`
+		Gateway  string     `json:"gateway_ip,omitempty"`
+		Gateways []string   `json:"gateway_ips,omitempty"`
+		Routes   []podRoute `json:"routes,omitempty"`
+		TunnelID int        `json:"tunnel_id,omitempty"`
 	}
 
-	ipPrefix := 24
-	if ovntest.MustParseIP(p.podIP).To4() == nil {
-		ipPrefix = 64
+	addresses := []string{}
+	for _, podIP := range strings.Split(p.podIP, " ") {
+		if utilnet.IsIPv4String(podIP) {
+			podIP += "/24"
+		} else if utilnet.IsIPv6String(podIP) {
+			podIP += "/64"
+		}
+		addresses = append(addresses, podIP)
 	}
 
-	return fmt.Sprintf(`{
-  "default": {
-    "ip_addresses": ["%s/%d"],
-    "mac_address": "%s",
-    "gateway_ips": ["%s"],
-    "ip_address": "%s/%d",
-    "gateway_ip": "%s"%s
-  }
-}`, p.podIP, ipPrefix, p.podMAC, p.nodeGWIP, p.podIP, ipPrefix, p.nodeGWIP, routesJSON)
+	nodeGWIPs := strings.Split(p.nodeGWIP, " ")
+
+	var routes []podRoute
+	for _, route := range p.routes {
+		routes = append(routes, podRoute{Dest: route.Dest.String(), NextHop: route.NextHop.String()})
+	}
+
+	podAnnotations := map[string]podAnnotation{
+		"default": {
+			MAC:      p.podMAC,
+			IP:       addresses[0],
+			IPs:      addresses,
+			Gateway:  nodeGWIPs[0],
+			Gateways: nodeGWIPs,
+			Routes:   routes,
+		},
+	}
+
+	for _, portInfos := range p.secondaryPodInfos {
+		for nad, portInfo := range portInfos.allportInfo {
+			ipPrefix := 24
+			if ovntest.MustParseIP(p.podIP).To4() == nil {
+				ipPrefix = 64
+			}
+			ip := fmt.Sprintf("%s/%d", portInfo.podIP, ipPrefix)
+			podAnnotation := podAnnotation{
+				MAC:      portInfo.podMAC,
+				IP:       ip,
+				IPs:      []string{ip},
+				TunnelID: portInfo.tunnelID,
+			}
+			podAnnotations[nad] = podAnnotation
+		}
+	}
+
+	bytes, err := json.Marshal(podAnnotations)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	return string(bytes)
 }
 
 func setPodAnnotations(podObj *v1.Pod, testPod testPod) {
-	podAnnot := map[string]string{
-		util.OvnPodAnnotationName: testPod.getAnnotationsJson(),
+	if podObj.Annotations == nil {
+		podObj.Annotations = map[string]string{}
 	}
-	podObj.Annotations = podAnnot
-}
-
-func getLogicalSwitchUUID(client libovsdbclient.Client, name string) string {
-	ctext, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
-	defer cancel()
-	lsl := []nbdb.LogicalSwitch{}
-	err := client.WhereCache(
-		func(ls *nbdb.LogicalSwitch) bool {
-			return ls.Name == name
-		}).List(ctext, &lsl)
-
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gomega.Expect(len(lsl)).To(gomega.Equal(1))
-	return lsl[0].UUID
-
+	podObj.Annotations[util.OvnPodAnnotationName] = testPod.getAnnotationsJson()
 }
 
 func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbtest.TestData {

@@ -1091,6 +1091,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					}
 					pingSync.Wait()
 					tcpDumpSync.Wait()
+					checkAPBExternalRouteStatus(defaultPolicyName)
 				},
 				ginkgotable.Entry("ipv4", &addressesv4, "icmp"),
 				ginkgotable.Entry("ipv6", &addressesv6, "icmp6"))
@@ -1144,7 +1145,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					if !success {
 						framework.Failf("Failed to hit all the external gateways via for protocol %s, diff %s", protocol, cmp.Diff(expectedHostNames, returnedHostNames))
 					}
-
+					checkAPBExternalRouteStatus(defaultPolicyName)
 				},
 				ginkgotable.Entry("UDP ipv4", "udp", &addressesv4, externalUDPPort, srcUDPPort),
 				ginkgotable.Entry("TCP ipv4", "tcp", &addressesv4, externalTCPPort, srcHTTPPort),
@@ -1504,6 +1505,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					return n
 				}, 5).Should(gomega.Equal(podConnEntriesWithMACLabelsSet))
 				gomega.Expect(pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)).To(gomega.Equal(totalPodConnEntries))
+				checkAPBExternalRouteStatus(defaultPolicyName)
 			},
 				ginkgotable.Entry("IPV4 udp", &addressesv4, "udp"),
 				ginkgotable.Entry("IPV4 tcp", &addressesv4, "tcp"),
@@ -1646,6 +1648,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 							pingSync.Wait()
 							tcpDumpSync.Wait()
 						}
+						checkAPBExternalRouteStatus(defaultPolicyName)
 					},
 					ginkgotable.Entry("ipv4", &addressesv4, "icmp"),
 					ginkgotable.Entry("ipv6", &addressesv6, "icmp6"))
@@ -1706,6 +1709,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 								framework.ExpectEqual(expectedHostName, hostname, "Hostname returned by nc not as expected")
 							}
 						}
+						checkAPBExternalRouteStatus(defaultPolicyName)
 					},
 					ginkgotable.Entry("UDP ipv4", "udp", &addressesv4, externalUDPPort),
 					ginkgotable.Entry("TCP ipv4", "tcp", &addressesv4, externalTCPPort),
@@ -2015,10 +2019,12 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					}
 					pingSync.Wait()
 					tcpDumpSync.Wait()
+					checkAPBExternalRouteStatus(defaultPolicyName)
 				},
 				ginkgotable.Entry("ipv4", &addressesv4, "icmp"))
 
-			ginkgotable.DescribeTable("Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod when deleting the annotation and supported by a CR with the same gateway IPs",
+			ginkgotable.DescribeTable("Should validate TCP/UDP connectivity to an external gateway's loopback "+
+				"address via a pod when deleting the annotation and supported by a CR with the same gateway IPs",
 				func(protocol string, addresses *gatewayTestIPs, destPort, destPortOnPod int) {
 					if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 						skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
@@ -2070,7 +2076,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					if !success {
 						framework.Failf("Failed to hit all the external gateways via for protocol %s, diff %s", protocol, cmp.Diff(expectedHostNames, returnedHostNames))
 					}
-
+					checkAPBExternalRouteStatus(defaultPolicyName)
 				},
 				ginkgotable.Entry("UDP ipv4", "udp", &addressesv4, externalUDPPort, srcUDPPort),
 				ginkgotable.Entry("TCP ipv4", "tcp", &addressesv4, externalTCPPort, srcHTTPPort),
@@ -2231,6 +2237,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
 				totalPodConnEntries := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 				gomega.Expect(totalPodConnEntries).To(gomega.Equal(6)) // total conntrack entries for this pod/protocol
+				checkAPBExternalRouteStatus(defaultPolicyName)
 			},
 				ginkgotable.Entry("IPV4 udp", &addressesv4, "udp"),
 				ginkgotable.Entry("IPV4 tcp", &addressesv4, "tcp"),
@@ -2514,6 +2521,9 @@ func reachPodFromContainer(targetAddress, targetPort, targetPodName, srcContaine
 }
 
 func annotatePodForGateway(podName, podNS, namespace, networkIPs string, bfd bool) {
+	if !strings.HasPrefix(networkIPs, "\"") {
+		networkIPs = fmt.Sprintf("\"%s\"", networkIPs)
+	}
 	// add the annotations to the pod to enable the gateway forwarding.
 	// this fakes out the multus annotation so that the pod IP is
 	// actually an IP of an external container for testing purposes
@@ -2616,6 +2626,13 @@ spec:
 		return status
 	}, time.Minute, 1).Should(gomega.Equal("Success"))
 }
+
+func checkAPBExternalRouteStatus(policyName string) {
+	status, err := framework.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.status}")
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	gomega.Expect(status).To(gomega.Equal("Success"))
+}
+
 func createAPBExternalRouteCRWithStaticHop(policyName, namespaceName string, bfd bool, gateways ...string) {
 
 	data := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1

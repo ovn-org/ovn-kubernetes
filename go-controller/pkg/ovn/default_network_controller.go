@@ -120,6 +120,7 @@ type DefaultNetworkController struct {
 	nodeClusterRouterPortFailed sync.Map
 	hybridOverlayFailed         sync.Map
 	syncZoneICFailed            sync.Map
+	syncMigratablePodsFailed    sync.Map
 
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
@@ -129,10 +130,6 @@ type DefaultNetworkController struct {
 	// connecting to the join switch
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet
 
-	// zoneICHandler creates the interconnect resources for local nodes and remote nodes.
-	// Interconnect resources are Transit switch and logical ports connecting this transit switch
-	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
-	zoneICHandler *zoneic.ZoneInterconnectHandler
 	// zoneChassisHandler handles the local node and remote nodes in creating or updating the chassis entries in the OVN Southbound DB.
 	// Please see zone_interconnect/chassis_handler.go for more details.
 	zoneChassisHandler *zoneic.ZoneChassisHandler
@@ -168,7 +165,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	var zoneICHandler *zoneic.ZoneInterconnectHandler
 	var zoneChassisHandler *zoneic.ZoneChassisHandler
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		zoneICHandler = zoneic.NewZoneInterconnectHandler(&util.DefaultNetInfo{}, cnci.nbClient, cnci.sbClient)
+		zoneICHandler = zoneic.NewZoneInterconnectHandler(&util.DefaultNetInfo{}, cnci.nbClient, cnci.sbClient, cnci.watchFactory)
 		zoneChassisHandler = zoneic.NewZoneChassisHandler(cnci.sbClient)
 	}
 	apbExternalRouteController, err := apbroutecontroller.NewExternalMasterController(
@@ -201,6 +198,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			stopChan:                    defaultStopChan,
 			wg:                          defaultWg,
 			localZoneNodes:              &sync.Map{},
+			zoneICHandler:               zoneICHandler,
+			cancelableCtx:               util.NewCancelableContext(),
 		},
 		externalGWCache: apbExternalRouteController.ExternalGWCache,
 		exGWCacheMutex:  apbExternalRouteController.ExGWCacheMutex,
@@ -217,7 +216,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		switchLoadBalancerGroupUUID:  "",
 		routerLoadBalancerGroupUUID:  "",
 		svcController:                svcController,
-		zoneICHandler:                zoneICHandler,
 		zoneChassisHandler:           zoneChassisHandler,
 		apbExternalRouteController:   apbExternalRouteController,
 	}
@@ -325,6 +323,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
 	close(oc.stopChan)
+	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 }
 
@@ -403,21 +402,8 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	// Sync external gateway routes. External gateway are set via Admin Policy Based External Route CRs.
 	// So execute an individual sync method at startup to cleanup any difference
 	klog.V(4).Info("Cleaning External Gateway ECMP routes")
-	WithSyncDurationMetricNoError("external gateway routes", oc.apbExternalRouteController.Repair)
-
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		// if networkID is invalid, then we didn't find it on the initial node list.
-		// cluster-manager could still be starting and assigning, so execute full Init to search
-		if networkID == util.InvalidNetworkID {
-			if err := oc.zoneICHandler.Init(oc.kube, ctx); err != nil {
-				return err
-			}
-		} else {
-			// we already found the networkID, no need to search
-			if err := oc.zoneICHandler.EnsureTransitSwitch(networkID); err != nil {
-				return err
-			}
-		}
+	if err := WithSyncDurationMetric("external gateway routes", oc.apbExternalRouteController.Repair); err != nil {
+		return err
 	}
 
 	return nil
@@ -739,15 +725,19 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 				_, gwSync := h.oc.gatewaysFailed.Load(node.Name)
 				_, hoSync := h.oc.hybridOverlayFailed.Load(node.Name)
 				_, zoneICSync := h.oc.syncZoneICFailed.Load(node.Name)
+				_, syncMigratablePods := h.oc.syncMigratablePodsFailed.Load(node.Name)
 				nodeParams = &nodeSyncs{
 					nodeSync,
 					clusterRtrSync,
 					mgmtSync,
 					gwSync,
 					hoSync,
-					zoneICSync}
+					zoneICSync,
+					syncMigratablePods}
 			} else {
-				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect}
+				nodeHostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+				syncMigratablePods := nodeHostSubnets != nil
+				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect, syncMigratablePods}
 			}
 
 			if err = h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
@@ -887,18 +877,21 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 					nodeGatewayMTUSupportChanged(oldNode, newNode))
 				_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
+				_, failed = h.oc.syncMigratablePodsFailed.Load(newNode.Name)
+				syncMigratablePods := failed || nodeSubnetChanged(oldNode, newNode)
 				nodeSyncsParam = &nodeSyncs{
 					nodeSync,
 					clusterRtrSync,
 					mgmtSync,
 					gwSync,
 					hoSync,
-					syncZoneIC}
+					syncZoneIC,
+					syncMigratablePods}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node.  Trigger a full node sync.
-				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect}
+				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect, true}
 			}
 
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)

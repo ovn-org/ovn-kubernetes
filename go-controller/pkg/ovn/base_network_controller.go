@@ -11,15 +11,18 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -138,10 +141,20 @@ type BaseNetworkController struct {
 	// waitGroup per-Controller
 	wg *sync.WaitGroup
 
+	// some downstream components need to stop on their own or when the network
+	// controller is stopped
+	// use a chain of cancelable contexts for this
+	cancelableCtx util.CancelableContext
+
 	// List of nodes which belong to the local zone (stored as a sync map)
 	// If the map is nil, it means the controller is not tracking the node events
 	// and all the nodes are considered as local zone nodes.
 	localZoneNodes *sync.Map
+
+	// zoneICHandler creates the interconnect resources for local nodes and remote nodes.
+	// Interconnect resources are Transit switch and logical ports connecting this transit switch
+	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
+	zoneICHandler *zoneic.ZoneInterconnectHandler
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -373,7 +386,10 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		Name:      types.SwitchToRouterPrefix + switchName,
 		Type:      "router",
 		Addresses: []string{"router"},
-		Options:   map[string]string{"router-port": types.RouterToSwitchPrefix + switchName},
+		Options: map[string]string{
+			"router-port": types.RouterToSwitchPrefix + switchName,
+			"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
+		},
 	}
 	sw := nbdb.LogicalSwitch{Name: switchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
@@ -763,4 +779,8 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 	}
 	/** HACK END **/
 	return util.GetNodeZone(node) == bnc.zone
+}
+
+func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
+	return config.OVNKubernetesFeature.EnableInterconnect && bnc.NetInfo.TopologyType() == types.Layer2Topology
 }

@@ -283,7 +283,7 @@ func (a api) Create(models ...model.Model) ([]ovsdb.Operation, error) {
 	var operations []ovsdb.Operation
 
 	for _, model := range models {
-		var namedUUID string
+		var realUUID, namedUUID string
 		var err error
 
 		tableName, err := a.getTableFromModel(model)
@@ -297,7 +297,12 @@ func (a api) Create(models ...model.Model) ([]ovsdb.Operation, error) {
 			return nil, err
 		}
 		if uuid, err := info.FieldByColumn("_uuid"); err == nil {
-			namedUUID = uuid.(string)
+			tmpUUID := uuid.(string)
+			if ovsdb.IsNamedUUID(tmpUUID) {
+				namedUUID = tmpUUID
+			} else if ovsdb.IsValidUUID(tmpUUID) {
+				realUUID = tmpUUID
+			}
 		} else {
 			return nil, err
 		}
@@ -306,11 +311,14 @@ func (a api) Create(models ...model.Model) ([]ovsdb.Operation, error) {
 		if err != nil {
 			return nil, err
 		}
+		// UUID is given in the operation, not the object
+		delete(row, "_uuid")
 
 		operations = append(operations, ovsdb.Operation{
 			Op:       ovsdb.OperationInsert,
 			Table:    tableName,
 			Row:      row,
+			UUID:     realUUID,
 			UUIDName: namedUUID,
 		})
 	}

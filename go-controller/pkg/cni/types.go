@@ -47,6 +47,7 @@ type PodInterfaceInfo struct {
 	Ingress              int64  `json:"ingress"`
 	Egress               int64  `json:"egress"`
 	IsDPUHostMode        bool   `json:"is-dpu-host-mode"`
+	SkipIPConfig         bool   `json:"skip-ip-config"`
 	PodUID               string `json:"pod-uid"`
 	NetdevName           string `json:"vf-netdev-name"`
 	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`

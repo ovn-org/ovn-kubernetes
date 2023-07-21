@@ -14,7 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
-	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	mnpclient "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1"
@@ -60,13 +59,6 @@ var _ = Describe("Multi Homing", func() {
 		table.DescribeTable("is able to get to the Running phase", func(netConfigParams networkAttachmentConfigParams, podConfig podConfiguration) {
 			netConfig := newNetworkAttachmentConfig(netConfigParams)
 
-			if netConfig.topology == "layer2" {
-				if isInterconnectEnabled() {
-					e2eskipper.Skipf(
-						"Secondary network with topology %s is not yet supported with multiple zones interconnect deployment", netConfig.topology,
-					)
-				}
-			}
 			netConfig.namespace = f.Namespace.Name
 			podConfig.namespace = f.Namespace.Name
 
@@ -274,15 +266,6 @@ var _ = Describe("Multi Homing", func() {
 			"can communicate over the secondary network",
 			func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration, serverPodConfig podConfiguration) {
 				netConfig := newNetworkAttachmentConfig(netConfigParams)
-
-				// Skip the test if the netConfig topology is layer2 and the deployment is multi zone
-				if netConfig.topology == "layer2" {
-					if isInterconnectEnabled() {
-						e2eskipper.Skipf(
-							"Secondary network with topology %s is not yet supported with multiple zones interconnect deployment", netConfig.topology,
-						)
-					}
-				}
 
 				netConfig.namespace = f.Namespace.Name
 				clientPodConfig.namespace = f.Namespace.Name
@@ -694,14 +677,6 @@ var _ = Describe("Multi Homing", func() {
 				func(netConfigParams networkAttachmentConfigParams, allowedClientPodConfig podConfiguration, blockedClientPodConfig podConfiguration, serverPodConfig podConfiguration, policy *mnpapi.MultiNetworkPolicy) {
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
 
-					// Skip the test if the netConfig topology is layer2 and the deployment is multi zone
-					if netConfig.topology == "layer2" {
-						if isInterconnectEnabled() {
-							e2eskipper.Skipf(
-								"Secondary network with topology %s is not yet supported with multiple zones interconnect deployment", netConfig.topology,
-							)
-						}
-					}
 					blockedClientPodNamespace := f.Namespace.Name
 					if blockedClientPodConfig.requiresExtraNamespace {
 						blockedClientPodNamespace = extraNamespace.Name
@@ -781,7 +756,7 @@ var _ = Describe("Multi Homing", func() {
 					By("asserting the *blocked-client* pod **cannot** contact the server pod exposed endpoint")
 					Expect(connectToServer(blockedClientPodConfig, serverIP, port)).To(
 						MatchError(
-							MatchRegexp("Connection timeout after 200[0-1] ms")))
+							MatchRegexp("Connection timeout after 200[0-9] ms")))
 				},
 				table.Entry(
 					"for a pure L2 overlay when the multi-net policy describes the allow-list using pod selectors",
@@ -1133,13 +1108,6 @@ var _ = Describe("Multi Homing", func() {
 		var pod *v1.Pod
 
 		BeforeEach(func() {
-			// Skip the test if the netConfig topology is not layer3 and the deployment is multi zone
-			var err error
-			if isInterconnectEnabled() {
-				e2eskipper.Skipf(
-					"Secondary network with layer2 topology is not yet supported with multiple zones interconnect deployment",
-				)
-			}
 			netAttachDefs := []networkAttachmentConfig{
 				newAttachmentConfigWithOverriddenName(secondaryNetworkName, f.Namespace.Name, secondaryNetworkName, "layer2", secondaryFlatL2NetworkCIDR),
 				newAttachmentConfigWithOverriddenName(secondaryNetworkName+"-alias", f.Namespace.Name, secondaryNetworkName, "layer2", secondaryFlatL2NetworkCIDR),
@@ -1169,6 +1137,7 @@ var _ = Describe("Multi Homing", func() {
 				namespace: f.Namespace.Name,
 			}
 			By("creating the pod using a secondary network")
+			var err error
 			pod, err = cs.CoreV1().Pods(podConfig.namespace).Create(
 				context.Background(),
 				generatePodSpec(podConfig),

@@ -190,6 +190,8 @@ parse_args() {
                                                 ;;
             -pl | --install-cni-plugins )       KIND_INSTALL_PLUGINS=true
                                                 ;;
+            -ikv | --install-kubevirt)          KIND_INSTALL_KUBEVIRT=true
+                                                ;;
             -ha | --ha-enabled )                OVN_HA=true
                                                 ;;
             -me | --multicast-enabled)          OVN_MULTICAST_ENABLE=true
@@ -358,6 +360,7 @@ print_params() {
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
      echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
      echo "KIND_INSTALL_PLUGINS = $KIND_INSTALL_PLUGINS"
+     echo "KIND_INSTALL_KUBEVIRT = $KIND_INSTALL_KUBEVIRT"
      echo "OVN_HA = $OVN_HA"
      echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
@@ -499,11 +502,12 @@ set_default_params() {
   fi
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
-  K8S_VERSION=${K8S_VERSION:-v1.26.0}
+  K8S_VERSION=${K8S_VERSION:-v1.26.3}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
   KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
+  KIND_INSTALL_KUBEVIRT=${KIND_INSTALL_KUBEVIRT:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
   KIND_LOCAL_REGISTRY_NAME=${KIND_LOCAL_REGISTRY_NAME:-kind-registry}
@@ -580,7 +584,7 @@ set_default_params() {
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
-  OVN_DEPLOY_PODS=${OVN_DEPLOY_PODS:-"ovnkube-master ovnkube-node"}
+  OVN_DEPLOY_PODS=${OVN_DEPLOY_PODS:-"ovnkube-zone-controller ovnkube-control-plane ovnkube-master ovnkube-node"}
   OVN_METRICS_SCALE_ENABLE=${OVN_METRICS_SCALE_ENABLE:-false}
   OVN_ISOLATED=${OVN_ISOLATED:-false}
   OVN_GATEWAY_OPTS=${OVN_GATEWAY_OPTS:-""}
@@ -749,7 +753,9 @@ docker_disable_ipv6() {
 
 coredns_patch() {
   dns_server="8.8.8.8"
-  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+  # No need for ipv6 nameserver for dual stack, it will ask for 
+  # A and AAAA records
+  if [ "$IP_FAMILY" == "ipv6" ]; then
     dns_server="2001:4860:4860::8888"
   fi
 
@@ -806,6 +812,12 @@ build_ovn_image() {
       $OCI_BIN push "${OVN_IMAGE}"
     fi
     popd
+  # We should push to local registry if image is not remote
+  elif [ "${OVN_IMAGE}" != "" -a "${KIND_LOCAL_REGISTRY}" == true ] && (echo "$OVN_IMAGE" | grep / -vq); then 
+    local local_registry_ovn_image="localhost:5000/${OVN_IMAGE}"
+    $OCI_BIN tag "$OVN_IMAGE" $local_registry_ovn_image
+    OVN_IMAGE=$local_registry_ovn_image
+    $OCI_BIN push $OVN_IMAGE
   fi
 }
 
@@ -1239,6 +1251,46 @@ add_dns_hostnames() {
   done
 }
 
+function is_nested_virt_enabled() {
+    local kvm_nested="unknown"
+    if [ -f "/sys/module/kvm_intel/parameters/nested" ]; then
+        kvm_nested=$( cat /sys/module/kvm_intel/parameters/nested )
+    elif [ -f "/sys/module/kvm_amd/parameters/nested" ]; then
+        kvm_nested=$( cat /sys/module/kvm_amd/parameters/nested )
+    fi
+    [ "$kvm_nested" == "1" ] || [ "$kvm_nested" == "Y" ] || [ "$kvm_nested" == "y" ]
+}
+
+function install_kubevirt() {
+    for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
+        $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
+        $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_instances=512' >> /etc/sysctl.conf"
+        $OCI_BIN exec -i $node bash -c "sysctl -p /etc/sysctl.conf"
+        if [[ "${node}" =~ worker ]]; then
+            kubectl label nodes $node node-role.kubernetes.io/worker="" --overwrite=true
+        fi
+    done
+    local nightly_build_base_url="https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt"
+    local latest=$(curl -sL "${nightly_build_base_url}/latest")
+
+    echo "Deploy latest nighly build Kubevirt"
+    if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
+      kubectl apply -f "${nightly_build_base_url}/${latest}/kubevirt-operator.yaml"
+      kubectl apply -f "${nightly_build_base_url}/${latest}/kubevirt-cr.yaml"
+      if ! is_nested_virt_enabled; then
+        kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
+      fi
+    fi
+    if ! kubectl wait -n kubevirt kv kubevirt --for condition=Available --timeout 15m; then
+        kubectl get pod -n kubevirt -l || true
+        kubectl describe pod -n kubevirt -l || true
+        for p in $(kubectl get pod -n kubevirt -l -o name |sed "s#pod/##"); do
+            kubectl logs -p --all-containers=true -n kubevirt $p || true
+            kubectl logs --all-containers=true -n kubevirt $p || true
+        done
+    fi
+}
+
 check_dependencies
 # In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info"
 # the original command <parse_args $*> was replaced by <parse_args "$@">
@@ -1300,4 +1352,7 @@ if [ "$KIND_INSTALL_METALLB" == true ]; then
 fi
 if [ "$KIND_INSTALL_PLUGINS" == true ]; then
   install_plugins
+fi
+if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
+  install_kubevirt
 fi

@@ -5,11 +5,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"os"
 	"reflect"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/ovn-org/libovsdb/client"
@@ -29,12 +30,14 @@ import (
 // update is not leaked
 func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}, opts ...client.Option) (client.Client, error) {
 	const connectTimeout time.Duration = types.OVSDBTimeout * 2
+	const inactivityTimeout time.Duration = types.OVSDBTimeout * 18
 	logger := klogr.New()
 	options := []client.Option{
 		// Reading and parsing the DB after reconnect at scale can (unsurprisingly)
 		// take longer than a normal ovsdb operation. Give it a bit more time so
-		// we don't time out and enter a reconnect loop.
-		client.WithReconnect(connectTimeout, &backoff.ZeroBackOff{}),
+		// we don't time out and enter a reconnect loop. In addition it also enables
+		// inactivity check on the ovsdb connection.
+		client.WithInactivityCheck(inactivityTimeout, connectTimeout, &backoff.ZeroBackOff{}),
 		client.WithLeaderOnly(true),
 		client.WithLogger(&logger),
 	}
@@ -152,6 +155,7 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 	// define client indexes for objects that are using dbIDs
 	dbModel.SetIndexes(map[string][]model.ClientIndex{
 		nbdb.ACLTable:           {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
+		nbdb.DHCPOptionsTable:   {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
 		nbdb.LoadBalancerTable:  {{Columns: []model.ColumnKey{{Column: "name"}}}},
 		nbdb.LogicalSwitchTable: {{Columns: []model.ColumnKey{{Column: "name"}}}},
 		nbdb.LogicalRouterTable: {{Columns: []model.ColumnKey{{Column: "name"}}}},

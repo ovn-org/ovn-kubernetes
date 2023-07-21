@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -46,12 +47,13 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 					podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
 					stopChan:                    stopChan,
 					wg:                          &sync.WaitGroup{},
+					cancelableCtx:               util.NewCancelableContext(),
 				},
 			},
 		},
 	}
 
-	if oc.handlesPodIPAllocation() {
+	if oc.allocatesPodAnnotation() {
 		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
@@ -63,30 +65,41 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 	// TBD: changes needs to be made to support multicast in secondary networks
 	oc.multicastSupport = false
 
-	oc.initRetryFramework()
+	oc.BaseSecondaryLayer2NetworkController.initRetryFramework()
 	return oc
 }
 
 // Start starts the secondary localnet controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLocalnetNetworkController) Start(ctx context.Context) error {
-	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	klog.Infof("Starting controller for secondary network network %s", oc.GetNetworkName())
+
+	start := time.Now()
+	defer func() {
+		klog.Infof("Starting controller for secondary network network %s took %v", oc.GetNetworkName(), time.Since(start))
+	}()
+
 	if err := oc.Init(); err != nil {
 		return err
 	}
 
-	return oc.Run()
+	return oc.run(ctx)
+}
+
+func (oc *SecondaryLocalnetNetworkController) run(ctx context.Context) error {
+	return oc.BaseSecondaryLayer2NetworkController.run()
 }
 
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
 func (oc *SecondaryLocalnetNetworkController) Cleanup(netName string) error {
-	return oc.cleanup(types.LocalnetTopology, netName)
+	klog.Infof("Delete OVN logical entities for network %s", netName)
+	return oc.BaseSecondaryLayer2NetworkController.cleanup(types.LocalnetTopology, netName)
 }
 
 func (oc *SecondaryLocalnetNetworkController) Init() error {
 	switchName := oc.GetNetworkScopedName(types.OVNLocalnetSwitch)
 
-	logicalSwitch, err := oc.InitializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
+	logicalSwitch, err := oc.initializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
 	if err != nil {
 		return err
 	}
@@ -114,4 +127,9 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 	}
 
 	return nil
+}
+
+func (oc *SecondaryLocalnetNetworkController) Stop() {
+	klog.Infof("Stoping controller for secondary network %s", oc.GetNetworkName())
+	oc.BaseSecondaryLayer2NetworkController.stop()
 }
