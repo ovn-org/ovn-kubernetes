@@ -319,11 +319,11 @@ func (c *Controller) syncService(key string) error {
 	if err != nil {
 		return err
 	}
-	klog.Infof("Processing sync for service %s/%s", namespace, name)
+	klog.V(5).Infof("Processing sync for service %s/%s", namespace, name)
 	metrics.MetricSyncServiceCount.Inc()
 
 	defer func() {
-		klog.V(4).Infof("Finished syncing service %s on namespace %s : %v", name, namespace, time.Since(startTime))
+		klog.V(5).Infof("Finished syncing service %s on namespace %s : %v", name, namespace, time.Since(startTime))
 		metrics.MetricSyncServiceLatency.Observe(time.Since(startTime).Seconds())
 	}()
 
@@ -413,7 +413,7 @@ func (c *Controller) syncService(key string) error {
 	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
 	klog.V(5).Infof("Built service %s per-node LB %#v", key, perNodeLBs)
 	klog.V(5).Infof("Built service %s template LB %#v", key, templateLBs)
-	klog.V(3).Infof("Service %s has %d cluster-wide, %d per-node configs, %d template configs, making %d (cluster) %d (per node) and %d (template) load balancers",
+	klog.V(5).Infof("Service %s has %d cluster-wide, %d per-node configs, %d template configs, making %d (cluster) %d (per node) and %d (template) load balancers",
 		key, len(clusterConfigs), len(perNodeConfigs), len(templateConfigs),
 		len(clusterLBs), len(perNodeLBs), len(templateLBs))
 	lbs := append(clusterLBs, templateLBs...)
@@ -430,7 +430,7 @@ func (c *Controller) syncService(key string) error {
 	c.alreadyAppliedRWLock.RUnlock()
 
 	if alreadyAppliedKeyExists && LoadBalancersEqualNoUUID(existingLBs, lbs) {
-		klog.V(3).Infof("Skipping no-op change for service %s", key)
+		klog.V(5).Infof("Skipping no-op change for service %s", key)
 	} else {
 		klog.V(5).Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
 		// Actually apply load-balancers to OVN.
@@ -534,7 +534,7 @@ func (c *Controller) onServiceAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Adding service %s", key)
+	klog.V(5).Infof("Adding service %s", key)
 	service := obj.(*v1.Service)
 	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)
