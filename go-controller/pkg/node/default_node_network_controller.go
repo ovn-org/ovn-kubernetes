@@ -982,16 +982,29 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			}
 		}
 		klog.Infof("Upgrade hack: ovnkube-node %s finished setting DB Auth; took: %v", nc.name, time.Since(start))
-		// Resume ovn-controller
-		_, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "debug/resume")
+		// Enable logs in ovn-controller
+		/*
+			_, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "vlog/set", "dbg:main")
+			if err != nil {
+				klog.Exitf("Upgrade hack: Failed to set logs for ovn-controller %v %q", err, stderr)
+			}
+			// Resume ovn-controller
+
+			_, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "debug/resume")
+			if err != nil {
+				klog.Exitf("Upgrade hack: Failed to resume ovn-controller %v %q", err, stderr)
+			}
+			stdout, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "debug/status")
+			if err != nil && stdout != "running" {
+				klog.Exitf("Upgrade hack: Failed to resume ovn-controller %v %q %v", err, stderr, stdout)
+			}
+			klog.Infof("ovnkube-node %s resumed ovn-controller at %v", nc.name, time.Now())
+		*/
+		stdout, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "exit")
 		if err != nil {
-			klog.Exitf("Upgrade hack: Failed to resume ovn-controller %v %q", err, stderr)
+			klog.Exitf("Upgrade hack: Failed to exit ovn-controller %v %q %v", err, stderr, stdout)
 		}
-		stdout, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "debug/status")
-		if err != nil && stdout != "running" {
-			klog.Exitf("Upgrade hack: Failed to resume ovn-controller %v %q %v", err, stderr, stdout)
-		}
-		klog.Infof("ovnkube-node %s resumed ovn-controller at %v", nc.name, time.Now())
+		klog.Infof("ovnkube-node %s killed ovn-controller at %v", nc.name, time.Now())
 	}
 	/** HACK END **/
 
