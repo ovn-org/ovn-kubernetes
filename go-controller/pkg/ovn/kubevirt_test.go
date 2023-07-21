@@ -736,7 +736,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4},
 				dnsServiceIPs:       []string{dnsServiceIPv4},
 				testVirtLauncherPod: virtLauncher1(node1, vm1, "ipv4"),
-				replaceNode:         node1,
 				expectedDhcpv4: []testDHCPOptions{{
 					cidr:     nodeByName[node1].subnetIPv4,
 					dns:      dnsServiceIPv4,
@@ -748,7 +747,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4},
 				dnsServiceIPs:       []string{dnsServiceIPv4},
 				testVirtLauncherPod: virtLauncher1(node1, vm1, "ipv4"),
-				replaceNode:         node1,
 				expectedDhcpv4: []testDHCPOptions{{
 					cidr:     nodeByName[node1].subnetIPv4,
 					dns:      dnsServiceIPv4,
@@ -761,13 +759,11 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4},
 				dnsServiceIPs:       []string{dnsServiceIPv4},
 				testVirtLauncherPod: virtLauncher1(node1, vm1, "ipv4"),
-				replaceNode:         node1,
 			}),
 			Entry("for single stack ipv6 at global zone", testData{
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv6},
 				dnsServiceIPs:       []string{dnsServiceIPv6},
 				testVirtLauncherPod: virtLauncher1(node1, vm1, "ipv6"),
-				replaceNode:         node1,
 				expectedDhcpv6: []testDHCPOptions{{
 					cidr:     nodeByName[node1].subnetIPv6,
 					dns:      dnsServiceIPv6,
@@ -779,7 +775,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				dnsServiceIPs:       []string{dnsServiceIPv6},
 				interconnected:      true,
 				testVirtLauncherPod: virtLauncher1(node1, vm1, "ipv6"),
-				replaceNode:         node1,
 				expectedDhcpv6: []testDHCPOptions{{
 					cidr:     nodeByName[node1].subnetIPv6,
 					dns:      dnsServiceIPv6,
@@ -792,13 +787,11 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				interconnected:      true,
 				remoteNodes:         []string{node1},
 				testVirtLauncherPod: virtLauncher1(node1, vm1, "ipv6"),
-				replaceNode:         node1,
 			}),
 			Entry("for dual stack at global zone", testData{
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
 				dnsServiceIPs:       []string{dnsServiceIPv4, dnsServiceIPv6},
 				testVirtLauncherPod: virtLauncher1(node1, vm1, "dualstack"),
-				replaceNode:         node1,
 				expectedDhcpv4: []testDHCPOptions{{
 					cidr:     nodeByName[node1].subnetIPv4,
 					dns:      dnsServiceIPv4,
@@ -815,7 +808,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
 				dnsServiceIPs:       []string{dnsServiceIPv4, dnsServiceIPv6},
 				testVirtLauncherPod: virtLauncher1(node1, vm1, "dualstack"),
-				replaceNode:         node1,
 				expectedDhcpv4: []testDHCPOptions{{
 					cidr:     nodeByName[node1].subnetIPv4,
 					dns:      dnsServiceIPv4,
@@ -833,7 +825,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
 				dnsServiceIPs:       []string{dnsServiceIPv4, dnsServiceIPv6},
 				testVirtLauncherPod: virtLauncher1(node1, vm1, "dualstack"),
-				replaceNode:         node1,
 			}),
 
 			Entry("for pre-copy live migration at global zone", testData{
