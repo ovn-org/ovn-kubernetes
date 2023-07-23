@@ -13,10 +13,15 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchdb"
+
+	"github.com/ovn-org/libovsdb/client"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/plugins/pkg/ip"
@@ -234,6 +239,16 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		return nil, nil, err
 	}
 
+	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
+		l, err := netlink.LinkByName(hostIface.Name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to find host veth interface %s: %v", hostIface.Name, err)
+		}
+		if err := netlink.LinkSetTxQLen(l, 1000); err != nil {
+			return nil, nil, fmt.Errorf("failed to set host veth txqlen: %v", err)
+		}
+	}
+
 	// rename the host end of veth pair for the secondary network
 	if ifInfo.NetName != types.DefaultNetworkName {
 		hostIface.Name = containerID[:(15-len(ifnameSuffix))] + ifnameSuffix
@@ -253,7 +268,8 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 }
 
 // Setup sriov interface in the pod
-func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, deviceID string) (*current.Interface, *current.Interface, error) {
+func setupSriovInterface(vsClient client.Client, netns ns.NetNS, containerID,
+	ifName string, ifInfo *PodInterfaceInfo, deviceID string) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
@@ -316,8 +332,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		}
 
 		// 3. make sure it's not a port managed by OVS to avoid conflicts when renaming the representor
-		_, err = ovsExec("--if-exists", "del-port", oldHostRepName)
-		if err != nil {
+		if err := libovsdbops.DeletePort(vsClient, "br-int", oldHostRepName); err != nil {
 			return nil, nil, err
 		}
 
@@ -343,7 +358,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 }
 
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
-func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
+func ConfigureOVS(vsClient client.Client, ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, getter PodInfoGetter) error {
 
 	ifaceID := util.GetIfaceId(namespace, podName)
@@ -362,92 +377,115 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
 	// but only the latest one should have the iface-id set.
-	names, _ := ovsFind("Interface", "name", "external-ids:iface-id="+ifaceID)
-	for _, name := range names {
-		if name == hostIfaceName {
+	p := func(iface *vswitchdb.Interface) bool {
+		if iface.Name == hostIfaceName {
 			// this may be result of restarting ovnkube-node, and it is trying to add the same VF representor to
 			// br-int for the same pod; do not delete port in this case.
-			continue
+			return false
 		}
-		if out, err := ovsExec("--with-iface", "del-port", "br-int", name); err != nil {
-			klog.Warningf("Failed to delete stale OVS port %q with iface-id %q from br-int: %v\n %q",
-				name, ifaceID, err, out)
+		foundID, ok := iface.ExternalIDs["iface-id"]
+		return ok && foundID == ifaceID
+	}
+	if err := wait.PollUntilContextCancel(ctx, 3*time.Second, true, func(context.Context) (done bool, err error) {
+		if err := libovsdbops.DeleteInterfacesWithPredicate(vsClient, p); err != nil {
+			klog.Warningf("Failed to delete stale OVS ports with iface-id %q from br-int: %v", ifaceID, err)
+			return false, nil
 		}
+		// success
+		return true, nil
+	}); err != nil {
+		return err
 	}
 
-	// if the specified port was created for other Pod/NAD, return error
-	extIds, err := ovsFind("Interface", "external_ids", "name="+hostIfaceName)
-	if err == nil && len(extIds) == 1 {
-		extId := extIds[0]
-		ifaceIDStr := util.GetExternalIDValByKey(extId, "iface-id")
-		nadNameString := util.GetExternalIDValByKey(extId, types.NADExternalID)
-		// if NADExternalID does not exists, it is default network
-		if nadNameString == "" {
-			nadNameString = types.DefaultNetworkName
+	// if the specified interface was created for other Pod/NAD, return error
+	found, _ := libovsdbops.FindInterfacesWithPredicate(vsClient, func(iface *vswitchdb.Interface) bool {
+		name, ok := iface.ExternalIDs["name"]
+		return ok && name == hostIfaceName
+	})
+	for _, f := range found {
+		if f.ExternalIDs["iface-id"] != ifaceID {
+			return fmt.Errorf("OVS port %s was added for iface-id (%s), now readding it for (%s)", hostIfaceName, f.ExternalIDs["iface-id"], ifaceID)
 		}
-		if ifaceIDStr != ifaceID {
-			return fmt.Errorf("OVS port %s was added for iface-id (%s), now readding it for (%s)", hostIfaceName, ifaceIDStr, ifaceID)
+		// if NADExternalID does not exists, it is default network
+		nadNameString, ok := f.ExternalIDs[types.NADExternalID]
+		if !ok {
+			nadNameString = types.DefaultNetworkName
 		}
 		if nadNameString != ifInfo.NADName {
 			return fmt.Errorf("OVS port %s was added for NAD (%s), expect (%s)", hostIfaceName, nadNameString, ifInfo.NADName)
 		}
 	}
 
-	// Add the new sandbox's OVS port, tag the port as transient so stale
-	// pod ports are scrubbed on hard reboot
-	ovsArgs := []string{
-		"--may-exist", "add-port", "br-int", hostIfaceName, "other_config:transient=true", "--", "set",
-		"interface", hostIfaceName,
-		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
-		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
-		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
+	if err := libovsdbops.ClearPortQoSBySandboxID(vsClient, sandboxID); err != nil {
+		return err
 	}
 
+	// Add the new sandbox's OVS port, tag the port as transient so stale
+	// pod ports are scrubbed on hard reboot
+	iface := &vswitchdb.Interface{
+		ExternalIDs: map[string]string{
+			"attached_mac": ifInfo.MAC.String(),
+			"iface-id":     ifaceID,
+			"iface-id-ver": initialPodUID,
+			"sandbox":      sandboxID,
+		},
+	}
 	// IPAM is optional for secondary flatL2 networks; thus, the ifaces may not
 	// have IP addresses.
 	if len(ifInfo.IPs) > 0 {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")))
+		iface.ExternalIDs["ip_addresses"] = strings.Join(ipStrs, ",")
 	}
 
 	if len(ifInfo.NetdevName) != 0 {
 		// NOTE: For SF representor same external_id is used due to https://github.com/ovn-org/ovn-kubernetes/pull/3054
 		// Review this line when upgrade mechanism will be implemented
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:vf-netdev-name=%s", ifInfo.NetdevName))
+		iface.ExternalIDs["vf-netdev-name"] = ifInfo.NetdevName
 	}
 
 	if ifInfo.NetName != types.DefaultNetworkName {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:%s=%s", types.NetworkExternalID, ifInfo.NetName))
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:%s=%s", types.NADExternalID, ifInfo.NADName))
-	} else {
-		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", types.NetworkExternalID}...)
-		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", types.NADExternalID}...)
+		iface.ExternalIDs[types.NetworkExternalID] = ifInfo.NetName
+		iface.ExternalIDs[types.NADExternalID] = ifInfo.NADName
 	}
 
-	if out, err := ovsExec(ovsArgs...); err != nil {
-		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
+	if ifInfo.Egress > 0 {
+		// Note: bandwidth is configured from the OVS perspective, so
+		// pod Egress == OVS ingress
+
+		// ingress_policing_rate is in Kbps
+		egressKBPS := int(ifInfo.Egress / 1000)
+		iface.IngressPolicingRate = egressKBPS
+		// Set the ingress_policing_burst too per recommendation in ovsdb schema, i.e
+		// 10% of the rate
+		iface.IngressPolicingBurst = egressKBPS / 10
 	}
 
-	if err := clearPodBandwidth(sandboxID); err != nil {
-		return err
+	port := &vswitchdb.Port{
+		Name: hostIfaceName,
+		OtherConfig: map[string]string{
+			"transient": "true",
+		},
 	}
 
-	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
-		l, err := netlink.LinkByName(hostIfaceName)
+	if ifInfo.Ingress > 0 {
+		// Note: bandwidth is configured from the OVS perspective, so
+		// pod Ingress == OVS egress
+		qos, err := libovsdbops.CreateQoS(vsClient, sandboxID, ifInfo.Ingress)
 		if err != nil {
-			return fmt.Errorf("failed to find host veth interface %s: %v", hostIfaceName, err)
+			return fmt.Errorf("failed to create QoS: %v", err)
 		}
-		err = netlink.LinkSetTxQLen(l, 1000)
-		if err != nil {
-			return fmt.Errorf("failed to set host veth txqlen: %v", err)
-		}
-
-		if err := setPodBandwidth(sandboxID, hostIfaceName, ifInfo.Ingress, ifInfo.Egress); err != nil {
-			return err
-		}
+		qosUUID := qos.UUID
+		port.QOS = &qosUUID
 	}
 
-	if err := waitForPodInterface(ctx, ifInfo, hostIfaceName, ifaceID, getter,
+	bridge, err := libovsdbops.FindBridgeByName(vsClient, "br-int")
+	if err != nil {
+		return fmt.Errorf("failed to find bridge br-int: %v", err)
+	}
+	if err := libovsdbops.CreateOrUpdatePortAndAddToBridge(vsClient, bridge.UUID, port, iface); err != nil {
+		return fmt.Errorf("failed to create interface and port and add to bridge: %v", err)
+	}
+
+	if err := waitForPodInterface(vsClient, ctx, ifInfo, hostIfaceName, ifaceID, getter,
 		namespace, podName, initialPodUID); err != nil {
 		// Ensure the error shows up in node logs, rather than just
 		// being reported back to the runtime.
@@ -470,7 +508,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	klog.V(5).Infof("CNI Conf %v", pr.CNIConf)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
-		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
+		hostIface, contIface, err = setupSriovInterface(pr.vsClient, netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
 	} else {
 		if ifInfo.IsDPUHostMode {
 			return nil, fmt.Errorf("unexpected configuration, pod request on dpu host. " +
@@ -484,9 +522,9 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	}
 
 	if !ifInfo.IsDPUHostMode {
-		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID, getter)
+		err = ConfigureOVS(pr.vsClient, pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID, getter)
 		if err != nil {
-			pr.deletePorts(hostIface.Name, pr.PodNamespace, pr.PodName)
+			pr.deletePorts(pr.vsClient, hostIface.Name, pr.PodNamespace, pr.PodName)
 			return nil, err
 		}
 	}
@@ -603,9 +641,9 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 
 	// host side deletion of OVS port and kernel interface
 	ifName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
-	pr.deletePorts(ifName, pr.PodNamespace, pr.PodName)
+	pr.deletePorts(pr.vsClient, ifName, pr.PodNamespace, pr.PodName)
 
-	if err := clearPodBandwidth(pr.SandboxID); err != nil {
+	if err := libovsdbops.ClearPortQoSBySandboxID(pr.vsClient, pr.SandboxID); err != nil {
 		klog.Warningf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
 	}
 	pr.deletePodConntrack()
@@ -639,17 +677,16 @@ func (pr *PodRequest) deletePodConntrack() {
 	}
 }
 
-func (pr *PodRequest) deletePorts(ifaceName, podNamespace, podName string) {
+func (pr *PodRequest) deletePorts(vsClient client.Client, ifaceName, podNamespace, podName string) {
 	podDesc := fmt.Sprintf("%s/%s", podNamespace, podName)
 
-	out, err := ovsExec("del-port", "br-int", ifaceName)
-	if err != nil && !strings.Contains(err.Error(), "no port named") {
+	if err := libovsdbops.DeletePort(vsClient, "br-int", ifaceName); err != nil {
 		// DEL should be idempotent; don't return an error just log it
-		klog.Warningf("Failed to delete pod %q OVS port %s: %v\n  %q", podDesc, ifaceName, err, string(out))
+		klog.Warningf("Failed to delete pod %q OVS port %s: %v", podDesc, ifaceName, err)
 	}
 	// skip deleting representor ports
 	if pr.CNIConf.DeviceID == "" {
-		if err = util.LinkDelete(ifaceName); err != nil {
+		if err := util.LinkDelete(ifaceName); err != nil {
 			klog.Warningf("Failed to delete pod %q interface %s: %v", podDesc, ifaceName, err)
 		}
 	}

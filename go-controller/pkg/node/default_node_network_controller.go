@@ -28,6 +28,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
@@ -39,6 +40,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
+
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 )
 
 type CommonNodeNetworkControllerInfo struct {
@@ -63,6 +66,9 @@ type BaseNodeNetworkController struct {
 	// given NAD. DPU mode only
 	// Note that we assume that Pod's Network Attachment Selection Annotation will not change over time.
 	podNADToDPUCDMap sync.Map
+
+	// Local vswitchdb client for DPU mode
+	vsClient libovsdbclient.Client
 
 	// stopChan and WaitGroup per controller
 	stopChan chan struct{}
@@ -734,6 +740,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			}
 		}
 
+		nc.vsClient, err = libovsdb.NewVSwitchClient(nc.stopChan)
+		if err != nil {
+			return fmt.Errorf("failed to create vswitchd database client: %w", err)
+		}
+
 		err = setupOVNNode(node)
 		if err != nil {
 			return err
@@ -764,7 +775,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.vsClient)
 		if err != nil {
 			return err
 		}

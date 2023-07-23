@@ -2,6 +2,8 @@ package node
 
 import (
 	"fmt"
+	"sync"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -13,13 +15,16 @@ import (
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	factorymocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchdb"
 
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -91,6 +96,7 @@ var _ = Describe("Node DPU tests", func() {
 	var podLister v1mocks.PodLister
 	var podNamespaceLister v1mocks.PodNamespaceLister
 	var clientset *cni.ClientSet
+	var testdbCtx *libovsdbtest.Context
 
 	origSriovnetOps := util.GetSriovnetOps()
 	origNetlinkOps := util.GetNetLinkOps()
@@ -111,7 +117,10 @@ var _ = Describe("Node DPU tests", func() {
 		apbExternalRouteClient := adminpolicybasedrouteclient.NewSimpleClientset()
 		factoryMock = factorymocks.NodeWatchFactory{}
 		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeMock, apbExternalRouteClient, &factoryMock, nil, "")
-		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil)
+
+		dnnc = newDefaultNodeNetworkController(cnnci, make(chan struct{}), &sync.WaitGroup{})
+		dnnc.vsClient, testdbCtx, err = libovsdbtest.NewVSTestHarness(libovsdbtest.TestSetup{}, nil)
+		Expect(err).NotTo(HaveOccurred())
 
 		podInformer = coreinformermocks.PodInformer{}
 		podNamespaceLister = v1mocks.PodNamespaceLister{}
@@ -127,6 +136,9 @@ var _ = Describe("Node DPU tests", func() {
 	})
 
 	AfterEach(func() {
+		dnnc.Stop()
+		testdbCtx.Cleanup()
+
 		// Restore mocks so it does not affect other tests in the suite
 		util.SetSriovnetOpsInst(origSriovnetOps)
 		util.SetNetLinkOpMockInst(origNetlinkOps)
@@ -180,146 +192,126 @@ var _ = Describe("Node DPU tests", func() {
 
 		It("Fails if configure OVS fails", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
-			// set ovs CMD output
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSFindCmd("30", "Interface", "name",
-					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
-			})
-			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
-				Err: fmt.Errorf("failed to run ovs command"),
-			})
-			// Mock netlink/ovs calls for cleanup
-			checkOVSPortPodInfo(execMock, vfRep, false, "15", "", "")
+
+			// Don't pre-seed the vswitch DB with br-int to ensure ConfigureOVS fails
 
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 			// call addRepPort()
 			err := dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to run ovs command"))
+			Expect(err.Error()).To(ContainSubstring("failed to find bridge br-int: object not found"))
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+
+			// No changes should have been made to the vswitch
+			matcher := libovsdbtest.HaveData([]libovsdbtest.TestData{})
+			ok, err := matcher.Match(dnnc.vsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ok).To(BeTrue())
 		})
 
 		It("Fails if configure OVS fails but OVS interface is added", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
-			// set ovs CMD output
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSFindCmd("30", "Interface", "name",
-					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
-			})
-			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
-				Err: fmt.Errorf("failed to run ovs command"),
-			})
-			checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
+
 			// Mock netlink/ovs calls for cleanup
 			netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSDelPortCmd(vfRep),
-			})
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
-			// call addRepPort()
-			err := dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
+			dbSetup := []libovsdbtest.TestData{
+				&vswitchdb.Bridge{
+					UUID: "bridge-uuid",
+					Name: "br-int",
+				},
+			}
+			err := testdbCtx.VSServer.CreateTestData(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
+
+			// call addRepPort(); since there's no ovs-vswitchd to
+			// assign the Interface an ofport, the call will fail
+			err = dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to run ovs command"))
-			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+			Expect(err.Error()).To(ContainSubstring(fmt.Sprintf("ovs interface \"%s\" ofport not set", vfRep)))
+
+			// Ensure ovsdb contents are as expected; everything should
+			// have been cleaned up
+			Eventually(dnnc.vsClient).Should(libovsdbtest.HaveData(dbSetup))
 		})
 
 		Context("After successfully calling ConfigureOVS", func() {
+			ofport := 1
+			var bridge *vswitchdb.Bridge
 			BeforeEach(func() {
 				sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
-				// set ovs CMD output so cni.ConfigureOVS passes without error
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genOVSFindCmd("30", "Interface", "name",
-						"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
-				})
-				checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
-				})
-				// clearPodBandwidth
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genOVSFindCmd("30", "interface", "name",
-						"external-ids:sandbox=a8d09931"),
-				})
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genOVSFindCmd("30", "qos", "_uuid",
-						"external-ids:sandbox=a8d09931"),
-				})
-				// getIfaceOFPort
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genOVSGetCmd("Interface", "pf0vf9", "ofport", ""),
-					Output: "1",
-				})
 				// waitForPodFlows
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genOVSGetCmd("Interface", "pf0vf9", "external-ids", "iface-id"),
-					Output: genIfaceID(pod.Namespace, pod.Name),
-				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    genOfctlDumpFlowsCmd("table=9,dl_src="),
 					Output: "non-empty-output",
 				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genOfctlDumpFlowsCmd("table=0,in_port=1"),
+					Cmd:    genOfctlDumpFlowsCmd(fmt.Sprintf("table=0,in_port=%d", ofport)),
 					Output: "non-empty-output",
 				})
+
+				bridge = &vswitchdb.Bridge{
+					UUID: "bridge-uuid",
+					Name: "br-int",
+				}
+				dbSetup := []libovsdbtest.TestData{
+					bridge,
+					// Pre-seed the DB with an interface that has an Ofport
+					// so the !DPUHost codepath works correctly
+					&vswitchdb.Interface{
+						UUID:   "iface-uuid",
+						Name:   vfRep,
+						Ofport: &ofport,
+					},
+				}
+				err := testdbCtx.VSServer.CreateTestData(dbSetup)
+				Expect(err).NotTo(HaveOccurred())
 			})
 
 			Context("Fails if link configuration fails on", func() {
 				It("LinkByName()", func() {
 					netlinkOpsMock.On("LinkByName", vfRep).Return(nil, fmt.Errorf("failed to get link"))
-					// Mock ovs calls for cleanup
-					checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
-					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSDelPortCmd("pf0vf9"),
-					})
-
 					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 					err := dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+
+					Eventually(dnnc.vsClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{bridge}))
 				})
 
 				It("LinkSetMTU()", func() {
 					netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 					netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(fmt.Errorf("failed to set mtu"))
-					// Mock netlink/ovs calls for cleanup
-					checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
-					netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
-					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSDelPortCmd("pf0vf9"),
-					})
-
 					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
+
+					// Mock netlink calls for cleanup
+					netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 
 					err := dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+
+					Eventually(dnnc.vsClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{bridge}))
 				})
 
 				It("LinkSetUp()", func() {
 					netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 					netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
 					netlinkOpsMock.On("LinkSetUp", vfLink).Return(fmt.Errorf("failed to set link up"))
-					// Mock netlink/ovs calls for cleanup
-					checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
-					netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
-					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSDelPortCmd("pf0vf9"),
-					})
-
 					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
+
+					// Mock netlink calls for cleanup
+					netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 
 					err := dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+
+					Eventually(dnnc.vsClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{bridge}))
 				})
 			})
 
@@ -357,12 +349,8 @@ var _ = Describe("Node DPU tests", func() {
 				cpod := pod.DeepCopy()
 				cpod.Annotations, err = util.MarshalPodDPUConnStatus(cpod.Annotations, &dcs, types.DefaultNetworkName)
 				Expect(err).ToNot(HaveOccurred())
-				// Mock netlink/ovs calls for cleanup
-				checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
+				// Mock netlink calls for cleanup
 				netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genOVSDelPortCmd("pf0vf9"),
-				})
 
 				factoryMock.On("PodCoreInformer").Return(&podInformer)
 				podInformer.On("Lister").Return(&podLister)
@@ -373,66 +361,109 @@ var _ = Describe("Node DPU tests", func() {
 				err = dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
 				Expect(err).To(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+
+				Eventually(dnnc.vsClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{bridge}))
 			})
 		})
 	})
 
 	Context("delRepPort", func() {
-		var vfRep string
+		const vfRep string = "pf0vf9"
+		const sandboxID string = "a8d09931"
+		const ifaceUUID string = "u5553535353"
+		const portUUID string = "u124125521521"
 		var vfLink *linkMock.Link
 		var scd util.DPUConnectionDetails
+		var bridge *vswitchdb.Bridge
+		var intf *vswitchdb.Interface
+		var port *vswitchdb.Port
 
 		BeforeEach(func() {
-			vfRep = "pf0vf9"
 			vfLink = &linkMock.Link{}
 			scd = util.DPUConnectionDetails{
 				PfId:      "0",
 				VfId:      "9",
-				SandboxId: "a8d09931",
+				SandboxId: sandboxID,
+			}
+
+			bridge = &vswitchdb.Bridge{
+				UUID:  "bridge-uuid",
+				Name:  "br-int",
+				Ports: []string{portUUID},
+			}
+			intf = &vswitchdb.Interface{
+				UUID: ifaceUUID,
+				Name: vfRep,
+				ExternalIDs: map[string]string{
+					"sandbox": sandboxID,
+				},
+			}
+			port = &vswitchdb.Port{
+				UUID: portUUID,
+				Name: vfRep,
+				OtherConfig: map[string]string{
+					"transient": "true",
+				},
+				Interfaces: []string{ifaceUUID},
 			}
 		})
 
 		It("Sets link down for VF representor and removes VF representor from OVS", func() {
-			checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId, types.DefaultNetworkName)
 			netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists del-port br-int %s", "pf0vf9"),
-			})
-			err := dnnc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName)
+
+			err := testdbCtx.VSServer.CreateTestData([]libovsdbtest.TestData{bridge, intf, port})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = dnnc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+
+			bridge.Ports = nil
+			Eventually(dnnc.vsClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{bridge}))
 		})
 
 		It("Does not fail if LinkByName failed", func() {
-			checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId, types.DefaultNetworkName)
 			netlinkOpsMock.On("LinkByName", vfRep).Return(nil, fmt.Errorf("failed to get link"))
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSDelPortCmd("pf0vf9"),
-			})
-			err := dnnc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName)
+
+			err := testdbCtx.VSServer.CreateTestData([]libovsdbtest.TestData{bridge, intf, port})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = dnnc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+
+			bridge.Ports = nil
+			Eventually(dnnc.vsClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{bridge}))
 		})
 
 		It("Does not fail if removal of VF representor from OVS fails once", func() {
-			checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId, types.DefaultNetworkName)
 			netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
-			// fail on first try
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSDelPortCmd("pf0vf9"),
-				Err: fmt.Errorf("ovs command failed"),
-			})
-			// pass on the second
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSDelPortCmd("pf0vf9"),
-				Err: nil,
-			})
-			// pass on the second
-			err := dnnc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName)
+
+			// Add only the interface to OVS to ensure the first call
+			// to DeletePort fails becuase the bridge doesn't exist
+			err := testdbCtx.VSServer.CreateTestData([]libovsdbtest.TestData{intf, port})
+			Expect(err).NotTo(HaveOccurred())
+
+			wg := sync.WaitGroup{}
+			wg.Add(1)
+			go func() {
+				wg.Done()
+				<-time.After(1 * time.Second)
+				// Add the bridge after a short delay to allow
+				// DeletePort to succeed
+				port, err := libovsdbops.FindPortByName(dnnc.vsClient, port.Name)
+				Expect(err).NotTo(HaveOccurred())
+				bridge.Ports = []string{port.UUID}
+				err = testdbCtx.VSServer.CreateTestData([]libovsdbtest.TestData{bridge})
+				Expect(err).NotTo(HaveOccurred())
+			}()
+			wg.Wait()
+
+			err = dnnc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+
+			bridge.Ports = nil
+			Eventually(dnnc.vsClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{bridge}))
 		})
 	})
 })
