@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -385,8 +386,15 @@ func ConfigureOVS(vsClient client.Client, ctx context.Context, namespace, podNam
 		foundID, ok := iface.ExternalIDs["iface-id"]
 		return ok && foundID == ifaceID
 	}
-	if err := libovsdbops.DeleteInterfacesWithPredicate(vsClient, p); err != nil {
-		klog.Warningf("Failed to delete stale OVS ports with iface-id %q from br-int: %v", ifaceID, err)
+	if err := wait.PollUntilContextCancel(ctx, 3*time.Second, true, func(context.Context) (done bool, err error) {
+		if err := libovsdbops.DeleteInterfacesWithPredicate(vsClient, p); err != nil {
+			klog.Warningf("Failed to delete stale OVS ports with iface-id %q from br-int: %v", ifaceID, err)
+			return false, nil
+		}
+		// success
+		return true, nil
+	}); err != nil {
+		return err
 	}
 
 	// if the specified interface was created for other Pod/NAD, return error
