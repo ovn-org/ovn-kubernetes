@@ -304,7 +304,7 @@ func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, exist
 
 func (syncer *aclSyncer) getNetpolGressACLDbIDs(policyNamespace, policyName, policyType string,
 	gressIdx, portPolicyIdx, ipBlockIdx int) *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, syncer.controllerName,
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicyPortIndex, syncer.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			// policy namespace+name
 			libovsdbops.ObjectNameKey: policyNamespace + ":" + policyName,
