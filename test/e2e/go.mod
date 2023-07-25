@@ -50,11 +50,13 @@ require (
 )
 
 require (
+	github.com/Microsoft/go-winio v0.4.17 // indirect
 	github.com/aws/aws-sdk-go v1.44.204 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/clarketm/json v1.17.1 // indirect
+	github.com/containerd/containerd v1.4.12 // indirect
 	github.com/coreos/go-json v0.0.0-20230131223807-18775e0fb4fb // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
@@ -63,6 +65,8 @@ require (
 	github.com/coreos/vcontext v0.0.0-20230201181013-d72178a18687 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/distribution v2.8.2+incompatible // indirect
+	github.com/docker/go-connections v0.4.0 // indirect
+	github.com/docker/go-units v0.4.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.9.0 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/felixge/httpsnoop v1.0.1 // indirect
@@ -97,6 +101,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
+	github.com/opencontainers/image-spec v1.0.2 // indirect
 	github.com/openshift/api v0.0.0-20211217221424-8779abfbd571 // indirect
 	github.com/openshift/client-go v0.0.0-20210112165513-ebc401615f47 // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
@@ -106,6 +111,7 @@ require (
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
+	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/spf13/cobra v1.4.0 // indirect
 	github.com/spf13/pflag v1.0.6-0.20210604193023-d5e0c0615ace // indirect
 	github.com/stretchr/testify v1.8.2 // indirect
@@ -153,6 +159,7 @@ require (
 
 require (
 	github.com/coreos/butane v0.18.0
+	github.com/docker/docker v20.10.12+incompatible
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
 	google.golang.org/grpc v1.53.0
 	kubevirt.io/api v1.0.0-alpha.0
