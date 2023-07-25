@@ -738,7 +738,7 @@ func (bnc *BaseNetworkController) getPodNADNames(pod *kapi.Pod) []string {
 // ClusterPortGroupNameBase or ClusterRtrPortGroupNameBase.
 func (bnc *BaseNetworkController) getClusterPortGroupName(base string) string {
 	if bnc.IsSecondary() {
-		return hashedPortGroup(bnc.GetNetworkName()) + "_" + base
+		return libovsdbutil.HashedPortGroup(bnc.GetNetworkName()) + "_" + base
 	}
 	return base
 }

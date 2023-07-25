@@ -1,4 +1,4 @@
-package ovn
+package util
 
 import (
 	"fmt"
@@ -13,53 +13,53 @@ import (
 	knet "k8s.io/api/networking/v1"
 )
 
-func joinACLName(substrings ...string) string {
-	return strings.Join(substrings, "_")
-}
-
 // aclPipelineType defines when ACLs will be applied (direction and pipeline stage).
 // All acls of the same type will be sorted by priority, priorities for different types are independent.
-type aclPipelineType string
+type ACLPipelineType string
 
 const (
-	// lportIngress will be converted to direction="to-lport" ACL
-	lportIngress aclPipelineType = "to-lport"
-	// lportEgressAfterLB will be converted to direction="from-lport", options={"apply-after-lb": "true"} ACL
-	lportEgressAfterLB aclPipelineType = "from-lport-after-lb"
+	// LportIngress will be converted to direction="to-lport" ACL
+	LportIngress ACLPipelineType = "to-lport"
+	// LportEgressAfterLB will be converted to direction="from-lport", options={"apply-after-lb": "true"} ACL
+	LportEgressAfterLB ACLPipelineType = "from-lport-after-lb"
 )
 
-func policyTypeToAclPipeline(policyType knet.PolicyType) aclPipelineType {
+func PolicyTypeToAclPipeline(policyType knet.PolicyType) ACLPipelineType {
 	switch policyType {
 	case knet.PolicyTypeEgress:
-		return lportEgressAfterLB
+		return LportEgressAfterLB
 	case knet.PolicyTypeIngress:
-		return lportIngress
+		return LportIngress
 	default:
 		panic(fmt.Sprintf("Failed to convert PolicyType to aclPipelineType: unknown policyType type %s", policyType))
 	}
 }
 
-type aclDirection string
+type ACLDirection string
 
 const (
-	aclEgress  aclDirection = "Egress"
-	aclIngress aclDirection = "Ingress"
+	ACLEgress  ACLDirection = "Egress"
+	ACLIngress ACLDirection = "Ingress"
 )
 
-func aclDirectionToACLPipeline(aclDir aclDirection) aclPipelineType {
+func ACLDirectionToACLPipeline(aclDir ACLDirection) ACLPipelineType {
 	switch aclDir {
-	case aclEgress:
-		return lportEgressAfterLB
-	case aclIngress:
-		return lportIngress
+	case ACLEgress:
+		return LportEgressAfterLB
+	case ACLIngress:
+		return LportIngress
 	default:
-		panic(fmt.Sprintf("Failed to convert aclDirection to aclPipelineType: unknown aclDirection type %s", aclDir))
+		panic(fmt.Sprintf("Failed to convert ACLDirection to aclPipelineType: unknown ACLDirection type %s", aclDir))
 	}
 }
 
 // hash the provided input to make it a valid portGroup name.
-func hashedPortGroup(s string) string {
+func HashedPortGroup(s string) string {
 	return util.HashForOVN(s)
+}
+
+func JoinACLName(substrings ...string) string {
+	return strings.Join(substrings, "_")
 }
 
 // acl.Name is cropped to 64 symbols and is used for logging.
@@ -68,7 +68,7 @@ func hashedPortGroup(s string) string {
 // Just a namespace name may be 63 symbols long, therefore some information may be cropped.
 // Therefore, "feature" as "EF" for EgressFirewall and "NP" for network policy goes first, then namespace,
 // then acl-related info.
-func getACLName(dbIDs *libovsdbops.DbObjectIDs) string {
+func GetACLName(dbIDs *libovsdbops.DbObjectIDs) string {
 	t := dbIDs.GetIDsType()
 	aclName := ""
 	switch {
@@ -87,22 +87,22 @@ func getACLName(dbIDs *libovsdbops.DbObjectIDs) string {
 // It can properly set and reset log settings for ACL based on ACLLoggingLevels, and
 // set acl.Name and acl.ExternalIDs based on given DbIDs
 func BuildACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string, logLevels *ACLLoggingLevels,
-	aclT aclPipelineType) *nbdb.ACL {
+	aclT ACLPipelineType) *nbdb.ACL {
 	var options map[string]string
 	var direction string
 	switch aclT {
-	case lportEgressAfterLB:
+	case LportEgressAfterLB:
 		direction = nbdb.ACLDirectionFromLport
 		options = map[string]string{
 			"apply-after-lb": "true",
 		}
-	case lportIngress:
+	case LportIngress:
 		direction = nbdb.ACLDirectionToLport
 	default:
 		panic(fmt.Sprintf("Failed to build ACL: unknown acl type %s", aclT))
 	}
 	externalIDs := dbIDs.GetExternalIDs()
-	aclName := getACLName(dbIDs)
+	aclName := GetACLName(dbIDs)
 	log, logSeverity := getLogSeverity(action, logLevels)
 	ACL := libovsdbops.BuildACL(
 		aclName,
@@ -120,12 +120,12 @@ func BuildACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string
 	return ACL
 }
 
-func getACLMatch(portGroupName, match string, aclDir aclDirection) string {
+func GetACLMatch(portGroupName, match string, aclDir ACLDirection) string {
 	var aclMatch string
 	switch aclDir {
-	case aclIngress:
+	case ACLIngress:
 		aclMatch = "outport == @" + portGroupName
-	case aclEgress:
+	case ACLEgress:
 		aclMatch = "inport == @" + portGroupName
 	default:
 		panic(fmt.Sprintf("Unknown acl direction %s", aclDir))
@@ -134,6 +134,12 @@ func getACLMatch(portGroupName, match string, aclDir aclDirection) string {
 		aclMatch += " && " + match
 	}
 	return aclMatch
+}
+
+// ACL logging severity levels
+type ACLLoggingLevels struct {
+	Allow string `json:"allow,omitempty"`
+	Deny  string `json:"deny,omitempty"`
 }
 
 func getLogSeverity(action string, aclLogging *ACLLoggingLevels) (log bool, severity string) {
