@@ -340,6 +340,10 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 			klog.Errorf("Unable to get nodes from informer while waiting for node zone sync")
 			return false, nil
 		}
+		if len(nodes) == 0 {
+			klog.Infof("No nodes in cluster: waiting for a node to have %q zone is not needed", config.Default.Zone)
+			return true, nil
+		}
 		for _, node := range nodes {
 			if util.GetNodeZone(node) == config.Default.Zone {
 				return true, nil
