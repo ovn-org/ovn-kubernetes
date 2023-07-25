@@ -11,7 +11,7 @@ import (
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
 	"github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	utilnet "k8s.io/utils/net"

@@ -1,4 +1,4 @@
-package libovsdbops
+package ops
 
 import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"

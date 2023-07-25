@@ -1,4 +1,4 @@
-package libovsdbops
+package ops
 
 import (
 	"context"

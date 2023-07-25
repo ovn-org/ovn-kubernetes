@@ -1,12 +1,13 @@
-package libovsdbops
+package ops
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
-	"time"
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"

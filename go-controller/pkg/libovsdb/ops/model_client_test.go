@@ -1,11 +1,12 @@
-package libovsdbops
+package ops
 
 import (
 	"fmt"
-	"github.com/onsi/ginkgo"
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/onsi/ginkgo"
 
 	"github.com/onsi/gomega/types"
 	"github.com/ovn-org/libovsdb/client"
