@@ -138,15 +138,18 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
-		if h.oc.isLocalZoneNode(newNode) {
+		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
+		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode)
+		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode)
+		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
-				syncZoneIC = syncZoneIC || util.NodeNetworkIDAnnotationChanged(oldNode, newNode, h.oc.GetNetworkName())
+				syncZoneIC = syncZoneIC || zoneClusterChanged
 				nodeSyncsParam = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncZoneIC: syncZoneIC}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone.",
@@ -157,7 +160,16 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
 		} else {
-			return h.oc.addUpdateRemoteNodeEvent(newNode, config.OVNKubernetesFeature.EnableInterconnect)
+			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
+
+			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
+			// Also check if node subnet changed, so static routes are properly set
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged || zoneClusterChanged
+			if syncZoneIC {
+				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
+					newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)
+			}
+			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)

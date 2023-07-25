@@ -580,6 +580,23 @@ jobs:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
 
+    - name: Export ovn dbs
+      if: ${{ failure() }}
+      run: |
+        mkdir -p /tmp/kind/ovndbs
+        for node in ovn-control-plane ovn-worker ovn-worker2
+        do for db in ovnnb_db.db ovnsb_db.db
+          do docker cp ${node}:/var/lib/openvswitch/${db} /tmp/kind/ovndbs/${node}_${db} ||:
+          done
+        done
+
+    - name: Upload ovn dbs
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@v3
+      with:
+        name: kind-ovndbs-${{ env.JOB_NAME }}-${{ github.run_id }}
+        path: /tmp/kind/ovndbs
+
   e2e-periodic:
     name: e2e-periodic
     if: github.event_name == 'schedule'
