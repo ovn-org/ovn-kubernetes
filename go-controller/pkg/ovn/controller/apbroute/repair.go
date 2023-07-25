@@ -1,6 +1,7 @@
 package apbroute
 
 import (
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -13,7 +14,9 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute/gateway_info"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -21,10 +24,10 @@ import (
 type managedGWIPs struct {
 	namespacedName ktypes.NamespacedName
 	nodeName       string
-	gwList         gatewayInfoList
+	gwList         *gateway_info.GatewayInfoList
 }
 
-func (c *ExternalGatewayMasterController) Repair() {
+func (c *ExternalGatewayMasterController) Repair() error {
 	start := time.Now()
 	defer func() {
 		klog.V(4).Infof("Syncing exgw routes took %v", time.Since(start))
@@ -43,28 +46,33 @@ func (c *ExternalGatewayMasterController) Repair() {
 		}
 	}
 
+	// Build cache of expected routes in the cluster
+	// will be used for cleanup
+	policyGWIPsMap, err := c.syncPoliciesWithoutCleanup()
+	if err != nil {
+		return fmt.Errorf("error while aggregating the external policy routes: %v", err)
+	}
+
 	// Get all ECMP routes in OVN and build cache
-	ovnRouteCache := c.buildOVNECMPCache()
+	ovnRouteCache, err := c.buildOVNECMPCache()
+	if err != nil {
+		return fmt.Errorf("failed to build ECMP cache: %w", err)
+	}
 
 	if len(ovnRouteCache) == 0 {
 		// Even if no ECMP routes exist, we should ensure no 501 LRPs exist either
 		if err := c.nbClient.delAllHybridRoutePolicies(); err != nil {
-			klog.Errorf("Error while removing hybrid policies, error: %v", err)
+			if err != nil {
+				return fmt.Errorf("error while removing hybrid policies: %w", err)
+			}
 		}
 		// nothing in OVN, so no reason to search for stale routes
-		return
-	}
-
-	// Build cache of expected routes in the cluster
-	// map[podIP]set[podNamespacedName,nodeName,expectedGWIPs]
-	policyGWIPsMap, err := c.buildExternalIPGatewaysFromPolicyRules()
-	if err != nil {
-		klog.Errorf("Error while aggregating the external policy routes: %v", err)
+		return nil
 	}
 
 	annotatedGWIPsMap, err := c.buildExternalIPGatewaysFromAnnotations()
 	if err != nil {
-		klog.Errorf("Cannot retrieve the annotated gateway IPs:%w", err)
+		return fmt.Errorf("cannot retrieve the annotated gateway IPs:%w", err)
 	}
 
 	// compare caches and see if OVN routes are stale
@@ -91,20 +99,20 @@ func (c *ExternalGatewayMasterController) Repair() {
 			prefix, err := c.nbClient.extSwitchPrefix(node)
 			if err != nil {
 				// we shouldn't continue in this case, because we cant be sure this is a route we want to remove
-				klog.Errorf("Cannot sync exgw route: %+v, unable to determine exgw switch prefix: %v",
+				return fmt.Errorf("cannot sync exgw route: %+v, unable to determine exgw switch prefix: %v",
 					ovnRoute, err)
 			} else if (prefix != "" && !strings.Contains(ovnRoute.outport, prefix)) ||
 				(prefix == "" && strings.Contains(ovnRoute.outport, types.EgressGWSwitchPrefix)) {
 				continue
 			}
 			if expectedNextHopsPolicy != nil {
-				ovnRoute.shouldExist = c.processOVNRoute(ovnRoute, expectedNextHopsPolicy.gwList, podIP, expectedNextHopsPolicy)
+				ovnRoute.shouldExist = c.processOVNRoute(ovnRoute, expectedNextHopsPolicy.gwList, podIP, expectedNextHopsPolicy, true)
 				if ovnRoute.shouldExist {
 					continue
 				}
 			}
 			if expectedNextHopsAnnotation != nil {
-				ovnRoute.shouldExist = c.processOVNRoute(ovnRoute, expectedNextHopsAnnotation.gwList, podIP, expectedNextHopsAnnotation)
+				ovnRoute.shouldExist = c.processOVNRoute(ovnRoute, expectedNextHopsAnnotation.gwList, podIP, expectedNextHopsAnnotation, false)
 			}
 		}
 	}
@@ -122,7 +130,7 @@ func (c *ExternalGatewayMasterController) Repair() {
 				lrsr := nbdb.LogicalRouterStaticRoute{UUID: ovnRoute.uuid}
 				err := c.nbClient.deleteLogicalRouterStaticRoutes(ovnRoute.router, &lrsr)
 				if err != nil {
-					klog.Errorf("Error deleting static route %s from router %s: %v", ovnRoute.uuid, ovnRoute.router, err)
+					return fmt.Errorf("error deleting static route %s from router %s: %v", ovnRoute.uuid, ovnRoute.router, err)
 				}
 
 				// check to see if we should also clean up bfd
@@ -133,11 +141,11 @@ func (c *ExternalGatewayMasterController) Repair() {
 				prefix, err := c.nbClient.extSwitchPrefix(node)
 				if err != nil {
 					// We shouldn't continue in this case, because we cant be sure this is a route we want to remove
-					klog.Errorf("Cannot sync exgw bfd: %+v, unable to determine exgw switch prefix: %v",
+					return fmt.Errorf("cannot sync exgw bfd: %+v, unable to determine exgw switch prefix: %v",
 						ovnRoute, err)
 				} else {
 					if err := c.nbClient.cleanUpBFDEntry(ovnRoute.nextHop, ovnRoute.router, prefix); err != nil {
-						klog.Errorf("Cannot clean up BFD entry: %w", err)
+						return fmt.Errorf("cannot clean up BFD entry: %w", err)
 					}
 				}
 
@@ -151,71 +159,94 @@ func (c *ExternalGatewayMasterController) Repair() {
 			for _, ovnRoute := range ovnRoutes {
 				gr := strings.TrimPrefix(ovnRoute.router, types.GWRouterPrefix)
 				if err := c.nbClient.delHybridRoutePolicyForPod(net.ParseIP(podIP), gr); err != nil {
-					klog.Errorf("Error while removing hybrid policy for pod IP: %s, on node: %s, error: %v",
+					return fmt.Errorf("error while removing hybrid policy for pod IP: %s, on node: %s, error: %v",
 						podIP, gr, err)
 				}
 			}
 		}
 	}
+	return nil
 }
 
-func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromPolicyRules() (map[string]*managedGWIPs, error) {
-
+// syncPoliciesWithoutCleanup handles all existing policies and initializes caches. It doesn't do any cleanup,
+// but it returns managedGWIPs that should exist, and relies on the repair code to cleanup everything else.
+// After cleanup is completed, regular handling can be started.
+func (c *ExternalGatewayMasterController) syncPoliciesWithoutCleanup() (map[string]*managedGWIPs, error) {
 	clusterRouteCache := make(map[string]*managedGWIPs)
 	externalRoutePolicies, err := c.routeLister.List(labels.Everything())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list AdminPolicyBasedExternalRoute: %w", err)
 	}
 
 	for _, policy := range externalRoutePolicies {
-		p, err := c.mgr.processExternalRoutePolicy(policy)
+		if policy.Status.Status != adminpolicybasedrouteapi.SuccessStatus {
+			// skip handling policies without status that were not completely handled, or policies with error status
+			// because handling them will cause startup failure.
+			// db objects for these policies will be cleaned up, and policies will be handled from scratch by the
+			// general controller logic.
+			continue
+		}
+		_, err = c.mgr.syncRoutePolicy(policy.Name)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to sync policy %s: %w", policy.Name, err)
 		}
-		nsList, err := c.mgr.listNamespacesBySelector(p.targetNamespacesSelector)
-		if err != nil {
-			return nil, err
-		}
-		allGWIPs := make(gatewayInfoList, 0)
-		allGWIPs = append(allGWIPs, p.staticGateways...)
-		for _, gw := range p.dynamicGateways {
-			allGWIPs = append(allGWIPs, gw)
-		}
-		for _, ns := range nsList {
-			nsPods, err := c.podLister.Pods(ns.Name).List(labels.Everything())
-			if err != nil {
-				return nil, err
+	}
+	policyKeys := c.mgr.routePolicySyncCache.GetKeys()
+
+	for _, policyName := range policyKeys {
+		err = c.mgr.routePolicySyncCache.DoWithLock(policyName, func(key string) error {
+			existingPolicy, found := c.mgr.routePolicySyncCache.Load(policyName)
+			if !found {
+				return fmt.Errorf("policy %s was deleted during repair", key)
 			}
-			for _, nsPod := range nsPods {
-				// Ignore completed pods, host networked pods, pods not scheduled
-				if util.PodWantsHostNetwork(nsPod) || util.PodCompleted(nsPod) || !util.PodScheduled(nsPod) {
-					continue
-				}
-				for _, podIP := range nsPod.Status.PodIPs {
-					podIPStr := utilnet.ParseIPSloppy(podIP.IP).String()
-					clusterRouteCache[podIPStr] = &managedGWIPs{namespacedName: ktypes.NamespacedName{Namespace: nsPod.Namespace, Name: nsPod.Name}, nodeName: nsPod.Spec.NodeName, gwList: make(gatewayInfoList, 0)}
-					for _, gwInfo := range allGWIPs {
-						for _, gw := range gwInfo.Gateways.UnsortedList() {
-							if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIPStr) {
-								continue
+			for _, targetPods := range existingPolicy.targetNamespaces {
+				for targetPodNamespacedName, targetPodInfo := range targetPods {
+					targetPod, err := c.mgr.podLister.Pods(targetPodNamespacedName.Namespace).Get(targetPodNamespacedName.Name)
+					if err != nil {
+						return fmt.Errorf("failed getting target pod %s for policy %s: %w", targetPodNamespacedName, key, err)
+					}
+					for _, targetPodIP := range targetPod.Status.PodIPs {
+						podIPStr := utilnet.ParseIPSloppy(targetPodIP.IP).String()
+						clusterRouteCache[podIPStr] = &managedGWIPs{
+							namespacedName: ktypes.NamespacedName{Namespace: targetPod.Namespace, Name: targetPod.Name},
+							nodeName:       targetPod.Spec.NodeName,
+							gwList:         gateway_info.NewGatewayInfoList()}
+
+						allGWIPs := gateway_info.NewGatewayInfoList()
+						allGWIPs.InsertOverwrite(targetPodInfo.StaticGateways.Elems()...)
+						allGWIPs.InsertOverwrite(targetPodInfo.DynamicGateways.Elems()...)
+
+						for _, gwInfo := range allGWIPs.Elems() {
+							for gw := range gwInfo.Gateways {
+								if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIPStr) {
+									continue
+								}
+								clusterRouteCache[podIPStr].gwList.InsertOverwrite(gwInfo)
 							}
-							clusterRouteCache[podIPStr].gwList = append(clusterRouteCache[podIPStr].gwList, gwInfo)
 						}
 					}
 				}
 			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
-
 	}
+
 	return clusterRouteCache, nil
 }
 
-func (c *ExternalGatewayMasterController) processOVNRoute(ovnRoute *ovnRoute, gwList gatewayInfoList, podIP string, managedIPGWInfo *managedGWIPs) bool {
+func (c *ExternalGatewayMasterController) processOVNRoute(ovnRoute *ovnRoute, gwList *gateway_info.GatewayInfoList, podIP string,
+	managedIPGWInfo *managedGWIPs, noDbChanges bool) bool {
 	// podIP exists, check if route matches
-	for _, gwInfo := range gwList {
-		for _, clusterNextHop := range gwInfo.Gateways.UnsortedList() {
+	for _, gwInfo := range gwList.Elems() {
+		for clusterNextHop := range gwInfo.Gateways {
 			if ovnRoute.nextHop == clusterNextHop {
 				// populate the externalGWInfo cache with this pair podIP->next Hop IP.
+				if noDbChanges {
+					return true
+				}
 				err := c.nbClient.updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP, ovnRoute.nextHop, managedIPGWInfo.nodeName, gwInfo.BFDEnabled, managedIPGWInfo.namespacedName)
 				if err == nil {
 					return true
@@ -246,13 +277,13 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 			if _, ok := ns.Annotations[util.BfdAnnotation]; ok {
 				bfdEnabled = true
 			}
-			gwInfo := newGatewayInfo(ips, bfdEnabled)
+			gwInfo := gateway_info.NewGatewayInfo(ips, bfdEnabled)
 			nsPodList, err := c.podLister.Pods(ns.Name).List(labels.Everything())
 			if err != nil {
 				return nil, err
 			}
-			// iterate through all the pods in the namespace and associate the gw ips to those that correspond
-			populateManagedGWIPsCacheInNamespace(ns.Name, gwInfo, clusterRouteCache, nsPodList)
+			// set static gateway ips for all pods in the namespace
+			populateManagedGWIPsCacheForPods(gwInfo, clusterRouteCache, nsPodList)
 		}
 	}
 
@@ -282,17 +313,21 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 		if _, ok := pod.Annotations[util.BfdAnnotation]; ok {
 			bfdEnabled = true
 		}
-		gwInfo := newGatewayInfo(foundGws, bfdEnabled)
+		gwInfo := gateway_info.NewGatewayInfo(foundGws, bfdEnabled)
 		for _, targetNs := range strings.Split(targetNamespaces, ",") {
-			// iterate through all pods and associate the gw ips to those that correspond
-			populateManagedGWIPsCacheInNamespace(targetNs, gwInfo, clusterRouteCache, podList)
+			nsPodList, err := c.podLister.Pods(targetNs).List(labels.Everything())
+			if err != nil {
+				return nil, err
+			}
+			// set dynamic gateway ips for all pods in the targetNamespaces
+			populateManagedGWIPsCacheForPods(gwInfo, clusterRouteCache, nsPodList)
 		}
 	}
 	return clusterRouteCache, nil
 }
 
-func populateManagedGWIPsCacheInNamespace(targetNamespace string, gwInfo *gatewayInfo, cache map[string]*managedGWIPs, podList []*v1.Pod) {
-	for _, gwIP := range gwInfo.Gateways.UnsortedList() {
+func populateManagedGWIPsCacheForPods(gwInfo *gateway_info.GatewayInfo, cache map[string]*managedGWIPs, podList []*v1.Pod) {
+	for gwIP := range gwInfo.Gateways {
 		for _, pod := range podList {
 			// ignore completed pods, host networked pods, pods not scheduled
 			if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
@@ -307,9 +342,10 @@ func populateManagedGWIPsCacheInNamespace(targetNamespace string, gwInfo *gatewa
 					cache[podIPStr] = &managedGWIPs{
 						namespacedName: ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name},
 						nodeName:       pod.Spec.NodeName,
+						gwList:         gateway_info.NewGatewayInfoList(),
 					}
 				}
-				cache[podIPStr].gwList = append(cache[podIPStr].gwList, newGatewayInfo(sets.New(gwIP), gwInfo.BFDEnabled))
+				cache[podIPStr].gwList.InsertOverwrite(gateway_info.NewGatewayInfo(sets.New(gwIP), gwInfo.BFDEnabled))
 			}
 		}
 	}
@@ -325,14 +361,13 @@ type ovnRoute struct {
 	shouldExist bool
 }
 
-func (c *ExternalGatewayMasterController) buildOVNECMPCache() map[string][]*ovnRoute {
+func (c *ExternalGatewayMasterController) buildOVNECMPCache() (map[string][]*ovnRoute, error) {
 	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return item.Options["ecmp_symmetric_reply"] == "true"
 	}
 	logicalRouterStaticRoutes, err := c.nbClient.findLogicalRouterStaticRoutesWithPredicate(p)
 	if err != nil {
-		klog.Errorf("CleanECMPRoutes: failed to list ecmp routes: %v", err)
-		return nil
+		return nil, fmt.Errorf("CleanECMPRoutes: failed to list ecmp routes: %v", err)
 	}
 
 	ovnRouteCache := make(map[string][]*ovnRoute)
@@ -342,8 +377,7 @@ func (c *ExternalGatewayMasterController) buildOVNECMPCache() map[string][]*ovnR
 		}
 		logicalRouters, err := c.nbClient.findLogicalRoutersWithPredicate(p)
 		if err != nil {
-			klog.Errorf("CleanECMPRoutes: failed to find logical router for %s, err: %v", logicalRouterStaticRoute.UUID, err)
-			continue
+			return nil, fmt.Errorf("CleanECMPRoutes: failed to find logical router for %s, err: %v", logicalRouterStaticRoute.UUID, err)
 		}
 
 		route := &ovnRoute{
@@ -359,5 +393,5 @@ func (c *ExternalGatewayMasterController) buildOVNECMPCache() map[string][]*ovnR
 			ovnRouteCache[podIP.String()] = append(ovnRouteCache[podIP.String()], route)
 		}
 	}
-	return ovnRouteCache
+	return ovnRouteCache, nil
 }

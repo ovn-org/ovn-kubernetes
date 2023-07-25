@@ -50,6 +50,38 @@ func errorFromResult(op *Operation, r OperationResult) OperationError {
 	}
 }
 
+func ResultFromError(err error) OperationResult {
+	if err == nil {
+		panic("Program error: passed nil error to resultFromError")
+	}
+	switch e := err.(type) {
+	case *ReferentialIntegrityViolation:
+		return OperationResult{Error: referentialIntegrityViolation, Details: e.details}
+	case *ConstraintViolation:
+		return OperationResult{Error: constraintViolation, Details: e.details}
+	case *ResourcesExhausted:
+		return OperationResult{Error: resourcesExhausted, Details: e.details}
+	case *IOError:
+		return OperationResult{Error: ioError, Details: e.details}
+	case *DuplicateUUIDName:
+		return OperationResult{Error: duplicateUUIDName, Details: e.details}
+	case *DomainError:
+		return OperationResult{Error: domainError, Details: e.details}
+	case *RangeError:
+		return OperationResult{Error: rangeError, Details: e.details}
+	case *TimedOut:
+		return OperationResult{Error: timedOut, Details: e.details}
+	case *NotSupported:
+		return OperationResult{Error: notSupported, Details: e.details}
+	case *Aborted:
+		return OperationResult{Error: aborted, Details: e.details}
+	case *NotOwner:
+		return OperationResult{Error: notOwner, Details: e.details}
+	default:
+		return OperationResult{Error: e.Error()}
+	}
+}
+
 // CheckOperationResults checks whether the provided operation was a success
 // If the operation was a success, it will return nil, nil
 // If the operation failed, due to a error committing the transaction it will
@@ -114,6 +146,10 @@ func (e *ReferentialIntegrityViolation) Operation() *Operation {
 type ConstraintViolation struct {
 	details   string
 	operation *Operation
+}
+
+func NewConstraintViolation(details string) *ConstraintViolation {
+	return &ConstraintViolation{details: details}
 }
 
 // Error implements the error interface

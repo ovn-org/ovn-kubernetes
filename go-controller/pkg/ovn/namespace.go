@@ -203,9 +203,11 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 		if err != nil {
 			errors = append(errors, err)
 		} else {
-			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: newBFDEnabled}, nsInfo, old.Name)
-			if err != nil {
-				errors = append(errors, err)
+			if exGateways.Len() != 0 {
+				err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: newBFDEnabled}, nsInfo, old.Name)
+				if err != nil {
+					errors = append(errors, err)
+				}
 			}
 		}
 		// if new annotation is empty, exgws were removed, may need to add SNAT per pod

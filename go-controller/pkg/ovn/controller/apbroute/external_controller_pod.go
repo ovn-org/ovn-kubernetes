@@ -6,42 +6,20 @@ import (
 	"net"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
-	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
-func (m *externalPolicyManager) syncPod(pod *v1.Pod, podLister corev1listers.PodLister, routeQueue workqueue.RateLimitingInterface) error {
-
-	_, err := podLister.Pods(pod.Namespace).Get(pod.Name)
-	if err != nil && !apierrors.IsNotFound(err) {
+func (m *externalPolicyManager) syncPod(pod *v1.Pod, routeQueue workqueue.RateLimitingInterface) error {
+	policyKeys, err := m.getPoliciesForPodChange(pod)
+	if err != nil {
 		return err
 	}
-
-	// Only queues policies affected by gateway pods
-	policies, pErr := m.listPoliciesInNamespacesUsingPodGateway(ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name})
-	if pErr != nil {
-		return pErr
-	}
-	if policies.Len() == 0 {
-		// this is not a gateway pod
-		cacheInfo, found := m.getNamespaceInfoFromCache(pod.Namespace)
-		if found {
-			// its namespace is a target for policies.
-			policies = policies.Union(cacheInfo.Policies)
-			m.unlockNamespaceInfoCache(pod.Namespace)
-		}
-	}
-	klog.V(4).Infof("Processing gateway pod %s/%s with matching policies %+v", pod.Namespace, pod.Name, policies.UnsortedList())
-	for policyName := range policies {
-		klog.V(5).Infof("Queueing policy %s", policyName)
+	klog.V(5).Infof("APB queuing policies: %v for pod: %s/%s", policyKeys, pod.Namespace, pod.Name)
+	for policyName := range policyKeys {
 		routeQueue.Add(policyName)
 	}
 
@@ -91,53 +69,4 @@ func getMultusIPsFromNetworkName(pod *v1.Pod, networkName string) (sets.Set[stri
 		}
 	}
 	return nil, fmt.Errorf("unable to find multus network %s in pod %s/%s", networkName, pod.Namespace, pod.Name)
-}
-
-func (m *externalPolicyManager) listPoliciesUsingPodGateway(key ktypes.NamespacedName) ([]*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, error) {
-
-	ret := make([]*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, 0)
-	policies, err := m.routeLister.List(labels.Everything())
-	if err != nil {
-		return nil, err
-	}
-	for _, p := range policies {
-		klog.V(5).Infof("Checking for policy %s to have pod %s", p.Name, key)
-		pp, err := m.processExternalRoutePolicy(p)
-		if err != nil {
-			return nil, err
-		}
-		if _, found := pp.dynamicGateways[key]; found {
-			klog.V(5).Infof("Policy %s has pod %s", p.Name, key)
-			ret = append(ret, p)
-		}
-
-	}
-	return ret, nil
-}
-
-func (m *externalPolicyManager) listPoliciesInNamespacesUsingPodGateway(key ktypes.NamespacedName) (sets.Set[string], error) {
-	policies := sets.New[string]()
-	// Iterate through all current namespaces that contain the pod. This is needed in case the pod is deleted from an existing namespace, in which case
-	// if we iterated applying the namespace selector in the policies, we would miss the fact that a pod was part of a namespace that is no longer
-	// and we'd miss updating that namespace and removing the pod through the reconciliation of the policy in that namespace.
-	nsList := m.listNamespaceInfoCache()
-	for _, namespaceName := range nsList {
-		cacheInfo, found := m.getNamespaceInfoFromCache(namespaceName)
-		if !found {
-			continue
-		}
-		if _, ok := cacheInfo.DynamicGateways[key]; ok {
-			policies = policies.Union(cacheInfo.Policies)
-		}
-		m.unlockNamespaceInfoCache(namespaceName)
-	}
-	// List all namespaces that match the policy, for those new namespaces where the pod now applies
-	p, err := m.listPoliciesUsingPodGateway(key)
-	if err != nil {
-		return nil, err
-	}
-	for _, policy := range p {
-		policies.Insert(policy.Name)
-	}
-	return policies, nil
 }

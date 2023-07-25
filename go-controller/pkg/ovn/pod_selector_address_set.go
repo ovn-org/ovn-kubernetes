@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -53,7 +54,7 @@ type PodSelectorAddressSet struct {
 	// handlerResources holds the data that is used and updated by the handlers.
 	handlerResources *PodSelectorAddrSetHandlerInfo
 
-	stopChan chan struct{}
+	cancelableContext *util.CancelableContext
 }
 
 // EnsurePodSelectorAddressSet returns address set for requested (podSelector, namespaceSelector, namespace).
@@ -161,8 +162,9 @@ func (bnc *BaseNetworkController) DeletePodSelectorAddressSet(addrSetKey, backRe
 
 func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 	// create pod handler resources before starting the handlers
-	if psas.stopChan == nil {
-		psas.stopChan = util.GetChildStopChan(bnc.stopChan)
+	if psas.cancelableContext == nil {
+		cancelableContext := util.NewCancelableContextChild(bnc.cancelableCtx)
+		psas.cancelableContext = &cancelableContext
 	}
 	if psas.handlerResources == nil {
 		as, err := bnc.addressSetFactory.NewAddressSet(psas.addrSetDbIDs, nil)
@@ -179,7 +181,7 @@ func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 			netInfo:           bnc.NetInfo,
 			ipv4Mode:          ipv4Mode,
 			ipv6Mode:          ipv6Mode,
-			stopChan:          psas.stopChan,
+			stopChan:          psas.cancelableContext.Done(),
 		}
 	}
 
@@ -216,9 +218,9 @@ func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 
 func (psas *PodSelectorAddressSet) destroy(bnc *BaseNetworkController) error {
 	klog.Infof("Deleting shared address set for pod selector %s", psas.key)
-	if psas.stopChan != nil {
-		close(psas.stopChan)
-		psas.stopChan = nil
+	if psas.cancelableContext != nil {
+		psas.cancelableContext.Cancel()
+		psas.cancelableContext = nil
 	}
 
 	psas.needsCleanup = true
@@ -253,7 +255,7 @@ func (bnc *BaseNetworkController) addPodSelectorHandler(psAddrSet *PodSelectorAd
 		factory.AddressSetPodSelectorType,
 		syncFunc,
 		podHandlerResources,
-		psAddrSet.stopChan)
+		psAddrSet.cancelableContext.Done())
 
 	podHandler, err := retryFramework.WatchResourceFiltered(namespace, podSelector)
 	if err != nil {
@@ -275,7 +277,7 @@ func (bnc *BaseNetworkController) addNamespacedPodSelectorHandler(psAddrSet *Pod
 		factory.AddressSetNamespaceAndPodSelectorType,
 		nil,
 		psAddrSet.handlerResources,
-		psAddrSet.stopChan,
+		psAddrSet.cancelableContext.Done(),
 	)
 	namespaceHandler, err := retryFramework.WatchResourceFiltered("", psAddrSet.namespaceSelector)
 	if err != nil {
@@ -320,7 +322,7 @@ type PodSelectorAddrSetHandlerInfo struct {
 	ipv4Mode bool
 	ipv6Mode bool
 
-	stopChan chan struct{}
+	stopChan <-chan struct{}
 }
 
 // idempotent
@@ -370,7 +372,8 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) addPods(pods ...*v1.Pod) error
 	for _, pod := range pods {
 		podIPs, err := util.GetPodIPsOfNetwork(pod, handlerInfo.netInfo)
 		if err != nil {
-			return err
+			// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
+			return ovntypes.NewSuppressedError(err)
 		}
 		ips = append(ips, podIPs...)
 	}
@@ -383,7 +386,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) deletePod(pod *v1.Pod) error {
 	if err != nil {
 		// if pod ips can't be fetched on delete, we don't expect that information about ips will ever be updated,
 		// therefore just log the error and return.
-		klog.Warningf("Could not find pod %s/%s IPs to delete from pod selector address set: %w", pod.Namespace, pod.Name, err)
+		klog.Warningf("Could not find pod %s/%s IPs to delete from pod selector address set: %v", pod.Namespace, pod.Name, err)
 		return nil
 	}
 	return handlerInfo.addressSet.DeleteIPs(ips)
@@ -467,7 +470,10 @@ func (bnc *BaseNetworkController) podSelectorPodNeedsDelete(pod *kapi.Pod, podHa
 	}
 	ips, err := util.GetPodIPsOfNetwork(pod, bnc.NetInfo)
 	if err != nil {
-		return "", fmt.Errorf("can't get pod IPs %s/%s: %w", pod.Namespace, pod.Name, err)
+		// if pod has no IP, nothing to do
+		klog.Warningf("Failed to get IPs of pod %s/%s during address_set pod selector removal: %v",
+			pod.Namespace, pod.Name, err)
+		return "", nil
 	}
 	// completed pod be deleted a long time ago, check if there is a new pod with that same ip
 	collidingPod, err := bnc.findPodWithIPAddresses(ips)

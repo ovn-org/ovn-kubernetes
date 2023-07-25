@@ -181,11 +181,12 @@ func (h *egressIPClusterControllerEventHandler) SyncFunc(objs []interface{}) err
 		syncFunc = h.syncFunc
 	} else {
 		switch h.objType {
+		case factory.EgressIPType:
+			syncFunc = nil
 		case factory.EgressNodeType:
 			syncFunc = h.eIPC.initEgressNodeReachability
-		case factory.EgressIPType,
-			factory.CloudPrivateIPConfigType:
-			syncFunc = nil
+		case factory.CloudPrivateIPConfigType:
+			syncFunc = h.eIPC.syncCloudPrivateIPConfigs
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)

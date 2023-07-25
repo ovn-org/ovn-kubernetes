@@ -153,3 +153,9 @@ func (manager *LogicalSwitchManager) ConditionalIPRelease(switchName string, ipn
 func (manager *LogicalSwitchManager) ForSwitch(switchName string) subnet.NamedAllocator {
 	return manager.allocator.ForSubnet(switchName)
 }
+
+// GetSubnetName will find the switch that contains one of the subnets
+// from "subnets" if not it will return "", false
+func (manager *LogicalSwitchManager) GetSubnetName(subnets []*net.IPNet) (string, bool) {
+	return manager.allocator.GetSubnetName(subnets)
+}

@@ -318,6 +318,30 @@ func TestSetupNetwork(t *testing.T) {
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Flags: net.FlagUp}}},
 			},
 		},
+		{
+			desc:    "test skip ip config",
+			inpLink: mockLink,
+			inpPodIfaceInfo: &PodInterfaceInfo{
+				SkipIPConfig: true,
+				PodAnnotation: util.PodAnnotation{
+					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
+					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
+					Gateways: ovntest.MustParseIPs("192.168.0.1"),
+					Routes: []util.PodRoute{
+						{
+							Dest:    ovntest.MustParseIPNet("192.168.1.0/24"),
+							NextHop: net.ParseIP("192.168.1.1"),
+						},
+					},
+				},
+			},
+			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
+			},
+			linkMockHelper: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			},
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {

@@ -485,13 +485,12 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		// namespace selector will be run because it is not empty.
 		// one namespace should match the label and start a pod watchFactory.
 		// that gives us 2 retryFrameworks, so 2 periodicallyRetryResources goroutines.
-		// The request itself will create one child stopChannel, that is one more goroutine.
 		peerASKey, _, _, err := fakeOvn.controller.EnsurePodSelectorAddressSet(
 			selector, selector, namespaceName1, "backRef")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Eventually(func() int {
 			return runtime.NumGoroutine()
-		}).Should(gomega.Equal(goroutinesNumInit + 3))
+		}).Should(gomega.Equal(goroutinesNumInit + 2))
 
 		err = fakeOvn.controller.DeletePodSelectorAddressSet(peerASKey, "backRef")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

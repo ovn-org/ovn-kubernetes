@@ -14,10 +14,17 @@ import (
 type Database interface {
 	CreateDatabase(database string, model ovsdb.DatabaseSchema) error
 	Exists(database string) bool
-	Commit(database string, id uuid.UUID, updates ovsdb.TableUpdates2) error
+	Commit(database string, id uuid.UUID, update Update) error
 	CheckIndexes(database string, table string, m model.Model) error
 	List(database, table string, conditions ...ovsdb.Condition) (map[string]model.Model, error)
 	Get(database, table string, uuid string) (model.Model, error)
+}
+
+// Update abstacts a database update in both ovsdb and model notation
+type Update interface {
+	GetUpdatedTables() []string
+	ForEachModelUpdate(table string, do func(uuid string, old, new model.Model) error) error
+	ForEachRowUpdate(table string, do func(uuid string, row ovsdb.RowUpdate2) error) error
 }
 
 type inMemoryDatabase struct {
@@ -61,14 +68,15 @@ func (db *inMemoryDatabase) Exists(name string) bool {
 	return ok
 }
 
-func (db *inMemoryDatabase) Commit(database string, id uuid.UUID, updates ovsdb.TableUpdates2) error {
+func (db *inMemoryDatabase) Commit(database string, id uuid.UUID, update Update) error {
 	if !db.Exists(database) {
 		return fmt.Errorf("db does not exist")
 	}
 	db.mutex.RLock()
 	targetDb := db.databases[database]
 	db.mutex.RUnlock()
-	return targetDb.Populate2(updates)
+
+	return targetDb.ApplyCacheUpdate(update)
 }
 
 func (db *inMemoryDatabase) CheckIndexes(database string, table string, m model.Model) error {

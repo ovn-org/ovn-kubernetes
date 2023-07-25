@@ -21,6 +21,7 @@ import (
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -348,6 +349,7 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 		Type: "router",
 		Options: map[string]string{
 			"router-port": types.RouterToSwitchPrefix + node.Name,
+			"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
 		},
 		Addresses: []string{"router"},
 	})
@@ -976,6 +978,13 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
 			DnatSnatIP:           "169.254.0.1",
 		}
+		_, clusterIPNet, err := net.ParseCIDR(clusterCIDR)
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+		config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{
+			CIDR:             clusterIPNet,
+			HostSubnetLength: 24,
+		}}
 
 		expectedClusterLBGroup = newLoadBalancerGroup(types.ClusterLBGroupName)
 		expectedSwitchLBGroup = newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
@@ -1022,7 +1031,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			EgressQoSClient:      egressQoSFakeClient,
 			EgressServiceClient:  egressServiceFakeClient,
 		}
-		var err error
 
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient}, testNode.Name)

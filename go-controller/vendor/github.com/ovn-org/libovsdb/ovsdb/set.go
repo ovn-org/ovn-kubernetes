@@ -32,7 +32,7 @@ func NewOvsSet(obj interface{}) (OvsSet, error) {
 	}
 
 	switch v.Kind() {
-	case reflect.Slice, reflect.Array:
+	case reflect.Slice:
 		for i := 0; i < v.Len(); i++ {
 			ovsSet = append(ovsSet, v.Index(i).Interface())
 		}
