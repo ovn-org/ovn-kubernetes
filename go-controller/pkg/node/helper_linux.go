@@ -59,7 +59,7 @@ func getDefaultGatewayInterfaceDetails(gwIface string, ipV4Mode, ipV6Mode bool) 
 		if intfName == "" {
 			intfName = intfIPv6Name
 		} else if (len(intfName) > 0 && len(intfIPv6Name) > 0) && intfName != intfIPv6Name {
-			return "", nil, fmt.Errorf("multiple gateway interfaces detected: %s %s", intfName, intfIPv6Name)
+			return "", nil, fmt.Errorf("multiple gateway interfaces detected: '%s' '%s'", intfName, intfIPv6Name)
 		}
 
 		// only add the GW IP if it is specified
