@@ -195,7 +195,7 @@ func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*n
 			}
 
 			logicalPort := ovntypes.RouterToSwitchPrefix + nodeName
-			if err := util.CreateMACBinding(oc.sbClient, logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
+			if err := libovsdbutil.CreateMACBinding(oc.sbClient, logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
 				return fmt.Errorf("failed to create MAC Binding for hybrid overlay: %v", err)
 			}
 
