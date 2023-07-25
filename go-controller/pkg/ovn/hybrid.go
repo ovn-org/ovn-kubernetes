@@ -112,7 +112,7 @@ func (oc *DefaultNetworkController) handleHybridOverlayPort(node *kapi.Node, ann
 			return fmt.Errorf("failed to add hybrid overlay port %+v for node %s: %v", lsp, node.Name, err)
 		}
 		for _, subnet := range subnets {
-			if err := util.UpdateNodeSwitchExcludeIPs(oc.nbClient, node.Name, subnet); err != nil {
+			if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(oc.nbClient, node.Name, subnet); err != nil {
 				return err
 			}
 		}
