@@ -209,7 +209,7 @@ func (oc *DefaultNetworkController) isPodInLocalZone(pod *kapi.Pod) (bool, error
 	if err != nil {
 		return false, err
 	}
-	return util.GetNodeZone(node) == oc.zone, nil
+	return oc.isLocalZoneNode(node), nil
 }
 
 // addGWRoutesForNamespace handles adding routes for all existing pods in namespace
@@ -581,7 +581,7 @@ func (oc *DefaultNetworkController) deletePodSNAT(nodeName string, extIPs, podIP
 	if err != nil {
 		return err
 	}
-	if util.GetNodeZone(node) != oc.zone {
+	if !oc.isLocalZoneNode(node) {
 		klog.V(4).Infof("Node %s is not in the local zone %s", nodeName, oc.zone)
 		return nil
 	}
