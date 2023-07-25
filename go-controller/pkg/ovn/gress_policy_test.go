@@ -4,8 +4,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/assert"
 
-	knet "k8s.io/api/networking/v1"
 	"testing"
+
+	knet "k8s.io/api/networking/v1"
 )
 
 func TestGetMatchFromIPBlock(t *testing.T) {
@@ -123,49 +124,145 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 
 func TestGetL4Match(t *testing.T) {
 	testcases := []struct {
-		desc     string
-		protocol string
-		port     int32
-		endPort  int32
-		expected string
+		desc        string
+		protocol    string
+		portPolices []*portPolicy
+		expected    string
 	}{
 		{
 			"unsupported protocol",
 			"kube",
-			0,
-			0,
+			[]*portPolicy{
+				{
+					protocol: "kube",
+					port:     0,
+					endPort:  0,
+				},
+			},
 			"",
 		},
 		{
-			"valid protocol with no endport specified",
-			"TCP",
-			300,
-			0,
-			"tcp && tcp.dst==300",
-		},
-		{
-			"valid protocol with endport specified",
-			"TCP",
-			300,
-			310,
-			"tcp && 300<=tcp.dst<=310",
-		},
-		{
-			"valid protocol with no ports specified",
-			"TCP",
-			0,
-			0,
+			"empty port policies",
 			"tcp",
+			[]*portPolicy{},
+			"",
+		},
+		{
+			"single tcp port",
+			"tcp",
+			[]*portPolicy{
+				{
+					protocol: "TCP",
+					port:     800,
+				},
+			},
+			"tcp && tcp.dst==800",
+		},
+		{
+			"valid individual tcp ports",
+			"tcp",
+			[]*portPolicy{
+				{
+					protocol: "TCP",
+					port:     800,
+				},
+				{
+					protocol: "TCP",
+					port:     900,
+				},
+				{
+					protocol: "TCP",
+					port:     1900,
+				},
+			},
+			"tcp && tcp.dst=={800,900,1900}",
+		},
+		{
+			"single udp port range",
+			"udp",
+			[]*portPolicy{
+				{
+					protocol: "UDP",
+					port:     800,
+					endPort:  850,
+				},
+			},
+			"udp && 800<=udp.dst<=850",
+		},
+		{
+			"valid tcp port ranges only",
+			"tcp",
+			[]*portPolicy{
+				{
+					protocol: "TCP",
+					port:     800,
+					endPort:  850,
+				},
+				{
+					protocol: "TCP",
+					port:     900,
+					endPort:  950,
+				},
+				{
+					protocol: "TCP",
+					port:     1900,
+					endPort:  2000,
+				},
+			},
+			"tcp && (800<=tcp.dst<=850 || 900<=tcp.dst<=950 || 1900<=tcp.dst<=2000)",
+		},
+		{
+			"valid udp ports and ranges",
+			"udp",
+			[]*portPolicy{
+				{
+					protocol: "UDP",
+					port:     800,
+				},
+				{
+					protocol: "UDP",
+					port:     900,
+				},
+				{
+					protocol: "UDP",
+					port:     1900,
+					endPort:  2000,
+				},
+				{
+					protocol: "UDP",
+					port:     4900,
+					endPort:  5000,
+				},
+			},
+			"udp && (udp.dst=={800,900} || 1900<=udp.dst<=2000 || 4900<=udp.dst<=5000)",
+		},
+		{
+			"just sctp",
+			"sctp",
+			[]*portPolicy{
+				{
+					protocol: "SCTP",
+				},
+			},
+			"sctp",
 		},
 	}
 
 	for _, tc := range testcases {
-		pp := &portPolicy{
-			protocol: tc.protocol,
-			port:     tc.port,
-			endPort:  tc.endPort,
+		gp := &gressPolicy{
+			policyNamespace: "default",
+			policyName:      "test-policy",
+			policyType:      "Ingress",
+			portPolicies:    tc.portPolices,
 		}
-		l4Match, _ := pp.getL4Match()
+		protocolPortsMap := gp.getProtocolPortsMap()
+		if tc.expected == "" {
+			assert.Equal(t, len(protocolPortsMap), 0)
+			continue
+		}
+		assert.Equal(t, len(protocolPortsMap), 1)
+		assert.Contains(t, protocolPortsMap, tc.protocol)
+		l4Match := getL4Match(tc.protocol, protocolPortsMap[tc.protocol])
 		assert.Equal(t, tc.expected, l4Match)
 	}
 }
