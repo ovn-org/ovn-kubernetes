@@ -39,6 +39,20 @@ const (
 	ovnNodeL3GatewayConfig = "k8s.ovn.org/l3-gateway-config"
 )
 
+const (
+	// nbdb and sbdb local socket file path and protocol string which are
+	// used by ovnkube-trace for establishing the connection when node
+	// runs on its own zone in an interconnect environment.
+	nbdbServerSock = "unix:/var/run/ovn/ovnnb_db.sock"
+	sbdbServerSock = "unix:/var/run/ovn/ovnsb_db.sock"
+	sockProtocol   = "unix"
+)
+
+const (
+	ip4 = "ip4"
+	ip6 = "ip6"
+)
+
 var (
 	level klog.Level
 )
@@ -55,13 +69,11 @@ type OvsInterface struct {
 
 // SvcInfo contains information about a service.
 type SvcInfo struct {
-	SvcName      string // The service's name
-	SvcNamespace string // The service's namespace
-	ClusterIP    string // The service's cluster IP address
-	PodName      string // The first Endpoint subset.Addresses[].TargetRef.Name that can be found (a pod name)
-	PodNamespace string // The namespace of the selected pod
-	PodIP        string // The IP address of the selected pod
-	PodPort      string // Endpoint target port used to reach the pod in PodName
+	SvcName      string   // The service's name
+	SvcNamespace string   // The service's namespace
+	ClusterIP    string   // The service's cluster IP address
+	PodInfo      *PodInfo // The endpoint pod associated with the service
+	PodPort      string   // Endpoint target port used to reach the pod in PodName
 }
 
 // NodeInfo contains node information.
@@ -80,6 +92,7 @@ type PodInfo struct {
 	NodeInfo
 	PrimaryInterfaceName string // primary pod interface name inside the pod
 	IP                   string // the primary interface's primary IP address
+	IPVer                string // the address family of the primary IP address
 	MAC                  string // the primary interface's MAC address
 	VethName             string // veth peer of the primary interface of the pod
 	OfportNum            string // ofport number of veth interface or for host net pods of ovn-k8s-mp0
@@ -87,7 +100,15 @@ type PodInfo struct {
 	PodNamespace         string // the pod's namespace
 	ContainerName        string // the pod's principal container name (the first container found atm)
 	RtosMAC              string // router to switch mac address, the L2 address of the first hop router of the pod
+	RtotsMAC             string // router to transit switch port mac address
 	HostNetwork          bool   // if this pod is host networked or not
+	IsInterConnect       bool   // indicates if the pod is running on ovn interconnect environment or not
+	InterConnectZoneName string // contains interconnect zone name of the pod's hosting node.
+	NbURI                string // pod's ovn nb db uri string
+	SbURI                string // pod's ovn sb db uri string
+	SslCertKeys          string // ssl cert keys string to access ovn nbdb/sbdb
+	NbCommand            string // contains subset of nb command string to execute on ovn nbdb
+	SbCommand            string // contains subset of sb command string to execute on ovn sbdb
 }
 
 // String returns a JSON representation of the SvcInfo object, or "" on failure.
@@ -115,16 +136,9 @@ func (si SvcInfo) getL3Ver() string {
 	return "ip6"
 }
 
-func (pi PodInfo) getL3Ver() string {
-	if net.ParseIP(pi.IP).To4() != nil {
-		return "ip4"
-	}
-	return "ip6"
-}
-
 // FullyQualifiedPodName returns the full name of the pod, <namespace>_<pod>.
 func (si *SvcInfo) FullyQualifiedPodName() string {
-	return fmt.Sprintf("%s_%s", si.PodNamespace, si.PodName)
+	return si.PodInfo.FullyQualifiedPodName()
 }
 
 // FullyQualifiedPodName returns the full name of the pod, <namespace>_<pod>.
@@ -340,7 +354,7 @@ func getPodOvsInterfaceNameAndOfport(coreclient *corev1client.CoreV1Client, rest
 }
 
 // getSvcInfo builds the SvcInfo object for this service. PodName/PodNamespace/PodIP are for the first valid endpoint pod that can be found for this service.
-func getSvcInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, svcName string, ovnNamespace string, namespace string) (svcInfo *SvcInfo, err error) {
+func getSvcInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, svcName string, ovnNamespace string, namespace, addressFamily string) (svcInfo *SvcInfo, err error) {
 	// Get service with the name supplied by svcName
 	svc, err := coreclient.Services(namespace).Get(context.TODO(), svcName, metav1.GetOptions{})
 	if err != nil {
@@ -367,7 +381,7 @@ func getSvcInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	}
 	klog.V(5).Infof("==> Got Endpoint %v for service %s in namespace %s\n", ep, svcName, namespace)
 
-	err = extractSubsetInfo(ep.Subsets, svcInfo)
+	err = extractSubsetInfo(coreclient, restconfig, ep.Subsets, svcInfo, ovnNamespace, addressFamily)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +391,7 @@ func getSvcInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 
 // extractSubsetInfo copies information from the endpoint subsets into the SvcInfo object.
 // Modifies the svcInfo object the pointer of which is passed to it.
-func extractSubsetInfo(subsets []kapi.EndpointSubset, svcInfo *SvcInfo) error {
+func extractSubsetInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, subsets []kapi.EndpointSubset, svcInfo *SvcInfo, ovnNamespace, addressFamily string) error {
 	for _, subset := range subsets {
 		klog.V(5).Infof("==> Trying to extract information for service %s in namespace %s from subset %v",
 			svcInfo.SvcName, svcInfo.SvcNamespace, subset)
@@ -410,13 +424,18 @@ func extractSubsetInfo(subsets []kapi.EndpointSubset, svcInfo *SvcInfo) error {
 				continue // with the next address
 			}
 
+			// Get info needed for the src Pod
+			svcPodInfo, err := getPodInfo(coreclient, restconfig, epAddress.TargetRef.Name, ovnNamespace, epAddress.TargetRef.Namespace, addressFamily)
+			if err != nil {
+				klog.Exitf("Failed to get information from pod %s: %v", epAddress.TargetRef.Name, err)
+			}
+			klog.V(5).Infof("svcPodInfo is %s\n", svcPodInfo)
+
 			// At this point, we should have found valid pod information + a port, so set them and return nil.
-			svcInfo.PodName = epAddress.TargetRef.Name
-			svcInfo.PodNamespace = epAddress.TargetRef.Namespace
-			svcInfo.PodIP = utilnet.ParseIPSloppy(epAddress.IP).String()
+			svcInfo.PodInfo = svcPodInfo
 			svcInfo.PodPort = podPort
-			klog.V(5).Infof("==> Got address and port information for service endpoint. podName: %s, podNamespace: %s, podIP: %s, podPort: %s",
-				svcInfo.PodName, svcInfo.PodNamespace, svcInfo.PodIP, svcInfo.PodPort)
+			klog.V(5).Infof("==> Got address and port information for service endpoint. podName: %s, podNamespace: %s, podIP: %s, podPort: %s, podNodeName: %s",
+				svcInfo.PodInfo.PodName, svcInfo.PodInfo.PodNamespace, svcInfo.PodInfo.IP, svcInfo.PodPort, svcInfo.PodInfo.NodeName)
 			return nil
 		}
 	}
@@ -425,7 +444,7 @@ func extractSubsetInfo(subsets []kapi.EndpointSubset, svcInfo *SvcInfo) error {
 }
 
 // getPodInfo returns a pointer to a fully populated PodInfo struct, or error on failure.
-func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, podName string, ovnNamespace string, namespace string, cmd string) (podInfo *PodInfo, err error) {
+func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, podName string, ovnNamespace string, namespace, addressFamily string) (podInfo *PodInfo, err error) {
 	// Create a PodInfo object with the base information already added, such as
 	// IP, PodName, ContainerName, NodeName, HostNetwork, Namespace, PrimaryInterfaceName
 	pod, err := coreclient.Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
@@ -433,8 +452,16 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 		klog.V(1).Infof("Pod %s in namespace %s not found\n", podName, namespace)
 		return nil, err
 	}
+
+	podIP, err := getDesiredPodIP(pod, addressFamily)
+	if err != nil {
+		klog.V(1).Infof("Pod %s in namespace %s doesn't have desired ip address configured\n", podName, namespace)
+		return nil, err
+	}
+
 	podInfo = &PodInfo{
-		IP:            utilnet.ParseIPSloppy(pod.Status.PodIP).String(),
+		IP:            podIP,
+		IPVer:         addressFamily,
 		PodName:       pod.Name,
 		ContainerName: pod.Spec.Containers[0].Name,
 		HostNetwork:   pod.Spec.HostNetwork,
@@ -462,17 +489,24 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 		return nil, err
 	}
 
-	// Find rtos MAC (this is the pod's first hop router).
-	lspCmd := "ovn-sbctl --no-leader-only " + cmd + " --bare --no-heading --column=mac list Port_Binding " + types.RouterToSwitchPrefix + podInfo.NodeName
-	ipOutput, ipError, err := execInPod(coreclient, restconfig, ovnNamespace, podInfo.OvnKubePodName, "ovnkube-node", lspCmd, "")
+	podInfo, err = getDatabaseURIs(coreclient, restconfig, ovnNamespace, podInfo)
 	if err != nil {
-		return nil, fmt.Errorf("execInPod() failed. err: %s, stderr: %s, stdout: %s, podInfo: %v", err, ipError, ipOutput, podInfo)
+		klog.Exitf("Failed to get database URIs: %v\n", err)
 	}
-	macIP := strings.Split(strings.Replace(ipOutput, "\n", "", -1), " ")
-	if len(macIP) != 2 {
-		return nil, fmt.Errorf("invalid output %s", ipOutput)
+
+	// Find rtos MAC (this is the pod's first hop router).
+	podInfo.RtosMAC, err = getRouterPortMacAddress(coreclient, restconfig, podInfo, ovnNamespace, types.RouterToSwitchPrefix)
+	if err != nil {
+		return nil, err
 	}
-	podInfo.RtosMAC = macIP[0]
+
+	// Find rtots MAC (this is the pod's first hop router when ovn is in interconnected zone).
+	if podInfo.IsInterConnect {
+		podInfo.RtotsMAC, err = getRouterPortMacAddress(coreclient, restconfig, podInfo, ovnNamespace, types.RouterToTransitSwitchPrefix)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// Set information specific to ovn-k8s-mp0. This info is required for routingViaHost gateway mode traffic to an external IP
 	// destination.
@@ -501,12 +535,28 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 		podInfo.OfportNum = ovsInterfaceInformation.Ofport
 	}
 
-	podInfo.NodeExternalBridgeName, err = getNodeExternalBridgeName(coreclient, restconfig, ovnNamespace, podInfo.OvnKubePodName, cmd, podInfo.NodeName)
+	podInfo.NodeExternalBridgeName, err = getNodeExternalBridgeName(coreclient, restconfig, ovnNamespace, podInfo.OvnKubePodName, podInfo.SbCommand, podInfo.NodeName)
 	if err != nil {
 		return nil, err
 	}
 
 	return podInfo, err
+}
+
+func getRouterPortMacAddress(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, podInfo *PodInfo, ovnNamespace, portPrefix string) (string, error) {
+	tspCmd := "ovn-sbctl --no-leader-only " + podInfo.SbCommand + " --bare --no-heading --column=mac list Port_Binding " + portPrefix + podInfo.NodeName
+	ipOutput, ipError, err := execInPod(coreclient, restconfig, ovnNamespace, podInfo.OvnKubePodName, "ovnkube-node", tspCmd, "")
+	if err != nil {
+		return "", fmt.Errorf("execInPod() failed. err: %s, stderr: %s, stdout: %s, podInfo: %v", err, ipError, ipOutput, podInfo)
+	}
+	// The ipOutput is with the following format: 0a:58:a8:fe:00:03 168.254.0.3/16 or
+	// 0a:58:0a:f4:02:01 10.244.2.1/24 fd00:10:244:3::1/64 for dual stack cluster.
+	// Parse the mac address from it.
+	macIP := strings.Split(strings.Replace(ipOutput, "\n", "", -1), " ")
+	if len(macIP) < 1 {
+		return "", fmt.Errorf("invalid mac ip output %s", ipOutput)
+	}
+	return macIP[0], nil
 }
 
 // getNodeExternalBridgeName gets the name of the external bridge of this node, e.g. breth0 or br-ex.
@@ -550,30 +600,23 @@ func getOvnNamespace(coreclient *corev1client.CoreV1Client, override string) (st
 
 // Get the OVN Database URIs from the first container found in any pod in the ovn-kubernetes namespace with name "ovnkube-node"
 // Returns nbAddress, sbAddress, protocol == "ssl", nil
-func getDatabaseURIs(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, ovnNamespace string) (string, string, bool, error) {
+func getDatabaseURIs(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, ovnNamespace string, podInfo *PodInfo) (*PodInfo, error) {
+	podName := podInfo.OvnKubePodName
 	containerName := "ovnkube-node"
-	var err error
-
 	found := false
-	var podName string
-
-	listOptions := metav1.ListOptions{}
-	pods, err := coreclient.Pods(ovnNamespace).List(context.TODO(), listOptions)
+	pod, err := coreclient.Pods(ovnNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
 	if err != nil {
-		return "", "", false, err
+		return nil, err
 	}
-	for _, pod := range pods.Items {
-		for _, container := range pod.Spec.Containers {
-			if container.Name == containerName {
-				found = true
-				podName = pod.Name
-				break
-			}
+	for _, container := range pod.Spec.Containers {
+		if container.Name == containerName {
+			found = true
+			break
 		}
 	}
 	if !found {
 		klog.V(5).Infof("Cannot find ovnkube pods with container %s", containerName)
-		return "", "", false, fmt.Errorf("cannot find ovnkube pods with container: %s", containerName)
+		return nil, fmt.Errorf("cannot find ovnkube pods with container: %s", containerName)
 	}
 	klog.V(5).Infof("Found pod '%s' with container '%s'", podName, containerName)
 
@@ -581,29 +624,64 @@ func getDatabaseURIs(coreclient *corev1client.CoreV1Client, restconfig *rest.Con
 	hostOutput, hostError, err := execInPod(coreclient, restconfig, ovnNamespace, podName, containerName, psCmd, "")
 	if err != nil {
 		klog.V(5).Infof("execInPod('%s') failed with err: '%s', stderr: '%s', stdout: '%s', Pod Name '%s' \n", psCmd, err, hostError, hostOutput, podName)
-		return "", "", false, err
+		return nil, err
 	}
-
+	podInfo.IsInterConnect = len(regexp.MustCompile("--enable-interconnect").FindString(hostOutput)) > 0
+	if podInfo.IsInterConnect {
+		// When interconnect is enabled, then retrieve its zone name from psCmd output.
+		// The psCmd output contains zone string like below:
+		// ... --enable-interconnect --zone ovn-worker2 ...
+		re := regexp.MustCompile(`--zone(=| )[^\s]+`)
+		res := re.FindString(hostOutput)
+		if len(res) > 6 {
+			podInfo.InterConnectZoneName = strings.TrimSpace(res[6:])
+		}
+	}
 	re := regexp.MustCompile(`--nb-address(=| )[^\s]+`)
-	nbAddress := strings.Replace(
-		re.FindString(hostOutput)[13:],
-		"://",
-		":",
-		-1)
+	nbAddress := re.FindString(hostOutput)
+	if len(nbAddress) > 13 {
+		nbAddress = strings.Replace(
+			re.FindString(hostOutput)[13:],
+			"://",
+			":",
+			-1)
+	} else {
+		nbAddress = nbdbServerSock
+	}
 	re = regexp.MustCompile(`--sb-address(=| )[^\s]+`)
-	sbAddress := strings.Replace(
-		re.FindString(hostOutput)[13:],
-		"://",
-		":",
-		-1)
-	re = regexp.MustCompile(`(ssl|tcp)`)
+	sbAddress := re.FindString(hostOutput)
+	if len(sbAddress) > 13 {
+		sbAddress = strings.Replace(
+			re.FindString(hostOutput)[13:],
+			"://",
+			":",
+			-1)
+	} else {
+		sbAddress = sbdbServerSock
+	}
+	re = regexp.MustCompile(`(ssl|tcp|unix)`)
 	protocol := re.FindString(nbAddress)
 
 	klog.V(5).Infof("Nb address for OVN database communication is %s", nbAddress)
 	klog.V(5).Infof("Sb address for OVN database communication is %s", sbAddress)
 	klog.V(5).Infof("Protocol for OVN database communication is %s", protocol)
+	if podInfo.IsInterConnect {
+		klog.V(5).Infof("The pod %s's interconnect zone name is %s", podInfo.OvnKubePodName,
+			podInfo.InterConnectZoneName)
+	}
+	podInfo.NbURI = nbAddress
+	podInfo.SbURI = sbAddress
+	if protocol == "ssl" {
+		podInfo.SslCertKeys = "-p /ovn-cert/tls.key -c /ovn-cert/tls.crt -C /ovn-ca/ca-bundle.crt "
+	} else {
+		podInfo.SslCertKeys = " "
+	}
+	podInfo.NbCommand = podInfo.SslCertKeys + "--db " + podInfo.NbURI
+	klog.V(5).Infof("The nbcmd of pod %s is %s", podInfo.OvnKubePodName, podInfo.NbCommand)
+	podInfo.SbCommand = podInfo.SslCertKeys + "--db " + podInfo.SbURI
+	klog.V(5).Infof("The sbcmd of pod %s is %s", podInfo.OvnKubePodName, podInfo.SbCommand)
 
-	return nbAddress, sbAddress, protocol == "ssl", nil
+	return podInfo, nil
 }
 
 // printSuccessOrFailure will print a success or failure message. If searchString is set, then we expect to find a match for the
@@ -638,54 +716,65 @@ func printSuccessOrFailure(commandDescription, src, dst, commandStdout, commandS
 }
 
 // runOvnTraceToService runs an ovntrace from src pod to dst service. If dstSvcInfo == nil, then skip all steps.
-func runOvnTraceToService(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, srcPodInfo *PodInfo, dstSvcInfo *SvcInfo, sbcmd, ovnNamespace, protocol, dstPort string) {
+func runOvnTraceToService(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, srcPodInfo *PodInfo, dstSvcInfo *SvcInfo, ovnNamespace, protocol, dstPort string) {
 	var inport string
 	inport = srcPodInfo.FullyQualifiedPodName()
 	if srcPodInfo.HostNetwork {
 		inport = srcPodInfo.K8sNodeNamePort
 	}
+	svcL3Ver := dstSvcInfo.getL3Ver()
+	if srcPodInfo.IPVer != svcL3Ver {
+		klog.Exitf("Pod src IP address family (address: %s) and service IP address family (address: %s) do not match",
+			srcPodInfo.IP, dstSvcInfo.ClusterIP)
+	}
 	cmd := fmt.Sprintf(`ovn-trace --no-leader-only %[1]s %[2]s --ct=new `+
 		`'inport=="%[3]s" && eth.src==%[4]s && eth.dst==%[5]s && %[6]s.src==%[7]s && %[8]s.dst==%[9]s && ip.ttl==64 && %[10]s.dst==%[11]s && %[10]s.src==52888' --lb-dst %[12]s:%[13]s`,
-		sbcmd,                 // 1
+		srcPodInfo.SbCommand,  // 1
 		srcPodInfo.NodeName,   // 2
 		inport,                // 3
 		srcPodInfo.MAC,        // 4
 		srcPodInfo.RtosMAC,    // 5
-		srcPodInfo.getL3Ver(), // 6
+		srcPodInfo.IPVer,      // 6
 		srcPodInfo.IP,         // 7
-		dstSvcInfo.getL3Ver(), // 8
+		svcL3Ver,              // 8
 		dstSvcInfo.ClusterIP,  // 9
 		protocol,              // 10
 		dstPort,               // 11
-		dstSvcInfo.PodIP,      // 12
+		dstSvcInfo.PodInfo.IP, // 12
 		dstSvcInfo.PodPort,    // 13
 	)
 	klog.V(4).Infof("ovn-trace command from src to service clusterIP is %s", cmd)
 
 	ovnSrcDstOut, ovnSrcDstErr, err := execInPod(coreclient, restconfig, ovnNamespace, srcPodInfo.OvnKubePodName, "ovnkube-node", cmd, "")
-	successString := fmt.Sprintf(`output to "%s"`, dstSvcInfo.FullyQualifiedPodName())
-	printSuccessOrFailure("ovn-trace from source pod to service clusterIP", srcPodInfo.PodName, dstSvcInfo.SvcName, ovnSrcDstOut, ovnSrcDstErr, err, successString)
+	var successString string
+	if !srcPodInfo.IsInterConnect || podsInSameInterconnectZone(srcPodInfo, dstSvcInfo.PodInfo) {
+		successString = fmt.Sprintf(`output to "%s"`, dstSvcInfo.FullyQualifiedPodName())
+	} else {
+		successString = fmt.Sprintf(`output to "tstor-%s"`, dstSvcInfo.PodInfo.NodeName)
+	}
+	direction := "source pod to service clusterIP"
+	printSuccessOrFailure("ovn-trace "+direction, srcPodInfo.PodName, dstSvcInfo.SvcName, ovnSrcDstOut, ovnSrcDstErr, err, successString)
+	runOvnTraceToRemotePod(coreclient, restconfig, direction, srcPodInfo, dstSvcInfo.PodInfo, ovnNamespace, protocol, dstPort)
+
 }
 
 // runOvnTraceToIP runs an ovntrace from src pod to dst IP address (should be external to the cluster).
 // Returns the node that the trace will exit on.
-func runOvnTraceToIP(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, srcPodInfo *PodInfo, parsedDstIP net.IP, sbcmd, ovnNamespace, protocol, dstPort string) (string, string) {
+func runOvnTraceToIP(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, srcPodInfo *PodInfo, parsedDstIP net.IP, ovnNamespace, protocol, dstPort string) (string, string) {
 	if srcPodInfo.HostNetwork {
 		klog.Exitf("Pod cannot be on Host Network when tracing to an IP address; use ping\n")
 	}
 
-	l3ver := "ip6"
-	if parsedDstIP.To4() != nil {
-		l3ver = "ip4"
-	}
-	if srcPodInfo.getL3Ver() != l3ver {
+	l3ver := getIPVer(parsedDstIP)
+
+	if srcPodInfo.IPVer != l3ver {
 		klog.Exitf("Pod src IP address family (address: %s) and destination IP address family (address: %s) do not match",
 			srcPodInfo.IP, parsedDstIP)
 	}
 
 	cmd := fmt.Sprintf(`ovn-trace --no-leader-only %[1]s %[2]s `+
 		`'inport=="%[3]s" && eth.src==%[4]s && eth.dst==%[5]s && %[6]s.src==%[7]s && %[8]s.dst==%[9]s && ip.ttl==64 && %[10]s.dst==%[11]s && %[10]s.src==52888'`,
-		sbcmd,                              // 1
+		srcPodInfo.SbCommand,               // 1
 		srcPodInfo.NodeName,                // 2
 		srcPodInfo.FullyQualifiedPodName(), // 3
 		srcPodInfo.MAC,                     // 4
@@ -702,7 +791,8 @@ func runOvnTraceToIP(coreclient *corev1client.CoreV1Client, restconfig *rest.Con
 	// This is different depending on:
 	// a) if this is routingViaHost gateway mode, output to "k8s-<nodename>"
 	// b) for routingViaHost gateway egressip and routingViaOVN gateway mode, go out of <bridge name>_<node name>
-	successString := fmt.Sprintf(`output to "(.*)_(.*)", type "localnet"|output to "k8s-%s"`, srcPodInfo.NodeName)
+	// c) when interconnect enabled and egressip available for the pod, then go out of tstor-<egress-node> with type "remote".
+	successString := fmt.Sprintf(`output to "(.*)_(.*)", type "localnet"|output to "k8s-%s"|remote`, srcPodInfo.NodeName)
 	// Run the command and check if succesString was found.
 	ovnSrcDstOut, ovnSrcDstErr, err := execInPod(coreclient, restconfig, ovnNamespace, srcPodInfo.OvnKubePodName, "ovnkube-node", cmd, "")
 	printSuccessOrFailure("ovn-trace from pod to IP", srcPodInfo.PodName, parsedDstIP.String(), ovnSrcDstOut, ovnSrcDstErr, err, successString)
@@ -728,8 +818,18 @@ func runOvnTraceToIP(coreclient *corev1client.CoreV1Client, restconfig *rest.Con
 		return string(node), string(bridgeName)
 	}
 
+	// Try to find egress node name when ovnSrcDstOut contains "output to tstor-<egress-node>"".
+	nodeNameRegex := `output to "tstor-(.*)",`
+	re = regexp.MustCompile(nodeNameRegex)
+	subMatches = re.FindSubmatch([]byte(ovnSrcDstOut))
+	if len(subMatches) > 1 {
+		node := subMatches[len(subMatches)-1]
+		klog.V(1).Infof("%sout on node %s%s\n", green, node, reset)
+		return string(node), ""
+	}
+
 	klog.V(5).Infof("Could not find SNAT for this trace command, this must be routingViaHost gateway mode without EgressIP.")
-	nodeNameRegex := `output to "k8s-(.*)",`
+	nodeNameRegex = `output to "k8s-(.*)",`
 	re = regexp.MustCompile(nodeNameRegex)
 	subMatches = re.FindSubmatch([]byte(ovnSrcDstOut))
 	if len(subMatches) < 2 {
@@ -741,7 +841,7 @@ func runOvnTraceToIP(coreclient *corev1client.CoreV1Client, restconfig *rest.Con
 }
 
 // runOvnTraceToPod runs an ovntrace from src pod to dst pod.
-func runOvnTraceToPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, direction string, srcPodInfo, dstPodInfo *PodInfo, sbcmd, ovnNamespace, protocol, dstPort string) {
+func runOvnTraceToPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, direction string, srcPodInfo, dstPodInfo *PodInfo, ovnNamespace, protocol, dstPort string) {
 	var inport string
 	inport = srcPodInfo.FullyQualifiedPodName()
 	if srcPodInfo.HostNetwork {
@@ -749,17 +849,17 @@ func runOvnTraceToPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Co
 	}
 	cmd := fmt.Sprintf(`ovn-trace --no-leader-only %[1]s %[2]s `+
 		`'inport=="%[3]s" && eth.src==%[4]s && eth.dst==%[5]s && %[6]s.src==%[7]s && %[8]s.dst==%[9]s && ip.ttl==64 && %[10]s.dst==%[11]s && %[10]s.src==52888'`,
-		sbcmd,                 // 1
-		srcPodInfo.NodeName,   // 2
-		inport,                // 3
-		srcPodInfo.MAC,        // 4
-		srcPodInfo.RtosMAC,    // 5
-		srcPodInfo.getL3Ver(), // 6
-		srcPodInfo.IP,         // 7
-		dstPodInfo.getL3Ver(), // 8
-		dstPodInfo.IP,         // 9
-		protocol,              // 10
-		dstPort,               // 11
+		srcPodInfo.SbCommand, // 1
+		srcPodInfo.NodeName,  // 2
+		inport,               // 3
+		srcPodInfo.MAC,       // 4
+		srcPodInfo.RtosMAC,   // 5
+		srcPodInfo.IPVer,     // 6
+		srcPodInfo.IP,        // 7
+		dstPodInfo.IPVer,     // 8
+		dstPodInfo.IP,        // 9
+		protocol,             // 10
+		dstPort,              // 11
 	)
 	klog.V(4).Infof("ovn-trace command from %s is %s", direction, cmd)
 
@@ -773,11 +873,42 @@ func runOvnTraceToPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Co
 		} else {
 			successString = fmt.Sprintf(`output to "%s_%s"`, srcPodInfo.NodeExternalBridgeName, srcPodInfo.NodeName)
 		}
-	} else {
+	} else if !srcPodInfo.IsInterConnect || podsInSameInterconnectZone(srcPodInfo, dstPodInfo) {
 		successString = fmt.Sprintf(`output to "%s"`, dstPodInfo.FullyQualifiedPodName())
+	} else {
+		successString = fmt.Sprintf(`output to "tstor-%s"`, dstPodInfo.NodeName)
 	}
 	ovnSrcDstOut, ovnSrcDstErr, err := execInPod(coreclient, restconfig, ovnNamespace, srcPodInfo.OvnKubePodName, "ovnkube-node", cmd, "")
 	printSuccessOrFailure("ovn-trace "+direction, srcPodInfo.PodName, dstPodInfo.PodName, ovnSrcDstOut, ovnSrcDstErr, err, successString)
+	runOvnTraceToRemotePod(coreclient, restconfig, direction, srcPodInfo, dstPodInfo, ovnNamespace, protocol, dstPort)
+}
+
+func runOvnTraceToRemotePod(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, direction string, srcPodInfo, dstPodInfo *PodInfo, ovnNamespace, protocol, dstPort string) {
+	if dstPodInfo.HostNetwork || !srcPodInfo.IsInterConnect || podsInSameInterconnectZone(srcPodInfo, dstPodInfo) {
+		return
+	}
+	cmd := fmt.Sprintf(`ovn-trace --no-leader-only %[1]s `+
+		`'inport=="%[2]s" && eth.src==%[3]s && eth.dst==%[4]s && %[5]s.src==%[6]s && %[7]s.dst==%[8]s && ip.ttl==64 && %[9]s.dst==%[10]s && %[9]s.src==52888'`,
+		dstPodInfo.SbCommand, // 1
+		types.TransitSwitchToRouterPrefix+srcPodInfo.NodeName, // 2
+		srcPodInfo.MAC,      // 3
+		dstPodInfo.RtotsMAC, // 4
+		srcPodInfo.IPVer,    // 5
+		srcPodInfo.IP,       // 6
+		dstPodInfo.IPVer,    // 7
+		dstPodInfo.IP,       // 8
+		protocol,            // 9
+		dstPort,             // 10
+	)
+	klog.V(4).Infof("ovn-trace command on destination pod node is %s", cmd)
+	successString := fmt.Sprintf(`output to "%s"`, dstPodInfo.FullyQualifiedPodName())
+	ovnSrcDstOut, ovnSrcDstErr, err := execInPod(coreclient, restconfig, ovnNamespace, dstPodInfo.OvnKubePodName, "ovnkube-node", cmd, "")
+	printSuccessOrFailure("ovn-trace (remote) "+direction, srcPodInfo.PodName, dstPodInfo.PodName, ovnSrcDstOut, ovnSrcDstErr, err, successString)
+}
+
+func podsInSameInterconnectZone(srcPodInfo, dstPodInfo *PodInfo) bool {
+	return srcPodInfo.IsInterConnect && dstPodInfo.IsInterConnect &&
+		srcPodInfo.InterConnectZoneName == dstPodInfo.InterConnectZoneName
 }
 
 // runOfprotoTraceToPod runs an ofproto/trace command from the src to the destination pod.
@@ -930,9 +1061,9 @@ func verifyDependency(coreclient *corev1client.CoreV1Client, restconfig *rest.Co
 // runOvnDetrace runs an ovn-detrace command for the given input.
 // Returns error if dependencies are not met (allows for graceful handling of those issues).
 func runOvnDetrace(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, direction string, srcPodInfo *PodInfo,
-	dstName string, appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys, nbcmd string) error {
+	dstName string, appSrcDstOut, ovnNamespace string) error {
 	// If NBDB connectivity is not available do not run ovn-detrace.
-	if _, stdErr, err := execInPod(coreclient, restconfig, ovnNamespace, srcPodInfo.OvnKubePodName, "ovnkube-node", fmt.Sprintf("ovn-nbctl %s get-connection", nbcmd), ""); err != nil {
+	if _, stdErr, err := execInPod(coreclient, restconfig, ovnNamespace, srcPodInfo.OvnKubePodName, "ovnkube-node", fmt.Sprintf("ovn-nbctl %s get-connection", srcPodInfo.NbCommand), ""); err != nil {
 		return fmt.Errorf("nbdb is not available %q", stdErr)
 	}
 	// If dependencies aren't satisfied do not run ovn-detrace.
@@ -941,9 +1072,9 @@ func runOvnDetrace(coreclient *corev1client.CoreV1Client, restconfig *rest.Confi
 	}
 
 	cmd := fmt.Sprintf(`ovn-detrace --ovnnb=%[1]s --ovnsb=%[2]s %[3]s --ovsdb=unix:/var/run/openvswitch/db.sock`,
-		nbURI,       // 1
-		sbURI,       // 2
-		sslCertKeys, // 3
+		srcPodInfo.NbURI,       // 1
+		srcPodInfo.SbURI,       // 2
+		srcPodInfo.SslCertKeys, // 3
 	)
 	klog.V(4).Infof("ovn-detrace command from %s is %s", direction, cmd)
 
@@ -998,6 +1129,23 @@ func displayNodeInfo(coreclient *corev1client.CoreV1Client) {
 	}
 }
 
+func getDesiredPodIP(pod *kapi.Pod, addressFamily string) (string, error) {
+	for _, podIP := range pod.Status.PodIPs {
+		ip := utilnet.ParseIPSloppy(podIP.IP)
+		if getIPVer(ip) == addressFamily {
+			return ip.String(), nil
+		}
+	}
+	return "", fmt.Errorf("could not find desired pod ip address for the given address family")
+}
+
+func getIPVer(ip net.IP) string {
+	if ip.To4() != nil {
+		return ip4
+	}
+	return ip6
+}
+
 // setLogLevel sets the log level for this application.
 func setLogLevel(loglevel string) {
 	klog.InitFlags(nil)
@@ -1026,6 +1174,7 @@ func main() {
 	dstPort := flag.String("dst-port", "80", "dst-port: destination port")
 	tcp := flag.Bool("tcp", false, "use tcp transport protocol")
 	udp := flag.Bool("udp", false, "use udp transport protocol")
+	addressFamily := flag.String("addr-family", ip4, "Address family (ip4 or ip6) to be used for tracing")
 	skipOvnDetrace := flag.Bool("skip-detrace", false, "skip ovn-detrace command")
 	loglevel := flag.String("loglevel", "0", "loglevel: klog level")
 	flag.Parse()
@@ -1113,24 +1262,8 @@ func main() {
 		displayNodeInfo(coreclient)
 	}
 
-	// Common ssl parameters
-	var sslCertKeys string
-	nbURI, sbURI, useSSL, err := getDatabaseURIs(coreclient, restconfig, ovnNamespace)
-	if err != nil {
-		klog.Exitf("Failed to get database URIs: %v\n", err)
-	}
-	if useSSL {
-		sslCertKeys = "-p /ovn-cert/tls.key -c /ovn-cert/tls.crt -C /ovn-ca/ca-bundle.crt "
-	} else {
-		sslCertKeys = " "
-	}
-	nbcmd := sslCertKeys + "--db " + nbURI
-	klog.V(5).Infof("The nbcmd is %s", nbcmd)
-	sbcmd := sslCertKeys + "--db " + sbURI
-	klog.V(5).Infof("The sbcmd is %s", sbcmd)
-
 	// Get info needed for the src Pod
-	srcPodInfo, err := getPodInfo(coreclient, restconfig, *srcPodName, ovnNamespace, *srcNamespace, sbcmd)
+	srcPodInfo, err := getPodInfo(coreclient, restconfig, *srcPodName, ovnNamespace, *srcNamespace, *addressFamily)
 	if err != nil {
 		klog.Exitf("Failed to get information from pod %s: %v", *srcPodName, err)
 	}
@@ -1139,12 +1272,12 @@ func main() {
 	// 1) Either run a trace from source pod to destination IP and return ...
 	if parsedDstIP != nil {
 		klog.V(5).Infof("Running a trace to an IP address")
-		egressNodeName, egressBridgeName := runOvnTraceToIP(coreclient, restconfig, srcPodInfo, parsedDstIP, sbcmd, ovnNamespace, protocol, *dstPort)
+		egressNodeName, egressBridgeName := runOvnTraceToIP(coreclient, restconfig, srcPodInfo, parsedDstIP, ovnNamespace, protocol, *dstPort)
 		appSrcDstOut := runOfprotoTraceToIP(coreclient, restconfig, srcPodInfo, parsedDstIP, ovnNamespace, protocol, *dstPort, egressNodeName, egressBridgeName)
 		if *skipOvnDetrace {
 			return
 		}
-		err = runOvnDetrace(coreclient, restconfig, "pod to external IP", srcPodInfo, parsedDstIP.String(), appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys, nbcmd)
+		err = runOvnDetrace(coreclient, restconfig, "pod to external IP", srcPodInfo, parsedDstIP.String(), appSrcDstOut, ovnNamespace)
 		if err != nil {
 			klog.Infof("Skipped ovn-detrace due to: %q", err)
 		}
@@ -1157,18 +1290,18 @@ func main() {
 	var dstSvcInfo *SvcInfo
 	if *dstSvcName != "" {
 		// Get dst service
-		dstSvcInfo, err = getSvcInfo(coreclient, restconfig, *dstSvcName, ovnNamespace, *dstNamespace)
+		dstSvcInfo, err = getSvcInfo(coreclient, restconfig, *dstSvcName, ovnNamespace, *dstNamespace, *addressFamily)
 		if err != nil {
 			klog.Exitf("Failed to get information from service %s: %v", *dstSvcName, err)
 		}
 		klog.V(5).Infof("dstSvcInfo is %s\n", dstSvcInfo)
 		// Set dst pod name, we'll use this to run through pod-pod tests as if use supplied this pod
-		*dstPodName = dstSvcInfo.PodName
-		klog.V(1).Infof("Using pod %s in service %s to test against", dstSvcInfo.PodName, *dstSvcName)
+		*dstPodName = dstSvcInfo.PodInfo.PodName
+		klog.V(1).Infof("Using pod %s in service %s to test against", dstSvcInfo.PodInfo.PodName, *dstSvcName)
 	}
 
 	// Now get info needed for the dst Pod
-	dstPodInfo, err := getPodInfo(coreclient, restconfig, *dstPodName, ovnNamespace, *dstNamespace, sbcmd)
+	dstPodInfo, err := getPodInfo(coreclient, restconfig, *dstPodName, ovnNamespace, *dstNamespace, *addressFamily)
 	if err != nil {
 		klog.Exitf("Failed to get information from pod %s: %v", *dstPodName, err)
 	}
@@ -1181,10 +1314,10 @@ func main() {
 
 	// ovn-trace commands
 	if dstSvcInfo != nil {
-		runOvnTraceToService(coreclient, restconfig, srcPodInfo, dstSvcInfo, sbcmd, ovnNamespace, protocol, *dstPort)
+		runOvnTraceToService(coreclient, restconfig, srcPodInfo, dstSvcInfo, ovnNamespace, protocol, *dstPort)
 	}
-	runOvnTraceToPod(coreclient, restconfig, "source pod to destination pod", srcPodInfo, dstPodInfo, sbcmd, ovnNamespace, protocol, *dstPort)
-	runOvnTraceToPod(coreclient, restconfig, "destination pod to source pod", dstPodInfo, srcPodInfo, sbcmd, ovnNamespace, protocol, *dstPort)
+	runOvnTraceToPod(coreclient, restconfig, "source pod to destination pod", srcPodInfo, dstPodInfo, ovnNamespace, protocol, *dstPort)
+	runOvnTraceToPod(coreclient, restconfig, "destination pod to source pod", dstPodInfo, srcPodInfo, ovnNamespace, protocol, *dstPort)
 
 	// ovs-appctl ofproto/trace commands
 	appSrcDstOut := runOfprotoTraceToPod(coreclient, restconfig, "source pod to destination pod", srcPodInfo, dstPodInfo, ovnNamespace, protocol, *dstPort)
@@ -1194,12 +1327,12 @@ func main() {
 	if *skipOvnDetrace {
 		return
 	}
-	err = runOvnDetrace(coreclient, restconfig, "source pod to destination pod", srcPodInfo, dstPodInfo.PodName, appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys, nbcmd)
+	err = runOvnDetrace(coreclient, restconfig, "source pod to destination pod", srcPodInfo, dstPodInfo.PodName, appSrcDstOut, ovnNamespace)
 	if err != nil {
 		klog.Infof("Skipped ovn-detrace due to: %q", err)
 		return
 	}
-	err = runOvnDetrace(coreclient, restconfig, "destination pod to source pod", dstPodInfo, srcPodInfo.PodName, appDstSrcOut, ovnNamespace, nbURI, sbURI, sslCertKeys, nbcmd)
+	err = runOvnDetrace(coreclient, restconfig, "destination pod to source pod", dstPodInfo, srcPodInfo.PodName, appDstSrcOut, ovnNamespace)
 	if err != nil {
 		klog.Infof("Skipped ovn-detrace due to: %q", err)
 		return
