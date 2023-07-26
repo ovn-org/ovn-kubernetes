@@ -43,7 +43,8 @@ const (
 	// 5ms, 10ms, 20ms, 40ms, 80ms, 160ms, 320ms, 640ms, 1.3s, 2.6s, 5.1s, 10.2s, 20.4s, 41s, 82s
 	maxRetries = 15
 
-	controllerName = "ovn-lb-controller"
+	controllerName     = "ovn-lb-controller"
+	nodeControllerName = "node-tracker-controller"
 )
 
 var NoServiceLabelError = fmt.Errorf("endpointSlice missing %s label", discovery.LabelServiceName)
@@ -67,10 +68,8 @@ func NewController(client clientset.Interface,
 		nodeIPv6Templates:     NewNodeIPsTemplates(v1.IPv6Protocol),
 		serviceInformer:       serviceInformer,
 		serviceLister:         serviceInformer.Lister(),
-		servicesSynced:        serviceInformer.Informer().HasSynced,
 		endpointSliceInformer: endpointSliceInformer,
 		endpointSliceLister:   endpointSliceInformer.Lister(),
-		endpointSlicesSynced:  endpointSliceInformer.Informer().HasSynced,
 		eventRecorder:         recorder,
 		repair:                newRepair(serviceInformer.Lister(), nbClient),
 		nodeInformer:          nodeInformer,
@@ -102,17 +101,11 @@ type Controller struct {
 	serviceInformer coreinformers.ServiceInformer
 	// serviceLister is able to list/get services and is populated by the shared informer passed to
 	serviceLister corelisters.ServiceLister
-	// servicesSynced returns true if the service shared informer has been synced at least once.
-	servicesSynced cache.InformerSynced
 
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer
 	// endpointSliceLister is able to list/get endpoint slices and is populated
 	// by the shared informer passed to NewController
 	endpointSliceLister discoverylisters.EndpointSliceLister
-	// endpointSlicesSynced returns true if the endpoint slice shared informer
-	// has been synced at least once. Added as a member to the struct to allow
-	// injection for testing.
-	endpointSlicesSynced cache.InformerSynced
 
 	nodesSynced cache.InformerSynced
 
@@ -170,8 +163,18 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	klog.Infof("Starting controller %s", controllerName)
 	defer klog.Infof("Shutting down controller %s", controllerName)
 
+	nodeHandler, err := c.nodeTracker.Start(c.nodeInformer)
+	if err != nil {
+		return err
+	}
+	// We need node cache to be synced first, as we rely on it to properly reprogram initial per node load balancers
+	klog.Info("Waiting for node tracker caches to sync")
+	if !util.WaitForNamedCacheSyncWithTimeout(nodeControllerName, stopCh, nodeHandler.HasSynced) {
+		return fmt.Errorf("error syncing cache")
+	}
+
 	klog.Info("Setting up event handlers for services")
-	_, err := c.serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	svcHandler, err := c.serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onServiceAdd,
 		UpdateFunc: c.onServiceUpdate,
 		DeleteFunc: c.onServiceDelete,
@@ -181,7 +184,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	}
 
 	klog.Info("Setting up event handlers for endpoint slices")
-	_, err = c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	endpointHandler, err := c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onEndpointSliceAdd,
 		UpdateFunc: c.onEndpointSliceUpdate,
 		DeleteFunc: c.onEndpointSliceDelete,
@@ -190,14 +193,9 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		return err
 	}
 
-	err = c.nodeTracker.Start(c.nodeInformer)
-	if err != nil {
-		return err
-	}
-
 	// Wait for the caches to be synced
-	klog.Info("Waiting for informer caches to sync")
-	if !util.WaitForNamedCacheSyncWithTimeout(controllerName, stopCh, c.servicesSynced, c.endpointSlicesSynced, c.nodesSynced) {
+	klog.Info("Waiting for service and endpoint caches to sync")
+	if !util.WaitForNamedCacheSyncWithTimeout(controllerName, stopCh, svcHandler.HasSynced, endpointHandler.HasSynced) {
 		return fmt.Errorf("error syncing cache")
 	}
 

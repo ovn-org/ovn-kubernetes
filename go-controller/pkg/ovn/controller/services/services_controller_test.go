@@ -85,8 +85,6 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 
-	controller.servicesSynced = alwaysReady
-	controller.endpointSlicesSynced = alwaysReady
 	controller.initTopLevelCache()
 	controller.useLBGroups = true
 	controller.useTemplates = true
