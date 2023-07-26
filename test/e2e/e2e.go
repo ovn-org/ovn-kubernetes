@@ -2488,7 +2488,8 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 		}
 
 		// start the first container that will act as an external gateway
-		_, err := runCommand(containerRuntime, "run", "-itd", "--privileged", "--network", externalContainerNetwork, "--name", gwContainer, "centos/tools")
+		_, err := runCommand(containerRuntime, "run", "-itd", "--privileged", "--network", externalContainerNetwork,
+			"--name", gwContainer, agnhostImage)
 		if err != nil {
 			framework.Failf("failed to start external gateway test container %s: %v", gwContainer, err)
 		}
