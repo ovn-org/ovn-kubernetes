@@ -9,6 +9,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -75,7 +76,7 @@ func NewController(client clientset.Interface,
 		nodeInformer:          nodeInformer,
 		nodesSynced:           nodeInformer.Informer().HasSynced,
 	}
-	zone, err := util.GetNBZone(c.nbClient)
+	zone, err := libovsdbutil.GetNBZone(c.nbClient)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get the NB Zone : err - %w", err)
 	}

@@ -3,7 +3,7 @@ package kubevirt
 import (
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	ktypes "k8s.io/apimachinery/pkg/types"
 )
 

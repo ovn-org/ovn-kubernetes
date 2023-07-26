@@ -23,7 +23,8 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
@@ -605,7 +606,7 @@ func (bnc *BaseNetworkController) assignPodAddresses(switchName string) (net.Har
 // Given a logical switch port and the switch on which it is scheduled, get all
 // addresses currently assigned to it including subnet masks.
 func (bnc *BaseNetworkController) getPortAddresses(switchName string, existingLSP *nbdb.LogicalSwitchPort) (net.HardwareAddr, []*net.IPNet, error) {
-	podMac, podIPs, err := util.ExtractPortAddresses(existingLSP)
+	podMac, podIPs, err := libovsdbutil.ExtractPortAddresses(existingLSP)
 	if err != nil {
 		return nil, nil, err
 	} else if podMac == nil || len(podIPs) == 0 {
