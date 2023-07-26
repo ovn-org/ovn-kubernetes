@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -244,7 +245,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *kapi.Pod, dpuCD *util.DPU
 	// be part of healthcheck.
 	ifInfo.NetdevName = vfRepName
 	klog.Infof("Adding VF representor %s for %s", vfRepName, podDesc)
-	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, getter)
+	err = cni.ConfigureOVS(bnnc.vsClient, context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, getter)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
@@ -285,16 +286,21 @@ func (bnnc *BaseNodeNetworkController) delRepPort(pod *kapi.Pod, dpuCD *util.DPU
 	//TODO(adrianc): handle: clearPodBandwidth(pr.SandboxID), pr.deletePodConntrack()
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
 	klog.Infof("Delete VF representor %s for %s", vfRepName, podDesc)
-	ifExists, sandbox, expectedNADName, err := util.GetOVSPortPodInfo(vfRepName)
+
+	found, err := libovsdbops.FindInterfaceByName(bnnc.vsClient, vfRepName)
 	if err != nil {
-		return fmt.Errorf(err.Error())
-	}
-	if !ifExists {
 		klog.Infof("VF representor %s for %s is not an OVS interface, nothing to do", vfRepName, podDesc)
 		return nil
 	}
+
+	sandbox := found.ExternalIDs["sandbox"]
 	if sandbox != dpuCD.SandboxId {
 		return fmt.Errorf("OVS port %s was added for sandbox (%s), expecting (%s)", vfRepName, sandbox, dpuCD.SandboxId)
+	}
+	expectedNADName := found.ExternalIDs[types.NADExternalID]
+	// if network_name does not exists, it is default network
+	if expectedNADName == "" {
+		expectedNADName = types.DefaultNetworkName
 	}
 	if expectedNADName != nadName {
 		return fmt.Errorf("OVS port %s was added for NAD (%s), expecting (%s)", vfRepName, expectedNADName, nadName)
@@ -311,8 +317,8 @@ func (bnnc *BaseNodeNetworkController) delRepPort(pod *kapi.Pod, dpuCD *util.DPU
 
 	// remove from br-int
 	return wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
-		_, _, err := util.RunOVSVsctl("--if-exists", "del-port", "br-int", vfRepName)
-		if err != nil {
+		if err := libovsdbops.DeletePort(bnnc.vsClient, "br-int", vfRepName); err != nil {
+			klog.Warningf("Failed to delete OVS port %q from br-int: %v", vfRepName, err)
 			return false, nil
 		}
 		klog.Infof("Port %s deleted from bridge br-int", vfRepName)
