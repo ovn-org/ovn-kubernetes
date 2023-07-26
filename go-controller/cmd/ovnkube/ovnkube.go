@@ -319,7 +319,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	case runMode.clusterManager:
 		metrics.RegisterClusterManagerBase()
 		haConfig = &config.ClusterMgrHA
-		name = "ovn-kubernetes-cluster-manager"
+		name = "ovn-kubernetes-master"
 	}
 
 	// Set up leader election process. Use lease resource lock as configmap and
