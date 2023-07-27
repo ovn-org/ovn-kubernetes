@@ -668,6 +668,11 @@ var CommonFlags = []cli.Flag{
 		Usage: "initialize ovnkube-controller (but not cluster-manager), requires the hostname as argument",
 	},
 	&cli.StringFlag{
+		Name: "init-ovnkube-controller-with-node",
+		Usage: "initialize ovnkube-controller and node (but not cluster-manager), requires the hostname " +
+			"that should equal the name that node is registered with in kubernetes cluster as argument",
+	},
+	&cli.StringFlag{
 		Name:  "init-node",
 		Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
 	},
