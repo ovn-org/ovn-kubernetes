@@ -12,7 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"

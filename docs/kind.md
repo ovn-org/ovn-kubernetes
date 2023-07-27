@@ -359,9 +359,9 @@ Download and install latest version of `kubectl`:
 $ K8S_VERSION=v1.26.0
 $ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
 $ chmod +x kubectl
-$ sudo mv kubectl /usr/bin/kubectl-v1.18.0
+$ sudo mv kubectl /usr/bin/kubectl-$K8S_VERSION
 $ sudo rm /usr/bin/kubectl
-$ sudo ln -s /usr/bin/kubectl-v1.18.0 /usr/bin/kubectl
+$ sudo ln -s /usr/bin/kubectl-$K8S_VERSION /usr/bin/kubectl
 $ kubectl version --client
 Client Version: version.Info{Major:"1", Minor:"18", GitVersion:"v1.18.0", GitCommit:"9e991415386e4cf155a24b1da15becaa390438d8", GitTreeState:"clean", BuildDate:"2020-03-25T14:58:59Z", GoVersion:"go1.13.8", Compiler:"gc", Platform:"linux/amd64"}
 ```

@@ -13,7 +13,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -239,7 +240,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					// updateACL will be updated
 					// Direction of both ACLs will be converted to
 					updateACL.Direction = nbdb.ACLDirectionToLport
-					newName := getACLName(updateIDs)
+					newName := libovsdbutil.GetACLName(updateIDs)
 					updateACL.Name = &newName
 					// check severity was reset from default to nil
 					updateACL.Severity = nil
@@ -289,7 +290,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					ipv4ACL := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
@@ -336,7 +337,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					_, asHash6 := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					ipv6ACL := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && ip6.src == $"+asHash6,
@@ -390,7 +391,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					udpACL := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash+" && ((udp && ( udp.dst == 100 )))",
@@ -438,7 +439,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					ipv4ACL := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip4.dst == 1.2.3.5/23) && ip4.src == $"+asHash+" && ((tcp && ( tcp.dst == 100 )))",
@@ -499,7 +500,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					ipv4ACL := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
@@ -617,7 +618,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					ipv4ACL := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						fmt.Sprintf("(ip4.dst == %s) && ip4.src == $%s", nodeIP, asHash),
@@ -702,7 +703,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					ipv4ACL := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip4.dst == 1.2.3.5/23) && ip4.src == $"+asHash+" && ((tcp && ( tcp.dst == 100 )))",
@@ -788,7 +789,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					ipv4ACL := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
@@ -869,7 +870,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					ipv4ACL := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
@@ -988,7 +989,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						}
 						dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 						acl := libovsdbops.BuildACL(
-							getACLName(dbIDs),
+							libovsdbutil.GetACLName(dbIDs),
 							nbdb.ACLDirectionToLport,
 							t.EgressFirewallStartPriority,
 							match,
@@ -1038,7 +1039,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					acl := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip4.dst == 0.0.0.0/0 && ip4.dst != "+clusterSubnetStr+") && ip4.src == $"+asHash,
@@ -1086,7 +1087,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					aclIDs1 := fakeOVN.controller.getEgressFirewallACLDbIDs(namespace1.Name, 0)
 					ipv4ACL1 := libovsdbops.BuildACL(
-						getACLName(aclIDs1),
+						libovsdbutil.GetACLName(aclIDs1),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip4.dst == 1.2.3.5/23) && ip4.src == $"+asHash,
@@ -1102,7 +1103,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					aclIDs2 := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 1)
 					ipv4ACL2 := libovsdbops.BuildACL(
-						getACLName(aclIDs2),
+						libovsdbutil.GetACLName(aclIDs2),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority-1,
 						"(ip4.dst == 2.2.3.5/23) && ip4.src == $"+asHash,
@@ -1222,7 +1223,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
 					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					acl := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						libovsdbutil.GetACLName(dbIDs),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
 						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,

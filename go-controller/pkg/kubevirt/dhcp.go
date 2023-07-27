@@ -13,7 +13,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )

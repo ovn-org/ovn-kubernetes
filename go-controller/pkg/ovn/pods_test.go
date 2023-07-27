@@ -12,7 +12,7 @@ import (
 
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"

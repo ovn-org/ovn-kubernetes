@@ -104,8 +104,8 @@ func newNodeTracker(zone string, resyncFn func(nodes []nodeInfo)) *nodeTracker {
 	}
 }
 
-func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) error {
-	_, err := nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.ResourceEventHandlerRegistration, error) {
+	return nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node, ok := obj.(*v1.Node)
 			if !ok {
@@ -160,7 +160,6 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) error {
 			nt.removeNodeWithServiceReSync(node.Name)
 		},
 	}))
-	return err
 
 }
 
@@ -278,6 +277,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 
 // getZoneNodes returns a list of all nodes (and their relevant information)
 // which belong to the nodeTracker 'zone'
+// MUST be called with nt locked
 func (nt *nodeTracker) getZoneNodes() []nodeInfo {
 	out := make([]nodeInfo, 0, len(nt.nodes))
 	for _, node := range nt.nodes {

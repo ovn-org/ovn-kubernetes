@@ -7,7 +7,7 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"

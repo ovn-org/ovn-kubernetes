@@ -12,7 +12,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
@@ -306,7 +307,7 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 	var zone string
 	var err1 error
 	err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
-		zone, err1 = util.GetNBZone(cm.nbClient)
+		zone, err1 = libovsdbutil.GetNBZone(cm.nbClient)
 		if err1 != nil {
 			return false, nil
 		}
@@ -339,6 +340,10 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 		if err != nil {
 			klog.Errorf("Unable to get nodes from informer while waiting for node zone sync")
 			return false, nil
+		}
+		if len(nodes) == 0 {
+			klog.Infof("No nodes in cluster: waiting for a node to have %q zone is not needed", config.Default.Zone)
+			return true, nil
 		}
 		for _, node := range nodes {
 			if util.GetNodeZone(node) == config.Default.Zone {

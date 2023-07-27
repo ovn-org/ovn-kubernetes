@@ -29,12 +29,6 @@ import (
 
 const egressFirewallDNSDefaultDuration = 30 * time.Minute
 
-// ACL logging severity levels
-type ACLLoggingLevels struct {
-	Allow string `json:"allow,omitempty"`
-	Deny  string `json:"deny,omitempty"`
-}
-
 const (
 	// TCP is the constant string for the string "TCP"
 	TCP = "TCP"

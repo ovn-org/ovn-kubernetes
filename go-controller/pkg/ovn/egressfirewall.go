@@ -9,7 +9,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -303,7 +304,7 @@ func (oc *DefaultNetworkController) updateEgressFirewallStatusWithRetry(egressFi
 }
 
 func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, hashedAddressSetNameIPv4,
-	hashedAddressSetNameIPv6 string, aclLogging *ACLLoggingLevels, ruleIDs ...int) error {
+	hashedAddressSetNameIPv6 string, aclLogging *libovsdbutil.ACLLoggingLevels, ruleIDs ...int) error {
 	for _, rule := range ef.egressRules {
 		// check if only specific rule ids are requested to be added
 		if len(ruleIDs) > 0 {
@@ -374,17 +375,17 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 
 // createEgressFirewallRules uses the previously generated elements and creates the
 // acls for all node switches
-func (oc *DefaultNetworkController) createEgressFirewallRules(ruleIdx int, match, action, namespace string, aclLogging *ACLLoggingLevels) error {
+func (oc *DefaultNetworkController) createEgressFirewallRules(ruleIdx int, match, action, namespace string, aclLogging *libovsdbutil.ACLLoggingLevels) error {
 	aclIDs := oc.getEgressFirewallACLDbIDs(namespace, ruleIdx)
 	priority := types.EgressFirewallStartPriority - ruleIdx
-	egressFirewallACL := BuildACL(
+	egressFirewallACL := libovsdbutil.BuildACL(
 		aclIDs,
 		priority,
 		match,
 		action,
 		aclLogging,
 		// since egressFirewall has direction to-lport, set type to ingress
-		lportIngress,
+		libovsdbutil.LportIngress,
 	)
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressFirewallACL)
 	if err != nil {
@@ -672,7 +673,7 @@ func (oc *DefaultNetworkController) updateACLLoggingForEgressFirewall(egressFire
 			libovsdbops.ObjectNameKey: ef.namespace,
 		})
 	p := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
-	if err := UpdateACLLoggingWithPredicate(oc.nbClient, p, &nsInfo.aclLogging); err != nil {
+	if err := libovsdbutil.UpdateACLLoggingWithPredicate(oc.nbClient, p, &nsInfo.aclLogging); err != nil {
 		return false, fmt.Errorf("unable to update ACL logging in ns %s, err: %v", ef.namespace, err)
 	}
 	return true, nil
