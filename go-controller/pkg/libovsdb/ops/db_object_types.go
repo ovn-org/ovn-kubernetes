@@ -15,10 +15,11 @@ const (
 	EgressQoSOwnerType         ownerType = "EgressQoS"
 	// NetworkPolicyOwnerType is deprecated for address sets, should only be used for sync.
 	// New owner of network policy address sets, is PodSelectorOwnerType.
-	NetworkPolicyOwnerType      ownerType = "NetworkPolicy"
-	NetpolDefaultOwnerType      ownerType = "NetpolDefault"
-	PodSelectorOwnerType        ownerType = "PodSelector"
-	NamespaceOwnerType          ownerType = "Namespace"
+	NetworkPolicyOwnerType ownerType = "NetworkPolicy"
+	NetpolDefaultOwnerType ownerType = "NetpolDefault"
+	PodSelectorOwnerType   ownerType = "PodSelector"
+	NamespaceOwnerType     ownerType = "Namespace"
+	// HybridNodeRouteOwnerType is transferred from egressgw to apbRoute controller with the same dbIDs
 	HybridNodeRouteOwnerType    ownerType = "HybridNodeRoute"
 	EgressIPOwnerType           ownerType = "EgressIP"
 	EgressServiceOwnerType      ownerType = "EgressService"
