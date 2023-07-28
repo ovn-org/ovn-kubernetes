@@ -137,9 +137,9 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*D
 	}
 
 	nc.apbExternalRouteNodeController, err = apbroute.NewExternalNodeController(
-		cnnci.apbExternalRouteClient,
 		nc.watchFactory.PodCoreInformer(),
 		nc.watchFactory.NamespaceInformer(),
+		nc.watchFactory.APBRouteInformer(),
 		stopChan)
 	if err != nil {
 		return nil, err

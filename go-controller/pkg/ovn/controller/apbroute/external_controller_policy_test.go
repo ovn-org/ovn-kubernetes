@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -96,9 +97,10 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 	stopChan = make(chan struct{})
 	fakeClient = fake.NewSimpleClientset(k8sObjects...)
 	fakeRouteClient = adminpolicybasedrouteclient.NewSimpleClientset(routePolicyObjects...)
-	iFactory, err = factory.NewMasterWatchFactory(&util.OVNMasterClientset{KubeClient: fakeClient})
-	Expect(err).NotTo(HaveOccurred())
-	err = iFactory.Start()
+	iFactory, err = factory.NewMasterWatchFactory(&util.OVNMasterClientset{
+		KubeClient:             fakeClient,
+		AdminPolicyRouteClient: fakeRouteClient,
+	})
 	Expect(err).NotTo(HaveOccurred())
 	// Try to get the NBZone.  If there is an error, create NB_Global record.
 	// Otherwise NewController() will return error since it
@@ -114,6 +116,7 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 		stopChan,
 		iFactory.PodCoreInformer(),
 		iFactory.NamespaceInformer(),
+		iFactory.APBRouteInformer(),
 		iFactory.NodeCoreInformer().Lister(),
 		nbClient,
 		addressset.NewFakeAddressSetFactory(ControllerName))
@@ -125,6 +128,9 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 		err = deleteTestNBGlobal(nbClient, "global")
 		Expect(err).NotTo(HaveOccurred())
 	}
+
+	err = iFactory.Start()
+	Expect(err).NotTo(HaveOccurred())
 
 	mgr = externalController.mgr
 	wg = &sync.WaitGroup{}
@@ -230,6 +236,9 @@ var _ = Describe("OVN External Gateway policy", func() {
 	})
 
 	BeforeEach(func() {
+		// Restore global default values before each testcase
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		config.OVNKubernetesFeature.EnableMultiExternalGateway = true
 		initialDB = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{

@@ -1,11 +1,12 @@
 package factory
 
 import (
+	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	coreinformers "k8s.io/client-go/informers/core/v1"
-	v1coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -49,7 +50,8 @@ type NodeWatchFactory interface {
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
 	NamespaceInformer() coreinformers.NamespaceInformer
-	PodCoreInformer() v1coreinformers.PodInformer
+	PodCoreInformer() coreinformers.PodInformer
+	APBRouteInformer() adminpolicybasedrouteinformer.AdminPolicyBasedExternalRouteInformer
 
 	GetPods(namespace string) ([]*kapi.Pod, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
