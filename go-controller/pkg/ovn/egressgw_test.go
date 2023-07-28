@@ -2421,6 +2421,15 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
+				apbRoute := newPolicy("policy",
+					&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceT.Name}},
+					sets.NewString("9.0.0.1"),
+					true,
+					nil,
+					nil,
+					false,
+					"",
+				)
 
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
@@ -2459,19 +2468,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
 						},
 					},
-					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
-						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy",
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceT.Name}},
-								sets.NewString("9.0.0.1"),
-								true,
-								nil,
-								nil,
-								false,
-								"",
-							),
-						},
-					},
 				)
 
 				t.populateLogicalSwitchCache(fakeOvn)
@@ -2482,6 +2478,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.RunAPBExternalPolicyController()
+				// TODO review db objs handover between egressgw and apbroute
+				_, err = fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Create(
+					context.TODO(), &apbRoute, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asIndex := getHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				asv4, _ := addressset.GetHashNamesForAS(asIndex)
