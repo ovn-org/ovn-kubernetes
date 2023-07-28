@@ -89,7 +89,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
-
+		config.OVNKubernetesFeature.EnableMultiExternalGateway = true
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
