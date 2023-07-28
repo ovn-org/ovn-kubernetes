@@ -584,7 +584,11 @@ var _ = ginkgo.Describe("Services", func() {
 			var addrs []string
 			err := json.Unmarshal([]byte(addrAnnotation), &addrs)
 			framework.ExpectNoError(err, "failed to parse node[%s] host-address annotation[%s]", node.Name, addrAnnotation)
-
+			for i, addr := range addrs {
+				addrSplit := strings.Split(addr, "/")
+				gomega.Expect(addrSplit).Should(gomega.HaveLen(2))
+				addrs[i] = addrSplit[0]
+			}
 			toCurlAddresses.Insert(addrs...)
 
 			var newIP string
