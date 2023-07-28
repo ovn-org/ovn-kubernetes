@@ -459,7 +459,7 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort,
 	}
 
 	for _, slice := range slices {
-		klog.V(4).Infof("Getting endpoints for slice %s/%s", slice.Namespace, slice.Name)
+		klog.V(5).Infof("Getting endpoints for slice %s/%s", slice.Namespace, slice.Name)
 
 		// build the list of valid endpoints in the slice
 		for _, port := range slice.Ports {
@@ -481,7 +481,7 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort,
 			out.Port = *port.Port
 			ForEachEligibleEndpoint(slice, service, func(endpoint discovery.Endpoint, shortcut *bool) {
 				for _, ip := range endpoint.Addresses {
-					klog.V(4).Infof("Adding slice %s endpoint: %v, port: %d", slice.Name, endpoint.Addresses, *port.Port)
+					klog.V(5).Infof("Adding slice %s endpoint: %v, port: %d", slice.Name, endpoint.Addresses, *port.Port)
 					ipStr := utilnet.ParseIPSloppy(ip).String()
 					switch slice.AddressType {
 					case discovery.AddressTypeIPv4:
@@ -498,7 +498,7 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort,
 
 	out.V4IPs = v4ips.List()
 	out.V6IPs = v6ips.List()
-	klog.V(4).Infof("LB Endpoints for %s/%s are: %v / %v on port: %d",
+	klog.V(5).Infof("LB Endpoints for %s/%s are: %v / %v on port: %d",
 		slices[0].Namespace, slices[0].Labels[discovery.LabelServiceName],
 		out.V4IPs, out.V6IPs, out.Port)
 	return out

@@ -7,7 +7,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -52,7 +53,7 @@ type namespaceInfo struct {
 	multicastEnabled bool
 
 	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
-	aclLogging ACLLoggingLevels
+	aclLogging libovsdbutil.ACLLoggingLevels
 }
 
 func getNamespaceAddrSetDbIDs(namespaceName, controller string) *libovsdbops.DbObjectIDs {
@@ -102,7 +103,7 @@ func (bnc *BaseNetworkController) WatchNamespaces() error {
 //
 //	annotation, then assume that this key should be disabled by setting its nsInfo value to "".
 func (bnc *BaseNetworkController) aclLoggingUpdateNsInfo(annotation string, nsInfo *namespaceInfo) error {
-	var aclLevels ACLLoggingLevels
+	var aclLevels libovsdbutil.ACLLoggingLevels
 	var errors []error
 
 	// If the annotation is "" or "{}", use empty strings. Otherwise, parse the annotation.
@@ -321,10 +322,10 @@ func (bnc *BaseNetworkController) configureNamespaceCommon(nsInfo *namespaceInfo
 
 // GetNamespaceACLLogging retrieves ACLLoggingLevels for the Namespace.
 // nsInfo will be locked (and unlocked at the end) for given namespace if it exists.
-func (bnc *BaseNetworkController) GetNamespaceACLLogging(ns string) *ACLLoggingLevels {
+func (bnc *BaseNetworkController) GetNamespaceACLLogging(ns string) *libovsdbutil.ACLLoggingLevels {
 	nsInfo, nsUnlock := bnc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
-		return &ACLLoggingLevels{
+		return &libovsdbutil.ACLLoggingLevels{
 			Allow: "",
 			Deny:  "",
 		}

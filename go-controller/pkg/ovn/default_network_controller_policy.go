@@ -4,7 +4,8 @@ import (
 	"fmt"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -34,12 +35,12 @@ func (oc *DefaultNetworkController) addHairpinAllowACL() error {
 	}
 
 	ingressACLIDs := oc.getNetpolDefaultACLDbIDs(string(knet.PolicyTypeIngress))
-	ingressACL := BuildACL(ingressACLIDs, types.DefaultAllowPriority, match,
-		nbdb.ACLActionAllowRelated, nil, lportIngress)
+	ingressACL := libovsdbutil.BuildACL(ingressACLIDs, types.DefaultAllowPriority, match,
+		nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
 
 	egressACLIDs := oc.getNetpolDefaultACLDbIDs(string(knet.PolicyTypeEgress))
-	egressACL := BuildACL(egressACLIDs, types.DefaultAllowPriority, match,
-		nbdb.ACLActionAllowRelated, nil, lportEgressAfterLB)
+	egressACL := libovsdbutil.BuildACL(egressACLIDs, types.DefaultAllowPriority, match,
+		nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportEgressAfterLB)
 
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, ingressACL, egressACL)
 	if err != nil {

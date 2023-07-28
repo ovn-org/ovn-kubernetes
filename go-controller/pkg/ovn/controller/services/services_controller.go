@@ -9,6 +9,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -42,7 +43,8 @@ const (
 	// 5ms, 10ms, 20ms, 40ms, 80ms, 160ms, 320ms, 640ms, 1.3s, 2.6s, 5.1s, 10.2s, 20.4s, 41s, 82s
 	maxRetries = 15
 
-	controllerName = "ovn-lb-controller"
+	controllerName     = "ovn-lb-controller"
+	nodeControllerName = "node-tracker-controller"
 )
 
 var NoServiceLabelError = fmt.Errorf("endpointSlice missing %s label", discovery.LabelServiceName)
@@ -66,16 +68,14 @@ func NewController(client clientset.Interface,
 		nodeIPv6Templates:     NewNodeIPsTemplates(v1.IPv6Protocol),
 		serviceInformer:       serviceInformer,
 		serviceLister:         serviceInformer.Lister(),
-		servicesSynced:        serviceInformer.Informer().HasSynced,
 		endpointSliceInformer: endpointSliceInformer,
 		endpointSliceLister:   endpointSliceInformer.Lister(),
-		endpointSlicesSynced:  endpointSliceInformer.Informer().HasSynced,
 		eventRecorder:         recorder,
 		repair:                newRepair(serviceInformer.Lister(), nbClient),
 		nodeInformer:          nodeInformer,
 		nodesSynced:           nodeInformer.Informer().HasSynced,
 	}
-	zone, err := util.GetNBZone(c.nbClient)
+	zone, err := libovsdbutil.GetNBZone(c.nbClient)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get the NB Zone : err - %w", err)
 	}
@@ -101,17 +101,11 @@ type Controller struct {
 	serviceInformer coreinformers.ServiceInformer
 	// serviceLister is able to list/get services and is populated by the shared informer passed to
 	serviceLister corelisters.ServiceLister
-	// servicesSynced returns true if the service shared informer has been synced at least once.
-	servicesSynced cache.InformerSynced
 
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer
 	// endpointSliceLister is able to list/get endpoint slices and is populated
 	// by the shared informer passed to NewController
 	endpointSliceLister discoverylisters.EndpointSliceLister
-	// endpointSlicesSynced returns true if the endpoint slice shared informer
-	// has been synced at least once. Added as a member to the struct to allow
-	// injection for testing.
-	endpointSlicesSynced cache.InformerSynced
 
 	nodesSynced cache.InformerSynced
 
@@ -169,8 +163,18 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	klog.Infof("Starting controller %s", controllerName)
 	defer klog.Infof("Shutting down controller %s", controllerName)
 
+	nodeHandler, err := c.nodeTracker.Start(c.nodeInformer)
+	if err != nil {
+		return err
+	}
+	// We need node cache to be synced first, as we rely on it to properly reprogram initial per node load balancers
+	klog.Info("Waiting for node tracker caches to sync")
+	if !util.WaitForNamedCacheSyncWithTimeout(nodeControllerName, stopCh, nodeHandler.HasSynced) {
+		return fmt.Errorf("error syncing cache")
+	}
+
 	klog.Info("Setting up event handlers for services")
-	_, err := c.serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	svcHandler, err := c.serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onServiceAdd,
 		UpdateFunc: c.onServiceUpdate,
 		DeleteFunc: c.onServiceDelete,
@@ -180,7 +184,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	}
 
 	klog.Info("Setting up event handlers for endpoint slices")
-	_, err = c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	endpointHandler, err := c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onEndpointSliceAdd,
 		UpdateFunc: c.onEndpointSliceUpdate,
 		DeleteFunc: c.onEndpointSliceDelete,
@@ -189,14 +193,9 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		return err
 	}
 
-	err = c.nodeTracker.Start(c.nodeInformer)
-	if err != nil {
-		return err
-	}
-
 	// Wait for the caches to be synced
-	klog.Info("Waiting for informer caches to sync")
-	if !util.WaitForNamedCacheSyncWithTimeout(controllerName, stopCh, c.servicesSynced, c.endpointSlicesSynced, c.nodesSynced) {
+	klog.Info("Waiting for service and endpoint caches to sync")
+	if !util.WaitForNamedCacheSyncWithTimeout(controllerName, stopCh, svcHandler.HasSynced, endpointHandler.HasSynced) {
 		return fmt.Errorf("error syncing cache")
 	}
 
@@ -319,11 +318,11 @@ func (c *Controller) syncService(key string) error {
 	if err != nil {
 		return err
 	}
-	klog.Infof("Processing sync for service %s/%s", namespace, name)
+	klog.V(5).Infof("Processing sync for service %s/%s", namespace, name)
 	metrics.MetricSyncServiceCount.Inc()
 
 	defer func() {
-		klog.V(4).Infof("Finished syncing service %s on namespace %s : %v", name, namespace, time.Since(startTime))
+		klog.V(5).Infof("Finished syncing service %s on namespace %s : %v", name, namespace, time.Since(startTime))
 		metrics.MetricSyncServiceLatency.Observe(time.Since(startTime).Seconds())
 	}()
 
@@ -413,7 +412,7 @@ func (c *Controller) syncService(key string) error {
 	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
 	klog.V(5).Infof("Built service %s per-node LB %#v", key, perNodeLBs)
 	klog.V(5).Infof("Built service %s template LB %#v", key, templateLBs)
-	klog.V(3).Infof("Service %s has %d cluster-wide, %d per-node configs, %d template configs, making %d (cluster) %d (per node) and %d (template) load balancers",
+	klog.V(5).Infof("Service %s has %d cluster-wide, %d per-node configs, %d template configs, making %d (cluster) %d (per node) and %d (template) load balancers",
 		key, len(clusterConfigs), len(perNodeConfigs), len(templateConfigs),
 		len(clusterLBs), len(perNodeLBs), len(templateLBs))
 	lbs := append(clusterLBs, templateLBs...)
@@ -430,7 +429,7 @@ func (c *Controller) syncService(key string) error {
 	c.alreadyAppliedRWLock.RUnlock()
 
 	if alreadyAppliedKeyExists && LoadBalancersEqualNoUUID(existingLBs, lbs) {
-		klog.V(3).Infof("Skipping no-op change for service %s", key)
+		klog.V(5).Infof("Skipping no-op change for service %s", key)
 	} else {
 		klog.V(5).Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
 		// Actually apply load-balancers to OVN.
@@ -534,7 +533,7 @@ func (c *Controller) onServiceAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Adding service %s", key)
+	klog.V(5).Infof("Adding service %s", key)
 	service := obj.(*v1.Service)
 	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)
