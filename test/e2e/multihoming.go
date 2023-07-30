@@ -71,21 +71,7 @@ var _ = Describe("Multi Homing", func() {
 			createNad(nadClient, netConfig)
 
 			By("creating the pod using a secondary network")
-			pod, err := cs.CoreV1().Pods(podConfig.namespace).Create(
-				context.Background(),
-				generatePodSpec(podConfig),
-				metav1.CreateOptions{},
-			)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("asserting the pod gets to the `Ready` phase")
-			Eventually(func() v1.PodPhase {
-				updatedPod, err := cs.CoreV1().Pods(podConfig.namespace).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
-				if err != nil {
-					return v1.PodFailed
-				}
-				return updatedPod.Status.Phase
-			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+			pod := kickstartPod(cs, podConfig)
 
 			if netConfig.excludeCIDRs != nil {
 				podIP, err := podIPForAttachment(cs, pod.GetNamespace(), pod.GetName(), secondaryNetworkName, 0)
@@ -278,39 +264,10 @@ var _ = Describe("Multi Homing", func() {
 				createNad(nadClient, netConfig)
 
 				By("instantiating the server pod")
-				serverPod, err := cs.CoreV1().Pods(serverPodConfig.namespace).Create(
-					context.Background(),
-					generatePodSpec(serverPodConfig),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(serverPod).NotTo(BeNil())
-
-				By("asserting the server pod reaches the `Ready` state")
-				Eventually(func() v1.PodPhase {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return v1.PodFailed
-					}
-					return updatedPod.Status.Phase
-				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+				serverPod := kickstartPod(cs, serverPodConfig)
 
 				By("instantiating the *client* pod")
-				clientPod, err := cs.CoreV1().Pods(clientPodConfig.namespace).Create(
-					context.Background(),
-					generatePodSpec(clientPodConfig),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
-
-				By("asserting the client pod reaches the `Ready` state")
-				Eventually(func() v1.PodPhase {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), clientPod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return v1.PodFailed
-					}
-					return updatedPod.Status.Phase
-				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+				kickstartPod(cs, clientPodConfig)
 
 				serverIP := ""
 				if netConfig.cidr == "" {
@@ -331,6 +288,7 @@ var _ = Describe("Multi Homing", func() {
 				for i, cidr := range strings.Split(netConfig.cidr, ",") {
 					if cidr != "" {
 						By("asserting the server pod has an IP from the configured range")
+						var err error
 						serverIP, err = podIPForAttachment(cs, f.Namespace.Name, serverPod.GetName(), netConfig.name, i)
 						Expect(err).NotTo(HaveOccurred())
 						By(fmt.Sprintf("asserting the server pod IP %v is from the configured range %v/%v", serverIP, cidr, netPrefixLengthPerNode))
@@ -1143,22 +1101,7 @@ var _ = Describe("Multi Homing", func() {
 				namespace: f.Namespace.Name,
 			}
 			By("creating the pod using a secondary network")
-			var err error
-			pod, err = cs.CoreV1().Pods(podConfig.namespace).Create(
-				context.Background(),
-				generatePodSpec(podConfig),
-				metav1.CreateOptions{},
-			)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("asserting the pod gets to the `Ready` phase")
-			Eventually(func() v1.PodPhase {
-				updatedPod, err := cs.CoreV1().Pods(podConfig.namespace).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
-				if err != nil {
-					return v1.PodFailed
-				}
-				return updatedPod.Status.Phase
-			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+			pod = kickstartPod(cs, podConfig)
 		})
 
 		It("features two different IPs from the same subnet", func() {
