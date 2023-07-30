@@ -170,7 +170,7 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"when attaching to an localnet - switched - network",
+				"when attaching to a localnet - switched - network",
 				networkAttachmentConfigParams{
 					cidr:     secondaryLocalnetNetworkCIDR,
 					name:     secondaryNetworkName,
@@ -183,7 +183,7 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"when attaching to an Localnet - switched - network featuring `excludeCIDR`s",
+				"when attaching to a localnet - switched - network featuring `excludeCIDR`s",
 				networkAttachmentConfigParams{
 					cidr:         secondaryLocalnetNetworkCIDR,
 					name:         secondaryNetworkName,
@@ -197,7 +197,7 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"when attaching to an localnet - switched - network without IPAM",
+				"when attaching to a localnet - switched - network without IPAM",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
 					topology: "localnet",
@@ -209,7 +209,7 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"when attaching to an localnet - switched - network with an IPv6 subnet",
+				"when attaching to a localnet - switched - network with an IPv6 subnet",
 				networkAttachmentConfigParams{
 					cidr:     secondaryIPv6CIDR,
 					name:     secondaryNetworkName,
@@ -472,7 +472,7 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"can communicate over an localnet secondary network when the pods are scheduled on different nodes",
+				"can communicate over a localnet secondary network when the pods are scheduled on different nodes",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
 					topology: "localnet",
@@ -492,7 +492,7 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes",
+				"can communicate over a localnet secondary network without IPAM when the pods are scheduled on different nodes",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
 					topology: "localnet",
@@ -513,7 +513,7 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes, with static IPs configured via network selection elements",
+				"can communicate over a localnet secondary network without IPAM when the pods are scheduled on different nodes, with static IPs configured via network selection elements",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
 					topology: "localnet",
@@ -538,7 +538,7 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"can communicate over an localnet secondary network with an IPv6 subnet when pods are scheduled on different nodes",
+				"can communicate over a localnet secondary network with an IPv6 subnet when pods are scheduled on different nodes",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
 					topology: "localnet",
@@ -558,7 +558,7 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 			table.Entry(
-				"can communicate over an localnet secondary network with a dual stack configuration when pods are scheduled on different nodes",
+				"can communicate over a localnet secondary network with a dual stack configuration when pods are scheduled on different nodes",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
 					topology: "localnet",
