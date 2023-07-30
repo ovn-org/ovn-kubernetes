@@ -68,13 +68,7 @@ var _ = Describe("Multi Homing", func() {
 			netConfig.namespace = f.Namespace.Name
 			podConfig.namespace = f.Namespace.Name
 
-			By("creating the attachment configuration")
-			_, err := nadClient.NetworkAttachmentDefinitions(netConfig.namespace).Create(
-				context.Background(),
-				generateNAD(netConfig),
-				metav1.CreateOptions{},
-			)
-			Expect(err).NotTo(HaveOccurred())
+			createNad(nadClient, netConfig)
 
 			By("creating the pod using a secondary network")
 			pod, err := cs.CoreV1().Pods(podConfig.namespace).Create(
@@ -281,13 +275,7 @@ var _ = Describe("Multi Homing", func() {
 					defer setupLocalnetUnderlay(cs, netConfig)()
 				}
 
-				By("creating the attachment configuration")
-				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
-					context.Background(),
-					generateNAD(netConfig),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
+				createNad(nadClient, netConfig)
 
 				By("instantiating the server pod")
 				serverPod, err := cs.CoreV1().Pods(serverPodConfig.namespace).Create(
@@ -738,12 +726,7 @@ var _ = Describe("Multi Homing", func() {
 						stepInfo := fmt.Sprintf("creating the attachment configuration for namespace %q", ns.Name)
 						By(stepInfo)
 						netConfig.namespace = ns.Name
-						_, err := nadClient.NetworkAttachmentDefinitions(ns.Name).Create(
-							context.Background(),
-							generateNAD(netConfig),
-							metav1.CreateOptions{},
-						)
-						Expect(err).NotTo(HaveOccurred())
+						createNad(nadClient, netConfig)
 					}
 
 					By("sitting on our hands for a couple secs we give the controller time to sync all NADs before provisioning policies and pods")
@@ -1144,14 +1127,7 @@ var _ = Describe("Multi Homing", func() {
 			}
 
 			for i := range netAttachDefs {
-				netConfig := netAttachDefs[i]
-				By("creating the attachment configuration")
-				_, err := nadClient.NetworkAttachmentDefinitions(netConfig.namespace).Create(
-					context.Background(),
-					generateNAD(netConfig),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
+				createNad(nadClient, netAttachDefs[i])
 			}
 
 			By("sitting on our hands for a couple secs we give the controller time to sync all NADs before provisioning policies and pods")
