@@ -91,9 +91,9 @@ type DynamicHop struct {
 	// +required
 	PodSelector metav1.LabelSelector `json:"podSelector"`
 	// NamespaceSelector defines a selector to filter the namespaces where the pod gateways are located.
-	// +kubebuilder:validation:Optional
-	// +optional
-	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector"`
+	// +kubebuilder:validation:Required
+	// +required
+	NamespaceSelector metav1.LabelSelector `json:"namespaceSelector"`
 	// NetworkAttachmentName determines the multus network name to use when retrieving the pod IPs that will be used as the gateway IP.
 	// When this field is empty, the logic assumes that the pod is configured with HostNetwork and is using the node's IP as gateway.
 	// +optional
