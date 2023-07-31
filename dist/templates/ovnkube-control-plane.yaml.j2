@@ -123,6 +123,13 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        # OCP HACK
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        # END OCP HACK
         - name: OVN_HYBRID_OVERLAY_ENABLE
           value: "{{ ovn_hybrid_overlay_enable }}"
         - name: OVN_EGRESSIP_ENABLE
