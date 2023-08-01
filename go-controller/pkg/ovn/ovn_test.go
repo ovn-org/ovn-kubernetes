@@ -28,6 +28,7 @@ import (
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -229,8 +230,8 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 	nbZoneFailed := false
 	// Try to get the NBZone.  If there is an error, create NB_Global record.
 	// Otherwise NewCommonNetworkControllerInfo() will return error since it
-	// calls util.GetNBZone().
-	_, err := util.GetNBZone(libovsdbOvnNBClient)
+	// calls libovsdbutil.GetNBZone().
+	_, err := libovsdbutil.GetNBZone(libovsdbOvnNBClient)
 	if err != nil {
 		nbZoneFailed = true
 		err = createTestNBGlobal(libovsdbOvnNBClient, "global")
@@ -334,8 +335,8 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 		nbZoneFailed := false
 		// Try to get the NBZone.  If there is an error, create NB_Global record.
 		// Otherwise NewCommonNetworkControllerInfo() will return error since it
-		// calls util.GetNBZone().
-		_, err := util.GetNBZone(o.nbClient)
+		// calls libovsdbutil.GetNBZone().
+		_, err := libovsdbutil.GetNBZone(o.nbClient)
 		if err != nil {
 			nbZoneFailed = true
 			err = createTestNBGlobal(o.nbClient, "global")

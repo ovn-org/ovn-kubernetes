@@ -11,13 +11,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -2389,7 +2387,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				)
 				fakeOvn.RunAPBExternalPolicyController()
 
-				asIndex := getHybridRouteAddrSetDbIDs("node1", apbroute.ControllerName)
+				asIndex := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				asv4, _ := addressset.GetHashNamesForAS(asIndex)
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
@@ -2415,7 +2413,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient, 5).Should(libovsdbtest.HaveData(finalNB))
 				// check if the address-set was created with the podIP
-				dbIDs := getHybridRouteAddrSetDbIDs("node1", apbroute.ControllerName)
+				dbIDs := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				fakeOvn.asf.ExpectAddressSetWithIPs(dbIDs, []string{"10.128.1.3"})
 				return nil
 			}
@@ -2490,7 +2488,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.RunAPBExternalPolicyController()
 
-				asIndex := getHybridRouteAddrSetDbIDs("node1", apbroute.ControllerName)
+				asIndex := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				asv4, _ := addressset.GetHashNamesForAS(asIndex)
 				nbWithLRP := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
@@ -2601,7 +2599,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				)
 
 				fakeOvn.RunAPBExternalPolicyController()
-				asIndex := getHybridRouteAddrSetDbIDs("node1", apbroute.ControllerName)
+				asIndex := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				asv4, _ := addressset.GetHashNamesForAS(asIndex)
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
@@ -2652,7 +2650,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 		ginkgo.It("delete hybrid route policy for pods", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
-				asIndex := getHybridRouteAddrSetDbIDs("node1", apbroute.ControllerName)
+				asIndex := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				asv4, _ := addressset.GetHashNamesForAS(asIndex)
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
@@ -2703,7 +2701,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				err := fakeOvn.controller.apbExternalRouteController.DelHybridRoutePolicyForPod(net.ParseIP("10.128.1.3"), "node1")
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
-				dbIDs := getHybridRouteAddrSetDbIDs("node1", apbroute.ControllerName)
+				dbIDs := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				fakeOvn.asf.EventuallyExpectNoAddressSet(dbIDs)
 				return nil
 			}
@@ -2714,9 +2712,9 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 		ginkgo.It("delete hybrid route policy for pods with force", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeShared
-				asIndex1 := getHybridRouteAddrSetDbIDs("node1", apbroute.ControllerName)
+				asIndex1 := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				as1v4, _ := addressset.GetHashNamesForAS(asIndex1)
-				asIndex2 := getHybridRouteAddrSetDbIDs("node2", apbroute.ControllerName)
+				asIndex2 := apbroute.GetHybridRouteAddrSetDbIDs("node2", DefaultNetworkControllerName)
 				as2v4, _ := addressset.GetHashNamesForAS(asIndex2)
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
@@ -2775,7 +2773,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				err := fakeOvn.controller.apbExternalRouteController.DelAllHybridRoutePolicies()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
-				dbIDs := getHybridRouteAddrSetDbIDs("node1", apbroute.ControllerName)
+				dbIDs := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				fakeOvn.asf.EventuallyExpectNoAddressSet(dbIDs)
 				return nil
 			}
@@ -2786,7 +2784,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 		ginkgo.It("delete legacy hybrid route policies", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
-				asIndex := getHybridRouteAddrSetDbIDs("node1", apbroute.ControllerName)
+				asIndex := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				asv4, _ := addressset.GetHashNamesForAS(asIndex)
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{

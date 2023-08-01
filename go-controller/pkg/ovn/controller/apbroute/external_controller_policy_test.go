@@ -3,14 +3,16 @@ package apbroute
 import (
 	"context"
 	"fmt"
+	"sync"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"sync"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -100,13 +102,16 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 	Expect(err).NotTo(HaveOccurred())
 	// Try to get the NBZone.  If there is an error, create NB_Global record.
 	// Otherwise NewController() will return error since it
-	// calls util.GetNBZone().
-	_, err = util.GetNBZone(nbClient)
+	// calls libovsdbutil.GetNBZone().
+	_, err = libovsdbutil.GetNBZone(nbClient)
 	if err != nil {
 		nbZoneFailed = true
 		err = createTestNBGlobal(nbClient, "global")
 		Expect(err).NotTo(HaveOccurred())
 	}
+	// this package tests apbRoute controller separately from the legacy functionality, therefore
+	// it is not necessary to pass DefaultNetworkController name
+	controllerName := "test-controller"
 	externalController, err = NewExternalMasterController(fakeClient,
 		fakeRouteClient,
 		stopChan,
@@ -114,7 +119,8 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 		iFactory.NamespaceInformer(),
 		iFactory.NodeCoreInformer().Lister(),
 		nbClient,
-		addressset.NewFakeAddressSetFactory(ControllerName))
+		addressset.NewFakeAddressSetFactory(controllerName),
+		controllerName)
 	Expect(err).NotTo(HaveOccurred())
 
 	if nbZoneFailed {

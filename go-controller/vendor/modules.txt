@@ -47,7 +47,7 @@ github.com/cenkalti/hub
 ## explicit
 github.com/cenkalti/rpc2
 github.com/cenkalti/rpc2/jsonrpc
-# github.com/cespare/xxhash/v2 v2.1.2
+# github.com/cespare/xxhash/v2 v2.2.0
 ## explicit; go 1.11
 github.com/cespare/xxhash/v2
 # github.com/containerd/cgroups v1.0.1
@@ -399,8 +399,8 @@ golang.org/x/net/ipv4
 golang.org/x/net/ipv6
 golang.org/x/net/proxy
 golang.org/x/net/trace
-# golang.org/x/oauth2 v0.0.0-20220411215720-9780585627b5
-## explicit; go 1.11
+# golang.org/x/oauth2 v0.4.0
+## explicit; go 1.17
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
 # golang.org/x/sync v0.1.0
@@ -451,10 +451,10 @@ google.golang.org/appengine/internal/log
 google.golang.org/appengine/internal/remote_api
 google.golang.org/appengine/internal/urlfetch
 google.golang.org/appengine/urlfetch
-# google.golang.org/genproto v0.0.0-20220502173005-c8bf987b8c21
-## explicit; go 1.15
+# google.golang.org/genproto v0.0.0-20230110181048-76db0878b65f
+## explicit; go 1.19
 google.golang.org/genproto/googleapis/rpc/status
-# google.golang.org/grpc v1.49.0
+# google.golang.org/grpc v1.53.0
 ## explicit; go 1.17
 google.golang.org/grpc
 google.golang.org/grpc/attributes

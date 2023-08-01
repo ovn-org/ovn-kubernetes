@@ -7,7 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -28,7 +29,7 @@ type gressPolicy struct {
 	policyNamespace string
 	policyName      string
 	policyType      knet.PolicyType
-	aclPipeline     aclPipelineType
+	aclPipeline     libovsdbutil.ACLPipelineType
 	idx             int
 
 	// peerVxAddressSets include PodSelectorAddressSet names, and address sets for selected namespaces
@@ -90,7 +91,7 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, contro
 		policyNamespace:   namespace,
 		policyName:        name,
 		policyType:        policyType,
-		aclPipeline:       policyTypeToAclPipeline(policyType),
+		aclPipeline:       libovsdbutil.PolicyTypeToAclPipeline(policyType),
 		idx:               idx,
 		peerV4AddressSets: &sync.Map{},
 		peerV6AddressSets: &sync.Map{},
@@ -287,7 +288,7 @@ func (gp *gressPolicy) isEmpty() bool {
 // by the parent NetworkPolicy)
 // buildLocalPodACLs is safe for concurrent use, since it only uses gressPolicy fields that don't change
 // since creation, or are safe for concurrent use like peerVXAddressSets
-func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLoggingLevels) (createdACLs []*nbdb.ACL,
+func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libovsdbutil.ACLLoggingLevels) (createdACLs []*nbdb.ACL,
 	skippedACLs []*nbdb.ACL) {
 	var lportMatch string
 	if gp.policyType == knet.PolicyTypeIngress {
@@ -326,7 +327,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 			ipBlockMatches := gp.getMatchFromIPBlock(lportMatch, l4Match)
 			for ipBlockIdx, ipBlockMatch := range ipBlockMatches {
 				aclIDs := gp.getNetpolACLDbIDs(portPolIdx, ipBlockIdx)
-				acl := BuildACL(aclIDs, types.DefaultAllowPriority, ipBlockMatch, action,
+				acl := libovsdbutil.BuildACL(aclIDs, types.DefaultAllowPriority, ipBlockMatch, action,
 					aclLogging, gp.aclPipeline)
 				createdACLs = append(createdACLs, acl)
 			}
@@ -347,7 +348,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 				addrSetMatch = fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
 			}
 			aclIDs := gp.getNetpolACLDbIDs(portPolIdx, emptyIdx)
-			acl := BuildACL(aclIDs, types.DefaultAllowPriority, addrSetMatch, action,
+			acl := libovsdbutil.BuildACL(aclIDs, types.DefaultAllowPriority, addrSetMatch, action,
 				aclLogging, gp.aclPipeline)
 			if l3Match == "" {
 				// if l3Match is empty, then no address sets are selected for a given gressPolicy.

@@ -24,7 +24,7 @@ RUN echo "Running on $BUILDPLATFORM, building for $TARGETPLATFORM"
 
 # install needed rpms - openvswitch must be 2.10.4 or higher
 RUN INSTALL_PKGS=" \
-	python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+	python3-pip python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap hostname kubernetes-client util-linux \
         ovn ovn-central ovn-host python3-openvswitch tcpdump openvswitch-test python3-pyOpenSSL \
 	iptables iproute iputils strace socat koji \

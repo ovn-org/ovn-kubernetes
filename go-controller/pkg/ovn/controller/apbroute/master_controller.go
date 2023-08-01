@@ -33,6 +33,7 @@ import (
 	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions"
 	adminpolicybasedroutelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/listers/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -40,7 +41,6 @@ import (
 const (
 	resyncInterval = 0
 	maxRetries     = 15
-	ControllerName = "apb-external-route-controller"
 )
 
 // Admin Policy Based Route services
@@ -85,13 +85,14 @@ func NewExternalMasterController(
 	nodeLister corev1listers.NodeLister,
 	nbClient libovsdbclient.Client,
 	addressSetFactory addressset.AddressSetFactory,
+	controllerName string,
 ) (*ExternalGatewayMasterController, error) {
 
 	routePolicyFactory := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
 	externalRouteInformer := routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes()
 	externalGWCache := make(map[ktypes.NamespacedName]*ExternalRouteInfo)
 	exGWCacheMutex := &sync.RWMutex{}
-	zone, err := util.GetNBZone(nbClient)
+	zone, err := libovsdbutil.GetNBZone(nbClient)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +104,7 @@ func NewExternalMasterController(
 		addressSetFactory: addressSetFactory,
 		externalGWCache:   externalGWCache,
 		exGWCacheMutex:    exGWCacheMutex,
-		controllerName:    ControllerName,
+		controllerName:    controllerName,
 		zone:              zone,
 	}
 

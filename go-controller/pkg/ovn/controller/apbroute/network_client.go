@@ -22,7 +22,8 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedroutelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/listers/adminpolicybasedroute/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute/gateway_info"
@@ -319,7 +320,7 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gateway_info.GatewayIn
 func (nb *northBoundClient) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Add podIP to the node's address_set.
-		asIndex := getHybridRouteAddrSetDbIDs(node, nb.controllerName)
+		asIndex := GetHybridRouteAddrSetDbIDs(node, nb.controllerName)
 		as, err := nb.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot ensure that addressSet for node %s exists %v", node, err)
@@ -343,7 +344,7 @@ func (nb *northBoundClient) addHybridRoutePolicyForPod(podIP net.IP, node string
 		}
 
 		// get the GR to join switch ip address
-		grJoinIfAddrs, err := util.GetLRPAddrs(nb.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
+		grJoinIfAddrs, err := libovsdbutil.GetLRPAddrs(nb.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
 		if err != nil {
 			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, types.GWRouterToJoinSwitchPrefix, err)
 		}
@@ -592,7 +593,7 @@ func (nb *northBoundClient) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr s
 func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Delete podIP from the node's address_set.
-		asIndex := getHybridRouteAddrSetDbIDs(node, nb.controllerName)
+		asIndex := GetHybridRouteAddrSetDbIDs(node, nb.controllerName)
 		as, err := nb.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
@@ -715,7 +716,7 @@ func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
 	return nats, nil
 }
 
-func getHybridRouteAddrSetDbIDs(nodeName, controller string) *libovsdbops.DbObjectIDs {
+func GetHybridRouteAddrSetDbIDs(nodeName, controller string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetHybridNodeRoute, controller,
 		map[libovsdbops.ExternalIDKey]string{
 			// there is only 1 address set of this type per node

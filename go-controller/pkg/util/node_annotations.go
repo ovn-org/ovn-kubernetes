@@ -755,6 +755,11 @@ func HasNodeMigratedZone(node *kapi.Node) bool {
 	return ok
 }
 
+// NodeMigratedZoneAnnotationChanged returns true if the ovnNodeMigratedZoneName annotation changed for the node
+func NodeMigratedZoneAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	return oldNode.Annotations[ovnNodeMigratedZoneName] != newNode.Annotations[ovnNodeMigratedZoneName]
+}
+
 /** HACK END **/
 
 // GetNodeZone returns the zone of the node set in the 'ovnNodeZoneName' node annotation.

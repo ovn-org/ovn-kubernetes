@@ -12,10 +12,10 @@ import (
 	"github.com/onsi/gomega/format"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -61,8 +61,8 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 	nbZoneFailed := false
 	// Try to get the NBZone.  If there is an error, create NB_Global record.
 	// Otherwise NewController() will return error since it
-	// calls util.GetNBZone().
-	_, err = util.GetNBZone(nbClient)
+	// calls libovsdbutil.GetNBZone().
+	_, err = libovsdbutil.GetNBZone(nbClient)
 	if err != nil {
 		nbZoneFailed = true
 		err = createTestNBGlobal(nbClient, "global")
@@ -85,8 +85,6 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 
-	controller.servicesSynced = alwaysReady
-	controller.endpointSlicesSynced = alwaysReady
 	controller.initTopLevelCache()
 	controller.useLBGroups = true
 	controller.useTemplates = true
