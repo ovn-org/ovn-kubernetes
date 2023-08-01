@@ -143,18 +143,17 @@ func CreateOrUpdateChassis(sbClient libovsdbclient.Client, chassis *sbdb.Chassis
 		{
 			Model: encap,
 			DoAfter: func() {
-				encaps := append(chassis.Encaps, encap.UUID)
-				chassis.Encaps = sets.New(encaps...).UnsortedList()
+				chassis.Encaps = []string{encap.UUID}
 			},
 			OnModelUpdates: onModelUpdatesAllNonDefault(),
 			ErrNotFound:    false,
 			BulkOp:         false,
 		},
 		{
-			Model:          chassis,
-			OnModelUpdates: onModelUpdatesAllNonDefault(),
-			ErrNotFound:    false,
-			BulkOp:         false,
+			Model:            chassis,
+			OnModelMutations: []interface{}{&chassis.OtherConfig, &chassis.Encaps},
+			ErrNotFound:      false,
+			BulkOp:           false,
 		},
 	}
 

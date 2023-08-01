@@ -34,14 +34,6 @@ type gatewayInfo struct {
 	bfdEnabled bool
 }
 
-func getHybridRouteAddrSetDbIDs(nodeName, controller string) *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetHybridNodeRoute, controller,
-		map[libovsdbops.ExternalIDKey]string{
-			// there is only 1 address set of this type per node
-			libovsdbops.ObjectNameKey: nodeName,
-		})
-}
-
 // ensureRouteInfoLocked either gets the current routeInfo in the cache with a lock, or creates+locks a new one if missing
 func (oc *DefaultNetworkController) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*apbroutecontroller.ExternalRouteInfo, error) {
 	// We don't want to hold the cache lock while we try to lock the routeInfo (unless we are creating it, then we know
@@ -687,11 +679,13 @@ func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, nodeName string, extI
 }
 
 // addHybridRoutePolicyForPod handles adding a higher priority allow policy to allow traffic to be routed normally
-// by ecmp routes
+// by ecmp routes.
+// WARNING: updates same db entries as apbroutecontroller. Make sure to call only when route is not managed by
+// apbroute controller.
 func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Add podIP to the node's address_set.
-		asIndex := getHybridRouteAddrSetDbIDs(node, oc.controllerName)
+		asIndex := apbroutecontroller.GetHybridRouteAddrSetDbIDs(node, oc.controllerName)
 		as, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot ensure that addressSet for node %s exists %v", node, err)
@@ -762,10 +756,12 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 
 // delHybridRoutePolicyForPod handles deleting a logical route policy that
 // forces pod egress traffic to be rerouted to a gateway router for local gateway mode.
+// WARNING: updates same db entries as apbroutecontroller. Make sure to call only when route is not managed by
+// apbroute controller.
 func (oc *DefaultNetworkController) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Delete podIP from the node's address_set.
-		asIndex := getHybridRouteAddrSetDbIDs(node, oc.controllerName)
+		asIndex := apbroutecontroller.GetHybridRouteAddrSetDbIDs(node, oc.controllerName)
 		as, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
