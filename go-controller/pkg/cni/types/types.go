@@ -43,6 +43,11 @@ type NetConf struct {
 	// LogFileMaxAge represents the maximum number
 	// of days to retain old log files
 	LogFileMaxAge int `json:"logfile-maxage"`
+	// Runtime arguments passed by the NPWG implementation (e.g. multus)
+	RuntimeConfig struct {
+		// see https://github.com/k8snetworkplumbingwg/device-info-spec
+		CNIDeviceInfoFile string `json:"CNIDeviceInfoFile,omitempty"`
+	} `json:"runtimeConfig,omitempty"`
 }
 
 // NetworkSelectionElement represents one element of the JSON format

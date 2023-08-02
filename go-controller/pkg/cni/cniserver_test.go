@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	utiltesting "k8s.io/client-go/util/testing"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -136,6 +137,29 @@ func TestCNIServer(t *testing.T) {
 					"CNI_ARGS":        makeCNIArgs(namespace, name),
 				},
 				Config: []byte(cniConfig),
+			},
+			result: expectedResult,
+		},
+		// Normal ADD request with DeviceInfo
+		{
+			name: "ADD_WITH_DEVICEINFO",
+			request: &Request{
+				Env: map[string]string{
+					"CNI_COMMAND":     string(CNIAdd),
+					"CNI_CONTAINERID": sandboxID,
+					"CNI_NETNS":       "/path/to/something",
+					"CNI_ARGS":        makeCNIArgs(namespace, name),
+				},
+				Config: []byte(cniConfig),
+				DeviceInfo: nadapi.DeviceInfo{
+					Type:    "vdpa",
+					Version: "1.0.0",
+					Vdpa: &nadapi.VdpaDevice{
+						ParentDevice: "vdpa:0000:65:00.3",
+						Driver:       "vhost",
+						Path:         "/dev/vhost-vdpa-1",
+						PciAddress:   "0000:65:00.3"},
+				},
 			},
 			result: expectedResult,
 		},
