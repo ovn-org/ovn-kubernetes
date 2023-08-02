@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -52,7 +53,17 @@ func (zch *ZoneChassisHandler) AddRemoteZoneNode(node *corev1.Node) error {
 func (zch *ZoneChassisHandler) DeleteRemoteZoneNode(node *corev1.Node) error {
 	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
-		return fmt.Errorf("failed to parse node chassis-id for node - %s, error: %w", node.Name, err)
+		// if the chassis annotation wasn't found, there's no chance we'll find it at the next retry, since
+		// we'd be inspecting the exact same node resource, which we received together with the delete event.
+		// So delete the remote node by node name instead.
+		klog.Infof("Failed to parse node chassis-id for node - %s, will remove chassis by node name; error: %v", node.Name, err)
+		p := func(chassis *sbdb.Chassis) bool {
+			return chassis.Hostname == node.Name && chassis.OtherConfig != nil && strings.ToLower(chassis.OtherConfig["is-remote"]) == "true"
+		}
+		if err := libovsdbops.DeleteChassisWithPredicate(zch.sbClient, p); err != nil {
+			return fmt.Errorf("failed to remove the remote chassis associated with remote node %s in the OVN SB Chassis table: %v", node.Name, err)
+		}
+		return nil
 	}
 
 	ch := &sbdb.Chassis{
