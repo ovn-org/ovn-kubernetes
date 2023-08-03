@@ -266,6 +266,24 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		if err != nil {
 			return err
 		}
+	} else if bsnc.TopologyType() == types.LocalnetTopology {
+		// On localnet networks, we might be processing the pod as a result of a
+		// node changing zone local -> remote so cleanup the logical port in
+		// case it exists and is no longer needed.
+		// This should be an idempotent operation.
+		// Not needed for layer3 networks as in that case the whole node switch
+		// is removed
+		// No need to release IPs as those are allocated from cluster manager
+		logicalPort := bsnc.GetLogicalPortName(pod, nadName)
+		expectedSwitchName, err := bsnc.getExpectedSwitchName(pod)
+		if err != nil {
+			return err
+		}
+		ops, err = bsnc.delLSPOps(logicalPort, expectedSwitchName, "")
+		if err != nil {
+			return err
+		}
+		bsnc.logicalPortCache.remove(pod, nadName)
 	}
 
 	if podAnnotation == nil {
@@ -343,7 +361,12 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			return bsnc.removeRemoteZonePodFromNamespaceAddressSet(pod)
 		}
 
-		return nil
+		// except for localnet networks, continue the delete flow in case a node just
+		// became remote where we might still need to cleanup. On L3 networks
+		// the node switch is removed so there is no need to do this.
+		if bsnc.TopologyType() != types.LocalnetTopology {
+			return nil
+		}
 	}
 
 	// for a specific NAD belongs to this network, Pod's logical port might already be created half-way
