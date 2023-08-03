@@ -57,7 +57,9 @@ func (rm *routeManager) run(stopCh <-chan struct{}) {
 				continue
 			}
 			if err = rm.processNetlinkEvent(newRouteEvent); err != nil {
-				klog.Errorf("Route Manager: failed to process route update event (%s): %v", newRouteEvent.String(), err)
+				// TODO: make util.GetNetLinkOps().IsLinkNotFoundError(err) smarter to unwrap error
+				// and use it here to log errors that are not IsLinkNotFoundError
+				klog.V(5).Info("Route Manager: failed to process route update event (%s): %v", newRouteEvent.String(), err)
 			}
 		case <-ticker.C:
 			if !subscribed {
@@ -148,11 +150,11 @@ func (rm *routeManager) processNetlinkEvent(ru netlink.RouteUpdate) error {
 		return nil
 	}
 	if rm.logRouteChanges {
-		klog.Infof("Route Manager: netlink route deletion event: %q", ru.String())
+		klog.V(5).Infof("Route Manager: netlink route deletion event: %q", ru.String())
 	}
 	rlEvent, err := convertRouteUpdateToRoutesPerLink(ru)
 	if err != nil {
-		return fmt.Errorf("failed to convert netlink event to routesPerLink: %v", err)
+		return fmt.Errorf("failed to convert netlink event to routesPerLink: %w", err)
 	}
 	infName, err := rlEvent.getLinkName()
 	if err != nil {
@@ -438,7 +440,7 @@ func (r route) string() string {
 func convertRouteUpdateToRoutesPerLink(ru netlink.RouteUpdate) (routesPerLink, error) {
 	link, err := netlink.LinkByIndex(ru.LinkIndex)
 	if err != nil {
-		return routesPerLink{}, fmt.Errorf("failed to get link by index from route update: %v", ru)
+		return routesPerLink{}, fmt.Errorf("failed to get link by index from route update (%v): %w", ru, err)
 	}
 
 	return routesPerLink{
