@@ -966,6 +966,10 @@ install_ovn() {
   run_kubectl apply -f policy.networking.k8s.io_adminnetworkpolicies.yaml
   run_kubectl apply -f policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
   run_kubectl apply -f ovn-setup.yaml
+  run_kubectl apply -f rbac-ovnkube-cluster-manager.yaml
+  run_kubectl apply -f rbac-ovnkube-master.yaml
+  run_kubectl apply -f rbac-ovnkube-node.yaml
+  run_kubectl apply -f rbac-ovnkube-db.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
   # leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=
