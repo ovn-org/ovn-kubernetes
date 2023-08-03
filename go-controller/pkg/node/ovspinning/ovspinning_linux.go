@@ -18,7 +18,7 @@ import (
 )
 
 // These variables are meant to be used in unit tests
-var tickDuration time.Duration = 10 * time.Second
+var tickDuration time.Duration = 1 * time.Second
 var getOvsVSwitchdPIDFn func() (string, error) = util.GetOvsVSwitchdPID
 var getOvsDBServerPIDFn func() (string, error) = util.GetOvsDBServerPID
 var featureEnablerFile string = "/etc/openvswitch/enable_dynamic_cpu_affinity"

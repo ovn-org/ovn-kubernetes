@@ -7,6 +7,8 @@ import (
 	"net"
 	"strings"
 
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/client"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -414,4 +416,45 @@ func reachToServerPodFromClient(cs clientset.Interface, serverConfig podConfigur
 	}
 
 	return fmt.Errorf("pod not running. /me is sad")
+}
+
+func findInterfaceByIP(targetIP string) (string, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return "", err
+	}
+
+	for _, iface := range interfaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			return "", err
+		}
+
+		for _, addr := range addrs {
+			ip, _, err := net.ParseCIDR(addr.String())
+			if err != nil {
+				return "", err
+			}
+
+			if ip.String() == targetIP {
+				return iface.Name, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("Interface with IP %s not found", targetIP)
+}
+
+func getNetworkGateway(cli *client.Client, networkName string) (string, error) {
+	network, err := cli.NetworkInspect(context.Background(), networkName, types.NetworkInspectOptions{})
+	if err != nil {
+		return "", err
+	}
+
+	if network.IPAM.Config != nil && len(network.IPAM.Config) > 0 {
+		gatewayIP := network.IPAM.Config[0].Gateway
+		return gatewayIP, nil
+	}
+
+	return "", fmt.Errorf("Gateway not found for network %q", networkName)
 }
