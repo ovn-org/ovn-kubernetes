@@ -56,7 +56,6 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/clarketm/json v1.17.1 // indirect
-	github.com/containerd/containerd v1.4.12 // indirect
 	github.com/coreos/go-json v0.0.0-20230131223807-18775e0fb4fb // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
@@ -159,7 +158,7 @@ require (
 
 require (
 	github.com/coreos/butane v0.18.0
-	github.com/docker/docker v20.10.12+incompatible
+	github.com/docker/docker v20.10.24+incompatible
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
 	google.golang.org/grpc v1.53.0
 	kubevirt.io/api v1.0.0-alpha.0
