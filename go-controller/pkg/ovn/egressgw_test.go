@@ -2406,7 +2406,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
-		ginkgo.It("should keep the hybrid route policy after deleting the namespace gateway annotation when there is an APB External Route CR overlapping the same external gateway IP", func() {
+		table.DescribeTable("should keep the hybrid route policy after deleting the namespace gateway annotation when there is an APB External Route CR overlapping the same external gateway IP", func(legacyFirst bool) {
+
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
 
@@ -2460,29 +2461,40 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
 						},
 					},
-					&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
-						Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
-							newPolicy("policy",
-								&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceT.Name}},
-								sets.NewString("9.0.0.1"),
-								true,
-								nil,
-								nil,
-								false,
-								"",
-							),
-						},
-					},
 				)
 
 				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
+
+				apbRoute := newPolicy("policy",
+					&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceT.Name}},
+					sets.NewString("9.0.0.1"),
+					false,
+					nil,
+					nil,
+					false,
+					"",
+				)
+				if !legacyFirst {
+					// when CR exists, egress_gw code won't do anything
+					_, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Create(
+						context.TODO(), &apbRoute, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.RunAPBExternalPolicyController()
+
+				if legacyFirst {
+					// create CR after egress_gw has handled namespace annotations
+					_, err := fakeOvn.fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Create(
+						context.TODO(), &apbRoute, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				}
 
 				asIndex := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				asv4, _ := addressset.GetHashNamesForAS(asIndex)
@@ -2557,7 +2569,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
+		},
+			table.Entry("when APBRoute handles first", false),
+			table.Entry("when external_gw handles first", true))
+
 		ginkgo.It("should create a single policy for concurrent addHybridRoutePolicy for the same node", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
