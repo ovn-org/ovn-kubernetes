@@ -74,6 +74,7 @@ var (
 	Logging = LoggingConfig{
 		File:                "", // do not log to a file by default
 		CNIFile:             "",
+		LibovsdbFile:        "",
 		Level:               4,
 		LogFileMaxSize:      100, // Size in Megabytes
 		LogFileMaxBackups:   5,
@@ -251,9 +252,11 @@ type LoggingConfig struct {
 	File string `gcfg:"logfile"`
 	// CNIFile is the path of the file for the CNI shim to log to
 	CNIFile string `gcfg:"cnilogfile"`
+	// LibovsdbFile is the path of the file for the libovsdb client to log to
+	LibovsdbFile string `gcfg:"libovsdblogfile"`
 	// Level is the logging verbosity level
 	Level int `gcfg:"loglevel"`
-	// LogFileMaxSize is the maximum size in bytes of the logfile
+	// LogFileMaxSize is the maximum size in megabytes of the logfile
 	// before it gets rolled.
 	LogFileMaxSize int `gcfg:"logfile-maxsize"`
 	// LogFileMaxBackups represents the the maximum number of old log files to retain
@@ -818,6 +821,11 @@ var CommonFlags = []cli.Flag{
 		Usage:       "path of a file to direct log from cni shim to output to (default: /var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log)",
 		Destination: &cliConfig.Logging.CNIFile,
 		Value:       "/var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log",
+	},
+	&cli.StringFlag{
+		Name:        "libovsdblogfile",
+		Usage:       "path of a file to direct log from libovsdb client to output to (default is to use same as --logfile)",
+		Destination: &cliConfig.Logging.LibovsdbFile,
 	},
 	// Logfile rotation parameters
 	&cli.IntFlag{
