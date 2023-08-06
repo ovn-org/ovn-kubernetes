@@ -5,7 +5,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -13,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/stdr"
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -21,9 +25,45 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/fsnotify/fsnotify.v1"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 )
+
+func newClientLogger(dbModelName string) (logger logr.Logger, err error) {
+	logggerFilename := config.Logging.LibovsdbFile
+	if len(logggerFilename) == 0 {
+		// Not using a separate log file for libovsdb client
+		logger = klogr.New()
+		return logger, nil
+	}
+
+	// Make sure logger file can be opened and created with the right perms
+	// Ref: https://github.com/natefinch/lumberjack/issues/82#issuecomment-482143273
+	err = os.MkdirAll(filepath.Dir(logggerFilename), 0755)
+	if err != nil {
+		return logger, fmt.Errorf("making directories for logger file %s for libovsdb failed: %w", logggerFilename, err)
+	}
+	checkFile, err := os.OpenFile(logggerFilename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
+	if err != nil {
+		return logger, fmt.Errorf("opening logger file %s for libovsdb failed: %w", logggerFilename, err)
+	}
+	_ = checkFile.Close()
+
+	// Create the lumberjack logger, which will write to a rolling log file.
+	ll := &lumberjack.Logger{
+		Filename:   logggerFilename,
+		MaxSize:    config.Logging.LogFileMaxSize, // MB
+		MaxBackups: config.Logging.LogFileMaxBackups,
+		MaxAge:     config.Logging.LogFileMaxAge, // Days
+		Compress:   true,
+	}
+	klog.Infof("Client for %s using log verbosity %d with lumberjack %#v", dbModelName, config.Logging.Level, ll)
+	clientLog := log.New(ll, "", log.Ldate|log.Ltime|log.Lshortfile)
+	_ = stdr.SetVerbosity(config.Logging.Level)
+	logger = stdr.New(clientLog)
+	return logger, nil
+}
 
 // newClient creates a new client object given the provided config
 // the stopCh is required to ensure the goroutine for ssl cert
@@ -31,7 +71,10 @@ import (
 func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}, opts ...client.Option) (client.Client, error) {
 	const connectTimeout time.Duration = types.OVSDBTimeout * 2
 	const inactivityTimeout time.Duration = types.OVSDBTimeout * 18
-	logger := klogr.New()
+	logger, err := newClientLogger(dbModel.Name())
+	if err != nil {
+		return nil, err
+	}
 	options := []client.Option{
 		// Reading and parsing the DB after reconnect at scale can (unsurprisingly)
 		// take longer than a normal ovsdb operation. Give it a bit more time so
