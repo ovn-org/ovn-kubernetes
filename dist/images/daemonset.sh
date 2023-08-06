@@ -47,6 +47,7 @@ OVN_LOGLEVEL_NBCTLD=""
 OVNKUBE_LOGFILE_MAXSIZE=""
 OVNKUBE_LOGFILE_MAXBACKUPS=""
 OVNKUBE_LOGFILE_MAXAGE=""
+OVNKUBE_LIBOVSDB_CLIENT_LOGFILE=""
 OVN_ACL_LOGGING_RATE_LIMIT=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
@@ -179,6 +180,9 @@ while [ "$1" != "" ]; do
     ;;
   --ovnkube-logfile-maxage)
     OVNKUBE_LOGFILE_MAXAGE=$VALUE
+    ;;
+  --ovnkube-libovsdb-client-logfile)
+    OVNKUBE_LIBOVSDB_CLIENT_LOGFILE=$VALUE
     ;;
   --acl-logging-rate-limit)
     OVN_ACL_LOGGING_RATE_LIMIT=$VALUE
@@ -369,6 +373,8 @@ ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
 echo "ovnkube_logfile_maxbackups: ${ovnkube_logfile_maxbackups}"
 ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 echo "ovnkube_logfile_maxage: ${ovnkube_logfile_maxage}"
+ovnkube_libovsdb_client_logfile=${OVNKUBE_LIBOVSDB_CLIENT_LOGFILE}
+echo "ovnkube_libovsdb_client_logfile: ${ovnkube_libovsdb_client_logfile}"
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 echo "ovn_acl_logging_rate_limit: ${ovn_acl_logging_rate_limit}"
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE}
@@ -551,6 +557,7 @@ ovn_image=${ovnkube_image} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_libovsdb_client_logfile=${ovnkube_libovsdb_client_logfile} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
@@ -653,6 +660,7 @@ ovn_image=${ovnkube_image} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_libovsdb_client_logfile=${ovnkube_libovsdb_client_logfile} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
@@ -705,6 +713,7 @@ ovn_image=${ovnkube_image} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_libovsdb_client_logfile=${ovnkube_libovsdb_client_logfile} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \

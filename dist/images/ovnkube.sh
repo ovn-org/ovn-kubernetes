@@ -58,6 +58,7 @@ fi
 # OVNKUBE_LOGFILE_MAXSIZE - log file max size in MB(default 100 MB)
 # OVNKUBE_LOGFILE_MAXBACKUPS - log file max backups (default 5)
 # OVNKUBE_LOGFILE_MAXAGE - log file max age in days (default 5 days)
+# OVNKUBE_LIBOVSDB_CLIENT_LOGFILE - separate log file for libovsdb client (default: do not separate from logfile)
 # OVN_ACL_LOGGING_RATE_LIMIT - specify default ACL logging rate limit in messages per second (default: 20)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
@@ -103,6 +104,10 @@ ovnkubelogdir=/var/log/ovn-kubernetes
 ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
 ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
 ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
+
+# logfile for libovsdb client. When not specified, the ovsdb client logs
+# are not separated from the "main" --logfile used by ovnkube
+ovnkube_libovsdb_client_logfile=${OVNKUBE_LIBOVSDB_CLIENT_LOGFILE:-}
 
 # ovnkube.sh version (update when API between daemonset and script changes - v.x.y)
 ovnkube_version="3"
@@ -1058,6 +1063,11 @@ ovn-master() {
       "
   }
 
+  libovsdb_client_logfile_flag=
+  if [[ -n ${ovnkube_libovsdb_client_logfile} ]]; then
+      libovsdb_client_logfile_flag="--libovsdblogfile ${ovnkube_libovsdb_client_logfile}"
+  fi
+
   ovn_acl_logging_rate_limit_flag=
   if [[ -n ${ovn_acl_logging_rate_limit} ]]; then
       ovn_acl_logging_rate_limit_flag="--acl-logging-rate-limit ${ovn_acl_logging_rate_limit}"
@@ -1161,6 +1171,7 @@ ovn-master() {
     ${ovn_v6_join_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
+    ${libovsdb_client_logfile_flag} \
     ${ovn_master_ssl_opts} \
     ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
@@ -1258,6 +1269,11 @@ ovnkube-controller() {
       "
   }
   echo "ovn_master_ssl_opts=${ovn_master_ssl_opts}"
+
+  libovsdb_client_logfile_flag=
+  if [[ -n ${ovnkube_libovsdb_client_logfile} ]]; then
+      libovsdb_client_logfile_flag="--libovsdblogfile ${ovnkube_libovsdb_client_logfile}"
+  fi
 
   ovn_acl_logging_rate_limit_flag=
   if [[ -n ${ovn_acl_logging_rate_limit} ]]; then
@@ -1365,6 +1381,7 @@ ovnkube-controller() {
     ${ovn_v6_join_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-controller.log \
+    ${libovsdb_client_logfile_flag} \
     ${ovn_master_ssl_opts} \
     ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
