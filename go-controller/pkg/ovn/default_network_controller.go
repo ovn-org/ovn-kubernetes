@@ -538,11 +538,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 			defer oc.wg.Done()
 			unidlingController.Run(oc.stopChan)
 		}()
-
-		_, err = unidling.NewUnidledAtController(oc.kube, oc.watchFactory.ServiceInformer())
-		if err != nil {
-			return err
-		}
 	}
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN and the ConfigMap

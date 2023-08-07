@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -99,6 +101,11 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 
 		cm.egressServiceController, err = egressservice.NewController(ovnClient, wf, isReachable)
 		if err != nil {
+			return nil, err
+		}
+	}
+	if config.Kubernetes.OVNEmptyLbEvents {
+		if _, err := unidling.NewUnidledAtController(&kube.Kube{KClient: ovnClient.KubeClient}, wf.ServiceInformer()); err != nil {
 			return nil, err
 		}
 	}
