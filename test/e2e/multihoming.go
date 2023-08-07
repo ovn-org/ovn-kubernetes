@@ -3,6 +3,9 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
+	"github.com/docker/docker/client"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -635,6 +639,105 @@ var _ = Describe("Multi Homing", func() {
 				},
 			),
 		)
+
+		Context("localnet OVN-K secondary network", func() {
+			const (
+				clientPodName          = "client-pod"
+				nodeHostnameKey        = "kubernetes.io/hostname"
+				servicePort            = 9000
+				dockerNetworkName      = "underlay"
+				underlayServiceIP      = "60.128.0.1"
+				secondaryInterfaceName = "eth1"
+			)
+
+			var netConfig networkAttachmentConfig
+			var nodes []v1.Pod
+			var underlayBridgeName string
+			var cmdWebServer *exec.Cmd
+
+			Context("with a service running on the underlay", func() {
+				BeforeEach(func() {
+					netConfig = newNetworkAttachmentConfig(
+						networkAttachmentConfigParams{
+							name:         secondaryNetworkName,
+							namespace:    f.Namespace.Name,
+							vlanID:       localnetVLANID,
+							topology:     "localnet",
+							cidr:         secondaryLocalnetNetworkCIDR,
+							excludeCIDRs: []string{underlayServiceIP + "/32"},
+						})
+
+					By("setting up the localnet underlay")
+					nodes = ovsPods(cs)
+					Expect(nodes).NotTo(BeEmpty())
+					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+				})
+
+				BeforeEach(func() {
+					By("adding IP to the underlay docker bridge")
+					cli, err := client.NewClientWithOpts(client.FromEnv)
+					Expect(err).NotTo(HaveOccurred())
+
+					gatewayIP, err := getNetworkGateway(cli, dockerNetworkName)
+					Expect(err).NotTo(HaveOccurred())
+
+					underlayBridgeName, err = findInterfaceByIP(gatewayIP)
+					Expect(err).NotTo(HaveOccurred())
+
+					cmd := exec.Command("sudo", "ip", "addr", "add", underlayServiceIP+"/24", "dev", underlayBridgeName)
+					cmd.Stderr = os.Stderr
+					err = cmd.Run()
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				BeforeEach(func() {
+					By("starting a service, connected to the underlay")
+					cmdWebServer = exec.Command("python3", "-m", "http.server", "--bind", underlayServiceIP, strconv.Itoa(servicePort))
+					cmdWebServer.Stderr = os.Stderr
+					err := cmdWebServer.Start()
+					Expect(err).NotTo(HaveOccurred(), "failed to create web server, port might be busy")
+				})
+
+				BeforeEach(func() {
+					By("creating the attachment configuration")
+					_, err := nadClient.NetworkAttachmentDefinitions(netConfig.namespace).Create(
+						context.Background(),
+						generateNAD(netConfig),
+						metav1.CreateOptions{},
+					)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				AfterEach(func() {
+					err := cmdWebServer.Process.Kill()
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				AfterEach(func() {
+					cmd := exec.Command("sudo", "ip", "addr", "del", underlayServiceIP+"/24", "dev", underlayBridgeName)
+					cmd.Stderr = os.Stderr
+					err := cmd.Run()
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				AfterEach(func() {
+					By("tearing down the localnet underlay")
+					Expect(teardownUnderlay(nodes)).To(Succeed())
+				})
+
+				It("can communicate over a localnet secondary network from pod to the underlay service", func() {
+					clientPodConfig := podConfiguration{
+						name:        clientPodName,
+						namespace:   f.Namespace.Name,
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					}
+					kickstartPod(cs, clientPodConfig)
+
+					By("asserting the *client* pod can contact the underlay service")
+					Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
+				})
+			})
+		})
 
 		Context("multi-network policies", func() {
 			const (

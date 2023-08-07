@@ -250,6 +250,54 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
+	ginkgo.It("Delete remote zone node with no chassis id", func() {
+		app.Action = func(ctx *cli.Context) error {
+			dbSetup := libovsdbtest.TestSetup{
+				SBData: initialSBDB,
+			}
+
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			config.Kubernetes.HostNetworkNamespace = ""
+
+			var libovsdbOvnSBClient libovsdbclient.Client
+			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient)
+
+			// Add testNode1 as a remote node
+			err = zoneChassisHandler.AddRemoteZoneNode(&testNode1)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Check the SB Chassis.
+			nodeCh, err := libovsdbops.GetChassis(libovsdbOvnSBClient, &node1Chassis)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(nodeCh.OtherConfig).Should(gomega.HaveKeyWithValue("is-remote", "true"))
+
+			// Remove chassis ID from the node (unfortunate action from cluster admin)
+			testNode1.Annotations = make(map[string]string)
+
+			// Call DeleteRemoteZoneNode for remote zone node.  The chassis entry should still be deleted
+			err = zoneChassisHandler.DeleteRemoteZoneNode(&testNode1)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			// Check the SB Chassis.
+			_, err = libovsdbops.GetChassis(libovsdbOvnSBClient, &node1Chassis)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+			"-init-cluster-manager",
+			"-zone-join-switch-subnets=" + joinSubnetCIDR,
+			"-enable-interconnect",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
 	ginkgo.It("Sync nodes", func() {
 		app.Action = func(ctx *cli.Context) error {
 			dbSetup := libovsdbtest.TestSetup{
