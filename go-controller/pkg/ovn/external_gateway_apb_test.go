@@ -3000,7 +3000,7 @@ func newPolicy(policyName string, fromNSSelector *metav1.LabelSelector, staticHo
 	}
 	if dynamicHopsNSSelector != nil && dynamicHopsPodSelector != nil {
 		p.Spec.NextHops.DynamicHops = []*adminpolicybasedrouteapi.DynamicHop{
-			{NamespaceSelector: dynamicHopsNSSelector,
+			{NamespaceSelector: *dynamicHopsNSSelector,
 				PodSelector:           *dynamicHopsPodSelector,
 				NetworkAttachmentName: networkAttachementName,
 				BFDEnabled:            bfdDynamic},
@@ -3026,7 +3026,7 @@ func updatePolicy(policyName string, fromNSSelector *metav1.LabelSelector, stati
 	if dynamicHopsNSSelector != nil && dynamicHopsPodSelector != nil {
 		p.Spec.NextHops.DynamicHops = append(p.Spec.NextHops.DynamicHops,
 			&adminpolicybasedrouteapi.DynamicHop{
-				NamespaceSelector:     dynamicHopsNSSelector,
+				NamespaceSelector:     *dynamicHopsNSSelector,
 				PodSelector:           *dynamicHopsPodSelector,
 				NetworkAttachmentName: networkAttachementName,
 				BFDEnabled:            bfdDynamic},
