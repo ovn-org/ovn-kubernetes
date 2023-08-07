@@ -481,8 +481,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
 		}
 
-		cm, err := controllerManager.NewNetworkControllerManager(ovnClientset, runMode.identity,
-			masterWatchFactory, libovsdbOvnNBClient, libovsdbOvnSBClient, eventRecorder, wg)
+		cm, err := controllerManager.NewNetworkControllerManager(ovnClientset, masterWatchFactory, libovsdbOvnNBClient, libovsdbOvnSBClient, eventRecorder, wg)
 		if err != nil {
 			return err
 		}

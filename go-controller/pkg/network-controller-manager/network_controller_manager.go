@@ -49,10 +49,6 @@ type NetworkControllerManager struct {
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
 
-	// unique identity for controllerManager running on different ovnkube-master instance,
-	// used for leader election
-	identity string
-
 	defaultNetworkController nad.BaseNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
@@ -173,7 +169,7 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 }
 
 // NewNetworkControllerManager creates a new ovnkube controller manager to manage all the controller for all networks
-func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, wf *factory.WatchFactory,
+func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
 	recorder record.EventRecorder, wg *sync.WaitGroup) (*NetworkControllerManager, error) {
 	podRecorder := metrics.NewPodRecorder()
@@ -197,7 +193,6 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 		podRecorder:  &podRecorder,
 
 		wg:               wg,
-		identity:         identity,
 		multicastSupport: config.EnableMulticast,
 	}
 
