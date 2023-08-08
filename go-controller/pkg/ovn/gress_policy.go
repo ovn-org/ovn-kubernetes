@@ -15,13 +15,17 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
 const (
 	noneMatch = "None"
-	// emptyIdx is used to create ACL for gressPolicy that doesn't have ports or ipBlocks
+	// emptyIdx is used to create ACL for gressPolicy that doesn't have ipBlocks
 	emptyIdx = -1
+	// emptyProtocol is used to create ACL for gressPolicy that doesn't have port policies hence no protocols
+	emptyProtocol = "None"
 )
 
 type gressPolicy struct {
@@ -63,25 +67,58 @@ type portPolicy struct {
 	endPort  int32
 }
 
-func (pp *portPolicy) getL4Match() (string, error) {
-	var supportedProtocols = []string{TCP, UDP, SCTP}
-	var foundProtocol string
-	for _, protocol := range supportedProtocols {
-		if protocol == pp.protocol {
-			foundProtocol = strings.ToLower(pp.protocol)
-			break
+// for a given ingress/egress rule, captures all the provided port ranges and
+// individual ports
+type gressPolicyPorts struct {
+	portList  []string // list of provided ports as string
+	portRange []string // list of provided port ranges in OVN ACL format
+}
+
+var supportedProtocols = sets.NewString(TCP, UDP, SCTP)
+
+func (gp *gressPolicy) getProtocolPortsMap() map[string]*gressPolicyPorts {
+	gressProtoPortsMap := make(map[string]*gressPolicyPorts)
+	for _, pp := range gp.portPolicies {
+		if found := supportedProtocols.Has(pp.protocol); !found {
+			klog.Warningf("Unknown protocol %v, while processing network policy %s/%s",
+				pp.protocol, gp.policyNamespace, gp.policyName)
+			continue
+		}
+		protocol := strings.ToLower(pp.protocol)
+		gpp, ok := gressProtoPortsMap[protocol]
+		if !ok {
+			gpp = &gressPolicyPorts{portList: []string{}, portRange: []string{}}
+			gressProtoPortsMap[protocol] = gpp
+		}
+		if pp.endPort != 0 && pp.endPort != pp.port {
+			gpp.portRange = append(gpp.portRange, fmt.Sprintf("%d<=%s.dst<=%d", pp.port, protocol, pp.endPort))
+		} else if pp.port != 0 {
+			gpp.portList = append(gpp.portList, fmt.Sprintf("%d", pp.port))
 		}
 	}
-	if len(foundProtocol) == 0 {
-		return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
-	}
-	if pp.endPort != 0 && pp.endPort != pp.port {
-		return fmt.Sprintf("%s && %d<=%s.dst<=%d", foundProtocol, pp.port, foundProtocol, pp.endPort), nil
+	return gressProtoPortsMap
+}
 
-	} else if pp.port != 0 {
-		return fmt.Sprintf("%s && %s.dst==%d", foundProtocol, foundProtocol, pp.port), nil
+func getL4Match(protocol string, ports *gressPolicyPorts) string {
+	allL4Matches := []string{}
+	if len(ports.portList) > 0 {
+		// if there is just one port, then don't use `{}`
+		template := "%s.dst==%s"
+		if len(ports.portList) > 1 {
+			template = "%s.dst=={%s}"
+		}
+		allL4Matches = append(allL4Matches, fmt.Sprintf(template, protocol, strings.Join(ports.portList, ",")))
 	}
-	return foundProtocol, nil
+	allL4Matches = append(allL4Matches, ports.portRange...)
+	l4Match := protocol
+	if len(allL4Matches) > 0 {
+		template := "%s && %s"
+		if len(allL4Matches) > 1 {
+			template = "%s && (%s)"
+		}
+		l4Match = fmt.Sprintf(template, protocol, strings.Join(allL4Matches, " || "))
+	}
+	return l4Match
 }
 
 func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string, isNetPolStateless bool, netInfo util.BasicNetInfo) *gressPolicy {
@@ -296,37 +333,26 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libov
 	} else {
 		lportMatch = fmt.Sprintf("inport == @%s", portGroupName)
 	}
-	var portPolicyIdxs []int
-	if len(gp.portPolicies) == 0 {
-		portPolicyIdxs = []int{emptyIdx}
-	} else {
-		portPolicyIdxs = make([]int, 0, len(gp.portPolicies))
-		for i := 0; i < len(gp.portPolicies); i++ {
-			portPolicyIdxs = append(portPolicyIdxs, i)
-		}
-	}
 	var l4Match string
-	var err error
 	action := nbdb.ACLActionAllowRelated
 	if gp.isNetPolStateless {
 		action = nbdb.ACLActionAllowStateless
 	}
-	for _, portPolIdx := range portPolicyIdxs {
-		if portPolIdx != emptyIdx {
-			portPol := gp.portPolicies[portPolIdx]
-			l4Match, err = portPol.getL4Match()
-			if err != nil {
-				continue
-			}
-		} else {
-			l4Match = noneMatch
+	protocolPortsMap := gp.getProtocolPortsMap()
+	if len(protocolPortsMap) == 0 {
+		protocolPortsMap[emptyProtocol] = nil
+	}
+	for protocol, ports := range protocolPortsMap {
+		l4Match = noneMatch
+		if ports != nil {
+			l4Match = getL4Match(protocol, ports)
 		}
 
 		if len(gp.ipBlocks) > 0 {
 			// Add ACL allow rule for IPBlock CIDR
 			ipBlockMatches := gp.getMatchFromIPBlock(lportMatch, l4Match)
 			for ipBlockIdx, ipBlockMatch := range ipBlockMatches {
-				aclIDs := gp.getNetpolACLDbIDs(portPolIdx, ipBlockIdx)
+				aclIDs := gp.getNetpolACLDbIDs(ipBlockIdx, protocol)
 				acl := libovsdbutil.BuildACL(aclIDs, types.DefaultAllowPriority, ipBlockMatch, action,
 					aclLogging, gp.aclPipeline)
 				createdACLs = append(createdACLs, acl)
@@ -347,7 +373,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libov
 			} else {
 				addrSetMatch = fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
 			}
-			aclIDs := gp.getNetpolACLDbIDs(portPolIdx, emptyIdx)
+			aclIDs := gp.getNetpolACLDbIDs(emptyIdx, protocol)
 			acl := libovsdbutil.BuildACL(aclIDs, types.DefaultAllowPriority, addrSetMatch, action,
 				aclLogging, gp.aclPipeline)
 			if l3Match == "" {
@@ -376,7 +402,7 @@ func parseACLPolicyKey(aclPolicyKey string) (string, string, error) {
 	return s[0], s[1], nil
 }
 
-func (gp *gressPolicy) getNetpolACLDbIDs(portPolicyIdx, ipBlockIdx int) *libovsdbops.DbObjectIDs {
+func (gp *gressPolicy) getNetpolACLDbIDs(ipBlockIdx int, protocol string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, gp.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			// policy namespace+name
@@ -385,14 +411,16 @@ func (gp *gressPolicy) getNetpolACLDbIDs(portPolicyIdx, ipBlockIdx int) *libovsd
 			libovsdbops.PolicyDirectionKey: string(gp.policyType),
 			// gress rule index
 			libovsdbops.GressIdxKey: strconv.Itoa(gp.idx),
-			// acls are created for every gp.portPolicies:
+			// acls are created for every gp.portPolicies which are grouped by protocol:
 			// - for empty policy (no selectors and no ip blocks) - empty ACL
 			// OR
 			// - all selector-based peers ACL
 			// - for every IPBlock +1 ACL
-			// Therefore unique id for given gressPolicy is portPolicy idx + IPBlock idx
-			// (empty policy and all selector-based peers ACLs will have idx=-1)
-			libovsdbops.PortPolicyIndexKey: strconv.Itoa(portPolicyIdx),
-			libovsdbops.IpBlockIndexKey:    strconv.Itoa(ipBlockIdx),
+			// Therefore unique id for a given gressPolicy is protocol name + IPBlock idx
+			// (protocol will be "None" if no port policy is defined, and empty policy and all
+			// selector-based peers ACLs will have idx=-1)
+			libovsdbops.IpBlockIndexKey: strconv.Itoa(ipBlockIdx),
+			// protocol key
+			libovsdbops.PortPolicyProtocolKey: protocol,
 		})
 }

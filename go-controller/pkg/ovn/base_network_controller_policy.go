@@ -1040,7 +1040,6 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 		if err != nil {
 			return fmt.Errorf("failed to start local pod handler: %v", err)
 		}
-
 		return nil
 	})
 	return np, err

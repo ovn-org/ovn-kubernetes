@@ -28,7 +28,8 @@ const (
 	NetpolNodeOwnerType         ownerType = "NetpolNode"
 	NetpolNamespaceOwnerType    ownerType = "NetpolNamespace"
 	VirtualMachineOwnerType     ownerType = "VirtualMachine"
-
+	// NetworkPolicyPortIndexOwnerType is the old version of NetworkPolicyOwnerType, kept for sync only
+	NetworkPolicyPortIndexOwnerType ownerType = "NetworkPolicyPortIndexOwnerType"
 	// owner extra IDs, make sure to define only 1 ExternalIDKey for every string value
 	PriorityKey           ExternalIDKey = "priority"
 	PolicyDirectionKey    ExternalIDKey = "direction"
@@ -40,6 +41,7 @@ const (
 	IpBlockIndexKey       ExternalIDKey = "ip-block-index"
 	RuleIndex             ExternalIDKey = "rule-index"
 	CIDRKey               ExternalIDKey = types.OvnK8sPrefix + "/cidr"
+	PortPolicyProtocolKey ExternalIDKey = "port-policy-protocol"
 )
 
 // ObjectIDsTypes should only be created here
@@ -128,7 +130,7 @@ var ACLNetpolNode = newObjectIDsType(acl, NetpolNodeOwnerType, []ExternalIDKey{
 	IpKey,
 })
 
-// ACLNetworkPolicy define a unique index for every network policy ACL.
+// ACLNetworkPolicyPortIndex define a unique index for every network policy ACL.
 // ingress/egress + NetworkPolicy[In/E]gressRule idx - defines given gressPolicy.
 // ACLs are created for every gp.portPolicies:
 // - for empty policy (no selectors and no ip blocks) - empty ACL (see allIPsMatch)
@@ -137,7 +139,8 @@ var ACLNetpolNode = newObjectIDsType(acl, NetpolNodeOwnerType, []ExternalIDKey{
 // - for every IPBlock +1 ACL
 // Therefore unique id for a given gressPolicy is portPolicy idx + IPBlock idx
 // (empty policy and all selector-based peers ACLs will have idx=-1)
-var ACLNetworkPolicy = newObjectIDsType(acl, NetworkPolicyOwnerType, []ExternalIDKey{
+// Note: keep for backward compatibility only
+var ACLNetworkPolicyPortIndex = newObjectIDsType(acl, NetworkPolicyPortIndexOwnerType, []ExternalIDKey{
 	// policy namespace+name
 	ObjectNameKey,
 	// egress or ingress
@@ -145,6 +148,27 @@ var ACLNetworkPolicy = newObjectIDsType(acl, NetworkPolicyOwnerType, []ExternalI
 	// gress rule index
 	GressIdxKey,
 	PortPolicyIndexKey,
+	IpBlockIndexKey,
+})
+
+// ACLNetworkPolicy define a unique index for every network policy ACL.
+// ingress/egress + NetworkPolicy[In/E]gressRule idx - defines given gressPolicy.
+// ACLs are created for gp.portPolicies which are grouped by protocol:
+// - for empty policy (no selectors and no ip blocks) - empty ACL (see allIPsMatch)
+// OR
+// - all selector-based peers ACL
+// - for every IPBlock +1 ACL
+// Therefore unique id for a given gressPolicy is protocol name + IPBlock idx
+// (protocol will be "None" if no port policy is defined, and empty policy and all
+// selector-based peers ACLs will have idx=-1)
+var ACLNetworkPolicy = newObjectIDsType(acl, NetworkPolicyOwnerType, []ExternalIDKey{
+	// policy namespace+name
+	ObjectNameKey,
+	// egress or ingress
+	PolicyDirectionKey,
+	// gress rule index
+	GressIdxKey,
+	PortPolicyProtocolKey,
 	IpBlockIndexKey,
 })
 

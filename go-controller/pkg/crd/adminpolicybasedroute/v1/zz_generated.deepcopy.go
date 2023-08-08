@@ -21,7 +21,6 @@ limitations under the License.
 package v1
 
 import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -130,11 +129,7 @@ func (in *AdminPolicyBasedRouteStatus) DeepCopy() *AdminPolicyBasedRouteStatus {
 func (in *DynamicHop) DeepCopyInto(out *DynamicHop) {
 	*out = *in
 	in.PodSelector.DeepCopyInto(&out.PodSelector)
-	if in.NamespaceSelector != nil {
-		in, out := &in.NamespaceSelector, &out.NamespaceSelector
-		*out = new(metav1.LabelSelector)
-		(*in).DeepCopyInto(*out)
-	}
+	in.NamespaceSelector.DeepCopyInto(&out.NamespaceSelector)
 	return
 }
 

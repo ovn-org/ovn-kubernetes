@@ -362,7 +362,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 			)
 			duplicatedDynamic.Spec.NextHops.DynamicHops = append(duplicatedDynamic.Spec.NextHops.DynamicHops,
 				&adminpolicybasedrouteapi.DynamicHop{
-					NamespaceSelector: &v1.LabelSelector{MatchLabels: gatewayNamespaceMatch},
+					NamespaceSelector: v1.LabelSelector{MatchLabels: gatewayNamespaceMatch},
 					PodSelector:       v1.LabelSelector{MatchLabels: map[string]string{"key": "duplicated"}},
 					BFDEnabled:        false,
 				})

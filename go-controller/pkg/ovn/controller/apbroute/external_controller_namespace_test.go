@@ -46,7 +46,7 @@ func newPolicy(policyName string, fromNSSelector *v1.LabelSelector, staticHopsGW
 	}
 	if dynamicHopsNSSelector != nil && dynamicHopsPodSelector != nil {
 		p.Spec.NextHops.DynamicHops = []*adminpolicybasedrouteapi.DynamicHop{
-			{NamespaceSelector: dynamicHopsNSSelector,
+			{NamespaceSelector: *dynamicHopsNSSelector,
 				PodSelector: *dynamicHopsPodSelector,
 				BFDEnabled:  bfdEnabled},
 		}
