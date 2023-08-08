@@ -39,8 +39,9 @@ import (
 )
 
 const (
-	maxRetries       = 10
-	svcExternalIDKey = "EgressSVC" // key set on lrps to identify to which egress service it belongs
+	maxRetries         = 10
+	svcExternalIDKey   = "EgressSVC" // key set on lrps to identify to which egress service it belongs
+	interconnectSuffix = ":ic"
 )
 
 type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
@@ -48,6 +49,7 @@ type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSet
 type EnsureNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 	controllerName string, nodeLister corelisters.NodeLister) error
 type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(libovsdbclient.Client, string) error
+type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, nodeName string) error
 
 type Controller struct {
 	controllerName string
@@ -59,6 +61,7 @@ type Controller struct {
 	initClusterEgressPolicies                InitClusterEgressPoliciesFunc
 	ensureNoRerouteNodePolicies              EnsureNoRerouteNodePoliciesFunc
 	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc
+	createDefaultRouteToExternalForIC        CreateDefaultRouteToExternalFunc
 
 	services       map[string]*svcState  // svc key -> state, for services that have sourceIPBy LBIP
 	nodes          map[string]*nodeState // node name -> state, contains nodes that host an egress service
@@ -116,6 +119,7 @@ func NewController(
 	initClusterEgressPolicies InitClusterEgressPoliciesFunc,
 	ensureNoRerouteNodePolicies EnsureNoRerouteNodePoliciesFunc,
 	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc,
+	createDefaultRouteToExternalForIC CreateDefaultRouteToExternalFunc,
 	stopCh <-chan struct{},
 	esInformer egressserviceinformer.EgressServiceInformer,
 	serviceInformer coreinformers.ServiceInformer,
@@ -132,6 +136,7 @@ func NewController(
 		initClusterEgressPolicies:                initClusterEgressPolicies,
 		ensureNoRerouteNodePolicies:              ensureNoRerouteNodePolicies,
 		deleteLegacyDefaultNoRerouteNodePolicies: deleteLegacyDefaultNoRerouteNodePolicies,
+		createDefaultRouteToExternalForIC:        createDefaultRouteToExternalForIC,
 		stopCh:                                   stopCh,
 		services:                                 map[string]*svcState{},
 		nodes:                                    map[string]*nodeState{},
@@ -391,6 +396,13 @@ func (c *Controller) repair() error {
 
 		svc, found := c.services[svcKey]
 		if !found {
+			if config.OVNKubernetesFeature.EnableInterconnect && strings.Contains(svcKey, interconnectSuffix) {
+				// This condition ensures the LRPs that are created with the ":ic" suffix are ignored for now
+				// and we deal with only default local pod LRPs in this part of the cleanup.
+				// The ":ic" LRPs added for remote pods will be repaired further down.
+				klog.Infof("Egress service repair will not delete lrp for service %s because it could be valid: %v", svcKey, item)
+				return false
+			}
 			klog.Infof("Egress service repair will delete lrp for service %s because it is no longer a valid egress service: %v", svcKey, item)
 			return true
 		}
@@ -451,51 +463,60 @@ func (c *Controller) repair() error {
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		lrsrPredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		lrpICPredicate := func(item *nbdb.LogicalRouterPolicy) bool {
+			if item.Priority != ovntypes.EgressSVCReroutePriority {
+				return false
+			}
 			svcKey, found := item.ExternalIDs[svcExternalIDKey]
 			if !found {
 				return false
 			}
 
-			if item.Policy == nil || *item.Policy != nbdb.LogicalRouterStaticRoutePolicySrcIP {
-				klog.Infof("Egress service repair will delete lrsr for service %s it has an invalid policy: %v", svcKey, item)
-				return true
-			}
-
 			svc, found := c.services[svcKey]
+			if found {
+				klog.Infof("Egress service repair already finished repairing lrp for service %s: %v", svcKey, item)
+				return false
+			}
 			if !found {
-				klog.Infof("Egress service repair will delete lrsr for service %s because it is no longer a valid egress service: %v", svcKey, item)
-				return true
+				trimmedKeyValue := strings.TrimSuffix(svcKey, interconnectSuffix)
+				svc, found = c.services[trimmedKeyValue]
+				if !found {
+					klog.Infof("Egress service repair will delete lrsr for service %s because it is no longer a valid egress service: %v", svcKey, item)
+					return true
+				}
+				klog.Infof("Egress service repair continues with repairing service %s because it is valid: %v", svcKey, item)
 			}
 
 			node := c.nodes[svc.node]
 			svcNodeInLocalZone, zoneKnown := c.nodesZoneState[node.name]
 			if !zoneKnown {
-				klog.Errorf("Egress service repair failed to verify whether the svc node %s is in the local zone, deleting lrsr", node.name)
+				klog.Errorf("Egress service repair failed to verify whether the svc node %s is in the local zone, deleting lrp", node.name)
 				return true
 			}
 			if !svcNodeInLocalZone {
-				klog.Infof("Egress service repair will delete lrsr for service %s because the service is no longer hosted in the local zone: %v", svcKey, item)
+				klog.Infof("Egress service repair will delete lrp for service %s because the service is no longer hosted in the local zone: %v", svcKey, item)
 				return true
 			}
 
-			// We only configure LRSRs for endpoint IPs remote to the zone for local services
+			// We only configure IC LRPs for endpoint IPs remote to the zone for local services
 			v4RemoteEps := svcKeyToRemoteV4Endpoints[svcKey]
 			v6RemoteEps := svcKeyToRemoteV6Endpoints[svcKey]
 
-			logicalIP := item.IPPrefix
+			// we extract the IP from the match: "ip4.src == IP" / "ip6.src == IP"
+			splitMatch := strings.Split(item.Match, " ")
+			logicalIP := splitMatch[len(splitMatch)-1]
 			if !v4RemoteEps.Has(logicalIP) && !v6RemoteEps.Has(logicalIP) {
-				klog.Infof("Egress service repair will delete lrsr for service %s: Cannot find a valid remote endpoint within match criteria: %v", svcKey, item)
+				klog.Infof("Egress service repair will delete lrp for service %s: Cannot find a valid endpoint within match criteria: %v", svcKey, item)
 				return true
 			}
 
-			if len(item.Nexthop) == 0 {
-				klog.Infof("Egress service repair will delete lrsr for service %s because it has an empty nexthop: %v", svcKey, item)
+			if len(item.Nexthops) != 1 {
+				klog.Infof("Egress service repair will delete lrp for service %s because it has more than one nexthop: %v", svcKey, item)
 				return true
 			}
 
-			if item.Nexthop != node.v4MgmtIP.String() && item.Nexthop != node.v6MgmtIP.String() {
-				klog.Infof("Egress service repair will delete %s lrsr because it is uses a stale nexthop for service %s: %v", logicalIP, svcKey, item)
+			if item.Nexthops[0] != node.v4MgmtIP.String() && item.Nexthops[0] != node.v6MgmtIP.String() {
+				klog.Infof("Egress service repair will delete %s lrp because it is uses a stale nexthop for service %s: %v", logicalIP, svcKey, item)
 				return true
 			}
 
@@ -506,10 +527,10 @@ func (c *Controller) repair() error {
 			svcKeyToRemoteConfiguredV6Endpoints[svcKey] = append(svcKeyToLocalConfiguredV6Endpoints[svcKey], logicalIP)
 			return false
 		}
-		ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, ovntypes.OVNClusterRouter, lrsrPredicate)
+		ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, ovntypes.OVNClusterRouter, lrpICPredicate)
 		if err != nil {
 			errorList = append(errorList,
-				fmt.Errorf("failed to create ops for deleting stale logical router static routes from router %s: %v", ovntypes.OVNClusterRouter, err))
+				fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", ovntypes.OVNClusterRouter, err))
 		}
 	}
 
@@ -789,10 +810,10 @@ func (c *Controller) syncEgressService(key string) error {
 	}
 	allOps = append(allOps, createOps...)
 
-	if svcNodeInLocalZone && (len(v4RemoteToAdd)+len(v6RemoteToAdd)) > 0 {
+	if config.OVNKubernetesFeature.EnableInterconnect && svcNodeInLocalZone && (len(v4RemoteToAdd)+len(v6RemoteToAdd)) > 0 {
 		// when IC is disabled v[4|6]RemoteToRemove are empty and no ops are created
-		// with IC enabled, when service is hosted in the local zone, create static routes for remote endpoints
-		createOps, err = c.createOrUpdateLogicalRouterStaticRoutesOps(key, node.v4MgmtIP.String(), node.v6MgmtIP.String(), v4RemoteToAdd, v6RemoteToAdd)
+		// with IC enabled, when service is hosted in the local zone, create logical router policies for remote endpoints
+		createOps, err = c.createOrUpdateLogicalRouterPoliciesOps(key+interconnectSuffix, node.v4MgmtIP.String(), node.v6MgmtIP.String(), v4RemoteToAdd, v6RemoteToAdd)
 		if err != nil {
 			return err
 		}
@@ -814,14 +835,16 @@ func (c *Controller) syncEgressService(key string) error {
 	}
 	allOps = append(allOps, deleteOps...)
 
-	// when IC is disabled v[4|6]RemoteToRemove are empty and no ops are created
-	// with IC enabled, it is safer to avoid checking whether the service is local
-	// as we want to remove the static routes configured for the specific remote pods.
-	deleteOps, err = c.deleteLogicalRouterStaticRoutesOps(key, v4RemoteToRemove, v6RemoteToRemove)
-	if err != nil {
-		return err
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		// when IC is disabled v[4|6]RemoteToRemove are empty and no ops are created
+		// with IC enabled, it is safer to avoid checking whether the service is local
+		// as we want to remove the logical router policies configured for the specific remote pods.
+		deleteOps, err = c.deleteLogicalRouterPoliciesOps(key+interconnectSuffix, v4RemoteToRemove, v6RemoteToRemove)
+		if err != nil {
+			return err
+		}
+		allOps = append(allOps, deleteOps...)
 	}
-	allOps = append(allOps, deleteOps...)
 
 	deleteOps, err = c.deletePodIPsFromAddressSetOps(createIPAddressNetSlice(v4LocalToRemove, v6LocalToRemove))
 	if err != nil {
@@ -853,7 +876,8 @@ func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcSt
 	svcState.stale = true
 
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.ExternalIDs[svcExternalIDKey] == key
+		return item.ExternalIDs[svcExternalIDKey] == key ||
+			item.ExternalIDs[svcExternalIDKey] == key+interconnectSuffix // will remove the LRPs we add for IC as well
 	}
 
 	deleteOps := []libovsdb.Operation{}
@@ -867,16 +891,6 @@ func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcSt
 		return err
 	}
 	deleteOps = append(deleteOps, delAddrSetOps...)
-
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.ExternalIDs[svcExternalIDKey] == key
-		}
-		deleteOps, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, deleteOps, ovntypes.OVNClusterRouter, p)
-		if err != nil {
-			return err
-		}
-	}
 
 	if _, err := libovsdbops.TransactAndCheck(c.nbClient, deleteOps); err != nil {
 		return fmt.Errorf("failed to clean egress service resources for %s, err: %v", key, err)
