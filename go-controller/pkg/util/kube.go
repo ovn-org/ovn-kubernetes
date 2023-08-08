@@ -496,6 +496,26 @@ func ServiceInternalTrafficPolicyLocal(service *kapi.Service) bool {
 	return service.Spec.InternalTrafficPolicy != nil && *service.Spec.InternalTrafficPolicy == kapi.ServiceInternalTrafficPolicyLocal
 }
 
+// GetClusterSubnets returns the v4&v6 cluster subnets in a cluster separately
+func GetClusterSubnets() ([]*net.IPNet, []*net.IPNet) {
+	var v4ClusterSubnets = []*net.IPNet{}
+	var v6ClusterSubnets = []*net.IPNet{}
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		if !utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+			v4ClusterSubnets = append(v4ClusterSubnets, clusterSubnet.CIDR)
+		} else {
+			v6ClusterSubnets = append(v6ClusterSubnets, clusterSubnet.CIDR)
+		}
+	}
+	return v4ClusterSubnets, v6ClusterSubnets
+}
+
+// GetAllClusterSubnets returns all (v4&v6) cluster subnets in a cluster
+func GetAllClusterSubnets() []*net.IPNet {
+	v4ClusterSubnets, v6ClusterSubnets := GetClusterSubnets()
+	return append(v4ClusterSubnets, v6ClusterSubnets...)
+}
+
 // GetNodePrimaryIP extracts the primary IP address from the node status in the  API
 func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 	if node == nil {

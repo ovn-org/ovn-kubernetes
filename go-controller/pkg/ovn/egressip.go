@@ -1306,7 +1306,7 @@ func (oc *DefaultNetworkController) initClusterEgressPolicies(nodes []interface{
 // required by the egressIP and egressServices features.
 func InitClusterEgressPolicies(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 	controllerName string) error {
-	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
+	v4ClusterSubnet, v6ClusterSubnet := util.GetClusterSubnets()
 	if err := createDefaultNoReroutePodPolicies(nbClient, v4ClusterSubnet, v6ClusterSubnet); err != nil {
 		return err
 	}
@@ -1995,19 +1995,6 @@ func (oc *DefaultNetworkController) deletePodIPsFromAddressSet(addrSetIPs []net.
 		return fmt.Errorf("cannot delete egressPodIPs %v from the address set %v: err: %v", addrSetIPs, EgressIPServedPodsAddrSetName, err)
 	}
 	return nil
-}
-
-func getClusterSubnets() ([]*net.IPNet, []*net.IPNet) {
-	var v4ClusterSubnets = []*net.IPNet{}
-	var v6ClusterSubnets = []*net.IPNet{}
-	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		if !utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-			v4ClusterSubnets = append(v4ClusterSubnets, clusterSubnet.CIDR)
-		} else {
-			v6ClusterSubnets = append(v6ClusterSubnets, clusterSubnet.CIDR)
-		}
-	}
-	return v4ClusterSubnets, v6ClusterSubnets
 }
 
 // createDefaultNoRerouteServicePolicies ensures service reachability from the
