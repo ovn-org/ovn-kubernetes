@@ -11,7 +11,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
@@ -48,9 +47,9 @@ func getIPTablesProtocol(ip string) iptables.Protocol {
 // getMasqueradeVIP returns the .3 masquerade VIP based on the protocol (v4/v6) of provided IP string
 func getMasqueradeVIP(ip string) string {
 	if utilnet.IsIPv6String(ip) {
-		return types.V6HostETPLocalMasqueradeIP
+		return config.Gateway.MasqueradeIPs.V6HostETPLocalMasqueradeIP.String()
 	}
-	return types.V4HostETPLocalMasqueradeIP
+	return config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String()
 }
 
 // insertIptRules adds the provided rules in an insert fashion
@@ -114,7 +113,7 @@ func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
 // `targetIP` is clusterIP towards which the DNAT of nodePort service is to be added
 // `targetPort` is the port towards which the DNAT of the nodePort service is to be added
 //
-//	case1: if svcHasLocalHostNetEndPnt=false + isETPLocal=true targetIP=types.HostETPLocalMasqueradeIP and targetPort=svcPort.NodePort
+//	case1: if svcHasLocalHostNetEndPnt=false + isETPLocal=true targetIP=config.masqueradeIP["HostETPLocalMasqueradeIP"] and targetPort=svcPort.NodePort
 //	case2: default: targetIP=clusterIP and targetPort=svcPort.Port
 //
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
@@ -250,7 +249,7 @@ func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, 
 // `externalIP` can either be the externalIP or LB.status.ingressIP
 // `dstIP` corresponds to the IP to which the provided externalIP needs to be DNAT-ed to
 //
-//	case1: if svcHasLocalHostNetEndPnt=false + isETPLocal=true, dstIP=types.HostETPLocalMasqueradeIP
+//	case1: if svcHasLocalHostNetEndPnt=false + isETPLocal=true, dstIP=config.MasqueradeIP["HostETPLocalMasqueradeIP"]
 //	case2: default: dstIP=clusterIP
 //
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
@@ -282,9 +281,9 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svc
 
 func getGatewayForwardRules(svcCIDR *net.IPNet) []nodeipt.Rule {
 	protocol := getIPTablesProtocol(svcCIDR.IP.String())
-	masqueradeIP := types.V4OVNMasqueradeIP
+	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
 	if protocol == iptables.ProtocolIPv6 {
-		masqueradeIP = types.V6OVNMasqueradeIP
+		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
 	}
 	return []nodeipt.Rule{
 		{
@@ -309,7 +308,7 @@ func getGatewayForwardRules(svcCIDR *net.IPNet) []nodeipt.Rule {
 			Table: "filter",
 			Chain: "FORWARD",
 			Args: []string{
-				"-s", masqueradeIP,
+				"-s", masqueradeIP.String(),
 				"-j", "ACCEPT",
 			},
 			Protocol: protocol,
@@ -318,7 +317,7 @@ func getGatewayForwardRules(svcCIDR *net.IPNet) []nodeipt.Rule {
 			Table: "filter",
 			Chain: "FORWARD",
 			Args: []string{
-				"-d", masqueradeIP,
+				"-d", masqueradeIP.String(),
 				"-j", "ACCEPT",
 			},
 			Protocol: protocol,
@@ -373,9 +372,9 @@ func initExternalBridgeDropForwardingRules(ifName string) error {
 func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	protocol := getIPTablesProtocol(cidr.IP.String())
-	masqueradeIP := types.V4OVNMasqueradeIP
+	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
 	if protocol == iptables.ProtocolIPv6 {
-		masqueradeIP = types.V6OVNMasqueradeIP
+		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
 	}
 	return []nodeipt.Rule{
 		{
@@ -411,7 +410,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 			Table: "nat",
 			Chain: "POSTROUTING",
 			Args: []string{
-				"-s", masqueradeIP,
+				"-s", masqueradeIP.String(),
 				"-j", "MASQUERADE",
 			},
 			Protocol: protocol,

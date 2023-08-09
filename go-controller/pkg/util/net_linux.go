@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/j-keck/arping"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
@@ -486,9 +486,9 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 func IsAddressReservedForInternalUse(addr net.IP) bool {
 	var subnetStr string
 	if addr.To4() != nil {
-		subnetStr = types.V4MasqueradeSubnet
+		subnetStr = config.Gateway.V4MasqueradeSubnet
 	} else {
-		subnetStr = types.V6MasqueradeSubnet
+		subnetStr = config.Gateway.V6MasqueradeSubnet
 	}
 	_, subnet, err := net.ParseCIDR(subnetStr)
 	if err != nil {

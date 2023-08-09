@@ -292,9 +292,9 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 
 	for _, nextHop := range node.DummyNextHopIPs() {
 		// Add return service route for OVN back to host
-		prefix := types.V4MasqueradeSubnet
+		prefix := config.Gateway.V4MasqueradeSubnet
 		if utilnet.IsIPv6(nextHop) {
-			prefix = types.V6MasqueradeSubnet
+			prefix = config.Gateway.V6MasqueradeSubnet
 		}
 		lrsr := nbdb.LogicalRouterStaticRoute{
 			IPPrefix:   prefix,

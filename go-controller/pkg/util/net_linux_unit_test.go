@@ -7,9 +7,9 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
@@ -1121,12 +1121,12 @@ func TestIsAddressReservedForInternalUse(t *testing.T) {
 		},
 		{
 			desc:   "reserved IPv4 address",
-			input:  ovntest.MustParseIP(types.V4HostMasqueradeIP),
+			input:  config.Gateway.MasqueradeIPs.V4HostMasqueradeIP,
 			outExp: true,
 		},
 		{
 			desc:   "reserved IPv6 address",
-			input:  ovntest.MustParseIP(types.V6HostMasqueradeIP),
+			input:  config.Gateway.MasqueradeIPs.V6HostMasqueradeIP,
 			outExp: true,
 		},
 	}

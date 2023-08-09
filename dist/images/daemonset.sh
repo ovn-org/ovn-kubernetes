@@ -71,6 +71,8 @@ OVN_DISABLE_OVN_IFACE_ID_VER="false"
 OVN_MULTI_NETWORK_ENABLE=
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
+OVN_V4_MASQUERADE_SUBNET=""
+OVN_V6_MASQUERADE_SUBNET=""
 OVN_NETFLOW_TARGETS=""
 OVN_SFLOW_TARGETS=""
 OVN_IPFIX_TARGETS=""
@@ -256,6 +258,12 @@ while [ "$1" != "" ]; do
   --v6-join-subnet)
     OVN_V6_JOIN_SUBNET=$VALUE
     ;;
+  --v4-masquerade-subnet)
+    OVN_V4_MASQUERADE_SUBNET=$VALUE
+    ;;
+  --v6-masquerade-subnet)
+    OVN_V6_MASQUERADE_SUBNET=$VALUE
+    ;;
   --netflow-targets)
     OVN_NETFLOW_TARGETS=$VALUE
     ;;
@@ -439,6 +447,10 @@ ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET}
 echo "ovn_v4_join_subnet: ${ovn_v4_join_subnet}"
 ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET}
 echo "ovn_v6_join_subnet: ${ovn_v6_join_subnet}"
+ovn_v4_masquerade_subnet=${OVN_V4_MASQUERADE_SUBNET}
+echo "ovn_v4_masquerade_subnet: ${ovn_v4_masquerade_subnet}"
+ovn_v6_masquerade_subnet=${OVN_V6_MASQUERADE_SUBNET}
+echo "ovn_v6_masquerade_subnet: ${ovn_v6_masquerade_subnet}"
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS}
 echo "ovn_netflow_targets: ${ovn_netflow_targets}"
 ovn_sflow_targets=${OVN_SFLOW_TARGETS}
@@ -487,6 +499,8 @@ ovn_image=${ovnkube_image} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
@@ -535,6 +549,8 @@ ovn_image=${image} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
@@ -569,6 +585,8 @@ ovn_image=${ovnkube_image} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
@@ -605,6 +623,8 @@ ovn_image=${ovnkube_image} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \

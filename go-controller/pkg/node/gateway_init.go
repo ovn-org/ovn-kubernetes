@@ -205,12 +205,12 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 					// For local gw, if not default gateway is available or the provide gateway interface is not the host gateway interface
 					// use nexthop masquerade IP as GR default gw to steer traffic to the gateway bridge
 					if needIPv4NextHop {
-						nexthop := net.ParseIP(types.V4DummyNextHopMasqueradeIP)
+						nexthop := config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP
 						gatewayNextHops = append(gatewayNextHops, nexthop)
 						needIPv4NextHop = false
 					}
 					if needIPv6NextHop {
-						nexthop := net.ParseIP(types.V6DummyNextHopMasqueradeIP)
+						nexthop := config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP
 						gatewayNextHops = append(gatewayNextHops, nexthop)
 						needIPv6NextHop = false
 					}

@@ -23,11 +23,11 @@ func (oc *DefaultNetworkController) addHairpinAllowACL() error {
 	var v4Match, v6Match, match string
 
 	if config.IPv4Mode {
-		v4Match = fmt.Sprintf("%s.src == %s", "ip4", types.V4OVNServiceHairpinMasqueradeIP)
+		v4Match = fmt.Sprintf("%s.src == %s", "ip4", config.Gateway.MasqueradeIPs.V4OVNServiceHairpinMasqueradeIP.String())
 		match = v4Match
 	}
 	if config.IPv6Mode {
-		v6Match = fmt.Sprintf("%s.src == %s", "ip6", types.V6OVNServiceHairpinMasqueradeIP)
+		v6Match = fmt.Sprintf("%s.src == %s", "ip6", config.Gateway.MasqueradeIPs.V6OVNServiceHairpinMasqueradeIP.String())
 		match = v6Match
 	}
 	if config.IPv4Mode && config.IPv6Mode {
