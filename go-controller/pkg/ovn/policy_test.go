@@ -328,7 +328,7 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 		if statelessNetPol {
 			action = nbdb.ACLActionAllowStateless
 		}
-		dbIDs := gp.getNetpolACLDbIDs(emptyIdx, emptyIdx)
+		dbIDs := gp.getNetpolACLDbIDs(emptyIdx, emptyProtocol)
 		acl := libovsdbops.BuildACL(
 			libovsdbutil.GetACLName(dbIDs),
 			direction,
@@ -347,7 +347,7 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 	}
 	for i, ipBlock := range ipBlocks {
 		match := fmt.Sprintf("ip4.%s == %s && %s == @%s", ipDir, ipBlock, portDir, pgName)
-		dbIDs := gp.getNetpolACLDbIDs(emptyIdx, i)
+		dbIDs := gp.getNetpolACLDbIDs(i, emptyProtocol)
 		acl := libovsdbops.BuildACL(
 			libovsdbutil.GetACLName(dbIDs),
 			direction,
@@ -364,8 +364,8 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
 	}
-	for portPolicyIdx, v := range tcpPeerPorts {
-		dbIDs := gp.getNetpolACLDbIDs(portPolicyIdx, emptyIdx)
+	for _, v := range tcpPeerPorts {
+		dbIDs := gp.getNetpolACLDbIDs(emptyIdx, "tcp")
 		acl := libovsdbops.BuildACL(
 			libovsdbutil.GetACLName(dbIDs),
 			direction,
@@ -2223,7 +2223,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 
 	buildExpectedIngressPeerNSv4ACL := func(gp *gressPolicy, pgName string, asDbIDses []*libovsdbops.DbObjectIDs,
 		aclLogging *libovsdbutil.ACLLoggingLevels) *nbdb.ACL {
-		aclIDs := gp.getNetpolACLDbIDs(emptyIdx, emptyIdx)
+		aclIDs := gp.getNetpolACLDbIDs(emptyIdx, emptyProtocol)
 		hashedASNames := []string{}
 
 		for _, dbIdx := range asDbIDses {
