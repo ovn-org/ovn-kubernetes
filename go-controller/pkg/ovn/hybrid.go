@@ -194,8 +194,13 @@ func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*n
 				return fmt.Errorf("failed to add policy route '%s' for host %q on %s , error: %v", matchStr, nodeName, ovntypes.OVNClusterRouter, err)
 			}
 
-			logicalPort := ovntypes.RouterToSwitchPrefix + nodeName
-			if err := libovsdbutil.CreateMACBinding(oc.sbClient, logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
+			smb := &nbdb.StaticMACBinding{
+				LogicalPort:        ovntypes.RouterToSwitchPrefix + nodeName,
+				MAC:                portMac.String(),
+				IP:                 drIP.String(),
+				OverrideDynamicMAC: true,
+			}
+			if err := libovsdbops.CreateOrUpdateStaticMacBinding(oc.nbClient, smb); err != nil {
 				return fmt.Errorf("failed to create MAC Binding for hybrid overlay: %v", err)
 			}
 

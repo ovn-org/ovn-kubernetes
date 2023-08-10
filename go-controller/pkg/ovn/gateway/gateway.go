@@ -8,7 +8,6 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -64,23 +63,26 @@ func GetGatewayPhysicalIPs(nbClient libovsdbclient.Client, gatewayRouter string)
 
 // CreateDummyGWMacBindings creates mac bindings (ipv4 and ipv6) for a fake next hops
 // used by host->service traffic
-func CreateDummyGWMacBindings(sbClient libovsdbclient.Client, nodeName string) error {
-	for _, nextHop := range node.DummyNextHopIPs() {
-		dummyNextHopMAC := util.IPAddrToHWAddr(nextHop)
-		nodeGWRouter := util.GetGatewayRouterFromNode(nodeName)
-		logicalPort := ovntypes.GWRouterToExtSwitchPrefix + nodeGWRouter
-		if err := libovsdbutil.CreateMACBinding(
-			sbClient,
-			logicalPort,
-			nodeGWRouter,
-			dummyNextHopMAC,
-			nextHop,
-		); err != nil {
-			return fmt.Errorf(
-				"failed to create MAC Binding for dummy nexthop %s: %v",
-				nodeName,
-				err)
+func CreateDummyGWMacBindings(nbClient libovsdbclient.Client, nodeName string) error {
+	nodeGWRouter := util.GetGatewayRouterFromNode(nodeName)
+	logicalPort := ovntypes.GWRouterToExtSwitchPrefix + nodeGWRouter
+	dummyNextHopIPs := node.DummyNextHopIPs()
+	smbs := make([]*nbdb.StaticMACBinding, len(dummyNextHopIPs))
+	for i := range dummyNextHopIPs {
+		smb := &nbdb.StaticMACBinding{
+			LogicalPort:        logicalPort,
+			MAC:                util.IPAddrToHWAddr(dummyNextHopIPs[i]).String(),
+			IP:                 dummyNextHopIPs[i].String(),
+			OverrideDynamicMAC: true,
 		}
+		smbs[i] = smb
+	}
+
+	if err := libovsdbops.CreateOrUpdateStaticMacBinding(nbClient, smbs...); err != nil {
+		return fmt.Errorf(
+			"failed to create MAC Binding for dummy nexthop %s: %v",
+			nodeName,
+			err)
 	}
 
 	return nil
