@@ -119,18 +119,6 @@ func RegisterClusterManagerFunctional() {
 	}
 }
 
-func UnregisterClusterManagerFunctional() {
-	prometheus.Unregister(metricV4HostSubnetCount)
-	prometheus.Unregister(metricV6HostSubnetCount)
-	prometheus.Unregister(metricV4AllocatedHostSubnetCount)
-	prometheus.Unregister(metricV6AllocatedHostSubnetCount)
-	if config.OVNKubernetesFeature.EnableEgressIP {
-		prometheus.Unregister(metricEgressIPNodeUnreacheableCount)
-		prometheus.Unregister(metricEgressIPRebalanceCount)
-		prometheus.Unregister(metricEgressIPCount)
-	}
-}
-
 // RecordSubnetUsage records the number of subnets allocated for nodes
 func RecordSubnetUsage(v4SubnetsAllocated, v6SubnetsAllocated float64) {
 	metricV4AllocatedHostSubnetCount.Set(v4SubnetsAllocated)
