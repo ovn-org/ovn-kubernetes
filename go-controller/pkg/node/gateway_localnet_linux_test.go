@@ -2234,7 +2234,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				// to ensure the endpoint is local-host-networked
-				res := fNPW.nodeIPManager.addresses.Has(ep1.Addresses[0])
+				res := fNPW.nodeIPManager.addresses.Has(fmt.Sprintf("%s/32", ep1.Addresses[0]))
 				Expect(res).To(BeTrue())
 				err := fNPW.AddService(&service)
 				Expect(err).NotTo(HaveOccurred())
@@ -2522,7 +2522,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				// to ensure the endpoint is local-host-networked
-				res := fNPW.nodeIPManager.addresses.Has(endpointSlice.Endpoints[0].Addresses[0])
+				res := fNPW.nodeIPManager.addresses.Has(fmt.Sprintf("%s/32", endpointSlice.Endpoints[0].Addresses[0]))
 				Expect(res).To(BeTrue())
 				err := fNPW.AddService(&service)
 				Expect(err).NotTo(HaveOccurred())

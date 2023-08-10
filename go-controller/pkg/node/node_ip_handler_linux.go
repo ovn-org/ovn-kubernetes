@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -334,7 +335,19 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 		return false, fmt.Errorf("failed to parse the primary IP address string from kubernetes node status")
 	}
 	c.Lock()
-	exists := c.addresses.Has(nodePrimaryAddrStr)
+	var exists bool
+	for _, hostAddr := range c.addresses.UnsortedList() {
+		ip, _, err := net.ParseCIDR(hostAddr)
+		if err != nil {
+			klog.Errorf("Node IP: failed to parse node address %q. Unable to detect if node primary address changed: %w",
+				hostAddr, err)
+			continue
+		}
+		if ip.Equal(nodePrimaryAddr) {
+			exists = true
+			break
+		}
+	}
 	c.Unlock()
 
 	if !exists || c.nodePrimaryAddr.Equal(nodePrimaryAddr) {
@@ -418,29 +431,31 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 }
 
 func (c *addressManager) sync() {
-	var err error
-	var addrs []net.Addr
+	var addrs []netlink.Addr
 
 	if c.useNetlink {
-		addrs, err = net.InterfaceAddrs()
+		links, err := netlink.LinkList()
 		if err != nil {
-			klog.Errorf("Failed to sync Node IP Manager: unable list all IPs on the node, error: %v", err)
+			klog.Errorf("Failed sync due to being unable to list links: %v", err)
 			return
+		}
+		for _, link := range links {
+			foundAddrs, err := linkmanager.GetExternallyAvailableAddressesExcludeAssigned(link, config.IPv4Mode, config.IPv6Mode)
+			if err != nil {
+				klog.Errorf("Unable to retrieve addresses for link %s: %v", link.Attrs().Name, err)
+				return
+			}
+			addrs = append(addrs, foundAddrs...)
 		}
 	}
 
 	currAddresses := sets.New[string]()
 	for _, addr := range addrs {
-		ip, ipnet, err := net.ParseCIDR(addr.String())
-		if err != nil {
-			klog.Errorf("Invalid IP address found on host: %s", addr.String())
+		if !c.isValidNodeIP(addr.IP) {
+			klog.V(5).Infof("Skipping non-useable IP address for host: %s", addr.String())
 			continue
 		}
-		if !c.isValidNodeIP(ip) {
-			klog.V(5).Infof("Skipping non-useable IP address for host: %s", ip.String())
-			continue
-		}
-		netAddr := &net.IPNet{IP: ip, Mask: ipnet.Mask}
+		netAddr := net.IPNet{IP: addr.IP, Mask: addr.Mask}
 		currAddresses.Insert(netAddr.String())
 	}
 
