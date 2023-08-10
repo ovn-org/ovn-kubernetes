@@ -208,6 +208,8 @@ spec:
           value: "{{ ovnkube_logfile_maxbackups }}"
         - name: OVNKUBE_LOGFILE_MAXAGE
           value: "{{ ovnkube_logfile_maxage }}"
+        - name: OVNKUBE_LIBOVSDB_CLIENT_LOGFILE
+          value: "{{ ovnkube_libovsdb_client_logfile }}"
         - name: OVNKUBE_CONFIG_DURATION_ENABLE
           value: "{{ ovnkube_config_duration_enable }}"
         - name: OVNKUBE_METRICS_SCALE_ENABLE
@@ -243,6 +245,8 @@ spec:
               fieldPath: metadata.namespace
         - name: OVN_HYBRID_OVERLAY_ENABLE
           value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
+          value: "{{ ovn_admin_network_policy_enable }}"
         - name: OVN_EGRESSIP_ENABLE
           value: "{{ ovn_egress_ip_enable }}"
         - name: OVN_EGRESSIP_HEALTHCHECK_PORT
@@ -267,6 +271,10 @@ spec:
           value: "{{ ovn_v4_join_subnet }}"
         - name: OVN_V6_JOIN_SUBNET
           value: "{{ ovn_v6_join_subnet }}"
+        - name: OVN_V4_MASQUERADE_SUBNET
+          value: "{{ ovn_v4_masquerade_subnet }}"
+        - name: OVN_V6_MASQUERADE_SUBNET
+          value: "{{ ovn_v6_masquerade_subnet }}"
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
         - name: OVN_GATEWAY_MODE

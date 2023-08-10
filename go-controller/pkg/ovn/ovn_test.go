@@ -39,6 +39,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
+	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 )
 
 const (
@@ -73,6 +75,7 @@ type FakeOVN struct {
 	nbsbCleanup  *libovsdbtest.Context
 	egressQoSWg  *sync.WaitGroup
 	egressSVCWg  *sync.WaitGroup
+	anpWg        *sync.WaitGroup
 
 	// information map of all secondary network controllers
 	secondaryControllers map[string]secondaryControllerInfo
@@ -89,6 +92,7 @@ func NewFakeOVN(useFakeAddressSet bool) *FakeOVN {
 		fakeRecorder: record.NewFakeRecorder(10),
 		egressQoSWg:  &sync.WaitGroup{},
 		egressSVCWg:  &sync.WaitGroup{},
+		anpWg:        &sync.WaitGroup{},
 
 		secondaryControllers: map[string]secondaryControllerInfo{},
 	}
@@ -105,6 +109,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	multiNetworkPolicyObjects := []runtime.Object{}
 	egressServiceObjects := []runtime.Object{}
 	apbExternalRouteObjects := []runtime.Object{}
+	anpObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []nettypes.NetworkAttachmentDefinition{}
 	for _, object := range objects {
@@ -123,12 +128,15 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			nads = append(nads, o.Items...)
 		case *adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList:
 			apbExternalRouteObjects = append(apbExternalRouteObjects, object)
+		case *anpapi.AdminNetworkPolicyList:
+			anpObjects = append(anpObjects, object)
 		default:
 			v1Objects = append(v1Objects, object)
 		}
 	}
 	o.fakeClient = &util.OVNMasterClientset{
 		KubeClient:               fake.NewSimpleClientset(v1Objects...),
+		ANPClient:                anpfake.NewSimpleClientset(anpObjects...),
 		EgressIPClient:           egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient:     egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
 		EgressQoSClient:          egressqosfake.NewSimpleClientset(egressQoSObjects...),
@@ -151,6 +159,7 @@ func (o *FakeOVN) shutdown() {
 	o.wg.Wait()
 	o.egressQoSWg.Wait()
 	o.egressSVCWg.Wait()
+	o.anpWg.Wait()
 	o.nbsbCleanup.Cleanup()
 	for _, ocInfo := range o.secondaryControllers {
 		close(ocInfo.bnc.stopChan)
@@ -241,6 +250,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		ovnClient.KubeClient,
 		&kube.KubeOVN{
 			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
+			ANPClient:            ovnClient.ANPClient,
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			EgressServiceClient:  ovnClient.EgressServiceClient,
@@ -270,6 +280,16 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 	}
 
 	return dnc, err
+}
+
+func (o *FakeOVN) InitAndRunANPController() {
+	err := o.controller.newANPController()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	o.anpWg.Add(1)
+	go func() {
+		defer o.anpWg.Done()
+		o.controller.anpController.Run(1, o.stopChan)
+	}()
 }
 
 func createTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {

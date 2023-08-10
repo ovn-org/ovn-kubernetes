@@ -478,6 +478,7 @@ jobs:
           make -C test control-plane WHAT="Kubevirt Virtual Machines"
         else
           make -C test ${{ matrix.target }}
+          make -C test conformance
         fi
 
     - name: Export kind logs

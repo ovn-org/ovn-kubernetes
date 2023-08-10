@@ -20,6 +20,9 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/pointer"
 
+	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	anpapifake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
+
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -191,6 +194,29 @@ func newEgressService(name, namespace string) *egressservice.EgressService {
 	}
 }
 
+func newAdminNetworkPolicy(name string, priority int32) *anpapi.AdminNetworkPolicy {
+	return &anpapi.AdminNetworkPolicy{
+		ObjectMeta: newObjectMeta(name, ""),
+		Spec: anpapi.AdminNetworkPolicySpec{
+			Priority: priority,
+			Subject: anpapi.AdminNetworkPolicySubject{
+				Namespaces: &metav1.LabelSelector{},
+			},
+		},
+	}
+}
+
+func newBaselineAdminNetworkPolicy(name string) *anpapi.BaselineAdminNetworkPolicy {
+	return &anpapi.BaselineAdminNetworkPolicy{
+		ObjectMeta: newObjectMeta(name, ""),
+		Spec: anpapi.BaselineAdminNetworkPolicySpec{
+			Subject: anpapi.AdminNetworkPolicySubject{
+				Namespaces: &metav1.LabelSelector{},
+			},
+		},
+	}
+}
+
 func objSetup(c *fake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
@@ -233,6 +259,13 @@ func egressServiceObjSetup(c *egressservicefake.Clientset, objType string, listF
 	return w
 }
 
+func adminNetworkPolicyObjSetup(c *anpapifake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
 type handlerCalls struct {
 	added   int32
 	updated int32
@@ -261,6 +294,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		cloudNetworkFakeClient              *ocpcloudnetworkclientsetfake.Clientset
 		egressQoSFakeClient                 *egressqosfake.Clientset
 		egressServiceFakeClient             *egressservicefake.Clientset
+		adminNetworkPolicyFakeClient        *anpapifake.Clientset
 		podWatch, namespaceWatch, nodeWatch *watch.FakeWatcher
 		policyWatch, serviceWatch           *watch.FakeWatcher
 		endpointSliceWatch                  *watch.FakeWatcher
@@ -269,6 +303,8 @@ var _ = Describe("Watch Factory Operations", func() {
 		cloudPrivateIPConfigWatch           *watch.FakeWatcher
 		egressQoSWatch                      *watch.FakeWatcher
 		egressServiceWatch                  *watch.FakeWatcher
+		adminNetPolWatch                    *watch.FakeWatcher
+		baselineAdminNetPolWatch            *watch.FakeWatcher
 		pods                                []*v1.Pod
 		namespaces                          []*v1.Namespace
 		nodes                               []*v1.Node
@@ -281,6 +317,8 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressFirewalls                     []*egressfirewall.EgressFirewall
 		egressQoSes                         []*egressqos.EgressQoS
 		egressServices                      []*egressservice.EgressService
+		adminNetworkPolicies                []*anpapi.AdminNetworkPolicy
+		baselineAdminNetworkPolicies        []*anpapi.BaselineAdminNetworkPolicy
 		err                                 error
 	)
 
@@ -296,6 +334,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		config.OVNKubernetesFeature.EnableEgressFirewall = true
 		config.OVNKubernetesFeature.EnableEgressQoS = true
 		config.OVNKubernetesFeature.EnableEgressService = true
+		config.OVNKubernetesFeature.EnableAdminNetworkPolicy = true
 		config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
 
 		fakeClient = &fake.Clientset{}
@@ -304,9 +343,11 @@ var _ = Describe("Watch Factory Operations", func() {
 		cloudNetworkFakeClient = &ocpcloudnetworkclientsetfake.Clientset{}
 		egressQoSFakeClient = &egressqosfake.Clientset{}
 		egressServiceFakeClient = &egressservicefake.Clientset{}
+		adminNetworkPolicyFakeClient = &anpapifake.Clientset{}
 
 		ovnClientset = &util.OVNMasterClientset{
 			KubeClient:           fakeClient,
+			ANPClient:            adminNetworkPolicyFakeClient,
 			EgressIPClient:       egressIPFakeClient,
 			CloudNetworkClient:   cloudNetworkFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
@@ -414,6 +455,24 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressServiceWatch = egressServiceObjSetup(egressServiceFakeClient, "egressservices", func(core.Action) (bool, runtime.Object, error) {
 			obj := &egressservice.EgressServiceList{}
 			for _, p := range egressServices {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
+
+		adminNetworkPolicies = make([]*anpapi.AdminNetworkPolicy, 0)
+		adminNetPolWatch = adminNetworkPolicyObjSetup(adminNetworkPolicyFakeClient, "adminnetworkpolicies", func(core.Action) (bool, runtime.Object, error) {
+			obj := &anpapi.AdminNetworkPolicyList{}
+			for _, p := range adminNetworkPolicies {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
+
+		baselineAdminNetworkPolicies = make([]*anpapi.BaselineAdminNetworkPolicy, 0)
+		baselineAdminNetPolWatch = adminNetworkPolicyObjSetup(adminNetworkPolicyFakeClient, "baselineadminnetworkpolicies", func(core.Action) (bool, runtime.Object, error) {
+			obj := &anpapi.BaselineAdminNetworkPolicyList{}
+			for _, p := range baselineAdminNetworkPolicies {
 				obj.Items = append(obj.Items, *p)
 			}
 			return true, obj, nil
@@ -563,6 +622,14 @@ var _ = Describe("Watch Factory Operations", func() {
 			egressServices = append(egressServices, newEgressService("myEgressService", "default"))
 			testExisting(EgressServiceType, "", nil, defaultHandlerPriority)
 		})
+		It("is called for each existing admin network policy", func() {
+			adminNetworkPolicies = append(adminNetworkPolicies, newAdminNetworkPolicy("myANP", 3))
+			testExisting(AdminNetworkPolicyType, "", nil, defaultHandlerPriority)
+		})
+		It("is called for each existing baseline admin network policy", func() {
+			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP"))
+			testExisting(BaselineAdminNetworkPolicyType, "", nil, defaultHandlerPriority)
+		})
 
 		It("is called for each existing pod that matches a given namespace and label", func() {
 			pod := newPod("pod1", "default")
@@ -667,6 +734,16 @@ var _ = Describe("Watch Factory Operations", func() {
 			egressServices = append(egressServices, newEgressService("myEgressService1", "default"))
 			testExisting(EgressServiceType)
 		})
+		It("calls ADD for each existing Admin Network Policy", func() {
+			adminNetworkPolicies = append(adminNetworkPolicies, newAdminNetworkPolicy("myANP1", 10))
+			adminNetworkPolicies = append(adminNetworkPolicies, newAdminNetworkPolicy("myANP2", 20))
+			testExisting(AdminNetworkPolicyType)
+		})
+		It("calls ADD for each existing Baseline Admin Network Policy", func() {
+			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP"))
+			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP2"))
+			testExisting(BaselineAdminNetworkPolicyType)
+		})
 	})
 
 	Context("when EgressIP is disabled", func() {
@@ -719,6 +796,23 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("does not contain EgressService informer", func() {
 			config.OVNKubernetesFeature.EnableEgressService = false
 			testExisting(EgressServiceType)
+		})
+	})
+	Context("when Admin Network Policy is disabled", func() {
+		testExisting := func(objType reflect.Type) {
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wf.informers).NotTo(HaveKey(objType))
+		}
+		It("does not contain Admin Network Policy informer", func() {
+			config.OVNKubernetesFeature.EnableAdminNetworkPolicy = false
+			testExisting(AdminNetworkPolicyType)
+		})
+		It("does not contain Baseline Admin Network Policy informer", func() {
+			config.OVNKubernetesFeature.EnableAdminNetworkPolicy = false
+			testExisting(BaselineAdminNetworkPolicyType)
 		})
 	})
 
@@ -1773,6 +1867,85 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(c.getDeleted, 2).Should(Equal(1))
 
 		wf.RemoveEgressServiceHandler(h)
+	})
+	It("responds to admin network policy add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newAdminNetworkPolicy("myANP", 2)
+		h, c := addHandler(wf, AdminNetworkPolicyType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				anp := obj.(*anpapi.AdminNetworkPolicy)
+				Expect(reflect.DeepEqual(anp, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newANP := new.(*anpapi.AdminNetworkPolicy)
+				Expect(reflect.DeepEqual(newANP, added)).To(BeTrue())
+				Expect(newANP.Spec.Priority).To(Equal(int32(3)))
+			},
+			DeleteFunc: func(obj interface{}) {
+				anp := obj.(*anpapi.AdminNetworkPolicy)
+				Expect(reflect.DeepEqual(anp, added)).To(BeTrue())
+			},
+		})
+
+		adminNetworkPolicies = append(adminNetworkPolicies, added)
+		adminNetPolWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Spec.Priority = 3
+		adminNetPolWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		adminNetworkPolicies = adminNetworkPolicies[:0]
+		adminNetPolWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveAdminNetworkPolicyHandler(h)
+	})
+	It("responds to baseline admin network policy add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newBaselineAdminNetworkPolicy("myBANP")
+		h, c := addHandler(wf, BaselineAdminNetworkPolicyType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				banp := obj.(*anpapi.BaselineAdminNetworkPolicy)
+				Expect(reflect.DeepEqual(banp, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newBANP := new.(*anpapi.BaselineAdminNetworkPolicy)
+				Expect(reflect.DeepEqual(newBANP, added)).To(BeTrue())
+				labelSelect := &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"kubernetes.io/metadata.name": "default",
+					},
+				}
+				Expect(newBANP.Spec.Subject.Namespaces).To(Equal(labelSelect))
+			},
+			DeleteFunc: func(obj interface{}) {
+				anp := obj.(*anpapi.BaselineAdminNetworkPolicy)
+				Expect(reflect.DeepEqual(anp, added)).To(BeTrue())
+			},
+		})
+
+		baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, added)
+		baselineAdminNetPolWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Spec.Subject.Namespaces = &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				"kubernetes.io/metadata.name": "default",
+			},
+		}
+		baselineAdminNetPolWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		baselineAdminNetworkPolicies = baselineAdminNetworkPolicies[:0]
+		baselineAdminNetPolWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveBaselineAdminNetworkPolicyHandler(h)
 	})
 	It("stops processing events after the handler is removed", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)

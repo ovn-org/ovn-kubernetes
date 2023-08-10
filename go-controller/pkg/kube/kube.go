@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
+	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 )
 
 // InterfaceOVN represents the exported methods for dealing with getting/setting
@@ -71,6 +72,7 @@ type Kube struct {
 // Implements InterfaceOVN
 type KubeOVN struct {
 	Kube
+	ANPClient            anpclientset.Interface
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface

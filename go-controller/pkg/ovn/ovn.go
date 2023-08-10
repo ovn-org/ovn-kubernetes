@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	egresssvc_zone "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -458,4 +459,22 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
 		oc.watchFactory.EndpointSliceCoreInformer(),
 		oc.watchFactory.NodeCoreInformer(), oc.zone)
+}
+
+func (oc *DefaultNetworkController) newANPController() error {
+	var err error
+	oc.anpController, err = anpcontroller.NewController(
+		DefaultNetworkControllerName,
+		oc.nbClient,
+		oc.kube.ANPClient,
+		oc.watchFactory.ANPInformer(),
+		oc.watchFactory.BANPInformer(),
+		oc.watchFactory.NamespaceCoreInformer(),
+		oc.watchFactory.PodCoreInformer(),
+		oc.addressSetFactory,
+		oc.isPodScheduledinLocalZone,
+		oc.zone,
+		oc.recorder,
+	)
+	return err
 }

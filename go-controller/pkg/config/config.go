@@ -74,6 +74,7 @@ var (
 	Logging = LoggingConfig{
 		File:                "", // do not log to a file by default
 		CNIFile:             "",
+		LibovsdbFile:        "",
 		Level:               4,
 		LogFileMaxSize:      100, // Size in Megabytes
 		LogFileMaxBackups:   5,
@@ -129,8 +130,22 @@ var (
 
 	// Gateway holds node gateway-related parsed config file parameters and command-line overrides
 	Gateway = GatewayConfig{
-		V4JoinSubnet: "100.64.0.0/16",
-		V6JoinSubnet: "fd98::/64",
+		V4JoinSubnet:       "100.64.0.0/16",
+		V6JoinSubnet:       "fd98::/64",
+		V4MasqueradeSubnet: "169.254.169.0/29",
+		V6MasqueradeSubnet: "fd69::/125",
+		MasqueradeIPs: MasqueradeIPsConfig{
+			V4OVNMasqueradeIP:               net.ParseIP("169.254.169.1"),
+			V6OVNMasqueradeIP:               net.ParseIP("fd69::1"),
+			V4HostMasqueradeIP:              net.ParseIP("169.254.169.2"),
+			V6HostMasqueradeIP:              net.ParseIP("fd69::2"),
+			V4HostETPLocalMasqueradeIP:      net.ParseIP("169.254.169.3"),
+			V6HostETPLocalMasqueradeIP:      net.ParseIP("fd69::3"),
+			V4DummyNextHopMasqueradeIP:      net.ParseIP("169.254.169.4"),
+			V6DummyNextHopMasqueradeIP:      net.ParseIP("fd69::4"),
+			V4OVNServiceHairpinMasqueradeIP: net.ParseIP("169.254.169.5"),
+			V6OVNServiceHairpinMasqueradeIP: net.ParseIP("fd69::5"),
+		},
 	}
 
 	// MasterHA holds master HA related config options.
@@ -251,9 +266,11 @@ type LoggingConfig struct {
 	File string `gcfg:"logfile"`
 	// CNIFile is the path of the file for the CNI shim to log to
 	CNIFile string `gcfg:"cnilogfile"`
+	// LibovsdbFile is the path of the file for the libovsdb client to log to
+	LibovsdbFile string `gcfg:"libovsdblogfile"`
 	// Level is the logging verbosity level
 	Level int `gcfg:"loglevel"`
-	// LogFileMaxSize is the maximum size in bytes of the logfile
+	// LogFileMaxSize is the maximum size in megabytes of the logfile
 	// before it gets rolled.
 	LogFileMaxSize int `gcfg:"logfile-maxsize"`
 	// LogFileMaxBackups represents the the maximum number of old log files to retain
@@ -352,6 +369,8 @@ type MetricsConfig struct {
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
+	// Admin Network Policy feature is enabled
+	EnableAdminNetworkPolicy bool `gcfg:"enable-admin-network-policy"`
 	// EgressIP feature is enabled
 	EnableEgressIP bool `gcfg:"enable-egress-ip"`
 	// EgressIP node reachability total timeout in seconds
@@ -399,6 +418,13 @@ type GatewayConfig struct {
 	V4JoinSubnet string `gcfg:"v4-join-subnet"`
 	// V6JoinSubnet to be used in the cluster
 	V6JoinSubnet string `gcfg:"v6-join-subnet"`
+	// V4MasqueradeSubnet to be used in the cluster
+	V4MasqueradeSubnet string `gcfg:"v4-masquerade-subnet"`
+	// V6MasqueradeSubnet to be used in the cluster
+	V6MasqueradeSubnet string `gcfg:"v6-masquerade-subnet"`
+	// MasqueradeIps to be allocated from the masquerade subnets to enable host to service traffic
+	MasqueradeIPs MasqueradeIPsConfig
+
 	// DisablePacketMTUCheck disables adding openflow flows to check packets too large to be
 	// delivered to OVN due to pod MTU being lower than NIC MTU. Disabling this check will result in southbound packets
 	// exceeding pod MTU to be dropped by OVN. With this check enabled, ICMP needs frag/packet too big will be sent
@@ -819,6 +845,11 @@ var CommonFlags = []cli.Flag{
 		Destination: &cliConfig.Logging.CNIFile,
 		Value:       "/var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log",
 	},
+	&cli.StringFlag{
+		Name:        "libovsdblogfile",
+		Usage:       "path of a file to direct log from libovsdb client to output to (default is to use same as --logfile)",
+		Destination: &cliConfig.Logging.LibovsdbFile,
+	},
 	// Logfile rotation parameters
 	&cli.IntFlag{
 		Name:        "logfile-maxsize",
@@ -918,6 +949,12 @@ var CNIFlags = []cli.Flag{
 
 // OVNK8sFeatureFlags capture OVN-Kubernetes feature related options
 var OVNK8sFeatureFlags = []cli.Flag{
+	&cli.BoolFlag{
+		Name:        "enable-admin-network-policy",
+		Usage:       "Configure to use Admin Network Policy CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableAdminNetworkPolicy,
+		Value:       OVNKubernetesFeature.EnableAdminNetworkPolicy,
+	},
 	&cli.BoolFlag{
 		Name:        "enable-egress-ip",
 		Usage:       "Configure to use EgressIP CRD feature with ovn-kubernetes.",
@@ -1278,6 +1315,18 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "The v6 join subnet used for assigning join switch IPv6 addresses",
 		Destination: &cliConfig.Gateway.V6JoinSubnet,
 		Value:       Gateway.V6JoinSubnet,
+	},
+	&cli.StringFlag{
+		Name:        "gateway-v4-masquerade-subnet",
+		Usage:       "The v4 masquerade subnet used for assigning masquerade IPv4 addresses",
+		Destination: &cliConfig.Gateway.V4MasqueradeSubnet,
+		Value:       Gateway.V4MasqueradeSubnet,
+	},
+	&cli.StringFlag{
+		Name:        "gateway-v6-masquerade-subnet",
+		Usage:       "The v6 masquerade subnet used for assigning masquerade IPv6 addresses",
+		Destination: &cliConfig.Gateway.V6MasqueradeSubnet,
+		Value:       Gateway.V6MasqueradeSubnet,
 	},
 	&cli.BoolFlag{
 		Name:        "disable-pkt-mtu-check",
@@ -1724,7 +1773,7 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
-func completeGatewayConfig(allSubnets *configSubnets) error {
+func completeGatewayConfig(allSubnets *configSubnets, masqueradeIPs *MasqueradeIPsConfig) error {
 	// Validate v4 and v6 join subnets
 	v4IP, v4JoinCIDR, err := net.ParseCIDR(Gateway.V4JoinSubnet)
 	if err != nil || utilnet.IsIPv6(v4IP) {
@@ -1735,9 +1784,28 @@ func completeGatewayConfig(allSubnets *configSubnets) error {
 	if err != nil || !utilnet.IsIPv6(v6IP) {
 		return fmt.Errorf("invalid gateway v6 join subnet specified, subnet: %s: error: %v", Gateway.V6JoinSubnet, err)
 	}
-
 	allSubnets.append(configSubnetJoin, v4JoinCIDR)
 	allSubnets.append(configSubnetJoin, v6JoinCIDR)
+
+	//validate v4 and v6 masquerade subnets
+	v4MasqueradeIP, v4MasqueradeCIDR, err := net.ParseCIDR(Gateway.V4MasqueradeSubnet)
+	if err != nil || utilnet.IsIPv6(v4MasqueradeCIDR.IP) {
+		return fmt.Errorf("invalid gateway v4 masquerade subnet specified, subnet: %s: error: %v", Gateway.V4MasqueradeSubnet, err)
+	}
+	if err = allocateV4MasqueradeIPs(v4MasqueradeIP, masqueradeIPs); err != nil {
+		return fmt.Errorf("unable to allocate V4MasqueradeIPs: %s", err)
+	}
+
+	v6MasqueradeIP, v6MasqueradeCIDR, err := net.ParseCIDR(Gateway.V6MasqueradeSubnet)
+	if err != nil || !utilnet.IsIPv6(v6MasqueradeCIDR.IP) {
+		return fmt.Errorf("invalid gateway v6 masquerade subnet specified, subnet: %s: error: %v", Gateway.V6MasqueradeSubnet, err)
+	}
+	if err = allocateV6MasqueradeIPs(v6MasqueradeIP, masqueradeIPs); err != nil {
+		return fmt.Errorf("unable to allocate V6MasqueradeIPs: %s", err)
+	}
+
+	allSubnets.append(configSubnetMasquerade, v4MasqueradeCIDR)
+	allSubnets.append(configSubnetMasquerade, v6MasqueradeCIDR)
 
 	return nil
 }
@@ -2175,7 +2243,8 @@ func completeConfig() error {
 	if err := completeDefaultConfig(allSubnets); err != nil {
 		return err
 	}
-	if err := completeGatewayConfig(allSubnets); err != nil {
+
+	if err := completeGatewayConfig(allSubnets, &Gateway.MasqueradeIPs); err != nil {
 		return err
 	}
 	if err := completeMonitoringConfig(); err != nil {

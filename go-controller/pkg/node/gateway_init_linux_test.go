@@ -301,7 +301,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 			// check that the masquerade route was added
 			expRoute := &netlink.Route{
-				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())),
 				LinkIndex: l.Attrs().Index,
 				Src:       ifAddrs[0].IP,
 			}
@@ -659,7 +659,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			// check that the masquerade route was not added
 			l, err := netlink.LinkByName(brphys)
 			expRoute := &netlink.Route{
-				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())),
 				LinkIndex: l.Attrs().Index,
 				Src:       ifAddrs[0].IP,
 			}
@@ -782,7 +782,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 
 			// check that the masquerade route was added
 			expRoute = &netlink.Route{
-				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())),
 				LinkIndex: link.Attrs().Index,
 				Src:       ovntest.MustParseIP(hostIP),
 			}
@@ -1108,7 +1108,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 
 			// check that the masquerade route was added
 			expRoute := &netlink.Route{
-				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())),
 				LinkIndex: l.Attrs().Index,
 				Src:       ifAddrs[0].IP,
 			}
@@ -1806,7 +1806,7 @@ var _ = Describe("Gateway unit tests", func() {
 				err = util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
 
-				gwIPs := []net.IP{net.ParseIP(types.V4DummyNextHopMasqueradeIP)}
+				gwIPs := []net.IP{config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP}
 				config.Gateway.Interface = dummyBridgeName
 				config.Gateway.Mode = config.GatewayModeLocal
 				config.Gateway.AllowNoUplink = true
@@ -1840,7 +1840,7 @@ var _ = Describe("Gateway unit tests", func() {
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
 
-				gwIPs := []net.IP{net.ParseIP(types.V4DummyNextHopMasqueradeIP)}
+				gwIPs := []net.IP{config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP}
 				config.Gateway.Interface = dummyBridgeName
 				config.Gateway.Mode = config.GatewayModeLocal
 				config.Gateway.AllowNoUplink = true

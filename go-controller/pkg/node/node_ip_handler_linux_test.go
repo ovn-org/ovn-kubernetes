@@ -9,10 +9,10 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/vishvananda/netlink"
@@ -157,7 +157,7 @@ var _ = Describe("Node IP Handler tests", func() {
 
 		Context("by adding and deleting an invalid IP", func() {
 			It("should not update node annotations", func() {
-				for _, addr := range []string{tc.mgmtPortIP4.String(), tc.mgmtPortIP6.String(), types.V4HostMasqueradeIP + "/29", types.V6HostMasqueradeIP + "/125"} {
+				for _, addr := range []string{tc.mgmtPortIP4.String(), tc.mgmtPortIP6.String(), config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String() + "/29", config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String() + "/125"} {
 					ipNet := ipEvent(addr, true, tc.addrChan)
 					Consistently(func() bool {
 						return nodeHasAddress(tc.fakeClient, nodeName, ipNet)

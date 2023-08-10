@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	iputils "github.com/containernetworking/plugins/pkg/ip"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -160,10 +161,11 @@ func ParseFlowCollectors(flowCollectors string) ([]HostPort, error) {
 type configSubnetType string
 
 const (
-	configSubnetJoin    configSubnetType = "built-in join subnet"
-	configSubnetCluster configSubnetType = "cluster subnet"
-	configSubnetService configSubnetType = "service subnet"
-	configSubnetHybrid  configSubnetType = "hybrid overlay subnet"
+	configSubnetJoin       configSubnetType = "built-in join subnet"
+	configSubnetCluster    configSubnetType = "cluster subnet"
+	configSubnetService    configSubnetType = "service subnet"
+	configSubnetHybrid     configSubnetType = "hybrid overlay subnet"
+	configSubnetMasquerade configSubnetType = "masquerade subnet"
 )
 
 type configSubnet struct {
@@ -189,7 +191,7 @@ func newConfigSubnets() *configSubnets {
 // append adds a single subnet to cs
 func (cs *configSubnets) append(subnetType configSubnetType, subnet *net.IPNet) {
 	cs.subnets = append(cs.subnets, configSubnet{subnetType: subnetType, subnet: subnet})
-	if subnetType != configSubnetJoin {
+	if subnetType != configSubnetJoin && subnetType != configSubnetMasquerade {
 		if utilnet.IsIPv6CIDR(subnet) {
 			cs.v6[subnetType] = true
 		} else {
@@ -270,4 +272,69 @@ func ContainsJoinIP(ip net.IP) bool {
 		}
 	}
 	return false
+}
+
+// masqueradeIP represents the masqueradeIPs used by the masquerade subnets for host to service traffic
+type MasqueradeIPsConfig struct {
+	V4OVNMasqueradeIP               net.IP
+	V6OVNMasqueradeIP               net.IP
+	V4HostMasqueradeIP              net.IP
+	V6HostMasqueradeIP              net.IP
+	V4HostETPLocalMasqueradeIP      net.IP
+	V6HostETPLocalMasqueradeIP      net.IP
+	V4DummyNextHopMasqueradeIP      net.IP
+	V6DummyNextHopMasqueradeIP      net.IP
+	V4OVNServiceHairpinMasqueradeIP net.IP
+	V6OVNServiceHairpinMasqueradeIP net.IP
+}
+
+// allocateV4/6MasqueradeIPs allocates the masqueradeIPs based off of the passed in masqueradeSubnet (.0)
+// it does this by cascading down from the initial ip down to the .5 currently (more masqueradeIps may be added in the future)
+
+func allocateV4MasqueradeIPs(masqueradeSubnetNetworkAddress net.IP, masqueradeIPs *MasqueradeIPsConfig) error {
+	masqueradeIPs.V4OVNMasqueradeIP = iputils.NextIP(masqueradeSubnetNetworkAddress)
+	if masqueradeIPs.V4OVNMasqueradeIP == nil {
+		return fmt.Errorf("error setting V4OVNMasqueradeIP: %s", masqueradeSubnetNetworkAddress)
+	}
+	masqueradeIPs.V4HostMasqueradeIP = iputils.NextIP(masqueradeIPs.V4OVNMasqueradeIP) //using the last set ip we can cascade from the .0 down
+	if masqueradeIPs.V4HostMasqueradeIP == nil {
+		return fmt.Errorf("error setting V4HostMasqueradeIP: %s", masqueradeIPs.V4OVNMasqueradeIP)
+	}
+	masqueradeIPs.V4HostETPLocalMasqueradeIP = iputils.NextIP(masqueradeIPs.V4HostMasqueradeIP)
+	if masqueradeIPs.V4HostETPLocalMasqueradeIP == nil {
+		return fmt.Errorf("error setting V4HostETPLocalMasqueradeIP: %s", masqueradeIPs.V4HostMasqueradeIP)
+	}
+	masqueradeIPs.V4DummyNextHopMasqueradeIP = iputils.NextIP(masqueradeIPs.V4HostETPLocalMasqueradeIP)
+	if masqueradeIPs.V4DummyNextHopMasqueradeIP == nil {
+		return fmt.Errorf("error setting V4DummyNextHopMasqueradeIP: %s", masqueradeIPs.V4HostETPLocalMasqueradeIP)
+	}
+	masqueradeIPs.V4OVNServiceHairpinMasqueradeIP = iputils.NextIP(masqueradeIPs.V4DummyNextHopMasqueradeIP)
+	if masqueradeIPs.V4OVNServiceHairpinMasqueradeIP == nil {
+		return fmt.Errorf("error setting V4OVNServiceHairpinMasqueradeIP: %s", masqueradeIPs.V4DummyNextHopMasqueradeIP)
+	}
+	return nil
+}
+
+func allocateV6MasqueradeIPs(masqueradeSubnetNetworkAddress net.IP, masqueradeIPs *MasqueradeIPsConfig) error {
+	masqueradeIPs.V6OVNMasqueradeIP = iputils.NextIP(masqueradeSubnetNetworkAddress)
+	if masqueradeIPs.V6OVNMasqueradeIP == nil {
+		return fmt.Errorf("error setting V6OVNMasqueradeIP: %s", masqueradeSubnetNetworkAddress)
+	}
+	masqueradeIPs.V6HostMasqueradeIP = iputils.NextIP(masqueradeIPs.V6OVNMasqueradeIP) //using the last set ip we can cascade from the .0 down
+	if masqueradeIPs.V6HostMasqueradeIP == nil {
+		return fmt.Errorf("error setting V6HostMasqueradeIP: %s", masqueradeIPs.V6OVNMasqueradeIP)
+	}
+	masqueradeIPs.V6HostETPLocalMasqueradeIP = iputils.NextIP(masqueradeIPs.V6HostMasqueradeIP)
+	if masqueradeIPs.V6HostETPLocalMasqueradeIP == nil {
+		return fmt.Errorf("error setting V6HostETPLocalMasqueradeIP: %s", masqueradeIPs.V6HostMasqueradeIP)
+	}
+	masqueradeIPs.V6DummyNextHopMasqueradeIP = iputils.NextIP(masqueradeIPs.V6HostETPLocalMasqueradeIP)
+	if masqueradeIPs.V6DummyNextHopMasqueradeIP == nil {
+		return fmt.Errorf("error setting V6DummyNextHopMasqueradeIP: %s", masqueradeIPs.V6HostETPLocalMasqueradeIP)
+	}
+	masqueradeIPs.V6OVNServiceHairpinMasqueradeIP = iputils.NextIP(masqueradeIPs.V6DummyNextHopMasqueradeIP)
+	if masqueradeIPs.V6OVNServiceHairpinMasqueradeIP == nil {
+		return fmt.Errorf("error setting V6OVNServiceHairpinMasqueradeIP: %s", masqueradeIPs.V6DummyNextHopMasqueradeIP)
+	}
+	return nil
 }

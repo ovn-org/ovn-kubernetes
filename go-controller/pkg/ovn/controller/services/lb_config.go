@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	conf "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -404,11 +405,11 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 						switchV6TargetNeedsTemplate = true
 					}
 
-					routerV4targetips, changed, _ := config.makeNodeRouterTargetIPs(service, &node, config.eps.V4IPs, types.V4HostMasqueradeIP)
+					routerV4targetips, changed, _ := config.makeNodeRouterTargetIPs(service, &node, config.eps.V4IPs, conf.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String())
 					if !routerV4TargetNeedsTemplate && changed {
 						routerV4TargetNeedsTemplate = true
 					}
-					routerV6targetips, changed, _ := config.makeNodeRouterTargetIPs(service, &node, config.eps.V6IPs, types.V6HostMasqueradeIP)
+					routerV6targetips, changed, _ := config.makeNodeRouterTargetIPs(service, &node, config.eps.V6IPs, conf.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String())
 					if !routerV6TargetNeedsTemplate && changed {
 						routerV6TargetNeedsTemplate = true
 					}
@@ -593,8 +594,8 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				switchV4targetips, _ := config.makeNodeSwitchTargetIPs(service, &node, config.eps.V4IPs)
 				switchV6targetips, _ := config.makeNodeSwitchTargetIPs(service, &node, config.eps.V6IPs)
 
-				routerV4targetips, _, zeroRouterV4LocalEndpoints := config.makeNodeRouterTargetIPs(service, &node, config.eps.V4IPs, types.V4HostMasqueradeIP)
-				routerV6targetips, _, zeroRouterV6LocalEndpoints := config.makeNodeRouterTargetIPs(service, &node, config.eps.V6IPs, types.V6HostMasqueradeIP)
+				routerV4targetips, _, zeroRouterV4LocalEndpoints := config.makeNodeRouterTargetIPs(service, &node, config.eps.V4IPs, conf.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String())
+				routerV6targetips, _, zeroRouterV6LocalEndpoints := config.makeNodeRouterTargetIPs(service, &node, config.eps.V6IPs, conf.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String())
 
 				routerV4targets := joinHostsPort(routerV4targetips, config.eps.Port)
 				routerV6targets := joinHostsPort(routerV6targetips, config.eps.Port)
@@ -641,10 +642,10 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 
 					if config.externalTrafficLocal && config.hasNodePort {
 						// add special masqueradeIP as a vip if its nodePort svc with ETP=local
-						mvip := types.V4HostETPLocalMasqueradeIP
+						mvip := conf.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String()
 						targetsETP := joinHostsPort(switchV4targetips, config.eps.Port)
 						if isv6 {
-							mvip = types.V6HostETPLocalMasqueradeIP
+							mvip = conf.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String()
 							targetsETP = joinHostsPort(switchV6targetips, config.eps.Port)
 						}
 						switchRules = append(switchRules, LBRule{

@@ -58,6 +58,7 @@ fi
 # OVNKUBE_LOGFILE_MAXSIZE - log file max size in MB(default 100 MB)
 # OVNKUBE_LOGFILE_MAXBACKUPS - log file max backups (default 5)
 # OVNKUBE_LOGFILE_MAXAGE - log file max age in days (default 5 days)
+# OVNKUBE_LIBOVSDB_CLIENT_LOGFILE - separate log file for libovsdb client (default: do not separate from logfile)
 # OVN_ACL_LOGGING_RATE_LIMIT - specify default ACL logging rate limit in messages per second (default: 20)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
@@ -72,6 +73,7 @@ fi
 # OVN_ENABLE_LFLOW_CACHE - enable ovn-controller lflow-cache
 # OVN_LFLOW_CACHE_LIMIT - maximum number of logical flow cache entries of ovn-controller
 # OVN_LFLOW_CACHE_LIMIT_KB - maximum size of the logical flow cache of ovn-controller
+# OVN_ADMIN_NETWORK_POLICY_ENABLE - enable admin network policy for ovn-kubernetes
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSIP_HEALTHCHECK_PORT - egress IP node check to use grpc on this port (0 ==> dial to port 9 instead)
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
@@ -103,6 +105,10 @@ ovnkubelogdir=/var/log/ovn-kubernetes
 ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
 ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
 ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
+
+# logfile for libovsdb client. When not specified, the ovsdb client logs
+# are not separated from the "main" --logfile used by ovnkube
+ovnkube_libovsdb_client_logfile=${OVNKUBE_LIBOVSDB_CLIENT_LOGFILE:-}
 
 # ovnkube.sh version (update when API between daemonset and script changes - v.x.y)
 ovnkube_version="3"
@@ -205,6 +211,10 @@ ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS:-}
 ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET:-}
 # OVN_V6_JOIN_SUBNET - v6 join subnet
 ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
+# OVN_V4_MASQUERADE_SUBNET - v4 masquerade subnet
+ovn_v4_masquerade_subnet=${OVN_V4_MASQUERADE_SUBNET:-}
+# OVN_V6_MASQUERADE_SUBNET - v6 masquerade subnet
+ovn_v6_masquerade_subnet=${OVN_V6_MASQUERADE_SUBNET:-}
 #OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 #OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
@@ -215,6 +225,7 @@ ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE:-}
 ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT:-}
 ovn_lflow_cache_limit_kb=${OVN_LFLOW_CACHE_LIMIT_KB:-}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
+ovn_admin_network_policy_enable=${OVN_ADMIN_NETWORK_POLICY_ENABLE:=false}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 #OVN_EGRESSIP_HEALTHCHECK_PORT - egress IP node check to use grpc on this port
@@ -1044,6 +1055,16 @@ ovn-master() {
       ovn_v6_join_subnet_opt="--gateway-v6-join-subnet=${ovn_v6_join_subnet}"
   fi
 
+  ovn_v4_masquerade_subnet_opt=
+  if [[ -n ${ovn_v4_masquerade_subnet} ]]; then 
+      ovn_v4_masquerade_subnet_opt="--gateway-v4-masquerade-subnet=${ovn_v4_masquerade_subnet}"
+  fi
+
+  ovn_v6_masquerade_subnet_opt=
+  if [[ -n ${ovn_v6_masquerade_subnet} ]]; then 
+      ovn_v6_masquerade_subnet_opt="--gateway-v6-masquerade-subnet=${ovn_v6_masquerade_subnet}"
+  fi
+
   local ovn_master_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     ovn_master_ssl_opts="
@@ -1058,6 +1079,11 @@ ovn-master() {
       "
   }
 
+  libovsdb_client_logfile_flag=
+  if [[ -n ${ovnkube_libovsdb_client_logfile} ]]; then
+      libovsdb_client_logfile_flag="--libovsdblogfile ${ovnkube_libovsdb_client_logfile}"
+  fi
+
   ovn_acl_logging_rate_limit_flag=
   if [[ -n ${ovn_acl_logging_rate_limit} ]]; then
       ovn_acl_logging_rate_limit_flag="--acl-logging-rate-limit ${ovn_acl_logging_rate_limit}"
@@ -1066,6 +1092,11 @@ ovn-master() {
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
+  fi
+
+  anp_enabled_flag=
+  if [[ ${ovn_admin_network_policy_enable} == "true" ]]; then
+      anp_enabled_flag="--enable-admin-network-policy"
   fi
 
   egressip_enabled_flag=
@@ -1159,12 +1190,16 @@ ovn-master() {
     ${empty_lb_events_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
+    ${ovn_v4_masquerade_subnet_opt} \
+    ${ovn_v6_masquerade_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
+    ${libovsdb_client_logfile_flag} \
     ${ovn_master_ssl_opts} \
     ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
+    ${anp_enabled_flag} \
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
     ${egressfirewall_enabled_flag} \
@@ -1244,6 +1279,18 @@ ovnkube-controller() {
   fi
   echo "ovn_v6_join_subnet_opt=${ovn_v6_join_subnet_opt}"
 
+  ovn_v4_masquerade_subnet_opt=
+  if [[ -n ${ovn_v4_masquerade_subnet} ]]; then 
+      ovn_v4_masquerade_subnet_opt="--gateway-v4-masquerade-subnet=${ovn_v4_masquerade_subnet}"
+  fi
+  echo "ovn_v4_masquerade_subnet_opt=${ovn_v4_masquerade_subnet_opt}"
+
+  ovn_v6_masquerade_subnet_opt=
+  if [[ -n ${ovn_v6_masquerade_subnet} ]]; then 
+      ovn_v6_masquerade_subnet_opt="--gateway-v6-masquerade-subnet=${ovn_v6_masquerade_subnet}"
+  fi
+  echo "ovn_v6_masquerade_subnet_opt=${ovn_v6_masquerade_subnet_opt}"
+
   local ovn_master_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     ovn_master_ssl_opts="
@@ -1259,6 +1306,11 @@ ovnkube-controller() {
   }
   echo "ovn_master_ssl_opts=${ovn_master_ssl_opts}"
 
+  libovsdb_client_logfile_flag=
+  if [[ -n ${ovnkube_libovsdb_client_logfile} ]]; then
+      libovsdb_client_logfile_flag="--libovsdblogfile ${ovnkube_libovsdb_client_logfile}"
+  fi
+
   ovn_acl_logging_rate_limit_flag=
   if [[ -n ${ovn_acl_logging_rate_limit} ]]; then
       ovn_acl_logging_rate_limit_flag="--acl-logging-rate-limit ${ovn_acl_logging_rate_limit}"
@@ -1270,6 +1322,12 @@ ovnkube-controller() {
       multicast_enabled_flag="--enable-multicast"
   fi
   echo "multicast_enabled_flag=${multicast_enabled_flag}"
+
+  anp_enabled_flag=
+  if [[ ${ovn_admin_network_policy_enable} == "true" ]]; then
+      anp_enabled_flag="--enable-admin-network-policy"
+  fi
+  echo "anp_enabled_flag=${anp_enabled_flag}"
 
   egressip_enabled_flag=
   if [[ ${ovn_egressip_enable} == "true" ]]; then
@@ -1363,12 +1421,16 @@ ovnkube-controller() {
     ${empty_lb_events_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
+    ${ovn_v4_masquerade_subnet_opt} \
+    ${ovn_v6_masquerade_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-controller.log \
+    ${libovsdb_client_logfile_flag} \
     ${ovn_master_ssl_opts} \
     ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
+    ${anp_enabled_flag} \
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
     ${egressfirewall_enabled_flag} \
@@ -1432,6 +1494,18 @@ ovn-cluster-manager() {
   fi
   echo "ovn_v6_join_subnet_opt: ${ovn_v6_join_subnet_opt}"
 
+   ovn_v4_masquerade_subnet_opt=
+  if [[ -n ${ovn_v4_masquerade_subnet} ]]; then 
+      ovn_v4_masquerade_subnet_opt="--gateway-v4-masquerade-subnet=${ovn_v4_masquerade_subnet}"
+  fi
+  echo "ovn_v4_masquerade_subnet_opt=${ovn_v4_masquerade_subnet_opt}"
+
+  ovn_v6_masquerade_subnet_opt=
+  if [[ -n ${ovn_v6_masquerade_subnet} ]]; then 
+      ovn_v6_masquerade_subnet_opt="--gateway-v6-masquerade-subnet=${ovn_v6_masquerade_subnet}"
+  fi
+  echo "ovn_v6_masquerade_subnet_opt=${ovn_v6_masquerade_subnet_opt}"
+
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
@@ -1468,6 +1542,12 @@ ovn-cluster-manager() {
   fi
   echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
 
+  empty_lb_events_flag=
+  if [[ ${ovn_empty_lb_events} == "true" ]]; then
+      empty_lb_events_flag="--ovn-empty-lb-events"
+  fi
+  echo "empty_lb_events_flag=${empty_lb_events_flag}"
+
   echo "=============== ovn-cluster-manager ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-cluster-manager ${K8S_NODE} \
@@ -1476,9 +1556,12 @@ ovn-cluster-manager() {
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
+    ${empty_lb_events_flag} \
     ${hybrid_overlay_flags} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
+    ${ovn_v4_masquerade_subnet_opt} \
+    ${ovn_v6_masquerade_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-cluster-manager.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-cluster-manager.log \
     ${ovnkube_metrics_tls_opts} \
@@ -1593,6 +1676,11 @@ ovn-node() {
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
+  fi
+
+  anp_enabled_flag=
+  if [[ ${ovn_admin_network_policy_enable} == "true" ]]; then
+      anp_enabled_flag="--enable-admin-network-policy"
   fi
 
   egressip_enabled_flag=
@@ -1793,6 +1881,7 @@ ovn-node() {
     ${lflow_cache_limit} \
     ${lflow_cache_limit_kb} \
     ${multicast_enabled_flag} \
+    ${anp_enabled_flag} \
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
     ${egressservice_enabled_flag} \

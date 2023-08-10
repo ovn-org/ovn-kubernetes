@@ -182,6 +182,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 		client: ovnClient.KubeClient,
 		kube: &kube.KubeOVN{
 			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
+			ANPClient:            ovnClient.ANPClient,
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
