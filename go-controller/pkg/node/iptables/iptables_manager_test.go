@@ -3,6 +3,7 @@ package iptables
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 	"sync"
 	"time"
@@ -30,6 +31,9 @@ var _ = ginkgo.Describe("IPTables Manager", func() {
 		defer ginkgo.GinkgoRecover()
 		if os.Getenv("NOROOT") == "TRUE" {
 			ginkgo.Skip("Test requires root privileges")
+		}
+		if !commandExists("iptables") {
+			ginkgo.Skip("Test requires iptables tools to be available in PATH")
 		}
 		var err error
 		runtime.LockOSThread()
@@ -162,3 +166,8 @@ var _ = ginkgo.Describe("IPTables Manager", func() {
 		})
 	})
 })
+
+func commandExists(cmd string) bool {
+	_, err := exec.LookPath(cmd)
+	return err == nil
+}
