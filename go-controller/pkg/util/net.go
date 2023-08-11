@@ -63,6 +63,17 @@ func GetNodeHybridOverlayIfAddr(subnet *net.IPNet) *net.IPNet {
 	return &net.IPNet{IP: iputils.NextIP(mgmtIfAddr.IP), Mask: subnet.Mask}
 }
 
+// IsNodeHybridOverlayIfAddr returns whether the provided IP is a node hybrid
+// overlay address on any of the provided subnets
+func IsNodeHybridOverlayIfAddr(ip net.IP, subnets []*net.IPNet) bool {
+	for _, subnet := range subnets {
+		if ip.Equal(GetNodeHybridOverlayIfAddr(subnet).IP) {
+			return true
+		}
+	}
+	return false
+}
+
 // JoinHostPortInt32 is like net.JoinHostPort(), but with an int32 for the port
 func JoinHostPortInt32(host string, port int32) string {
 	return net.JoinHostPort(host, strconv.Itoa(int(port)))

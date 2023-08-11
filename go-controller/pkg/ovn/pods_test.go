@@ -253,6 +253,7 @@ func (p testPod) getAnnotationsJson() string {
 		TunnelID int        `json:"tunnel_id,omitempty"`
 	}
 
+	var address string
 	addresses := []string{}
 	for _, podIP := range strings.Split(p.podIP, " ") {
 		if utilnet.IsIPv4String(podIP) {
@@ -262,8 +263,15 @@ func (p testPod) getAnnotationsJson() string {
 		}
 		addresses = append(addresses, podIP)
 	}
+	if len(addresses) == 1 {
+		address = addresses[0]
+	}
 
 	nodeGWIPs := strings.Split(p.nodeGWIP, " ")
+	var nodeGWIP string
+	if len(nodeGWIPs) == 1 {
+		nodeGWIP = nodeGWIPs[0]
+	}
 
 	var routes []podRoute
 	for _, route := range p.routes {
@@ -273,9 +281,9 @@ func (p testPod) getAnnotationsJson() string {
 	podAnnotations := map[string]podAnnotation{
 		"default": {
 			MAC:      p.podMAC,
-			IP:       addresses[0],
+			IP:       address,
 			IPs:      addresses,
-			Gateway:  nodeGWIPs[0],
+			Gateway:  nodeGWIP,
 			Gateways: nodeGWIPs,
 			Routes:   routes,
 		},
@@ -2171,6 +2179,80 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.BeNil())
 				myPod1Key, err := retry.GetResourceKey(pod)
 				retry.CheckRetryObjectEventually(myPod1Key, true, fakeOvn.controller.retryPods)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("deletes an outdated hybrid overlay subnet route in dual stack configuration", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24 fd11::/64",
+					"",
+					"10.128.1.1 fd11::1",
+					"myPod",
+					"10.128.1.30 fd11::30",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+
+				// annotations without HO route
+				expectedAnnotations := t.getAnnotationsJson()
+
+				// add HO route
+				t.routes = append(
+					t.routes,
+					util.PodRoute{
+						Dest:    ovntest.MustParseIPNet("10.128.10.0/24"),
+						NextHop: ovntest.MustParseIP("10.128.1.3"),
+					},
+				)
+
+				// set annotattions on pod with the oudated HO route
+				pod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				setPodAnnotations(pod, t)
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*pod,
+						},
+					},
+				)
+				t.populateLogicalSwitchCache(fakeOvn)
+
+				// pod exists with the expected annotation including the oudated HO route
+				gomega.Eventually(func() string {
+					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
+				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
+
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// check that after start the HO route has been removed
+				gomega.Eventually(func() string {
+					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
+				}, 2).Should(gomega.MatchJSON(expectedAnnotations))
+
+				gomega.Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				return nil
 			}
 
