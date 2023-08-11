@@ -942,7 +942,7 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 			oc.syncZoneICFailed.Delete(node.Name)
 		}
 	}
-	klog.Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
+	klog.V(5).Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
 	return err
 }
 

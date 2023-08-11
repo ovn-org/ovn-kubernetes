@@ -1201,7 +1201,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
 				skipSnat, node1.NodeMgmtPortIP, "1400")
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
-
 			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
 			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 			return nil

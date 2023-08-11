@@ -38,18 +38,18 @@ func generateGatewayInitExpectedSB(testData []libovsdbtest.TestData, nodeName st
 		testData = append(testData, &sbdb.MACBinding{
 			UUID:        "MAC-binding-UUID",
 			Datapath:    gr + "-UUID",
-			IP:          types.V4DummyNextHopMasqueradeIP,
+			IP:          config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP.String(),
 			LogicalPort: types.GWRouterToExtSwitchPrefix + gr,
-			MAC:         util.IPAddrToHWAddr(net.ParseIP(types.V4DummyNextHopMasqueradeIP)).String(),
+			MAC:         util.IPAddrToHWAddr(config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP).String(),
 		})
 	}
 	if config.IPv6Mode {
 		testData = append(testData, &sbdb.MACBinding{
 			UUID:        "MAC-binding-2-UUID",
 			Datapath:    gr + "-UUID",
-			IP:          types.V6DummyNextHopMasqueradeIP,
+			IP:          config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP.String(),
 			LogicalPort: types.GWRouterToExtSwitchPrefix + gr,
-			MAC:         util.IPAddrToHWAddr(net.ParseIP(types.V6DummyNextHopMasqueradeIP)).String(),
+			MAC:         util.IPAddrToHWAddr(config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP).String(),
 		})
 	}
 
@@ -143,8 +143,8 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 
 		testData = append(testData, &nbdb.LogicalRouterStaticRoute{
 			UUID:       staticServiceRouteNamedUUID,
-			IPPrefix:   types.V4MasqueradeSubnet,
-			Nexthop:    types.V4DummyNextHopMasqueradeIP,
+			IPPrefix:   config.Gateway.V4MasqueradeSubnet,
+			Nexthop:    config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP.String(),
 			OutputPort: &externalRouterPort,
 		})
 	}
@@ -154,8 +154,8 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 
 		testData = append(testData, &nbdb.LogicalRouterStaticRoute{
 			UUID:       staticServiceRouteNamedUUID,
-			IPPrefix:   types.V6MasqueradeSubnet,
-			Nexthop:    types.V6DummyNextHopMasqueradeIP,
+			IPPrefix:   config.Gateway.V6MasqueradeSubnet,
+			Nexthop:    config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP.String(),
 			OutputPort: &externalRouterPort,
 		})
 	}

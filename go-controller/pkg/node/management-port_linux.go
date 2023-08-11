@@ -56,13 +56,13 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 	// add the .3 masqueradeIP to add the route via mp0 for ETP=local case
 	// used only in LGW but we create it in SGW as well to maintain parity.
 	if isIPv6 {
-		_, masqueradeSubnet, err := net.ParseCIDR(types.V6HostETPLocalMasqueradeIP + "/128")
+		_, masqueradeSubnet, err := net.ParseCIDR(config.Gateway.MasqueradeIPs.V6HostETPLocalMasqueradeIP.String() + "/128")
 		if err != nil {
 			return nil, err
 		}
 		cfg.allSubnets = append(cfg.allSubnets, masqueradeSubnet)
 	} else {
-		_, masqueradeSubnet, err := net.ParseCIDR(types.V4HostETPLocalMasqueradeIP + "/32")
+		_, masqueradeSubnet, err := net.ParseCIDR(config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String() + "/32")
 		if err != nil {
 			return nil, err
 		}

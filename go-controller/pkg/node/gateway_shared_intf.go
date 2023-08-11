@@ -1114,7 +1114,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ip, ip_dst=%s, ip_src=%s,"+
 				"actions=ct(commit,zone=%d,nat(dst=%s),table=4)",
-				defaultOpenFlowCookie, ofPortPatch, types.V4HostMasqueradeIP, physicalIP.IP,
+				defaultOpenFlowCookie, ofPortPatch, config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String(), physicalIP.IP,
 				HostMasqCTZone, physicalIP.IP))
 
 		// table 0, hairpin from OVN destined to local host (but an additional node IP), send to table 4
@@ -1128,7 +1128,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			}
 
 			// not needed for special masquerade IP
-			if ip.Equal(net.ParseIP(types.V4HostMasqueradeIP)) {
+			if ip.Equal(config.Gateway.MasqueradeIPs.V4HostMasqueradeIP) {
 				continue
 			}
 
@@ -1143,7 +1143,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ip, ip_dst=%s,"+
 				"actions=ct(zone=%d,nat,table=5)",
-				defaultOpenFlowCookie, ofPortHost, types.V4OVNMasqueradeIP, OVNMasqCTZone))
+				defaultOpenFlowCookie, ofPortHost, config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String(), OVNMasqCTZone))
 	}
 	if config.IPv6Mode {
 		if ofPortPhys != "" {
@@ -1172,7 +1172,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ipv6, ipv6_dst=%s, ipv6_src=%s,"+
 				"actions=ct(commit,zone=%d,nat(dst=%s),table=4)",
-				defaultOpenFlowCookie, ofPortPatch, types.V6HostMasqueradeIP, physicalIP.IP,
+				defaultOpenFlowCookie, ofPortPatch, config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String(), physicalIP.IP,
 				HostMasqCTZone, physicalIP.IP))
 
 		// table 0, hairpin from OVN destined to local host (but an additional node IP), send to table 4
@@ -1186,7 +1186,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			}
 
 			// not needed for special masquerade IP
-			if ip.Equal(net.ParseIP(types.V6HostMasqueradeIP)) {
+			if ip.Equal(config.Gateway.MasqueradeIPs.V6HostMasqueradeIP) {
 				continue
 			}
 
@@ -1201,7 +1201,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ipv6, ipv6_dst=%s,"+
 				"actions=ct(zone=%d,nat,table=5)",
-				defaultOpenFlowCookie, ofPortHost, types.V6OVNMasqueradeIP, OVNMasqCTZone))
+				defaultOpenFlowCookie, ofPortHost, config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String(), OVNMasqCTZone))
 	}
 
 	var protoPrefix string
@@ -1211,10 +1211,10 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 		if utilnet.IsIPv4CIDR(svcCIDR) {
 			protoPrefix = "ip"
-			masqIP = types.V4HostMasqueradeIP
+			masqIP = config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String()
 		} else {
 			protoPrefix = "ipv6"
-			masqIP = types.V6HostMasqueradeIP
+			masqIP = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String()
 		}
 
 		// table 0, Host -> OVN towards SVC, SNAT to special IP
@@ -1312,13 +1312,13 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, table=4,ip,"+
 				"actions=ct(commit,zone=%d,nat(src=%s),table=3)",
-				defaultOpenFlowCookie, OVNMasqCTZone, types.V4OVNMasqueradeIP))
+				defaultOpenFlowCookie, OVNMasqCTZone, config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String()))
 	}
 	if config.IPv6Mode {
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, table=4,ipv6, "+
 				"actions=ct(commit,zone=%d,nat(src=%s),table=3)",
-				defaultOpenFlowCookie, OVNMasqCTZone, types.V6OVNMasqueradeIP))
+				defaultOpenFlowCookie, OVNMasqCTZone, config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String()))
 	}
 	// table 5, Host Reply traffic to hairpinned svc, need to unDNAT, send to table 2
 	if config.IPv4Mode {
@@ -1958,7 +1958,7 @@ func addMasqueradeRoute(routeManager *routeManager, netIfaceName, nodeName strin
 	mtu := 0
 	var routes []route
 	if ipv4 != nil {
-		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP))
+		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String()))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv4)
 
 		routes = append(routes, route{
@@ -1970,7 +1970,7 @@ func addMasqueradeRoute(routeManager *routeManager, netIfaceName, nodeName strin
 	}
 
 	if ipv6 != nil {
-		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/128", types.V6OVNMasqueradeIP))
+		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/128", config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String()))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv6)
 
 		routes = append(routes, route{
@@ -1995,14 +1995,14 @@ func setNodeMasqueradeIPOnExtBridge(extBridgeName string) error {
 
 	var bridgeCIDRs []cidrAndFlags
 	if config.IPv4Mode {
-		_, masqIPNet, _ := net.ParseCIDR(types.V4MasqueradeSubnet)
-		masqIPNet.IP = net.ParseIP(types.V4HostMasqueradeIP)
+		_, masqIPNet, _ := net.ParseCIDR(config.Gateway.V4MasqueradeSubnet)
+		masqIPNet.IP = config.Gateway.MasqueradeIPs.V4HostMasqueradeIP
 		bridgeCIDRs = append(bridgeCIDRs, cidrAndFlags{ipNet: masqIPNet, flags: 0})
 	}
 
 	if config.IPv6Mode {
-		_, masqIPNet, _ := net.ParseCIDR(types.V6MasqueradeSubnet)
-		masqIPNet.IP = net.ParseIP(types.V6HostMasqueradeIP)
+		_, masqIPNet, _ := net.ParseCIDR(config.Gateway.V6MasqueradeSubnet)
+		masqIPNet.IP = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP
 		bridgeCIDRs = append(bridgeCIDRs, cidrAndFlags{ipNet: masqIPNet, flags: unix.IFA_F_NODAD})
 	}
 
@@ -2034,10 +2034,10 @@ func addHostMACBindings(bridgeName string) error {
 
 	var neighborIPs []string
 	if config.IPv4Mode {
-		neighborIPs = append(neighborIPs, types.V4OVNMasqueradeIP, types.V4DummyNextHopMasqueradeIP)
+		neighborIPs = append(neighborIPs, config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String(), config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP.String())
 	}
 	if config.IPv6Mode {
-		neighborIPs = append(neighborIPs, types.V6OVNMasqueradeIP, types.V6DummyNextHopMasqueradeIP)
+		neighborIPs = append(neighborIPs, config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String(), config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP.String())
 	}
 	for _, ip := range neighborIPs {
 		klog.Infof("Ensuring IP Neighbor entry for: %s", ip)

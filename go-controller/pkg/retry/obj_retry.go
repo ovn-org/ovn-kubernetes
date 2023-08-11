@@ -512,7 +512,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 						r.increaseFailedAttemptsCounter(retryObj)
 						return
 					}
-					klog.Infof("Creating %s %s took: %v", r.ResourceHandler.ObjType, key, time.Since(start))
+					klog.V(5).Infof("Creating %s %s took: %v", r.ResourceHandler.ObjType, key, time.Since(start))
 					// delete retryObj if handling was successful
 					r.DeleteRetryObj(key)
 					r.ResourceHandler.RecordSuccessEvent(obj)
@@ -560,7 +560,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					// This only applies to pod watchers (pods + dynamic network policy handlers watching pods).
 					if kerrors.IsNotFound(err) {
 						if r.ResourceHandler.IsObjectInTerminalState(newer) {
-							klog.Warningf("%s %s is in terminal state but no longer exists in informer cache, removing",
+							klog.V(5).Infof("%s %s is in terminal state but no longer exists in informer cache, removing",
 								r.ResourceHandler.ObjType, newKey)
 							r.DoWithLock(newKey, func(key string) {
 								r.processObjectInTerminalState(newer, newKey, resourceEventUpdate)
@@ -620,7 +620,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 						if found {
 							existingCacheEntry = retryEntryOrNil.config
 						}
-						klog.Infof("Deleting old %s of type %s during update", oldKey, r.ResourceHandler.ObjType)
+						klog.V(5).Infof("Deleting old %s of type %s during update", oldKey, r.ResourceHandler.ObjType)
 						if err := r.ResourceHandler.DeleteResource(old, existingCacheEntry); err != nil {
 							klog.Errorf("Failed to delete %s %s, during update: %v",
 								r.ResourceHandler.ObjType, oldKey, err)
@@ -646,7 +646,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 									r.ResourceHandler.ObjType, oldKey, newKey, err)
 								r.ResourceHandler.RecordErrorEvent(latest, "ErrorUpdatingResource", err)
 							} else {
-								klog.Infof("Failed to update %s, old=%s, new=%s, error: %v",
+								klog.V(5).Infof("Failed to update %s, old=%s, new=%s, error: %v",
 									r.ResourceHandler.ObjType, oldKey, newKey, err)
 							}
 							var retryEntry *retryObjEntry

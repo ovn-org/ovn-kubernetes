@@ -162,6 +162,8 @@ spec:
           value: "{{ ovn_gateway_opts }}"
         - name: OVN_HYBRID_OVERLAY_ENABLE
           value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
+          value: "{{ ovn_admin_network_policy_enable }}"
         - name: OVN_EGRESSIP_ENABLE
           value: "{{ ovn_egress_ip_enable }}"
         - name: OVN_EGRESSIP_HEALTHCHECK_PORT
@@ -192,6 +194,10 @@ spec:
           value: "{{ ovn_v4_join_subnet }}"
         - name: OVN_V6_JOIN_SUBNET
           value: "{{ ovn_v6_join_subnet }}"
+        - name: OVN_V4_MASQUERADE_SUBNET
+          value: "{{ ovn_v4_masquerade_subnet }}"
+        - name: OVN_V6_MASQUERADE_SUBNET
+          value: "{{ ovn_v6_masquerade_subnet }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
         - name: OVN_UNPRIVILEGED_MODE

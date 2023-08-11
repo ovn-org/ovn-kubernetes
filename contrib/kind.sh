@@ -103,6 +103,7 @@ usage() {
     echo "                 [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]"
     echo "                 [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]"
     echo "                 [-cl |--ovn-loglevel-controller <loglevel>] [-me|--multicast-enabled]"
+    echo "                 [-lcl|--libovsdb-client-logfile <logfile>]"
     echo "                 [-ep |--experimental-provider <name>] |"
     echo "                 [-eb |--egress-gw-separate-bridge] |"
     echo "                 [-lr |--local-kind-registry |"
@@ -155,6 +156,7 @@ usage() {
     echo "-nbl | --ovn-loglevel-nb            Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'."
     echo "-sbl | --ovn-loglevel-sb            Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'."
     echo "-cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'."
+    echo "-lcl | --libovsdb-client-logfile    Separate logs for libovsdb client into provided file. DEFAULT: do not separate."
     echo "-ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled."
     echo "-eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge."
     echo "-lr  | --local-kind-registry        Configure kind to use a local docker registry rather than manually loading images"
@@ -304,6 +306,9 @@ parse_args() {
             -cl  | --ovn-loglevel-controller )  shift
                                                 OVN_LOG_LEVEL_CONTROLLER=$1
                                                 ;;
+            -lcl | --libovsdb-client-logfile )  shift
+                                                LIBOVSDB_CLIENT_LOGFILE=$1
+                                                ;;
             -hns | --host-network-namespace )   OVN_HOST_NETWORK_NAMESPACE=$1
                                                 ;;
             -lr | --local-kind-registry )       KIND_LOCAL_REGISTRY=true
@@ -398,6 +403,7 @@ print_params() {
      echo "OVN_LOG_LEVEL_SB = $OVN_LOG_LEVEL_SB"
      echo "OVN_LOG_LEVEL_CONTROLLER = $OVN_LOG_LEVEL_CONTROLLER"
      echo "OVN_LOG_LEVEL_NBCTLD = $OVN_LOG_LEVEL_NBCTLD"
+     echo "LIBOVSDB_CLIENT_LOGFILE = $LIBOVSDB_CLIENT_LOGFILE"
      echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
@@ -534,6 +540,7 @@ set_default_params() {
   OVN_LOG_LEVEL_SB=${OVN_LOG_LEVEL_SB:-"-vconsole:info -vfile:info"}
   OVN_LOG_LEVEL_CONTROLLER=${OVN_LOG_LEVEL_CONTROLLER:-"-vconsole:info"}
   OVN_LOG_LEVEL_NBCTLD=${OVN_LOG_LEVEL_NBCTLD:-"-vconsole:info"}
+  LIBOVSDB_CLIENT_LOGFILE=${LIBOVSDB_CLIENT_LOGFILE:-}
   OVN_ENABLE_EX_GW_NETWORK_BRIDGE=${OVN_ENABLE_EX_GW_NETWORK_BRIDGE:-false}
   OVN_EX_GW_NETWORK_INTERFACE=""
   if [ "$OVN_ENABLE_EX_GW_NETWORK_BRIDGE" == true ]; then
@@ -551,6 +558,8 @@ set_default_params() {
   SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/112}
   JOIN_SUBNET_IPV4=${JOIN_SUBNET_IPV4:-100.64.0.0/16}
   JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
+  MASQUERADE_SUBNET_IPV4=${MASQUERADE_SUBNET_IPV4:-169.254.169.0/29}
+  MASQUERADE_SUBNET_IPV6=${MASQUERADE_SUBNET_IPV6:-fd69::/125}
   KIND_NUM_MASTER=1
   OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
 
@@ -854,7 +863,9 @@ create_ovn_kube_manifests() {
     --ovn-loglevel-nb="${OVN_LOG_LEVEL_NB}" \
     --ovn-loglevel-sb="${OVN_LOG_LEVEL_SB}" \
     --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
+    --ovnkube-libovsdb-client-logfile="${LIBOVSDB_CLIENT_LOGFILE}" \
     --ovnkube-config-duration-enable=true \
+    --admin-network-policy-enable=true \
     --egress-ip-enable=true \
     --egress-ip-healthcheck-port="${OVN_EGRESSIP_HEALTHCHECK_PORT}" \
     --egress-firewall-enable=true \
@@ -862,6 +873,8 @@ create_ovn_kube_manifests() {
     --egress-service-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
+    --v4-masquerade-subnet="${MASQUERADE_SUBNET_IPV4}" \
+    --v6-masquerade-subnet="${MASQUERADE_SUBNET_IPV6}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
     --multi-network-enable="${ENABLE_MULTI_NET}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
@@ -942,6 +955,8 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressqoses.yaml
   run_kubectl apply -f k8s.ovn.org_egressservices.yaml
   run_kubectl apply -f k8s.ovn.org_adminpolicybasedexternalroutes.yaml
+  run_kubectl apply -f policy.networking.k8s.io_adminnetworkpolicies.yaml
+  run_kubectl apply -f policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
   run_kubectl apply -f ovn-setup.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
