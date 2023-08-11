@@ -270,7 +270,7 @@ func newSSLKeyPairWatcherFunc(certFile, privKeyFile string, tlsConfig *tls.Confi
 							}
 							return true, nil
 						}); err != nil {
-							klog.Errorf("Fatal error: tiemout waiting for %s to be created", event.Name)
+							klog.Errorf("Fatal error: timeout waiting for %s to be created", event.Name)
 							os.Exit(1)
 						}
 						if err := watcher.Add(event.Name); err != nil {
