@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"io"
 	"net/http"
 	"strings"
@@ -191,6 +192,7 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 		}
 	}
 
+	req.IPs = cr.Env["ips"]
 	req.CNIConf = conf
 	req.timestamp = time.Now()
 	// Match the Kubelet default CRI operation timeout of 2m
@@ -236,4 +238,13 @@ func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write([]byte{}); err != nil {
 		klog.Warningf("Error writing %s HTTP response for metrics post", err)
 	}
+}
+
+func (pr *PodRequest) addIPRequestToNetworkSelectionElement(k kube.Interface, podLister corev1listers.PodLister, namespace, name string, ips []string) error {
+	pod, err := podLister.Pods(namespace).Get(name)
+	if err != nil {
+		return err
+	}
+
+	return UpdatePodNetworkConfigWithRetry(podLister, k, pod, pr.nadName, ips)
 }

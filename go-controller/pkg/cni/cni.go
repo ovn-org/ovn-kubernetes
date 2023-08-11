@@ -3,6 +3,7 @@ package cni
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -127,6 +128,15 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 		// In the case of SmartNIC (CX5), we store the netdevname in the representor's
 		// OVS interface's external_id column. This is done in ConfigureInterface().
 	}
+
+	ips := strings.Split(pr.IPs, ",")
+	if pr.IPs != "" {
+		if err := pr.addIPRequestToNetworkSelectionElement(kubecli, clientset.podLister, namespace, podName, ips); err != nil {
+			return nil, err
+		}
+		annotCondFn = isIPReported
+	}
+
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
 	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName,
@@ -134,6 +144,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
+
 	if err = pr.checkOrUpdatePodUID(pod); err != nil {
 		return nil, err
 	}
@@ -152,6 +163,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 		if err != nil {
 			return nil, err
 		}
+
 	} else {
 		response.PodIFInfo = podInterfaceInfo
 	}

@@ -888,7 +888,6 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 			return nil, false, fmt.Errorf("failed to get PodAnnotation for %s/%s/%s, cluster manager might have not allocated it yet",
 				nadName, pod.Namespace, pod.Name)
 		}
-
 		return podAnnotation, false, nil
 	}
 

@@ -35,6 +35,7 @@ type BasicNetInfo interface {
 	Subnets() []config.CIDRNetworkEntry
 	ExcludeSubnets() []*net.IPNet
 	Vlan() uint
+	DelegatedIPAMPlugin() string
 
 	// utility methods
 	CompareNetInfo(BasicNetInfo) bool
@@ -61,6 +62,11 @@ func (nInfo *DefaultNetInfo) GetNetworkName() string {
 // IsSecondary returns if this network is secondary
 func (nInfo *DefaultNetInfo) IsSecondary() bool {
 	return false
+}
+
+// HasDelegatedIPAM returns true if IPAM was delegated to a 3rd party plugin
+func (nInfo *DefaultNetInfo) DelegatedIPAMPlugin() string {
+	return ""
 }
 
 // GetNetworkScopedName returns a network scoped name form the provided one
@@ -140,6 +146,8 @@ type secondaryNetInfo struct {
 	// all net-attach-def NAD names for this network, used to determine if a pod needs
 	// to be plumbed for this network
 	nadNames sync.Map
+
+	delegatedIPAMPlugin string
 }
 
 // GetNetworkName returns the network name
@@ -217,6 +225,11 @@ func (nInfo *secondaryNetInfo) ExcludeSubnets() []*net.IPNet {
 	return nInfo.excludeSubnets
 }
 
+// DelegatedIPAMPlugin returns true if IPAM was delegated to a 3rd party plugin
+func (nInfo *secondaryNetInfo) DelegatedIPAMPlugin() string {
+	return nInfo.delegatedIPAMPlugin
+}
+
 // CompareNetInfo compares for equality this network information with the other
 func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
 	if nInfo.netName != other.GetNetworkName() {
@@ -270,6 +283,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		excludeSubnets: excludes,
 		mtu:            netconf.MTU,
 	}
+	ni.delegatedIPAMPlugin = netconf.IPAM.Type
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
 }
@@ -288,6 +302,7 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		mtu:            netconf.MTU,
 		vlan:           uint(netconf.VLANID),
 	}
+	ni.delegatedIPAMPlugin = netconf.IPAM.Type
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
 }
@@ -415,10 +430,6 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 		if netconf.NADName != nadName {
 			return nil, fmt.Errorf("net-attach-def name (%s) is inconsistent with config (%s)", nadName, netconf.NADName)
 		}
-	}
-
-	if netconf.IPAM.Type != "" {
-		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, UnsupportedIPAMKeyError)
 	}
 
 	return netconf, nil

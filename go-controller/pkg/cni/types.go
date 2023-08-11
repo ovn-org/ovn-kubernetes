@@ -157,6 +157,9 @@ type PodRequest struct {
 	// also, need to find the pod annotation, dpu pod connection/status annotations of the given NAD ("default"
 	// for default network).
 	nadName string
+
+	// IPs assigned by delegated IPAM
+	IPs string
 }
 
 type podRequestFunc func(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth) ([]byte, error)

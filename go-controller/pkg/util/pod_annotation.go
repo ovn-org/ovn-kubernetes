@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"net"
 
 	v1 "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
@@ -130,16 +129,8 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 		pa.IPs = append(pa.IPs, ip.String())
 	}
 
-	existingPa, ok := podNetworks[nadName]
+	_, ok := podNetworks[nadName]
 	if ok {
-		if len(pa.IPs) != len(existingPa.IPs) {
-			return nil, ErrOverridePodIPs
-		}
-		for _, ip := range pa.IPs {
-			if !SliceHasStringItem(existingPa.IPs, ip) {
-				return nil, ErrOverridePodIPs
-			}
-		}
 	}
 
 	for _, gw := range podInfo.Gateways {

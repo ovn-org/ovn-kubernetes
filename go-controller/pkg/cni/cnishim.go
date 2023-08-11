@@ -21,6 +21,7 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
+	"github.com/containernetworking/plugins/pkg/ipam"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -193,7 +194,24 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	}
 	setupLogging(conf)
 
+	isIPAMRequested := conf.IPAM.Type != ""
 	req := newCNIRequest(args)
+	if isIPAMRequested {
+		res, err := ipam.ExecAdd(conf.IPAM.Type, args.StdinData)
+		if err != nil {
+			return fmt.Errorf("delegate IPAM plugin %q errored: %v", conf.IPAM.Type, err)
+		}
+		result, err := current.NewResultFromResult(res)
+		if err != nil {
+			return err
+		}
+
+		var ips []string
+		for _, ip := range result.IPs {
+			ips = append(ips, ip.Address.String())
+		}
+		req.Env["ips"] = strings.Join(ips, ",")
+	}
 
 	body, errB := p.doCNI("http://dummy/", req)
 	if errB != nil {

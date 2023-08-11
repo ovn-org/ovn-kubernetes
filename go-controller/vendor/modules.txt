@@ -69,6 +69,7 @@ github.com/containernetworking/cni/pkg/version
 # github.com/containernetworking/plugins v1.2.0
 ## explicit; go 1.17
 github.com/containernetworking/plugins/pkg/ip
+github.com/containernetworking/plugins/pkg/ipam
 github.com/containernetworking/plugins/pkg/ns
 github.com/containernetworking/plugins/pkg/testutils
 github.com/containernetworking/plugins/pkg/utils/buildversion

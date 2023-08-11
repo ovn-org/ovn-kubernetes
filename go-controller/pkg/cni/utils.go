@@ -2,8 +2,12 @@ package cni
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	listers "k8s.io/client-go/listers/core/v1"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -34,6 +38,19 @@ func isDPUReady(podAnnotation map[string]string, nadName string) (*util.PodAnnot
 			if status.Status == util.DPUConnectionStatusReady {
 				return podNADAnnotation, true
 			}
+		}
+	}
+	return nil, false
+}
+
+// isIPReported is a wait condition which waits for OVN master to set k8snetworkplumbingwg
+// annotation with a specific requested IP Address
+func isIPReported(podAnnotation map[string]string, nadName string) (*util.PodAnnotation, bool) {
+	podNADAnnotation, ready := isOvnReady(podAnnotation, nadName)
+	if ready {
+		hasReportedIPS := len(podNADAnnotation.IPs) > 0
+		if hasReportedIPS {
+			return podNADAnnotation, true
 		}
 	}
 	return nil, false
@@ -157,3 +174,37 @@ func IsStaticPod(pod *kapi.Pod) bool {
 }
 
 //END taken from https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/types/pod_update.go
+
+// UpdatePodNetworkConfigWithRetry updates the NetworkSelectionElement details
+// annotation on the pod retrying on conflict
+func UpdatePodNetworkConfigWithRetry(podLister listers.PodLister, kube kube.Interface, pod *kapi.Pod, nadName string, ips []string) error {
+	updatePodAnnotationNoRollback := func(pod *kapi.Pod) (*kapi.Pod, func(), error) {
+		mostRecentPod, err := podLister.Pods(pod.Namespace).Get(pod.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		networkSelectionElements, err := util.GetK8sPodAllNetworkSelections(mostRecentPod)
+		for i, nse := range networkSelectionElements {
+			if util.GetNADName(pod.Namespace, nse.Name) == nadName {
+				networkSelectionElements[i].IPRequest = ips
+			}
+		}
+
+		bytes, err := json.Marshal(networkSelectionElements)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		newNetSelectionElements := string(bytes)
+		mostRecentPod.Annotations[v1.NetworkAttachmentAnnot] = newNetSelectionElements
+
+		return mostRecentPod, nil, nil
+	}
+
+	return util.UpdatePodWithRetryOrRollback(
+		podLister,
+		kube,
+		pod,
+		updatePodAnnotationNoRollback,
+	)
+}
