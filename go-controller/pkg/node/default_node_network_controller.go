@@ -1129,9 +1129,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableEgressIP {
-		c, err := egressip.NewController(nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(), nc.watchFactory.NamespaceInformer(),
-			nc.watchFactory.PodCoreInformer(), nc.routeManager, config.IPv4Mode, config.IPv6Mode, nc.name)
+	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
+		c, err := egressip.NewController(nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
+			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.routeManager, config.IPv4Mode,
+			config.IPv6Mode, nc.name)
 		if err != nil {
 			return fmt.Errorf("failed to create egress IP controller: %v", err)
 		}
@@ -1139,6 +1140,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err = c.Run(nc.stopChan, nc.wg, 1); err != nil {
 			return fmt.Errorf("failed to run egress IP controller: %v", err)
 		}
+	} else {
+		klog.Infof("Egress IP for non-OVN managed networks is disabled")
 	}
 
 	nc.wg.Add(1)

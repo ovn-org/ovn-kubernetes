@@ -1242,33 +1242,35 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				return assignments
 			}
 		}
-
-		assignableNodesWithSecondaryNet := make([]*egressNode, 0)
-		for _, eNode := range assignableNodes {
-			node, err := eIPC.watchFactory.GetNode(eNode.name)
-			if err != nil {
-				continue
-			}
-			if isOVNManagedNetwork, err := util.IsOVNManagedNetwork(node, eIP); err != nil {
-				klog.Errorf("Failed to determine if egress IP %s on node %s is going to be hosted on a non-OVN managed network: %v",
-					name, node.Name, err)
-			} else if !isOVNManagedNetwork {
-				network, err := util.GetNonOVNNetworkContainingIP(node, eIP)
+		// Egress IP for non-OVN managed networks is only available on baremetal environments
+		if !util.PlatformTypeIsEgressIPCloudProvider() {
+			assignableNodesWithSecondaryNet := make([]*egressNode, 0)
+			for _, eNode := range assignableNodes {
+				node, err := eIPC.watchFactory.GetNode(eNode.name)
 				if err != nil {
-					klog.Warningf("Failed to determine if egress IP is hosted by a non-OVN managed networks for node %s: %v",
-						eIP.String(), node.Name, err)
 					continue
 				}
-				if network == "" {
-					continue
+				if isOVNManagedNetwork, err := util.IsOVNManagedNetwork(node, eIP); err != nil {
+					klog.Errorf("Failed to determine if egress IP %s on node %s is going to be hosted on a non-OVN managed network: %v",
+						name, node.Name, err)
+				} else if !isOVNManagedNetwork {
+					network, err := util.GetNonOVNNetworkContainingIP(node, eIP)
+					if err != nil {
+						klog.Warningf("Failed to determine if egress IP is hosted by a non-OVN managed networks for node %s: %v",
+							eIP.String(), node.Name, err)
+						continue
+					}
+					if network == "" {
+						continue
+					}
+					assignableNodesWithSecondaryNet = append(assignableNodesWithSecondaryNet, eNode)
 				}
-				assignableNodesWithSecondaryNet = append(assignableNodesWithSecondaryNet, eNode)
 			}
-		}
-		// if the EIP is hosted by a non OVN managed network, then restrict the assignable nodes to the set of nodes that
-		// may host the non-OVN managed network
-		if len(assignableNodesWithSecondaryNet) > 0 {
-			assignableNodes = assignableNodesWithSecondaryNet
+			// if the EIP is hosted by a non OVN managed network, then restrict the assignable nodes to the set of nodes that
+			// may host the non-OVN managed network
+			if len(assignableNodesWithSecondaryNet) > 0 {
+				assignableNodes = assignableNodesWithSecondaryNet
+			}
 		}
 
 		var assignmentSuccessful bool
