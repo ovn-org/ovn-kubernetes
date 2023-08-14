@@ -157,10 +157,31 @@ func (c *ExternalGatewayMasterController) Repair() error {
 		// if pod had no ECMP routes we need to make sure we remove logical route policy for local gw mode
 		if !podHasAnyECMPRoutes {
 			for _, ovnRoute := range ovnRoutes {
-				gr := strings.TrimPrefix(ovnRoute.router, types.GWRouterPrefix)
-				if err := c.nbClient.delHybridRoutePolicyForPod(net.ParseIP(podIP), gr); err != nil {
+				node := strings.TrimPrefix(ovnRoute.router, types.GWRouterPrefix)
+				if err := c.nbClient.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
 					return fmt.Errorf("error while removing hybrid policy for pod IP: %s, on node: %s, error: %v",
-						podIP, gr, err)
+						podIP, node, err)
+				}
+			}
+		}
+	}
+
+	// could be stale hybrid policies with stale addresses in the set that had no corresponding OVN ecmp routes
+	// get all pods, attempt to delete their hybridRoutePolicy that have no policy
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		ovnHybridCache, err := c.buildOVNHybridCache()
+		if err != nil {
+			return fmt.Errorf("failed to build hybrid cache: %w", err)
+		}
+		for ip, node := range ovnHybridCache {
+			// check if this pod IP has a corresponding policy, if not, remove it
+			_, okPolicy := policyGWIPsMap[ip]
+			_, okAnnotation := annotatedGWIPsMap[ip]
+			if !okPolicy && !okAnnotation {
+				klog.Infof("CleanHybridPRoutes: Removing IP: %s from hybrid route policy", ip)
+				if err := c.nbClient.delHybridRoutePolicyForPod(net.ParseIP(ip), node); err != nil {
+					return fmt.Errorf("CleanHybridPRoutes: error while removing hybrid policy for pod IP: %s, on node: %s, error: %v",
+						ip, node, err)
 				}
 			}
 		}
@@ -184,6 +205,7 @@ func (c *ExternalGatewayMasterController) syncPoliciesWithoutCleanup() (map[stri
 			// because handling them will cause startup failure.
 			// db objects for these policies will be cleaned up, and policies will be handled from scratch by the
 			// general controller logic.
+			klog.Infof("Skip initial sync for APBRoute policy %s", policy.Name)
 			continue
 		}
 		_, err = c.mgr.syncRoutePolicy(policy.Name)
@@ -394,4 +416,64 @@ func (c *ExternalGatewayMasterController) buildOVNECMPCache() (map[string][]*ovn
 		}
 	}
 	return ovnRouteCache, nil
+}
+
+// returns a hybrid cache of map[podIPs]nodeName
+func (c *ExternalGatewayMasterController) buildOVNHybridCache() (map[string]string, error) {
+	ovnHybridCache := make(map[string]string)
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == types.HybridOverlayReroutePriority
+	}
+
+	logicalRouterPolicies, err := c.nbClient.findLogicalRouterPoliciesWithPredicate(p)
+	if err != nil {
+		return nil, fmt.Errorf("CleanHybridPRoutes: failed to list hybrid routes: %v", err)
+	}
+
+	foundNextHops := sets.Set[string]{}
+	for _, lrp := range logicalRouterPolicies {
+		foundNextHops.Insert(lrp.Nexthops...)
+	}
+
+	r := func(item *nbdb.LogicalRouterPort) bool {
+		for _, ip := range item.Networks {
+			// grab only IP prefix and not mask
+			p := strings.Split(ip, "/")
+			if foundNextHops.Has(p[0]) {
+				return true
+			}
+		}
+		return false
+	}
+
+	grPorts, err := c.nbClient.findLogicalRouterPortWithPredicate(r)
+	if err != nil {
+		return nil, fmt.Errorf("CleanHybridPRoutes: failed to search for logical router port: %v", err)
+	}
+
+	for _, grPort := range grPorts {
+		nodeName := strings.TrimPrefix(grPort.Name, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix)
+		if len(nodeName) == 0 && nodeName != grPort.Name {
+			continue
+		}
+
+		// nodeName has been found
+		// get address set and list all addresses
+		asIndex := GetHybridRouteAddrSetDbIDs(nodeName, c.nbClient.controllerName)
+		as, err := c.nbClient.addressSetFactory.GetAddressSet(asIndex)
+		if err != nil {
+			klog.Errorf("CleanHybridPRoutes: unable to find get address set %s: %v", asIndex, err)
+			continue
+		}
+		ipv4Addrs, ipv6Addrs := as.GetIPs()
+		for _, ip := range ipv4Addrs {
+			ovnHybridCache[ip] = nodeName
+		}
+		for _, ip := range ipv6Addrs {
+			ovnHybridCache[ip] = nodeName
+		}
+	}
+
+	klog.Infof("CleanHybridRoutes: OVN cache built: %#v", ovnHybridCache)
+	return ovnHybridCache, nil
 }

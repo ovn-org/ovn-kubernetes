@@ -9,6 +9,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -2843,6 +2844,119 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				err := fakeOvn.controller.delAllLegacyHybridRoutePolicies()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+		ginkgo.It("delete stale addresses from legacy hybrid route policies on startup", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.Gateway.Mode = config.GatewayModeLocal
+				asIndex := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
+				asv4, _ := addressset.GetHashNamesForAS(asIndex)
+
+				node1 := tNode{
+					Name:                 "node1",
+					NodeIP:               "1.2.3.4",
+					NodeLRPMAC:           "0a:58:0a:01:01:01",
+					LrpIP:                "100.64.0.2",
+					LrpIPv6:              "fd98::2",
+					DrLrpIP:              "100.64.0.1",
+					PhysicalBridgeMAC:    "11:22:33:44:55:66",
+					SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
+					NodeSubnet:           "10.1.1.0/24",
+					GWRouter:             ovntypes.GWRouterPrefix + "node1",
+					GatewayRouterIPMask:  "172.16.16.2/24",
+					GatewayRouterIP:      "172.16.16.2",
+					GatewayRouterNextHop: "172.16.16.1",
+					PhysicalBridgeName:   "br-eth0",
+					NodeGWIP:             "10.1.1.1/24",
+					NodeMgmtPortIP:       "10.1.1.2",
+					NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
+					DnatSnatIP:           "169.254.0.1",
+				}
+				// create a test node and annotate it with host subnet
+				testNode := node1.k8sNode("2")
+
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalRouterStaticRoute{
+								UUID:     "static-route-1-UUID",
+								IPPrefix: "10.128.1.3/32",
+								Nexthop:  "9.0.0.1",
+								Options: map[string]string{
+									"ecmp_symmetric_reply": "true",
+								},
+								OutputPort: &logicalRouterPort,
+								Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+							},
+							&nbdb.LogicalRouterPolicy{
+								UUID:     "501-new-UUID",
+								Priority: ovntypes.HybridOverlayReroutePriority,
+								Action:   nbdb.LogicalRouterPolicyActionReroute,
+								Nexthops: []string{"100.64.0.4"},
+								Match:    "inport == \"rtos-node1\" && ip4.src == $" + asv4 + " && ip4.dst != 10.128.0.0/14",
+							},
+							&nbdb.LogicalRouter{
+								Name:     ovntypes.OVNClusterRouter,
+								UUID:     ovntypes.OVNClusterRouter + "-UUID",
+								Policies: []string{"501-new-UUID"},
+							},
+							&nbdb.LogicalRouter{
+								UUID:         "GR_node1-UUID",
+								Name:         "GR_node1",
+								StaticRoutes: []string{"static-route-1-UUID"},
+							},
+							&nbdb.LogicalRouterPort{
+								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
+								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
+								Networks: []string{"100.64.0.4/32"},
+							},
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							testNode,
+						},
+					},
+				)
+
+				nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: fakeOvn.fakeClient.KubeClient},
+					testNode.Name)
+
+				vlanID := uint(1024)
+				l3Config := node1.gatewayConfig(config.GatewayModeLocal, vlanID)
+				err := util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = nodeAnnotator.Run()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// add address set with one legit IP that exists in a ecmp route, and one that doesn't
+				_, err = fakeOvn.asf.NewAddressSet(asIndex, []net.IP{net.ParseIP("10.128.1.3"), net.ParseIP("1.1.1.1")})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				finalNB := []libovsdbtest.TestData{
+					&nbdb.LogicalRouter{
+						Name: ovntypes.OVNClusterRouter,
+						UUID: ovntypes.OVNClusterRouter + "-UUID",
+					},
+					&nbdb.LogicalRouter{
+						UUID: "GR_node1-UUID",
+						Name: "GR_node1",
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
+						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
+						Networks: []string{"100.64.0.4/32"},
+					},
+				}
+
+				err = fakeOvn.controller.apbExternalRouteController.Repair()
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				fakeOvn.asf.EventuallyExpectNoAddressSet(asIndex)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+
 				return nil
 			}
 

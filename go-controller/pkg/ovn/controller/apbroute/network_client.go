@@ -56,6 +56,14 @@ type conntrackClient struct {
 	podLister corev1listers.PodLister
 }
 
+func (nb *northBoundClient) findLogicalRouterPortWithPredicate(p func(item *nbdb.LogicalRouterPort) bool) ([]*nbdb.LogicalRouterPort, error) {
+	return libovsdbops.FindLogicalRouterPortWithPredicate(nb.nbClient, p)
+}
+
+func (nb *northBoundClient) findLogicalRouterPoliciesWithPredicate(p func(item *nbdb.LogicalRouterPolicy) bool) ([]*nbdb.LogicalRouterPolicy, error) {
+	return libovsdbops.FindLogicalRouterPoliciesWithPredicate(nb.nbClient, p)
+}
+
 func (nb *northBoundClient) findLogicalRouterStaticRoutesWithPredicate(p func(item *nbdb.LogicalRouterStaticRoute) bool) ([]*nbdb.LogicalRouterStaticRoute, error) {
 	return libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(nb.nbClient, p)
 }
@@ -464,6 +472,7 @@ func (nb *northBoundClient) deletePodGWRoute(routeInfo *RouteInfo, podIP, gw, gr
 	}
 
 	node := util.GetWorkerFromGatewayRouter(gr)
+
 	// The gw is deleted from the routes cache after this func is called, length 1
 	// means it is the last gw for the pod and the hybrid route policy should be deleted.
 	if entry := routeInfo.PodExternalRoutes[podIP]; len(entry) <= 1 {
@@ -528,72 +537,75 @@ func (nb *northBoundClient) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr s
 // DelHybridRoutePolicyForPod handles deleting a logical route policy that
 // forces pod egress traffic to be rerouted to a gateway router for local gateway mode.
 func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
-	if config.Gateway.Mode == config.GatewayModeLocal {
-		// Delete podIP from the node's address_set.
-		asIndex := GetHybridRouteAddrSetDbIDs(node, nb.controllerName)
-		as, err := nb.addressSetFactory.EnsureAddressSet(asIndex)
-		if err != nil {
-			return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
-		}
-		err = as.DeleteIPs([]net.IP{(podIP)})
-		if err != nil {
-			return fmt.Errorf("unable to remove PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
-		}
+	if config.Gateway.Mode != config.GatewayModeLocal {
+		return nil
+	}
 
-		// delete hybrid policy to bypass lr-policy in GR, only if there are zero pods on this node.
-		ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
-		ipv4PodIPs, ipv6PodIPs := as.GetIPs()
-		deletePolicy := false
-		var l3Prefix string
-		var matchSrcAS string
-		if utilnet.IsIPv6(podIP) {
-			l3Prefix = "ip6"
-			if len(ipv6PodIPs) == 0 {
-				deletePolicy = true
-			}
-			matchSrcAS = ipv6HashedAS
-		} else {
-			l3Prefix = "ip4"
-			if len(ipv4PodIPs) == 0 {
-				deletePolicy = true
-			}
-			matchSrcAS = ipv4HashedAS
-		}
-		if deletePolicy {
-			var matchDst string
-			var clusterL3Prefix string
-			for _, clusterSubnet := range config.Default.ClusterSubnets {
-				if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-					clusterL3Prefix = "ip6"
-				} else {
-					clusterL3Prefix = "ip4"
-				}
-				if l3Prefix != clusterL3Prefix {
-					continue
-				}
-				matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
-			}
-			matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, node, l3Prefix, matchSrcAS)
-			matchStr += matchDst
+	// Delete podIP from the node's address_set.
+	asIndex := GetHybridRouteAddrSetDbIDs(node, nb.controllerName)
+	as, err := nb.addressSetFactory.EnsureAddressSet(asIndex)
+	if err != nil {
+		return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
+	}
+	err = as.DeleteIPs([]net.IP{podIP})
+	if err != nil {
+		return fmt.Errorf("unable to remove PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
+	}
 
-			p := func(item *nbdb.LogicalRouterPolicy) bool {
-				return item.Priority == types.HybridOverlayReroutePriority && item.Match == matchStr
-			}
-			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nb.nbClient, types.OVNClusterRouter, p)
-			if err != nil {
-				return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, types.OVNClusterRouter, err)
-			}
+	// delete hybrid policy to bypass lr-policy in GR, only if there are zero pods on this node.
+	ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
+	ipv4PodIPs, ipv6PodIPs := as.GetIPs()
+	deletePolicy := false
+	var l3Prefix string
+	var matchSrcAS string
+	if utilnet.IsIPv6(podIP) {
+		l3Prefix = "ip6"
+		if len(ipv6PodIPs) == 0 {
+			deletePolicy = true
 		}
-		if len(ipv4PodIPs) == 0 && len(ipv6PodIPs) == 0 {
-			// delete address set.
-			err := as.Destroy()
-			if err != nil {
-				return fmt.Errorf("failed to remove address set: %s, on: %s, err: %v",
-					as.GetName(), node, err)
+		matchSrcAS = ipv6HashedAS
+	} else {
+		l3Prefix = "ip4"
+		if len(ipv4PodIPs) == 0 {
+			deletePolicy = true
+		}
+		matchSrcAS = ipv4HashedAS
+	}
+	if deletePolicy {
+		var matchDst string
+		var clusterL3Prefix string
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+				clusterL3Prefix = "ip6"
+			} else {
+				clusterL3Prefix = "ip4"
 			}
+			if l3Prefix != clusterL3Prefix {
+				continue
+			}
+			matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
+		}
+		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, node, l3Prefix, matchSrcAS)
+		matchStr += matchDst
+
+		p := func(item *nbdb.LogicalRouterPolicy) bool {
+			return item.Priority == types.HybridOverlayReroutePriority && item.Match == matchStr
+		}
+		err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nb.nbClient, types.OVNClusterRouter, p)
+		if err != nil {
+			return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, types.OVNClusterRouter, err)
+		}
+	}
+	if len(ipv4PodIPs) == 0 && len(ipv6PodIPs) == 0 {
+		// delete address set.
+		err := as.Destroy()
+		if err != nil {
+			return fmt.Errorf("failed to remove address set: %s, on: %s, err: %v",
+				as.GetName(), node, err)
 		}
 	}
 	return nil
+
 }
 
 // extSwitchPrefix returns the prefix of the external switch to use for
