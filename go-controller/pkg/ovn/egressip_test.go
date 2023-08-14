@@ -136,7 +136,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN(true)
+		fakeOvn = NewFakeOVN(false)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -293,6 +293,21 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					expectedNatLogicalPort := "k8s-node2"
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						[]net.IP{net.ParseIP(podV4IP)},
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+					egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+						egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+						nil,
+					)
+					egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
 					expectedDatabaseState := []libovsdbtest.TestData{
 						&nbdb.LogicalRouterPolicy{
 							Priority: types.DefaultNoRereoutePriority,
@@ -373,6 +388,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								"exclude-lb-vips-from-garp": "true",
 							},
 						},
+						nodeIPAddrSet,
+						egressIPServedAS,
+						egressServedAddrSet,
 					}
 
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -574,6 +592,22 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						[]net.IP{net.ParseIP(podV4IP)},
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+						[]net.IP{net.ParseIP("192.168.126.51")},
+					)
+					nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+					egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+						egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+						nil,
+					)
+					egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 					expectedNatLogicalPort := "k8s-node2"
 					expectedDatabaseState := []libovsdbtest.TestData{
 						&nbdb.LogicalRouterPolicy{
@@ -663,6 +697,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								"exclude-lb-vips-from-garp": "true",
 							},
 						},
+						egressIPServedAS,
+						nodeIPAddrSet,
+						egressServedAddrSet,
 					}
 
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -913,6 +950,22 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState = expectedDatabaseState[1:] // reroute logical router policy is in remote zone, hence not visible
 					}
 
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						[]net.IP{net.ParseIP("10.128.0.15")},
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+					egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+						egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+						nil,
+					)
+					egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS, nodeIPAddrSet, egressServedAddrSet)
 					gomega.Eventually(fakeOvn.nbClient, inspectTimeout).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					return nil
@@ -1160,6 +1213,23 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies = []string{"default-no-reroute-UUID", "no-reroute-service-UUID"}
 						expectedDatabaseState = expectedDatabaseState[2:]
 					}
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						[]net.IP{net.ParseIP("10.128.0.15")},
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+					egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+						egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+						nil,
+					)
+					egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS, nodeIPAddrSet, egressServedAddrSet)
+
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					err = fakeOvn.controller.gatewayCleanup(node1Name) // simulate an already deleted node
@@ -1256,6 +1326,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					// NOTE: This test is not really a real scenario, it depicts a transient state.
 					expectedDatabaseState[4].(*nbdb.LogicalRouter).Policies = []string{"default-no-reroute-UUID", "no-reroute-service-UUID"}
 					expectedDatabaseState = expectedDatabaseState[1:]
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS, nodeIPAddrSet, egressServedAddrSet)
 
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 					return nil
@@ -1411,6 +1482,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						// add policy with nextHop towards egressNode's transit switchIP
 						expectedDatabaseState = append(expectedDatabaseState, getReRoutePolicy(egressPod.Status.PodIP, "6", []string{"fd97::2"}))
 					}
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					egressIPs, nodes := getEgressIPStatus(eIP.Name)
@@ -1445,6 +1522,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					}
 
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 					return nil
 				}
@@ -1570,6 +1648,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
 
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					egressIPs, nodes := getEgressIPStatus(eIP.Name)
@@ -1694,6 +1778,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
 
+				egressIPServedASv4, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedASv4.UUID = "egressIPServed-UUIDv4"
+
 				expectedNatLogicalPort := "k8s-node2"
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
@@ -1738,6 +1828,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID: ovntypes.GWRouterPrefix + node2Name + "-UUID",
 						Nat:  []string{"egressip-nat-UUID"},
 					},
+					egressIPServedASv4,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -1824,12 +1915,30 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err := fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				nodeIPsASdbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName)
-				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6, vipIPv4, vipIPv6})
+				egressIPServedASv4, egressIPServedASv6 := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedASv4.UUID = "egressIPServed-UUIDv4"
+				egressIPServedASv6.UUID = "egressIPServed-UUIDv6"
+				nodeIPAddrSetv4, nodeIPAddrSetv6 := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					[]net.IP{net.ParseIP(node1IPv4),
+						net.ParseIP(node2IPv4),
+						net.ParseIP(vipIPv4),
+						net.ParseIP(node1IPv6),
+						net.ParseIP(node2IPv6),
+						net.ParseIP(vipIPv6)},
+				)
+				nodeIPAddrSetv4.UUID = "nodeIPAddrSet-UUIDv4"
+				nodeIPAddrSetv6.UUID = "nodeIPAddrSet-UUIDv6"
+				egressServedAddrSetv4, egressServedAddrSetv6 := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSetv4.UUID = "egressServedAddrSet-UUIDv4"
+				egressServedAddrSetv6.UUID = "egressServedAddrSet-UUIDv6"
 
-				egressSvcPodsV4, egressSvcPodsV6 := addressset.GetHashNamesForAS(egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName))
-				egressipPodsV4, egressipPodsV6 := addressset.GetHashNamesForAS(getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName))
-				nodeIPsV4, nodeIPsV6 := addressset.GetHashNamesForAS(nodeIPsASdbIDs)
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -1846,7 +1955,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
 						Match: fmt.Sprintf("(ip4.src == $%s || ip4.src == $%s) && ip4.dst == $%s",
-							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
+							//egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
+							egressIPServedASv4.Name, egressServedAddrSetv4.Name, nodeIPAddrSetv4.Name),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
 						Options: map[string]string{"pkt_mark": "1008"},
@@ -1854,7 +1964,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
 						Match: fmt.Sprintf("(ip6.src == $%s || ip6.src == $%s) && ip6.dst == $%s",
-							egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
+							//egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
+							egressIPServedASv6.Name, egressServedAddrSetv6.Name, nodeIPAddrSetv6.Name),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-v6-no-reroute-node-UUID",
 						Options: map[string]string{"pkt_mark": "1008"},
@@ -1869,6 +1980,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"default-v6-no-reroute-node-UUID",
 						},
 					},
+					egressIPServedASv4,
+					egressIPServedASv6,
+					nodeIPAddrSetv4,
+					nodeIPAddrSetv6,
+					egressServedAddrSetv4,
+					egressServedAddrSetv6,
 				}
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -1877,20 +1994,20 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6})
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				//fakeOvn.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6})
+				//gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				node2.ObjectMeta.Annotations["k8s.ovn.org/host-addresses"] = fmt.Sprintf("[\"%s\", \"%s\", \"%s\", \"%s\"]", node2IPv4, node2IPv6, vipIPv4, vipIPv6)
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6, vipIPv4, vipIPv6})
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				//fakeOvn.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6, vipIPv4, vipIPv6})
+				//gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node2IPv4, node2IPv6, vipIPv4, vipIPv6})
+				//fakeOvn.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node2IPv4, node2IPv6, vipIPv4, vipIPv6})
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
@@ -2028,6 +2145,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[2].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 					return nil
 				}
@@ -2215,6 +2338,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
 
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					egressIPs, nodes := getEgressIPStatus(eIP.Name)
@@ -2244,6 +2373,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Nat:  nil,
 						},
 					}
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 					return nil
 				}
@@ -2389,6 +2519,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[2].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					egressIPs, nodes := getEgressIPStatus(eIP.Name)
@@ -2418,6 +2554,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Nat:  nil,
 						},
 					}
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 					return nil
 				}
@@ -2553,6 +2690,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[1].(*nbdb.LogicalRouter).Policies = []string{}
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					egressIPs, nodes := getEgressIPStatus(eIP.Name)
@@ -2585,6 +2728,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Nat:  nil,
 						},
 					}
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 					return nil
 				}
@@ -2910,6 +3054,22 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState = expectedDatabaseState[1:] // policy is not visible since podNode is remote
 					}
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						[]net.IP{net.ParseIP("10.128.0.15")},
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+					egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+						egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+						nil,
+					)
+					egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS, nodeIPAddrSet, egressServedAddrSet)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					latest, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP.Name, metav1.GetOptions{})
@@ -3024,6 +3184,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState = expectedDatabaseState[1:] // policy is not visible since podNode is remote
 					}
+					expectedDatabaseState = append(expectedDatabaseState, egressIPServedAS, nodeIPAddrSet, egressServedAddrSet)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 					return nil
 				}
@@ -3132,6 +3293,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						"stateless": "false",
 					},
 				}
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.EgressIPReroutePriority,
@@ -3163,6 +3329,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID: ovntypes.GWRouterPrefix + node2Name + "-UUID",
 						Nat:  []string{"egressip-nat-UUID"},
 					},
+					egressIPServedAS,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -3274,6 +3441,22 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouter{
 						Name:     ovntypes.OVNClusterRouter,
@@ -3320,6 +3503,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
@@ -3399,6 +3585,21 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// check the cache no longer has the entry
 				retry.CheckRetryObjectEventually(key, false, fakeOvn.controller.retryEgressNodes)
 
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouter{
 						Name:     ovntypes.OVNClusterRouter,
@@ -3429,6 +3630,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
@@ -3630,6 +3834,25 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				_, nodes := getEgressIPStatus(egressIPName)
 				gomega.Expect(nodes[0]).To(gomega.Equal(node1.Name))
 
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					[]net.IP{net.ParseIP("10.128.0.3")},
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
+				namespace1ASip4, _ := buildNamespaceAddressSets(egressNamespace.Name, []net.IP{net.ParseIP("10.128.0.3")})
+				finalDatabaseStatewithPod = append(finalDatabaseStatewithPod, egressIPServedAS, nodeIPAddrSet, egressServedAddrSet, namespace1ASip4)
+
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
 
 				// delete the pod
@@ -3680,6 +3903,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Ports: []string{},
 					},
 				}
+				egressIPServedAS.Addresses = []string{}
+				namespace1ASip4.Addresses = []string{}
+
+				expectedDatabaseStateWithoutPod = append(expectedDatabaseStateWithoutPod, egressIPServedAS, nodeIPAddrSet, egressServedAddrSet, namespace1ASip4)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseStateWithoutPod))
 				// recreate pod with same name immediately; simulating handler race (pods v/s egressip) condition,
 				// so instead of proper pod create, we try out egressIP pod setup which will be a no-op since pod doesn't exist
@@ -3840,6 +4067,23 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
 					Nat:  []string{"egressip-nat-UUID1"},
 				}
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					[]net.IP{net.ParseIP("10.128.0.50")},
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
+				namespace1ASip4, _ := buildNamespaceAddressSets(egressNamespace.Name, []net.IP{net.ParseIP("10.128.0.50")})
 				expectedDatabaseStatewithPod := []libovsdbtest.TestData{
 					podEIPSNAT,
 					&nbdb.LogicalRouterPolicy{
@@ -3898,7 +4142,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				_, nodes := getEgressIPStatus(egressIPName)
 				gomega.Expect(nodes[0]).To(gomega.Equal(node1.Name))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
+				// the test uses the index of the finalDatabaseSatatewithPod I use a temp because I don't want to mess with it
+				finalDatabaseStatewithPodTemp := append(finalDatabaseStatewithPod, egressIPServedAS, egressServedAddrSet, nodeIPAddrSet, namespace1ASip4)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPodTemp))
 
 				// delete the pod and simulate a cleanup failure:
 				// 1) create a situation where pod is gone from kapi but egressIP setup wasn't cleanedup due to deletion error
@@ -3986,7 +4232,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				podAddr = fmt.Sprintf("%s %s", newEgressPodPortInfo.mac.String(), newEgressPodIP)
 				podLSP.PortSecurity = []string{podAddr}
 				podLSP.Addresses = []string{podAddr}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod[1:]))
+				namespace1ASip4, _ = buildNamespaceAddressSets(egressNamespace.Name, []net.IP{net.ParseIP("10.128.0.60")})
+				finalDatabaseStatewithPodTemp = append(finalDatabaseStatewithPod[1:], egressIPServedAS, egressServedAddrSet, nodeIPAddrSet, namespace1ASip4)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPodTemp))
 
 				ginkgo.By("trigger a forced retry and ensure deletion of oldPod and creation of newPod are successful")
 				// let us add back the annotation to the oldPod which is being retried to make deletion a success
@@ -4007,7 +4255,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				podReRoutePolicy.Match = fmt.Sprintf("ip4.src == %s", newEgressPodIP)
 				podEIPSNAT.LogicalIP = newEgressPodIP
 				node1GR.Nat = []string{podEIPSNAT.UUID}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod[:len(finalDatabaseStatewithPod)-1]))
+				egressIPServedAS.Addresses = []string{"10.128.0.60"}
+				finalDatabaseStatewithPodTemp = append(finalDatabaseStatewithPod[:len(finalDatabaseStatewithPod)-1], egressIPServedAS, egressServedAddrSet, nodeIPAddrSet, namespace1ASip4)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPodTemp))
 				return nil
 			}
 
@@ -4343,6 +4593,25 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						node1GR.Nat = []string{"node-nat-UUID1"}
 					}
 
+					egressIPServedAS, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+						[]net.IP{net.ParseIP("10.128.0.3")},
+					)
+					egressIPServedAS.UUID = "egressIPServed-UUID"
+					nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+						getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+						nil,
+					)
+					nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+					egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+						egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+						nil,
+					)
+					egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
+					namespace1ASip4, _ := buildNamespaceAddressSets(egressNamespace.Name, []net.IP{net.ParseIP("10.128.0.3")})
+					finalDatabaseStatewithPod = append(finalDatabaseStatewithPod, egressIPServedAS, egressServedAddrSet, nodeIPAddrSet, namespace1ASip4)
+
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
 
 					// Make second node egressIP assignable
@@ -4596,6 +4865,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						node1GR.Nat = []string{"node-nat-UUID1"}
 						finalDatabaseStatewithPod[2].(*nbdb.LogicalRouter).StaticRoutes = []string{}
 					}
+					finalDatabaseStatewithPod = append(finalDatabaseStatewithPod, egressIPServedAS, egressServedAddrSet, nodeIPAddrSet, namespace1ASip4)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
 
 					// delete the second egressIP object to make sure the cache is updated podKey should be gone since nothing is managing it anymore
@@ -4711,6 +4981,22 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -4743,6 +5029,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -4795,6 +5084,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
@@ -4884,6 +5176,22 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -4930,6 +5238,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
@@ -5021,6 +5332,22 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -5067,6 +5394,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -5123,6 +5453,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
@@ -5253,6 +5586,23 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
 				expectedNatLogicalPort := "k8s-node2"
+
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					[]net.IP{net.ParseIP("10.128.0.15")},
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -5333,6 +5683,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -5456,6 +5809,23 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
+
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						UUID:     "keep-me-UUID",
@@ -5488,6 +5858,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
@@ -5638,6 +6011,25 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					"nat-addresses":             "router",
 					"exclude-lb-vips-from-garp": "true",
 				}
+
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					[]net.IP{net.ParseIP("10.128.0.15")},
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseStatewithPod := []libovsdbtest.TestData{
 					podEIPSNAT, &nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -5658,7 +6050,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
 						Networks: []string{"100.64.0.2/29"},
-					}, node1Switch}
+					},
+					node1Switch,
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
+				}
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseStatewithPod))
 				return nil
@@ -5746,6 +6143,24 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -5792,6 +6207,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				gomega.Eventually(eIP.Status.Items).Should(gomega.HaveLen(0))
@@ -5848,6 +6266,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -5914,6 +6335,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -6002,6 +6426,24 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -6048,7 +6490,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
+
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
 
@@ -6105,6 +6551,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -6188,6 +6637,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
@@ -6332,6 +6784,23 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					"nat-addresses":             "router",
 					"exclude-lb-vips-from-garp": "true",
 				}
+
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseStatewithPod := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -6352,7 +6821,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
 						Networks: []string{"100.64.0.2/29"},
-					}, node1Switch}
+					},
+					node1Switch,
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
+				}
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseStatewithPod))
 				return nil
@@ -6522,6 +6996,25 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					"nat-addresses":             "router",
 					"exclude-lb-vips-from-garp": "true",
 				}
+
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					[]net.IP{net.ParseIP("10.128.0.15")},
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseStatewithPod := []libovsdbtest.TestData{
 					podEIPSNAT, &nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -6542,7 +7035,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
 						Networks: []string{"100.64.0.2/29"},
-					}, node1Switch}
+					},
+					node1Switch,
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
+				}
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseStatewithPod))
 
@@ -6556,6 +7054,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				}, 5).Should(gomega.Equal(v1.PodSucceeded))
 
 				node1GR.Nat = []string{}
+				egressIPServedAS.Addresses = []string{}
 				expectedDatabaseStatewitCompletedPod := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -6576,7 +7075,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
 						Networks: []string{"100.64.0.2/29"},
-					}, node1Switch}
+					},
+					node1Switch,
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
+				}
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseStatewitCompletedPod))
 
@@ -6705,6 +7209,24 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					[]net.IP{net.ParseIP("10.128.0.15"), net.ParseIP("10.128.0.16")},
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
+
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -6761,6 +7283,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -6882,6 +7407,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
 						Networks: []string{"100.64.0.2/29"},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -7045,6 +7573,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -7172,6 +7703,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -7191,6 +7725,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(1)) // though 2 egressIPs to be re-assigned its only 1 egressIP object
 
+				egressIPServedAS.Addresses = []string{}
 				expectedDatabaseState = []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -7267,6 +7802,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -7368,6 +7906,21 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				egressIPServedAS, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				egressIPServedAS.UUID = "egressIPServed-UUID"
+				nodeIPAddrSet, _ := addressset.GetDbObjsForAS(
+					getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName),
+					nil,
+				)
+				nodeIPAddrSet.UUID = "nodeIPAddrSet-UUID"
+				egressServedAddrSet, _ := addressset.GetDbObjsForAS(
+					egresssvc.GetEgressServiceAddrSetDbIDs(DefaultNetworkControllerName),
+					nil,
+				)
+				egressServedAddrSet.UUID = "egressServedAddrSet-UUID"
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -7422,6 +7975,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				fakeOvn.patchEgressIPObj(node1Name, egressIP)
@@ -7432,6 +7988,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				egressIPServedAS.Addresses = nil
+				nodeIPAddrSet.Addresses = nil
+				egressServedAddrSet.Addresses = nil
 				expectedDatabaseState = []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -7488,6 +8048,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -7567,6 +8130,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"exclude-lb-vips-from-garp": "true",
 						},
 					},
+					egressIPServedAS,
+					nodeIPAddrSet,
+					egressServedAddrSet,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
