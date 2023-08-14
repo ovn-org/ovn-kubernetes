@@ -136,6 +136,18 @@ func DeleteLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRou
 
 // LOGICAL ROUTER PORT OPs
 
+type logicalRouterPortPredicate func(*nbdb.LogicalRouterPort) bool
+
+// FindLogicalRouterPortWithPredicate looks up logical router port from
+// the cache based on a given predicate
+func FindLogicalRouterPortWithPredicate(nbClient libovsdbclient.Client, p logicalRouterPortPredicate) ([]*nbdb.LogicalRouterPort, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	found := []*nbdb.LogicalRouterPort{}
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
+}
+
 // GetLogicalRouterPort looks up a logical router port from the cache
 func GetLogicalRouterPort(nbClient libovsdbclient.Client, lrp *nbdb.LogicalRouterPort) (*nbdb.LogicalRouterPort, error) {
 	found := []*nbdb.LogicalRouterPort{}
