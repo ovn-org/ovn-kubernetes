@@ -324,27 +324,6 @@ func setupOVNNode(node *kapi.Node) error {
 	if err != nil {
 		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
 	}
-	// If EncapPort is not the default tell sbdb to use specified port.
-	if config.Default.EncapPort != config.DefaultEncapPort {
-		systemID, err := util.GetNodeChassisID()
-		if err != nil {
-			return err
-		}
-		uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
-			fmt.Sprintf("chassis_name=%s", systemID))
-		if err != nil {
-			return err
-		}
-		if len(uuid) == 0 {
-			return fmt.Errorf("unable to find encap uuid to set geneve port for chassis %s", systemID)
-		}
-		_, stderr, errSet := util.RunOVNSbctl("set", "encap", uuid,
-			fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
-		)
-		if errSet != nil {
-			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
-		}
-	}
 
 	// clear stale ovs flow targets if needed
 	err = clearOVSFlowTargets()
@@ -357,6 +336,28 @@ func setupOVNNode(node *kapi.Node) error {
 		return fmt.Errorf("error setting ovs flow targets: %q", err)
 	}
 
+	return nil
+}
+
+func setEncapPort() error {
+	systemID, err := util.GetNodeChassisID()
+	if err != nil {
+		return err
+	}
+	uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
+		fmt.Sprintf("chassis_name=%s", systemID))
+	if err != nil {
+		return err
+	}
+	if len(uuid) == 0 {
+		return fmt.Errorf("unable to find encap uuid to set geneve port for chassis %s", systemID)
+	}
+	_, stderr, errSet := util.RunOVNSbctl("set", "encap", uuid,
+		fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
+	)
+	if errSet != nil {
+		return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
+	}
 	return nil
 }
 
@@ -818,6 +819,16 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	if err := nodeAnnotator.Run(); err != nil {
 		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	}
+
+	// If EncapPort is not the default tell sbdb to use specified port.
+	// We set the encap port after annotating the zone name so that ovnkube-controller has come up
+	// and configured the chassis in SBDB (ovnkube-controller waits for ovnkube-node to set annotation
+	// for at least one node in the given zone)
+	if config.Default.EncapPort != config.DefaultEncapPort {
+		if err := setEncapPort(); err != nil {
+			return err
+		}
 	}
 
 	/** HACK BEGIN **/
