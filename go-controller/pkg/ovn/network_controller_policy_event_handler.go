@@ -51,6 +51,7 @@ func (bnc *BaseNetworkController) newNetpolRetryFramework(
 
 // event handlers handles policy related events
 type networkControllerPolicyEventHandler struct {
+	retry.DefaultEventHandler
 	watchFactory    *factory.WatchFactory
 	objType         reflect.Type
 	bnc             *BaseNetworkController
@@ -113,33 +114,6 @@ func (h *networkControllerPolicyEventHandler) GetResourceFromInformerCache(key s
 			h.objType)
 	}
 	return obj, err
-}
-
-// RecordAddEvent records the add event on this given object.
-func (h *networkControllerPolicyEventHandler) RecordAddEvent(obj interface{}) {
-}
-
-// RecordUpdateEvent records the update event on this given object.
-func (h *networkControllerPolicyEventHandler) RecordUpdateEvent(obj interface{}) {
-}
-
-// RecordDeleteEvent records the delete event on this given object.
-func (h *networkControllerPolicyEventHandler) RecordDeleteEvent(obj interface{}) {
-}
-
-// RecordSuccessEvent records the success event on this given object.
-func (h *networkControllerPolicyEventHandler) RecordSuccessEvent(obj interface{}) {
-}
-
-// RecordErrorEvent records an error event on the given object.
-// Only used for pods now.
-func (h *networkControllerPolicyEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
-}
-
-// IsResourceScheduled returns true if the given object has been scheduled.
-// Only applied to pods for now. Returns true for all other types.
-func (h *networkControllerPolicyEventHandler) IsResourceScheduled(obj interface{}) bool {
-	return true
 }
 
 // AddResource adds the specified object to the cluster according to its type and returns the error,
