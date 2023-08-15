@@ -16,7 +16,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -115,7 +114,6 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 // Start the cluster manager.
 func (cm *ClusterManager) Start(ctx context.Context) error {
 	klog.Info("Starting the cluster manager")
-	metrics.RegisterClusterManagerFunctional()
 
 	// Start and sync the watch factory to begin listening for events
 	if err := cm.wf.Start(); err != nil {
@@ -165,5 +163,4 @@ func (cm *ClusterManager) Stop() {
 	if config.OVNKubernetesFeature.EnableEgressService {
 		cm.egressServiceController.Stop()
 	}
-	metrics.UnregisterClusterManagerFunctional()
 }
