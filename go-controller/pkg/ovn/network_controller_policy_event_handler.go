@@ -36,8 +36,8 @@ func (bnc *BaseNetworkController) newNetpolRetryFramework(
 		syncFunc:        syncFunc,
 	}
 	resourceHandler := &retry.ResourceHandler{
-		HasUpdateFunc:          hasResourceAnUpdateFunc(objectType),
-		NeedsUpdateDuringRetry: needsUpdateDuringRetry(objectType),
+		HasUpdateFunc:          hasPolicyResourceAnUpdateFunc(objectType),
+		NeedsUpdateDuringRetry: needsPolicyResourceUpdateDuringRetry(objectType),
 		ObjType:                objectType,
 		EventHandler:           eventHandler,
 	}
@@ -144,6 +144,15 @@ func (h *networkControllerPolicyEventHandler) AddResource(obj interface{}, fromR
 	}
 }
 
+func hasPolicyResourceAnUpdateFunc(objType reflect.Type) bool {
+	switch objType {
+	case factory.AddressSetPodSelectorType,
+		factory.LocalPodSelectorType:
+		return true
+	}
+	return false
+}
+
 // UpdateResource updates the specified object in the cluster to its version in newObj according to its
 // type and returns the error, if any, yielded during the object update.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
@@ -227,4 +236,8 @@ func (h *networkControllerPolicyEventHandler) IsObjectInTerminalState(obj interf
 	default:
 		return false
 	}
+}
+
+func needsPolicyResourceUpdateDuringRetry(objType reflect.Type) bool {
+	return false
 }

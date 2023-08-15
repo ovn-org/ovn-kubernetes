@@ -30,7 +30,6 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		factory.EgressIPPodType,
 		factory.EgressNodeType,
 		factory.EgressFwNodeType,
-		factory.LocalPodSelectorType,
 		factory.NamespaceType,
 		factory.MultiNetworkPolicyType:
 		return true
