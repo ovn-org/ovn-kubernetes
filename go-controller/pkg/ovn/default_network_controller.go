@@ -34,7 +34,6 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	ktypes "k8s.io/apimachinery/pkg/types"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -52,8 +51,9 @@ type DefaultNetworkController struct {
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[kapi.Protocol]string
 
-	externalGWCache map[ktypes.NamespacedName]*apbroutecontroller.ExternalRouteInfo
-	exGWCacheMutex  *sync.RWMutex
+	externalGatewayRouteInfo *apbroutecontroller.ExternalGatewayRouteInfoCache
+	// externalGWCache          map[ktypes.NamespacedName]*apbroutecontroller.RouteInfo
+	// exGWCacheMutex           *sync.RWMutex
 
 	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
 	egressFirewalls sync.Map
@@ -205,8 +205,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			zoneICHandler:               zoneICHandler,
 			cancelableCtx:               util.NewCancelableContext(),
 		},
-		externalGWCache: apbExternalRouteController.ExternalGWCache,
-		exGWCacheMutex:  apbExternalRouteController.ExGWCacheMutex,
+		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC: egressIPZoneController{
 			nodeIPUpdateMutex:  &sync.Mutex{},
 			podAssignmentMutex: &sync.Mutex{},

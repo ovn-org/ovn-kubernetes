@@ -52,7 +52,7 @@ type ExternalGatewayNodeController struct {
 
 	//external gateway caches
 	//make them public so that they can be used by the annotation logic to lock on namespaces and share the same external route information
-	ExternalGWCache map[ktypes.NamespacedName]*ExternalRouteInfo
+	ExternalGWCache map[ktypes.NamespacedName]*RouteInfo
 	ExGWCacheMutex  *sync.RWMutex
 
 	routePolicyFactory adminpolicybasedrouteinformer.SharedInformerFactory

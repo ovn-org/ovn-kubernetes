@@ -15,7 +15,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	ktypes "k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -65,15 +64,10 @@ type ExternalGatewayMasterController struct {
 	namespaceLister   corev1listers.NamespaceLister
 	namespaceInformer cache.SharedIndexInformer
 
-	// External gateway caches
-	// Make them public so that they can be used by the annotation logic to lock on namespaces and share the same external route information
-	ExternalGWCache map[ktypes.NamespacedName]*ExternalRouteInfo
-	ExGWCacheMutex  *sync.RWMutex
-
-	routePolicyFactory adminpolicybasedrouteinformer.SharedInformerFactory
-
-	mgr      *externalPolicyManager
-	nbClient *northBoundClient
+	routePolicyFactory       adminpolicybasedrouteinformer.SharedInformerFactory
+	mgr                      *externalPolicyManager
+	nbClient                 *northBoundClient
+	ExternalGWRouteInfoCache *ExternalGatewayRouteInfoCache
 }
 
 func NewExternalMasterController(
@@ -90,22 +84,20 @@ func NewExternalMasterController(
 
 	routePolicyFactory := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
 	externalRouteInformer := routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes()
-	externalGWCache := make(map[ktypes.NamespacedName]*ExternalRouteInfo)
-	exGWCacheMutex := &sync.RWMutex{}
+	externalGWRouteInfo := NewExternalGatewayRouteInfoCache()
 	zone, err := libovsdbutil.GetNBZone(nbClient)
 	if err != nil {
 		return nil, err
 	}
 	nbCli := &northBoundClient{
-		routeLister:       externalRouteInformer.Lister(),
-		nodeLister:        nodeLister,
-		podLister:         podInformer.Lister(),
-		nbClient:          nbClient,
-		addressSetFactory: addressSetFactory,
-		externalGWCache:   externalGWCache,
-		exGWCacheMutex:    exGWCacheMutex,
-		controllerName:    controllerName,
-		zone:              zone,
+		routeLister:              externalRouteInformer.Lister(),
+		nodeLister:               nodeLister,
+		podLister:                podInformer.Lister(),
+		nbClient:                 nbClient,
+		addressSetFactory:        addressSetFactory,
+		controllerName:           controllerName,
+		zone:                     zone,
+		externalGatewayRouteInfo: externalGWRouteInfo,
 	}
 
 	c := &ExternalGatewayMasterController{
@@ -130,10 +122,9 @@ func NewExternalMasterController(
 			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 			"apbexternalroutenamespaces",
 		),
-		ExternalGWCache:    externalGWCache,
-		ExGWCacheMutex:     exGWCacheMutex,
-		routePolicyFactory: routePolicyFactory,
-		nbClient:           nbCli,
+		ExternalGWRouteInfoCache: externalGWRouteInfo,
+		routePolicyFactory:       routePolicyFactory,
+		nbClient:                 nbCli,
 		mgr: newExternalPolicyManager(
 			stopCh,
 			podInformer.Lister(),
