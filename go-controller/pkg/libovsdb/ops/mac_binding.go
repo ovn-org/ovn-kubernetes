@@ -23,3 +23,19 @@ func CreateOrUpdateStaticMacBinding(nbClient libovsdbclient.Client, smbs ...*nbd
 	_, err := m.CreateOrUpdate(opModels...)
 	return err
 }
+
+// DeleteStaticMacBindings deletes the provided static mac bindings
+func DeleteStaticMacBindings(nbClient libovsdbclient.Client, smbs ...*nbdb.StaticMACBinding) error {
+	opModels := make([]operationModel, len(smbs))
+	for i := range smbs {
+		opModel := operationModel{
+			Model:       smbs[i],
+			ErrNotFound: false,
+			BulkOp:      false,
+		}
+		opModels[i] = opModel
+	}
+
+	m := newModelClient(nbClient)
+	return m.Delete(opModels...)
+}

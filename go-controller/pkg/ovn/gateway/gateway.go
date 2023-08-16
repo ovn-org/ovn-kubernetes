@@ -87,3 +87,21 @@ func CreateDummyGWMacBindings(nbClient libovsdbclient.Client, nodeName string) e
 
 	return nil
 }
+
+// DeleteDummyGWMacBindings removes mac bindings (ipv4 and ipv6) for a fake next hops
+// used by host->service traffic
+func DeleteDummyGWMacBindings(nbClient libovsdbclient.Client, nodeName string) error {
+	nodeGWRouter := util.GetGatewayRouterFromNode(nodeName)
+	logicalPort := ovntypes.GWRouterToExtSwitchPrefix + nodeGWRouter
+	dummyNextHopIPs := node.DummyNextHopIPs()
+	smbs := make([]*nbdb.StaticMACBinding, len(dummyNextHopIPs))
+	for i := range dummyNextHopIPs {
+		smb := &nbdb.StaticMACBinding{
+			LogicalPort: logicalPort,
+			IP:          dummyNextHopIPs[i].String(),
+		}
+		smbs[i] = smb
+	}
+
+	return libovsdbops.DeleteStaticMacBindings(nbClient, smbs...)
+}

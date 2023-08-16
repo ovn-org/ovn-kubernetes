@@ -1182,6 +1182,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 							"[fe::1]:1":        "[fe::2]:1,[fe::2]:2",
 						},
 					},
+					&nbdb.StaticMACBinding{
+						IP:          config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP.String(),
+						LogicalPort: types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
+					},
 					&nbdb.LogicalRouter{
 						Name: types.GWRouterPrefix + nodeName,
 						UUID: types.GWRouterPrefix + nodeName + "-UUID",

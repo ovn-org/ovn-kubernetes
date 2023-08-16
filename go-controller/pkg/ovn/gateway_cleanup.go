@@ -11,6 +11,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -54,6 +55,12 @@ func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
 	if err != nil {
 		return fmt.Errorf("failed to delete port %s on router %s: %v", logicalRouterPort.Name, gatewayRouter, err)
+	}
+
+	// Remove the static mac bindings of the gateway router
+	err = gateway.DeleteDummyGWMacBindings(oc.nbClient, nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to delete GR dummy mac bindings for node %s: %v", nodeName, err)
 	}
 
 	// Remove the gateway router associated with nodeName
