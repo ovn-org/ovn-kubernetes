@@ -256,10 +256,7 @@ func (oc *DefaultNetworkController) cleanupDGP(nodes *kapi.NodeList) error {
 		oc.delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
 	}
 	// remove SBDB MAC bindings for DGP
-	p := func(item *sbdb.MACBinding) bool {
-		return item.IP == types.V4NodeLocalNATSubnetNextHop || item.IP == types.V6NodeLocalNATSubnetNextHop
-	}
-	err := libovsdbops.DeleteMacBindingWithPredicate(oc.sbClient, p)
+	err := libovsdbutil.DeleteSbdbMacBindingsWithIPs(oc.sbClient, types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop)
 	if err != nil {
 		return fmt.Errorf("unable to remove mac_binding for DGP: %v", err)
 	}
