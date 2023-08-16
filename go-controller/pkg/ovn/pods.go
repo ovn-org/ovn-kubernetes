@@ -61,12 +61,11 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 
 		// delete the outdated hybrid overlay subnet route if it exists
 		newRoutes := []util.PodRoute{}
-		for _, subnet := range oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName) {
-			hybridOverlayIFAddr := util.GetNodeHybridOverlayIfAddr(subnet).IP
-			for _, route := range annotations.Routes {
-				if !route.NextHop.Equal(hybridOverlayIFAddr) {
-					newRoutes = append(newRoutes, route)
-				}
+		// HO is IPv4 only
+		ipv4Subnets := util.MatchAllIPNetFamily(false, oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName))
+		for _, route := range annotations.Routes {
+			if !util.IsNodeHybridOverlayIfAddr(route.NextHop, ipv4Subnets) {
+				newRoutes = append(newRoutes, route)
 			}
 		}
 		// checking the length because cannot compare the slices directly and if routes are removed
