@@ -61,14 +61,10 @@ func GetIPNetFullMask(ipStr string) (*net.IPNet, error) {
 		return nil, fmt.Errorf("failed to parse IP %q", ipStr)
 	}
 	mask := GetIPFullMask(ip)
-	// mask will be replaced
-	ip, ipNet, err := net.ParseCIDR(fmt.Sprintf("%s/32", ipStr))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse IP %q: %v", ipStr, err)
-	}
-	ipNet.Mask = mask
-	ipNet.IP = ip
-	return ipNet, nil
+	return &net.IPNet{
+		IP:   ip,
+		Mask: mask,
+	}, nil
 }
 
 // GetIPFullMaskString returns /32 if ip is IPV4 family and /128 if ip is IPV6 family
