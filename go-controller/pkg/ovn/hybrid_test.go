@@ -519,6 +519,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				return nil
 			}, 2).Should(gomega.Equal(libovsdbclient.ErrNotFound))
 
+			gomega.Eventually(clusterController.nbClient.Get(context.Background(), expectedStaticMACBinding), 2).Should(gomega.Equal(libovsdbclient.ErrNotFound))
+
 			return nil
 		}
 		err := app.Run([]string{
