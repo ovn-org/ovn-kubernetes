@@ -160,7 +160,7 @@ func NewController(eIPInformer egressipinformer.EgressIPInformer, nodeInformer c
 		routeManager:          routeManager,
 		linkManager:           linkmanager.NewController(nodeName, v4, v6),
 		ruleManager:           iprulemanager.NewController(v4, v6),
-		iptablesManager:       iptables.NewController(v4, v6),
+		iptablesManager:       iptables.NewController(),
 		nodeName:              nodeName,
 		v4:                    v4,
 		v6:                    v6,

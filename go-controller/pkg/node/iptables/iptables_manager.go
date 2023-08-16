@@ -37,27 +37,16 @@ type Controller struct {
 	chains     []Chain
 	iptV4      iptables.Interface
 	iptV6      iptables.Interface
-	v4         bool
-	v6         bool
 }
 
 // NewController creates a controller to manage chains and rules
-func NewController(v4, v6 bool) *Controller {
-	var iptV4, iptV6 iptables.Interface
-	if v4 {
-		iptV4 = iptables.New(kexec.New(), iptables.ProtocolIPv4)
-	}
-	if v6 {
-		iptV6 = iptables.New(kexec.New(), iptables.ProtocolIPv6)
-	}
+func NewController() *Controller {
 	return &Controller{
 		chainRules: make(map[Chain][]RuleArg, 0),
 		chains:     make([]Chain, 0),
 		mu:         &sync.Mutex{},
-		iptV4:      iptV4,
-		iptV6:      iptV6,
-		v4:         v4,
-		v6:         v6,
+		iptV4:      iptables.New(kexec.New(), iptables.ProtocolIPv4),
+		iptV6:      iptables.New(kexec.New(), iptables.ProtocolIPv6),
 	}
 }
 
@@ -320,14 +309,14 @@ func (c *Controller) reconcile() error {
 
 	// Gather existing rules from tables and chains
 	for chain := range c.chainRules {
-		if c.v4 && chain.Proto == iptables.ProtocolIPv4 {
+		if chain.Proto == iptables.ProtocolIPv4 {
 			rules, err := c.GetIPv4ChainRuleArgs(chain.Table, chain.Chain)
 			if err != nil {
 				return fmt.Errorf("failed to find IPv4 rules for chain %s in table %s", chain.Chain, chain.Table)
 			} else {
 				existingChainRulesV4[chain] = rules
 			}
-		} else if c.v6 && chain.Proto == iptables.ProtocolIPv6 {
+		} else if chain.Proto == iptables.ProtocolIPv6 {
 			rules, err := c.GetIPv6ChainRuleArgs(chain.Table, chain.Chain)
 			if err != nil {
 				return fmt.Errorf("failed to find IPv6 rules for chain %s in table %s", chain.Chain, chain.Table)
@@ -336,16 +325,15 @@ func (c *Controller) reconcile() error {
 			}
 		}
 	}
-	if c.v4 {
-		if err := processRules(c.iptV4, c.chains, c.chainRules, existingChainRulesV4); err != nil {
-			return fmt.Errorf("failed to process IPv4 rules: %v", err)
-		}
+
+	if err := processRules(c.iptV4, c.chains, c.chainRules, existingChainRulesV4); err != nil {
+		return fmt.Errorf("failed to process IPv4 rules: %v", err)
 	}
-	if c.v6 {
-		if err := processRules(c.iptV6, c.chains, c.chainRules, existingChainRulesV6); err != nil {
-			return fmt.Errorf("failed to process IPv6 rules: %v", err)
-		}
+
+	if err := processRules(c.iptV6, c.chains, c.chainRules, existingChainRulesV6); err != nil {
+		return fmt.Errorf("failed to process IPv6 rules: %v", err)
 	}
+
 	return nil
 }
 

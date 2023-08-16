@@ -43,7 +43,7 @@ var _ = ginkgo.Describe("IPTables Manager", func() {
 		wg = &sync.WaitGroup{}
 		stopCh = make(chan struct{})
 		wg.Add(1)
-		c = NewController(true, true)
+		c = NewController()
 		go testNS.Do(func(netNS ns.NetNS) error {
 			c.Run(stopCh, 50*time.Millisecond)
 			wg.Done()
