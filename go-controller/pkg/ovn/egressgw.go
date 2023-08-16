@@ -36,27 +36,29 @@ type gatewayInfo struct {
 }
 
 // ensureRouteInfoLocked either gets the current routeInfo in the cache with a lock, or creates+locks a new one if missing
-func (oc *DefaultNetworkController) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*apbroutecontroller.ExternalRouteInfo, error) {
+func (oc *DefaultNetworkController) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*apbroutecontroller.RouteInfo, error) {
 	// We don't want to hold the cache lock while we try to lock the routeInfo (unless we are creating it, then we know
 	// no one else is using it). This could lead to dead lock. Therefore the steps here are:
 	// 1. Get the cache lock, try to find the routeInfo
 	// 2. If routeInfo existed, release the cache lock
 	// 3. If routeInfo did not exist, safe to hold the cache lock while we create the new routeInfo
-	oc.exGWCacheMutex.Lock()
-	routeInfo, ok := oc.externalGWCache[podName]
+	oc.externalGatewayRouteInfo.ExGWCacheMutex.Lock()
+	routeInfo, ok := oc.externalGatewayRouteInfo.ExternalGWCache[podName]
+	var isDeleted bool
 	if !ok {
-		routeInfo = &apbroutecontroller.ExternalRouteInfo{
+		routeInfo = &apbroutecontroller.RouteInfo{
 			PodExternalRoutes: make(map[string]map[string]string),
 			PodName:           podName,
 		}
 		// we are creating routeInfo and going to set it in podExternalRoutes map
 		// so safe to hold the lock while we create and add it
-		defer oc.exGWCacheMutex.Unlock()
-		oc.externalGWCache[podName] = routeInfo
+		defer oc.externalGatewayRouteInfo.ExGWCacheMutex.Unlock()
+		oc.externalGatewayRouteInfo.ExternalGWCache[podName] = routeInfo
 	} else {
 		// if we found an existing routeInfo, do not hold the cache lock
 		// while waiting for routeInfo to Lock
-		oc.exGWCacheMutex.Unlock()
+		isDeleted = oc.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(podName)
+		oc.externalGatewayRouteInfo.ExGWCacheMutex.Unlock()
 	}
 
 	// 4. Now lock the routeInfo
@@ -65,23 +67,28 @@ func (oc *DefaultNetworkController) ensureRouteInfoLocked(podName ktypes.Namespa
 	// 5. If routeInfo was deleted between releasing the cache lock and grabbing
 	// the routeInfo lock, return an error so the caller doesn't use it and
 	// retries the operation later
-	if routeInfo.Deleted {
-		routeInfo.Unlock()
-		return nil, fmt.Errorf("routeInfo for pod %s, was altered during ensure route info", podName)
+	if oc.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(podName) {
+		if !isDeleted {
+			// info was modified while waiting for unlock, return error and retry later
+			routeInfo.Unlock()
+			return nil, fmt.Errorf("routeInfo for pod %s, was altered during ensure route info", podName)
+		}
+		// it was already deleted before the lock, so change the status as not deleted
+		oc.externalGatewayRouteInfo.SetRouteInfoDeletedStatus(podName, false)
 	}
 
 	return routeInfo, nil
 }
 
 // getRouteInfosForNamespace returns all routeInfos for a specific namespace
-func (oc *DefaultNetworkController) getRouteInfosForNamespace(namespace string) []*apbroutecontroller.ExternalRouteInfo {
-	oc.exGWCacheMutex.RLock()
-	defer oc.exGWCacheMutex.RUnlock()
+func (oc *DefaultNetworkController) getRouteInfosForNamespace(namespace string) map[ktypes.NamespacedName]*apbroutecontroller.RouteInfo {
+	oc.externalGatewayRouteInfo.ExGWCacheMutex.RLock()
+	defer oc.externalGatewayRouteInfo.ExGWCacheMutex.RUnlock()
 
-	routes := make([]*apbroutecontroller.ExternalRouteInfo, 0)
-	for namespacedName, routeInfo := range oc.externalGWCache {
+	routes := make(map[ktypes.NamespacedName]*apbroutecontroller.RouteInfo)
+	for namespacedName, routeInfo := range oc.externalGatewayRouteInfo.ExternalGWCache {
 		if namespacedName.Namespace == namespace {
-			routes = append(routes, routeInfo)
+			routes[namespacedName] = routeInfo
 		}
 	}
 
@@ -89,30 +96,30 @@ func (oc *DefaultNetworkController) getRouteInfosForNamespace(namespace string) 
 }
 
 // deleteRouteInfoLocked removes a routeInfo from the cache, and returns it locked
-func (oc *DefaultNetworkController) deleteRouteInfoLocked(name ktypes.NamespacedName) *apbroutecontroller.ExternalRouteInfo {
+func (oc *DefaultNetworkController) deleteRouteInfoLocked(name ktypes.NamespacedName) *apbroutecontroller.RouteInfo {
 	// Attempt to find the routeInfo in the cache, release the cache lock while
 	// we try to lock the routeInfo to avoid any deadlock
-	oc.exGWCacheMutex.RLock()
-	routeInfo := oc.externalGWCache[name]
-	oc.exGWCacheMutex.RUnlock()
+	oc.externalGatewayRouteInfo.ExGWCacheMutex.RLock()
+	routeInfo := oc.externalGatewayRouteInfo.ExternalGWCache[name]
+	oc.externalGatewayRouteInfo.ExGWCacheMutex.RUnlock()
 
 	if routeInfo == nil {
 		return nil
 	}
 	routeInfo.Lock()
 
-	if routeInfo.Deleted {
+	if oc.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(name) {
 		routeInfo.Unlock()
 		return nil
 	}
 
-	routeInfo.Deleted = true
+	oc.externalGatewayRouteInfo.SetRouteInfoDeletedStatus(name, true)
 
 	go func() {
-		oc.exGWCacheMutex.Lock()
-		defer oc.exGWCacheMutex.Unlock()
-		if newRouteInfo := oc.externalGWCache[name]; routeInfo == newRouteInfo {
-			delete(oc.externalGWCache, name)
+		oc.externalGatewayRouteInfo.ExGWCacheMutex.Lock()
+		defer oc.externalGatewayRouteInfo.ExGWCacheMutex.Unlock()
+		if newRouteInfo := oc.externalGatewayRouteInfo.ExternalGWCache[name]; routeInfo == newRouteInfo {
+			delete(oc.externalGatewayRouteInfo.ExternalGWCache, name)
 		}
 	}()
 
@@ -305,7 +312,7 @@ func (oc *DefaultNetworkController) deleteLogicalRouterStaticRoute(podIP, mask, 
 // deletePodGWRoute deletes all associated gateway routing resources for one
 // pod gateway route
 // this MUST be called with a lock on routeInfo
-func (oc *DefaultNetworkController) deletePodGWRoute(routeInfo *apbroutecontroller.ExternalRouteInfo, podIP, gw, gr string) error {
+func (oc *DefaultNetworkController) deletePodGWRoute(routeInfo *apbroutecontroller.RouteInfo, podIP, gw, gr string) error {
 	if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
 		return nil
 	}
@@ -418,9 +425,9 @@ func (oc *DefaultNetworkController) deleteGWRoutesForNamespace(namespace string,
 		return err
 	}
 	policyGWIPs = policyGWIPs.Union(policyStaticGWIPs)
-	for _, routeInfo := range oc.getRouteInfosForNamespace(namespace) {
+	for podNsName, routeInfo := range oc.getRouteInfosForNamespace(namespace) {
 		routeInfo.Lock()
-		if routeInfo.Deleted {
+		if oc.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(podNsName) {
 			routeInfo.Unlock()
 			continue
 		}

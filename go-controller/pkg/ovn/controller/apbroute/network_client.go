@@ -44,10 +44,10 @@ type northBoundClient struct {
 	nbClient libovsdbclient.Client
 
 	// An address set factory that creates address sets
-	addressSetFactory addressset.AddressSetFactory
-	externalGWCache   map[ktypes.NamespacedName]*ExternalRouteInfo
-	exGWCacheMutex    *sync.RWMutex
-	controllerName    string
+	addressSetFactory        addressset.AddressSetFactory
+	externalGatewayRouteInfo *ExternalGatewayRouteInfoCache
+
+	controllerName string
 
 	zone string
 }
@@ -128,7 +128,7 @@ func (nb *northBoundClient) delAllLegacyHybridRoutePolicies() error {
 func (nb *northBoundClient) deleteGatewayIPs(podNsName ktypes.NamespacedName, toBeDeletedGWIPs, _ sets.Set[string]) error {
 	for _, routeInfo := range nb.getRouteInfosForPod(podNsName) {
 		// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
-		if err := nb.deletePodGWRoutes(routeInfo, toBeDeletedGWIPs); err != nil {
+		if err := nb.deletePodGWRoutes(routeInfo, toBeDeletedGWIPs, podNsName); err != nil {
 			return err
 		}
 	}
@@ -136,10 +136,10 @@ func (nb *northBoundClient) deleteGatewayIPs(podNsName ktypes.NamespacedName, to
 }
 
 // deletePodGWRoutes removes known exgw routes for a pod via routeInfo for a list of given GW IPs
-func (nb *northBoundClient) deletePodGWRoutes(routeInfo *ExternalRouteInfo, toBeDeletedGWIPs sets.Set[string]) error {
+func (nb *northBoundClient) deletePodGWRoutes(routeInfo *RouteInfo, toBeDeletedGWIPs sets.Set[string], podNsName ktypes.NamespacedName) error {
 	routeInfo.Lock()
 	defer routeInfo.Unlock()
-	if routeInfo.Deleted {
+	if nb.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(podNsName) {
 		return nil
 	}
 	pod, err := nb.podLister.Pods(routeInfo.PodName.Namespace).Get(routeInfo.PodName.Name)
@@ -170,17 +170,17 @@ func (nb *northBoundClient) deletePodGWRoutes(routeInfo *ExternalRouteInfo, toBe
 			}
 		}
 	}
-	routeInfo.Deleted = deletedPod
+	nb.externalGatewayRouteInfo.SetRouteInfoDeletedStatus(podNsName, deletedPod)
 	return nil
 }
 
 // getRouteInfosForPod returns all routeInfos for a specific namespace
-func (nb *northBoundClient) getRouteInfosForPod(podNsName ktypes.NamespacedName) []*ExternalRouteInfo {
-	nb.exGWCacheMutex.RLock()
-	defer nb.exGWCacheMutex.RUnlock()
+func (nb *northBoundClient) getRouteInfosForPod(podNsName ktypes.NamespacedName) []*RouteInfo {
+	nb.externalGatewayRouteInfo.ExGWCacheMutex.RLock()
+	defer nb.externalGatewayRouteInfo.ExGWCacheMutex.RUnlock()
 
-	routes := make([]*ExternalRouteInfo, 0)
-	for namespacedName, routeInfo := range nb.externalGWCache {
+	routes := make([]*RouteInfo, 0)
+	for namespacedName, routeInfo := range nb.externalGatewayRouteInfo.ExternalGWCache {
 		if namespacedName == podNsName {
 			routes = append(routes, routeInfo)
 		}
@@ -478,27 +478,32 @@ func (nb *northBoundClient) updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP
 }
 
 // ensureRouteInfoLocked either gets the current routeInfo in the cache with a lock, or creates+locks a new one if missing
-func (nb *northBoundClient) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*ExternalRouteInfo, error) {
+func (nb *northBoundClient) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*RouteInfo, error) {
 	// We don't want to hold the cache lock while we try to lock the routeInfo (unless we are creating it, then we know
 	// no one else is using it). This could lead to dead lock. Therefore the steps here are:
 	// 1. Get the cache lock, try to find the routeInfo
 	// 2. If routeInfo existed, release the cache lock
 	// 3. If routeInfo did not exist, safe to hold the cache lock while we create the new routeInfo
-	nb.exGWCacheMutex.Lock()
-	routeInfo, ok := nb.externalGWCache[podName]
+	nb.externalGatewayRouteInfo.ExGWCacheMutex.Lock()
+	routeInfo, ok := nb.externalGatewayRouteInfo.ExternalGWCache[podName]
+	var isDeleted bool
 	if !ok {
-		routeInfo = &ExternalRouteInfo{
+		routeInfo = &RouteInfo{
 			PodExternalRoutes: make(map[string]map[string]string),
 			PodName:           podName,
 		}
 		// we are creating routeInfo and going to set it in podExternalRoutes map
 		// so safe to hold the lock while we create and add it
-		defer nb.exGWCacheMutex.Unlock()
-		nb.externalGWCache[podName] = routeInfo
+		defer nb.externalGatewayRouteInfo.ExGWCacheMutex.Unlock()
+		nb.externalGatewayRouteInfo.ExternalGWCache[podName] = routeInfo
 	} else {
+		// capture the current status of the routeInfo. Compare it once
+		// the route info lock is secured to check if the status was changed
+		// while waiting for the lock.
+		isDeleted = nb.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(podName)
 		// if we found an existing routeInfo, do not hold the cache lock
 		// while waiting for routeInfo to Lock
-		nb.exGWCacheMutex.Unlock()
+		nb.externalGatewayRouteInfo.ExGWCacheMutex.Unlock()
 	}
 
 	// 4. Now lock the routeInfo
@@ -507,15 +512,20 @@ func (nb *northBoundClient) ensureRouteInfoLocked(podName ktypes.NamespacedName)
 	// 5. If routeInfo was deleted between releasing the cache lock and grabbing
 	// the routeInfo lock, return an error so the caller doesn't use it and
 	// retries the operation later
-	if routeInfo.Deleted {
-		routeInfo.Unlock()
-		return nil, fmt.Errorf("routeInfo for pod %s, was altered during ensure route info", podName)
+	if nb.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(podName) {
+		if !isDeleted {
+			// info was modified while waiting for unlock, return error and retry later
+			routeInfo.Unlock()
+			return nil, fmt.Errorf("routeInfo for pod %s, was altered during ensure route info", podName)
+		}
+		// it was already deleted before the lock, so change the status as not deleted
+		nb.externalGatewayRouteInfo.SetRouteInfoDeletedStatus(podName, false)
 	}
 
 	return routeInfo, nil
 }
 
-func (nb *northBoundClient) deletePodGWRoute(routeInfo *ExternalRouteInfo, podIP, gw, gr string) error {
+func (nb *northBoundClient) deletePodGWRoute(routeInfo *RouteInfo, podIP, gw, gr string) error {
 	if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
 		return nil
 	}

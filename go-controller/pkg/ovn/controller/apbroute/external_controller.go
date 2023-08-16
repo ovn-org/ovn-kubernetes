@@ -37,7 +37,7 @@ func newPodInfo() *podInfo {
 	}
 }
 
-type ExternalRouteInfo struct {
+type RouteInfo struct {
 	sync.Mutex
 	Deleted bool
 	PodName ktypes.NamespacedName
@@ -45,6 +45,42 @@ type ExternalRouteInfo struct {
 	// external gateways are used. The first map key is the podIP (src-ip of the route),
 	// the second the GW IP (next hop), and the third the GR name
 	PodExternalRoutes map[string]map[string]string
+}
+
+type ExternalGatewayRouteInfoCache struct {
+	// External gateway caches
+	// Make them public so that they can be used by the annotation logic to lock on namespaces and share the same external route information
+	ExternalGWCache map[ktypes.NamespacedName]*RouteInfo
+	ExGWCacheMutex  *sync.RWMutex
+	routeInfoLocks  *syncmap.SyncMap[string]
+}
+
+func NewExternalGatewayRouteInfoCache() *ExternalGatewayRouteInfoCache {
+	return &ExternalGatewayRouteInfoCache{
+		ExternalGWCache: make(map[ktypes.NamespacedName]*RouteInfo),
+		ExGWCacheMutex:  &sync.RWMutex{},
+		routeInfoLocks:  syncmap.NewSyncMap[string](),
+	}
+}
+
+func (e *ExternalGatewayRouteInfoCache) GetRouteInfoDeletedStatus(podName ktypes.NamespacedName) bool {
+	var status bool
+	_ = e.routeInfoLocks.DoWithLock(podName.String(), func(_ string) error {
+		if v, ok := e.ExternalGWCache[podName]; ok {
+			status = v.Deleted
+		}
+		return nil
+	})
+	return status
+}
+
+func (e *ExternalGatewayRouteInfoCache) SetRouteInfoDeletedStatus(podName ktypes.NamespacedName, status bool) {
+	_ = e.routeInfoLocks.DoWithLock(podName.String(), func(_ string) error {
+		if v, ok := e.ExternalGWCache[podName]; ok {
+			v.Deleted = status
+		}
+		return nil
+	})
 }
 
 // routePolicyState contains current policy state as it was applied.

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	ktypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -47,11 +46,6 @@ type ExternalGatewayNodeController struct {
 	namespaceQueue    workqueue.RateLimitingInterface
 	namespaceLister   corev1listers.NamespaceLister
 	namespaceInformer cache.SharedIndexInformer
-
-	//external gateway caches
-	//make them public so that they can be used by the annotation logic to lock on namespaces and share the same external route information
-	ExternalGWCache map[ktypes.NamespacedName]*ExternalRouteInfo
-	ExGWCacheMutex  *sync.RWMutex
 
 	mgr *externalPolicyManager
 }
