@@ -207,13 +207,13 @@ func (m *externalPolicyManager) updateRoutePolicy(existingPolicy *routePolicySta
 				existingTargetPodConfig, found := existingNs[updatedPodNamespacedName]
 				if !found {
 					existingTargetPodConfig = newPodInfo()
-					existingNs[updatedPodNamespacedName] = existingTargetPodConfig
 				}
 				// applyPodConfig will apply changes and update existingTargetPodConfig with the status
 				err := m.applyPodConfig(updatedPod, existingTargetPodConfig, updatedPolicy)
 				if err != nil {
 					return err
 				}
+				existingNs[updatedPodNamespacedName] = existingTargetPodConfig
 			}
 		}
 	}

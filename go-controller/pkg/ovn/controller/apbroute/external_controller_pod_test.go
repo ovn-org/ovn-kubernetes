@@ -2,12 +2,13 @@ package apbroute
 
 import (
 	"context"
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 	"strconv"
 	"time"
 
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 
@@ -90,8 +91,12 @@ var _ = Describe("OVN External Gateway pod", func() {
 		initialDB = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
-					UUID: "node1",
-					Name: "node1",
+					UUID: "node",
+					Name: "node",
+				},
+				&nbdb.LogicalRouter{
+					UUID: "GR_node-UUID",
+					Name: "GR_node",
 				},
 			},
 		}
@@ -159,15 +164,14 @@ var _ = Describe("OVN External Gateway pod", func() {
 			initController([]runtime.Object{namespaceGW, namespaceTarget}, []runtime.Object{noMatchPolicy})
 
 			expectedPolicy, expectedRefs := expectedPolicyStateAndRefs(
-				[]*namespaceWithPods{namespaceTargetWithPod},
+				[]*namespaceWithPods{namespaceTargetWithoutPod},
 				nil,
 				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
 
 			eventuallyExpectNumberOfPolicies(1)
 			eventuallyExpectConfig(noMatchPolicy.Name, expectedPolicy, expectedRefs)
 
-			_, err := fakeClient.CoreV1().Pods(pod1.Namespace).Create(context.Background(), pod1, v1.CreateOptions{})
-			Expect(err).NotTo(HaveOccurred())
+			createPod(pod1, fakeClient)
 			//  make sure pod event is handled
 			time.Sleep(100 * time.Millisecond)
 
@@ -388,6 +392,11 @@ var _ = Describe("OVN External Gateway pod", func() {
 
 func deletePod(pod *corev1.Pod, fakeClient *fake.Clientset) {
 	err = fakeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, v1.DeleteOptions{})
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func createPod(pod *corev1.Pod, fakeClient *fake.Clientset) {
+	_, err = fakeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, v1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred())
 }
 
