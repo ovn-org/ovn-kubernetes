@@ -35,97 +35,6 @@ type gatewayInfo struct {
 	bfdEnabled bool
 }
 
-// ensureRouteInfoLocked either gets the current routeInfo in the cache with a lock, or creates+locks a new one if missing
-func (oc *DefaultNetworkController) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*apbroutecontroller.RouteInfo, error) {
-	// We don't want to hold the cache lock while we try to lock the routeInfo (unless we are creating it, then we know
-	// no one else is using it). This could lead to dead lock. Therefore the steps here are:
-	// 1. Get the cache lock, try to find the routeInfo
-	// 2. If routeInfo existed, release the cache lock
-	// 3. If routeInfo did not exist, safe to hold the cache lock while we create the new routeInfo
-	oc.externalGatewayRouteInfo.ExGWCacheMutex.Lock()
-	routeInfo, ok := oc.externalGatewayRouteInfo.ExternalGWCache[podName]
-	var isDeleted bool
-	if !ok {
-		routeInfo = &apbroutecontroller.RouteInfo{
-			PodExternalRoutes: make(map[string]map[string]string),
-			PodName:           podName,
-		}
-		// we are creating routeInfo and going to set it in podExternalRoutes map
-		// so safe to hold the lock while we create and add it
-		defer oc.externalGatewayRouteInfo.ExGWCacheMutex.Unlock()
-		oc.externalGatewayRouteInfo.ExternalGWCache[podName] = routeInfo
-	} else {
-		// if we found an existing routeInfo, do not hold the cache lock
-		// while waiting for routeInfo to Lock
-		isDeleted = oc.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(podName)
-		oc.externalGatewayRouteInfo.ExGWCacheMutex.Unlock()
-	}
-
-	// 4. Now lock the routeInfo
-	routeInfo.Lock()
-
-	// 5. If routeInfo was deleted between releasing the cache lock and grabbing
-	// the routeInfo lock, return an error so the caller doesn't use it and
-	// retries the operation later
-	if oc.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(podName) {
-		if !isDeleted {
-			// info was modified while waiting for unlock, return error and retry later
-			routeInfo.Unlock()
-			return nil, fmt.Errorf("routeInfo for pod %s, was altered during ensure route info", podName)
-		}
-		// it was already deleted before the lock, so change the status as not deleted
-		oc.externalGatewayRouteInfo.SetRouteInfoDeletedStatus(podName, false)
-	}
-
-	return routeInfo, nil
-}
-
-// getRouteInfosForNamespace returns all routeInfos for a specific namespace
-func (oc *DefaultNetworkController) getRouteInfosForNamespace(namespace string) map[ktypes.NamespacedName]*apbroutecontroller.RouteInfo {
-	oc.externalGatewayRouteInfo.ExGWCacheMutex.RLock()
-	defer oc.externalGatewayRouteInfo.ExGWCacheMutex.RUnlock()
-
-	routes := make(map[ktypes.NamespacedName]*apbroutecontroller.RouteInfo)
-	for namespacedName, routeInfo := range oc.externalGatewayRouteInfo.ExternalGWCache {
-		if namespacedName.Namespace == namespace {
-			routes[namespacedName] = routeInfo
-		}
-	}
-
-	return routes
-}
-
-// deleteRouteInfoLocked removes a routeInfo from the cache, and returns it locked
-func (oc *DefaultNetworkController) deleteRouteInfoLocked(name ktypes.NamespacedName) *apbroutecontroller.RouteInfo {
-	// Attempt to find the routeInfo in the cache, release the cache lock while
-	// we try to lock the routeInfo to avoid any deadlock
-	oc.externalGatewayRouteInfo.ExGWCacheMutex.RLock()
-	routeInfo := oc.externalGatewayRouteInfo.ExternalGWCache[name]
-	oc.externalGatewayRouteInfo.ExGWCacheMutex.RUnlock()
-
-	if routeInfo == nil {
-		return nil
-	}
-	routeInfo.Lock()
-
-	if oc.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(name) {
-		routeInfo.Unlock()
-		return nil
-	}
-
-	oc.externalGatewayRouteInfo.SetRouteInfoDeletedStatus(name, true)
-
-	go func() {
-		oc.externalGatewayRouteInfo.ExGWCacheMutex.Lock()
-		defer oc.externalGatewayRouteInfo.ExGWCacheMutex.Unlock()
-		if newRouteInfo := oc.externalGatewayRouteInfo.ExternalGWCache[name]; routeInfo == newRouteInfo {
-			delete(oc.externalGatewayRouteInfo.ExternalGWCache, name)
-		}
-	}()
-
-	return routeInfo
-}
-
 // addPodExternalGW handles detecting if a pod is serving as an external gateway for namespace(s) and adding routes
 // to all pods in that namespace
 func (oc *DefaultNetworkController) addPodExternalGW(pod *kapi.Pod) error {
@@ -425,68 +334,57 @@ func (oc *DefaultNetworkController) deleteGWRoutesForNamespace(namespace string,
 		return err
 	}
 	policyGWIPs = policyGWIPs.Union(policyStaticGWIPs)
-	for podNsName, routeInfo := range oc.getRouteInfosForNamespace(namespace) {
-		routeInfo.Lock()
-		if oc.externalGatewayRouteInfo.GetRouteInfoDeletedStatus(podNsName) {
-			routeInfo.Unlock()
-			continue
-		}
+	return oc.externalGatewayRouteInfo.CleanupNamespace(namespace, func(routeInfo *apbroutecontroller.RouteInfo) error {
 		for podIP, routes := range routeInfo.PodExternalRoutes {
 			for gw, gr := range routes {
 				if (deleteAll || matchGWs.Has(gw)) && !policyGWIPs.Has(gw) {
 					if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
 						// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
-						routeInfo.Unlock()
 						return fmt.Errorf("delete pod GW route failed: %w", err)
 					}
 					delete(routes, gw)
 				}
 			}
 		}
-		routeInfo.Unlock()
-	}
-	return nil
+		return nil
+	})
 }
 
 // deleteGwRoutesForPod handles deleting all routes to gateways for a pod IP on a specific GR
 func (oc *DefaultNetworkController) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets []*net.IPNet) (err error) {
-	routeInfo := oc.deleteRouteInfoLocked(name)
-	if routeInfo == nil {
-		return nil
-	}
-	defer routeInfo.Unlock()
-
-	policyGWIPs, err := oc.apbExternalRouteController.GetDynamicGatewayIPsForTargetNamespace(name.Namespace)
-	if err != nil {
-		return err
-	}
-	policyStaticGWIPs, err := oc.apbExternalRouteController.GetStaticGatewayIPsForTargetNamespace(name.Namespace)
-	if err != nil {
-		return err
-	}
-	policyGWIPs = policyGWIPs.Union(policyStaticGWIPs)
-
-	for _, podIPNet := range podIPNets {
-		podIP := podIPNet.IP.String()
-		routes, ok := routeInfo.PodExternalRoutes[podIP]
-		if !ok {
-			continue
+	return oc.externalGatewayRouteInfo.Cleanup(name, func(routeInfo *apbroutecontroller.RouteInfo) error {
+		policyGWIPs, err := oc.apbExternalRouteController.GetDynamicGatewayIPsForTargetNamespace(name.Namespace)
+		if err != nil {
+			return err
 		}
-		if len(routes) == 0 {
-			delete(routeInfo.PodExternalRoutes, podIP)
-			continue
+		policyStaticGWIPs, err := oc.apbExternalRouteController.GetStaticGatewayIPsForTargetNamespace(name.Namespace)
+		if err != nil {
+			return err
 		}
-		for gw, gr := range routes {
-			if !policyGWIPs.Has(gw) {
-				if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
-					// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
-					return fmt.Errorf("delete pod GW route failed: %w", err)
+		policyGWIPs = policyGWIPs.Union(policyStaticGWIPs)
+
+		for _, podIPNet := range podIPNets {
+			podIP := podIPNet.IP.String()
+			routes, ok := routeInfo.PodExternalRoutes[podIP]
+			if !ok {
+				continue
+			}
+			if len(routes) == 0 {
+				delete(routeInfo.PodExternalRoutes, podIP)
+				continue
+			}
+			for gw, gr := range routes {
+				if !policyGWIPs.Has(gw) {
+					if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
+						// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
+						return fmt.Errorf("delete pod GW route failed: %w", err)
+					}
+					delete(routes, gw)
 				}
-				delete(routes, gw)
 			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
@@ -515,63 +413,60 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 	}
 
 	port := portPrefix + types.GWRouterToExtSwitchPrefix + gr
-	routeInfo, err := oc.ensureRouteInfoLocked(podNsName)
-	if err != nil {
-		return fmt.Errorf("failed to ensure routeInfo for %s, error: %v", podNsName, err)
-	}
-	policyGWIPs, err := oc.apbExternalRouteController.GetDynamicGatewayIPsForTargetNamespace(podNsName.Namespace)
-	if err != nil {
-		return err
-	}
-	policyStaticGWIPs, err := oc.apbExternalRouteController.GetStaticGatewayIPsForTargetNamespace(podNsName.Namespace)
-	if err != nil {
-		return err
-	}
-	policyGWIPs = policyGWIPs.Union(policyStaticGWIPs)
 
-	defer routeInfo.Unlock()
+	return oc.externalGatewayRouteInfo.CreateOrLoad(podNsName, func(routeInfo *apbroutecontroller.RouteInfo) error {
+		policyGWIPs, err := oc.apbExternalRouteController.GetDynamicGatewayIPsForTargetNamespace(podNsName.Namespace)
+		if err != nil {
+			return err
+		}
+		policyStaticGWIPs, err := oc.apbExternalRouteController.GetStaticGatewayIPsForTargetNamespace(podNsName.Namespace)
+		if err != nil {
+			return err
+		}
+		policyGWIPs = policyGWIPs.Union(policyStaticGWIPs)
 
-	for _, podIPNet := range podIfAddrs {
-		for _, gateway := range gateways {
-			// TODO (trozet): use the go bindings here and batch commands
-			// validate the ip and gateway belong to the same address family
-			gws, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(podIPNet.IP), gateway.gws.UnsortedList())
-			if err == nil {
-				podIP := podIPNet.IP.String()
-				for _, gw := range gws {
-					// if route was already programmed, skip it
-					foundGR, ok := routeInfo.PodExternalRoutes[podIP][gw]
-					if (ok && foundGR == gr) || policyGWIPs.Has(gw) {
-						routesAdded++
-						continue
-					}
-					mask := util.GetIPFullMaskString(podIP)
+		for _, podIPNet := range podIfAddrs {
+			for _, gateway := range gateways {
+				// TODO (trozet): use the go bindings here and batch commands
+				// validate the ip and gateway belong to the same address family
+				gws, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(podIPNet.IP), gateway.gws.UnsortedList())
+				if err == nil {
+					podIP := podIPNet.IP.String()
+					for _, gw := range gws {
+						// if route was already programmed, skip it
+						foundGR, ok := routeInfo.PodExternalRoutes[podIP][gw]
+						if (ok && foundGR == gr) || policyGWIPs.Has(gw) {
+							routesAdded++
+							continue
+						}
+						mask := util.GetIPFullMaskString(podIP)
 
-					if err := oc.createBFDStaticRoute(gateway.bfdEnabled, gw, podIP, gr, port, mask); err != nil {
-						return err
-					}
-					if routeInfo.PodExternalRoutes[podIP] == nil {
-						routeInfo.PodExternalRoutes[podIP] = make(map[string]string)
-					}
-					routeInfo.PodExternalRoutes[podIP][gw] = gr
-					routesAdded++
-					if len(routeInfo.PodExternalRoutes[podIP]) == 1 {
-						if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
+						if err := oc.createBFDStaticRoute(gateway.bfdEnabled, gw, podIP, gr, port, mask); err != nil {
 							return err
 						}
+						if routeInfo.PodExternalRoutes[podIP] == nil {
+							routeInfo.PodExternalRoutes[podIP] = make(map[string]string)
+						}
+						routeInfo.PodExternalRoutes[podIP][gw] = gr
+						routesAdded++
+						if len(routeInfo.PodExternalRoutes[podIP]) == 1 {
+							if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
+								return err
+							}
+						}
 					}
+				} else {
+					klog.Warningf("Address families for the pod address %s and gateway %s did not match", podIPNet.IP.String(), gateway.gws)
 				}
-			} else {
-				klog.Warningf("Address families for the pod address %s and gateway %s did not match", podIPNet.IP.String(), gateway.gws)
 			}
 		}
-	}
-	// if no routes are added return an error
-	if routesAdded < 1 {
-		return fmt.Errorf("gateway specified for namespace %s with gateway addresses %v but no valid routes exist for pod: %s",
-			podNsName.Namespace, podIfAddrs, podNsName.Name)
-	}
-	return nil
+		// if no routes are added return an error
+		if routesAdded < 1 {
+			return fmt.Errorf("gateway specified for namespace %s with gateway addresses %v but no valid routes exist for pod: %s",
+				podNsName.Namespace, podIfAddrs, podNsName.Name)
+		}
+		return nil
+	})
 }
 
 // deletePodSNAT removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides

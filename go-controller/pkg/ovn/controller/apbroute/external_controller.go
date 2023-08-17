@@ -38,8 +38,6 @@ func newPodInfo() *podInfo {
 }
 
 type RouteInfo struct {
-	sync.Mutex
-	Deleted bool
 	PodName ktypes.NamespacedName
 	// PodExternalRoutes is a cache keeping the LR routes added to the GRs when
 	// external gateways are used. The first map key is the podIP (src-ip of the route),
@@ -49,38 +47,58 @@ type RouteInfo struct {
 
 type ExternalGatewayRouteInfoCache struct {
 	// External gateway caches
-	// Make them public so that they can be used by the annotation logic to lock on namespaces and share the same external route information
-	ExternalGWCache map[ktypes.NamespacedName]*RouteInfo
-	ExGWCacheMutex  *sync.RWMutex
-	routeInfoLocks  *syncmap.SyncMap[string]
+	routeInfos *syncmap.SyncMapComparableKey[ktypes.NamespacedName, *RouteInfo]
 }
 
 func NewExternalGatewayRouteInfoCache() *ExternalGatewayRouteInfoCache {
 	return &ExternalGatewayRouteInfoCache{
-		ExternalGWCache: make(map[ktypes.NamespacedName]*RouteInfo),
-		ExGWCacheMutex:  &sync.RWMutex{},
-		routeInfoLocks:  syncmap.NewSyncMap[string](),
+		routeInfos: syncmap.NewSyncMapComparableKey[ktypes.NamespacedName, *RouteInfo](),
 	}
 }
 
-func (e *ExternalGatewayRouteInfoCache) GetRouteInfoDeletedStatus(podName ktypes.NamespacedName) bool {
-	var status bool
-	_ = e.routeInfoLocks.DoWithLock(podName.String(), func(_ string) error {
-		if v, ok := e.ExternalGWCache[podName]; ok {
-			status = v.Deleted
+func (e *ExternalGatewayRouteInfoCache) CreateOrLoad(podName ktypes.NamespacedName, f func(routeInfo *RouteInfo) error) error {
+	return e.routeInfos.DoWithLock(podName, func(key ktypes.NamespacedName) error {
+		routeInfo := &RouteInfo{
+			PodExternalRoutes: make(map[string]map[string]string),
+			PodName:           podName,
 		}
-		return nil
+		routeInfo, _ = e.routeInfos.LoadOrStore(key, routeInfo)
+		return f(routeInfo)
 	})
-	return status
 }
 
-func (e *ExternalGatewayRouteInfoCache) SetRouteInfoDeletedStatus(podName ktypes.NamespacedName, status bool) {
-	_ = e.routeInfoLocks.DoWithLock(podName.String(), func(_ string) error {
-		if v, ok := e.ExternalGWCache[podName]; ok {
-			v.Deleted = status
+// Cleanup will call given function with lock and remove empty maps from the routeInfo.
+// If routeInfo is empty after cleanup, it will be deleted from the cache
+func (e *ExternalGatewayRouteInfoCache) Cleanup(podName ktypes.NamespacedName, f func(routeInfo *RouteInfo) error) error {
+	return e.routeInfos.DoWithLock(podName, func(key ktypes.NamespacedName) error {
+		routeInfo, loaded := e.routeInfos.Load(key)
+		if !loaded {
+			return nil
 		}
-		return nil
+		err := f(routeInfo)
+		for podIP, routes := range routeInfo.PodExternalRoutes {
+			if len(routes) == 0 {
+				delete(routeInfo.PodExternalRoutes, podIP)
+			}
+		}
+		if err == nil && len(routeInfo.PodExternalRoutes) == 0 {
+			e.routeInfos.Delete(key)
+		}
+		return err
 	})
+}
+
+// CleanupNamespace calls e.Cleanup for every pod from namespace=nsName
+func (e *ExternalGatewayRouteInfoCache) CleanupNamespace(nsName string, f func(routeInfo *RouteInfo) error) error {
+	for _, podName := range e.routeInfos.GetKeys() {
+		if podName.Namespace == nsName {
+			err := e.Cleanup(podName, f)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // routePolicyState contains current policy state as it was applied.
