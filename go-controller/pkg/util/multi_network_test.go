@@ -270,7 +270,7 @@ func TestParseNetconf(t *testing.T) {
                 "vlanID": 10,
                 "netAttachDefName": "ns1/nad1"
               }
-            ],
+            ]
     }
 `,
 			expectedNetConf: &ovncnitypes.NetConf{
@@ -278,9 +278,8 @@ func TestParseNetconf(t *testing.T) {
 				NADName:  "ns1/nad1",
 				MTU:      1400,
 				VLANID:   10,
-				NetConf:  cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
+				NetConf:  cnitypes.NetConf{Name: "tenantred", CNIVersion: "1.0.0", Type: "ovn-k8s-cni-overlay"},
 			},
-			unsupportedReason: "NetConfList plugin specs are not currently supported. This is the *only* supported configuration type for CNI version >= 1.0.0",
 		},
 	}
 
