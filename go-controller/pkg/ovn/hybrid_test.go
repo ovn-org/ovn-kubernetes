@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -323,7 +324,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.New(node1.NodeIP))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.New(fmt.Sprintf("%s/24", node1.NodeIP)))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -332,7 +333,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
+			hostAddrs, err := util.ParseNodeHostAddressesDropNetMask(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f, err = factory.NewMasterWatchFactory(fakeClient.GetMasterClientset())
@@ -614,7 +615,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.New(node1.NodeIP))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.New(fmt.Sprintf("%s/24", node1.NodeIP)))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -623,7 +624,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
+			hostAddrs, err := util.ParseNodeHostAddressesDropNetMask(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f, err = factory.NewMasterWatchFactory(fakeClient.GetMasterClientset())
@@ -829,7 +830,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.New(node1.NodeIP))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.New(fmt.Sprintf("%s/24", node1.NodeIP)))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -838,7 +839,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
+			hostAddrs, err := util.ParseNodeHostAddressesDropNetMask(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f, err = factory.NewMasterWatchFactory(fakeClient.GetMasterClientset())
@@ -1112,7 +1113,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.New(node1.NodeIP))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.New(fmt.Sprintf("%s/24", node1.NodeIP)))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1121,7 +1122,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
+			hostAddrs, err := util.ParseNodeHostAddressesDropNetMask(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f, err = factory.NewMasterWatchFactory(fakeClient)
@@ -1337,7 +1338,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.New(node1.NodeIP))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.New(fmt.Sprintf("%s/24", node1.NodeIP)))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
