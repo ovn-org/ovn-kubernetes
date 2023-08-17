@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -20,7 +21,7 @@ import (
 
 func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string, gwIPs []*net.IPNet,
 	nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory,
-	routeManager *routeManager) (*gateway, error) {
+	routeManager *routemanager.Controller) (*gateway, error) {
 	klog.Info("Creating new local gateway")
 	gw := &gateway{}
 

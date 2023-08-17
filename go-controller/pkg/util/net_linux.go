@@ -42,6 +42,7 @@ type NetLinkOps interface {
 	RouteAdd(route *netlink.Route) error
 	RouteReplace(route *netlink.Route) error
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
+	RuleListFiltered(family int, filter *netlink.Rule, filterMask uint64) ([]netlink.Rule, error)
 	NeighAdd(neigh *netlink.Neigh) error
 	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
@@ -146,6 +147,10 @@ func (defaultNetLinkOps) RouteReplace(route *netlink.Route) error {
 
 func (defaultNetLinkOps) RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error) {
 	return netlink.RouteListFiltered(family, filter, filterMask)
+}
+
+func (defaultNetLinkOps) RuleListFiltered(family int, filter *netlink.Rule, filterMask uint64) ([]netlink.Rule, error) {
+	return netlink.RuleListFiltered(family, filter, filterMask)
 }
 
 func (defaultNetLinkOps) NeighAdd(neigh *netlink.Neigh) error {
