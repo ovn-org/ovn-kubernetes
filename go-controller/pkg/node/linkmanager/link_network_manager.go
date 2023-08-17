@@ -224,7 +224,6 @@ func GetExternallyAvailableAddressesExcludeAssigned(link netlink.Link, v4, v6 bo
 
 // GetExternallyAvailableAddresses gets all addresses assigned on an interface with the following characteristics:
 // Must be up
-// Address must have scope universe
 // Assigned addresses are included
 func GetExternallyAvailableAddresses(link netlink.Link, v4, v6 bool) ([]netlink.Addr, error) {
 	validAddresses := make([]netlink.Addr, 0)
@@ -236,14 +235,7 @@ func GetExternallyAvailableAddresses(link netlink.Link, v4, v6 bool) ([]netlink.
 	if err != nil {
 		return validAddresses, fmt.Errorf("failed to get all valid link addresses: %v", err)
 	}
-	for _, address := range linkAddresses {
-		// consider only GLOBAL scope addresses
-		if address.Scope != int(netlink.SCOPE_UNIVERSE) {
-			continue
-		}
-		validAddresses = append(validAddresses, address)
-	}
-	return validAddresses, nil
+	return linkAddresses, nil
 }
 
 // GetExternallyAvailablePrefixesExcludeAssigned returns address Prefixes from interfaces with the following characteristics:
