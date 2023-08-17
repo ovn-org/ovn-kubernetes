@@ -10,6 +10,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -29,7 +30,7 @@ func newManagementPortRepresentor(nodeName string, hostSubnets []*net.IPNet, rep
 	}
 }
 
-func (mp *managementPortRepresentor) Create(_ *routeManager, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortRepresentor) Create(_ *routemanager.Controller, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	k8sMgmtIntfName := types.K8sMgmtIntfName
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		k8sMgmtIntfName += "_0"
@@ -139,7 +140,7 @@ func (mp *managementPortRepresentor) checkRepresentorPortHealth(cfg *managementP
 	}
 }
 
-func (mp *managementPortRepresentor) CheckManagementPortHealth(_ *routeManager, cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPortRepresentor) CheckManagementPortHealth(_ *routemanager.Controller, cfg *managementPortConfig, stopChan chan struct{}) {
 	go wait.Until(
 		func() {
 			mp.checkRepresentorPortHealth(cfg)
@@ -166,7 +167,7 @@ func newManagementPortNetdev(hostSubnets []*net.IPNet, netdevName string) Manage
 	}
 }
 
-func (mp *managementPortNetdev) Create(routeManager *routeManager, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortNetdev) Create(routeManager *routemanager.Controller, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	klog.Infof("Lookup netdevice link and existing management port using '%v'", mp.netdevName)
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)
 	if err != nil {
@@ -238,7 +239,7 @@ func (mp *managementPortNetdev) Create(routeManager *routeManager, nodeAnnotator
 	return cfg, nil
 }
 
-func (mp *managementPortNetdev) CheckManagementPortHealth(routeManager *routeManager, cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPortNetdev) CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig, stopChan chan struct{}) {
 	go wait.Until(
 		func() {
 			checkManagementPortHealth(routeManager, cfg)
