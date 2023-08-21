@@ -321,10 +321,12 @@ func GetDbObjsForAS(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (*nbdb.Address
 	v4set = buildAddressSet(dbIDs, ipv4InternalID)
 	uniqIPs := ipsToStringUnique(v4IPs)
 	v4set.Addresses = uniqIPs
+	v4set.UUID = v4set.Name + "-UUID"
 	// v6 address set
 	v6set = buildAddressSet(dbIDs, ipv6InternalID)
 	uniqIPs = ipsToStringUnique(v6IPs)
 	v6set.Addresses = uniqIPs
+	v6set.UUID = v6set.Name + "-UUID"
 	return v4set, v6set
 }
 
