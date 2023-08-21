@@ -1288,7 +1288,8 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			}
 			egressIPNetwork, err := util.GetEgressIPNetwork(node, eIP)
 			if err != nil {
-				klog.Errorf("Failed to consider node %s for egress IP %s: %v", node.Name, name, err)
+				klog.Errorf("Failed to consider node %s for EgressIP %s IP %s because unable to find a network to host it: %v",
+					node.Name, name, eIP.String(), err)
 				continue
 			}
 			if egressIPNetwork == "" {
@@ -1425,7 +1426,7 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 			}
 			ip := net.ParseIP(eIPStatus.EgressIP)
 			if ip == nil {
-				klog.Errorf("Allocator error: EgressIP allocation contains unparsable IP address: %s", eIPStatus.EgressIP)
+				klog.Errorf("Allocator error: EgressIP allocation contains unparsable IP address: %q", eIPStatus.EgressIP)
 			}
 			node, err := eIPC.watchFactory.GetNode(eNode.name)
 			if err != nil {
@@ -1434,16 +1435,16 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 			}
 			isOVNManaged, err := util.IsOVNManagedNetwork(node, ip)
 			if err != nil {
-				klog.Errorf("Allocator error: failed to determine if IP %s is part of an OVN managed network for "+
-					"egress IP %s: %v", ip.String(), name, err)
+				klog.Errorf("Allocator error: failed to determine if IP %q is part of an OVN managed network for "+
+					"egress IP %s: %v", eIPStatus.EgressIP, name, err)
 			}
 			isSecondaryNetwork, err := util.IsNonOVNManagedNetworkContainingIP(node, ip)
 			if err != nil {
-				klog.Errorf("Allocator error: failed to determine if Egress IP %s is to be hosted by a non-OVN managed "+
-					"network for egress IP %s: %v", ip.String(), name, err)
+				klog.Errorf("Allocator error: failed to determine if Egress IP %q is to be hosted by a non-OVN managed "+
+					"network for egress IP %s: %v", eIPStatus.EgressIP, name, err)
 			}
 			if !isOVNManaged && !isSecondaryNetwork {
-				klog.Errorf("Allocator error: egress status for Egress IP %s", name, node.Name)
+				klog.Errorf("Allocator error: failed to assign Egress IP %s IP %q", name, eIPStatus.EgressIP)
 				validAssignment = false
 			}
 		}
