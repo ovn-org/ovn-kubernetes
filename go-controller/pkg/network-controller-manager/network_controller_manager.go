@@ -27,8 +27,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// networkControllerManager structure is the object manages all controllers for all networks
-type networkControllerManager struct {
+// NetworkControllerManager structure is the object manages all controllers for all networks
+type NetworkControllerManager struct {
 	client       clientset.Interface
 	kube         *kube.KubeOVN
 	watchFactory *factory.WatchFactory
@@ -59,7 +59,7 @@ type networkControllerManager struct {
 	nadController *nad.NetAttachDefinitionController
 }
 
-func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
+func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
@@ -77,7 +77,7 @@ func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo) (na
 }
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
-func (cm *networkControllerManager) newDummyNetworkController(topoType, netName string) (nad.NetworkController, error) {
+func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName string) (nad.NetworkController, error) {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
@@ -118,7 +118,7 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*
 	return nodeSwitches, clusterRouters, nil
 }
 
-func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
+func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
 	existingNetworksMap := map[string]struct{}{}
 	for _, oc := range allControllers {
 		existingNetworksMap[oc.GetNetworkName()] = struct{}{}
@@ -175,10 +175,10 @@ func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 // NewNetworkControllerManager creates a new ovnkube controller manager to manage all the controller for all networks
 func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, wf *factory.WatchFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder, wg *sync.WaitGroup) (*networkControllerManager, error) {
+	recorder record.EventRecorder, wg *sync.WaitGroup) (*NetworkControllerManager, error) {
 	podRecorder := metrics.NewPodRecorder()
 
-	cm := &networkControllerManager{
+	cm := &NetworkControllerManager{
 		client: ovnClient.KubeClient,
 		kube: &kube.KubeOVN{
 			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
@@ -211,7 +211,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 	return cm, nil
 }
 
-func (cm *networkControllerManager) configureSCTPSupport() error {
+func (cm *NetworkControllerManager) configureSCTPSupport() error {
 	hasSCTPSupport, err := util.DetectSCTPSupport()
 	if err != nil {
 		return err
@@ -226,7 +226,7 @@ func (cm *networkControllerManager) configureSCTPSupport() error {
 	return nil
 }
 
-func (cm *networkControllerManager) configureSvcTemplateSupport() {
+func (cm *NetworkControllerManager) configureSvcTemplateSupport() {
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Chassis_Template_Var"); err != nil {
 		klog.Warningf("Version of OVN in use does not support Chassis_Template_Var. " +
 			"Disabling Templates Support")
@@ -236,14 +236,14 @@ func (cm *networkControllerManager) configureSvcTemplateSupport() {
 	}
 }
 
-func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
+func (cm *NetworkControllerManager) configureMetrics(stopChan <-chan struct{}) {
 	metrics.RegisterOVNKubeControllerPerformance(cm.nbClient)
 	metrics.RegisterOVNKubeControllerFunctional()
 	metrics.RunTimestamp(stopChan, cm.sbClient, cm.nbClient)
 	metrics.MonitorIPSec(cm.nbClient)
 }
 
-func (cm *networkControllerManager) createACLLoggingMeter() error {
+func (cm *NetworkControllerManager) createACLLoggingMeter() error {
 	band := &nbdb.MeterBand{
 		Action: ovntypes.MeterAction,
 		Rate:   config.Logging.ACLLoggingRateLimit,
@@ -274,13 +274,13 @@ func (cm *networkControllerManager) createACLLoggingMeter() error {
 }
 
 // newCommonNetworkControllerInfo creates and returns the common networkController info
-func (cm *networkControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
+func (cm *NetworkControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
 	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport)
 }
 
 // initDefaultNetworkController creates the controller for default network
-func (cm *networkControllerManager) initDefaultNetworkController() error {
+func (cm *NetworkControllerManager) initDefaultNetworkController() error {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
@@ -297,7 +297,7 @@ func (cm *networkControllerManager) initDefaultNetworkController() error {
 }
 
 // Start the ovnkube controller
-func (cm *networkControllerManager) Start(ctx context.Context) error {
+func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 	klog.Info("Starting the ovnkube controller")
 
 	// Make sure that the ovnkube-controller zone matches with the Northbound db zone.
@@ -399,7 +399,7 @@ func (cm *networkControllerManager) Start(ctx context.Context) error {
 }
 
 // Stop gracefully stops all managed controllers
-func (cm *networkControllerManager) Stop() {
+func (cm *NetworkControllerManager) Stop() {
 	// stop metric recorders
 	close(cm.stopChan)
 

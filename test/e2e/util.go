@@ -38,6 +38,7 @@ const (
 )
 
 var containerRuntime = "docker"
+var singleNodePerZoneResult *bool
 
 func init() {
 	if cr, found := os.LookupEnv("CONTAINER_RUNTIME"); found {
@@ -1031,7 +1032,7 @@ func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
 
 	ipTablesArgs := []string{"INPUT", "-p", protocol, "--dport", port, "-j", "DROP"}
 
-	args = []string{"exec", ovnKubePodName, "-c", "ovnkube-node", "--", "iptables", "--check"}
+	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", "iptables", "--check"}
 	_, err := framework.RunKubectl(ovnNamespace, append(args, ipTablesArgs...)...)
 
 	// errors known to be equivalent to not found
@@ -1050,7 +1051,7 @@ func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
 		return
 	}
 
-	args = []string{"exec", ovnKubePodName, "-c", "ovnkube-node", "--", "iptables", "--" + op}
+	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", "iptables", "--" + op}
 	framework.Logf("%s iptables input rule for protocol %s port %s action DROP on node %s", op, protocol, port, nodeName)
 	framework.RunKubectlOrDie(ovnNamespace, append(args, ipTablesArgs...)...)
 }
@@ -1068,6 +1069,29 @@ func randStr(n int) string {
 func isInterconnectEnabled() bool {
 	val, present := os.LookupEnv("OVN_ENABLE_INTERCONNECT")
 	return present && val == "true"
+}
+
+func singleNodePerZone() bool {
+	if singleNodePerZoneResult == nil {
+		args := []string{"get", "pods", "--selector=app=ovnkube-node", "-o", "jsonpath={.items[0].spec.containers[*].name}"}
+		containerNames := framework.RunKubectlOrDie(ovnNamespace, args...)
+		result := true
+		for _, containerName := range strings.Split(containerNames, " ") {
+			if containerName == "ovnkube-node" {
+				result = false
+				break
+			}
+		}
+		singleNodePerZoneResult = &result
+	}
+	return *singleNodePerZoneResult
+}
+
+func getNodeContainerName() string {
+	if singleNodePerZone() {
+		return "ovnkube-controller"
+	}
+	return "ovnkube-node"
 }
 
 // getNodeZone returns the node's zone

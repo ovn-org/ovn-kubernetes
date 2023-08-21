@@ -297,7 +297,14 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	}
 
 	// no need for leader election in node mode
+	// only node mode
 	if !runMode.clusterManager && !runMode.ovnkubeController {
+		return runOvnKube(ctx.Context, runMode, ovnClientset, eventRecorder)
+	}
+
+	// ovnkube-controller with node
+	if runMode.node && runMode.ovnkubeController {
+		metrics.RegisterOVNKubeControllerBase()
 		return runOvnKube(ctx.Context, runMode, ovnClientset, eventRecorder)
 	}
 
@@ -461,6 +468,8 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		metrics.MetricClusterManagerReadyDuration.Set(time.Since(startTime).Seconds())
 	}
 
+	var ovnkubeControllerStartErr error
+	ovnkubeControllerWG := sync.WaitGroup{}
 	if runMode.ovnkubeController {
 		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 
@@ -477,29 +486,34 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		if err != nil {
 			return err
 		}
-		err = cm.Start(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to start ovnkube controller: %w", err)
-		}
-		defer cm.Stop()
 
-		// record delay until ready
-		metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
+		// start NetworkControllerManager in a separate goroutine to allow parallel startup for NodeNetworkControllerManager.
+		// NetworkControllerManager during startup waits for ovnkube-node to set ovnNodeZoneName annotation, therefore
+		// they can't run sequentially (unless we use default "global" zone).
+		// Another advantage of running startup in parallel is reducing the startup time.
+		ovnkubeControllerWG.Add(1)
+		go func() {
+			defer ovnkubeControllerWG.Done()
+			err = cm.Start(ctx)
+			if err != nil {
+				ovnkubeControllerStartErr = fmt.Errorf("failed to start ovnkube controller: %w", err)
+				return
+			}
+			// record delay until ready
+			metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
+		}()
+		defer func() {
+			if ovnkubeControllerStartErr != nil {
+				cm.Stop()
+			}
+		}()
 	}
 
 	if runMode.node {
 		var nodeWatchFactory factory.NodeWatchFactory
 
-		if runMode.ovnkubeController && runMode.clusterManager {
-			// masterWatchFactory would be initialized as NewMasterWatchFactory already, let's use that
-			nodeWatchFactory = masterWatchFactory
-		} else if runMode.ovnkubeController {
-			// masterWatchFactory would be initialized as NewOVNKubeControllerWatchFactory, let's change that
-			// if Node and NCM modes are enabled, then we should call the combo mode - NewMasterWatchFactory
-			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
-			if err != nil {
-				return err
-			}
+		if runMode.ovnkubeController {
+			// masterWatchFactory would be initialized as NewOVNKubeControllerWatchFactory already, let's use that
 			nodeWatchFactory = masterWatchFactory
 		} else {
 			var err error
@@ -527,6 +541,13 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 		// record delay until ready
 		metrics.MetricNodeReadyDuration.Set(time.Since(startTime).Seconds())
+	}
+
+	if runMode.ovnkubeController {
+		ovnkubeControllerWG.Wait()
+		if ovnkubeControllerStartErr != nil {
+			return ovnkubeControllerStartErr
+		}
 	}
 
 	// start the prometheus server to serve OVS and OVN Metrics (default port: 9476)
