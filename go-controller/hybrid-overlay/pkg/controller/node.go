@@ -82,7 +82,13 @@ func podChanged(old, new interface{}) bool {
 	return false
 }
 
-// NewNode Returns a new Node
+// NewNode returns a new node controller
+// This controller is designed to be used both by ovnkube-node binary and by the
+// HO binary.
+// When used by ovnkube-node binary, it prepares the OVN nodes for the HO tunnel.
+// When used by the HO binary, it prepares the windows or SDN (SDN <-> OVN
+// migration) nodes for the HO tunnel. This is flagged by setting isHONode to true.
+
 // TODO(jtanenba) the localPodInformer no longer selects only local pods
 func NewNode(
 	kube kube.Interface,
@@ -90,12 +96,13 @@ func NewNode(
 	nodeInformer cache.SharedIndexInformer,
 	localPodInformer cache.SharedIndexInformer,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
+	isHONode bool,
 ) (*Node, error) {
 
 	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
 	localPodLister := listers.NewPodLister(localPodInformer.GetIndexer())
 
-	controller, err := newNodeController(kube, nodeName, nodeLister, localPodLister)
+	controller, err := newNodeController(kube, nodeName, nodeLister, localPodLister, isHONode)
 	if err != nil {
 		return nil, err
 	}

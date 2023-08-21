@@ -40,6 +40,7 @@ func newNodeController(kube kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
 	podLister listers.PodLister,
+	isHONode bool,
 ) (nodeController, error) {
 	supportedFeatures := hcn.GetSupportedFeatures()
 	if !supportedFeatures.HostRoute {

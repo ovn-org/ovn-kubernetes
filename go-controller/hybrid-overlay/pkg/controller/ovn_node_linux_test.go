@@ -327,6 +327,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -368,6 +369,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -407,6 +409,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -483,6 +486,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -582,6 +586,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -661,6 +666,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -760,6 +766,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -899,6 +906,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
