@@ -1041,6 +1041,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			nc.watchFactory.NodeInformer(),
 			nc.watchFactory.LocalPodInformer(),
 			informer.NewDefaultEventHandler,
+			false,
 		)
 		if err != nil {
 			return err
