@@ -107,6 +107,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		isOldReady := h.eIPC.isEgressNodeReady(oldNode)
 		isNewReady := h.eIPC.isEgressNodeReady(newNode)
 		isNewReachable := h.eIPC.isEgressNodeReachable(newNode)
+		isHostAddrAltered := util.NodeHostAddressesAnnotationChanged(oldNode, newNode)
 		h.eIPC.setNodeEgressReady(newNode.Name, isNewReady)
 		if !oldHadEgressLabel && newHasEgressLabel {
 			klog.Infof("Node: %s has been labeled, adding it for egress assignment", newNode.Name)
@@ -121,7 +122,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			}
 			return nil
 		}
-		if isOldReady == isNewReady {
+		if isOldReady == isNewReady && !isHostAddrAltered {
 			return nil
 		}
 		if !isNewReady {
@@ -134,6 +135,12 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			h.eIPC.setNodeEgressReachable(newNode.Name, isNewReachable)
 			if err := h.eIPC.addEgressNode(newNode.Name); err != nil {
 				return err
+			}
+		}
+		if isHostAddrAltered {
+			// we only need to consider EIPs that are assigned to networks that aren't managed by OVN
+			if err := h.eIPC.reconcileNonOVNNetworkEIPs(newNode); err != nil {
+				return fmt.Errorf("failed to reconsider egress IPs that are host on non-OVN managed networks: %v", err)
 			}
 		}
 		return nil

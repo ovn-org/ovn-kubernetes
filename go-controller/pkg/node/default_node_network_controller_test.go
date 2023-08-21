@@ -292,35 +292,8 @@ var _ = Describe("Node", func() {
 					chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
 					encapUUID   string = "e4437094-0094-4223-9f14-995d98d5fff8"
 				)
-				node := kapi.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: nodeName,
-					},
-					Status: kapi.NodeStatus{
-						Addresses: []kapi.NodeAddress{
-							{
-								Type:    kapi.NodeExternalIP,
-								Address: nodeIP,
-							},
-						},
-					},
-				}
 
 				fexec := ovntest.NewFakeExec()
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
-						"external_ids:ovn-encap-ip=%s "+
-						"external_ids:ovn-remote-probe-interval=%d "+
-						"external_ids:ovn-openflow-probe-interval=%d "+
-						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:hostname=\"%s\" "+
-						"external_ids:ovn-is-interconn=false "+
-						"external_ids:ovn-monitor-all=true "+
-						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
-						"external_ids:ovn-enable-lflow-cache=true",
-						nodeIP, interval, ofintval, ofintval, nodeName),
-				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 " +
 						"--if-exists get Open_vSwitch . external_ids:system-id"),
@@ -335,13 +308,6 @@ var _ = Describe("Node", func() {
 					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --no-leader-only set encap "+
 						"%s options:dst_port=%d", encapUUID, encapPort),
 				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
-						" -- " +
-						"clear bridge br-int sflow" +
-						" -- " +
-						"clear bridge br-int ipfix",
-				})
 
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
@@ -350,7 +316,7 @@ var _ = Describe("Node", func() {
 				Expect(err).NotTo(HaveOccurred())
 				config.Default.EncapPort = encapPort
 
-				err = setupOVNNode(&node)
+				err = setEncapPort()
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)

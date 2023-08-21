@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -67,12 +68,12 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, config *manage
 
 // updates the address manager with a new IP
 // returns true if there was an update
-func (c *addressManager) addAddr(ip net.IP) bool {
+func (c *addressManager) addAddr(ipnet net.IPNet) bool {
 	c.Lock()
 	defer c.Unlock()
-	if !c.addresses.Has(ip.String()) && c.isValidNodeIP(ip) {
-		klog.Infof("Adding IP: %s, to node IP manager", ip)
-		c.addresses.Insert(ip.String())
+	if !c.addresses.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP) {
+		klog.Infof("Adding IP: %s, to node IP manager", ipnet)
+		c.addresses.Insert(ipnet.String())
 		return true
 	}
 
@@ -81,12 +82,12 @@ func (c *addressManager) addAddr(ip net.IP) bool {
 
 // removes IP from address manager
 // returns true if there was an update
-func (c *addressManager) delAddr(ip net.IP) bool {
+func (c *addressManager) delAddr(ipnet net.IPNet) bool {
 	c.Lock()
 	defer c.Unlock()
-	if c.addresses.Has(ip.String()) && c.isValidNodeIP(ip) {
-		klog.Infof("Removing IP: %s, from node IP manager", ip)
-		c.addresses.Delete(ip.String())
+	if c.addresses.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP) {
+		klog.Infof("Removing IP: %s, from node IP manager", ipnet)
+		c.addresses.Delete(ipnet.String())
 		return true
 	}
 
@@ -100,8 +101,9 @@ func (c *addressManager) ListAddresses() []net.IP {
 	addrs := sets.List(c.addresses)
 	out := make([]net.IP, 0, len(addrs))
 	for _, addr := range addrs {
-		ip := net.ParseIP(addr)
-		if ip == nil {
+		ip, _, err := net.ParseCIDR(addr)
+		if err != nil {
+			klog.Errorf("Failed to parse %s: %v", addr, err)
 			continue
 		}
 		out = append(out, ip)
@@ -172,9 +174,9 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 				}
 				addrChanged := false
 				if a.NewAddr {
-					addrChanged = c.addAddr(a.LinkAddress.IP)
+					addrChanged = c.addAddr(a.LinkAddress)
 				} else {
-					addrChanged = c.delAddr(a.LinkAddress.IP)
+					addrChanged = c.delAddr(a.LinkAddress)
 				}
 
 				c.handleNodePrimaryAddrChange()
@@ -333,7 +335,19 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 		return false, fmt.Errorf("failed to parse the primary IP address string from kubernetes node status")
 	}
 	c.Lock()
-	exists := c.addresses.Has(nodePrimaryAddrStr)
+	var exists bool
+	for _, hostAddr := range c.addresses.UnsortedList() {
+		ip, _, err := net.ParseCIDR(hostAddr)
+		if err != nil {
+			klog.Errorf("Node IP: failed to parse node address %q. Unable to detect if node primary address changed: %w",
+				hostAddr, err)
+			continue
+		}
+		if ip.Equal(nodePrimaryAddr) {
+			exists = true
+			break
+		}
+	}
 	c.Unlock()
 
 	if !exists || c.nodePrimaryAddr.Equal(nodePrimaryAddr) {
@@ -417,29 +431,32 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 }
 
 func (c *addressManager) sync() {
-	var err error
-	var addrs []net.Addr
+	var addrs []netlink.Addr
 
 	if c.useNetlink {
-		addrs, err = net.InterfaceAddrs()
+		links, err := netlink.LinkList()
 		if err != nil {
-			klog.Errorf("Failed to sync Node IP Manager: unable list all IPs on the node, error: %v", err)
+			klog.Errorf("Failed sync due to being unable to list links: %v", err)
 			return
+		}
+		for _, link := range links {
+			foundAddrs, err := linkmanager.GetExternallyAvailableAddressesExcludeAssigned(link, config.IPv4Mode, config.IPv6Mode)
+			if err != nil {
+				klog.Errorf("Unable to retrieve addresses for link %s: %v", link.Attrs().Name, err)
+				return
+			}
+			addrs = append(addrs, foundAddrs...)
 		}
 	}
 
 	currAddresses := sets.New[string]()
 	for _, addr := range addrs {
-		ip, _, err := net.ParseCIDR(addr.String())
-		if err != nil {
-			klog.Errorf("Invalid IP address found on host: %s", addr.String())
+		if !c.isValidNodeIP(addr.IP) {
+			klog.V(5).Infof("Skipping non-useable IP address for host: %s", addr.String())
 			continue
 		}
-		if !c.isValidNodeIP(ip) {
-			klog.V(5).Infof("Skipping non-useable IP address for host: %s", ip.String())
-			continue
-		}
-		currAddresses.Insert(ip.String())
+		netAddr := net.IPNet{IP: addr.IP, Mask: addr.Mask}
+		currAddresses.Insert(netAddr.String())
 	}
 
 	addrChanged := c.assignAddresses(currAddresses)
