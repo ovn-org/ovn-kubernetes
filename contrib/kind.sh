@@ -94,6 +94,7 @@ usage() {
     echo "                 [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
     echo "                 [-dp |--disable-pkt-mtu-check]"
     echo "                 [-df |--disable-forwarding]"
+    echo "                 [-ecp | --encap-port |"
     echo "                 [-pl]|--install-cni-plugins ]"
     echo "                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>]"
     echo "                 [-if |--ipfix-targets <targets>]  [-ifs|--ipfix-sampling <num>]"
@@ -128,6 +129,7 @@ usage() {
     echo "-ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled."
     echo "-dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled"
     echo "-df  | --disable-forwarding         Disable forwarding on OVNK managed interfaces. Default: Disabled"
+    echo "-ecp | --encap-port                 UDP port used for geneve overlay. DEFAULT: 6081"
     echo "-pl  | --install-cni-plugins ]      Installs additional CNI network plugins. DEFAULT: Disabled"
     echo "-nf  | --netflow-targets            Comma delimited list of ip:port or :port (using node IP) netflow collectors. DEFAULT: Disabled."
     echo "-sf  | --sflow-targets              Comma delimited list of ip:port or :port (using node IP) sflow collectors. DEFAULT: Disabled."
@@ -162,7 +164,7 @@ usage() {
     echo "-lr  | --local-kind-registry        Configure kind to use a local docker registry rather than manually loading images"
     echo "-dd  | --dns-domain                 Configure a custom dnsDomain for k8s services, Defaults to 'cluster.local'"
     echo "-cn  | --cluster-name               Configure the kind cluster's name"
-    echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane" 
+    echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane"
     echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
     echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
     echo "-sm  | --scale-metrics              Enable scale metrics"
@@ -203,6 +205,9 @@ parse_args() {
             -ds | --disable-snat-multiple-gws ) OVN_DISABLE_SNAT_MULTIPLE_GWS=true
                                                 ;;
             -df | --disable-forwarding )        OVN_DISABLE_FORWARDING=true
+                                                ;;
+            -ecp | --encap-port )               shift
+                                                OVN_ENCAP_PORT=$1
                                                 ;;
             -dp | --disable-pkt-mtu-check )     OVN_DISABLE_PKT_MTU_CHECK=true
                                                 ;;
@@ -385,6 +390,7 @@ print_params() {
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
      echo "OVN_DISABLE_FORWARDING = $OVN_DISABLE_FORWARDING"
+     echo "OVN_ENCAP_PORT = $OVN_ENCAP_PORT"
      echo "OVN_DISABLE_PKT_MTU_CHECK = $OVN_DISABLE_PKT_MTU_CHECK"
      echo "OVN_NETFLOW_TARGETS = $OVN_NETFLOW_TARGETS"
      echo "OVN_SFLOW_TARGETS = $OVN_SFLOW_TARGETS"
@@ -527,6 +533,7 @@ set_default_params() {
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
   OVN_DISABLE_FORWARDING=${OVN_DISABLE_FORWARDING:=false}
+  OVN_ENCAP_PORT=${OVN_ENCAP_PORT:-""}
   OVN_DISABLE_PKT_MTU_CHECK=${OVN_DISABLE_PKT_MTU_CHECK:-false}
   OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
   OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
@@ -850,6 +857,7 @@ create_ovn_kube_manifests() {
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
     --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
     --disable-forwarding="${OVN_DISABLE_FORWARDING}" \
+    --ovn-encap-port="${OVN_ENCAP_PORT}" \
     --disable-pkt-mtu-check="${OVN_DISABLE_PKT_MTU_CHECK}" \
     --ovn-empty-lb-events="${OVN_EMPTY_LB_EVENTS}" \
     --multicast-enabled="${OVN_MULTICAST_ENABLE}" \
