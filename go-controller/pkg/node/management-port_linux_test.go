@@ -364,8 +364,10 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	wg := &sync.WaitGroup{}
 	rm := routemanager.NewController()
 	stopCh := make(chan struct{})
+	wg.Add(1)
 	go testNS.Do(func(netNS ns.NetNS) error {
 		rm.Run(stopCh, 10*time.Second)
+		wg.Done()
 		return nil
 	})
 	defer func() {
