@@ -11,6 +11,7 @@ import (
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -150,6 +151,11 @@ func (zch *ZoneChassisHandler) createOrUpdateNodeChassis(node *corev1.Node, isRe
 		IP:          nodePrimaryIp,
 		Type:        "geneve",
 		Options:     map[string]string{"csum": "true"},
+	}
+
+	// set the geneve port if using something else than default
+	if config.Default.EncapPort != config.DefaultEncapPort {
+		encap.Options["dst_port"] = strconv.FormatUint(uint64(config.Default.EncapPort), 10)
 	}
 
 	return libovsdbops.CreateOrUpdateChassis(zch.sbClient, &chassis, &encap)

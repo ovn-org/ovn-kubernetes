@@ -1,6 +1,8 @@
 package zoneinterconnect
 
 import (
+	"context"
+
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 
@@ -38,7 +40,7 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
-		//gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -121,6 +123,45 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 			nodeCh, err = libovsdbops.GetChassis(libovsdbOvnSBClient, &node3Chassis)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(nodeCh.OtherConfig).Should(gomega.HaveKeyWithValue("is-remote", "true"))
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+			"-init-cluster-manager",
+			"-zone-join-switch-subnets=" + joinSubnetCIDR,
+			"-enable-interconnect",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	ginkgo.It("encap dst-port check", func() {
+		app.Action = func(ctx *cli.Context) error {
+			dbSetup := libovsdbtest.TestSetup{
+				SBData: initialSBDB,
+			}
+
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			config.Kubernetes.HostNetworkNamespace = ""
+			config.Default.EncapPort = 9880
+
+			var libovsdbOvnSBClient libovsdbclient.Client
+			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient)
+			err = zoneChassisHandler.AddRemoteZoneNode(&testNode3)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			encap := &sbdb.Encap{
+				Type: "geneve",
+				IP:   testNode3.Status.Addresses[0].Address,
+			}
+			err = libovsdbOvnSBClient.Get(context.Background(), encap)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(encap.Options["dst_port"]).Should(gomega.Equal("9880"))
 			return nil
 		}
 
