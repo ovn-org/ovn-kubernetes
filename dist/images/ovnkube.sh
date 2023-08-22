@@ -1254,6 +1254,12 @@ ovnkube-controller() {
   fi
   echo "disable_snat_multiple_gws_flag=${disable_snat_multiple_gws_flag}"
 
+  ovn_encap_port_flag=
+  if [[ -n "${ovn_encap_port}" ]]; then
+      ovn_encap_port_flag="--encap-port=${ovn_encap_port}"
+  fi
+  echo "ovn_encap_port_flag=${ovn_encap_port_flag}"
+
   disable_pkt_mtu_check_flag=
   if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
       disable_pkt_mtu_check_flag="--disable-pkt-mtu-check"
@@ -1425,6 +1431,7 @@ ovnkube-controller() {
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_tls_opts} \
+    ${ovn_encap_port_flag} \
     ${ovn_master_ssl_opts} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v4_masquerade_subnet_opt} \
@@ -1499,6 +1506,12 @@ ovnkube-controller-with-node() {
   if [[ ${ovn_disable_forwarding} == "true" ]]; then
       disable_forwarding_flag="--disable-forwarding"
   fi
+
+  ovn_encap_port_flag=
+  if [[ -n "${ovn_encap_port}" ]]; then
+      ovn_encap_port_flag="--encap-port=${ovn_encap_port}"
+  fi
+  echo "ovn_encap_port_flag=${ovn_encap_port_flag}"
 
   disable_pkt_mtu_check_flag=
   if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
@@ -1781,6 +1794,7 @@ ovnkube-controller-with-node() {
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_dbs} \
     ${ovn_encap_ip_flag} \
+    ${ovn_encap_port_flag} \
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
@@ -1827,6 +1841,12 @@ ovnkube-controller-with-node() {
 ovn-cluster-manager() {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
+
+  ovn_encap_port_flag=
+    if [[ -n "${ovn_encap_port}" ]]; then
+      ovn_encap_port_flag="--encap-port=${ovn_encap_port}"
+  fi
+  echo "ovn_encap_port_flag=${ovn_encap_port_flag}"
 
   egressip_enabled_flag=
   if [[ ${ovn_egressip_enable} == "true" ]]; then
@@ -1932,6 +1952,7 @@ ovn-cluster-manager() {
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_tls_opts} \
+    ${ovn_encap_port_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
@@ -2033,6 +2054,12 @@ ovn-node() {
   if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
       disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
   fi
+
+  ovn_encap_port_flag=
+  if [[ -n "${ovn_encap_port}" ]]; then
+      ovn_encap_port_flag="--encap-port=${ovn_encap_port}"
+  fi
+  echo "ovn_encap_port_flag=${ovn_encap_port_flag}"
 
   disable_forwarding_flag=
   if [[ ${ovn_disable_forwarding} == "true" ]]; then
@@ -2246,6 +2273,7 @@ ovn-node() {
         ${ofctrl_wait_before_clear} \
         ${ovn_dbs} \
         ${ovn_encap_ip_flag} \
+        ${ovn_encap_port_flag} \
         ${ovnkube_enable_interconnect_flag} \
         ${ovnkube_enable_multi_external_gateway_flag} \
         ${ovnkube_metrics_tls_opts} \
