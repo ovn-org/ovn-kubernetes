@@ -85,6 +85,29 @@ func generateRR(dnsName, ip, nextQueryTime string) dns.RR {
 	return rr
 }
 
+func setDNSOpsMock(dnsName, retIP string) {
+	mockDnsOps := new(util_mocks.DNSOps)
+	util.SetDNSLibOpsMockInst(mockDnsOps)
+	methods := []ovntest.TestifyMockHelper{
+		{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
+			Servers: []string{"1.1.1.1"},
+			Port:    "1234"}, nil}, 0, 1},
+		{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{dnsName}, 0, 1},
+		{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+		{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(dnsName, retIP, "300")}}, 500 * time.Second, nil}, 0, 1},
+	}
+	for _, item := range methods {
+		call := mockDnsOps.On(item.OnCallMethodName)
+		for _, arg := range item.OnCallMethodArgType {
+			call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+		}
+		for _, ret := range item.RetArgList {
+			call.ReturnArguments = append(call.ReturnArguments, ret)
+		}
+		call.Once()
+	}
+}
+
 func TestAdd(t *testing.T) {
 	mockAddressSetFactoryOps := new(mocks.AddressSetFactory)
 	mockAddressSetOps := new(mocks.AddressSet)
