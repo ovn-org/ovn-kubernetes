@@ -7,10 +7,8 @@ import (
 	"time"
 
 	kapi "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -497,54 +495,6 @@ func (oc *DefaultNetworkController) cleanupNodeResources(nodeName string) error 
 	return nil
 }
 
-// OVN uses an overlay and doesn't need GCE Routes, we need to
-// clear the NetworkUnavailable condition that kubelet adds to initial node
-// status when using GCE (done here: https://github.com/kubernetes/kubernetes/blob/master/pkg/controller/cloud/node_controller.go#L237).
-// See discussion surrounding this here: https://github.com/kubernetes/kubernetes/pull/34398.
-// TODO: make upstream kubelet more flexible with overlays and GCE so this
-// condition doesn't get added for network plugins that don't want it, and then
-// we can remove this function.
-func (oc *DefaultNetworkController) clearInitialNodeNetworkUnavailableCondition(origNode *kapi.Node) {
-	// If it is not a Cloud Provider node, then nothing to do.
-	if origNode.Spec.ProviderID == "" {
-		return
-	}
-
-	cleared := false
-	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		var err error
-
-		oldNode, err := oc.watchFactory.GetNode(origNode.Name)
-		if err != nil {
-			return err
-		}
-		// Informer cache should not be mutated, so get a copy of the object
-		node := oldNode.DeepCopy()
-
-		for i := range node.Status.Conditions {
-			if node.Status.Conditions[i].Type == kapi.NodeNetworkUnavailable {
-				condition := &node.Status.Conditions[i]
-				if condition.Status != kapi.ConditionFalse && condition.Reason == "NoRouteCreated" {
-					condition.Status = kapi.ConditionFalse
-					condition.Reason = "RouteCreated"
-					condition.Message = "ovn-kube cleared kubelet-set NoRouteCreated"
-					condition.LastTransitionTime = metav1.Now()
-					if err = oc.kube.UpdateNodeStatus(node); err == nil {
-						cleared = true
-					}
-				}
-				break
-			}
-		}
-		return err
-	})
-	if resultErr != nil {
-		klog.Errorf("Status update failed for local node %s: %v", origNode.Name, resultErr)
-	} else if cleared {
-		klog.Infof("Cleared node NetworkUnavailable/NoRouteCreated condition for %s", origNode.Name)
-	}
-}
-
 // this is the worker function that does the periodic sync of nodes from kube API
 // and sbdb and deletes chassis that are stale
 func (oc *DefaultNetworkController) syncNodesPeriodic() {
@@ -783,7 +733,6 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 				return err
 			}
 		}
-		oc.clearInitialNodeNetworkUnavailableCondition(node)
 		return nil
 	}
 
@@ -854,8 +803,6 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 	if err := annotator.Run(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to set hybrid overlay annotations for node %s: %v", node.Name, err))
 	}
-
-	oc.clearInitialNodeNetworkUnavailableCondition(node)
 
 	if nSyncs.syncGw {
 		err := oc.syncNodeGateway(node, nil)
