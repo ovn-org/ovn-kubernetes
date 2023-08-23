@@ -3073,7 +3073,9 @@ func checkAPBRouteStatus(fakeOVN *FakeOVN, policyName string, expectFailure bool
 	// first fetch status, if it is empty policy may not be handled yet
 	gomega.Eventually(func() bool {
 		status, err = fakeOVN.controller.apbExternalRouteController.GetAPBRoutePolicyStatus(policyName)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		if err != nil {
+			return false
+		}
 		return status.Status != ""
 	}).Should(gomega.BeTrue())
 
