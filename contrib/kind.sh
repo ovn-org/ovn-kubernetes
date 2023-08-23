@@ -1053,6 +1053,29 @@ install_metallb() {
   sleep 30
 }
 
+# The "stable" tag is a moving tag let's pre-load it so the sha256 do not
+# disappear
+install_fedora_coreos_image() {
+  local fedora_coreos_image="quay.io/fedora/fedora-coreos:stable"
+  # If local registry is being used push image there for consumption by kind cluster
+  if [ "$KIND_LOCAL_REGISTRY" == true ]; then
+    echo "TODO"
+  else
+    ${OCI_BIN} pull "${fedora_coreos_image}"
+    KIND_WORKERS=$(kind get nodes --name "${KIND_CLUSTER_NAME}" |grep worker |paste -sd "," -)
+    if [ "$OCI_BIN" == "podman" ]; then
+      # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
+      rm -f /tmp/fedora-coreos.tar
+      podman save -o /tmp/fedora-cores.tar "${fedora_coreos_image}"
+      kind load image-archive --nodes "${KIND_WORKERS}" /tmp/ovn-kube-f.tar --name "${KIND_CLUSTER_NAME}"
+    else
+      kind load docker-image --nodes "${KIND_WORKERS}" "${fedora_coreos_image}" --name "${KIND_CLUSTER_NAME}"
+    fi
+  fi
+}
+
+
+
 install_plugins() {
   git clone https://github.com/containernetworking/plugins.git
   pushd plugins
@@ -1378,4 +1401,5 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
+  install_fedora_coreos_image
 fi
