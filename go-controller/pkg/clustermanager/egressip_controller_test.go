@@ -2992,6 +2992,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 	ginkgo.Context("syncEgressIP for dual-stack", func() {
 
 		ginkgo.It("should not update valid assignments", func() {
+			// FIXME(mk): this test doesn't ensure that the EIP status does not get patched during the test run
+			// and therefore is an invalid test to test that the status is not patched
 			app.Action = func(ctx *cli.Context) error {
 				config.IPv6Mode = true
 				config.IPv4Mode = true
@@ -3059,7 +3061,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 								Network:  "192.168.0.0/16",
 							},
 							{
-								EgressIP: net.ParseIP(egressIPv6).String(),
+								EgressIP: egressIPv6,
 								Node:     egressNode1.name,
 								Network:  "::/64",
 							},
