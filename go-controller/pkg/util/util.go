@@ -14,6 +14,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
+	"crypto/rand"
+
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -355,4 +357,22 @@ func StringSlice[T fmt.Stringer](items []T) []string {
 		s[i] = items[i].String()
 	}
 	return s
+}
+
+var chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890-"
+
+// GenerateId returns a random id as a string with the requested length
+func GenerateId(length int) string {
+	charsLength := len(chars)
+	b := make([]byte, length)
+	_, err := rand.Read(b) // generates len(b) random bytes
+	if err != nil {
+		klog.Errorf("can't generate a random ID: ", err)
+		return ""
+	}
+
+	for i := 0; i < length; i++ {
+		b[i] = chars[int(b[i])%charsLength]
+	}
+	return string(b)
 }

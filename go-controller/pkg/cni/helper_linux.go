@@ -132,6 +132,30 @@ func setSysctl(sysctl string, newVal int) error {
 	return os.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0o640)
 }
 
+// safely move the netdev to the pod namespace, making sure to avoid name conflicts
+func safeMoveIfToNetns(ifname string, netns ns.NetNS, containerID string) (newNetdeviceName string, err error) {
+	newNetdeviceName = ifname
+	err = moveIfToNetns(ifname, netns)
+
+	if err != nil {
+		if strings.Contains(err.Error(), "file exists") {
+			// netdev with the same name exists in the pod
+			newNetdeviceName = generateIfName(containerID)
+			err = renameLink(ifname, newNetdeviceName)
+			if err != nil {
+				return ifname, err
+			}
+			err = moveIfToNetns(newNetdeviceName, netns)
+			if err != nil {
+				return ifname, err
+			}
+		} else {
+			return ifname, err
+		}
+	}
+	return newNetdeviceName, nil
+}
+
 func moveIfToNetns(ifname string, netns ns.NetNS) error {
 	dev, err := util.GetNetLinkOps().LinkByName(ifname)
 	if err != nil {
@@ -252,81 +276,77 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 	return hostIface, contIface, nil
 }
 
+// generate a unique interface name for the temporary netdev that will be moved to pod namespace
+func generateIfName(containerID string) string {
+	randomId := util.GenerateId(5) // random ID with 5 chars
+	// ifname max length is 15
+	return containerID[:(15-len(randomId))] + randomId
+}
+
 // Setup sriov interface in the pod
 func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, deviceID string) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
-	ifnameSuffix := ""
-
 	netdevice := ifInfo.NetdevName
 
 	// 1. Move netdevice to Container namespace
-	err := moveIfToNetns(netdevice, netns)
-	if err != nil {
-		return nil, nil, err
-	}
+	if len(netdevice) != 0 {
+		newNetdevName, err := safeMoveIfToNetns(netdevice, netns, containerID)
+		if err != nil {
+			return nil, nil, err
+		}
+		err = netns.Do(func(hostNS ns.NetNS) error {
+			contIface.Name = ifName
+			err = renameLink(newNetdevName, contIface.Name)
+			if err != nil {
+				return err
+			}
+			link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
+			if err != nil {
+				return err
+			}
+			err = util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC)
+			if err != nil {
+				return err
+			}
+			err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU)
+			if err != nil {
+				return err
+			}
+			err = util.GetNetLinkOps().LinkSetUp(link)
+			if err != nil {
+				return err
+			}
 
-	err = netns.Do(func(hostNS ns.NetNS) error {
-		contIface.Name = ifName
-		err = renameLink(netdevice, contIface.Name)
-		if err != nil {
-			return err
-		}
-		link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
-		if err != nil {
-			return err
-		}
-		err = util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC)
-		if err != nil {
-			return err
-		}
-		err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU)
-		if err != nil {
-			return err
-		}
-		err = util.GetNetLinkOps().LinkSetUp(link)
-		if err != nil {
-			return err
-		}
+			err = setupNetwork(link, ifInfo)
+			if err != nil {
+				return err
+			}
 
-		err = setupNetwork(link, ifInfo)
+			contIface.Mac = ifInfo.MAC.String()
+			contIface.Sandbox = netns.Path()
+
+			return nil
+		})
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-
-		contIface.Mac = ifInfo.MAC.String()
-		contIface.Sandbox = netns.Path()
-
-		// to generate the unique host interface name, postfix it with the podInterface index for non-default network
-		if ifInfo.NetName != types.DefaultNetworkName {
-			ifnameSuffix = fmt.Sprintf("_%d", link.Attrs().Index)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, nil, err
 	}
 
 	if !ifInfo.IsDPUHostMode {
 		// 2. get device representor name
-		oldHostRepName, err := util.GetFunctionRepresentorName(deviceID)
+		hostRepName, err := util.GetFunctionRepresentorName(deviceID)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		// 3. make sure it's not a port managed by OVS to avoid conflicts when renaming the representor
-		_, err = ovsExec("--if-exists", "del-port", oldHostRepName)
+		// 3. make sure it's not a port managed by OVS to avoid conflicts
+		_, err = ovsExec("--if-exists", "del-port", hostRepName)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		// 4. rename the host representor
-		hostIface.Name = containerID[:(15-len(ifnameSuffix))] + ifnameSuffix
-		if err = renameLink(oldHostRepName, hostIface.Name); err != nil {
-			return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostRepName, hostIface.Name, err)
-		}
-
+		hostIface.Name = hostRepName
 		link, err := util.GetNetLinkOps().LinkByName(hostIface.Name)
 		if err != nil {
 			return nil, nil, err
