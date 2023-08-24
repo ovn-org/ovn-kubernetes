@@ -519,7 +519,7 @@ func getOVNKubePodLogsFiltered(clientset kubernetes.Interface, namespace, nodeNa
 		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node pods: %w", err)
 	}
 
-	logs, err := e2epod.GetPodLogs(clientset, ovnNamespace, ovnKubeNodePods.Items[0].Name, "ovnkube-node")
+	logs, err := e2epod.GetPodLogs(clientset, ovnNamespace, ovnKubeNodePods.Items[0].Name, getNodeContainerName())
 	if err != nil {
 		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node [%s/%s] logs: %w",
 			ovnNamespace, ovnKubeNodePods.Items[0].Name, err)
@@ -583,7 +583,12 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 		if isInterconnectEnabled() {
 			controlPlanePodName = "ovnkube-control-plane"
-			controlPlaneLeaseName = "ovn-kubernetes-master-ovn-control-plane"
+			// in "one node per zone" config, ovnkube-controller doesn't create leader election lease
+			if !singleNodePerZone() {
+				controlPlaneLeaseName = "ovn-kubernetes-master-ovn-control-plane"
+			} else {
+				controlPlaneLeaseName = "ovn-kubernetes-master"
+			}
 		} else {
 			controlPlanePodName = "ovnkube-master"
 			controlPlaneLeaseName = "ovn-kubernetes-master"
@@ -2616,7 +2621,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 
 			ginkgo.By(fmt.Sprintf("Configuring ovnkube-node to use the new %s collector target", protocolStr))
 			setEnv := map[string]string{ovnEnvVar: addressAndPort}
-			setUnsetTemplateContainerEnv(f.ClientSet, ovnNs, "daemonset/ovnkube-node", "ovnkube-node", setEnv)
+			setUnsetTemplateContainerEnv(f.ClientSet, ovnNs, "daemonset/ovnkube-node", getNodeContainerName(), setEnv)
 
 			ginkgo.By(fmt.Sprintf("Checking that the collector container received %s data", protocolStr))
 			keyword := keywordInLogs[protocol]
@@ -2646,7 +2651,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 				protocolStr, keyword))
 
 			ginkgo.By(fmt.Sprintf("Unsetting %s variable in ovnkube-node daemonset", ovnEnvVar))
-			setUnsetTemplateContainerEnv(f.ClientSet, ovnNs, "daemonset/ovnkube-node", "ovnkube-node", nil, ovnEnvVar)
+			setUnsetTemplateContainerEnv(f.ClientSet, ovnNs, "daemonset/ovnkube-node", getNodeContainerName(), nil, ovnEnvVar)
 
 			ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
 				LabelSelector: "name=ovnkube-node",
@@ -2661,7 +2666,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 					Command:       []string{"ovs-vsctl", "find", strings.ToLower(protocolStr)},
 					Namespace:     ovnNs,
 					PodName:       ovnKubeNodePod.Name,
-					ContainerName: "ovnkube-node",
+					ContainerName: getNodeContainerName(),
 					CaptureStdout: true,
 					CaptureStderr: true,
 				}
