@@ -117,6 +117,11 @@ func RegisterClusterManagerFunctional() {
 		prometheus.MustRegister(metricEgressIPRebalanceCount)
 		prometheus.MustRegister(metricEgressIPCount)
 	}
+	if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
+		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+			panic(err)
+		}
+	}
 }
 
 // RecordSubnetUsage records the number of subnets allocated for nodes

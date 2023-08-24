@@ -17,7 +17,7 @@ import (
 // egressIPClusterControllerEventHandler object handles the events
 // from retry framework for the egressIPClusterController.
 type egressIPClusterControllerEventHandler struct {
-	objretry.EventHandler
+	objretry.DefaultEventHandler
 	objType  reflect.Type
 	eIPC     *egressIPClusterController
 	syncFunc func([]interface{}) error
@@ -203,44 +203,6 @@ func (h *egressIPClusterControllerEventHandler) SyncFunc(objs []interface{}) err
 		return nil
 	}
 	return syncFunc(objs)
-}
-
-// RecordAddEvent records the add event on this object. Not used here.
-func (h *egressIPClusterControllerEventHandler) RecordAddEvent(obj interface{}) {
-}
-
-// RecordUpdateEvent records the update event on this object. Not used here.
-func (h *egressIPClusterControllerEventHandler) RecordUpdateEvent(obj interface{}) {
-}
-
-// RecordDeleteEvent records the delete event on this object. Not used here.
-func (h *egressIPClusterControllerEventHandler) RecordDeleteEvent(obj interface{}) {
-}
-
-func (h *egressIPClusterControllerEventHandler) RecordSuccessEvent(obj interface{}) {
-}
-
-// RecordErrorEvent records an error event on this object. Not used here.
-func (h *egressIPClusterControllerEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
-}
-
-// isResourceScheduled returns true if the object has been scheduled.  Always returns true.
-func (h *egressIPClusterControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
-	return true
-}
-
-// IsObjectInTerminalState returns true if the object is a in terminal state.  Always returns true.
-func (h *egressIPClusterControllerEventHandler) IsObjectInTerminalState(obj interface{}) bool {
-	return false
-}
-
-func (h *egressIPClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
-	return false, nil
-}
-
-// GetInternalCacheEntry returns the internal cache entry for this object
-func (h *egressIPClusterControllerEventHandler) GetInternalCacheEntry(obj interface{}) interface{} {
-	return nil
 }
 
 // getResourceFromInformerCache returns the latest state of the object from the informers cache

@@ -20,12 +20,10 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
-	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
-	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions"
+	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 
 	adminpolicybasedroutelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/listers/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // Admin Policy Based Route Node controller
@@ -55,27 +53,22 @@ type ExternalGatewayNodeController struct {
 	ExternalGWCache map[ktypes.NamespacedName]*ExternalRouteInfo
 	ExGWCacheMutex  *sync.RWMutex
 
-	routePolicyFactory adminpolicybasedrouteinformer.SharedInformerFactory
-
 	mgr *externalPolicyManager
 }
 
 func NewExternalNodeController(
-	apbRoutePolicyClient adminpolicybasedrouteclient.Interface,
 	podInformer coreinformers.PodInformer,
 	namespaceInformer coreinformers.NamespaceInformer,
+	apbRouteInformer adminpolicybasedrouteinformer.AdminPolicyBasedExternalRouteInformer,
 	stopCh <-chan struct{},
 ) (*ExternalGatewayNodeController, error) {
 
 	namespaceLister := namespaceInformer.Lister()
-	routePolicyFactory := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
-	externalRouteInformer := routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes()
 
 	c := &ExternalGatewayNodeController{
-		stopCh:             stopCh,
-		routePolicyFactory: routePolicyFactory,
-		routeLister:        externalRouteInformer.Lister(),
-		routeInformer:      externalRouteInformer.Informer(),
+		stopCh:        stopCh,
+		routeLister:   apbRouteInformer.Lister(),
+		routeInformer: apbRouteInformer.Informer(),
 		routeQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 			"apbexternalroutes",
@@ -96,7 +89,7 @@ func NewExternalNodeController(
 			stopCh,
 			podInformer.Lister(),
 			namespaceInformer.Lister(),
-			routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
+			apbRouteInformer.Lister(),
 			&conntrackClient{podLister: podInformer.Lister()}),
 	}
 
@@ -134,20 +127,6 @@ func (c *ExternalGatewayNodeController) Run(wg *sync.WaitGroup, threadiness int)
 		}))
 	if err != nil {
 		return err
-	}
-
-	c.routePolicyFactory.Start(c.stopCh)
-
-	if !util.WaitForNamedCacheSyncWithTimeout("apbexternalroutenamespaces", c.stopCh, c.namespaceInformer.HasSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
-	}
-
-	if !util.WaitForNamedCacheSyncWithTimeout("apbexternalroutepods", c.stopCh, c.podInformer.HasSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
-	}
-
-	if !util.WaitForNamedCacheSyncWithTimeout("adminpolicybasedexternalroutes", c.stopCh, c.routeInformer.HasSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
 	for i := 0; i < threadiness; i++ {

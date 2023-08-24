@@ -172,8 +172,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	var err error
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	err = o.watcher.Start()
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -188,6 +187,9 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	o.controller.clusterLoadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 	o.controller.switchLoadBalancerGroupUUID = types.ClusterSwitchLBGroupName + "-UUID"
 	o.controller.routerLoadBalancerGroupUUID = types.ClusterRouterLBGroupName + "-UUID"
+
+	err = o.watcher.Start()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	for _, nad := range nadList {
 		err := o.NewSecondaryNetworkController(&nad)
