@@ -83,6 +83,7 @@ func podChanged(old, new interface{}) bool {
 }
 
 // NewNode Returns a new Node
+// TODO(jtanenba) the localPodInformer no longer selects only local pods
 func NewNode(
 	kube kube.Interface,
 	nodeName string,
@@ -124,6 +125,9 @@ func NewNode(
 			pod, ok := obj.(*kapi.Pod)
 			if !ok {
 				return fmt.Errorf("object is not a pod")
+			}
+			if pod.Spec.NodeName != nodeName {
+				return nil
 			}
 			return n.controller.AddPod(pod)
 		},
