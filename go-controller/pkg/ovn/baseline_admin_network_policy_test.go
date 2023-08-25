@@ -62,14 +62,9 @@ func getACLsForBANPRules(banp *anpapi.BaselineAdminNetworkPolicy) []*nbdb.ACL {
 }
 
 func buildBANPAddressSets(banp *anpapi.BaselineAdminNetworkPolicy, index int32, ips []net.IP, gressPrefix libovsdbutil.ACLDirection) (*nbdb.AddressSet, *nbdb.AddressSet) {
-	priority := getBANPRulePriority(index)
 	asIndex := anpovn.GetANPPeerAddrSetDbIDs(banp.Name, string(gressPrefix),
 		fmt.Sprintf("%d", index), DefaultNetworkControllerName, true)
-	v4set, v6set := addressset.GetDbObjsForAS(asIndex, ips)
-
-	v4set.UUID = fmt.Sprintf("%s-%d-%s-ipv4-addrSet", banp.Name, priority, gressPrefix)
-	v6set.UUID = fmt.Sprintf("%s-%d-%s-ipv6-addrSet", banp.Name, priority, gressPrefix)
-	return v4set, v6set
+	return addressset.GetTestDbAddrSets(asIndex, ips)
 }
 
 var _ = ginkgo.Describe("OVN BANP Operations", func() {

@@ -204,14 +204,9 @@ func getACLsForANPRules(anp *anpapi.AdminNetworkPolicy) []*nbdb.ACL {
 }
 
 func buildANPAddressSets(anp *anpapi.AdminNetworkPolicy, index int32, ips []net.IP, gressPrefix libovsdbutil.ACLDirection) (*nbdb.AddressSet, *nbdb.AddressSet) {
-	priority := getANPRulePriority(getBaseRulePriority(anp.Spec.Priority), index)
 	asIndex := anpovn.GetANPPeerAddrSetDbIDs(anp.Name, string(gressPrefix),
 		fmt.Sprintf("%d", index), DefaultNetworkControllerName, false)
-	v4set, v6set := addressset.GetDbObjsForAS(asIndex, ips)
-
-	v4set.UUID = fmt.Sprintf("%s-%d-%s-ipv4-addrSet", anp.Name, priority, gressPrefix)
-	v6set.UUID = fmt.Sprintf("%s-%d-%s-ipv6-addrSet", anp.Name, priority, gressPrefix)
-	return v4set, v6set
+	return addressset.GetTestDbAddrSets(asIndex, ips)
 }
 
 var _ = ginkgo.Describe("OVN ANP Operations", func() {
