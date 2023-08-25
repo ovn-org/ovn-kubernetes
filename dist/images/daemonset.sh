@@ -223,6 +223,9 @@ while [ "$1" != "" ]; do
   --disable-forwarding)
     OVN_DISABLE_FORWARDING=$VALUE
     ;;
+  --ovn-encap-port)
+    OVN_ENCAP_PORT=$VALUE
+    ;;
   --disable-pkt-mtu-check)
     OVN_DISABLE_PKT_MTU_CHECK=$VALUE
     ;;
@@ -413,6 +416,8 @@ ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
 echo "ovn_disable_snat_multiple_gws: ${ovn_disable_snat_multiple_gws}"
 ovn_disable_forwarding=${OVN_DISABLE_FORWARDING}
 echo "ovn_disable_forwarding: ${ovn_disable_forwarding}"
+ovn_encap_port=${OVN_ENCAP_PORT}
+echo "ovn_encap_port: ${ovn_encap_port}"
 ovn_disable_pkt_mtu_check=${OVN_DISABLE_PKT_MTU_CHECK}
 echo "ovn_disable_pkt_mtu_check: ${ovn_disable_pkt_mtu_check}"
 ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS}
@@ -502,6 +507,7 @@ ovn_image=${ovnkube_image} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
   ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
@@ -553,6 +559,7 @@ ovn_image=${image} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
   ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
@@ -589,6 +596,7 @@ ovn_image=${ovnkube_image} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
   ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
@@ -696,6 +704,7 @@ ovn_image=${ovnkube_image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
@@ -750,6 +759,7 @@ ovn_image=${ovnkube_image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
