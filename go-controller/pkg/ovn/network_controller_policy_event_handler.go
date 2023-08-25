@@ -36,8 +36,8 @@ func (bnc *BaseNetworkController) newNetpolRetryFramework(
 		syncFunc:        syncFunc,
 	}
 	resourceHandler := &retry.ResourceHandler{
-		HasUpdateFunc:          hasResourceAnUpdateFunc(objectType),
-		NeedsUpdateDuringRetry: needsUpdateDuringRetry(objectType),
+		HasUpdateFunc:          hasPolicyResourceAnUpdateFunc(objectType),
+		NeedsUpdateDuringRetry: needsPolicyResourceUpdateDuringRetry(objectType),
 		ObjType:                objectType,
 		EventHandler:           eventHandler,
 	}
@@ -51,6 +51,7 @@ func (bnc *BaseNetworkController) newNetpolRetryFramework(
 
 // event handlers handles policy related events
 type networkControllerPolicyEventHandler struct {
+	retry.DefaultEventHandler
 	watchFactory    *factory.WatchFactory
 	objType         reflect.Type
 	bnc             *BaseNetworkController
@@ -115,33 +116,6 @@ func (h *networkControllerPolicyEventHandler) GetResourceFromInformerCache(key s
 	return obj, err
 }
 
-// RecordAddEvent records the add event on this given object.
-func (h *networkControllerPolicyEventHandler) RecordAddEvent(obj interface{}) {
-}
-
-// RecordUpdateEvent records the update event on this given object.
-func (h *networkControllerPolicyEventHandler) RecordUpdateEvent(obj interface{}) {
-}
-
-// RecordDeleteEvent records the delete event on this given object.
-func (h *networkControllerPolicyEventHandler) RecordDeleteEvent(obj interface{}) {
-}
-
-// RecordSuccessEvent records the success event on this given object.
-func (h *networkControllerPolicyEventHandler) RecordSuccessEvent(obj interface{}) {
-}
-
-// RecordErrorEvent records an error event on the given object.
-// Only used for pods now.
-func (h *networkControllerPolicyEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
-}
-
-// IsResourceScheduled returns true if the given object has been scheduled.
-// Only applied to pods for now. Returns true for all other types.
-func (h *networkControllerPolicyEventHandler) IsResourceScheduled(obj interface{}) bool {
-	return true
-}
-
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
@@ -168,6 +142,15 @@ func (h *networkControllerPolicyEventHandler) AddResource(obj interface{}, fromR
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
 	}
+}
+
+func hasPolicyResourceAnUpdateFunc(objType reflect.Type) bool {
+	switch objType {
+	case factory.AddressSetPodSelectorType,
+		factory.LocalPodSelectorType:
+		return true
+	}
+	return false
 }
 
 // UpdateResource updates the specified object in the cluster to its version in newObj according to its
@@ -253,4 +236,8 @@ func (h *networkControllerPolicyEventHandler) IsObjectInTerminalState(obj interf
 	default:
 		return false
 	}
+}
+
+func needsPolicyResourceUpdateDuringRetry(objType reflect.Type) bool {
+	return false
 }

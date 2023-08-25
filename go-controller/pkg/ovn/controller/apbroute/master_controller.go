@@ -16,7 +16,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -30,7 +29,7 @@ import (
 
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
-	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions"
+	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 	adminpolicybasedroutelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/listers/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -39,12 +38,10 @@ import (
 )
 
 const (
-	resyncInterval = 0
-	maxRetries     = 15
+	maxRetries = 15
 )
 
 // Admin Policy Based Route services
-
 type ExternalGatewayMasterController struct {
 	client               kubernetes.Interface
 	apbRoutePolicyClient adminpolicybasedrouteclient.Interface
@@ -70,8 +67,6 @@ type ExternalGatewayMasterController struct {
 	ExternalGWCache map[ktypes.NamespacedName]*ExternalRouteInfo
 	ExGWCacheMutex  *sync.RWMutex
 
-	routePolicyFactory adminpolicybasedrouteinformer.SharedInformerFactory
-
 	mgr      *externalPolicyManager
 	nbClient *northBoundClient
 }
@@ -82,14 +77,13 @@ func NewExternalMasterController(
 	stopCh <-chan struct{},
 	podInformer coreinformers.PodInformer,
 	namespaceInformer coreinformers.NamespaceInformer,
+	apbRouteInformer adminpolicybasedrouteinformer.AdminPolicyBasedExternalRouteInformer,
 	nodeLister corev1listers.NodeLister,
 	nbClient libovsdbclient.Client,
 	addressSetFactory addressset.AddressSetFactory,
 	controllerName string,
 ) (*ExternalGatewayMasterController, error) {
 
-	routePolicyFactory := adminpolicybasedrouteinformer.NewSharedInformerFactory(apbRoutePolicyClient, resyncInterval)
-	externalRouteInformer := routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes()
 	externalGWCache := make(map[ktypes.NamespacedName]*ExternalRouteInfo)
 	exGWCacheMutex := &sync.RWMutex{}
 	zone, err := libovsdbutil.GetNBZone(nbClient)
@@ -97,7 +91,7 @@ func NewExternalMasterController(
 		return nil, err
 	}
 	nbCli := &northBoundClient{
-		routeLister:       externalRouteInformer.Lister(),
+		routeLister:       apbRouteInformer.Lister(),
 		nodeLister:        nodeLister,
 		podLister:         podInformer.Lister(),
 		nbClient:          nbClient,
@@ -112,8 +106,8 @@ func NewExternalMasterController(
 		client:               client,
 		apbRoutePolicyClient: apbRoutePolicyClient,
 		stopCh:               stopCh,
-		routeLister:          externalRouteInformer.Lister(),
-		routeInformer:        externalRouteInformer.Informer(),
+		routeLister:          apbRouteInformer.Lister(),
+		routeInformer:        apbRouteInformer.Informer(),
 		routeQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 			"adminpolicybasedexternalroutes",
@@ -130,15 +124,14 @@ func NewExternalMasterController(
 			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 			"apbexternalroutenamespaces",
 		),
-		ExternalGWCache:    externalGWCache,
-		ExGWCacheMutex:     exGWCacheMutex,
-		routePolicyFactory: routePolicyFactory,
-		nbClient:           nbCli,
+		ExternalGWCache: externalGWCache,
+		ExGWCacheMutex:  exGWCacheMutex,
+		nbClient:        nbCli,
 		mgr: newExternalPolicyManager(
 			stopCh,
 			podInformer.Lister(),
 			namespaceInformer.Lister(),
-			routePolicyFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Lister(),
+			apbRouteInformer.Lister(),
 			nbCli),
 	}
 	return c, nil
@@ -175,31 +168,6 @@ func (c *ExternalGatewayMasterController) Run(wg *sync.WaitGroup, threadiness in
 		}))
 	if err != nil {
 		return err
-	}
-
-	c.routePolicyFactory.Start(c.stopCh)
-
-	syncWg := &sync.WaitGroup{}
-	syncErrs := []error{}
-	for _, se := range []struct {
-		resourceName string
-		syncFn       cache.InformerSynced
-	}{
-		{"apbexternalroutenamespaces", c.namespaceInformer.HasSynced},
-		{"apbexternalroutepods", c.podInformer.HasSynced},
-		{"adminpolicybasedexternalroutes", c.routeInformer.HasSynced},
-	} {
-		syncWg.Add(1)
-		go func(resourceName string, syncFn cache.InformerSynced) {
-			defer syncWg.Done()
-			if !util.WaitForNamedCacheSyncWithTimeout(resourceName, c.stopCh, syncFn) {
-				syncErrs = append(syncErrs, fmt.Errorf("timed out waiting for %q caches to sync", resourceName))
-			}
-		}(se.resourceName, se.syncFn)
-	}
-	syncWg.Wait()
-	if len(syncErrs) != 0 {
-		return kerrors.NewAggregate(syncErrs)
 	}
 
 	for i := 0; i < threadiness; i++ {

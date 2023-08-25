@@ -83,7 +83,7 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) checkMode(restore bool) (s
 		return "", "", false
 	}
 	framework.Logf("Checking the ovnkube-node and ovnkube-master (ovnkube-cluster-manager if interconnect=true) healthcheck ports in use")
-	portNode := getTemplateContainerEnv(ovnNamespace, "daemonset/ovnkube-node", "ovnkube-node", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
+	portNode := getTemplateContainerEnv(ovnNamespace, "daemonset/ovnkube-node", getNodeContainerName(), OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
 	var portMaster string
 	if isInterconnectEnabled() {
 		portMaster = getTemplateContainerEnv(ovnNamespace, "deployment/ovnkube-control-plane", "ovnkube-cluster-manager", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
@@ -132,7 +132,7 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) setMode(nodeName string, r
 	if changeEnv {
 		framework.Logf("Updating ovnkube to use health check on port %s (0 is legacy, non 0 is GRPC)", portEnv)
 		setEnv := map[string]string{OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME: portEnv}
-		setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "daemonset/ovnkube-node", "ovnkube-node", setEnv)
+		setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "daemonset/ovnkube-node", getNodeContainerName(), setEnv)
 		if isInterconnectEnabled() {
 			setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "deployment/ovnkube-control-plane", "ovnkube-cluster-manager", setEnv)
 		} else {

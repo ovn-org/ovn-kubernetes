@@ -89,7 +89,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
-
+		config.OVNKubernetesFeature.EnableMultiExternalGateway = true
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
@@ -3073,7 +3073,9 @@ func checkAPBRouteStatus(fakeOVN *FakeOVN, policyName string, expectFailure bool
 	// first fetch status, if it is empty policy may not be handled yet
 	gomega.Eventually(func() bool {
 		status, err = fakeOVN.controller.apbExternalRouteController.GetAPBRoutePolicyStatus(policyName)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		if err != nil {
+			return false
+		}
 		return status.Status != ""
 	}).Should(gomega.BeTrue())
 

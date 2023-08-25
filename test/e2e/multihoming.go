@@ -736,6 +736,62 @@ var _ = Describe("Multi Homing", func() {
 					By("asserting the *client* pod can contact the underlay service")
 					Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
 				})
+
+				Context("with multi network policy blocking the traffic", func() {
+					var clientPodConfig podConfiguration
+					labels := map[string]string{"name": "access-control"}
+
+					const policyName = "allow-egress-ipblock"
+
+					BeforeEach(func() {
+						clientPodConfig = podConfiguration{
+							name:        clientPodName,
+							namespace:   f.Namespace.Name,
+							attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+							labels:      labels,
+						}
+						kickstartPod(cs, clientPodConfig)
+
+						By("asserting the *client* pod can contact the underlay service before creating the policy")
+						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
+					})
+
+					AfterEach(func() {
+						By("deleting the multi-network policy")
+						err := mnpClient.MultiNetworkPolicies(clientPodConfig.namespace).Delete(
+							context.Background(),
+							policyName,
+							metav1.DeleteOptions{},
+						)
+						Expect(err).NotTo(HaveOccurred())
+
+						By("asserting the *client* pod can contact the underlay service after deleting the policy")
+						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
+					})
+
+					It("can not communicate over a localnet secondary network from pod to the underlay service", func() {
+						By("creating the multi-network policy")
+						_, err := mnpClient.MultiNetworkPolicies(clientPodConfig.namespace).Create(
+							context.Background(),
+							multiNetEgressLimitingIPBlockPolicy(
+								policyName,
+								secondaryNetworkName,
+								metav1.LabelSelector{
+									MatchLabels: labels,
+								},
+								mnpapi.IPBlock{
+									CIDR:   secondaryLocalnetNetworkCIDR,
+									Except: []string{underlayServiceIP},
+								},
+							),
+							metav1.CreateOptions{},
+						)
+						Expect(err).NotTo(HaveOccurred())
+
+						By("asserting the *client* pod cannot contact the underlay service after creating the policy")
+						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(MatchError(ContainSubstring("Connection timeout")))
+					})
+				})
 			})
 		})
 
