@@ -42,7 +42,7 @@ func (g *GatewayInfoList) Has(gw *GatewayInfo) bool {
 
 func (g *GatewayInfoList) HasWithoutErr(gw *GatewayInfo) bool {
 	for _, i := range g.elems {
-		if i.SameSpec(gw) && i.applied {
+		if i.SameSpec(gw) && !i.failedToApply {
 			return true
 		}
 	}
@@ -82,7 +82,7 @@ func (g *GatewayInfoList) insertOverwrite(gw *GatewayInfo) {
 
 func (g *GatewayInfoList) InsertOverwriteFailed(gws ...*GatewayInfo) {
 	for _, gw := range gws {
-		gw.applied = false
+		gw.failedToApply = true
 	}
 	g.InsertOverwrite(gws...)
 }
@@ -148,9 +148,9 @@ func (g *GatewayInfoList) Equal(g2 *GatewayInfoList) bool {
 }
 
 type GatewayInfo struct {
-	Gateways   sets.Set[string]
-	BFDEnabled bool
-	applied    bool
+	Gateways      sets.Set[string]
+	BFDEnabled    bool
+	failedToApply bool
 }
 
 func (g *GatewayInfo) String() string {
@@ -172,7 +172,7 @@ func (g *GatewayInfo) RemoveIPs(g2 *GatewayInfo) {
 
 // Equal compares all GatewayInfo fields, including BFDEnabled and applied
 func (g *GatewayInfo) Equal(g2 *GatewayInfo) bool {
-	return g.BFDEnabled == g2.BFDEnabled && g.Gateways.Equal(g2.Gateways) && g.applied == g2.applied
+	return g.BFDEnabled == g2.BFDEnabled && g.Gateways.Equal(g2.Gateways) && g.failedToApply == g2.failedToApply
 }
 
 func (g *GatewayInfo) Has(ip string) bool {

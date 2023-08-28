@@ -66,7 +66,7 @@ var _ = Describe("GatewayInfoList", func() {
 			s1 := NewGatewayInfoList(NewGatewayInfo(sets.New("1.1.1.1"), false))
 			s1.InsertOverwriteFailed(NewGatewayInfo(sets.New("1.1.1.1"), false))
 			failedGwInfo := NewGatewayInfo(sets.New("1.1.1.1"), false)
-			failedGwInfo.applied = false
+			failedGwInfo.failedToApply = true
 			Expect(s1.Equal(NewGatewayInfoList(failedGwInfo))).To(BeTrue())
 		})
 
