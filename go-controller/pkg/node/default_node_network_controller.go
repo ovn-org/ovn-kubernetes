@@ -1034,6 +1034,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if config.HybridOverlay.Enabled {
 		// Not supported with DPUs, enforced in config
 		// TODO(adrianc): Revisit above comment
+		// TODO(jtanenba): LocalPodInformer informs on all pods
 		nodeController, err := honode.NewNode(
 			nc.Kube,
 			nc.name,
