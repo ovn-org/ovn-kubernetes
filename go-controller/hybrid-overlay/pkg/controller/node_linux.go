@@ -247,13 +247,14 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 func (n *NodeController) AddNode(node *kapi.Node) error {
 	klog.Info("Add Node ", node.Name)
 	var err error
+
 	if n.drIP == nil {
 		hybridOverlayDRIP, ok := node.Annotations[hotypes.HybridOverlayDRIP]
 		if !ok {
 			return fmt.Errorf("hybrid overlay not initialized on %s, it was not assigned an interface address", node.Name)
 		}
-		n.drIP = net.ParseIP(hybridOverlayDRIP)
-		if n.drIP == nil {
+		drIP := net.ParseIP(hybridOverlayDRIP)
+		if drIP == nil {
 			return fmt.Errorf("hybrid overlay not initialized on %s, the the annotation %s = %s is not an IP address", node.Name, hotypes.HybridOverlayDRIP, hybridOverlayDRIP)
 		}
 	}
