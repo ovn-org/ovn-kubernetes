@@ -292,12 +292,9 @@ func GetPodIPsOfNetwork(pod *v1.Pod, nInfo NetInfo) ([]net.IP, error) {
 }
 
 func DefaultNetworkPodIPs(pod *v1.Pod) ([]net.IP, error) {
-	ips := getAnnotatedPodIPs(pod, types.DefaultNetworkName)
-	if len(ips) > 0 {
-		return ips, nil
-	}
-	// Otherwise, default network, if the annotation is not valid try to use Kube API pod IPs
-	ips = make([]net.IP, 0, len(pod.Status.PodIPs))
+	// Try to use Kube API pod IPs for default network first
+	// This is much faster than trying to unmarshal annotations
+	ips := make([]net.IP, 0, len(pod.Status.PodIPs))
 	for _, podIP := range pod.Status.PodIPs {
 		ip := utilnet.ParseIPSloppy(podIP.IP)
 		if ip == nil {
@@ -306,6 +303,11 @@ func DefaultNetworkPodIPs(pod *v1.Pod) ([]net.IP, error) {
 		ips = append(ips, ip)
 	}
 
+	if len(ips) > 0 {
+		return ips, nil
+	}
+
+	ips = getAnnotatedPodIPs(pod, types.DefaultNetworkName)
 	if len(ips) > 0 {
 		return ips, nil
 	}
