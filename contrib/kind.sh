@@ -1221,7 +1221,7 @@ docker_create_second_disconnected_interface() {
 
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
-    "$OCI_BIN" network connect "$bridge_name" "$n"
+    "$OCI_BIN" network connect "$bridge_name" "$n" || true
   done
 }
 
