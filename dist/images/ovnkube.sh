@@ -1149,7 +1149,7 @@ ovn-master() {
 
   ovnkube_metrics_scale_enable_flag=
   if [[ ${ovnkube_metrics_scale_enable} == "true" ]]; then
-    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale"
+    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale --metrics-enable-pprof"
   fi
   echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
   
@@ -1413,7 +1413,7 @@ ovnkube-controller() {
 
   ovnkube_metrics_scale_enable_flag=
   if [[ ${ovnkube_metrics_scale_enable} == "true" ]]; then
-    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale"
+    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale --metrics-enable-pprof"
   fi
   echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
 
@@ -1773,7 +1773,7 @@ ovnkube-controller-with-node() {
 
   ovnkube_metrics_scale_enable_flag=
   if [[ ${ovnkube_metrics_scale_enable} == "true" ]]; then
-    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale"
+    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale --metrics-enable-pprof"
   fi
   echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
 
