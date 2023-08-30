@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 env:
   GO_VERSION: 1.19.6
