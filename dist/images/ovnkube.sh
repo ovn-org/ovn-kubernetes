@@ -1411,6 +1411,12 @@ ovnkube-controller() {
   fi
   echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
 
+  ovnkube_metrics_scale_enable_flag=
+  if [[ ${ovnkube_metrics_scale_enable} == "true" ]]; then
+    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale"
+  fi
+  echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
+
   echo "=============== ovnkube-controller ========== MASTER ONLY"
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} \
     ${anp_enabled_flag} \
@@ -1430,6 +1436,7 @@ ovnkube-controller() {
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
+    ${ovnkube_metrics_scale_enable_flag} \
     ${ovnkube_metrics_tls_opts} \
     ${ovn_encap_port_flag} \
     ${ovn_master_ssl_opts} \
@@ -1764,6 +1771,11 @@ ovnkube-controller-with-node() {
   fi
   echo "ovn_v6_masquerade_subnet_opt=${ovn_v6_masquerade_subnet_opt}"
 
+  ovnkube_metrics_scale_enable_flag=
+  if [[ ${ovnkube_metrics_scale_enable} == "true" ]]; then
+    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale"
+  fi
+  echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
 
   echo "=============== ovnkube-controller-with-node --init-ovnkube-controller-with-node=========="
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} --init-node ${K8S_NODE} \
@@ -1798,6 +1810,7 @@ ovnkube-controller-with-node() {
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
+    ${ovnkube_metrics_scale_enable_flag} \
     ${ovnkube_metrics_tls_opts} \
     ${ovnkube_node_mgmt_port_netdev_flag} \
     ${ovnkube_node_mode_flag} \
