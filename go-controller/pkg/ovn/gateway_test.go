@@ -224,6 +224,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		types.OVNICMPV6ErrorsRateLimiter:     getMeterNameForProtocol(types.OVNICMPV6ErrorsRateLimiter),
 		types.OVNRejectRateLimiter:           getMeterNameForProtocol(types.OVNRejectRateLimiter),
 		types.OVNTCPRSTRateLimiter:           getMeterNameForProtocol(types.OVNTCPRSTRateLimiter),
+		types.OVNServiceMonitorLimiter:       getMeterNameForProtocol(types.OVNServiceMonitorLimiter),
 	}
 	fairness := true
 	for _, v := range meters {

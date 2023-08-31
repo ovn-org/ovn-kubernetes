@@ -20,6 +20,7 @@ const (
 	OVNICMPV6ErrorsRateLimiter     = "icmp6-error"
 	OVNRejectRateLimiter           = "reject"
 	OVNTCPRSTRateLimiter           = "tcp-reset"
+	OVNServiceMonitorLimiter       = "svc-monitor"
 
 	// Default COPP object name
 	defaultCOPPName = "ovnkube-default"
@@ -34,6 +35,7 @@ var defaultProtocolNames = [...]string{
 	OVNICMPV6ErrorsRateLimiter,
 	OVNRejectRateLimiter,
 	OVNTCPRSTRateLimiter,
+	OVNServiceMonitorLimiter,
 }
 
 func getMeterNameForProtocol(protocol string) string {
