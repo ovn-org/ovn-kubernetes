@@ -1418,6 +1418,7 @@ func upgradeServiceRoute(routeManager *routemanager.Controller, bridgeName strin
 			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
 		}
 		rules := getLocalGatewayNATRules(types.LocalnetGatewayNextHopPort, IPNet)
+		rules = append(rules, getLocalGatewayFilterRules(types.LocalnetGatewayNextHopPort, IPNet)...)
 		if err := nodeipt.DelRules(rules); err != nil {
 			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
 		}

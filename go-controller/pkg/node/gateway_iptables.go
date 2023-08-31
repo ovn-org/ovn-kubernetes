@@ -369,20 +369,15 @@ func initExternalBridgeDropForwardingRules(ifName string) error {
 	return appendIptRules(getGatewayDropRules(ifName))
 }
 
-func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
+func getLocalGatewayFilterRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	protocol := getIPTablesProtocol(cidr.IP.String())
-	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
-	if protocol == iptables.ProtocolIPv6 {
-		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
-	}
 	return []nodeipt.Rule{
 		{
 			Table: "filter",
 			Chain: "FORWARD",
 			Args: []string{
 				"-o", ifname,
-				"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED",
 				"-j", "ACCEPT",
 			},
 			Protocol: protocol,
@@ -406,6 +401,17 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 			},
 			Protocol: protocol,
 		},
+	}
+}
+
+func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
+	// Allow packets to/from the gateway interface in case defaults deny
+	protocol := getIPTablesProtocol(cidr.IP.String())
+	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
+	if protocol == iptables.ProtocolIPv6 {
+		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
+	}
+	return []nodeipt.Rule{
 		{
 			Table: "nat",
 			Chain: "POSTROUTING",
@@ -429,7 +435,15 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 
 // initLocalGatewayNATRules sets up iptables rules for interfaces
 func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
-	// Append and not insert as these rules should be evaluated last
+	// Insert the filter table rules because they need to be evaluated BEFORE the DROP rules
+	// we have for forwarding. DO NOT change the ordering; specially important
+	// during SGW->LGW rollouts and restarts.
+	err := insertIptRules(getLocalGatewayFilterRules(ifname, cidr))
+	if err != nil {
+		return fmt.Errorf("unable to insert forwarding rules %v", err)
+	}
+	// append the masquerade rules in POSTROUTING table since that needs to be
+	// evaluated last.
 	return appendIptRules(getLocalGatewayNATRules(ifname, cidr))
 }
 
