@@ -268,7 +268,10 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 	return &pInfo, nil
 }
 
-func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP) (*kapi.Pod, error) {
+// findPodWithIPAddresses finds any pods with the same IPs in a running state on the cluster
+// If nodeName is provided, pods only belonging to the same node will be checked, unless this pod has
+// potentially live migrated.
+func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP, nodeName string) (*kapi.Pod, error) {
 	allPods, err := bnc.watchFactory.GetAllPods()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get pods: %w", err)
@@ -279,6 +282,16 @@ func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP) (*k
 		if util.PodCompleted(p) || util.PodWantsHostNetwork(p) || !util.PodScheduled(p) {
 			continue
 		}
+
+		// If the network type is Layer 3, then IP allocation is per node, so we can filter pods by node name.
+		// If pod is not applicable to live migration, restrict the search to only pods on the filtered node
+		// This specifically speeds up a case where a pod may have been annotated by ovnkube-controller, but has not yet
+		// returned from CNI ADD. In that case the GetPodIPsOfNetwork would unmarshal the annotation and take a perf
+		// hit for no reason (since the IP cannot be in the same subnet as what we are looking for).
+		if bnc.TopologyType() == ovntypes.Layer3Topology && !kubevirt.IsPodLiveMigratable(p) && len(nodeName) > 0 && nodeName != p.Spec.NodeName {
+			continue
+		}
+
 		// check if the pod addresses match in the OVN annotation
 		haystackPodAddrs, err := util.GetPodIPsOfNetwork(p, bnc.NetInfo)
 		if err != nil {
@@ -298,7 +311,7 @@ func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP) (*k
 }
 
 // canReleasePodIPs checks if the podIPs can be released or not.
-func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet) (bool, error) {
+func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet, nodeName string) (bool, error) {
 	// in certain configurations IP allocation is handled by cluster manager so
 	// we can locally release the IPs without checking
 	if !bnc.allocatesPodAnnotation() {
@@ -309,7 +322,8 @@ func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet) (boo
 	for _, podIPNet := range podIfAddrs {
 		needleIPs = append(needleIPs, podIPNet.IP)
 	}
-	collidingPod, err := bnc.findPodWithIPAddresses(needleIPs)
+
+	collidingPod, err := bnc.findPodWithIPAddresses(needleIPs, nodeName)
 	if err != nil {
 		return false, fmt.Errorf("unable to determine if pod IPs: %#v are in use by another pod :%w", podIfAddrs, err)
 
@@ -980,7 +994,12 @@ func (bnc *BaseNetworkController) shouldReleaseDeletedPod(expectedSwitchName, sw
 			return true, nil
 		}
 
-		canRelease, err := bnc.canReleasePodIPs(podIfAddrs)
+		// if this pod applies to live migration, it could have migrated do not filter node name
+		nodeName := ""
+		if !kubevirt.IsPodLiveMigratable(pod) {
+			nodeName = pod.Spec.NodeName
+		}
+		canRelease, err := bnc.canReleasePodIPs(podIfAddrs, nodeName)
 		if err != nil {
 			return false, fmt.Errorf("unable to determine if completed pod IP is in use by another pod. "+
 				"Will not release pod %s/%s IP: %#v from allocator. %v", pod.Namespace, pod.Name, podIfAddrs, err)

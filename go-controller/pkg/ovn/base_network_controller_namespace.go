@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -403,7 +404,12 @@ func (bsnc *BaseNetworkController) removeRemoteZonePodFromNamespaceAddressSet(po
 	// make sure that the ips are not colliding with other pod.
 	shouldRelease := true
 	if util.PodCompleted(pod) {
-		shouldRelease, err := bsnc.canReleasePodIPs(podIfAddrs)
+		// if this pod applies to live migration, it could have migrated do not filter node name
+		nodeName := ""
+		if !kubevirt.IsPodLiveMigratable(pod) {
+			nodeName = pod.Spec.NodeName
+		}
+		shouldRelease, err := bsnc.canReleasePodIPs(podIfAddrs, nodeName)
 		if err != nil {
 			klog.Errorf("Unable to determine if completed remote pod IP is in use by another pod. "+
 				"Will not release pod %s/%s IP: %#v from namespace addressset. %w", pod.Namespace, pod.Name, podIfAddrs, err)

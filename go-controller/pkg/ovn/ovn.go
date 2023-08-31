@@ -181,14 +181,13 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 //
 // It returns nil on success and error on failure; failure indicates the pod set up should be retried later.
 func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
-	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
-	if err != nil {
-		// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
-		return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w",
-			pod.Namespace, pod.Name, ovntypes.NewSuppressedError(err))
-	}
-
 	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
+		podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+		if err != nil {
+			// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
+			return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w",
+				pod.Namespace, pod.Name, ovntypes.NewSuppressedError(err))
+		}
 		if err := oc.addRemotePodToNamespace(pod.Namespace, podIfAddrs); err != nil {
 			return fmt.Errorf("failed to add remote pod %s/%s to namespace: %w", pod.Namespace, pod.Name, err)
 		}
