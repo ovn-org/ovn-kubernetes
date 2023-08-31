@@ -284,7 +284,7 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 			desc:      "error: annotation not found for node",
 			inpNode:   &v1.Node{},
 			errAssert: true,
-			errMatch:  fmt.Errorf("%s annotation not found for node", ovnNodeL3GatewayConfig),
+			errMatch:  fmt.Errorf("%s annotation not found for node", OvnNodeL3GatewayConfig),
 		},
 		{
 			desc: "error: fail to unmarshal l3 gateway config annotations",
@@ -304,7 +304,7 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 				},
 			},
 			errAssert: true,
-			errMatch:  fmt.Errorf("%s annotation for %s network not found", ovnNodeL3GatewayConfig, ovnDefaultNetworkGateway),
+			errMatch:  fmt.Errorf("%s annotation for %s network not found", OvnNodeL3GatewayConfig, ovnDefaultNetworkGateway),
 		},
 		{
 			desc: "error: nod chassis ID annotation not found",
@@ -314,7 +314,7 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 				},
 			},
 			errAssert: true,
-			errMatch:  fmt.Errorf("%s annotation not found", ovnNodeChassisID),
+			errMatch:  fmt.Errorf("%s annotation not found", OvnNodeChassisID),
 		},
 		{
 			desc: "success: parse completed",

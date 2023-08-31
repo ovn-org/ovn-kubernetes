@@ -46,7 +46,7 @@ Example:
 
 const (
 	DPUConnectionDetailsAnnot = "k8s.ovn.org/dpu.connection-details"
-	DPUConnetionStatusAnnot   = "k8s.ovn.org/dpu.connection-status"
+	DPUConnectionStatusAnnot  = "k8s.ovn.org/dpu.connection-status"
 
 	DPUConnectionStatusReady = "Ready"
 	DPUConnectionStatusError = "Error"
@@ -140,7 +140,7 @@ func UnmarshalPodDPUConnDetails(annotations map[string]string, nadName string) (
 // UnmarshalPodDPUConnStatusAllNetworks returns the DPUConnectionStatus map of all networks from the given Pod annotation
 func UnmarshalPodDPUConnStatusAllNetworks(annotations map[string]string) (map[string]DPUConnectionStatus, error) {
 	podDcss := make(map[string]DPUConnectionStatus)
-	ovnAnnotation, ok := annotations[DPUConnetionStatusAnnot]
+	ovnAnnotation, ok := annotations[DPUConnectionStatusAnnot]
 	if ok {
 		if err := json.Unmarshal([]byte(ovnAnnotation), &podDcss); err != nil {
 			// DPU connection status annotation could be in the legacy format
@@ -149,7 +149,7 @@ func UnmarshalPodDPUConnStatusAllNetworks(annotations map[string]string) (map[st
 				podDcss[types.DefaultNetworkName] = legacyScs
 			} else {
 				return nil, fmt.Errorf("failed to unmarshal OVN pod %s annotation %q: %v",
-					DPUConnetionStatusAnnot, annotations, err)
+					DPUConnectionStatusAnnot, annotations, err)
 			}
 		}
 	}
@@ -170,13 +170,13 @@ func MarshalPodDPUConnStatus(annotations map[string]string, scs *DPUConnectionSt
 	if scs != nil {
 		if ok && sc == *scs {
 			return nil, newAnnotationAlreadySetError("OVN pod %s annotation for NAD %s already exists in %v",
-				DPUConnetionStatusAnnot, nadName, annotations)
+				DPUConnectionStatusAnnot, nadName, annotations)
 		}
 		podScss[nadName] = *scs
 	} else {
 		if !ok {
 			return nil, newAnnotationAlreadySetError("OVN pod %s annotation for NAD %s already removed",
-				DPUConnetionStatusAnnot, nadName)
+				DPUConnectionStatusAnnot, nadName)
 		}
 		delete(podScss, nadName)
 	}
@@ -184,13 +184,13 @@ func MarshalPodDPUConnStatus(annotations map[string]string, scs *DPUConnectionSt
 	if err != nil {
 		return nil, fmt.Errorf("failed marshaling pod annotation map %v: %v", podScss, err)
 	}
-	annotations[DPUConnetionStatusAnnot] = string(bytes)
+	annotations[DPUConnectionStatusAnnot] = string(bytes)
 	return annotations, nil
 }
 
 // UnmarshalPodDPUConnStatus returns DPU connection status for the specified NAD
 func UnmarshalPodDPUConnStatus(annotations map[string]string, nadName string) (*DPUConnectionStatus, error) {
-	ovnAnnotation, ok := annotations[DPUConnetionStatusAnnot]
+	ovnAnnotation, ok := annotations[DPUConnectionStatusAnnot]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
 	}
@@ -202,7 +202,7 @@ func UnmarshalPodDPUConnStatus(annotations map[string]string, nadName string) (*
 	scs, ok := podScss[nadName]
 	if !ok {
 		return nil, newAnnotationNotSetError("no OVN %s annotation for network %s: %q",
-			DPUConnetionStatusAnnot, nadName, ovnAnnotation)
+			DPUConnectionStatusAnnot, nadName, ovnAnnotation)
 	}
 	return &scs, nil
 }

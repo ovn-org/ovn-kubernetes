@@ -39,6 +39,7 @@ convert_cni() {
   kubectl -n ovn-kubernetes delete pod -l name=ovnkube-zone-controller ||:
   kubectl -n ovn-kubernetes delete pod -l name=ovnkube-master ||:
   kubectl -n ovn-kubernetes delete pod -l name=ovnkube-control-plane ||:
+  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-identity ||:
 
   # restart ovnkube-node
   kubectl -n ovn-kubernetes rollout restart daemonset ovnkube-node

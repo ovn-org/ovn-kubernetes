@@ -28,8 +28,6 @@ spec:
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
-      # Requires fairly broad permissions - ability to read all services and network functions as well
-      # as all pods.
       serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
@@ -259,6 +257,12 @@ spec:
         - mountPath: /host
           name: host-slash
           readOnly: true
+        - mountPath: /var/lib/kubelet
+          name: host-kubelet
+          readOnly: true
+        - mountPath: /host-kubernetes
+          name: host-kubeconfig
+          readOnly: true
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
@@ -433,6 +437,8 @@ spec:
           value: "{{ ovn_enable_interconnect }}"
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: "{{ ovn_enable_multi_external_gateway }}"
+        - name: OVN_ENABLE_OVNKUBE_IDENTITY
+          value: "{{ ovn_enable_ovnkube_identity }}"
 
         readinessProbe:
           exec:
@@ -556,6 +562,12 @@ spec:
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
+      - name: host-kubelet
+        hostPath:
+          path: /var/lib/kubelet
+      - name: host-kubeconfig
+        hostPath:
+          path: /etc/kubernetes/
       - name: host-var-log-ovnkube
         hostPath:
           path: /var/log/ovn-kubernetes

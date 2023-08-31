@@ -79,24 +79,24 @@ var _ = Describe("CNI Utils tests", func() {
 	Context("isDPUReady", func() {
 		It("Returns true if dpu.connection-status is present and Status is Ready", func() {
 			podAnnot := map[string]string{
-				util.OvnPodAnnotationName:    defaultPodAnnotation,
-				util.DPUConnetionStatusAnnot: `{"Status":"Ready"}`}
+				util.OvnPodAnnotationName:     defaultPodAnnotation,
+				util.DPUConnectionStatusAnnot: `{"Status":"Ready"}`}
 			_, ready := isDPUReady(podAnnot, ovntypes.DefaultNetworkName)
 			Expect(ready).To(Equal(true))
 		})
 
 		It("Returns false if dpu.connection-status is present and Status is not Ready", func() {
 			podAnnot := map[string]string{
-				util.OvnPodAnnotationName:    defaultPodAnnotation,
-				util.DPUConnetionStatusAnnot: `{"Status":"NotReady"}`}
+				util.OvnPodAnnotationName:     defaultPodAnnotation,
+				util.DPUConnectionStatusAnnot: `{"Status":"NotReady"}`}
 			_, ready := isDPUReady(podAnnot, ovntypes.DefaultNetworkName)
 			Expect(ready).To(Equal(false))
 		})
 
 		It("Returns false if dpu.connection-status Status is not present", func() {
 			podAnnot := map[string]string{
-				util.OvnPodAnnotationName:    defaultPodAnnotation,
-				util.DPUConnetionStatusAnnot: `{"Foo":"Bar"}`}
+				util.OvnPodAnnotationName:     defaultPodAnnotation,
+				util.DPUConnectionStatusAnnot: `{"Foo":"Bar"}`}
 			_, ready := isDPUReady(podAnnot, ovntypes.DefaultNetworkName)
 			Expect(ready).To(Equal(false))
 		})
