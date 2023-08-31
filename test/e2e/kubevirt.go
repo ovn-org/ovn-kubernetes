@@ -457,7 +457,7 @@ passwd:
 									Name: "containerdisk",
 									VolumeSource: kubevirtv1.VolumeSource{
 										ContainerDisk: &kubevirtv1.ContainerDiskSource{
-											Image: "quay.io/fedora/fedora-coreos-kubevirt:stable",
+											Image: "quay.io/kubevirtci/fedora-coreos-kubevirt:v20230905-be4fa50",
 										},
 									},
 								},
