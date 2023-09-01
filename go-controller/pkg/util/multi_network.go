@@ -98,7 +98,8 @@ func (nInfo *DefaultNetInfo) CompareNetInfo(netBasicInfo BasicNetInfo) bool {
 
 // TopologyType returns the defaultNetConfInfo's topology type which is empty
 func (nInfo *DefaultNetInfo) TopologyType() string {
-	return ""
+	// TODO(trozet): optimize other checks using this function after changing default network type from "" -> L3
+	return types.Layer3Topology
 }
 
 // MTU returns the defaultNetConfInfo's MTU value
