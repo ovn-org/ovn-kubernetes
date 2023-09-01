@@ -216,15 +216,15 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		Rate:   int(25),
 	})
 	meters := map[string]string{
-		types.OVNARPRateLimiter:              getMeterNameForProtocol(types.OVNARPRateLimiter),
-		types.OVNARPResolveRateLimiter:       getMeterNameForProtocol(types.OVNARPResolveRateLimiter),
-		types.OVNBFDRateLimiter:              getMeterNameForProtocol(types.OVNBFDRateLimiter),
-		types.OVNControllerEventsRateLimiter: getMeterNameForProtocol(types.OVNControllerEventsRateLimiter),
-		types.OVNICMPV4ErrorsRateLimiter:     getMeterNameForProtocol(types.OVNICMPV4ErrorsRateLimiter),
-		types.OVNICMPV6ErrorsRateLimiter:     getMeterNameForProtocol(types.OVNICMPV6ErrorsRateLimiter),
-		types.OVNRejectRateLimiter:           getMeterNameForProtocol(types.OVNRejectRateLimiter),
-		types.OVNTCPRSTRateLimiter:           getMeterNameForProtocol(types.OVNTCPRSTRateLimiter),
-		types.OVNServiceMonitorLimiter:       getMeterNameForProtocol(types.OVNServiceMonitorLimiter),
+		OVNARPRateLimiter:              getMeterNameForProtocol(OVNARPRateLimiter),
+		OVNARPResolveRateLimiter:       getMeterNameForProtocol(OVNARPResolveRateLimiter),
+		OVNBFDRateLimiter:              getMeterNameForProtocol(OVNBFDRateLimiter),
+		OVNControllerEventsRateLimiter: getMeterNameForProtocol(OVNControllerEventsRateLimiter),
+		OVNICMPV4ErrorsRateLimiter:     getMeterNameForProtocol(OVNICMPV4ErrorsRateLimiter),
+		OVNICMPV6ErrorsRateLimiter:     getMeterNameForProtocol(OVNICMPV6ErrorsRateLimiter),
+		OVNRejectRateLimiter:           getMeterNameForProtocol(OVNRejectRateLimiter),
+		OVNTCPRSTRateLimiter:           getMeterNameForProtocol(OVNTCPRSTRateLimiter),
+		OVNServiceMonitorLimiter:       getMeterNameForProtocol(OVNServiceMonitorLimiter),
 	}
 	fairness := true
 	for _, v := range meters {
