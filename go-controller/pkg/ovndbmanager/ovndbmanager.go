@@ -28,7 +28,12 @@ import (
 var DBError = errors.New("error interacting with OVN database")
 
 const (
-	maxDBRetry     = 10
+	// maxTimeSinceLastSuccesfulClusterStatus is the maximum time since the
+	// cluster status was last obtained succesfuly after which the DB is reset.
+	// Ideally we want this to be over the crash-loop back-off cap of 5 minutes
+	// to avoid resetting the DB if the it is not up for some other reason.
+	maxTimeSinceLastSuccesfulClusterStatus = time.Minute * 10
+
 	nbdbSchema     = "/usr/share/ovn/ovn-nb.ovsschema"
 	nbdbServerSock = "unix:/var/run/ovn/ovnnb_db.sock"
 	sbdbSchema     = "/usr/share/ovn/ovn-sb.ovsschema"
@@ -86,56 +91,50 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 		os.Exit(1)
 	}
 
-	var dbRetry int32
+	lastSuccesfulClusterStatus := time.Now()
 
 	for {
 		select {
 		case <-ticker.C:
 			klog.V(5).Infof("Ensure routines for Raft db: %s kicked off by ticker", db)
-			if err := ensureLocalRaftServerID(dbProperties); err != nil {
+			err := ensureLocalRaftServerID(dbProperties)
+			if err != nil {
 				klog.Error(err)
-				if errors.Is(err, DBError) {
-					updateDBRetryCounter(&dbRetry, dbProperties)
-				}
-			} else {
-				dbRetry = 0
 			}
-			if err := ensureClusterRaftMembership(dbProperties, kclient); err != nil {
+			if !errors.Is(err, DBError) {
+				lastSuccesfulClusterStatus = time.Now()
+			}
+			err = ensureClusterRaftMembership(dbProperties, kclient)
+			if err != nil {
 				klog.Error(err)
-				if errors.Is(err, DBError) {
-					updateDBRetryCounter(&dbRetry, dbProperties)
-				}
-			} else {
-				dbRetry = 0
 			}
+			if !errors.Is(err, DBError) {
+				lastSuccesfulClusterStatus = time.Now()
+			}
+
 			if dbProperties.ElectionTimer != 0 {
-				if err := ensureElectionTimeout(dbProperties); err != nil {
+				err = ensureElectionTimeout(dbProperties)
+				if err != nil {
 					klog.Error(err)
-					if errors.Is(err, DBError) {
-						updateDBRetryCounter(&dbRetry, dbProperties)
-					}
-				} else {
-					dbRetry = 0
 				}
+				if !errors.Is(err, DBError) {
+					lastSuccesfulClusterStatus = time.Now()
+				}
+			}
+
+			timeSinceLastSuccesfulClusterStatus := time.Since(lastSuccesfulClusterStatus)
+			if timeSinceLastSuccesfulClusterStatus > maxTimeSinceLastSuccesfulClusterStatus {
+				klog.Infof("Failed to get %s cluster status for %s, resetting DB file", db, timeSinceLastSuccesfulClusterStatus)
+				err := resetRaftDB(dbProperties)
+				if err != nil {
+					klog.Warningf(err.Error())
+				}
+				lastSuccesfulClusterStatus = time.Now()
 			}
 		case <-stopCh:
 			ticker.Stop()
 			return
 		}
-	}
-}
-
-func updateDBRetryCounter(retryCounter *int32, db *util.OvsDbProperties) {
-	if *retryCounter > maxDBRetry {
-		//delete the db file and start master
-		err := resetRaftDB(db)
-		if err != nil {
-			klog.Warningf(err.Error())
-		}
-		*retryCounter = 0
-	} else {
-		*retryCounter += 1
-		klog.Infof("Failed to get cluster status for: %s, number of retries: %d", db, *retryCounter)
 	}
 }
 
