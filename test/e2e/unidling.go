@@ -223,10 +223,10 @@ var _ = ginkgo.Describe("Unidling", func() {
 				close(done)
 			}()
 			wg.Wait()
+			defer func() { <-done }()
 
 			// Connecting to the service should work at the first attempt
 			gomega.Expect(checkService(clientPod, cmd)).To(gomega.Equal(works))
-			<-done
 		})
 	})
 
