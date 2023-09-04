@@ -105,7 +105,10 @@ func (oc *DefaultNetworkController) staticRouteCleanup(nextHops []net.IP) {
 		ips.Insert(nextHop.String())
 	}
 	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-		return ips.Has(item.Nexthop)
+		// FIXME(mk): Currently, logical router static routes do not have OVN DB indexes except Egress IP configured LRSRs.
+		// Exclude any LRSRs that have an owner. Remove this when all LRSRs have an owner reference and then only
+		// delete owned GW related static routes.
+		return ips.Has(item.Nexthop) && item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == ""
 	}
 	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
 	if err != nil {
