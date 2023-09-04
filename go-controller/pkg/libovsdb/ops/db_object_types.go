@@ -6,6 +6,7 @@ const (
 	addressSet dbObjType = iota
 	acl
 	dhcpOptions
+	lrStaticRoute
 )
 
 const (
@@ -43,7 +44,9 @@ const (
 	IpBlockIndexKey       ExternalIDKey = "ip-block-index"
 	RuleIndex             ExternalIDKey = "rule-index"
 	CIDRKey               ExternalIDKey = types.OvnK8sPrefix + "/cidr"
+	NextHop               ExternalIDKey = "next-hop"
 	PortPolicyProtocolKey ExternalIDKey = "port-policy-protocol"
+	EgressIPIPKey         ExternalIDKey = "egressip-ip"
 )
 
 // ObjectIDsTypes should only be created here
@@ -240,4 +243,13 @@ var VirtualMachineDHCPOptions = newObjectIDsType(dhcpOptions, VirtualMachineOwne
 	ObjectNameKey,
 	// CIDR field from DHCPOptions with ":" replaced by "."
 	CIDRKey,
+})
+
+var LRStaticRouteEgressIP = newObjectIDsType(lrStaticRoute, EgressIPOwnerType, []ExternalIDKey{
+	// Cluster scoped EgressIP object name
+	ObjectNameKey,
+	// EgressIP IP with ":" replaced by ".".
+	EgressIPIPKey,
+	// ip_prefix field from LRSR with ":" replaced by ".". For EIP feature, we do not add CIDR to ip_prefix, just IP with no subnet mask/
+	IpKey,
 })
