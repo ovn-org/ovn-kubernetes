@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -475,8 +476,15 @@ func (bnc *BaseNetworkController) podSelectorPodNeedsDelete(pod *kapi.Pod, podHa
 			pod.Namespace, pod.Name, err)
 		return "", nil
 	}
+
+	// if this pod applies to live migration, it could have migrated do not filter node name
+	nodeName := ""
+	if !kubevirt.IsPodLiveMigratable(pod) {
+		nodeName = pod.Spec.NodeName
+	}
+
 	// completed pod be deleted a long time ago, check if there is a new pod with that same ip
-	collidingPod, err := bnc.findPodWithIPAddresses(ips)
+	collidingPod, err := bnc.findPodWithIPAddresses(ips, nodeName)
 	if err != nil {
 		return "", fmt.Errorf("lookup for pods with the same IPs [%s] failed: %w", util.JoinIPs(ips, " "), err)
 	}
