@@ -362,12 +362,12 @@ var _ = ginkgo.Describe("Services", func() {
 							}
 							for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
 								framework.Logf("Flushing the ip route cache on %s", ovnKubeNodePod.Name)
-								_, err := framework.RunHostCmdWithRetries(
-									ovnNs,
-									ovnKubeNodePod.Name,
-									"ip route flush cache",
-									framework.Poll,
-									60*time.Second)
+								containerName := "ovnkube-node"
+								if isInterconnectEnabled() {
+									containerName = "ovnkube-controller"
+								}
+								_, err := framework.RunKubectl(ovnNs, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
+									"ip", "route", "flush", "cache")
 								framework.ExpectNoError(err, "Flushing the ip route cache failed")
 							}
 						}
