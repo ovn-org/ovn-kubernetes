@@ -882,16 +882,12 @@ func (oc *DefaultNetworkController) syncPodAssignmentCache(egressIPCache map[str
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
 	for egressIPName, state := range egressIPCache {
-		p1 := func(item *nbdb.LogicalRouterPolicy) bool {
-			return item.Priority == types.EgressIPReroutePriority && item.ExternalIDs["name"] == egressIPName
-		}
+		p1 := composeEIPRouterPolicyPredicateForName(egressIPName)
 		reRoutePolicies, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(oc.nbClient, p1)
 		if err != nil {
 			return err
 		}
-		p2 := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.ExternalIDs["name"] == egressIPName
-		}
+		p2 := composeEIPStaticRoutePredicateForName(egressIPName)
 		reRouteStaticRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(oc.nbClient, p2)
 		if err != nil {
 			return err
@@ -958,7 +954,7 @@ func (oc *DefaultNetworkController) syncStaleEgressReroutePolicy(egressIPCache m
 		if item.Priority != types.EgressIPReroutePriority {
 			return false
 		}
-		egressIPName := item.ExternalIDs["name"]
+		egressIPName := getEIPNameFromExternalIDs(item.GetExternalIDs())
 		cacheEntry, exists := egressIPCache[egressIPName]
 		splitMatch := strings.Split(item.Match, " ")
 		logicalIP := splitMatch[len(splitMatch)-1]
@@ -1015,9 +1011,9 @@ func (oc *DefaultNetworkController) syncStaleEgressReroutePolicy(egressIPCache m
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (oc *DefaultNetworkController) syncStaleSNATRules(egressIPCache map[string]egressIPCacheEntry) error {
 	predicate := func(item *nbdb.NAT) bool {
-		egressIPName, exists := item.ExternalIDs["name"]
+		egressIPName := getEIPNameFromExternalIDs(item.ExternalIDs)
 		// Exclude rows that have no name or are not the right type
-		if !exists || item.Type != nbdb.NATTypeSNAT {
+		if egressIPName == "" || item.Type != nbdb.NATTypeSNAT {
 			return false
 		}
 		parsedLogicalIP := net.ParseIP(item.LogicalIP).String()
@@ -1853,21 +1849,12 @@ func (e *egressIPZoneController) createStaticRouteOps(ops []ovsdb.Operation, pod
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 	// Handle all pod IPs that match the egress IP address family
 	for _, podIPNet := range util.MatchAllIPNetFamily(isEgressIPv6, podIPNets) {
-		lrsr := nbdb.LogicalRouterStaticRoute{
-			IPPrefix: podIPNet.IP.String(),
-			Nexthop:  nextHop,
-			ExternalIDs: map[string]string{
-				"name": egressIPName,
-			},
-			Policy: &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-		}
-		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.IPPrefix == lrsr.IPPrefix && item.Nexthop == lrsr.Nexthop && item.ExternalIDs["name"] == lrsr.ExternalIDs["name"] && item.Policy == lrsr.Policy
-		}
-
-		ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter, &lrsr, p)
+		podIP := podIPNet.IP.String()
+		route := composeEIPStaticRoute(egressIPName, status.EgressIP, podIP, nextHop)
+		ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter, route,
+			composeEIPStaticRoutePredicateForNamePodIPAndNextHop(egressIPName, podIP, nextHop))
 		if err != nil {
-			return nil, fmt.Errorf("error creating logical router static route %+v on router %s: %v", lrsr, types.OVNClusterRouter, err)
+			return nil, fmt.Errorf("error creating logical router static route %+v on router %s: %v", route, types.OVNClusterRouter, err)
 		}
 	}
 	return ops, nil
@@ -1878,10 +1865,8 @@ func (e *egressIPZoneController) deleteStaticRouteOps(ops []ovsdb.Operation, pod
 	var err error
 	// Handle all pod IPs that match the egress IP address family
 	for _, podIPNet := range util.MatchAllIPNetFamily(isEgressIPv6, podIPNets) {
-		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.IPPrefix == podIPNet.IP.String() && item.ExternalIDs["name"] == egressIPName && item.Policy != nil && *item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
-		}
-		ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter, p)
+		ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter,
+			composeEIPStaticRoutePredicateWithNameAndPodIP(egressIPName, podIPNet.IP.String()))
 		if err != nil {
 			return nil, fmt.Errorf("error deleting logical router static route on router %s: %v", types.OVNClusterRouter, err)
 		}
@@ -1919,41 +1904,33 @@ func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status e
 			}
 		}
 	}
-
+	var policyPred func(item *nbdb.LogicalRouterPolicy) bool
 	if nextHopIP != "" {
-		policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
-			hasIPNexthop := false
-			for _, nexthop := range item.Nexthops {
-				if nexthop == nextHopIP {
-					hasIPNexthop = true
-					break
-				}
-			}
-			return item.Priority == types.EgressIPReroutePriority && item.ExternalIDs["name"] == name && hasIPNexthop
-		}
-		ops, err = libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter, policyPred, nextHopIP)
-		if err != nil {
-			return nil, fmt.Errorf("error removing nexthop IP %s from egress ip %s policies on router %s: %v",
-				nextHopIP, name, types.OVNClusterRouter, err)
-		}
+		policyPred = composeEIPRouterPolicyPredicateForNameAndNextHop(name, nextHopIP)
 	} else {
-		//FIXME: (mk) just nuke everything to do with this 'name'
-		klog.Errorf("Unable to get next hop IP and therefore there could be stale logical route policies for Egress IP %s", status.EgressIP)
+		policyPred = composeEIPRouterPolicyPredicateForName(name)
+	}
+	ops, err = libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter, policyPred, nextHopIP)
+	if err != nil {
+		return nil, fmt.Errorf("error removing nexthop IP %s from egress ip %s policies on router %s: %v",
+			nextHopIP, name, types.OVNClusterRouter, err)
 	}
 
 	var nats []*nbdb.NAT
 	if loadedEgressNode && isLocalZoneEgressNode {
-		if config.OVNKubernetesFeature.EnableInterconnect && nextHopIP != "" {
-			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-				return item.Nexthop == nextHopIP && item.ExternalIDs["name"] == name && item.Policy != nil && *item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
+		// if config.OVNKubernetesFeature.EnableInterconnect && nextHopIP != "" {
+		if config.OVNKubernetesFeature.EnableInterconnect {
+			if nextHopIP != "" {
+				ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter,
+					composeEIPStaticRoutePredicateWithNameAndNextHop(name, nextHopIP))
+			} else {
+				// Unable to get nextHop therefore we remove all LRSRs that are created for a specific EgressIP IP which will break HA
+				ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter,
+					composeEIPStaticRoutePredicateForNameAndEIPIP(name, status.EgressIP))
 			}
-			ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter, p)
 			if err != nil {
 				return nil, fmt.Errorf("error deleting logical router static routes on router %s for %s: %w", types.OVNClusterRouter, name, err)
 			}
-		} else if config.OVNKubernetesFeature.EnableInterconnect {
-			//FIXME: (mk) We need to wipe everything with that external 'name' and the priority we own
-			klog.Errorf("Failed to find next hop IP therefore unable to clean static routes")
 		}
 		routerName := util.GetGatewayRouterFromNode(status.Node)
 		natPred := func(nat *nbdb.NAT) bool {
@@ -2235,4 +2212,90 @@ func getPodKey(pod *kapi.Pod) string {
 func getPodNamespaceAndNameFromKey(podKey string) (string, string) {
 	parts := strings.Split(podKey, "_")
 	return parts[0], parts[1]
+}
+
+func composeEIPStaticRoute(eIPName, eIPIP, podIP, nextHop string) *nbdb.LogicalRouterStaticRoute {
+	route := &nbdb.LogicalRouterStaticRoute{
+		IPPrefix: podIP,
+		Nexthop:  nextHop,
+		Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+	}
+	dbObject := libovsdbops.NewDbObjectIDs(libovsdbops.LRStaticRouteEgressIP, DefaultNetworkControllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: eIPName,
+			libovsdbops.EgressIPIPKey: strings.ReplaceAll(eIPIP, ":", "."),
+			libovsdbops.IpKey:         strings.ReplaceAll(podIP, ":", "."),
+		})
+	route.ExternalIDs = dbObject.GetExternalIDs()
+	return route
+}
+
+func composeEIPStaticRoutePredicateForName(eIPName string) func(item *nbdb.LogicalRouterStaticRoute) bool {
+	return func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return getEIPNameFromExternalIDs(item.GetExternalIDs()) == eIPName && item.Policy != nil && *item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
+	}
+}
+
+func composeEIPStaticRoutePredicateForNameAndEIPIP(eIPName, eIPIP string) func(item *nbdb.LogicalRouterStaticRoute) bool {
+	return func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.Policy != nil && *item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP &&
+			getEIPNameFromExternalIDs(item.GetExternalIDs()) == eIPName &&
+			item.ExternalIDs[libovsdbops.EgressIPIPKey.String()] == strings.ReplaceAll(eIPIP, ":", ".")
+	}
+}
+
+func composeEIPStaticRoutePredicateWithNameAndPodIP(eIPName, podIP string) func(item *nbdb.LogicalRouterStaticRoute) bool {
+	return func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.Policy != nil && *item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP &&
+			item.IPPrefix == podIP && getEIPNameFromExternalIDs(item.GetExternalIDs()) == eIPName
+	}
+}
+
+func composeEIPStaticRoutePredicateWithNameAndNextHop(eIPName, nextHop string) func(item *nbdb.LogicalRouterStaticRoute) bool {
+	return func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.Policy != nil && *item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP &&
+			item.Nexthop == nextHop && getEIPNameFromExternalIDs(item.GetExternalIDs()) == eIPName
+	}
+}
+
+func composeEIPStaticRoutePredicateForNamePodIPAndNextHop(eIPName, podIP, nextHop string) func(item *nbdb.LogicalRouterStaticRoute) bool {
+	return func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.Policy != nil && *item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP &&
+			item.IPPrefix == podIP && item.Nexthop == nextHop &&
+			getEIPNameFromExternalIDs(item.GetExternalIDs()) == eIPName
+	}
+}
+
+func composeEIPRouterPolicyPredicateForName(eIPName string) func(item *nbdb.LogicalRouterPolicy) bool {
+	return func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == types.EgressIPReroutePriority && getEIPNameFromExternalIDs(item.GetExternalIDs()) == eIPName
+	}
+}
+
+func composeEIPRouterPolicyPredicateForNameAndNextHop(eIPName, nextHop string) func(item *nbdb.LogicalRouterPolicy) bool {
+	return func(item *nbdb.LogicalRouterPolicy) bool {
+		if item.Priority != types.EgressIPReroutePriority {
+			return false
+		}
+		hasIPNextHop := false
+		for _, policyNextHop := range item.Nexthops {
+			if policyNextHop == nextHop {
+				hasIPNextHop = true
+				break
+			}
+		}
+		return hasIPNextHop && getEIPNameFromExternalIDs(item.GetExternalIDs()) == eIPName
+	}
+}
+
+// getEIPNameFromExternalIDs attempts to find the EgressIP CR name from external IDs. If unable to find, empty string is returned.
+func getEIPNameFromExternalIDs(externalIDs map[string]string) string {
+	if name, ok := externalIDs[libovsdbops.ObjectNameKey.String()]; ok {
+		return name
+	}
+	// attempt to find EIP name using legacy "name"
+	if name, ok := externalIDs["name"]; ok {
+		return name
+	}
+	return ""
 }
