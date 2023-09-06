@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 
@@ -461,7 +462,7 @@ func DeleteNextHopsFromLogicalRouterPolicies(nbClient libovsdbclient.Client, rou
 	for _, lrp := range lrps {
 		nextHops := lrp.Nexthops
 		lrp, err := GetLogicalRouterPolicy(nbClient, lrp)
-		if err == libovsdbclient.ErrNotFound {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
 			continue
 		}
 		if err != nil {
@@ -1005,7 +1006,7 @@ func GetRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (
 	nats := []*nbdb.NAT{}
 	for _, uuid := range r.Nat {
 		nat, err := GetNAT(nbClient, &nbdb.NAT{UUID: uuid})
-		if err == libovsdbclient.ErrNotFound {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
 			continue
 		}
 		if err != nil {
@@ -1075,7 +1076,7 @@ func CreateOrUpdateNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRout
 // logical router and returns the corresponding ops
 func DeleteNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
 	routerNats, err := GetRouterNATs(nbClient, router)
-	if err == libovsdbclient.ErrNotFound {
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
 		return ops, nil
 	}
 	if err != nil {
