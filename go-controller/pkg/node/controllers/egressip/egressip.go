@@ -1,6 +1,7 @@
 package egressip
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -245,10 +246,19 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			return fmt.Errorf("unable to ensure iptables rules for jump rule: %v", err)
 		}
 	}
-	if err := c.RepairNode(); err != nil {
-		// TODO(mk): return error here instead of logging and retry or put in a retry func
-		klog.Errorf("Failed to repair node. Stale configuration maybe present on node: %v", err)
+
+	err = wait.PollUntilContextTimeout(wait.ContextForChannel(stopCh), 1*time.Second, 10*time.Second, true,
+		func(ctx context.Context) (done bool, err error) {
+			if err := c.RepairNode(); err != nil {
+				klog.Errorf("Failed to repair node: '%v' - Retrying", err)
+				return false, nil
+			}
+			return true, nil
+		})
+	if err != nil {
+		return fmt.Errorf("failed to run EgressIP controller because repairing node failed: %v", err)
 	}
+
 	for i := 0; i < threads; i++ {
 		for _, workerFn := range []func(*sync.WaitGroup){
 			c.runEIPWorker,
