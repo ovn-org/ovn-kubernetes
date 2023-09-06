@@ -13,6 +13,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 )
 
 // wait on a certain pod annotation related condition
@@ -86,10 +87,13 @@ func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 				// drop through to try again
 			} else if pod != nil {
 				podNADAnnotation, ready := annotCond(pod.Annotations, nadName)
+				klog.Infof("SURYA inside GetPodWithAnnotations %v/%v/%v", pod, podNADAnnotation, ready)
 				if ready {
+					klog.Infof("SURYA inside GetPodWithAnnotations %v/%v/%v", pod, podNADAnnotation, ready)
 					return pod, pod.Annotations, podNADAnnotation, nil
 				}
 			}
+			klog.Infof("SURYA inside GetPodWithAnnotations %v/%v/%v", namespace, name, pod)
 
 			// try again later
 			time.Sleep(200 * time.Millisecond)
@@ -130,6 +134,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		NADName:              nadName,
 		EnableUDPAggregation: config.Default.EnableUDPAggregation,
 	}
+	klog.Infof("SURYA inside PodAnnotation2PodInfo %v", podInterfaceInfo)
 	return podInterfaceInfo, nil
 }
 

@@ -41,6 +41,7 @@ type Plugin struct {
 
 // NewCNIPlugin creates the internal Plugin object
 func NewCNIPlugin(socketPath string) *Plugin {
+	klog.Infof("SURYA: inside NewCNIPlugin")
 	if len(socketPath) == 0 {
 		socketPath = serverSocketPath
 	}
@@ -50,6 +51,7 @@ func NewCNIPlugin(socketPath string) *Plugin {
 // Create and fill a Request with this Plugin's environment and stdin which
 // contain the CNI variables and configuration
 func newCNIRequest(args *skel.CmdArgs) *Request {
+	klog.Infof("SURYA: inside newCNIRequest %v", args)
 	envMap := make(map[string]string)
 	for _, item := range os.Environ() {
 		idx := strings.Index(item, "=")
@@ -67,6 +69,7 @@ func newCNIRequest(args *skel.CmdArgs) *Request {
 // Send a CNI request to the CNI server via JSON + HTTP over a root-owned unix socket,
 // and return the result
 func (p *Plugin) doCNI(url string, req interface{}) ([]byte, error) {
+	klog.Infof("SURYA: inside doCNI %v", req)
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal CNI request %v: %v", req, err)
@@ -94,7 +97,7 @@ func (p *Plugin) doCNI(url string, req interface{}) ([]byte, error) {
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("CNI request failed with status %v: '%s'", resp.StatusCode, string(body))
 	}
-
+	klog.Infof("SURYA: inside doCNI %v/%v", resp, body)
 	return body, nil
 }
 
@@ -173,6 +176,7 @@ type shimClientset struct {
 }
 
 func (c *shimClientset) getPod(namespace, name string) (*kapi.Pod, error) {
+	klog.Infof("SURYA inside getPod %v/%v", namespace, name)
 	return c.kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }
 
@@ -194,6 +198,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	setupLogging(conf)
 
 	req := newCNIRequest(args)
+	klog.Infof("SURYA: inside CmdAdd %v", req)
 
 	body, errB := p.doCNI("http://dummy/", req)
 	if errB != nil {
@@ -219,6 +224,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	if response.Result != nil {
 		// Return the full CNI result from ovnkube-node if it configured the pod interface
 		result = response.Result
+		klog.Infof("SURYA: Inside CmdAdd %v", result)
 	} else {
 		// The onvkube-node is running in un-privileged mode. The responsibility of
 		// plugging an interface into Pod is on the Shim.
@@ -230,6 +236,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 			klog.Error(err.Error())
 			return err
 		}
+		klog.Infof("SURYA: Inside CmdAdd %v", pr)
 		defer pr.cancel()
 
 		if !response.PodIFInfo.IsDPUHostMode {
@@ -248,6 +255,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 			klog.Error(err.Error())
 			return err
 		}
+		klog.Infof("SURYA: Inside CmdAdd %v", result)
 	}
 
 	return types.PrintResult(result, conf.CNIVersion)

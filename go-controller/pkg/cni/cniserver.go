@@ -49,6 +49,7 @@ import (
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
 func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
+	klog.Infof("SURYA: Starting up NEWCNIServer")
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
@@ -78,6 +79,7 @@ func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
 	router.HandleFunc("/metrics", s.handleCNIMetrics).Methods("POST")
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		klog.Infof("SURYA: Calling handleCNIRequest %v", r)
 		result, err := s.handleCNIRequest(r)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
@@ -116,6 +118,7 @@ func gatherCNIArgs(env map[string]string) (map[string]string, error) {
 }
 
 func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
+	klog.Infof("SURYA: Inside cniRequestToPodRequest %v", cr)
 	cmd, ok := cr.Env["CNI_COMMAND"]
 	if !ok {
 		return nil, fmt.Errorf("unexpected or missing CNI_COMMAND")
@@ -195,17 +198,20 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 	req.timestamp = time.Now()
 	// Match the Kubelet default CRI operation timeout of 2m
 	req.ctx, req.cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	klog.Infof("SURYA: Inside cniRequestToPodRequest %v", req)
 	return req, nil
 }
 
 // Dispatch a pod request to the request handler and return the result to the
 // CNI server client
 func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
+	klog.Infof("SURYA: Inside handleCNIRequest %v", r)
 	var cr Request
 	b, _ := io.ReadAll(r.Body)
 	if err := json.Unmarshal(b, &cr); err != nil {
 		return nil, err
 	}
+	klog.Infof("SURYA: Inside handleCNIRequest %v", cr)
 	req, err := cniRequestToPodRequest(&cr)
 	if err != nil {
 		return nil, err
@@ -222,7 +228,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 
 func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
 	var cm CNIRequestMetrics
-
+	klog.Infof("SURYA: Inside handleCNIMetrics %v", r)
 	b, _ := io.ReadAll(r.Body)
 	if err := json.Unmarshal(b, &cm); err != nil {
 		klog.Warningf("Failed to unmarshal JSON (%s) to CNIRequestMetrics struct: %v",
@@ -236,4 +242,5 @@ func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write([]byte{}); err != nil {
 		klog.Warningf("Error writing %s HTTP response for metrics post", err)
 	}
+	klog.Infof("SURYA: Inside handleCNIMetrics %v", r)
 }

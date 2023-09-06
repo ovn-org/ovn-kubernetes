@@ -127,6 +127,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 		// In the case of SmartNIC (CX5), we store the netdevname in the representor's
 		// OVS interface's external_id column. This is done in ConfigureInterface().
 	}
+	klog.Infof("SURYA inside cmdAdd %v", pr)
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
 	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName,
@@ -137,12 +138,13 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	if err = pr.checkOrUpdatePodUID(pod); err != nil {
 		return nil, err
 	}
-
+	klog.Infof("SURYA inside cmdAdd %v/%v/%v/%v", pr, pod, annotations, podNADAnnotation)
 	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, podNADAnnotation, pr.PodUID, netdevName,
 		pr.nadName, pr.netName, pr.CNIConf.MTU)
 	if err != nil {
 		return nil, err
 	}
+	klog.Infof("SURYA inside cmdAdd %v/%v/%v", pr, pod, podInterfaceInfo)
 
 	podInterfaceInfo.SkipIPConfig = kubevirt.IsPodLiveMigratable(pod)
 
@@ -155,7 +157,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	} else {
 		response.PodIFInfo = podInterfaceInfo
 	}
-
+	klog.Infof("SURYA inside cmdAdd %v/%v/%v/%v/%v", pr, pod, annotations, podNADAnnotation, response)
 	return response, nil
 }
 

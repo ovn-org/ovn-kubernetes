@@ -12,6 +12,7 @@ import (
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
 )
 
 // Start the Server's local HTTP server on a root-owned Unix domain socket.
@@ -79,5 +80,6 @@ func (s *Server) Start(rundir string) error {
 			utilruntime.HandleError(fmt.Errorf("CNI server Serve() failed: %v", err))
 		}
 	}, 0)
+	klog.Infof("SURYA: CNI Started")
 	return nil
 }
