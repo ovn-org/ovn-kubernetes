@@ -1220,7 +1220,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					retry.CheckRetryObjectEventually(efKey, true, fakeOVN.controller.retryEgressFirewalls)
 
 					// check dns address set was created
-					addrSet, _ := addressset.GetDbObjsForAS(
+					addrSet, _ := addressset.GetTestDbAddrSets(
 						getEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
 						[]net.IP{net.ParseIP(resolvedIP)})
 					expectedDatabaseState := append(initialData, addrSet)

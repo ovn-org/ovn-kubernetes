@@ -84,7 +84,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					ExternalIDs: map[string]string{"EgressQoS": "staleNS"},
 					UUID:        "staleQoS-UUID",
 				}
-				staleAddrSet, _ := addressset.GetDbObjsForAS(
+				staleAddrSet, _ := addressset.GetTestDbAddrSets(
 					getEgressQosAddrSetDbIDs("staleNS", "1000", controllerName),
 					[]net.IP{net.ParseIP("1.2.3.4")})
 
@@ -242,7 +242,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					ExternalIDs: map[string]string{"EgressQoS": "staleNS"},
 					UUID:        "staleQoS-UUID",
 				}
-				staleAddrSet, _ := addressset.GetDbObjsForAS(
+				staleAddrSet, _ := addressset.GetTestDbAddrSets(
 					getEgressQosAddrSetDbIDs("staleNS", "1000", controllerName),
 					[]net.IP{net.ParseIP("1.2.3.4")})
 

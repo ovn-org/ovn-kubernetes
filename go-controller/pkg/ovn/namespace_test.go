@@ -71,11 +71,7 @@ func getNsAddrSetHashNames(ns string) (string, string) {
 }
 
 func buildNamespaceAddressSets(namespace string, ips []net.IP) (*nbdb.AddressSet, *nbdb.AddressSet) {
-	v4set, v6set := addressset.GetDbObjsForAS(getNamespaceAddrSetDbIDs(namespace, "default-network-controller"), ips)
-
-	v4set.UUID = fmt.Sprintf("%s-ipv4-addrSet", namespace)
-	v6set.UUID = fmt.Sprintf("%s-ipv6-addrSet", namespace)
-	return v4set, v6set
+	return addressset.GetTestDbAddrSets(getNamespaceAddrSetDbIDs(namespace, "default-network-controller"), ips)
 }
 
 var _ = ginkgo.Describe("OVN Namespace Operations", func() {

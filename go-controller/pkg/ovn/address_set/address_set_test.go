@@ -20,7 +20,7 @@ func getDbAddrSets(dbIDs *libovsdbops.DbObjectIDs, ipFamily string, ips []string
 	for _, ip := range ips {
 		parsedIPs = append(parsedIPs, net.ParseIP(ip))
 	}
-	asv4, asv6 := GetDbObjsForAS(dbIDs, parsedIPs)
+	asv4, asv6 := GetTestDbAddrSets(dbIDs, parsedIPs)
 	if ipFamily == ipv4InternalID {
 		asv4.UUID = asv4.Name + "-UUID"
 		return asv4
