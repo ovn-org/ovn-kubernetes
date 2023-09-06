@@ -13,7 +13,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -600,6 +599,23 @@ func ParseNodeTransitSwitchPortAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 	return parsePrimaryIfAddrAnnotation(node, ovnTransitSwitchPortAddr)
 }
 
+// GetNodeEIPConfig attempts to generate EIP configuration from a nodes annotations.
+// If the platform is running in the cloud, retrieve config info from node obj annotation added by Cloud Network Config
+// Controller (CNCC). If not on a cloud platform (i.e. baremetal), retrieve from the node obj primary interface annotation.
+func GetNodeEIPConfig(node *kapi.Node) (*ParsedNodeEgressIPConfiguration, error) {
+	var parsedEgressIPConfig *ParsedNodeEgressIPConfiguration
+	var err error
+	if PlatformTypeIsEgressIPCloudProvider() {
+		parsedEgressIPConfig, err = ParseCloudEgressIPConfig(node)
+	} else {
+		parsedEgressIPConfig, err = ParseNodePrimaryIfAddr(node)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("unable to generate egress IP config for node %s: %w", node.Name, err)
+	}
+	return parsedEgressIPConfig, nil
+}
+
 // ParseCloudEgressIPConfig returns the cloud's information concerning the node's primary network interface
 func ParseCloudEgressIPConfig(node *kapi.Node) (*ParsedNodeEgressIPConfiguration, error) {
 	egressIPConfigAnnotation, ok := node.Annotations[cloudEgressIPConfigAnnotationKey]
@@ -782,25 +798,18 @@ func IsNonOVNManagedNetworkContainingIP(node *v1.Node, ip net.IP) (bool, error) 
 	return true, nil
 }
 
-// GetEgressIPNetwork attempts to retrieve a network that contains EgressIP. It first checks the primary OVN managed network,
-// otherwise searches through non-OVN managed networks
-func GetEgressIPNetwork(node *v1.Node, eIP net.IP) (string, error) {
-	primaryNetworks, err := getNodeIfAddrAnnotation(node)
-	if err != nil {
-		return "", fmt.Errorf("failed to get node address annotation for node %s: %v", node.Name, err)
+// GetEgressIPNetwork attempts to retrieve a network that contains EgressIP. Check the OVN managed network first as
+// represented by parameter eIPConfig, and if no match is found, and if not in a cloud environment, check non-OVN managed networks.
+func GetEgressIPNetwork(node *v1.Node, eIPConfig *ParsedNodeEgressIPConfiguration, eIP net.IP) (string, error) {
+	if eIPConfig.V4.Net != nil && eIPConfig.V4.Net.Contains(eIP) {
+		return eIPConfig.V4.Net.String(), nil
 	}
-	primaryNetwork := primaryNetworks.IPv4
-	if utilnet.IsIPv6(eIP) {
-		primaryNetwork = primaryNetworks.IPv6
+	if eIPConfig.V6.Net != nil && eIPConfig.V6.Net.Contains(eIP) {
+		return eIPConfig.V6.Net.String(), nil
 	}
-	if primaryNetwork != "" {
-		_, primaryNet, err := net.ParseCIDR(primaryNetwork)
-		if err != nil {
-			return "", fmt.Errorf("failed to parse CIDR %s for node %s: %v", primaryNetwork, node.Name, err)
-		}
-		if primaryNet.Contains(eIP) {
-			return primaryNet.String(), nil
-		}
+	// Do not attempt to check if a non-OVN managed network may host an EIP if we are in a cloud environment
+	if PlatformTypeIsEgressIPCloudProvider() {
+		return "", nil
 	}
 	network, err := GetNonOVNNetworkContainingIP(node, eIP)
 	if err != nil {
@@ -811,46 +820,14 @@ func GetEgressIPNetwork(node *v1.Node, eIP net.IP) (string, error) {
 
 // IsOVNManagedNetwork attempts to detect if the argument IP can be hosted by a network managed by OVN. Currently, this is
 // only the primary OVN network
-func IsOVNManagedNetwork(node *v1.Node, ip net.IP) (bool, error) {
-	if ip == nil {
-		return false, fmt.Errorf("empty IP is not valid")
+func IsOVNManagedNetwork(eIPConfig *ParsedNodeEgressIPConfiguration, ip net.IP) bool {
+	if eIPConfig.V4.Net != nil && eIPConfig.V4.Net.Contains(ip) {
+		return true
 	}
-	if node == nil {
-		return false, fmt.Errorf("unable to determine if IP %s is OVN managed because node argument is nil", ip.String())
+	if eIPConfig.V6.Net != nil && eIPConfig.V6.Net.Contains(ip) {
+		return true
 	}
-	isIPV6 := utilnet.IsIPv6(ip)
-	primaryNetworks, err := getNodeIfAddrAnnotation(node)
-	if err != nil {
-		return false, fmt.Errorf("failed to determine if IP %s is OVN managed: %v", ip.String(), err)
-	}
-	if isIPV6 {
-		if primaryNetworks.IPv6 != "" {
-			_, primaryIPv6IPNet, err := net.ParseCIDR(primaryNetworks.IPv6)
-			if err != nil {
-				return false, fmt.Errorf("failed to parse IPv6 IP CIDR %s and therefore unable to detect if "+
-					"IP %s is OVN managed: %v", primaryNetworks.IPv6, ip.String(), err)
-			}
-			if primaryIPv6IPNet.Contains(ip) {
-				return true, nil
-			} else {
-				return false, nil
-			}
-		}
-	} else {
-		if primaryNetworks.IPv4 != "" {
-			_, primaryIPv4IPNet, err := net.ParseCIDR(primaryNetworks.IPv4)
-			if err != nil {
-				return false, fmt.Errorf("failed to parse IPv4 IP CIDR %s and therefore unable to detect if "+
-					"IP %s is OVN managed: %v", primaryNetworks.IPv4, ip.String(), err)
-			}
-			if primaryIPv4IPNet.Contains(ip) {
-				return true, nil
-			} else {
-				return false, nil
-			}
-		}
-	}
-	return false, fmt.Errorf("unable to determine if IP %s is within the OVN managed network for node %s", ip.String(), node.Name)
+	return false
 }
 
 // GetNonOVNNetworkContainingIP attempts to find a non OVN managed network to host the argument IP

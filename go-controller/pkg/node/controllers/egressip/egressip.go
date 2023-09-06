@@ -500,6 +500,11 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 		return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
 			fmt.Errorf("failed to find this node %q kubernetes Node object: %v", c.nodeName, err)
 	}
+	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
+	if err != nil {
+		return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
+			fmt.Errorf("failed to determine egress IP config for node %s: %w", node.Name, err)
+	}
 	// max of 1 EIP IP is selected. Return when 1 is found.
 	for _, status := range eip.Status.Items {
 		if isValid := isEIPStatusItemValid(status, c.nodeName); !isValid {
@@ -510,12 +515,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 			return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
 				fmt.Errorf("failed to generate mask for EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
-		isOVNManaged, err := util.IsOVNManagedNetwork(node, eIPNet.IP)
-		if err != nil {
-			return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
-				fmt.Errorf("failed to determine if EgressIP %s IP %s is OVN managed: %v", eip.Name, status.EgressIP, err)
-		}
-		if isOVNManaged {
+		if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 			continue
 		}
 		isV6 := eIPNet.IP.To4() == nil
@@ -819,6 +819,10 @@ func (c *Controller) RepairNode() error {
 	if err != nil {
 		return err
 	}
+	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
+	if err != nil {
+		return err
+	}
 	for _, egressIP := range egressIPs {
 		if len(egressIP.Status.Items) == 0 {
 			continue
@@ -831,12 +835,7 @@ func (c *Controller) RepairNode() error {
 			if err != nil {
 				return err
 			}
-			isOVNManaged, err := util.IsOVNManagedNetwork(node, eIPNet.IP)
-			if err != nil {
-				return fmt.Errorf("failed to determine if EgressIP %s IP %s is OVN managed: %v", egressIP.Name,
-					status.EgressIP, err)
-			}
-			if isOVNManaged {
+			if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 				continue
 			}
 			isV6 := eIPNet.IP.To4() == nil
