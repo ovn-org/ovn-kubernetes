@@ -1657,9 +1657,6 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 		table.DescribeTable("should be able to allocate several EgressIPs and avoid the same node", func(egressIP1, egressIP2 string) {
 			app.Action = func(ctx *cli.Context) error {
-				//
-				//egressIP1 := "0:0:0:0:0:feff:c0a8:8e0d"
-				//egressIP2 := "0:0:0:0:0:feff:c0a8:8e0f"
 				node1IPv4OVNManaged := ""
 				node1IPv6OVNManaged := "0:0:0:0:0:feff:c0a8:8e0c/64"
 				node1IPv6NonOVNManaged := "0:0:1:0:0:feff:c0a8:8e0c/64"
@@ -1722,8 +1719,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
 				)
 
-				egressNode1 := setupNode(node1Name, []string{node1IPv6OVNManaged, node1IPv6NonOVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
-				egressNode2 := setupNode(node2Name, []string{node2IPv6OVNManaged, node2IPv6NonOVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
+				egressNode1 := setupNode(node1Name, []string{node1IPv6OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
+				egressNode2 := setupNode(node2Name, []string{node2IPv6OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
 
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode1.name] = &egressNode1
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode2.name] = &egressNode2
@@ -1807,8 +1804,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
 				)
 
-				egressNode1 := setupNode(node1Name, []string{node1IPv4OVNManaged, node1IPv6NonOVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
-				egressNode2 := setupNode(node2Name, []string{node2IPv4OVNManaged, node2IPv6NonOVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
+				egressNode1 := setupNode(node1Name, []string{node1IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
+				egressNode2 := setupNode(node2Name, []string{node2IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
 
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode1.name] = &egressNode1
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode2.name] = &egressNode2
@@ -1901,8 +1898,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
 				)
 
-				egressNode1 := setupNode(node1Name, []string{node1IPv4OVNManaged, node1IPv6NonOVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
-				egressNode2 := setupNode(node2Name, []string{node2IPv4OVNManaged, node2IPv6NonOVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
+				egressNode1 := setupNode(node1Name, []string{node1IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
+				egressNode2 := setupNode(node2Name, []string{node2IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
 
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode1.name] = &egressNode1
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode2.name] = &egressNode2
@@ -1987,8 +1984,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
 				)
 
-				egressNode1 := setupNode(node1Name, []string{node1IPv4OVNManaged, node1IPv6NonOVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
-				egressNode2 := setupNode(node2Name, []string{node2IPv4OVNManaged, node2IPv6NonOVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
+				egressNode1 := setupNode(node1Name, []string{node1IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
+				egressNode2 := setupNode(node2Name, []string{node2IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
 
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode1.name] = &egressNode1
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode2.name] = &egressNode2
