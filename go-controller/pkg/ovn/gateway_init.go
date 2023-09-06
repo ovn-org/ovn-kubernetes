@@ -521,7 +521,7 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 		},
 		Name: interfaceID,
 	}
-	if vlanID != nil {
+	if vlanID != nil && int(*vlanID) != 0 {
 		intVlanID := int(*vlanID)
 		externalLogicalSwitchPort.TagRequest = &intVlanID
 	}
