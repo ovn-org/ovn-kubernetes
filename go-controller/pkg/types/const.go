@@ -115,16 +115,6 @@ const (
 	PacketsPerSecond     = "pktps"
 	MeterAction          = "drop"
 
-	// Default Meters created on GRs.
-	OVNARPRateLimiter              = "arp"
-	OVNARPResolveRateLimiter       = "arp-resolve"
-	OVNBFDRateLimiter              = "bfd"
-	OVNControllerEventsRateLimiter = "event-elb"
-	OVNICMPV4ErrorsRateLimiter     = "icmp4-error"
-	OVNICMPV6ErrorsRateLimiter     = "icmp6-error"
-	OVNRejectRateLimiter           = "reject"
-	OVNTCPRSTRateLimiter           = "tcp-reset"
-
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
 	OvnNamespacedDenyPGTopoVersion = 2
