@@ -1348,20 +1348,10 @@ func (e egressStatuses) contains(potentialStatus egressipv1.EgressIPStatusItem) 
 	if _, exists := e.statusMap[potentialStatus]; exists {
 		return true
 	}
-	// handle the case where not network is populated. This may occur if an EIP obj was considered by a cluster
-	// manager egress IP controller that did not support the network field
-	potentialStatus.Network = ""
-	if _, exists := e.statusMap[potentialStatus]; exists {
-		return true
-	}
 	return false
 }
 
 func (e egressStatuses) delete(deleteStatus egressipv1.EgressIPStatusItem) {
-	delete(e.statusMap, deleteStatus)
-	// also remove any keys without networks set. This is may occur when upgrading from a version that didn't set the
-	// network field
-	deleteStatus.Network = ""
 	delete(e.statusMap, deleteStatus)
 }
 

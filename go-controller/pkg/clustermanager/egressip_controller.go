@@ -694,7 +694,7 @@ func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node)
 	eIPC.allocator.Lock()
 	for _, egressIP := range egressIPs.Items {
 		for _, status := range egressIP.Status.Items {
-			if status.Node == node.Name && status.Network != "" {
+			if status.Node == node.Name {
 				egressIPIP := net.ParseIP(status.EgressIP)
 				if egressIPIP == nil {
 					return fmt.Errorf("unexpected empty egress IP found in status for egressIP %s", egressIP.Name)
@@ -714,11 +714,9 @@ func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node)
 						"is hosted by non-OVN managed network for node %s: %w", egressIP.Name, egressIPIP.String(), node.Name, err))
 					continue
 				}
-				// do not reconcile if calculated EIP IP assigned network is what is already configured
-				if network == status.Network {
-					continue
+				if network == "" {
+					reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
 				}
-				reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
 			}
 		}
 	}
@@ -1232,7 +1230,6 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				assignments = append(assignments, egressipv1.EgressIPStatusItem{
 					Node:     status.Node,
 					EgressIP: eIP.String(),
-					Network:  eIPNetwork,
 				})
 				continue
 			} else {
@@ -1324,7 +1321,6 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			assignments = append(assignments, egressipv1.EgressIPStatusItem{
 				Node:     eNode.name,
 				EgressIP: eIP.String(),
-				Network:  egressIPNetwork,
 			})
 			eNode.allocations[eIP.String()] = name
 			assignmentSuccessful = true

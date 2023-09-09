@@ -937,9 +937,6 @@ func isEIPStatusItemValid(status eipv1.EgressIPStatusItem, nodeName string) bool
 	if status.EgressIP == "" {
 		return false
 	}
-	if status.Network == "" {
-		return false
-	}
 	return true
 }
 
