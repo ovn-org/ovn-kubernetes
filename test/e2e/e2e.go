@@ -303,6 +303,38 @@ func createServiceForPodsWithLabel(f *framework.Framework, namespace string, ser
 	return res.Spec.ClusterIP, nil
 }
 
+func createNetwork(networkName, subnet string) {
+	args := []string{containerRuntime, "network", "create", "--driver", "bridge", networkName, "--subnet", subnet}
+	_, err := runCommand(args...)
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		framework.Failf("failed to create secondary network %q with subnet %q: %v", networkName, subnet, err)
+	}
+}
+
+func deleteNetwork(networkName string) {
+	args := []string{containerRuntime, "network", "rm", networkName}
+	_, err := runCommand(args...)
+	if err != nil && !strings.Contains(err.Error(), "not found") {
+		framework.Failf("failed to delete network %q: %v", networkName, err)
+	}
+}
+
+func attachNetwork(networkName, containerName string) {
+	args := []string{containerRuntime, "network", "connect", networkName, containerName}
+	_, err := runCommand(args...)
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		framework.Failf("failed to attach network %q to container %q: %v", networkName, containerName, err)
+	}
+}
+
+func detachNetwork(networkName, containerName string) {
+	args := []string{containerRuntime, "network", "disconnect", networkName, containerName}
+	_, err := runCommand(args...)
+	if err != nil {
+		framework.Failf("failed to attach network %q to container %q: %v", networkName, containerName, err)
+	}
+}
+
 func createClusterExternalContainer(containerName string, containerImage string, dockerArgs []string, entrypointArgs []string) (string, string) {
 	args := []string{containerRuntime, "run", "-itd"}
 	args = append(args, dockerArgs...)
@@ -319,6 +351,9 @@ func createClusterExternalContainer(containerName string, containerImage string,
 	ipv6, err := runCommand(containerRuntime, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.GlobalIPv6Address}}{{end}}", containerName)
 	if err != nil {
 		framework.Failf("failed to inspect external test container for its IP (v6): %v", err)
+	}
+	if ipv4 == "" && ipv6 == "" {
+		framework.Failf("failed to get IPv4 or IPv6 address for container %s", containerName)
 	}
 	return strings.Trim(ipv4, "\n"), strings.Trim(ipv6, "\n")
 }
