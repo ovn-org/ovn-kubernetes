@@ -24,6 +24,7 @@ import (
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	kapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -572,6 +573,10 @@ func (oc *DefaultNetworkController) deletePodSNAT(nodeName string, extIPs, podIP
 
 	node, err := oc.watchFactory.NodeCoreInformer().Lister().Get(nodeName)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// If node does not exist, there is nothing to delete
+			return nil
+		}
 		return err
 	}
 	if !oc.isLocalZoneNode(node) {
@@ -640,7 +645,7 @@ func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, nod
 		Name: types.GWRouterPrefix + nodeName,
 	}
 	ops, err = libovsdbops.DeleteNATsOps(nbClient, ops, &logicalRouter, nats...)
-	if err != nil {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return nil, fmt.Errorf("failed create operation for deleting SNAT rule for pod on gateway router %s: %v", logicalRouter.Name, err)
 	}
 	return ops, nil

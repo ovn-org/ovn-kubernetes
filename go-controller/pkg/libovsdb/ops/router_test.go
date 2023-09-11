@@ -152,6 +152,13 @@ func TestDeleteNATsFromRouter(t *testing.T) {
 			expectedNbdb: initialNbdb,
 		},
 		{
+			desc:         "no router -- with a name",
+			routerName:   "doesNotExistRouter",
+			expectErr:    false,
+			nats:         []*nbdb.NAT{fakeNAT1.DeepCopy(), fakeNAT2.DeepCopy(), fakeNAT3.DeepCopy(), fakeNAT4.DeepCopy()},
+			expectedNbdb: initialNbdb,
+		},
+		{
 			desc:         "no deletes: no matching nats",
 			routerName:   "rtr1",
 			nats:         []*nbdb.NAT{fakeNAT2.DeepCopy(), fakeNAT3.DeepCopy(), fakeNAT4.DeepCopy()},

@@ -421,6 +421,10 @@ func (wf *WatchFactory) Start() error {
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
 // informers to save memory + bandwidth. It is to be used by the node-only process.
+//
+// TODO(jtanenba) originally the pod selector was only supposed to select pods local to the node
+// commit 91046e889... changed that and pod selector selects all pods in the cluster fix the naming
+// of the localPodSelector or figure out how to deal with selecting all pods everywhere.
 func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
 		iFactory:             informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),

@@ -570,10 +570,6 @@ set_default_params() {
   KIND_NUM_MASTER=1
   OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
 
-  if [ "$OVN_HA" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
-     echo "HA mode cannot be used together with Interconnect"
-     exit 1
-  fi
 
   if [ "$OVN_COMPACT_MODE" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
      echo "Compact mode cannot be used together with Interconnect"
@@ -590,7 +586,7 @@ set_default_params() {
   if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
     KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-1}
 
-    TOTAL_NODES=$((KIND_NUM_WORKER + 1))
+    TOTAL_NODES=$((KIND_NUM_WORKER + KIND_NUM_MASTER))
     if [[ ${KIND_NUM_NODES_PER_ZONE} -gt 1 ]] && [[ $((TOTAL_NODES % KIND_NUM_NODES_PER_ZONE)) -ne 0 ]]; then
       echo "(Total k8s nodes / number of nodes per zone) should be zero"
       exit 1
@@ -966,6 +962,10 @@ install_ovn() {
   run_kubectl apply -f policy.networking.k8s.io_adminnetworkpolicies.yaml
   run_kubectl apply -f policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
   run_kubectl apply -f ovn-setup.yaml
+  run_kubectl apply -f rbac-ovnkube-cluster-manager.yaml
+  run_kubectl apply -f rbac-ovnkube-master.yaml
+  run_kubectl apply -f rbac-ovnkube-node.yaml
+  run_kubectl apply -f rbac-ovnkube-db.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
   # leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=

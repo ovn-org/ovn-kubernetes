@@ -30,7 +30,7 @@ spec:
     spec:
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
-      serviceAccountName: ovn
+      serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
       {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
@@ -310,6 +310,8 @@ spec:
           value: "{{ ovnkube_libovsdb_client_logfile }}"
         - name: OVNKUBE_CONFIG_DURATION_ENABLE
           value: "{{ ovnkube_config_duration_enable }}"
+        - name: OVNKUBE_METRICS_SCALE_ENABLE
+          value: "{{ ovnkube_metrics_scale_enable }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:

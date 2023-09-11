@@ -115,6 +115,7 @@ jobs:
       run: |
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
+          sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
           docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
         popd
@@ -195,6 +196,7 @@ jobs:
       run: |
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
+          sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
           docker build -t ovn-daemonset-f:pr -f Dockerfile.fedora .
           mkdir _output

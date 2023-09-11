@@ -299,14 +299,11 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		namespaceName := "namespace1"
 		policyName := "networkpolicy1"
 		staleNetpolIDs := getStaleNetpolAddrSetDbIDs(namespaceName, policyName, "ingress", "0", DefaultNetworkControllerName)
-		staleNetpolAS, _ := addressset.GetDbObjsForAS(staleNetpolIDs, []net.IP{net.ParseIP("1.1.1.1")})
-		staleNetpolAS.UUID = staleNetpolAS.Name + "-UUID"
+		staleNetpolAS, _ := addressset.GetTestDbAddrSets(staleNetpolIDs, []net.IP{net.ParseIP("1.1.1.1")})
 		unusedPodSelIDs := getPodSelectorAddrSetDbIDs("pasName", DefaultNetworkControllerName)
-		unusedPodSelAS, _ := addressset.GetDbObjsForAS(unusedPodSelIDs, []net.IP{net.ParseIP("1.1.1.2")})
-		unusedPodSelAS.UUID = unusedPodSelAS.Name + "-UUID"
+		unusedPodSelAS, _ := addressset.GetTestDbAddrSets(unusedPodSelIDs, []net.IP{net.ParseIP("1.1.1.2")})
 		refNetpolIDs := getStaleNetpolAddrSetDbIDs(namespaceName, policyName, "egress", "0", DefaultNetworkControllerName)
-		refNetpolAS, _ := addressset.GetDbObjsForAS(refNetpolIDs, []net.IP{net.ParseIP("1.1.1.3")})
-		refNetpolAS.UUID = refNetpolAS.Name + "-UUID"
+		refNetpolAS, _ := addressset.GetTestDbAddrSets(refNetpolIDs, []net.IP{net.ParseIP("1.1.1.3")})
 		netpolACL := libovsdbops.BuildACL(
 			"netpolACL",
 			nbdb.ACLDirectionFromLport,
@@ -324,8 +321,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		)
 		netpolACL.UUID = "netpolACL-UUID"
 		refPodSelIDs := getPodSelectorAddrSetDbIDs("pasName2", DefaultNetworkControllerName)
-		refPodSelAS, _ := addressset.GetDbObjsForAS(refPodSelIDs, []net.IP{net.ParseIP("1.1.1.4")})
-		refPodSelAS.UUID = refPodSelAS.Name + "-UUID"
+		refPodSelAS, _ := addressset.GetTestDbAddrSets(refPodSelIDs, []net.IP{net.ParseIP("1.1.1.4")})
 		podSelACL := libovsdbops.BuildACL(
 			"podSelACL",
 			nbdb.ACLDirectionFromLport,

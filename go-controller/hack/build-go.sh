@@ -9,6 +9,7 @@ source "$(dirname "${BASH_SOURCE}")/init.sh"
 build_binaries() {
     # Check for `go` binary and set ${GOPATH}.
     setup_env
+    echo ${OVN_KUBE_ROOT}
     cd "${OVN_KUBE_ROOT}"
 
     mkdir -p "${OVN_KUBE_OUTPUT_BINPATH}"
@@ -19,7 +20,7 @@ build_binaries() {
     GIT_BRANCH=$(git rev-parse --symbolic-full-name --abbrev-ref HEAD)
     BUILD_USER=$(whoami)
     BUILD_DATE=$(date +"%Y-%m-%d")
-    K8S_CLIENT_VERSION=$(grep 'k8s.io/client-go' ${OVN_KUBE_GO_PACKAGE}/go.sum | head -1 |cut -f2 -d' ')
+    K8S_CLIENT_VERSION=$(grep 'k8s.io/client-go' ${OVN_KUBE_ROOT}/go.mod | head -1 |cut -f2 -d' ')
 
     set -x
     for bin in "$@"; do

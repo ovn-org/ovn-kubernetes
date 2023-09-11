@@ -114,7 +114,7 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 				return err
 			}
 		}
-		return kube.UpdatePod(modifiedPod)
+		return kube.UpdatePodStatus(modifiedPod)
 	})
 	if resultErr != nil {
 		return nil, fmt.Errorf("failed to update labels and annotations on pod %s/%s: %v", pod.Namespace, pod.Name, resultErr)

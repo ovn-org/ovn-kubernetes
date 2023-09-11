@@ -63,9 +63,15 @@ func newRoutePolicyState() *routePolicyState {
 // Equal compares StaticGateways and DynamicGateways elements for every namespace to be exactly the same,
 // including applied status
 func (rp *routePolicyState) Equal(rp2 *routePolicyState) bool {
+	if len(rp2.targetNamespaces) != len(rp.targetNamespaces) {
+		return false
+	}
 	for nsName, nsInfo := range rp.targetNamespaces {
 		nsInfo2, found := rp2.targetNamespaces[nsName]
 		if !found {
+			return false
+		}
+		if len(nsInfo) != len(nsInfo2) {
 			return false
 		}
 		for podName, podInfo := range nsInfo {
