@@ -13,8 +13,10 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
+	persistentipsapi "github.com/maiqueb/persistentips/pkg/crd/persistentip/v1alpha1"
 	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -30,7 +32,7 @@ import (
 // level to support the necessary configuration for the cluster networks.
 type networkClusterController struct {
 	watchFactory *factory.WatchFactory
-	kube         kube.Interface
+	kube         kube.InterfaceOVN
 	stopChan     chan struct{}
 	wg           *sync.WaitGroup
 
@@ -44,16 +46,24 @@ type networkClusterController struct {
 	podHandler *factory.Handler
 	retryPods  *objretry.RetryFramework
 
+	persistentIPsHandler *factory.Handler
+	retryPersistentIPs   *objretry.RetryFramework
+
 	podAllocator       *pod.PodAllocator
 	nodeAllocator      *node.NodeAllocator
+	pipsAllocator      *persistentips.PersistentIPsAllocator
 	networkIDAllocator idallocator.NamedAllocator
 
 	util.NetInfo
 }
 
 func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
-	kube := &kube.Kube{
-		KClient: ovnClient.KubeClient,
+	kube := &kube.KubeOVN{
+		Kube: kube.Kube{
+			KClient:        ovnClient.KubeClient,
+			MetadataClient: ovnClient.MetadataClient,
+		},
+		PersistentIPsClient: ovnClient.PersistentIPsClient,
 	}
 
 	wg := &sync.WaitGroup{}
@@ -134,12 +144,15 @@ func (ncc *networkClusterController) init() error {
 
 	if ncc.hasPodAllocation() {
 		ncc.retryPods = ncc.newRetryFramework(factory.PodType, true)
+		ncc.retryPersistentIPs = ncc.newRetryFramework(factory.PersistentIPsType, false)
 
-		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, ncc.watchFactory.PodCoreInformer().Lister(), ncc.kube)
+		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, ncc.watchFactory.PodCoreInformer().Lister(), ncc.kube, ncc.watchFactory)
 		err := ncc.podAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}
+
+		ncc.pipsAllocator = persistentips.NewPersistentIPsAllocator(ncc.NetInfo, ncc.kube, ncc.podAllocator.IPAllocator())
 	}
 
 	return nil
@@ -169,6 +182,11 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 			return fmt.Errorf("unable to watch pods: %w", err)
 		}
 		ncc.podHandler = podHandler
+		persistentIPsHandler, err := ncc.retryPersistentIPs.WatchResource()
+		if err != nil {
+			return fmt.Errorf("unable to watch persistentips: %w", err)
+		}
+		ncc.persistentIPsHandler = persistentIPsHandler
 	}
 
 	return nil
@@ -184,6 +202,10 @@ func (ncc *networkClusterController) Stop() {
 
 	if ncc.podHandler != nil {
 		ncc.watchFactory.RemovePodHandler(ncc.podHandler)
+	}
+
+	if ncc.persistentIPsHandler != nil {
+		ncc.watchFactory.RemovePersistentIPsHandler(ncc.persistentIPsHandler)
 	}
 }
 
@@ -257,6 +279,8 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 			return err
 		}
 		h.clearInitialNodeNetworkUnavailableCondition(node)
+	case factory.PersistentIPsType:
+		return nil
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
 	}
@@ -320,6 +344,16 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
 		return h.ncc.nodeAllocator.HandleDeleteNode(node)
+	case factory.PersistentIPsType:
+		pips, ok := obj.(*persistentipsapi.IPAMLease)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *corev1.PersistentIPs", obj)
+		}
+		err := h.ncc.pipsAllocator.Delete(pips)
+		if err != nil {
+			klog.Infof("PersistentIPs delete failed for %s/%s, will try again later: %v",
+				pips.Namespace, pips.Name, err)
+		}
 	}
 	return nil
 }
@@ -334,6 +368,8 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 		switch h.objType {
 		case factory.PodType:
 			syncFunc = h.ncc.podAllocator.Sync
+		case factory.PersistentIPsType:
+			syncFunc = h.ncc.pipsAllocator.Sync
 		case factory.NodeType:
 			syncFunc = h.ncc.nodeAllocator.Sync
 

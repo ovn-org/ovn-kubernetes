@@ -10,6 +10,7 @@ import (
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	persistentipsapi "github.com/maiqueb/persistentips/pkg/crd/persistentip/v1alpha1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
@@ -87,6 +88,7 @@ func allocatePodAnnotation(
 			netInfo,
 			pod,
 			network,
+			nil,
 			reallocateIP)
 		return pod, rollback, err
 	}
@@ -119,6 +121,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 	idAllocator id.NamedAllocator,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
+	ipamLease *persistentipsapi.IPAMLease,
 	reallocateIP bool) (
 	*v1.Pod,
 	*util.PodAnnotation,
@@ -132,6 +135,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		allocator.netInfo,
 		pod,
 		network,
+		ipamLease,
 		reallocateIP,
 	)
 }
@@ -144,6 +148,7 @@ func allocatePodAnnotationWithTunnelID(
 	netInfo util.NetInfo,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
+	ipamLease *persistentipsapi.IPAMLease,
 	reallocateIP bool) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -157,6 +162,7 @@ func allocatePodAnnotationWithTunnelID(
 			netInfo,
 			pod,
 			network,
+			ipamLease,
 			reallocateIP)
 		return pod, rollback, err
 	}
@@ -198,6 +204,7 @@ func allocatePodAnnotationWithRollback(
 	netInfo util.NetInfo,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
+	ipamLease *persistentipsapi.IPAMLease,
 	reallocateIP bool) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -273,6 +280,7 @@ func allocatePodAnnotationWithRollback(
 	hasIPAM := util.DoesNetworkRequireIPAM(netInfo)
 	hasIPRequest := network != nil && len(network.IPRequest) > 0
 	hasStaticIPRequest := hasIPRequest && !reallocateIP
+	hasIPAMLease := ipamLease != nil && len(ipamLease.Spec.IPs) > 0
 
 	if hasIPAM && hasStaticIPRequest {
 		// for now we can't tell apart already allocated IPs from IPs excluded
@@ -291,6 +299,11 @@ func allocatePodAnnotationWithRollback(
 	if len(tentative.IPs) == 0 {
 		if hasIPRequest {
 			tentative.IPs, err = util.ParseIPNets(network.IPRequest)
+			if err != nil {
+				return
+			}
+		} else if hasIPAMLease {
+			tentative.IPs, err = util.ParseIPNets(ipamLease.Spec.IPs)
 			if err != nil {
 				return
 			}

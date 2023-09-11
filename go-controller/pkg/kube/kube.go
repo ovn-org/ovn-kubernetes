@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
+	persistentipsv1 "github.com/maiqueb/persistentips/pkg/crd/persistentip/v1alpha1"
+	persistentipsclientset "github.com/maiqueb/persistentips/pkg/crd/persistentip/v1alpha1/apis/clientset/versioned"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
@@ -13,14 +15,21 @@ import (
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	kapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes"
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
+	metadataclient "k8s.io/client-go/metadata"
 	"k8s.io/klog/v2"
 	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
+)
+
+var (
+	vmGVR = schema.GroupVersionResource{Group: "kubevirt.io", Resource: "virtualmachines", Version: "v1"}
 )
 
 // InterfaceOVN represents the exported methods for dealing with getting/setting
@@ -37,6 +46,7 @@ type InterfaceOVN interface {
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
 	UpdateEgressServiceStatus(namespace, name, host string) error
+	CreatePersistentIPs(namespace, name, network, iface string, ips []string) error
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -65,7 +75,8 @@ type Interface interface {
 // Kube works with kube client only
 // Implements Interface
 type Kube struct {
-	KClient kubernetes.Interface
+	KClient        kubernetes.Interface
+	MetadataClient metadataclient.Interface
 }
 
 // KubeOVN works with all kube and ovn resources
@@ -78,6 +89,7 @@ type KubeOVN struct {
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
 	EgressServiceClient  egressserviceclientset.Interface
 	APBRouteClient       adminpolicybasedrouteclientset.Interface
+	PersistentIPsClient  persistentipsclientset.Interface
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -427,4 +439,49 @@ func (k *KubeOVN) UpdateEgressServiceStatus(namespace, name, host string) error 
 
 	_, err = k.EgressServiceClient.K8sV1().EgressServices(es.Namespace).UpdateStatus(context.TODO(), es, metav1.UpdateOptions{})
 	return err
+}
+
+func (k *KubeOVN) CreatePersistentIPs(namespace, name, network, iface string, ips []string) error {
+	_, err := k.PersistentIPsClient.K8sV1alpha1().IPAMLeases(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			vmUID, err := k.readUIDFromVM(namespace, name)
+			if err != nil {
+				return err
+			}
+			pips := &persistentipsv1.IPAMLease{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace,
+					Name:      name,
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "kubevirt.io/v1",
+						Kind:       "VirtualMachine",
+						Name:       name,
+						UID:        vmUID,
+					}},
+				},
+				Spec: persistentipsv1.IPAMLeaseSpec{
+					Network:   network,
+					Interface: iface,
+					IPs:       ips,
+				},
+			}
+			pips, err = k.PersistentIPsClient.K8sV1alpha1().IPAMLeases(pips.Namespace).Create(context.TODO(), pips, metav1.CreateOptions{})
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+	return nil
+}
+
+func (k *KubeOVN) readUIDFromVM(namespace, name string) (types.UID, error) {
+	vmMetadataClient := k.Kube.MetadataClient.Resource(vmGVR)
+	vmMetadata, err := vmMetadataClient.Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	return vmMetadata.UID, nil
 }

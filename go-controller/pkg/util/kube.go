@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	metadataclient "k8s.io/client-go/metadata"
 	"k8s.io/client-go/pkg/version"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -36,6 +37,7 @@ import (
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
+	persistentipsclientset "github.com/maiqueb/persistentips/pkg/crd/persistentip/v1alpha1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 )
@@ -43,6 +45,7 @@ import (
 // OVNClientset is a wrapper around all clientsets used by OVN-Kubernetes
 type OVNClientset struct {
 	KubeClient               kubernetes.Interface
+	MetadataClient           metadataclient.Interface
 	ANPClient                anpclientset.Interface
 	EgressIPClient           egressipclientset.Interface
 	EgressFirewallClient     egressfirewallclientset.Interface
@@ -52,6 +55,7 @@ type OVNClientset struct {
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 	EgressServiceClient      egressserviceclientset.Interface
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
+	PersistentIPsClient      persistentipsclientset.Interface
 }
 
 // OVNMasterClientset
@@ -65,6 +69,7 @@ type OVNMasterClientset struct {
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 	EgressServiceClient      egressserviceclientset.Interface
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
+	PersistentIPsClient      persistentipsclientset.Interface
 }
 
 // OVNNetworkControllerManagerClientset
@@ -77,6 +82,7 @@ type OVNKubeControllerClientset struct {
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 	EgressServiceClient      egressserviceclientset.Interface
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
+	PersistentIPsClient      persistentipsclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -88,10 +94,12 @@ type OVNNodeClientset struct {
 
 type OVNClusterManagerClientset struct {
 	KubeClient            kubernetes.Interface
+	MetadataClient        metadataclient.Interface
 	EgressIPClient        egressipclientset.Interface
 	CloudNetworkClient    ocpcloudnetworkclientset.Interface
 	NetworkAttchDefClient networkattchmentdefclientset.Interface
 	EgressServiceClient   egressserviceclientset.Interface
+	PersistentIPsClient   persistentipsclientset.Interface
 }
 
 func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
@@ -105,6 +113,7 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
 		EgressServiceClient:      cs.EgressServiceClient,
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
+		PersistentIPsClient:      cs.PersistentIPsClient,
 	}
 }
 
@@ -118,6 +127,7 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
 		EgressServiceClient:      cs.EgressServiceClient,
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
+		PersistentIPsClient:      cs.PersistentIPsClient,
 	}
 }
 
@@ -137,10 +147,12 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset {
 	return &OVNClusterManagerClientset{
 		KubeClient:            cs.KubeClient,
+		MetadataClient:        cs.MetadataClient,
 		EgressIPClient:        cs.EgressIPClient,
 		CloudNetworkClient:    cs.CloudNetworkClient,
 		NetworkAttchDefClient: cs.NetworkAttchDefClient,
 		EgressServiceClient:   cs.EgressServiceClient,
+		PersistentIPsClient:   cs.PersistentIPsClient,
 	}
 }
 
@@ -284,8 +296,19 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		return nil, err
 	}
 
+	persistentIPsClientSet, err := persistentipsclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+
+	metadataClient, err := metadataclient.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+
 	return &OVNClientset{
 		KubeClient:               kclientset,
+		MetadataClient:           metadataClient,
 		ANPClient:                anpClientset,
 		EgressIPClient:           egressIPClientset,
 		EgressFirewallClient:     egressFirewallClientset,
@@ -295,6 +318,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		MultiNetworkPolicyClient: multiNetworkPolicyClientset,
 		EgressServiceClient:      egressserviceClientset,
 		AdminPolicyRouteClient:   adminPolicyBasedRouteClientset,
+		PersistentIPsClient:      persistentIPsClientSet,
 	}, nil
 }
 

@@ -69,7 +69,11 @@ func (sncm *secondaryNetworkClusterManager) Start() error {
 		return err
 	}
 
-	return sncm.nadController.Start()
+	if err := sncm.nadController.Start(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (sncm *secondaryNetworkClusterManager) init() error {

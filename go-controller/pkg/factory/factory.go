@@ -54,6 +54,11 @@ import (
 	adminbasedpolicyinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions"
 	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 
+	persistentipsapi "github.com/maiqueb/persistentips/pkg/crd/persistentip/v1alpha1"
+	persistentipsscheme "github.com/maiqueb/persistentips/pkg/crd/persistentip/v1alpha1/apis/clientset/versioned/scheme"
+	persistentipsfactory "github.com/maiqueb/persistentips/pkg/crd/persistentip/v1alpha1/apis/informers/externalversions"
+	persistentipslister "github.com/maiqueb/persistentips/pkg/crd/persistentip/v1alpha1/apis/listers/persistentip/v1alpha1"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
@@ -88,6 +93,7 @@ type WatchFactory struct {
 	mnpFactory           mnpinformerfactory.SharedInformerFactory
 	egressServiceFactory egressserviceinformerfactory.SharedInformerFactory
 	apbRouteFactory      adminbasedpolicyinformerfactory.SharedInformerFactory
+	pipsFactory          persistentipsfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -162,6 +168,7 @@ var (
 	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
 	NetworkAttachmentDefinitionType       reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 	MultiNetworkPolicyType                reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
+	PersistentIPsType                     reflect.Type = reflect.TypeOf(&persistentipsapi.IPAMLease{})
 
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
@@ -416,6 +423,15 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if wf.pipsFactory != nil {
+		wf.pipsFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.pipsFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -545,6 +561,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		cpipcFactory:         ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.EgressServiceClient, resyncInterval),
+		pipsFactory:          persistentipsfactory.NewSharedInformerFactory(ovnClientset.PersistentIPsClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
 	}
@@ -553,6 +570,9 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 	}
 
 	if err := egressserviceapi.AddToScheme(egressservicescheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := persistentipsapi.AddToScheme(persistentipsscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -616,6 +636,10 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 	if config.OVNKubernetesFeature.EnableInterconnect && config.OVNKubernetesFeature.EnableMultiNetwork {
 		wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan, defaultNumEventQueues)
+		if err != nil {
+			return nil, err
+		}
+		wf.informers[PersistentIPsType], err = newQueuedInformer(PersistentIPsType, wf.pipsFactory.K8s().V1alpha1().IPAMLeases().Informer(), wf.stopChan, defaultNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -687,8 +711,13 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if multinetworkpolicy, ok := obj.(*mnpapi.MultiNetworkPolicy); ok {
 			return &multinetworkpolicy.ObjectMeta, nil
 		}
+	case PersistentIPsType:
+		if persistentips, ok := obj.(*persistentipsapi.IPAMLease); ok {
+			return &persistentips.ObjectMeta, nil
+		}
 	}
-	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
+
+	return nil, fmt.Errorf("cannot get ObjectMeta from type %v -> %v", objType, PersistentIPsType)
 }
 
 type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
@@ -794,6 +823,11 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddEndpointSliceHandler(funcs, processExisting)
 		}, nil
 
+	case PersistentIPsType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+			return wf.AddPersistentIPsHandler(funcs, processExisting)
+		}, nil
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
@@ -871,6 +905,16 @@ func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selec
 // RemovePodHandler removes a Pod object event handler function
 func (wf *WatchFactory) RemovePodHandler(handler *Handler) {
 	wf.removeHandler(PodType, handler)
+}
+
+// RemovePersistentIPsHandler removes a PersistentIPs object event handler function
+func (wf *WatchFactory) RemovePersistentIPsHandler(handler *Handler) {
+	wf.removeHandler(PersistentIPsType, handler)
+}
+
+// AddPersistentIPsHandler adds a handler function that will be executed on AddPersistentIPsobject changes
+func (wf *WatchFactory) AddPersistentIPsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(PersistentIPsType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
 // AddServiceHandler adds a handler function that will be executed on Service object changes
@@ -1157,6 +1201,11 @@ func (wf *WatchFactory) GetMultiNetworkPolicy(namespace, name string) (*mnpapi.M
 func (wf *WatchFactory) GetEgressFirewall(namespace, name string) (*egressfirewallapi.EgressFirewall, error) {
 	egressFirewallLister := wf.informers[EgressFirewallType].lister.(egressfirewalllister.EgressFirewallLister)
 	return egressFirewallLister.EgressFirewalls(namespace).Get(name)
+}
+
+func (wf *WatchFactory) GetPersistentIPs(namespace, name string) (*persistentipsapi.IPAMLease, error) {
+	lister := wf.informers[PersistentIPsType].lister.(persistentipslister.IPAMLeaseLister)
+	return lister.IPAMLeases(namespace).Get(name)
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
