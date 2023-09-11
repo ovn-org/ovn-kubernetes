@@ -11,6 +11,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/pkg/errors"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -562,10 +563,10 @@ func (bnc *BaseNetworkController) determineOVNTopoVersionFromOVN() error {
 func (bnc *BaseNetworkController) getOVNTopoVersionFromLogicalRouter(clusterRouterName string) (int, error) {
 	logicalRouter := &nbdb.LogicalRouter{Name: clusterRouterName}
 	logicalRouter, err := libovsdbops.GetLogicalRouter(bnc.nbClient, logicalRouter)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return 0, fmt.Errorf("error getting router %s: %v", clusterRouterName, err)
 	}
-	if err == libovsdbclient.ErrNotFound {
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
 		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
 		return math.MaxInt32, nil
 	}
@@ -584,10 +585,10 @@ func (bnc *BaseNetworkController) getOVNTopoVersionFromLogicalRouter(clusterRout
 func (bnc *BaseNetworkController) getOVNTopoVersionFromLogicalSwitch(switchName string) (int, error) {
 	logicalSwitch := &nbdb.LogicalSwitch{Name: switchName}
 	logicalSwitch, err := libovsdbops.GetLogicalSwitch(bnc.nbClient, logicalSwitch)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return 0, fmt.Errorf("error getting switch %s: %v", switchName, err)
 	}
-	if err == libovsdbclient.ErrNotFound {
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
 		// no switch exists, DB is empty, nothing to upgrade
 		return math.MaxInt32, nil
 	}

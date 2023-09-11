@@ -124,7 +124,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		Name: types.ClusterPortGroupNameBase,
 	}
 	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return err
 	}
 	if pg == nil {
@@ -142,7 +142,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		Name: types.ClusterRtrPortGroupNameBase,
 	}
 	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return err
 	}
 	if pg == nil {
