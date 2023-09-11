@@ -127,8 +127,16 @@ rules:
   - network-attachment-definitions
   - multi-networkpolicies
   verbs: ["list", "get", "watch"]
-
-
+- apiGroups:
+  - k8s.cni.cncf.io
+  resources:
+  - ipamleases 
+  verbs: ["create", "list", "get", "watch"]
+- apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachines
+  verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

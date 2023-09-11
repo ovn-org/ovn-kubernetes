@@ -965,6 +965,7 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_adminpolicybasedexternalroutes.yaml
   run_kubectl apply -f policy.networking.k8s.io_adminnetworkpolicies.yaml
   run_kubectl apply -f policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
+  run_kubectl apply -f k8s.cni.cncf.io_ipamleases.yaml
   run_kubectl apply -f ovn-setup.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
@@ -1357,7 +1358,7 @@ install_ovn
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   install_ingress
 fi
-if [ "$ENABLE_MULTI_NET" == true ]; then
+if [ "$ENABLE_MULTI_NET" == true -a "$KIND_CREATE" == true ]; then
   install_multus
   install_mpolicy_crd
   docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface

@@ -86,3 +86,5 @@ echo "Copying Admin Network Policy CRD"
 curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.0/config/crd/policy.networking.k8s.io_adminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_adminnetworkpolicies.yaml
 echo "Copying Baseline Admin Network Policy CRD"
 curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.0/config/crd/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
+echo "Copying IPAMLease CRD"
+curl -sSL https://raw.githubusercontent.com/maiqueb/persistentips/v0.1.0-alpha/artifacts/k8s.cni.cncf.io_ipamleases.yaml -o ../dist/templates/k8s.cni.cncf.io_ipamleases.yaml
