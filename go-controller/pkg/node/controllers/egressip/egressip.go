@@ -537,6 +537,8 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 		if !found {
 			continue
 		}
+		klog.Infof("Generating config for EgressIP %s IP %s which is hosted by a non-OVN managed interface (name %s)",
+			eip.Name, status.EgressIP, link.Attrs().Name)
 		// go through all selected pods and build a config per pod IP. We know there are at least one pod and these the
 		// pod(s) have IP(s).
 		eIPConfig, podIPConfigs = generateEIPConfigForPods(selectedPodIPs, link, eIPNet, isV6)

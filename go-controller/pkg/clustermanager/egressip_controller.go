@@ -1274,6 +1274,8 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			// if the EIP is hosted by a non OVN managed network, then restrict the assignable nodes to the set of nodes that
 			// may host the non-OVN managed network
 			if len(assignableNodesWithSecondaryNet) > 0 {
+				klog.V(5).Infof("Restricting the number of assignable nodes from %d to %d because EgressIP %s IP %s "+
+					"is going to be hosted by a non-OVN managed network", len(assignableNodes), len(assignableNodesWithSecondaryNet), name, eIP.String())
 				assignableNodes = assignableNodesWithSecondaryNet
 			}
 		}
@@ -1324,7 +1326,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			})
 			eNode.allocations[eIP.String()] = name
 			assignmentSuccessful = true
-			klog.Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, eNode)
+			klog.Infof("Successful assignment of egress IP: %s to network %s on node: %+v", egressIP, egressIPNetwork, eNode)
 			break
 		}
 	}
