@@ -3852,7 +3852,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				)
 
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode1.name] = &egressNode1
-				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode1.name] = &egressNode2
+				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode2.name] = &egressNode2
 
 				_, err := fakeClusterManagerOVN.eIPC.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
