@@ -1478,11 +1478,11 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 		return fmt.Errorf("failed to add pod %s/%s because failed to lookup node %s: %v", pod.Namespace, pod.Name,
 			pod.Spec.NodeName, err)
 	}
-	isOVNManagedNetwork, err := util.IsOVNManagedNetwork(eNode, eIPIP)
+	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(eNode)
 	if err != nil {
-		return fmt.Errorf("failed to consider pod %s/%s because failed to determine if egress IP %s is OVN managed: %v",
-			pod.Namespace, pod.Name, egressIPName, err)
+		return fmt.Errorf("failed to get node %s egress IP config: %w", eNode.Name, err)
 	}
+	isOVNManagedNetwork := util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPIP)
 	nextHopIP, err := e.getNextHop(status.Node, status.EgressIP, egressIPName, isLocalZoneEgressNode, isOVNManagedNetwork)
 	if err != nil || nextHopIP == "" {
 		return fmt.Errorf("failed to determine next hop for pod %s/%s when configuring egress IP %s"+
@@ -1541,20 +1541,21 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 	// node may not exist - attempt to retrieve it
 	eNode, err := e.watchFactory.GetNode(status.Node)
 	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to add pod %s/%s because failed to lookup node %s: %v", pod.Namespace, pod.Name,
+		return fmt.Errorf("failed to delete pod %s/%s egress IP config because failed to lookup node %s obj: %v", pod.Namespace, pod.Name,
 			pod.Spec.NodeName, err)
 	}
 	if err == nil {
 		eIPIP := net.ParseIP(status.EgressIP)
-		isOVNManagedNetwork, err := util.IsOVNManagedNetwork(eNode, eIPIP)
+		parsedEIPConfig, err := util.GetNodeEIPConfig(eNode)
 		if err != nil {
-			return fmt.Errorf("failed to delete egress IP %s (%s) because failed to determine if EgressIP is OVN managed: %v",
-				egressIPName, status.EgressIP, err)
-		}
-		nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, egressIPName, isLocalZoneEgressNode, isOVNManagedNetwork)
-		if err != nil {
-			klog.Warningf("Unable to determine next hop for egress IP %s IP %s assigned to node %s: %v", egressIPName,
-				status.EgressIP, status.Node, err)
+			klog.Warningf("Unable to get node %s egress IP config: %v", eNode.Name, err)
+		} else {
+			isOVNManagedNetwork := util.IsOVNManagedNetwork(parsedEIPConfig, eIPIP)
+			nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, egressIPName, isLocalZoneEgressNode, isOVNManagedNetwork)
+			if err != nil {
+				klog.Warningf("Unable to determine next hop for egress IP %s IP %s assigned to node %s: %v", egressIPName,
+					status.EgressIP, status.Node, err)
+			}
 		}
 	}
 
@@ -1907,11 +1908,10 @@ func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status e
 	eNode, err := e.watchFactory.GetNode(status.Node)
 	if err == nil {
 		eIPIP := net.ParseIP(status.EgressIP)
-		isOVNManagedNetwork, err := util.IsOVNManagedNetwork(eNode, eIPIP)
-		if err != nil {
-			klog.Errorf("Failed to delete EgressIP %s, failed to determine if EgressIP %s is OVN managed: %v",
-				name, eIPIP, err)
+		if eIPConfig, err := util.GetNodeEIPConfig(eNode); err != nil {
+			klog.Warningf("Failed to get Egress IP config from node annotation: %v", name, eIPIP, err)
 		} else {
+			isOVNManagedNetwork := util.IsOVNManagedNetwork(eIPConfig, eIPIP)
 			nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, name, isLocalZoneEgressNode, isOVNManagedNetwork)
 			if err != nil {
 				return nil, fmt.Errorf("failed to delete egress IP %s (%s) because unable to determine next hop: %v",
