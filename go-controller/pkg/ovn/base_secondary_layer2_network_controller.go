@@ -16,6 +16,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -89,7 +91,16 @@ func (h *baseSecondaryLayer2NetworkControllerEventHandler) IsResourceScheduled(o
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
 func (h *baseSecondaryLayer2NetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
-	return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
+	switch h.objType {
+	case factory.NodeType:
+		node, ok := obj.(*corev1.Node)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to Node", obj)
+		}
+		return h.oc.addUpdateNodeEvent(node)
+	default:
+		return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
+	}
 }
 
 // UpdateResource updates the specified object in the cluster to its version in newObj according to its
@@ -97,14 +108,32 @@ func (h *baseSecondaryLayer2NetworkControllerEventHandler) AddResource(obj inter
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
 func (h *baseSecondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
-	return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
+	switch h.objType {
+	case factory.NodeType:
+		node, ok := newObj.(*corev1.Node)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to Node", newObj)
+		}
+		return h.oc.addUpdateNodeEvent(node)
+	default:
+		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
+	}
 }
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
 func (h *baseSecondaryLayer2NetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
-	return h.oc.DeleteSecondaryNetworkResourceCommon(h.objType, obj, cachedObj)
+	switch h.objType {
+	case factory.NodeType:
+		node, ok := obj.(*corev1.Node)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to Node", obj)
+		}
+		return h.oc.deleteNodeEvent(node)
+	default:
+		return h.oc.DeleteSecondaryNetworkResourceCommon(h.objType, obj, cachedObj)
+	}
 }
 
 func (h *baseSecondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []interface{}) error {
@@ -115,6 +144,9 @@ func (h *baseSecondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []inter
 		syncFunc = h.syncFunc
 	} else {
 		switch h.objType {
+		case factory.NodeType:
+			syncFunc = h.oc.syncNodes
+
 		case factory.PodType:
 			syncFunc = h.oc.syncPodsForSecondaryNetwork
 
@@ -147,6 +179,7 @@ type BaseSecondaryLayer2NetworkController struct {
 }
 
 func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
+	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 
 	// For secondary networks, we don't have to watch namespace events if
@@ -195,6 +228,9 @@ func (oc *BaseSecondaryLayer2NetworkController) stop() {
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
 	}
+	if oc.nodeHandler != nil {
+		oc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
+	}
 	if oc.namespaceHandler != nil {
 		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
 	}
@@ -229,6 +265,10 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
 	if err := oc.WatchNamespaces(); err != nil {
+		return err
+	}
+
+	if err := oc.WatchNodes(); err != nil {
 		return err
 	}
 
@@ -287,4 +327,67 @@ func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchNa
 	}
 
 	return &logicalSwitch, nil
+}
+
+func (oc *BaseSecondaryLayer2NetworkController) addUpdateNodeEvent(node *corev1.Node) error {
+	if oc.isLocalZoneNode(node) {
+		return oc.addUpdateLocalNodeEvent(node)
+	}
+	return oc.addUpdateRemoteNodeEvent(node)
+}
+
+func (oc *BaseSecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1.Node) error {
+	_, present := oc.localZoneNodes.LoadOrStore(node.Name, true)
+
+	if !present {
+		// process all pods so they are reconfigured as local
+		errs := oc.addAllPodsOnNode(node.Name)
+		if errs != nil {
+			err := kerrors.NewAggregate(errs)
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (oc *BaseSecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *corev1.Node) error {
+	_, present := oc.localZoneNodes.Load(node.Name)
+
+	if present {
+		err := oc.deleteNodeEvent(node)
+		if err != nil {
+			return err
+		}
+
+		// process all pods so they are reconfigured as remote
+		errs := oc.addAllPodsOnNode(node.Name)
+		if errs != nil {
+			err = kerrors.NewAggregate(errs)
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (oc *BaseSecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) error {
+	oc.localZoneNodes.Delete(node.Name)
+	return nil
+}
+
+func (oc *BaseSecondaryLayer2NetworkController) syncNodes(nodes []interface{}) error {
+	for _, tmp := range nodes {
+		node, ok := tmp.(*corev1.Node)
+		if !ok {
+			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
+		}
+
+		// Add the node to the foundNodes only if it belongs to the local zone.
+		if oc.isLocalZoneNode(node) {
+			oc.localZoneNodes.Store(node.Name, true)
+		}
+	}
+
+	return nil
 }
