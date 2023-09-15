@@ -133,7 +133,7 @@ jobs:
    
     - name: Load docker image
       run: |
-        docker load --input image.tar
+        docker load --input image.tar && rm -rf image.tar
         
     - name: kind setup
       run: |
