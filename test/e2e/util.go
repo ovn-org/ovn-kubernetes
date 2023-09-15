@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,7 +24,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/framework/debug"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	testutils "k8s.io/kubernetes/test/utils"
 	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
@@ -301,7 +304,7 @@ func pokeEndpoint(namespace, clientContainer, protocol, targetHost string, targe
 	var res string
 	var err error
 	if len(namespace) != 0 {
-		res, err = framework.RunKubectl(namespace, cmd...)
+		res, err = e2ekubectl.RunKubectl(namespace, cmd...)
 	} else {
 		// command is to be run inside runtime container
 		res, err = runCommand(cmd...)
@@ -535,7 +538,7 @@ func getNodeAddresses(node *v1.Node) (string, string) {
 }
 
 func getNodeStatus(node string) string {
-	status, err := framework.RunKubectl("default", "get", "node", "-o", "jsonpath={.status.conditions[?(@.type==\"Ready\")].status}", node)
+	status, err := e2ekubectl.RunKubectl("default", "get", "node", "-o", "jsonpath={.status.conditions[?(@.type==\"Ready\")].status}", node)
 	if err != nil {
 		framework.Failf("Unable to retrieve the status for node: %s %v", node, err)
 	}
@@ -726,7 +729,8 @@ func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error 
 	if utilnet.IsIPv6String(dstPodIP) {
 		targetIP = fmt.Sprintf("[%s]", dstPodIP)
 	}
-	stdout, stderr, err := fr.ExecShellInPodWithFullOutput(
+	stdout, stderr, err := e2epod.ExecShellInPodWithFullOutput(
+		fr,
 		srcPodName,
 		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:8000 | head -n1", targetIP))
 	if err == nil && stdout == "HTTP/1.1 200 OK" {
@@ -769,7 +773,7 @@ func ExecShellInPodWithFullOutput(f *framework.Framework, namespace, podName str
 
 // execCommandInPodWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
 func execCommandInPodWithFullOutput(f *framework.Framework, namespace, podName string, cmd ...string) (string, string, error) {
-	pod, err := f.PodClientNS(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+	pod, err := f.ClientSet.CoreV1().Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
 	framework.ExpectNoError(err, "failed to get pod %v", podName)
 	gomega.Expect(pod.Spec.Containers).NotTo(gomega.BeEmpty())
 	return ExecCommandInContainerWithFullOutput(f, namespace, podName, pod.Spec.Containers[0].Name, cmd...)
@@ -777,7 +781,7 @@ func execCommandInPodWithFullOutput(f *framework.Framework, namespace, podName s
 
 // ExecCommandInContainerWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
 func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, podName, containerName string, cmd ...string) (string, string, error) {
-	options := framework.ExecOptions{
+	options := e2epod.ExecOptions{
 		Command:            cmd,
 		Namespace:          namespace,
 		PodName:            podName,
@@ -787,7 +791,7 @@ func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, pod
 		CaptureStderr:      true,
 		PreserveWhitespace: false,
 	}
-	return f.ExecWithOptions(options)
+	return e2epod.ExecWithOptions(f, options)
 }
 
 func assertACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerdict string, expectedACLSeverity string) (bool, error) {
@@ -952,6 +956,9 @@ func wrappedTestFramework(basename string) *framework.Framework {
 func newPrivelegedTestFramework(basename string) *framework.Framework {
 	f := framework.NewDefaultFramework(basename)
 	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
+	f.DumpAllNamespaceInfo = func(f *framework.Framework, namespace string) {
+		debug.DumpAllNamespaceInfo(f.ClientSet, namespace)
+	}
 	return f
 }
 
@@ -991,7 +998,7 @@ func countACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerd
 func getTemplateContainerEnv(namespace, resource, container, key string) string {
 	args := []string{"get", resource,
 		"-o=jsonpath='{.spec.template.spec.containers[?(@.name==\"" + container + "\")].env[?(@.name==\"" + key + "\")].value}'"}
-	value := framework.RunKubectlOrDie(ovnNamespace, args...)
+	value := e2ekubectl.RunKubectlOrDie(ovnNamespace, args...)
 	return strings.Trim(value, "'")
 }
 
@@ -1007,7 +1014,7 @@ func setUnsetTemplateContainerEnv(c kubernetes.Interface, namespace, resource, c
 		env = append(env, fmt.Sprintf("%s-", k))
 	}
 	framework.Logf("Setting environment in %s container %s of namespace %s to %v", resource, container, namespace, env)
-	framework.RunKubectlOrDie(namespace, append(args, env...)...)
+	e2ekubectl.RunKubectlOrDie(namespace, append(args, env...)...)
 
 	// Make sure the change has rolled out
 	// TODO (Change this to use the exported upstream function)
@@ -1028,12 +1035,12 @@ func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
 	}
 
 	args := []string{"get", "pods", "--selector=app=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
-	ovnKubePodName := framework.RunKubectlOrDie(ovnNamespace, args...)
+	ovnKubePodName := e2ekubectl.RunKubectlOrDie(ovnNamespace, args...)
 
 	ipTablesArgs := []string{"INPUT", "-p", protocol, "--dport", port, "-j", "DROP"}
 
 	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", "iptables", "--check"}
-	_, err := framework.RunKubectl(ovnNamespace, append(args, ipTablesArgs...)...)
+	_, err := e2ekubectl.RunKubectl(ovnNamespace, append(args, ipTablesArgs...)...)
 
 	// errors known to be equivalent to not found
 	notFound1 := "No chain/target/match by that name"
@@ -1053,7 +1060,7 @@ func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
 
 	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", "iptables", "--" + op}
 	framework.Logf("%s iptables input rule for protocol %s port %s action DROP on node %s", op, protocol, port, nodeName)
-	framework.RunKubectlOrDie(ovnNamespace, append(args, ipTablesArgs...)...)
+	e2ekubectl.RunKubectlOrDie(ovnNamespace, append(args, ipTablesArgs...)...)
 }
 
 func randStr(n int) string {
@@ -1074,7 +1081,7 @@ func isInterconnectEnabled() bool {
 func singleNodePerZone() bool {
 	if singleNodePerZoneResult == nil {
 		args := []string{"get", "pods", "--selector=app=ovnkube-node", "-o", "jsonpath={.items[0].spec.containers[*].name}"}
-		containerNames := framework.RunKubectlOrDie(ovnNamespace, args...)
+		containerNames := e2ekubectl.RunKubectlOrDie(ovnNamespace, args...)
 		result := true
 		for _, containerName := range strings.Split(containerNames, " ") {
 			if containerName == "ovnkube-node" {

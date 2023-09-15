@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/kubernetes/test/e2e/framework"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
@@ -177,7 +177,7 @@ func inRange(cidr string, ip string) error {
 }
 
 func connectToServer(clientPodConfig podConfiguration, serverIP string, port int) error {
-	_, err := framework.RunKubectl(
+	_, err := e2ekubectl.RunKubectl(
 		clientPodConfig.namespace,
 		"exec",
 		clientPodConfig.name,
@@ -203,7 +203,7 @@ func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topolog
 }
 
 func configurePodStaticIP(podNamespace string, podName string, staticIP string) error {
-	_, err := framework.RunKubectl(
+	_, err := e2ekubectl.RunKubectl(
 		podNamespace, "exec", podName, "--",
 		"ip", "addr", "add", staticIP, "dev", "net1",
 	)

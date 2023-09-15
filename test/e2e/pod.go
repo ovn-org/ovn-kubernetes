@@ -7,13 +7,15 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 )
 
 var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
@@ -90,7 +92,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 					}
 				}
 			}
-			f.PodClient().CreateSync(clientPod)
+			e2epod.NewPodClient(f).CreateSync(clientPod)
 
 			ginkgo.By("Creating the server pod with hostNetwork:true")
 			// Create the server pod.
@@ -110,14 +112,14 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 				}
 				serverPod.Spec.HostNetwork = true
 				serverPod.Spec.NodeName = serverPodNodeName
-				f.PodClient().Create(serverPod)
+				e2epod.NewPodClient(f).Create(serverPod)
 
 				err := e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, serverPod.Name, f.Namespace.Name, 1*time.Minute)
 				if err != nil {
-					f.PodClient().Delete(context.TODO(), serverPod.Name, metav1.DeleteOptions{})
+					e2epod.NewPodClient(f).Delete(context.TODO(), serverPod.Name, metav1.DeleteOptions{})
 					return err
 				}
-				serverPod, err = f.PodClient().Get(context.TODO(), serverPod.Name, metav1.GetOptions{})
+				serverPod, err = e2epod.NewPodClient(f).Get(context.TODO(), serverPod.Name, metav1.GetOptions{})
 				return err
 			}, 5*time.Minute, 1*time.Second).Should(gomega.Succeed())
 		})
@@ -137,7 +139,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 							echoPayloads[size],
 						)
 						framework.Logf("Testing TCP %s with command %q", size, cmd)
-						stdout, err := framework.RunHostCmdWithRetries(
+						stdout, err := e2epodoutput.RunHostCmdWithRetries(
 							clientPod.Namespace,
 							clientPod.Name,
 							cmd,
@@ -165,7 +167,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 							framework.Logf("Flushed cache on %s", serverPodNodeName)
 							// List the current IP route cache for informative purposes.
 							cmd := fmt.Sprintf("ip route get %s", clientnodeIP)
-							stdout, err = framework.RunHostCmd(
+							stdout, err = e2epodoutput.RunHostCmd(
 								serverPod.Namespace,
 								serverPod.Name,
 								cmd)
@@ -185,7 +187,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 								serverPodPort,
 							)
 							framework.Logf("Testing UDP %s with command %q", size, cmd)
-							stdout, err := framework.RunHostCmd(
+							stdout, err := e2epodoutput.RunHostCmd(
 								clientPod.Namespace,
 								clientPod.Name,
 								cmd)
@@ -200,7 +202,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 								ginkgo.By("Making sure that the ip route cache contains an MTU route")
 								// Get IP route cache and make sure that it contains an MTU route on the server side.
 								cmd = fmt.Sprintf("ip route get %s", clientnodeIP)
-								stdout, err = framework.RunHostCmd(
+								stdout, err = e2epodoutput.RunHostCmd(
 									serverPod.Namespace,
 									serverPod.Name,
 									cmd)
@@ -231,7 +233,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 							if isInterconnectEnabled() {
 								containerName = "ovnkube-controller"
 							}
-							_, err := framework.RunKubectl(ovnNs, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
+							_, err := e2ekubectl.RunKubectl(ovnNs, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
 								"ip", "route", "flush", "cache")
 							framework.ExpectNoError(err, "Flushing the ip route cache failed")
 						}
