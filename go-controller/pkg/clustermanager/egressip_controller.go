@@ -228,7 +228,8 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 					klog.Infof("CloudPrivateIPConfig: %s already assigned to node: %s", cloudPrivateIPConfigName, cloudPrivateIPConfig.Spec.Node)
 					continue
 				}
-				return fmt.Errorf("cloud create request failed for CloudPrivateIPConfig: %s, err: item exists", cloudPrivateIPConfigName)
+				return fmt.Errorf("cloud request failed for CloudPrivateIPConfig: %s, err: cannot be assigned to node %s because cloud has it in node %s",
+					cloudPrivateIPConfigName, op.toAdd, cloudPrivateIPConfig.Spec.Node)
 			}
 			cloudPrivateIPConfig := ocpcloudnetworkapi.CloudPrivateIPConfig{
 				ObjectMeta: metav1.ObjectMeta{
