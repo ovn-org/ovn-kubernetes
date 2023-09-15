@@ -276,7 +276,13 @@ jobs:
         echo "$GOPATH/bin" >> $GITHUB_PATH
 
     - name: Free up disk space
-      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
+      run: |
+        sudo eatmydata apt-get purge --auto-remove -y \
+          azure-cli aspnetcore-* dotnet-* ghc-* firefox \
+          google-chrome-stable google-cloud-sdk \
+          llvm-* microsoft-edge-stable mono-* \
+          msbuild mysql-server-core-* php-* php7* \
+          powershell temurin-* zulu-*
 
     - name: Download test-image-master
       uses: actions/download-artifact@v3
@@ -291,7 +297,7 @@ jobs:
 
     - name: Load docker image
       run: |
-        docker load --input ${CI_IMAGE_MASTER_TAR}
+        docker load --input ${CI_IMAGE_MASTER_TAR} && rm -rf ${CI_IMAGE_MASTER_TAR}
 
     - name: Check out code into the Go module directory - from Master branch
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
@@ -329,7 +335,7 @@ jobs:
 
     - name: Load docker image
       run: |
-        docker load --input ${CI_IMAGE_PR_TAR}
+        docker load --input ${CI_IMAGE_PR_TAR} && rm -rf ${CI_IMAGE_PR_TAR}
 
     - name: Check out code into the Go module directory - from PR branch
       uses: actions/checkout@v3
@@ -453,7 +459,7 @@ jobs:
 
     - name: Load docker image
       run: |
-        docker load --input ${CI_IMAGE_PR_TAR}
+        docker load --input ${CI_IMAGE_PR_TAR} && rm -rf ${CI_IMAGE_PR_TAR}
 
     - name: kind setup
       timeout-minutes: 30
@@ -551,7 +557,7 @@ jobs:
 
     - name: Load docker image
       run: |
-        docker load --input ${CI_IMAGE_PR_TAR}
+        docker load --input ${CI_IMAGE_PR_TAR} && rm -rf ${CI_IMAGE_PR_TAR}
 
     - name: kind IPv4 setup
       run: |
@@ -649,7 +655,7 @@ jobs:
           name: test-image-pr
       - name: Load docker image
         run: |
-          docker load --input ${CI_IMAGE_PR_TAR}
+          docker load --input ${CI_IMAGE_PR_TAR} && rm -rf ${CI_IMAGE_PR_TAR}
       - name: kind setup
         run: |
           export OVN_IMAGE="ovn-daemonset-f:pr"
