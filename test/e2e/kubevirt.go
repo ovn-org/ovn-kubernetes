@@ -13,8 +13,7 @@ import (
 	"sync"
 	"time"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/ginkgo/extensions/table"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/kubevirt"
@@ -586,7 +585,7 @@ passwd:
 				namespace,
 				selectedNode.Name,
 				"netexec", "--http-port", "8000")
-			_ = fr.PodClient().CreateSync(httpServerWorkerNode)
+			_ = e2epod.NewPodClient(fr).CreateSync(httpServerWorkerNode)
 		}
 
 		By("Waiting until both pods have an IP address")

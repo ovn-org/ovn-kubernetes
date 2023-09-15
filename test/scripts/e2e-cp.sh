@@ -120,15 +120,19 @@ export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
 export KUBE_CONTAINER_RUNTIME_NAME=containerd
 export NUM_NODES=2
 
+# make Ginkgo V2 to allow to use deprecated api's.
+export ACK_GINKGO_DEPRECATIONS=2.4.0
+
 FOCUS=$(echo ${@:1} | sed 's/ /\\s/g')
 
 pushd e2e
 
 go mod download
-go test -timeout=0 -v . \
+go test -test.timeout 180m -v . \
         -ginkgo.v \
         -ginkgo.focus ${FOCUS:-.} \
-        -ginkgo.flakeAttempts ${FLAKE_ATTEMPTS:-2} \
+        -ginkgo.timeout 3h \
+        -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
         -ginkgo.skip="${SKIPPED_TESTS}" \
         -provider skeleton \
         -kubeconfig ${KUBECONFIG} \

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -90,7 +90,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 		cmd := []string{"/bin/sh", "-c", iperf}
 		clientPod := newAgnhostPod(fr.Namespace.Name, mcastSource, cmd...)
 		clientPod.Spec.NodeName = clientNodeInfo.name
-		fr.PodClient().CreateSync(clientPod)
+		e2epod.NewPodClient(fr).CreateSync(clientPod)
 
 		// Start a multicast listener on the same groups and verify it received the traffic (iperf server is the multicast listener)
 		// join multicast group (-B 224.3.3.3), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
@@ -102,7 +102,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 		cmd = []string{"/bin/sh", "-c", iperf}
 		mcastServerPod1 := newAgnhostPod(fr.Namespace.Name, mcastServer1, cmd...)
 		mcastServerPod1.Spec.NodeName = serverNodeInfo.name
-		fr.PodClient().CreateSync(mcastServerPod1)
+		e2epod.NewPodClient(fr).CreateSync(mcastServerPod1)
 
 		// Start a multicast listener on on other group and verify it does not receive the traffic (iperf server is the multicast listener)
 		// join multicast group (-B 224.4.4.4), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
@@ -114,7 +114,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 		cmd = []string{"/bin/sh", "-c", iperf}
 		mcastServerPod2 := newAgnhostPod(fr.Namespace.Name, mcastServer2, cmd...)
 		mcastServerPod2.Spec.NodeName = serverNodeInfo.name
-		fr.PodClient().CreateSync(mcastServerPod2)
+		e2epod.NewPodClient(fr).CreateSync(mcastServerPod2)
 
 		ginkgo.By("checking if pod server1 received multicast traffic")
 		gomega.Eventually(func() (string, error) {
