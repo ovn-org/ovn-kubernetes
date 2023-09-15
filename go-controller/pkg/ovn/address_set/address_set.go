@@ -312,9 +312,9 @@ func GetHashNamesForAS(dbIDs *libovsdbops.DbObjectIDs) (string, string) {
 		buildAddressSet(dbIDs, ipv6InternalID).Name
 }
 
-// GetDbObjsForAS returns nbdb.AddressSet objects both for ipv4 and ipv6, regardless of current config.
-// May be used for testing and cleanup.
-func GetDbObjsForAS(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (*nbdb.AddressSet, *nbdb.AddressSet) {
+// GetTestDbAddrSets returns nbdb.AddressSet objects both for ipv4 and ipv6, regardless of current config.
+// May only be used for testing.
+func GetTestDbAddrSets(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (*nbdb.AddressSet, *nbdb.AddressSet) {
 	var v4set, v6set *nbdb.AddressSet
 	v4IPs, v6IPs := splitIPsByFamily(ips)
 	// v4 address set

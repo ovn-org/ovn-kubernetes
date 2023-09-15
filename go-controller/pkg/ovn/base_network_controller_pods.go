@@ -196,7 +196,7 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 		// Since portInfo is not available, use ovn to locate the logical switch (named after the node name) for the logical port.
 		portUUID, switchName, err = bnc.lookupPortUUIDAndSwitchName(logicalPort)
 		if err != nil {
-			if err != libovsdbclient.ErrNotFound {
+			if !errors.Is(err, libovsdbclient.ErrNotFound) {
 				return nil, fmt.Errorf("unable to locate portUUID+switchName for %s: %w", podDesc, err)
 			}
 			// The logical port no longer exists in OVN. The caller expects this function to be idem-potent,
@@ -478,10 +478,10 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	// will still have the old UUID.
 	lsp = &nbdb.LogicalSwitchPort{Name: portName}
 	existingLSP, err := libovsdbops.GetLogicalSwitchPort(bnc.nbClient, lsp)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return nil, nil, nil, false, fmt.Errorf("unable to get the lsp %s from the nbdb: %s", portName, err)
 	}
-	lspExist = err != libovsdbclient.ErrNotFound
+	lspExist = !errors.Is(err, libovsdbclient.ErrNotFound)
 
 	// Sanity check. If port exists, it should be in the logical switch obtained from the pod spec.
 	if lspExist {

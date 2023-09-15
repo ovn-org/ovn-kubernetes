@@ -54,8 +54,8 @@ func getMultusIPsFromNetworkName(pod *v1.Pod, networkName string) (sets.Set[stri
 	var multusNetworks []nettypes.NetworkStatus
 	err := json.Unmarshal([]byte(pod.ObjectMeta.Annotations[nettypes.NetworkStatusAnnot]), &multusNetworks)
 	if err != nil {
-		return nil, fmt.Errorf("unable to unmarshall annotation on pod %s k8s.v1.cni.cncf.io/network-status '%s': %v",
-			pod.Name, pod.ObjectMeta.Annotations[nettypes.NetworkStatusAnnot], err)
+		return nil, fmt.Errorf("unable to unmarshall annotation on pod %s %s '%s': %v",
+			pod.Name, nettypes.NetworkStatusAnnot, pod.ObjectMeta.Annotations[nettypes.NetworkStatusAnnot], err)
 	}
 	for _, multusNetwork := range multusNetworks {
 		if multusNetwork.Name == networkName {

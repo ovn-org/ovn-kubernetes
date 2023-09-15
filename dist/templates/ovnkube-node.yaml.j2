@@ -30,7 +30,7 @@ spec:
       priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
-      serviceAccountName: ovn
+      serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
       {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}

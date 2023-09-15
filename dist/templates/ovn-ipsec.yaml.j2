@@ -1,3 +1,34 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ovn-kubernetes-csr-request
+rules:
+  - apiGroups:
+      - certificates.k8s.io
+    resources:
+      - certificatesigningrequests
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+      - delete
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ovn-kubernetes-csr-request
+roleRef:
+  name: ovn-kubernetes-csr-request
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    name: ovnkube-node
+    namespace: ovn-kubernetes
+
+---
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -32,7 +63,7 @@ spec:
             - matchExpressions:
               - key: network.operator.openshift.io/dpu-host
                 operator: DoesNotExist
-      serviceAccountName: ovn
+      serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
       priorityClassName: "system-node-critical"

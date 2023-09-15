@@ -327,6 +327,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -368,6 +369,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -407,6 +409,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -437,12 +440,19 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		}
 		appRun(app)
 	})
-	ovntest.OnSupportedPlatformsIt("sets up local linux pod", func() {
+	ovntest.OnSupportedPlatformsIt("sets up local linux pod, ignores remote linux pod", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				pod1IP   string = "1.2.3.5"
 				pod1CIDR string = pod1IP + "/24"
 				pod1MAC  string = "aa:bb:cc:dd:ee:ff"
+
+				remotePodIP      string = "1.2.4.5"
+				remotePodCIDR    string = remotePodIP + "/24"
+				remotePodMAC     string = "11:22:33:44:55:66"
+				remoteNodeName   string = "remoteNode"
+				remoteNodeDRMAC  string = "66:55:44:33:22:11"
+				remoteNodeSubnet string = "1.2.4.0/24"
 			)
 
 			annotations := createNodeAnnotationsForSubnet(thisNodeSubnet)
@@ -450,9 +460,17 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
 			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
 			node := createNode(thisNode, "linux", thisNodeIP, annotations)
+
+			remoteNodeAnnotations := createNodeAnnotationsForSubnet(remoteNodeSubnet)
+			remoteNodeAnnotations[hotypes.HybridOverlayDRMAC] = remoteNodeDRMAC
+			remoteNodeAnnotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.65.0.3/16\"}"
+			remoteNodeAnnotations[hotypes.HybridOverlayDRIP] = "1.2.4.3"
+			remoteNode := createNode(remoteNodeName, "linux", "10.20.20.1", remoteNodeAnnotations)
+
 			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
+			remoteTestPod := createPod("test", "remotePod", remoteNodeName, remotePodCIDR, remotePodMAC)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
-				Items: []v1.Node{*node},
+				Items: []v1.Node{*node, *remoteNode},
 			})
 
 			// Node setup from initial node sync
@@ -468,6 +486,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -497,6 +516,15 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				"0x0": generateInitialFlowCacheEntry(mgmtIfAddr.IP.String(), thisNodeDRIP, thisNodeDRMAC),
 			}
 
+			Eventually(func() error {
+				linuxNode.flowMutex.Lock()
+				defer linuxNode.flowMutex.Unlock()
+				return compareFlowCache(linuxNode.flowCache, initialFlowCache)
+			}, 2).Should(BeNil())
+
+			// adding a remote pod should do nothing... we only care about directing traffic for pods on this node
+			_, err = fakeClient.CoreV1().Pods(remoteTestPod.Namespace).Create(context.TODO(), remoteTestPod, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() error {
 				linuxNode.flowMutex.Lock()
 				defer linuxNode.flowMutex.Unlock()
@@ -558,6 +586,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -637,6 +666,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -736,6 +766,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -875,6 +906,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				false,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)

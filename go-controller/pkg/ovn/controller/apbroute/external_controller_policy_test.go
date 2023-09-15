@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -29,8 +31,10 @@ import (
 func newPod(podName, namespace, hostIP string, labels map[string]string) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: v1.ObjectMeta{Name: podName, Namespace: namespace,
-			Labels: labels},
-		Spec:   corev1.PodSpec{HostNetwork: true},
+			Labels:      labels,
+			Annotations: map[string]string{nettypes.NetworkStatusAnnot: fmt.Sprintf(network_status, hostIP)},
+		},
+		Spec:   corev1.PodSpec{NodeName: "node"},
 		Status: corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: hostIP}}, Phase: corev1.PodRunning},
 	}
 }
@@ -57,6 +61,15 @@ var (
 	fakeClient         *fake.Clientset
 	mgr                *externalPolicyManager
 	err                error
+
+	node = &corev1.Node{
+		ObjectMeta: v1.ObjectMeta{
+			Name: "node",
+			Annotations: map[string]string{
+				"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`,
+				"k8s.ovn.org/node-chassis-id":   "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
+			},
+		}}
 )
 
 func createTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
@@ -95,7 +108,7 @@ func deleteTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
 func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 	var nbZoneFailed bool
 	stopChan = make(chan struct{})
-	fakeClient = fake.NewSimpleClientset(k8sObjects...)
+	fakeClient = fake.NewSimpleClientset(append(k8sObjects, node)...)
 	fakeRouteClient = adminpolicybasedrouteclient.NewSimpleClientset(routePolicyObjects...)
 	iFactory, err = factory.NewMasterWatchFactory(&util.OVNMasterClientset{
 		KubeClient:             fakeClient,
@@ -172,7 +185,7 @@ func eventuallyExpectConfig(policyName string, expectedPolicy *routePolicyState,
 		})
 		return result
 
-	}, 5).Should(BeTrue(), fmt.Sprintf("expected policy to match %s", expectedPolicy.String()))
+	}, 5).Should(BeTrue(), fmt.Sprintf("expected policy %s to match '%s'", policyName, expectedPolicy.String()))
 	Eventually(func() *policyReferencedObjects { return listRefObjects(policyName) }, 5).
 		Should(Equal(expectedRefs))
 }
@@ -246,8 +259,12 @@ var _ = Describe("OVN External Gateway policy", func() {
 		initialDB = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
-					UUID: "node1",
-					Name: "node1",
+					UUID: "node",
+					Name: "node",
+				},
+				&nbdb.LogicalRouter{
+					UUID: "GR_node-UUID",
+					Name: "GR_node",
 				},
 			},
 		}

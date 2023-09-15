@@ -2,8 +2,10 @@ package apbroute
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
@@ -26,6 +28,8 @@ const (
 	annotatedPodIP         = "192.168.2.1"
 	dynamicHopHostNetPodIP = "192.168.1.1"
 	staticHopGWIP          = "10.10.10.1"
+	networkAttachementName = "foo"
+	network_status         = `[{"name":"foo","interface":"net1","ips":["%s"],"mac":"01:23:45:67:89:10"}]`
 )
 
 func newPolicy(policyName string, fromNSSelector *v1.LabelSelector, staticHopsGWIPs sets.Set[string], dynamicHopsNSSelector *v1.LabelSelector, dynamicHopsPodSelector *v1.LabelSelector, bfdEnabled bool) *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute {
@@ -48,8 +52,9 @@ func newPolicy(policyName string, fromNSSelector *v1.LabelSelector, staticHopsGW
 	if dynamicHopsNSSelector != nil && dynamicHopsPodSelector != nil {
 		p.Spec.NextHops.DynamicHops = []*adminpolicybasedrouteapi.DynamicHop{
 			{NamespaceSelector: *dynamicHopsNSSelector,
-				PodSelector: *dynamicHopsPodSelector,
-				BFDEnabled:  bfdEnabled},
+				PodSelector:           *dynamicHopsPodSelector,
+				NetworkAttachmentName: networkAttachementName,
+				BFDEnabled:            bfdEnabled},
 		}
 	}
 	return &p
@@ -191,17 +196,18 @@ var _ = Describe("OVN External Gateway namespace", func() {
 
 		annotatedPodGW = &corev1.Pod{
 			ObjectMeta: v1.ObjectMeta{Name: "annotatedPod", Namespace: namespaceGW.Name,
-				Labels:      map[string]string{"name": "annotatedPod"},
-				Annotations: map[string]string{"k8s.ovn.org/routing-namespaces": "test", "k8s.ovn.org/routing-network": ""},
+				Labels: map[string]string{"name": "annotatedPod"},
+				Annotations: map[string]string{"k8s.ovn.org/routing-namespaces": "test",
+					"k8s.ovn.org/routing-network": "",
+					nettypes.NetworkStatusAnnot:   fmt.Sprintf(network_status, annotatedPodIP)},
 			},
-			Spec:   corev1.PodSpec{HostNetwork: true},
 			Status: corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: annotatedPodIP}}, Phase: corev1.PodRunning},
 		}
 
 		podGW = &corev1.Pod{
 			ObjectMeta: v1.ObjectMeta{Name: "pod", Namespace: namespaceGW.Name,
-				Labels: map[string]string{"name": "pod"}},
-			Spec:   corev1.PodSpec{HostNetwork: true},
+				Labels:      map[string]string{"name": "pod"},
+				Annotations: map[string]string{nettypes.NetworkStatusAnnot: fmt.Sprintf(network_status, dynamicHopHostNetPodIP)}},
 			Status: corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: dynamicHopHostNetPodIP}}, Phase: corev1.PodRunning},
 		}
 		namespaceTargetWithPod, namespaceTarget2WithPod, namespaceTarget2WithoutPod, namespaceGWWithPod *namespaceWithPods
@@ -217,7 +223,12 @@ var _ = Describe("OVN External Gateway namespace", func() {
 		initialDB = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
-					Name: "node1",
+					UUID: "node",
+					Name: "node",
+				},
+				&nbdb.LogicalRouter{
+					UUID: "GR_node-UUID",
+					Name: "GR_node",
 				},
 			},
 		}
