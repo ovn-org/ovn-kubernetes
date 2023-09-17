@@ -1326,9 +1326,9 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				EgressIP: eIP.String(),
 				Network:  egressIPNetwork,
 			})
-			klog.Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, eNode)
 			eNode.allocations[eIP.String()] = name
 			assignmentSuccessful = true
+			klog.Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, eNode)
 			break
 		}
 	}
@@ -1375,7 +1375,7 @@ func (eIPC *egressIPClusterController) validateEgressIPSpec(name string, egressI
 			eIPC.recorder.Eventf(&eIPRef, v1.EventTypeWarning, "InvalidEgressIP", "egress IP: %s for object EgressIP: %s is not a valid IP address", egressIP, name)
 			return nil, fmt.Errorf("unable to parse provided EgressIP: %s, invalid", egressIP)
 		}
-		validatedEgressIPs.Insert(egressIP)
+		validatedEgressIPs.Insert(ip.String())
 	}
 	return validatedEgressIPs, nil
 }

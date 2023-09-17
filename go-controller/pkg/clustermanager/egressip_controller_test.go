@@ -3058,7 +3058,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 								Network:  "192.168.0.0/16",
 							},
 							{
-								EgressIP: egressIPv6,
+								EgressIP: net.ParseIP(egressIPv6).String(),
 								Node:     egressNode1.name,
 								Network:  "::/64",
 							},
