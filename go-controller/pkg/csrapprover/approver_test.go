@@ -26,15 +26,12 @@ const csrName = "testCSR"
 
 func TestOVNKubeCSRController(t *testing.T) {
 	tests := []struct {
-		name                     string
-		expectedCommonNamePrefix string
-		expectedOrganization     []string
-		expectedGroups           sets.Set[string]
-		expectedUsersPrefixes    sets.Set[string]
-		expectedUsages           sets.Set[certificatesv1.KeyUsage]
-		expectedMaxDuration      time.Duration
-		expectedCondition        certificatesv1.CertificateSigningRequestCondition
-		expectedEvent            string
+		name                         string
+		expectedAcceptanceConditions []CSRAcceptanceCondition
+		expectedUsages               sets.Set[certificatesv1.KeyUsage]
+		expectedMaxDuration          time.Duration
+		expectedCondition            certificatesv1.CertificateSigningRequestCondition
+		expectedEvent                string
 
 		csrUserName      string
 		signerName       string
@@ -47,24 +44,41 @@ func TestOVNKubeCSRController(t *testing.T) {
 		shouldIgnore     bool
 	}{
 		{
-			name:                     "CSR with a CommonName that does not start with commonNamePrefix is ignored",
-			expectedCommonNamePrefix: "test:group",
-			expectedUsersPrefixes:    sets.New[string]("system:node"),
-			commonNamePrefix:         "different:group",
-			shouldIgnore:             true,
+			name: "CSR with a CommonName that does not start with commonNamePrefix is ignored",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					CommonNamePrefix: "test:group",
+					UserPrefixes:     []string{"system:node"},
+				},
+				{
+					CommonNamePrefix: "fake:group",
+					UserPrefixes:     []string{"system:fake"},
+					Groups:           []string{"test:fakenodes", "test:fakeauthenticated"},
+				},
+			},
+			commonNamePrefix: "different:group",
+			shouldIgnore:     true,
 		},
 		{
-			name:                     "CSR with .Spec.SignerName not equal to kubernetes.io/kube-apiserver-client is ignored",
-			expectedCommonNamePrefix: "test:group",
-			expectedUsersPrefixes:    sets.New[string]("system:node"),
-			commonNamePrefix:         "test:group",
-			signerName:               certificatesv1.KubeletServingSignerName,
-			shouldIgnore:             true,
+			name: "CSR with .Spec.SignerName not equal to kubernetes.io/kube-apiserver-client is ignored",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					CommonNamePrefix: "test:group",
+					UserPrefixes:     []string{"system:node"},
+				},
+			},
+			commonNamePrefix: "test:group",
+			signerName:       certificatesv1.KubeletServingSignerName,
+			shouldIgnore:     true,
 		},
 		{
-			name:                  "CSR created by unexpected user is denied",
-			expectedUsersPrefixes: sets.New[string]("system:node"),
-			expectedUsages:        sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
+			name: "CSR created by unexpected user is denied",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					UserPrefixes: []string{"system:node"},
+				},
+			},
+			expectedUsages: sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
 			expectedCondition: certificatesv1.CertificateSigningRequestCondition{
 				Type:    certificatesv1.CertificateDenied,
 				Status:  corev1.ConditionTrue,
@@ -77,9 +91,13 @@ func TestOVNKubeCSRController(t *testing.T) {
 			nodeName:      "test.node",
 		},
 		{
-			name:                  "CSR created by system:node:<nodeName> user with invalid nodeName is denied",
-			expectedUsersPrefixes: sets.New[string]("system:node"),
-			expectedUsages:        sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
+			name: "CSR created by system:node:<nodeName> user with invalid nodeName is denied",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					UserPrefixes: []string{"system:node"},
+				},
+			},
+			expectedUsages: sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
 			expectedCondition: certificatesv1.CertificateSigningRequestCondition{
 				Type:   certificatesv1.CertificateDenied,
 				Status: corev1.ConditionTrue,
@@ -100,11 +118,15 @@ func TestOVNKubeCSRController(t *testing.T) {
 			nodeName:    "test.node",
 		},
 		{
-			name:                     "CSR with unexpected groups is denied",
-			expectedCommonNamePrefix: "test:group",
-			expectedUsages:           sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
-			expectedUsersPrefixes:    sets.New[string]("system:node"),
-			expectedGroups:           sets.New[string]("test:nodes", "test:authenticated"),
+			name: "CSR with unexpected groups is denied",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					CommonNamePrefix: "test:group",
+					UserPrefixes:     []string{"system:node"},
+					Groups:           []string{"test:nodes", "test:authenticated"},
+				},
+			},
+			expectedUsages: sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
 			expectedCondition: certificatesv1.CertificateSigningRequestCondition{
 				Type:    certificatesv1.CertificateDenied,
 				Status:  corev1.ConditionTrue,
@@ -119,11 +141,15 @@ func TestOVNKubeCSRController(t *testing.T) {
 			groups:           []string{"test:nodes", "test:authenticated", "unexpected:group"},
 		},
 		{
-			name:                     "CSR with unexpected common name is denied",
-			expectedCommonNamePrefix: "test:group",
-			expectedUsages:           sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
-			expectedUsersPrefixes:    sets.New[string]("system:node"),
-			expectedGroups:           sets.New[string]("test:nodes", "test:authenticated"),
+			name: "CSR with unexpected common name is denied",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					CommonNamePrefix: "test:group",
+					UserPrefixes:     []string{"system:node"},
+					Groups:           []string{"test:nodes", "test:authenticated"},
+				},
+			},
+			expectedUsages: sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
 			expectedCondition: certificatesv1.CertificateSigningRequestCondition{
 				Type:    certificatesv1.CertificateDenied,
 				Status:  corev1.ConditionTrue,
@@ -138,11 +164,15 @@ func TestOVNKubeCSRController(t *testing.T) {
 			groups:           []string{"test:nodes", "test:authenticated"},
 		},
 		{
-			name:                     "CSR with unexpected usages is denied",
-			expectedCommonNamePrefix: "test:group",
-			expectedUsages:           sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
-			expectedUsersPrefixes:    sets.New[string]("system:node"),
-			expectedGroups:           sets.New[string]("test:nodes", "test:authenticated"),
+			name: "CSR with unexpected usages is denied",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					CommonNamePrefix: "test:group",
+					UserPrefixes:     []string{"system:node"},
+					Groups:           []string{"test:nodes", "test:authenticated"},
+				},
+			},
+			expectedUsages: sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
 			expectedCondition: certificatesv1.CertificateSigningRequestCondition{
 				Type:    certificatesv1.CertificateDenied,
 				Status:  corev1.ConditionTrue,
@@ -158,12 +188,16 @@ func TestOVNKubeCSRController(t *testing.T) {
 			groups:           []string{"test:nodes", "test:authenticated"},
 		},
 		{
-			name:                     "CSR without expirationSeconds is denied",
-			expectedCommonNamePrefix: "test:group",
-			expectedUsages:           sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
-			expectedUsersPrefixes:    sets.New[string]("system:node"),
-			expectedGroups:           sets.New[string]("test:nodes", "test:authenticated"),
-			expectedMaxDuration:      time.Hour,
+			name: "CSR without expirationSeconds is denied",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					CommonNamePrefix: "test:group",
+					UserPrefixes:     []string{"system:node"},
+					Groups:           []string{"test:nodes", "test:authenticated"},
+				},
+			},
+			expectedUsages:      sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
+			expectedMaxDuration: time.Hour,
 			expectedCondition: certificatesv1.CertificateSigningRequestCondition{
 				Type:    certificatesv1.CertificateDenied,
 				Status:  corev1.ConditionTrue,
@@ -178,12 +212,16 @@ func TestOVNKubeCSRController(t *testing.T) {
 			groups:           []string{"test:nodes", "test:authenticated"},
 		},
 		{
-			name:                     "CSR with invalid expirationSeconds is denied",
-			expectedCommonNamePrefix: "test:group",
-			expectedUsages:           sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
-			expectedUsersPrefixes:    sets.New[string]("system:node"),
-			expectedGroups:           sets.New[string]("test:nodes", "test:authenticated"),
-			expectedMaxDuration:      time.Hour,
+			name: "CSR with invalid expirationSeconds is denied",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					CommonNamePrefix: "test:group",
+					UserPrefixes:     []string{"system:node"},
+					Groups:           []string{"test:nodes", "test:authenticated"},
+				},
+			},
+			expectedUsages:      sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
+			expectedMaxDuration: time.Hour,
 			expectedCondition: certificatesv1.CertificateSigningRequestCondition{
 				Type:    certificatesv1.CertificateDenied,
 				Status:  corev1.ConditionTrue,
@@ -199,12 +237,46 @@ func TestOVNKubeCSRController(t *testing.T) {
 			duration:         time.Hour * 1000,
 		},
 		{
-			name:                     "Valid CSR is approved",
-			expectedCommonNamePrefix: "test:group",
-			expectedUsages:           sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
-			expectedUsersPrefixes:    sets.New[string]("system:node"),
-			expectedGroups:           sets.New[string]("test:nodes", "test:authenticated"),
-			expectedMaxDuration:      time.Hour,
+			name: "Valid CSR is approved",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					CommonNamePrefix: "test:group",
+					UserPrefixes:     []string{"system:node"},
+					Groups:           []string{"test:nodes", "test:authenticated"},
+				},
+			},
+			expectedUsages:      sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
+			expectedMaxDuration: time.Hour,
+			expectedCondition: certificatesv1.CertificateSigningRequestCondition{
+				Type:    certificatesv1.CertificateApproved,
+				Status:  corev1.ConditionTrue,
+				Reason:  "AutoApproved",
+				Message: fmt.Sprintf("Auto-approved CSR %q", csrName),
+			},
+			expectedEvent:    fmt.Sprintf("Normal CSRApproved CSR %q has been approved", csrName),
+			csrUserName:      "system:node:test.node",
+			signerName:       certificatesv1.KubeAPIServerClientSignerName,
+			commonNamePrefix: "test:group",
+			nodeName:         "test.node",
+			groups:           []string{"test:nodes", "test:authenticated"},
+			duration:         time.Hour,
+		},
+		{
+			name: "Valid CSR is approved with multiple conditions",
+			expectedAcceptanceConditions: []CSRAcceptanceCondition{
+				{
+					CommonNamePrefix: "fake:group",
+					UserPrefixes:     []string{"system:fake"},
+					Groups:           []string{"test:fakenodes", "test:fakeauthenticated"},
+				},
+				{
+					CommonNamePrefix: "test:group",
+					UserPrefixes:     []string{"system:node"},
+					Groups:           []string{"test:nodes", "test:authenticated"},
+				},
+			},
+			expectedUsages:      sets.New[certificatesv1.KeyUsage](certificatesv1.UsageClientAuth),
+			expectedMaxDuration: time.Hour,
 			expectedCondition: certificatesv1.CertificateSigningRequestCondition{
 				Type:    certificatesv1.CertificateApproved,
 				Status:  corev1.ConditionTrue,
@@ -260,11 +332,13 @@ func TestOVNKubeCSRController(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
+			for i, v := range tt.expectedAcceptanceConditions {
+				tt.expectedAcceptanceConditions[i].groupsSet = sets.New[string](v.Groups...)
+				tt.expectedAcceptanceConditions[i].userPrefixesSet = sets.New[string](v.UserPrefixes...)
+			}
+
 			csrCtrl := NewController(client,
-				tt.expectedCommonNamePrefix,
-				tt.expectedOrganization,
-				tt.expectedGroups,
-				tt.expectedUsersPrefixes,
+				tt.expectedAcceptanceConditions,
 				tt.expectedUsages,
 				tt.expectedMaxDuration,
 				recorder)
