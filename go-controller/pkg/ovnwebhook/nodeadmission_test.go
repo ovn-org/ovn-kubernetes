@@ -59,6 +59,8 @@ func TestNewNodeAdmissionWebhook(t *testing.T) {
 
 var nodeName = "fakeNode"
 var userName = fmt.Sprintf("%s:%s", csrapprover.NamePrefix, nodeName)
+var additionalNamePrefix = "system:foobar"
+var additionalUserName = fmt.Sprintf("%s:%s", additionalNamePrefix, nodeName)
 
 func TestNodeAdmission_ValidateUpdate(t *testing.T) {
 	adm := NewNodeAdmissionWebhook(false, false)

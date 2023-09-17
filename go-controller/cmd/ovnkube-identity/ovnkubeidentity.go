@@ -44,21 +44,25 @@ import (
 )
 
 type config struct {
-	kubeconfig          string
-	apiServer           string
-	logLevel            int
-	port                int
-	host                string
-	certDir             string
-	metricsAddress      string
-	leaseNamespace      string
-	enableInterconnect  bool
-	enableHybridOverlay bool
-	disableWebhook      bool
-	disableApprover     bool
-	waitForKAPIDuration time.Duration
-	localKAPIPort       int
-	extraAllowedUsers   cli.StringSlice
+	kubeconfig                 string
+	apiServer                  string
+	logLevel                   int
+	port                       int
+	host                       string
+	certDir                    string
+	metricsAddress             string
+	leaseNamespace             string
+	enableInterconnect         bool
+	enableHybridOverlay        bool
+	disableWebhook             bool
+	disableApprover            bool
+	waitForKAPIDuration        time.Duration
+	localKAPIPort              int
+	extraAllowedUsers          cli.StringSlice
+	csrAcceptanceConditionFile string
+	csrAcceptanceConditions    []csrapprover.CSRAcceptanceCondition
+	podAdmissionConditionFile  string
+	podAdmissionConditions     []ovnwebhook.PodAdmissionConditionOption
 }
 
 var cliCfg config
@@ -131,6 +135,16 @@ func main() {
 		}
 		if cliCfg.apiServer != "" {
 			restCfg.Host = cliCfg.apiServer
+		}
+
+		cliCfg.csrAcceptanceConditions, err = csrapprover.InitCSRAcceptanceConditions(cliCfg.csrAcceptanceConditionFile)
+		if err != nil {
+			return err
+		}
+
+		cliCfg.podAdmissionConditions, err = ovnwebhook.InitPodAdmissionConditionOptions(cliCfg.podAdmissionConditionFile)
+		if err != nil {
+			return err
 		}
 
 		startWg := &sync.WaitGroup{}
@@ -246,6 +260,16 @@ func main() {
 			Value:       6443,
 			Destination: &cliCfg.localKAPIPort,
 		},
+		&cli.StringFlag{
+			Name:        "csr-acceptance-conditions",
+			Usage:       "Configure additional certificate acceptance conditions",
+			Destination: &cliCfg.csrAcceptanceConditionFile,
+		},
+		&cli.StringFlag{
+			Name:        "pod-admission-conditions",
+			Usage:       "Configure additional pod validate admission conditions",
+			Destination: &cliCfg.podAdmissionConditionFile,
+		},
 	}
 	ctx := context.Background()
 
@@ -314,8 +338,8 @@ func runWebhook(c *cli.Context, restCfg *rest.Config) error {
 	}
 	webhookMux.Handle("/node", nodeHandler)
 
-	// in non-ic ovnkube-node does not have the permissions to update pods
-	if cliCfg.enableInterconnect {
+	// in non-ic ovnkube-node without additional conditions does not have the permissions to update pods
+	if cliCfg.enableInterconnect || len(cliCfg.csrAcceptanceConditions) > 1 {
 		informerFactory := informers.NewSharedInformerFactory(client, 10*time.Minute)
 		nodeInformer := informerFactory.Core().V1().Nodes().Informer()
 		informerFactory.Start(stopCh)
@@ -326,7 +350,7 @@ func runWebhook(c *cli.Context, restCfg *rest.Config) error {
 		podWebhook := admission.WithCustomValidator(
 			scheme.Scheme,
 			&corev1.Pod{},
-			ovnwebhook.NewPodAdmissionWebhook(nodeLister, cliCfg.extraAllowedUsers.Value()...),
+			ovnwebhook.NewPodAdmissionWebhook(nodeLister, cliCfg.podAdmissionConditions, cliCfg.extraAllowedUsers.Value()...),
 		).WithRecoverPanic(true)
 		podHandler, err := admission.StandaloneWebhook(
 			podWebhook,
@@ -427,10 +451,7 @@ func runCSRApproverManager(ctx context.Context, leaderID string, restCfg *rest.C
 		}).
 		Complete(csrapprover.NewController(
 			mgr.GetClient(),
-			csrapprover.NamePrefix,
-			csrapprover.Organization,
-			csrapprover.Groups,
-			csrapprover.UserPrefixes,
+			cliCfg.csrAcceptanceConditions,
 			csrapprover.Usages,
 			csrapprover.MaxDuration,
 			mgr.GetEventRecorderFor(csrapprover.ControllerName),
