@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/urfave/cli/v2"
-	kexec "k8s.io/utils/exec"
+	"time"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/urfave/cli/v2"
+	kexec "k8s.io/utils/exec"
 
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -143,6 +143,8 @@ zone=global
 
 [kubernetes]
 kubeconfig=/path/to/kubeconfig
+bootstrap-kubeconfig=
+cert-dir=
 apiserver=https://1.2.3.4:6443
 token=TG9yZW0gaXBzdW0gZ
 tokenFile=/path/to/token
@@ -294,6 +296,9 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.CertDuration).To(gomega.Equal(Kubernetes.CertDuration))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(""))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal([]byte{}))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal(""))
@@ -523,6 +528,15 @@ var _ = Describe("Config Operations", func() {
 		os.Setenv("K8S_TOKEN_FILE", "/new/path/to/token")
 		defer os.Setenv("K8S_TOKEN_FILE", "")
 
+		os.Setenv("BOOTSTRAP_KUBECONFIG", "/new/path/to/bootstrap-kubeconfig")
+		defer os.Setenv("BOOTSTRAP_KUBECONFIG", "")
+
+		os.Setenv("CERT_DIR", "/new/path/to/cert-dir")
+		defer os.Setenv("CERT_DIR", "")
+
+		os.Setenv("CERT_PREFIX", "ovnkube-node")
+		defer os.Setenv("CERT_PREFIX", "")
+
 		os.Setenv("K8S_APISERVER", "https://9.2.3.4:6443")
 		defer os.Setenv("K8S_APISERVER", "")
 
@@ -537,8 +551,9 @@ var _ = Describe("Config Operations", func() {
 			cfgPath, err = InitConfigSa(ctx, kexec.New(), tmpDir, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cfgPath).To(gomega.Equal(cfgFile.Name()))
-
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigEnvFile))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal("/new/path/to/bootstrap-kubeconfig"))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal("/new/path/to/cert-dir"))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("this is the  token test"))
@@ -557,11 +572,16 @@ var _ = Describe("Config Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
+		bootstrapKubeconfigFile := "/new/path/to/bootstrap-kubeconfig"
+		certDir := "/new/path/to/cert-dir"
+
 		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
 		err = writeTestConfigFile(cfgFile.Name(), "kubeconfig="+kubeconfigFile, "cacert="+kubeCAFile,
+			"bootstrap-kubeconfig="+bootstrapKubeconfigFile,
+			"cert-dir="+certDir,
 			"enable-multi-network=true",
 			"enable-multi-networkpolicy=true",
 			"enable-interconnect=true",
@@ -594,6 +614,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d22"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay22"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal(bootstrapKubeconfigFile))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal(certDir))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
@@ -667,6 +689,9 @@ var _ = Describe("Config Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
+		bootstrapKubeconfigFile := "/new/path/to/bootstrap-kubeconfig"
+		certDir := "/new/path/to/cert-dir"
+
 		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
@@ -691,6 +716,9 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/some/cni/dir"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal(bootstrapKubeconfigFile))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal(certDir))
+			gomega.Expect(Kubernetes.CertDuration).To(gomega.Equal(time.Second * 999))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asdfasdfasdfasfd"))
@@ -770,6 +798,9 @@ var _ = Describe("Config Operations", func() {
 			"-cni-plugin=a-plugin",
 			"-cluster-subnets=10.130.0.0/15/24",
 			"-k8s-kubeconfig=" + kubeconfigFile,
+			"-bootstrap-kubeconfig=" + bootstrapKubeconfigFile,
+			"-cert-dir=" + certDir,
+			"-cert-duration=999s",
 			"-k8s-apiserver=https://4.4.3.2:8080",
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
@@ -1146,6 +1177,9 @@ enable-pprof=true
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
+		bootstrapKubeconfigFile := "/new/path/to/bootstrap-kubeconfig"
+		certDir := "/new/path/to/cert-dir"
+
 		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
@@ -1175,6 +1209,9 @@ enable-pprof=true
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/some/cni/dir"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal(bootstrapKubeconfigFile))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal(certDir))
+			gomega.Expect(Kubernetes.CertDuration).To(gomega.Equal(time.Second * 999))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asdfasdfasdfasfd"))
@@ -1220,6 +1257,9 @@ enable-pprof=true
 			"-cni-conf-dir=/some/cni/dir",
 			"-cni-plugin=a-plugin",
 			"-k8s-kubeconfig=" + kubeconfigFile,
+			"-bootstrap-kubeconfig=" + bootstrapKubeconfigFile,
+			"-cert-dir=" + certDir,
+			"-cert-duration=999s",
 			"-k8s-apiserver=https://4.4.3.2:8080",
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
@@ -1246,6 +1286,9 @@ enable-pprof=true
 		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
+
+		bootstrapKubeconfigFile := "/new/path/to/bootstrap-kubeconfig"
+		certDir := "/new/path/to/cert-dir"
 
 		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1274,6 +1317,8 @@ enable-pprof=true
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d22"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay22"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal(bootstrapKubeconfigFile))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal(certDir))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
@@ -1287,6 +1332,8 @@ enable-pprof=true
 			app.Name,
 			"-config-file=" + cfgFile.Name(),
 			"-k8s-kubeconfig=" + kubeconfigFile,
+			"-bootstrap-kubeconfig=" + bootstrapKubeconfigFile,
+			"-cert-dir=" + certDir,
 			"-k8s-cacert=" + kubeCAFile,
 		}
 		err = app.Run(cliArgs)

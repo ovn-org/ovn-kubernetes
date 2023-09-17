@@ -87,7 +87,7 @@ OVNKUBE_CONFIG_DURATION_ENABLE=
 OVNKUBE_METRICS_SCALE_ENABLE=
 OVN_STATELESS_NETPOL_ENABLE="false"
 OVN_ENABLE_INTERCONNECT=
-
+OVN_ENABLE_OVNKUBE_IDENTITY="true"
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -322,6 +322,9 @@ while [ "$1" != "" ]; do
   --enable-multi-external-gateway)
     OVN_ENABLE_MULTI_EXTERNAL_GATEWAY=$VALUE
     ;;
+  --enable-ovnkube-identity)
+    OVN_ENABLE_OVNKUBE_IDENTITY=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -491,6 +494,9 @@ echo "ovn_enable_interconnect: ${ovn_enable_interconnect}"
 ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY}
 echo "ovn_enable_multi_external_gateway: ${ovn_enable_multi_external_gateway}"
 
+ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY}
+echo "ovn_enable_ovnkube_identity: ${ovn_enable_ovnkube_identity}"
+
 ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -537,6 +543,7 @@ ovn_image=${ovnkube_image} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
@@ -621,6 +628,7 @@ ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${ovnkube_image} \
@@ -656,6 +664,7 @@ ovn_image=${ovnkube_image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   j2 ../templates/ovnkube-control-plane.yaml.j2 -o ${output_dir}/ovnkube-control-plane.yaml
 
 ovn_image=${image} \
@@ -740,6 +749,7 @@ ovn_image=${ovnkube_image} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   j2 ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
 
 ovn_image=${ovnkube_image} \
@@ -795,12 +805,38 @@ ovn_image=${ovnkube_image} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   j2 ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   j2 ../templates/ovs-node.yaml.j2 -o ${output_dir}/ovs-node.yaml
+
+ovnkube_certs_dir="/tmp/ovnkube-certs"
+ovnkube_webhook_name="ovnkube-webhook"
+mkdir -p ${ovnkube_certs_dir}
+path_prefix="${ovnkube_certs_dir}/${ovnkube_webhook_name}"
+
+if [ "${ovn_enable_ovnkube_identity}" = "true" ]; then
+  # Create self signed CA and webhook cert
+  # NOTE: The CA and certificate are not renewed after they expire, this should only be used in development environments
+  openssl req -x509 -newkey rsa:4096 -nodes -keyout "${path_prefix}-ca.key" -out "${path_prefix}-ca.crt" -days 400 -subj "/CN=self-signed-ca"
+  openssl req -newkey rsa:4096 -nodes -keyout "${path_prefix}.key" -out "${path_prefix}.csr" -subj "/CN=localhost"
+  openssl x509 -req -in "${path_prefix}.csr" -CA "${path_prefix}-ca.crt" -CAkey "${path_prefix}-ca.key" -extfile <(printf "subjectAltName=DNS:localhost") -CAcreateserial -out "${path_prefix}.crt" -days 365
+fi
+
+ovn_image=${ovnkube_image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_master_count=${ovn_master_count} \
+  ovnkube_master_loglevel=${master_loglevel} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  webhook_ca_bundle=$(cat "${path_prefix}-ca.crt" | base64 -w0) \
+  webhook_key=$(cat "${path_prefix}.key" | base64 -w0) \
+  webhook_cert=$(cat "${path_prefix}.crt" | base64 -w0) \
+  ovn_enable_multi_node_zone=${ovn_enable_multi_node_zone} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  j2 ../templates/ovnkube-identity.yaml.j2 -o ${output_dir}/ovnkube-identity.yaml
 
 if ${enable_ipsec}; then
   ovn_image=${image} \
@@ -828,8 +864,10 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   j2 ../templates/ovn-setup.yaml.j2 -o ${output_dir}/ovn-setup.yaml
 
 ovn_enable_interconnect=${ovn_enable_interconnect} \
+ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   j2 ../templates/rbac-ovnkube-node.yaml.j2 -o ${output_dir}/rbac-ovnkube-node.yaml
 
+cp ../templates/rbac-ovnkube-identity.yaml.j2 ${output_dir}/rbac-ovnkube-identity.yaml
 cp ../templates/rbac-ovnkube-master.yaml.j2 ${output_dir}/rbac-ovnkube-master.yaml
 cp ../templates/rbac-ovnkube-db.yaml.j2 ${output_dir}/rbac-ovnkube-db.yaml
 cp ../templates/rbac-ovnkube-cluster-manager.yaml.j2 ${output_dir}/rbac-ovnkube-cluster-manager.yaml

@@ -170,6 +170,7 @@ usage() {
     echo "-sm  | --scale-metrics              Enable scale metrics"
     echo "-cm  | --compact-mode               Enable compact mode, ovnkube master and node run in the same process."
     echo "-ic  | --enable-interconnect        Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
+    echo "--disable-ovnkube-identity          Disable per-node cert and ovnkube-identity webhook"
     echo "-npz | --nodes-per-zone             If interconnect is enabled, number of nodes per zone (Default 1). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
@@ -347,6 +348,8 @@ parse_args() {
                                                 ;;
             -ic | --enable-interconnect )       OVN_ENABLE_INTERCONNECT=true
                                                 ;;
+            --disable-ovnkube-identity)         OVN_ENABLE_OVNKUBE_IDENTITY=false
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
@@ -422,6 +425,12 @@ print_params() {
      if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
        echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
      fi
+
+     if [ "${KIND_NUM_NODES_PER_ZONE}" -gt 1 ] && [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" = "true" ]; then
+       echo "multi_node_zone is not compatible with ovnkube_identity, disabling ovnkube_identity"
+       OVN_ENABLE_OVNKUBE_IDENTITY="false"
+     fi
+     echo "OVN_ENABLE_OVNKUBE_IDENTITY = $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo ""
 }
@@ -569,6 +578,7 @@ set_default_params() {
   MASQUERADE_SUBNET_IPV6=${MASQUERADE_SUBNET_IPV6:-fd69::/125}
   KIND_NUM_MASTER=1
   OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
+  OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 
 
   if [ "$OVN_COMPACT_MODE" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
@@ -840,6 +850,9 @@ create_ovn_kube_manifests() {
       ovnkube_image=$($OCI_BIN inspect --format='{{index .RepoDigests 0}}' $OVN_IMAGE)
     fi
     pushd ${DIR}/../dist/images
+    if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
+      KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-1}
+    fi
   ./daemonset.sh \
     --output-directory="${MANIFEST_OUTPUT_DIR}"\
     --image="${OVN_IMAGE}" \
@@ -884,7 +897,8 @@ create_ovn_kube_manifests() {
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
     --compact-mode="${OVN_COMPACT_MODE}" \
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
-    --enable-multi-external-gateway=true
+    --enable-multi-external-gateway=true \
+    --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}"
   popd
 }
 
@@ -911,6 +925,9 @@ install_ovn_global_zone() {
     run_kubectl apply -f ovnkube-db.yaml
   fi
 
+  if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
+    run_kubectl apply -f ovnkube-identity.yaml
+  fi
   run_kubectl apply -f ovnkube-master.yaml
   run_kubectl apply -f ovnkube-node.yaml
 }
@@ -921,6 +938,9 @@ install_ovn_single_node_zones() {
     kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
   done
 
+  if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
+    run_kubectl apply -f ovnkube-identity.yaml
+  fi
   run_kubectl apply -f ovnkube-control-plane.yaml
   run_kubectl apply -f ovnkube-single-node-zone.yaml
 }
@@ -946,6 +966,9 @@ install_ovn_multiple_nodes_zones() {
     fi
   done
 
+  if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
+    run_kubectl apply -f ovnkube-identity.yaml
+  fi
   run_kubectl apply -f ovnkube-control-plane.yaml
   run_kubectl apply -f ovnkube-zone-controller.yaml
   run_kubectl apply -f ovnkube-node.yaml
@@ -962,6 +985,7 @@ install_ovn() {
   run_kubectl apply -f policy.networking.k8s.io_adminnetworkpolicies.yaml
   run_kubectl apply -f policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
   run_kubectl apply -f ovn-setup.yaml
+  run_kubectl apply -f rbac-ovnkube-identity.yaml
   run_kubectl apply -f rbac-ovnkube-cluster-manager.yaml
   run_kubectl apply -f rbac-ovnkube-master.yaml
   run_kubectl apply -f rbac-ovnkube-node.yaml
