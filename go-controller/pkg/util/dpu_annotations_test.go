@@ -98,7 +98,7 @@ var _ = Describe("DPU Annotations test", func() {
 
 		Context("Default network", func() {
 			It("Get correct Pod annotation for the legacy default network pod annotation", func() {
-				annot[DPUConnetionStatusAnnot] = legacyAnnot
+				annot[DPUConnectionStatusAnnot] = legacyAnnot
 				pcs, err := UnmarshalPodDPUConnStatus(annot, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(pcs.Status).To(gomega.Equal(defaultCS.Status))
@@ -120,7 +120,7 @@ var _ = Describe("DPU Annotations test", func() {
 
 		Context("Second network", func() {
 			It("Get correct Pod annotation for Second network with legacy default network annoation", func() {
-				annot[DPUConnetionStatusAnnot] = legacyAnnot
+				annot[DPUConnectionStatusAnnot] = legacyAnnot
 				annot, err = MarshalPodDPUConnStatus(annot, &secondCS, "second")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				pcd, err := UnmarshalPodDPUConnStatus(annot, "default")

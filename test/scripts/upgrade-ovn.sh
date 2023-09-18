@@ -155,6 +155,7 @@ set_default_ovn_manifest_params() {
   KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
   KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
   OVN_HA=${OVN_HA:-false}
+  OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
   # ovn configs 
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
@@ -226,6 +227,7 @@ print_ovn_manifest_params() {
      echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
+     echo "OVN_ENABLE_OVNKUBE_IDENTITY =  $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo ""
 }
 
@@ -271,10 +273,17 @@ pushd ../dist/yaml
 
 # install updated k8s configuration for ovn-k (useful in case of ClusterRole updates)
 run_kubectl apply -f ovn-setup.yaml
+run_kubectl apply -f rbac-ovnkube-identity.yaml
 run_kubectl apply -f rbac-ovnkube-cluster-manager.yaml
 run_kubectl apply -f rbac-ovnkube-master.yaml
 run_kubectl apply -f rbac-ovnkube-node.yaml
 run_kubectl apply -f rbac-ovnkube-db.yaml
+
+if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
+  run_kubectl apply -f ovnkube-identity.yaml
+  kubectl_wait_deployment ovnkube-identity
+fi
+
 
 # install updated ovnkube-node daemonset
 run_kubectl apply -f ovnkube-node.yaml
