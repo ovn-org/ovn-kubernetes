@@ -10,6 +10,9 @@ import (
 	"sync"
 	"time"
 
+	eipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
+	egressiplisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
@@ -17,10 +20,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilnet "k8s.io/utils/net"
 
-	eipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
-	egressiplisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -553,6 +554,10 @@ func generateEIPConfigForPods(pods map[ktypes.NamespacedName][]net.IP, link netl
 	eipConfig.ip = getNetlinkAddressWithLabel(eIPNet, link.Attrs().Index, link.Attrs().Name)
 	for _, ips := range pods {
 		for _, ip := range ips {
+			isPodIPv6 := utilnet.IsIPv6(ip)
+			if isPodIPv6 != isEIPV6 {
+				continue
+			}
 			ipConfig := newPodIPConfig()
 			ipConfig.ipTableRule = generateIPTablesSNATRuleArg(ip, link.Attrs().Name, eIPNet.IP.String())
 			ipConfig.ipRule = generateIPRule(ip, link.Attrs().Index)
@@ -891,6 +896,10 @@ func (c *Controller) RepairNode() error {
 							return err
 						}
 						for _, ip := range podIPs {
+							isPodIPV6 := utilnet.IsIPv6(ip)
+							if isPodIPV6 != isEIPV6 {
+								continue
+							}
 							if !c.isIPSupported(ip) {
 								continue
 							}
