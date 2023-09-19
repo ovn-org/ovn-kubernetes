@@ -345,8 +345,50 @@ type RoutesPerLink struct {
 	Routes []Route
 }
 
-func (rl RoutesPerLink) Equal(rpl2 RoutesPerLink) bool {
-	return reflect.DeepEqual(rl, rpl2)
+func (rl RoutesPerLink) Equal(rl2 RoutesPerLink) bool {
+	if rl.Link == nil || rl2.Link == nil {
+		klog.Errorf("Unexpectedly passed a RoutesPerLink with no link defined")
+		return false
+	}
+	if rl.Link.Attrs().Name != rl2.Link.Attrs().Name {
+		return false
+	}
+	if rl.Link.Attrs().Index != rl2.Link.Attrs().Index {
+		return false
+	}
+	return rl.equalRoutes(rl2.Routes)
+}
+
+func (rl RoutesPerLink) equalRoutes(routesB []Route) bool {
+	if len(rl.Routes) != len(routesB) {
+		return false
+	}
+	routesA := rl.Routes
+	for _, routeA := range routesA {
+		var found bool
+		for _, routeB := range routesB {
+			if routeA.Equal(routeB) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	for _, routeB := range routesB {
+		var found bool
+		for _, routeA := range routesA {
+			if routeB.Equal(routeA) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 func (rl RoutesPerLink) validate() error {
