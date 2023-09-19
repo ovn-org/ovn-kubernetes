@@ -326,6 +326,10 @@ func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 	} else {
 		ips = make([]net.IP, 0, len(existingNodes))
 		for _, node := range existingNodes {
+			if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
+				// skip hybrid overlay nodes
+				continue
+			}
 			hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 			if err != nil {
 				klog.Warningf("Error parsing host subnet annotation for node %s (%v)",

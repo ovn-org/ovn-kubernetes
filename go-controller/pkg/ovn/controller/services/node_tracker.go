@@ -133,13 +133,15 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.Res
 			// - the name of the node (very rare) has changed
 			// - the `host-cidrs` annotation changed
 			// - node changes its zone
+			// - node becomes a hybrid overlay node from a ovn node or vice verse
 			// . No need to trigger update for any other field change.
 			if util.NodeSubnetAnnotationChanged(oldObj, newObj) ||
 				util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
 				oldObj.Name != newObj.Name ||
 				util.NodeHostCIDRsAnnotationChanged(oldObj, newObj) ||
 				util.NodeZoneAnnotationChanged(oldObj, newObj) ||
-				util.NodeMigratedZoneAnnotationChanged(oldObj, newObj) {
+				util.NodeMigratedZoneAnnotationChanged(oldObj, newObj) ||
+				util.NoHostSubnet(oldObj) != util.NoHostSubnet(newObj) {
 				nt.updateNode(newObj)
 			}
 		},
@@ -223,9 +225,9 @@ func (nt *nodeTracker) removeNode(nodeName string) {
 func (nt *nodeTracker) updateNode(node *v1.Node) {
 	klog.V(2).Infof("Processing possible switch / router updates for node %s", node.Name)
 	hsn, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-	if err != nil || hsn == nil {
+	if err != nil || hsn == nil || util.NoHostSubnet(node) {
 		// usually normal; means the node's gateway hasn't been initialized yet
-		klog.Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization): %v", node.Name, err)
+		klog.Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization), or it's a hybrid overlay node: %v", node.Name, err)
 		nt.removeNode(node.Name)
 		return
 	}

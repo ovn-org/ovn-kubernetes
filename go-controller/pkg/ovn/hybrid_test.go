@@ -60,23 +60,19 @@ func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Nod
 	}
 }
 
-func newTestWinNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
-	var err error
+func newTestHONode(name, hybridHostSubnet, drMAC string) v1.Node {
 	annotations := make(map[string]string)
-	if ovnHostSubnet != "" {
-		annotations, err = util.UpdateNodeHostSubnetAnnotation(annotations, ovntest.MustParseIPNets(ovnHostSubnet), types.DefaultNetworkName)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	}
 	if hybridHostSubnet != "" {
 		annotations[hotypes.HybridOverlayNodeSubnet] = hybridHostSubnet
 	}
 	if drMAC != "" {
 		annotations[hotypes.HybridOverlayDRMAC] = drMAC
 	}
+	annotations[util.OvnNodeChassisID] = "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec"
 	return v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
-			Labels:      map[string]string{v1.LabelOSStable: os},
+			Labels:      map[string]string{v1.LabelOSStable: "windows"},
 			Annotations: annotations,
 		},
 	}
@@ -94,7 +90,7 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 	hybridOverlayLRSR2 := &nbdb.LogicalRouterStaticRoute{
 		UUID: types.HybridSubnetPrefix + node.Name + "-gr-UUID",
 		ExternalIDs: map[string]string{
-			"name": types.HybridSubnetPrefix + node.Name + "-gr",
+			"name": types.HybridSubnetPrefix + node.Name + types.HybridOverlayGRSubfix,
 		},
 		IPPrefix: hoSubnet,
 		Nexthop:  node.DrLrpIP,
@@ -113,7 +109,7 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 		UUID:   types.HybridOverlayPrefix + node.Name + "-LRP2-UUID",
 		Action: "reroute",
 		ExternalIDs: map[string]string{
-			"name": types.HybridSubnetPrefix + node.Name + "-gr",
+			"name": types.HybridSubnetPrefix + node.Name + types.HybridOverlayGRSubfix,
 		},
 		Match:    "ip4.src == " + node.LrpIP + " && ip4.dst == " + hoSubnet,
 		Nexthops: []string{nodeHOIP},
@@ -982,6 +978,414 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+	})
+
+	ginkgo.It("handles a OVN node is switched to a HO node", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				hoNodeName   string = "node2"
+				hoNodeSubnet string = "10.1.3.0/24"
+				hoNodeDRMAC  string = "00:7f:0e:7f:ed:b5"
+				nodeHOMAC    string = "0a:58:0a:01:01:03"
+				nodeHOIP     string = "10.1.1.3"
+			)
+			node1 := tNode{
+				Name:                 "node1",
+				NodeIP:               "1.2.3.4",
+				NodeLRPMAC:           "0a:58:0a:01:01:01",
+				LrpIP:                "100.64.0.2",
+				DrLrpIP:              "100.64.0.1",
+				PhysicalBridgeMAC:    "11:22:33:44:55:66",
+				SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
+				NodeSubnet:           "10.1.1.0/24",
+				GWRouter:             types.GWRouterPrefix + "node1",
+				GatewayRouterIPMask:  "172.16.16.2/24",
+				GatewayRouterIP:      "172.16.16.2",
+				GatewayRouterNextHop: "172.16.16.1",
+				PhysicalBridgeName:   "br-eth0",
+				NodeGWIP:             "10.1.1.1/24",
+				NodeMgmtPortIP:       "10.1.1.2",
+				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
+				DnatSnatIP:           "169.254.0.1",
+			}
+
+			node2 := tNode{
+				Name:                 hoNodeName,
+				NodeIP:               "1.2.3.5",
+				NodeLRPMAC:           "0a:58:0a:01:02:01",
+				LrpIP:                "100.64.0.3",
+				DrLrpIP:              "100.64.0.1",
+				PhysicalBridgeMAC:    "00:7f:0e:7f:ed:b5",
+				SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47abc6",
+				NodeSubnet:           hoNodeSubnet,
+				GWRouter:             types.GWRouterPrefix + "node2",
+				GatewayRouterIPMask:  "172.16.16.2/24",
+				GatewayRouterIP:      "172.16.16.2",
+				GatewayRouterNextHop: "172.16.16.1",
+				PhysicalBridgeName:   "br-eth0",
+				NodeGWIP:             "10.1.3.1/24",
+				NodeMgmtPortIP:       "10.1.3.2",
+				NodeMgmtPortMAC:      "0a:58:0a:01:02:02",
+				DnatSnatIP:           "169.254.0.1",
+			}
+			testNode1 := node1.k8sNode("1")
+			testNode2 := node2.k8sNode("2")
+			testNode2.Annotations["k8s.ovn.org/node-subnets"] = "{\"default\":[\"10.1.3.0/24\"]}"
+
+			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{
+					testNode1,
+					testNode2,
+				},
+			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+			egressIPFakeClient := &egressipfake.Clientset{}
+			egressQoSFakeClient := &egressqosfake.Clientset{}
+			egressServiceFakeClient := &egressservicefake.Clientset{}
+			fakeClient := &util.OVNClientset{
+				KubeClient:           kubeFakeClient,
+				EgressIPClient:       egressIPFakeClient,
+				EgressFirewallClient: egressFirewallFakeClient,
+				EgressQoSClient:      egressQoSFakeClient,
+				EgressServiceClient:  egressServiceFakeClient,
+			}
+
+			vlanID := 1024
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			config.Kubernetes.HostNetworkNamespace = ""
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode1.Name)
+			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
+			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = util.SetNodeHostCIDRs(nodeAnnotator, sets.New(fmt.Sprintf("%s/24", node1.NodeIP)))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = nodeAnnotator.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode1.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			hostAddrs, err := util.ParseNodeHostCIDRsDropNetMask(updatedNode)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			f, err = factory.NewMasterWatchFactory(fakeClient.GetMasterClientset())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = f.Start()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
+			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
+			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
+			expectedOVNClusterRouter := newOVNClusterRouter()
+			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
+				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
+				Networks: []string{"100.64.0.1/16"},
+				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
+			}
+			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
+			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			expectedClusterRouterPortGroup := newRouterPortGroup()
+			expectedClusterPortGroup := newClusterPortGroup()
+
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					newClusterJoinSwitch(),
+					expectedNodeSwitch,
+					ovnClusterRouterLRP,
+					expectedOVNClusterRouter,
+					expectedClusterRouterPortGroup,
+					expectedClusterPortGroup,
+					expectedClusterLBGroup,
+					expectedSwitchLBGroup,
+					expectedRouterLBGroup,
+				},
+			}
+			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
+				record.NewFakeRecorder(10), wg)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+
+			//assuming all the pods have finished processing
+			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
+			// Let the real code run and ensure OVN database sync
+
+			c, cancel := context.WithCancel(ctx.Context)
+			defer cancel()
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = clusterManager.Start(c)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			defer clusterManager.Stop()
+
+			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
+
+			// switch the node to a HO node
+			testNode2.Labels = map[string]string{v1.LabelOSStable: "windows"}
+			testNode2.Annotations[hotypes.HybridOverlayNodeSubnet] = hoNodeSubnet
+			testNode2.Annotations[hotypes.HybridOverlayDRMAC] = hoNodeDRMAC
+			_, err = fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &testNode2, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode1.Name, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
+
+			//ensure hybrid overlay elements have been added
+			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
+				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+					return item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" &&
+						item.Nexthop == "100.64.0.1" &&
+						item.IPPrefix == hoNodeSubnet
+				}
+				logicalRouterStaticRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(clusterController.nbClient, p)
+				if err != nil {
+					return nil, err
+				}
+				return logicalRouterStaticRoutes, nil
+			}, 2).Should(gomega.HaveLen(1))
+
+			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
+				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+					return item.ExternalIDs["name"] == "hybrid-subnet-node1" &&
+						item.Nexthop == nodeHOIP &&
+						item.IPPrefix == hoNodeSubnet
+				}
+				logicalRouterStaticRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(clusterController.nbClient, p)
+				if err != nil {
+					return nil, err
+				}
+				return logicalRouterStaticRoutes, nil
+			}, 2).Should(gomega.HaveLen(1))
+
+			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
+				p := func(item *nbdb.LogicalRouterPolicy) bool {
+					return item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" &&
+						item.Match == fmt.Sprintf("ip4.src == 100.64.0.1 && ip4.dst == %s", hoNodeSubnet) &&
+						item.Action == "reroute" &&
+						item.Nexthops[0] == nodeHOIP
+				}
+				logicalRouterPolicies, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(clusterController.nbClient, p)
+				if err != nil {
+					return nil, err
+				}
+				return logicalRouterPolicies, nil
+			}, 2).Should(gomega.HaveLen(1))
+			return nil
+		}
+		err := app.Run([]string{
+			app.Name,
+			"--no-hostsubnet-nodes=kubernetes.io/os=windows",
+			"-cluster-subnets=" + clusterCIDR,
+			"-gateway-mode=shared",
+			"-enable-hybrid-overlay",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	ginkgo.It("handles a HO node is switched to a OVN node", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				hoNodeName   string = "node-windows"
+				hoNodeSubnet string = "10.1.3.0/24"
+				hoNodeDRMAC  string = "00:7f:0e:7f:ed:b5"
+				nodeHOMAC    string = "0a:58:0a:01:01:03"
+				hoSubnet     string = "11.1.0.0/16"
+				nodeHOIP     string = "10.1.1.3"
+			)
+			node1 := tNode{
+				Name:                 "node1",
+				NodeIP:               "1.2.3.4",
+				NodeLRPMAC:           "0a:58:0a:01:01:01",
+				LrpIP:                "100.64.0.2",
+				DrLrpIP:              "100.64.0.1",
+				PhysicalBridgeMAC:    "11:22:33:44:55:66",
+				SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
+				NodeSubnet:           "10.1.1.0/24",
+				GWRouter:             types.GWRouterPrefix + "node1",
+				GatewayRouterIPMask:  "172.16.16.2/24",
+				GatewayRouterIP:      "172.16.16.2",
+				GatewayRouterNextHop: "172.16.16.1",
+				PhysicalBridgeName:   "br-eth0",
+				NodeGWIP:             "10.1.1.1/24",
+				NodeMgmtPortIP:       "10.1.1.2",
+				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
+				DnatSnatIP:           "169.254.0.1",
+			}
+			testNode := node1.k8sNode("2")
+			hoNode := newTestHONode(hoNodeName, hoNodeSubnet, hoNodeDRMAC)
+
+			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{
+					newTestHONode(hoNodeName, hoNodeSubnet, hoNodeDRMAC),
+					testNode,
+				},
+			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+			egressIPFakeClient := &egressipfake.Clientset{}
+			egressQoSFakeClient := &egressqosfake.Clientset{}
+			egressServiceFakeClient := &egressservicefake.Clientset{}
+			fakeClient := &util.OVNClientset{
+				KubeClient:           kubeFakeClient,
+				EgressIPClient:       egressIPFakeClient,
+				EgressFirewallClient: egressFirewallFakeClient,
+				EgressQoSClient:      egressQoSFakeClient,
+				EgressServiceClient:  egressServiceFakeClient,
+			}
+
+			vlanID := 1024
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			config.Kubernetes.HostNetworkNamespace = ""
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
+			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
+			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = util.SetNodeHostCIDRs(nodeAnnotator, sets.New(fmt.Sprintf("%s/24", node1.NodeIP)))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = nodeAnnotator.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			hostAddrs, err := util.ParseNodeHostCIDRsDropNetMask(updatedNode)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			f, err = factory.NewMasterWatchFactory(fakeClient.GetMasterClientset())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = f.Start()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
+			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
+			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
+			expectedOVNClusterRouter := newOVNClusterRouter()
+			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
+				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
+				Networks: []string{"100.64.0.1/16"},
+				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
+			}
+			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
+			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			expectedClusterRouterPortGroup := newRouterPortGroup()
+			expectedClusterPortGroup := newClusterPortGroup()
+
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					newClusterJoinSwitch(),
+					expectedNodeSwitch,
+					ovnClusterRouterLRP,
+					expectedOVNClusterRouter,
+					expectedClusterRouterPortGroup,
+					expectedClusterPortGroup,
+					expectedClusterLBGroup,
+					expectedSwitchLBGroup,
+					expectedRouterLBGroup,
+				},
+			}
+			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
+				record.NewFakeRecorder(10), wg)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+
+			//assuming all the pods have finished processing
+			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
+			// Let the real code run and ensure OVN database sync
+
+			c, cancel := context.WithCancel(ctx.Context)
+			defer cancel()
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = clusterManager.Start(c)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			defer clusterManager.Stop()
+
+			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
+
+			gomega.Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
+
+			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// switch the node to a ovn node
+			hoNode.Labels = map[string]string{}
+			_, err = fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &hoNode, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			//check if the hybrid overlay elements have been cleaned up
+			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
+				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+					if item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" ||
+						item.ExternalIDs["name"] == "hybrid-subnet-node1" {
+						return true
+					}
+					return false
+				}
+				logicalRouterStaticRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(clusterController.nbClient, p)
+				if err != nil {
+					return nil, err
+				}
+				return logicalRouterStaticRoutes, nil
+			}, 2).Should(gomega.HaveLen(0))
+
+			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
+				p := func(item *nbdb.LogicalRouterPolicy) bool {
+					return item.ExternalIDs["name"] == "hybrid-subnet-node1"
+				}
+				logicalRouterPolicies, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(clusterController.nbClient, p)
+				if err != nil {
+					return nil, err
+				}
+				return logicalRouterPolicies, nil
+
+			}, 2).Should(gomega.HaveLen(0))
+
+			return nil
+		}
+		err := app.Run([]string{
+			app.Name,
+			"--no-hostsubnet-nodes=kubernetes.io/os=windows",
+			"-cluster-subnets=" + clusterCIDR,
+			"-gateway-mode=shared",
+			"-enable-hybrid-overlay",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	ginkgo.It("cleans up a Linux node when the OVN hostsubnet annotation is removed", func() {

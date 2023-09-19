@@ -735,6 +735,16 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
+		if config.HybridOverlay.Enabled {
+			if util.NoHostSubnet(node) {
+				return h.oc.addUpdateHoNodeEvent(node)
+			} else {
+				// clean possible remainings for a node that is used to be a HO node
+				if err := h.oc.deleteHoNodeEvent(node); err != nil {
+					return err
+				}
+			}
+		}
 		if h.oc.isLocalZoneNode(node) {
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
@@ -857,6 +867,19 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
+		var switchToOvnNode bool
+		if config.HybridOverlay.Enabled {
+			if util.NoHostSubnet(newNode) && !util.NoHostSubnet(oldNode) {
+				klog.Infof("Node %s has been updated to be a remote/unmanaged hybrid overlay node", newNode.Name)
+				return h.oc.addUpdateHoNodeEvent(newNode)
+			} else if !util.NoHostSubnet(newNode) && util.NoHostSubnet(oldNode) {
+				klog.Infof("Node %s has been updated to be an ovn-kubernetes managed node", newNode.Name)
+				if err := h.oc.deleteHoNodeEvent(newNode); err != nil {
+					return err
+				}
+				switchToOvnNode = true
+			}
+		}
 
 		// +--------------------+-------------------+-------------------------------------------------+
 		// |    oldNode         |      newNode      |       Action                                    |
@@ -916,7 +939,8 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 
 			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
 			// Also check if node subnet changed, so static routes are properly set
-			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged || zoneClusterChanged || primaryAddrChanged(oldNode, newNode)
+			// Also check if the node is used to be a hybrid overlay node
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged || zoneClusterChanged || primaryAddrChanged(oldNode, newNode) || switchToOvnNode
 			if syncZoneIC {
 				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
 					newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)
