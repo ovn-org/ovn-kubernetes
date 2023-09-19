@@ -368,7 +368,7 @@ github.com/stretchr/testify/mock
 # github.com/urfave/cli/v2 v2.2.0
 ## explicit; go 1.11
 github.com/urfave/cli/v2
-# github.com/vishvananda/netlink v1.2.1-beta.2.0.20230420174744-55c8b9515a01
+# github.com/vishvananda/netlink v1.2.1-beta.2.0.20230420174744-55c8b9515a01 => github.com/vishvananda/netlink v1.2.1-beta.2.0.20230905152006-63484bbf69f8
 ## explicit; go 1.12
 github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
@@ -414,7 +414,7 @@ golang.org/x/oauth2/internal
 # golang.org/x/sync v0.1.0
 ## explicit
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.8.0
+# golang.org/x/sys v0.10.0
 ## explicit; go 1.17
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
@@ -1140,3 +1140,4 @@ sigs.k8s.io/structured-merge-diff/v4/value
 sigs.k8s.io/yaml
 # github.com/Microsoft/hcsshim => github.com/Microsoft/hcsshim v0.8.20
 # github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
+# github.com/vishvananda/netlink => github.com/vishvananda/netlink v1.2.1-beta.2.0.20230905152006-63484bbf69f8
