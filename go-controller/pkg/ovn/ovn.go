@@ -271,10 +271,6 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *
 // It removes the remote pod ips from the namespace address set and if its an external gw pod, removes
 // its routes.
 func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
-	if err := oc.removeRemoteZonePodFromNamespaceAddressSet(pod); err != nil {
-		return fmt.Errorf("failed to remove the remote zone pod : %w", err)
-	}
-
 	if util.PodWantsHostNetwork(pod) {
 		// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
 		if err := oc.deletePodExternalGW(pod); err != nil {
@@ -283,13 +279,26 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
 		}
 	}
 
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
+	if err != nil {
+		return fmt.Errorf("unable to unmarshal pod annotation to release IPs at removeRemoteZonePod: %v", err)
+	}
+
+	// while this check is only intended for local pods, we also need it for
+	// remote live migrated pods that might have been allocated from this zone
+	if oc.wasPodReleasedBeforeStartup(string(pod.UID), ovntypes.DefaultNetworkName) {
+		klog.Infof("Completed pod %s/%s was already released before startup",
+			pod.Namespace,
+			pod.Name,
+		)
+		return nil
+	}
+
+	if err := oc.removeRemoteZonePodFromNamespaceAddressSet(pod); err != nil {
+		return fmt.Errorf("failed to remove the remote zone pod : %w", err)
+	}
+
 	if kubevirt.IsPodLiveMigratable(pod) {
-		// After live migration to a different zone ip should be deallocated
-		// from remote zone if VM is gone.
-		podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
-		if err != nil {
-			return fmt.Errorf("unable to unmarshal pod annotation to release IPs at removeRemoteZonePod: %v", err)
-		}
 		switchName, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(oc.lsManager, podAnnotation)
 		if zoneContainsPodSubnet {
 			if err := oc.lsManager.ReleaseIPs(switchName, podAnnotation.IPs); err != nil {

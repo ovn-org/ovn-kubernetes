@@ -195,3 +195,17 @@ func GetNodeSubnetAnnotationNetworkNames(node *kapi.Node) ([]string, error) {
 
 	return nodeNetworks, nil
 }
+
+// ParseNodesHostSubnetAnnotation parses parses the "k8s.ovn.org/node-subnets" annotation
+// for all the provided nodes
+func ParseNodesHostSubnetAnnotation(nodes []*kapi.Node, netName string) ([]*net.IPNet, error) {
+	allSubnets := []*net.IPNet{}
+	for _, node := range nodes {
+		subnets, err := ParseNodeHostSubnetAnnotation(node, netName)
+		if err != nil {
+			return nil, err
+		}
+		allSubnets = append(allSubnets, subnets...)
+	}
+	return allSubnets, nil
+}

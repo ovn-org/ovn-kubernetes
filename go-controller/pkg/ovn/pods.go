@@ -23,6 +23,7 @@ import (
 
 func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 	annotatedLocalPods := map[*kapi.Pod]map[string]*util.PodAnnotation{}
+	var allHostSubnets []*net.IPNet
 
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
@@ -54,6 +55,26 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		}
 
 		if annotations == nil {
+			continue
+		}
+
+		// We track which pods are allocated on startup to check which might
+		// have already been released. We track local non-migratable pods and
+		// live migratable pods that have an IP allocation from a local subnet
+		// (assigned to a node belonging to this zone) or from an unassigned
+		// subnet (previously assigned to a node that has been since removed)
+		var zoneContainsPodSubnetOrUntracked bool
+		if kubevirt.IsPodLiveMigratable(pod) {
+			allHostSubnets, zoneContainsPodSubnetOrUntracked, err = kubevirt.ZoneContainsPodSubnetOrUntracked(
+				oc.watchFactory,
+				oc.lsManager,
+				allHostSubnets,
+				annotations)
+			if err != nil {
+				return err
+			}
+		}
+		if kubevirt.IsPodLiveMigratable(pod) && !zoneContainsPodSubnetOrUntracked {
 			continue
 		}
 		annotatedLocalPods[pod] = map[string]*util.PodAnnotation{ovntypes.DefaultNetworkName: annotations}

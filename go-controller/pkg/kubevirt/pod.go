@@ -2,6 +2,7 @@ package kubevirt
 
 import (
 	"fmt"
+	"net"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -270,7 +271,7 @@ func allocateSyncMigratablePodIPs(watchFactory *factory.WatchFactory, lsManager 
 	// If this zone do not own the subnet or the node that is passed
 	// do not match the switch, they should not be deallocated
 	if !zoneContainsPodSubnet || (nodeName != "" && switchName != nodeName) {
-		return vmKey, "", nil, nil
+		return vmKey, "", annotation, nil
 	}
 	expectedLogicalPortName, err := allocatePodIPsOnSwitch(pod, annotation, nadName, switchName)
 	if err != nil {
@@ -284,4 +285,31 @@ func allocateSyncMigratablePodIPs(watchFactory *factory.WatchFactory, lsManager 
 func AllocateSyncMigratablePodIPsOnZone(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, nadName string, pod *corev1.Pod, allocatePodIPsOnSwitch func(*corev1.Pod, *util.PodAnnotation, string, string) (string, error)) (*ktypes.NamespacedName, string, *util.PodAnnotation, error) {
 	// We care about the whole zone so we pass the nodeName empty
 	return allocateSyncMigratablePodIPs(watchFactory, lsManager, nadName, "", pod, allocatePodIPsOnSwitch)
+}
+
+// ZoneContainsPodSubnetOrUntracked returns whether a pod with its corresponding
+// allocated IPs as reflected on the annotation come from a subnet that is
+// either assigned to a node of the zone or, not assigned to any node after
+// migrating from a node that has since been deleted and the subnet originally
+// assigned to that node has not yet been re-assigned to a different node. For
+// convenience, the host subnets might not provided in which case they might be
+// parsed and returned if used.
+func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, hostSubnets []*net.IPNet, annotation *util.PodAnnotation) ([]*net.IPNet, bool, error) {
+	_, local := ZoneContainsPodSubnet(lsManager, annotation)
+	if local {
+		return nil, true, nil
+	}
+	if len(hostSubnets) == 0 {
+		nodes, err := watchFactory.GetNodes()
+		if err != nil {
+			return nil, false, err
+		}
+		hostSubnets, err = util.ParseNodesHostSubnetAnnotation(nodes, ovntypes.DefaultNetworkName)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	// we can just use one of the IPs to check if it belongs to a subnet assigned
+	// to a node
+	return hostSubnets, !util.IsContainedInAnyCIDR(annotation.IPs[0], hostSubnets...), nil
 }
