@@ -43,7 +43,10 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 func (bnc *BaseNetworkController) allocatePodIPsOnSwitch(pod *kapi.Pod,
 	annotations *util.PodAnnotation, nadName string, switchName string) (expectedLogicalPortName string, err error) {
 
-	if !util.PodScheduled(pod) || util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) {
+	// Completed pods will be allocated as well to avoid having their IPs
+	// allocated to other pods before we make sure that we have released them
+	// first.
+	if !util.PodScheduled(pod) || util.PodWantsHostNetwork(pod) {
 		return "", nil
 	}
 	// skip nodes that are not running ovnk (inferred from host subnets)
@@ -67,15 +70,15 @@ func (bnc *BaseNetworkController) allocatePodIPsOnSwitch(pod *kapi.Pod,
 		}
 	}
 	if err := bnc.waitForNodeLogicalSwitchSubnetsInCache(switchName); err != nil {
-		return expectedLogicalPortName, fmt.Errorf("failed to wait for switch %s to be added to cache. IP allocation may fail!",
+		return expectedLogicalPortName, fmt.Errorf("failed to wait for switch %s to be added to cache. IP allocation may fail",
 			switchName)
 	}
 	if err = bnc.lsManager.AllocateIPs(switchName, annotations.IPs); err != nil {
 		if err == ipallocator.ErrAllocated {
-			// already allocated: log an error but not stop syncPod from continuing
-			klog.Errorf("Already allocated IPs: %s for pod: %s on switchName: %s",
+			// already allocated: log a warning but not stop syncPod from continuing
+			klog.Warningf("Already allocated IPs: %s for pod: %s in phase: %s on switch: %s",
 				util.JoinIPNetIPs(annotations.IPs, " "), expectedLogicalPortName,
-				switchName)
+				&pod.Status.Phase, switchName)
 		} else {
 			return expectedLogicalPortName, fmt.Errorf("couldn't allocate IPs: %s for pod: %s on switch: %s"+
 				" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), expectedLogicalPortName,
