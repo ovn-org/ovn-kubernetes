@@ -158,6 +158,11 @@ type BaseNetworkController struct {
 	// Interconnect resources are Transit switch and logical ports connecting this transit switch
 	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
 	zoneICHandler *zoneic.ZoneInterconnectHandler
+
+	// releasedPodsBeforeStartup tracks pods per NAD (map of NADs to pods UIDs)
+	// might have been already be released on startup
+	releasedPodsBeforeStartup  map[string]sets.Set[string]
+	releasedPodsOnStartupMutex sync.Mutex
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific

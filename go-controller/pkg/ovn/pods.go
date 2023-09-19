@@ -22,6 +22,8 @@ import (
 )
 
 func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
+	annotatedLocalPods := map[*kapi.Pod]map[string]*util.PodAnnotation{}
+
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
 	//
@@ -54,6 +56,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		if annotations == nil {
 			continue
 		}
+		annotatedLocalPods[pod] = map[string]*util.PodAnnotation{ovntypes.DefaultNetworkName: annotations}
 
 		if expectedLogicalPortName != "" {
 			expectedLogicalPorts[expectedLogicalPortName] = true
@@ -103,6 +106,10 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 	if err := kubevirt.SyncVirtualMachines(oc.nbClient, vms); err != nil {
 		return fmt.Errorf("failed syncing running virtual machines: %v", err)
 	}
+
+	// keep track of which pods might have already been released
+	oc.trackPodsReleasedBeforeStartup(annotatedLocalPods)
+
 	return oc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
 }
 

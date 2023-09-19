@@ -230,7 +230,13 @@ func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) e
 		}
 	}
 
-	return kubevirt.CleanUpLiveMigratablePod(oc.nbClient, oc.watchFactory, pod)
+	err := kubevirt.CleanUpLiveMigratablePod(oc.nbClient, oc.watchFactory, pod)
+	if err != nil {
+		return err
+	}
+
+	oc.forgetPodReleasedBeforeStartup(string(pod.UID), ovntypes.DefaultNetworkName)
+	return nil
 }
 
 // removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;
