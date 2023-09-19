@@ -1191,7 +1191,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				Name: name,
 			}
 			eIPC.recorder.Eventf(&eIPRef, v1.EventTypeWarning, "EgressIPConflict", "Egress IP %s with IP "+
-				"%s is conflicting with a host (%s) IP address and will not be assigned", name, eIP.String(), conflictedHost, name)
+				"%v is conflicting with a host (%s) IP address and will not be assigned", name, eIP, conflictedHost)
 			klog.Errorf("Egress IP: %v address is already assigned on an interface on node %s", eIP, conflictedHost)
 			return assignments
 		}
