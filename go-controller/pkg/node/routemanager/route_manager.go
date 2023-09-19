@@ -195,37 +195,14 @@ func (c *Controller) applyRoutesPerLink(rl RoutesPerLink) error {
 	return nil
 }
 
-var _, defaultRouteIPNet, _ = net.ParseCIDR("0.0.0.0/0")
-
 func (c *Controller) applyRoute(link netlink.Link, gwIP net.IP, subnet *net.IPNet, mtu int, src net.IP, table int) error {
-	var filterRoute *netlink.Route
-	var filterMask uint64
-	// netlink library contains an issue where we cannot filter by a default route with dst 0.0.0.0/0 because netlink library represents
-	// a default route with dst is nil therefore filter by table only
-	isDefaultRoute := subnet != nil && subnet.String() == defaultRouteIPNet.String()
-	if isDefaultRoute {
-		filterRoute, filterMask = filterRouteByTable(link.Attrs().Index, table)
-	} else {
-		filterRoute, filterMask = filterRouteByDstAndTable(link.Attrs().Index, subnet, table)
-	}
-
+	filterRoute, filterMask := filterRouteByDstAndTable(link.Attrs().Index, subnet, table)
 	nlRoutes, err := c.netlinkOps.RouteListFiltered(getNetlinkIPFamily(subnet), filterRoute, filterMask)
 	if err != nil {
 		return fmt.Errorf("failed to list filtered routes: %v", err)
 	}
 	if len(nlRoutes) == 0 {
 		return c.netlinkAddRoute(link, gwIP, subnet, mtu, src, table)
-	}
-	// remove when netlink library is fixed
-	// currently, the library we use to interact with netlink represents a route with destination 0.0.0.0/0 represented as nil in field dst
-	if isDefaultRoute {
-		temp := nlRoutes[:0]
-		for _, nlRoute := range nlRoutes {
-			if nlRoute.Dst == nil && nlRoute.Src == nil && nlRoute.Gw == nil {
-				temp = append(temp, nlRoute)
-			}
-		}
-		nlRoutes = temp
 	}
 	if len(nlRoutes) > 1 {
 		return fmt.Errorf("unexpected number of routes after filtering. Expecting one route but found: %+v", nlRoutes)
@@ -237,8 +214,7 @@ func (c *Controller) applyRoute(link netlink.Link, gwIP net.IP, subnet *net.IPNe
 		netlinkRoute.Gw = gwIP
 		err = c.netlinkOps.RouteReplace(netlinkRoute)
 		if err != nil {
-			return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v",
-				subnet.String(), gwIP.String(), mtu, err)
+			return fmt.Errorf("failed to replace route (using route '%s'): %v", netlinkRoute.String(), err)
 		}
 	}
 	return nil
@@ -266,38 +242,19 @@ func (c *Controller) netlinkAddRoute(link netlink.Link, gwIP net.IP, subnet *net
 }
 
 func (c *Controller) netlinkDelRoute(link netlink.Link, subnet *net.IPNet, table int) error {
-	// List routes for the link in the default routing table
 	filter, mask := filterRouteByTable(link.Attrs().Index, table)
-
 	nlRoutes, err := c.netlinkOps.RouteListFiltered(netlink.FAMILY_ALL, filter, mask)
 	if err != nil {
-		return fmt.Errorf("failed to get routes for link %s: %v", link.Attrs().Name, err)
+		return fmt.Errorf("failed to get routes for link %s from table %d: %v", link.Attrs().Name, table, err)
 	}
 	for _, nlRoute := range nlRoutes {
-		deleteRoute := false
-		// Delete if subnet is nil and netlink route dst is nil or if they are equal
-		if subnet == nil {
-			deleteRoute = nlRoute.Dst == nil
-		} else if nlRoute.Dst != nil {
-			deleteRoute = nlRoute.Dst.String() == subnet.String()
-			// HACK: bug in netlink which doesnt show default as destination
-		} else if nlRoute.Dst == nil && subnet.String() == "0.0.0.0/0" {
-			_, ipNet, _ := net.ParseCIDR("0.0.0.0/0")
-			nlRoute.Dst = ipNet
-			deleteRoute = true
-		}
-
-		if deleteRoute {
-			err = c.netlinkOps.RouteDel(&nlRoute)
-			if err != nil {
-				dstValue := "default"
-				if nlRoute.Dst != nil {
-					dstValue = nlRoute.Dst.String()
+		if nlRoute.Dst != nil {
+			if nlRoute.Dst.String() == subnet.String() {
+				if err = c.netlinkOps.RouteDel(&nlRoute); err != nil {
+					return fmt.Errorf("failed to delete route '%v' for link %s: %v", nlRoute, link.Attrs().Name, err)
 				}
-				return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v\n",
-					dstValue, nlRoute.Gw.String(), link.Attrs().Name, err)
+				break
 			}
-			break
 		}
 	}
 	return nil
@@ -505,12 +462,6 @@ func ConvertNetlinkRouteToRoute(nlRoute netlink.Route) Route {
 }
 
 func convertRouteUpdateToRoutesPerLink(link netlink.Link, ru netlink.RouteUpdate) (RoutesPerLink, error) {
-	//TODO: remove when fix is in netlink
-	if ru.Dst == nil {
-		_, ipNet, _ := net.ParseCIDR("0.0.0.0/0")
-		ru.Dst = ipNet
-	}
-
 	return RoutesPerLink{
 		Link: link,
 		Routes: []Route{
@@ -526,12 +477,6 @@ func convertRouteUpdateToRoutesPerLink(link netlink.Link, ru netlink.RouteUpdate
 }
 
 func convertNetlinkRouteToRoutesPerLink(link netlink.Link, nlRoute netlink.Route) (RoutesPerLink, error) {
-	if nlRoute.Dst == nil {
-		//TODO theres a bug in netlink which will be fixed with https://github.com/vishvananda/netlink/pull/852
-		// TODO fix this temp fix
-		_, ipNet, _ := net.ParseCIDR("0.0.0.0/0")
-		nlRoute.Dst = ipNet
-	}
 	return RoutesPerLink{
 		Link: link,
 		Routes: []Route{
