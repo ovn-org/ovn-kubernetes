@@ -40,6 +40,7 @@ type IPAMLeasesGetter interface {
 type IPAMLeaseInterface interface {
 	Create(ctx context.Context, iPAMLease *v1alpha1.IPAMLease, opts v1.CreateOptions) (*v1alpha1.IPAMLease, error)
 	Update(ctx context.Context, iPAMLease *v1alpha1.IPAMLease, opts v1.UpdateOptions) (*v1alpha1.IPAMLease, error)
+	UpdateStatus(ctx context.Context, iPAMLease *v1alpha1.IPAMLease, opts v1.UpdateOptions) (*v1alpha1.IPAMLease, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
 	Get(ctx context.Context, name string, opts v1.GetOptions) (*v1alpha1.IPAMLease, error)
@@ -128,6 +129,22 @@ func (c *iPAMLeases) Update(ctx context.Context, iPAMLease *v1alpha1.IPAMLease, 
 		Namespace(c.ns).
 		Resource("ipamleases").
 		Name(iPAMLease.Name).
+		VersionedParams(&opts, scheme.ParameterCodec).
+		Body(iPAMLease).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// UpdateStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
+func (c *iPAMLeases) UpdateStatus(ctx context.Context, iPAMLease *v1alpha1.IPAMLease, opts v1.UpdateOptions) (result *v1alpha1.IPAMLease, err error) {
+	result = &v1alpha1.IPAMLease{}
+	err = c.client.Put().
+		Namespace(c.ns).
+		Resource("ipamleases").
+		Name(iPAMLease.Name).
+		SubResource("status").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Body(iPAMLease).
 		Do(ctx).

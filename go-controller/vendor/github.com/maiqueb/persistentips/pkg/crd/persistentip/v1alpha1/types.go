@@ -16,6 +16,7 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=ipamleases,singular=ipamlease,scope=Namespaced
 // +kubebuilder:storageversion
+// +kubebuilder:subresource:status
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // IPAMLease is the Schema for the IPAMLease API
@@ -23,7 +24,8 @@ type IPAMLease struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec IPAMLeaseSpec `json:"spec,omitempty"`
+	Spec   IPAMLeaseSpec   `json:"spec,omitempty"`
+	Status IPAMLeaseStatus `json:"status,omitempty"`
 }
 
 type IPAMLeaseSpec struct {
@@ -31,6 +33,9 @@ type IPAMLeaseSpec struct {
 	Network string `json:"network"`
 	// The pod interface name for which this allocation was created
 	Interface string `json:"interface"`
+}
+
+type IPAMLeaseStatus struct {
 	// The list of IP addresses (v4, v6) that were allocated for the pod interface
 	IPs []string `json:"ips"`
 }
