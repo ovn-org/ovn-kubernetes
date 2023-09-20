@@ -80,7 +80,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (
 
 // getNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.
 func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
-	allIPs, err := util.GetNetworkInterfaceIPs(iface)
+	allIPs, err := util.GetFilteredInterfaceV4V6IPs(iface)
 	if err != nil {
 		return nil, fmt.Errorf("could not find IP addresses: %v", err)
 	}
@@ -268,7 +268,7 @@ func getInterfaceByIP(ip net.IP) (string, error) {
 	}
 
 	for _, link := range links {
-		ips, err := util.GetNetworkInterfaceIPs(link.Attrs().Name)
+		ips, err := util.GetFilteredInterfaceV4V6IPs(link.Attrs().Name)
 		if err != nil {
 			return "", err
 		}

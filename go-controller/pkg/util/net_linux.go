@@ -479,20 +479,38 @@ func DeleteConntrackServicePort(ip string, port int32, protocol kapi.Protocol, i
 	return DeleteConntrack(ip, port, protocol, ipFilterType, labels)
 }
 
-// GetNetworkInterfaceIPs returns the IP addresses for the network interface 'iface'.
-// We filter out addresses that are link local, reserved for internal use or added by keepalived.
-func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
+// GetFilteredInterfaceV4V6IPs returns the IP addresses for the network interface 'iface' for ipv4 and ipv6.
+// Filter out addresses that are link local, reserved for internal use or added by keepalived.
+func GetFilteredInterfaceV4V6IPs(iface string) ([]*net.IPNet, error) {
 	link, err := netLinkOps.LinkByName(iface)
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup link %s: %v", iface, err)
 	}
-
-	addrs, err := netLinkOps.AddrList(link, netlink.FAMILY_ALL)
+	netlinkAddrs, err := GetFilteredInterfaceAddrs(link, true, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list addresses for %q: %v", iface, err)
+		return nil, fmt.Errorf("failed get link %s addresses: %v", link.Attrs().Name, err)
 	}
+	ips := make([]*net.IPNet, 0, len(netlinkAddrs))
+	for _, netlinkAddr := range netlinkAddrs {
+		ips = append(ips, netlinkAddr.IPNet)
+	}
+	return ips, nil
+}
 
-	var ips []*net.IPNet
+// GetFilteredInterfaceAddrs returns addresses attached to a link and filters out link local addresses, OVN reserved IPs,
+// keepalived IPs and addresses marked as secondary or depreciated.
+func GetFilteredInterfaceAddrs(link netlink.Link, v4, v6 bool) ([]netlink.Addr, error) {
+	var ipFamily int // value of 0 means include both IP v4 and v6 addresses
+	if v4 && !v6 {
+		ipFamily = netlink.FAMILY_V4
+	} else if !v4 && v6 {
+		ipFamily = netlink.FAMILY_V6
+	}
+	addrs, err := netLinkOps.AddrList(link, ipFamily)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list addresses for %q: %v", link.Attrs().Name, err)
+	}
+	validAddrs := make([]netlink.Addr, 0)
 	for _, addr := range addrs {
 		if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) || IsAddressAddedByKeepAlived(addr) {
 			continue
@@ -504,9 +522,9 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 		if (addr.Flags & (unix.IFA_F_SECONDARY | unix.IFA_F_DEPRECATED)) != 0 {
 			continue
 		}
-		ips = append(ips, addr.IPNet)
+		validAddrs = append(validAddrs, addr)
 	}
-	return ips, nil
+	return validAddrs, nil
 }
 
 func IsAddressReservedForInternalUse(addr net.IP) bool {
