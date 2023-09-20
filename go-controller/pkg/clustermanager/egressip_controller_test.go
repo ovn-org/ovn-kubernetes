@@ -296,7 +296,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node1IPv4OVNManaged, node1IPv4NonOVNManaged, node1Ipv4NonOVNManaged2),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node1IPv4OVNManaged, node1IPv4NonOVNManaged, node1Ipv4NonOVNManaged2),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -317,7 +317,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node2IPv4OVNManaged, node2IPv4NonOVNManaged, node2Ipv4NonOVNManaged2, node2Ipv4NonOVNManaged3),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node2IPv4OVNManaged, node2IPv4NonOVNManaged, node2Ipv4NonOVNManaged2, node2Ipv4NonOVNManaged3),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -416,7 +416,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node1IPv4OVNManaged, node1IPv4NonOVNManaged, node1Ipv4NonOVNManaged2),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node1IPv4OVNManaged, node1IPv4NonOVNManaged, node1Ipv4NonOVNManaged2),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -437,7 +437,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node2IPv4OVNManaged, node2IPv4NonOVNManaged, node2Ipv4NonOVNManaged2, node2Ipv4NonOVNManaged3),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node2IPv4OVNManaged, node2IPv4NonOVNManaged, node2Ipv4NonOVNManaged2, node2Ipv4NonOVNManaged3),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -537,7 +537,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, node1IPv6OVNManaged),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses": fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node1IPv4OVNManaged,
+							util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node1IPv4OVNManaged,
 								node1IPv6OVNManaged, node1IPv4NonOVNManaged, node1IPv4NonOVNManaged2),
 						},
 					},
@@ -556,7 +556,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses": fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node2IPv4OVNManaged,
+							util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node2IPv4OVNManaged,
 								node2IPv4NonOVNManaged, node2IPv4NonOVNManaged2),
 						},
 					},
@@ -615,7 +615,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, nodeIPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", nodeIPv4, nodeIPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", nodeIPv4, nodeIPv6),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -683,7 +683,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
 							"k8s.ovn.org/l3-gateway-config":   `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop":"192.168.126.1"}}`,
 							"k8s.ovn.org/node-chassis-id":     "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -707,7 +707,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
 							"k8s.ovn.org/l3-gateway-config":   `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:50", "ip-address":"192.168.126.13/24", "next-hop":"192.168.126.1"}}`,
 							"k8s.ovn.org/node-chassis-id":     "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -817,7 +817,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, nodeIPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", nodeIPv4, nodeIPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", nodeIPv4, nodeIPv6),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -873,7 +873,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", "", node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -894,7 +894,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -1083,7 +1083,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv4, node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv4, node1IPv6),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -1104,7 +1104,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -1167,7 +1167,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -1188,7 +1188,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -1263,7 +1263,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv4, node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv4, node1IPv6),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -1281,7 +1281,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -1377,7 +1377,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv4, node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv4, node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1398,7 +1398,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1498,7 +1498,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", nodeIPv4),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\"]}", v4NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", nodeIPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", nodeIPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1580,7 +1580,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1601,7 +1601,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1660,7 +1660,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, node1IPv6OVNManaged),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1681,7 +1681,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, node2IPv6OVNManaged),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1745,7 +1745,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, node1IPv6OVNManaged),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1766,7 +1766,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, node2IPv6OVNManaged),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1839,7 +1839,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, node1IPv6OVNManaged),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1860,7 +1860,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, node2IPv6OVNManaged),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1925,7 +1925,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, node1IPv6OVNManaged),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1946,7 +1946,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, node2IPv6OVNManaged),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2012,7 +2012,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2033,7 +2033,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2077,7 +2077,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("should not be able to allocate EgressIP equal to an address in host-addresses annotation", func() {
+		ginkgo.It("should not be able to allocate EgressIP equal to an address in host-cidrs annotation", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				egressIP := "0:0:0:0:0:feff:c0a8:8e0a"
@@ -2093,7 +2093,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6, node1IPv62),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6, node1IPv62),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2114,7 +2114,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2174,7 +2174,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2195,7 +2195,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2253,7 +2253,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2274,7 +2274,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2332,7 +2332,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2353,7 +2353,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2413,7 +2413,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2434,7 +2434,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2492,7 +2492,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2513,7 +2513,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2569,7 +2569,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2590,7 +2590,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2652,7 +2652,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2673,7 +2673,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2734,7 +2734,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2755,7 +2755,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2823,7 +2823,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2844,7 +2844,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2904,7 +2904,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", "", node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2925,7 +2925,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2992,7 +2992,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", "", node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv6),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv6),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3013,7 +3013,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3091,7 +3091,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3112,7 +3112,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3184,7 +3184,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3205,7 +3205,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3273,7 +3273,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3294,7 +3294,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3363,7 +3363,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3384,7 +3384,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3475,7 +3475,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3496,7 +3496,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3584,7 +3584,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3605,7 +3605,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3679,7 +3679,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3700,7 +3700,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3770,7 +3770,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3791,7 +3791,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3867,7 +3867,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node1IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -3888,7 +3888,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", node2IPv4),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",

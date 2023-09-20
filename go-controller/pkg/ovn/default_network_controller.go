@@ -889,7 +889,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged
 				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
 				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-					nodeSubnetChanged || hostAddressesChanged(oldNode, newNode) ||
+					nodeSubnetChanged || hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode))
 				_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
@@ -949,7 +949,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		h.oc.eIPC.nodeZoneState.Store(newNode.Name, h.oc.isLocalZoneNode(newNode))
 		h.oc.eIPC.nodeZoneState.UnlockKey(newNode.Name)
 		// update the nodeIP in the defalt-reRoute (102 priority) destination address-set
-		if util.NodeHostAddressesAnnotationChanged(oldNode, newNode) {
+		if util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
 			klog.Infof("Egress IP detected IP address change for node %s. Updating no re-route policies", newNode.Name)
 			err := h.oc.ensureDefaultNoRerouteNodePolicies()
 			if err != nil {

@@ -236,7 +236,7 @@ func MatchIPStringFamily(isIPv6 bool, ipStrings []string) (string, error) {
 	return "", fmt.Errorf("no %s string available", IPFamilyName(isIPv6))
 }
 
-// MatchAllIPStringFamily loops through the array of string and returns a
+// MatchAllIPStringFamily loops through the array of string and returns a slice
 // of addresses in the same IP Family, based on input flag isIPv6.
 func MatchAllIPStringFamily(isIPv6 bool, ipStrings []string) ([]string, error) {
 	var ipAddrs []string

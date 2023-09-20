@@ -15,8 +15,8 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/urfave/cli/v2"
 
@@ -205,7 +205,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 				staleLRP1 := &nbdb.LogicalRouterPolicy{
 					ExternalIDs: map[string]string{"EgressSVC": "testns/gonesvc"}, // the service was deleted
-					Priority:    types.EgressSVCReroutePriority,
+					Priority:    ovntypes.EgressSVCReroutePriority,
 					UUID:        "staleLRP1-UUID",
 					Match:       "ip4.src == 10.10.10.10",
 					Nexthops:    []string{"1.2.3.4"},
@@ -213,7 +213,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 				staleLRP2 := &nbdb.LogicalRouterPolicy{
 					ExternalIDs: map[string]string{"EgressSVC": "testns/nolongeregresssvc"}, // corresponding EgressService removed
-					Priority:    types.EgressSVCReroutePriority,
+					Priority:    ovntypes.EgressSVCReroutePriority,
 					UUID:        "staleLRP2-UUID",
 					Match:       "ip4.src == 10.10.10.10",
 					Nexthops:    []string{"1.2.3.4"},
@@ -221,7 +221,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 				staleLRP3 := &nbdb.LogicalRouterPolicy{
 					ExternalIDs: map[string]string{"EgressSVC": "testns/svc1"},
-					Priority:    types.EgressSVCReroutePriority,
+					Priority:    ovntypes.EgressSVCReroutePriority,
 					UUID:        "staleLRP3-UUID",
 					Match:       "ip4.src == 10.128.1.100", // gone endpoint
 					Nexthops:    []string{"10.128.1.2"},
@@ -229,7 +229,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 				staleLRP4 := &nbdb.LogicalRouterPolicy{
 					ExternalIDs: map[string]string{"EgressSVC": "testns/svc2"},
-					Priority:    types.EgressSVCReroutePriority,
+					Priority:    ovntypes.EgressSVCReroutePriority,
 					UUID:        "staleLRP4-UUID",
 					Match:       "ip4.src == 10.128.2.5",
 					Nexthops:    []string{"10.128.1.2"}, // wrong nexthop
@@ -237,7 +237,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 				staleLRP5 := &nbdb.LogicalRouterPolicy{
 					ExternalIDs: map[string]string{"EgressSVC": "testns/svc3"},
-					Priority:    types.EgressSVCReroutePriority,
+					Priority:    ovntypes.EgressSVCReroutePriority,
 					UUID:        "staleLRP5-UUID",
 					Match:       "ip4.src == 10.128.2.50",
 					Nexthops:    []string{"10.128.2.2"}, // node2 can't be used for svc3 which is not assigned to any node
@@ -245,7 +245,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 				staleLRP6 := &nbdb.LogicalRouterPolicy{ // belongs to an EgressService with srcIPBy=Network
 					ExternalIDs: map[string]string{"EgressSVC": "testns/svc4"},
-					Priority:    types.EgressSVCReroutePriority,
+					Priority:    ovntypes.EgressSVCReroutePriority,
 					UUID:        "staleLRP6-UUID",
 					Match:       "ip4.src == 10.128.1.27",
 					Nexthops:    []string{"10.128.1.2"},
@@ -253,7 +253,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 				toKeepLRP1 := &nbdb.LogicalRouterPolicy{
 					ExternalIDs: map[string]string{"EgressSVC": "testns/svc1"},
-					Priority:    types.EgressSVCReroutePriority,
+					Priority:    ovntypes.EgressSVCReroutePriority,
 					UUID:        "toKeepLRP1-UUID",
 					Match:       "ip4.src == 10.128.1.5",
 					Nexthops:    []string{"10.128.1.2"},
@@ -261,15 +261,15 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 				toKeepLRP2 := &nbdb.LogicalRouterPolicy{
 					ExternalIDs: map[string]string{"EgressSVC": "testns/svc2"},
-					Priority:    types.EgressSVCReroutePriority,
+					Priority:    ovntypes.EgressSVCReroutePriority,
 					UUID:        "toKeepLRP2-UUID",
 					Match:       "ip4.src == 10.128.2.5",
 					Nexthops:    []string{"10.128.2.2"},
 				}
 
 				clusterRouter := &nbdb.LogicalRouter{
-					Name:     types.OVNClusterRouter,
-					UUID:     types.OVNClusterRouter + "-UUID",
+					Name:     ovntypes.OVNClusterRouter,
+					UUID:     ovntypes.OVNClusterRouter + "-UUID",
 					Policies: []string{"staleLRP1-UUID", "staleLRP2-UUID", "staleLRP3-UUID", "staleLRP4-UUID", "toKeepLRP1-UUID", "toKeepLRP2-UUID"},
 				}
 
@@ -478,8 +478,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				toKeepLRSR1 := egressServiceRouterPolicy("toKeepLRSR1-UUID", "testns/svc1:ic", "10.128.2.5", "10.128.1.2")
 
 				clusterRouter := &nbdb.LogicalRouter{
-					Name: types.OVNClusterRouter,
-					UUID: types.OVNClusterRouter + "-UUID",
+					Name: ovntypes.OVNClusterRouter,
+					UUID: ovntypes.OVNClusterRouter + "-UUID",
 					Policies: []string{"staleLRP1-UUID", "staleLRP2-UUID", "staleLRP3-UUID", "toKeepLRP1-UUID", "toKeepLRP2-UUID",
 						"staleLRSR1-UUID", "staleLRSR2-UUID", "staleLRSR3-UUID", "staleLRSR4-UUID", "staleLRSR5-UUID", "toKeepLRSR1-UUID"},
 				}
@@ -578,8 +578,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				node2.Labels = map[string]string{"house": "Slytherin"}
 
 				clusterRouter := &nbdb.LogicalRouter{
-					Name: types.OVNClusterRouter,
-					UUID: types.OVNClusterRouter + "-UUID",
+					Name: ovntypes.OVNClusterRouter,
+					UUID: ovntypes.OVNClusterRouter + "-UUID",
 				}
 
 				dbSetup := libovsdbtest.TestSetup{
@@ -791,8 +791,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet, node1transitIPv4, node1transitIPv6)
 				node2 := nodeFor(node2Name, node2IPv4, node2IPv6, node2IPv4Subnet, node2IPv6Subnet, node2transitIPv4, node2transitIPv6)
 				clusterRouter := &nbdb.LogicalRouter{
-					Name: types.OVNClusterRouter,
-					UUID: types.OVNClusterRouter + "-UUID",
+					Name: ovntypes.OVNClusterRouter,
+					UUID: ovntypes.OVNClusterRouter + "-UUID",
 				}
 
 				dbSetup := libovsdbtest.TestSetup{
@@ -960,8 +960,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				node2 := nodeFor(node2Name, node2IPv4, node2IPv6, node2IPv4Subnet, node2IPv6Subnet, node2transitIPv4, node2transitIPv6)
 
 				clusterRouter := &nbdb.LogicalRouter{
-					Name: types.OVNClusterRouter,
-					UUID: types.OVNClusterRouter + "-UUID",
+					Name: ovntypes.OVNClusterRouter,
+					UUID: ovntypes.OVNClusterRouter + "-UUID",
 				}
 				node1LRP := &nbdb.LogicalRouterPort{
 					UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -1264,8 +1264,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				node2.Labels = map[string]string{"home": "rock"}
 
 				clusterRouter := &nbdb.LogicalRouter{
-					Name: types.OVNClusterRouter,
-					UUID: types.OVNClusterRouter + "-UUID",
+					Name: ovntypes.OVNClusterRouter,
+					UUID: ovntypes.OVNClusterRouter + "-UUID",
 				}
 
 				dbSetup := libovsdbtest.TestSetup{
@@ -1483,11 +1483,11 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
-				ginkgo.By("updating the second node host addresses the node ip no re-route address set will be updated")
+				ginkgo.By("updating the second node host cidr the node ip no re-route address set will be updated")
 				nodeIPsASdbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName)
 				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6})
 
-				node2.ObjectMeta.Annotations["k8s.ovn.org/host-addresses"] = fmt.Sprintf("[\"%s\", \"%s\", \"%s\", \"%s\"]", node2IPv4+"/24", node2IPv6+"/64", vipIPv4+"/24", vipIPv6+"/64")
+				node2.ObjectMeta.Annotations[util.OVNNodeHostCIDRs] = fmt.Sprintf("[\"%s\", \"%s\", \"%s\", \"%s\"]", node2IPv4+"/24", node2IPv6+"/64", vipIPv4+"/24", vipIPv6+"/64")
 				node2.ResourceVersion = "3"
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1495,7 +1495,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6, vipIPv4, vipIPv6})
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				node2.ObjectMeta.Annotations["k8s.ovn.org/host-addresses"] = fmt.Sprintf("[\"%s\", \"%s\"]", node2IPv4+"/24", node2IPv6+"/64")
+				node2.ObjectMeta.Annotations[util.OVNNodeHostCIDRs] = fmt.Sprintf("[\"%s\", \"%s\"]", node2IPv4+"/24", node2IPv6+"/64")
 				node2.ResourceVersion = "4"
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1582,7 +1582,7 @@ func egressServiceRouterPolicy(uuid, key, addr, nexthop string) *nbdb.LogicalRou
 		ExternalIDs: map[string]string{"EgressSVC": key},
 		Match:       match,
 		Nexthops:    []string{nexthop},
-		Priority:    types.EgressSVCReroutePriority,
+		Priority:    ovntypes.EgressSVCReroutePriority,
 	}
 }
 
@@ -1593,7 +1593,7 @@ func getDefaultNoReroutePolicies(controllerName string) []*nbdb.LogicalRouterPol
 	nodeIPsV4, nodeIPsV6 := addressset.GetHashNamesForAS(getEgressIPAddrSetDbIDs(NodeIPAddrSetName, controllerName))
 	allLRPS = append(allLRPS,
 		&nbdb.LogicalRouterPolicy{
-			Priority: types.DefaultNoRereoutePriority,
+			Priority: ovntypes.DefaultNoRereoutePriority,
 			Match: fmt.Sprintf("(ip4.src == $%s || ip4.src == $%s) && ip4.dst == $%s",
 				egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 			Action:  nbdb.LogicalRouterPolicyActionAllow,
@@ -1601,7 +1601,7 @@ func getDefaultNoReroutePolicies(controllerName string) []*nbdb.LogicalRouterPol
 			Options: map[string]string{"pkt_mark": "1008"},
 		},
 		&nbdb.LogicalRouterPolicy{
-			Priority: types.DefaultNoRereoutePriority,
+			Priority: ovntypes.DefaultNoRereoutePriority,
 			Match: fmt.Sprintf("(ip6.src == $%s || ip6.src == $%s) && ip6.dst == $%s",
 				egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
 			Action:  nbdb.LogicalRouterPolicyActionAllow,
@@ -1612,25 +1612,25 @@ func getDefaultNoReroutePolicies(controllerName string) []*nbdb.LogicalRouterPol
 
 	allLRPS = append(allLRPS,
 		&nbdb.LogicalRouterPolicy{
-			Priority: types.DefaultNoRereoutePriority,
+			Priority: ovntypes.DefaultNoRereoutePriority,
 			Match:    "ip4.src == 10.128.0.0/16 && ip4.dst == 10.128.0.0/16",
 			Action:   nbdb.LogicalRouterPolicyActionAllow,
 			UUID:     "default-pod2pod-no-reroute-UUID",
 		},
 		&nbdb.LogicalRouterPolicy{
-			Priority: types.DefaultNoRereoutePriority,
+			Priority: ovntypes.DefaultNoRereoutePriority,
 			Match:    fmt.Sprintf("ip4.src == 10.128.0.0/16 && ip4.dst == %s", config.Gateway.V4JoinSubnet),
 			Action:   nbdb.LogicalRouterPolicyActionAllow,
 			UUID:     "no-reroute-service-UUID",
 		},
 		&nbdb.LogicalRouterPolicy{
-			Priority: types.DefaultNoRereoutePriority,
+			Priority: ovntypes.DefaultNoRereoutePriority,
 			Match:    "ip6.src == fe00::/16 && ip6.dst == fe00::/16",
 			Action:   nbdb.LogicalRouterPolicyActionAllow,
 			UUID:     "default-v6-pod2pod-no-reroute-UUID",
 		},
 		&nbdb.LogicalRouterPolicy{
-			Priority: types.DefaultNoRereoutePriority,
+			Priority: ovntypes.DefaultNoRereoutePriority,
 			Match:    fmt.Sprintf("ip6.src == fe00::/16 && ip6.dst == %s", config.Gateway.V6JoinSubnet),
 			Action:   nbdb.LogicalRouterPolicyActionAllow,
 			UUID:     "no-reroute-v6-service-UUID",
@@ -1668,7 +1668,7 @@ func nodeFor(name, ipv4, ipv6, v4subnet, v6subnet, transitIPv4, transitIPv6 stri
 			Name: name,
 			Annotations: map[string]string{
 				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", ipv4, ipv6),
-				"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\",\"%s\"]", fmt.Sprintf("%s/24", ipv4), fmt.Sprintf("%s/64", ipv6)),
+				util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", fmt.Sprintf("%s/24", ipv4), fmt.Sprintf("%s/64", ipv6)),
 				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\",\"%s\"]}", v4subnet, v6subnet),
 
 				// Used only with IC tests

@@ -46,7 +46,7 @@ func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
 	// addresses
 	if labels.Equals(oldNodeLabels, newNodeLabels) &&
 		oldNodeReady == newNodeReady &&
-		!util.NodeHostAddressesAnnotationChanged(oldNode, newNode) {
+		!util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
 		return
 	}
 
