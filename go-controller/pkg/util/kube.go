@@ -1,13 +1,21 @@
 package util
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
+	certificatesv1 "k8s.io/api/certificates/v1"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -16,6 +24,7 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -23,7 +32,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/transport"
 	"k8s.io/client-go/util/cert"
+	"k8s.io/client-go/util/certificate"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -93,6 +104,16 @@ type OVNClusterManagerClientset struct {
 	NetworkAttchDefClient networkattchmentdefclientset.Interface
 	EgressServiceClient   egressserviceclientset.Interface
 }
+
+const (
+	certNamePrefix       = "ovnkube-client"
+	certCommonNamePrefix = "system:ovn-node"
+	certOrganization     = "system:ovn-nodes"
+)
+
+var (
+	certUsages = []certificatesv1.KeyUsage{certificatesv1.UsageDigitalSignature, certificatesv1.UsageClientAuth}
+)
 
 func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 	return &OVNMasterClientset{
@@ -199,6 +220,16 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 			BearerTokenFile: conf.TokenFile,
 			TLSClientConfig: rest.TLSClientConfig{CAData: conf.CAData},
 		}
+		if conf.CertDir != "" {
+			kconfig = &rest.Config{
+				Host: conf.APIServer,
+				TLSClientConfig: rest.TLSClientConfig{
+					KeyFile:  path.Join(conf.CertDir, certNamePrefix+"-current.pem"),
+					CertFile: path.Join(conf.CertDir, certNamePrefix+"-current.pem"),
+					CAData:   conf.CAData,
+				},
+			}
+		}
 	} else if strings.HasPrefix(conf.APIServer, "http") {
 		kconfig, err = clientcmd.BuildConfigFromFlags(conf.APIServer, "")
 	} else {
@@ -220,6 +251,84 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 	return kconfig, nil
 }
 
+// StartNodeCertificateManager manages the creation and rotation of the node-specific client certificate.
+// When there is no existing certificate, it will use the BootstrapKubeconfig kubeconfig to create a CSR and it will
+// wait for the certificate before returning.
+func StartNodeCertificateManager(ctx context.Context, wg *sync.WaitGroup, conf *config.KubernetesConfig) error {
+	nodeName := os.Getenv("K8S_NODE")
+	if nodeName == "" {
+		return fmt.Errorf("failed to get the node name required for the certificate from K8S_NODE env")
+	}
+	defaultKConfig, err := newKubernetesRestConfig(conf)
+	if err != nil {
+		return fmt.Errorf("unable to create kubernetes rest config, err: %v", err)
+	}
+	defaultKConfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
+	defaultKConfig.ContentType = "application/vnd.kubernetes.protobuf"
+
+	bootstrapKConfig, err := clientcmd.BuildConfigFromFlags("", conf.BootstrapKubeconfig)
+	if err != nil {
+		return fmt.Errorf("failed to load bootstrap kubeconfig from %s, err: %v", conf.BootstrapKubeconfig, err)
+	}
+	// If we have a valid certificate, use that to fetch CSRs.
+	// Otherwise, use the bootstrap credentials.
+	// https://github.com/kubernetes/kubernetes/blob/068ee321bc7bfe1c2cefb87fb4d9e5deea84fbc8/cmd/kubelet/app/server.go#L953-L963
+	newClientsetFn := func(current *tls.Certificate) (kubernetes.Interface, error) {
+		cfg := bootstrapKConfig
+		if current != nil {
+			cfg = defaultKConfig
+		}
+		return kubernetes.NewForConfig(cfg)
+	}
+
+	certificateStore, err := certificate.NewFileStore(certNamePrefix, conf.CertDir, conf.CertDir, "", "")
+	if err != nil {
+		return fmt.Errorf("failed to initialize the certificate store: %v", err)
+	}
+	certManager, err := certificate.NewManager(&certificate.Config{
+		ClientsetFn: newClientsetFn,
+		Template: &x509.CertificateRequest{
+			Subject: pkix.Name{
+				CommonName:   fmt.Sprintf("%s:%s", certCommonNamePrefix, nodeName),
+				Organization: []string{certOrganization},
+			},
+		},
+		RequestedCertificateLifetime: &conf.CertDuration,
+		SignerName:                   certificatesv1.KubeAPIServerClientSignerName,
+		Usages:                       certUsages,
+		CertificateStore:             certificateStore,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to initialize the certificate manager: %v", err)
+	}
+
+	if conf.CertDuration < time.Hour {
+		// the default value for CertCallbackRefreshDuration (5min) is too long for short-lived certs,
+		// set it to a more sensible value
+		transport.CertCallbackRefreshDuration = time.Second * 10
+	}
+	certManager.Start()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		certManager.Stop()
+	}()
+
+	klog.Infof("Waiting for certificate")
+	var storeErr error
+	err = wait.PollUntilContextTimeout(context.TODO(), time.Second, 2*time.Minute, true, func(_ context.Context) (bool, error) {
+		var currentCert *tls.Certificate
+		currentCert, storeErr = certificateStore.Current()
+		return currentCert != nil && storeErr == nil, nil
+	})
+	if err != nil {
+		return fmt.Errorf("certificate was not signed, last cert store err: %v err: %v", storeErr, err)
+	}
+	klog.Infof("Certificate found")
+	return nil
+}
+
 // NewKubernetesClientset creates a Kubernetes clientset from a KubernetesConfig
 func NewKubernetesClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) {
 	kconfig, err := newKubernetesRestConfig(conf)
@@ -228,6 +337,7 @@ func NewKubernetesClientset(conf *config.KubernetesConfig) (*kubernetes.Clientse
 	}
 	kconfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
 	kconfig.ContentType = "application/vnd.kubernetes.protobuf"
+
 	clientset, err := kubernetes.NewForConfig(kconfig)
 	if err != nil {
 		return nil, err

@@ -1,6 +1,7 @@
 package egressip
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -245,10 +246,19 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			return fmt.Errorf("unable to ensure iptables rules for jump rule: %v", err)
 		}
 	}
-	if err := c.RepairNode(); err != nil {
-		// TODO(mk): return error here instead of logging and retry or put in a retry func
-		klog.Errorf("Failed to repair node. Stale configuration maybe present on node: %v", err)
+
+	err = wait.PollUntilContextTimeout(wait.ContextForChannel(stopCh), 1*time.Second, 10*time.Second, true,
+		func(ctx context.Context) (done bool, err error) {
+			if err := c.RepairNode(); err != nil {
+				klog.Errorf("Failed to repair node: '%v' - Retrying", err)
+				return false, nil
+			}
+			return true, nil
+		})
+	if err != nil {
+		return fmt.Errorf("failed to run EgressIP controller because repairing node failed: %v", err)
 	}
+
 	for i := 0; i < threads; i++ {
 		for _, workerFn := range []func(*sync.WaitGroup){
 			c.runEIPWorker,
@@ -500,6 +510,11 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 		return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
 			fmt.Errorf("failed to find this node %q kubernetes Node object: %v", c.nodeName, err)
 	}
+	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
+	if err != nil {
+		return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
+			fmt.Errorf("failed to determine egress IP config for node %s: %w", node.Name, err)
+	}
 	// max of 1 EIP IP is selected. Return when 1 is found.
 	for _, status := range eip.Status.Items {
 		if isValid := isEIPStatusItemValid(status, c.nodeName); !isValid {
@@ -510,12 +525,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 			return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
 				fmt.Errorf("failed to generate mask for EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
-		isOVNManaged, err := util.IsOVNManagedNetwork(node, eIPNet.IP)
-		if err != nil {
-			return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
-				fmt.Errorf("failed to determine if EgressIP %s IP %s is OVN managed: %v", eip.Name, status.EgressIP, err)
-		}
-		if isOVNManaged {
+		if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 			continue
 		}
 		isV6 := eIPNet.IP.To4() == nil
@@ -819,6 +829,10 @@ func (c *Controller) RepairNode() error {
 	if err != nil {
 		return err
 	}
+	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
+	if err != nil {
+		return err
+	}
 	for _, egressIP := range egressIPs {
 		if len(egressIP.Status.Items) == 0 {
 			continue
@@ -831,12 +845,7 @@ func (c *Controller) RepairNode() error {
 			if err != nil {
 				return err
 			}
-			isOVNManaged, err := util.IsOVNManagedNetwork(node, eIPNet.IP)
-			if err != nil {
-				return fmt.Errorf("failed to determine if EgressIP %s IP %s is OVN managed: %v", egressIP.Name,
-					status.EgressIP, err)
-			}
-			if isOVNManaged {
+			if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 				continue
 			}
 			isV6 := eIPNet.IP.To4() == nil

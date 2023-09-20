@@ -467,5 +467,6 @@ func (c *addressManager) sync() {
 		if err != nil {
 			klog.Errorf("Address Manager failed to update node address annotations: %v", err)
 		}
+		c.OnChanged()
 	}
 }

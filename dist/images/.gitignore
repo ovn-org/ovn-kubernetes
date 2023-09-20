@@ -2,6 +2,7 @@ ovn-k8s-cni-overlay
 ovn-kube-util
 ovnkube
 ovnkube-trace
+ovnkube-identity
 ovndbchecker
 hybrid-overlay-node
 git_info

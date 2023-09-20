@@ -294,6 +294,7 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 				node.Name, err)
 			return err
 		}
+		h.clearInitialNodeNetworkUnavailableCondition(node)
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
