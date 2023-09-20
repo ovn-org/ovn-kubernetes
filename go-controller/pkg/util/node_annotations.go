@@ -77,6 +77,10 @@ const (
 	// OVNNodeHostCIDRs is used to track the different host IP addresses and subnet masks on the node
 	OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
 
+	// OVNNodeNonOVNEgressIPs contains EgressIP addresses that aren't managed by OVN. The EIP addresses are assigned to
+	// standard linux interfaces and not interfaces of type OVS.
+	OVNNodeNonOVNEgressIPs = "k8s.ovn.org/non-ovn-egress-ips"
+
 	// egressIPConfigAnnotationKey is used to indicate the cloud subnet and
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
@@ -776,6 +780,27 @@ func ParseNodeHostCIDRsList(node *kapi.Node) ([]string, error) {
 			addrAnnotation, node.Name, err)
 	}
 	return cfg, nil
+}
+
+// IsNodeNonOVNEgressIPsAnnotationSet returns true if an annotation that tracks assigned of egress IPs to interfaces OVN doesn't manage
+// is set
+func IsNodeNonOVNEgressIPsAnnotationSet(node *kapi.Node) bool {
+	_, ok := node.Annotations[OVNNodeNonOVNEgressIPs]
+	return ok
+}
+
+// ParseNodeNonOVNEgressIPsAnnotation returns non-OVN managed egress IPs addresses for a node
+func ParseNodeNonOVNEgressIPsAnnotation(node *kapi.Node) (sets.Set[string], error) {
+	addrAnnotation, ok := node.Annotations[OVNNodeNonOVNEgressIPs]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeNonOVNEgressIPs, node.Name)
+	}
+
+	var cfg []string
+	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v", OVNNodeNonOVNEgressIPs, addrAnnotation, node.Name, err)
+	}
+	return sets.New(cfg...), nil
 }
 
 // IsNonOVNManagedNetworkContainingIP attempts to find a non OVN managed network that will host the argument IP. If no network is

@@ -1162,7 +1162,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	linkManager := linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode, nc.updateGatewayMAC)
 
 	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
-		c, err := egressip.NewController(nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
+		c, err := egressip.NewController(nc.Kube, nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
 			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.routeManager, config.IPv4Mode,
 			config.IPv6Mode, nc.name, linkManager)
 		if err != nil {

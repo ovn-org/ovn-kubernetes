@@ -44,18 +44,6 @@ var _ = ginkgo.Describe("Link network manager", func() {
 		linkName2: 2,
 	}
 
-	getLinkNameFromIndex := func(index int) string {
-		if index == 0 {
-			panic("non zero index is not allowed")
-		}
-		for linkName, linkIndex := range linkNameIndexes {
-			if linkIndex == index {
-				return linkName
-			}
-		}
-		panic(fmt.Sprintf("failed to find index %d in map", index))
-	}
-
 	getLinkIndexFromName := func(linkName string) int {
 		linkIndex, ok := linkNameIndexes[linkName]
 		if !ok {
@@ -67,12 +55,6 @@ var _ = ginkgo.Describe("Link network manager", func() {
 	newNetlinkAddrWithIndexSet := func(cidr, linkName string) netlink.Addr {
 		addr := newNetlinkAddr(cidr)
 		addr.LinkIndex = getLinkIndexFromName(linkName)
-		return addr
-	}
-
-	newNetlinkAddrWithIndexLabelSet := func(cidr, linkName string) netlink.Addr {
-		addr := newNetlinkAddrWithIndexSet(cidr, linkName)
-		addr.Label = GetAssignedAddressLabel(linkName)
 		return addr
 	}
 
@@ -109,7 +91,6 @@ var _ = ginkgo.Describe("Link network manager", func() {
 		v4Enabled, v6Enabled, expectErr, expectAddAddrCalled bool) {
 
 		expectedAddr := addrToAdd
-		expectedAddr.Label = GetAssignedAddressLabel(linkName1)
 		nlLink1Mock.On("Attrs").Return(&netlink.LinkAttrs{Name: linkName1, Index: getLinkIndexFromName(linkName1)}, nil)
 		nlLink2Mock.On("Attrs").Return(&netlink.LinkAttrs{Name: linkName2, Index: getLinkIndexFromName(linkName2)}, nil)
 		nlMock.On("LinkList").Return([]netlink.Link{nlLink1Mock, nlLink2Mock}, nil)
@@ -139,13 +120,13 @@ var _ = ginkgo.Describe("Link network manager", func() {
 		table.Entry("Add IPv4 address when it exists in store but not applied",
 			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{},
 			map[string][]netlink.Addr{
-				linkName1: {newNetlinkAddrWithIndexLabelSet(v4CIDR1, linkName1)},
+				linkName1: {newNetlinkAddrWithIndexSet(v4CIDR1, linkName1)},
 			},
 			v4Enabled, v6Disabled, noErr, addrAddNotCalled),
 		table.Entry("Doesn't attempt to add an IPv4 address when already applied and exists in store",
-			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{newNetlinkAddrWithIndexLabelSet(v4CIDR1, linkName1)},
+			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{newNetlinkAddrWithIndexSet(v4CIDR1, linkName1)},
 			map[string][]netlink.Addr{
-				linkName1: {newNetlinkAddrWithIndexLabelSet(v4CIDR1, linkName1)},
+				linkName1: {newNetlinkAddrWithIndexSet(v4CIDR1, linkName1)},
 			},
 			v4Enabled, v6Disabled, noErr, addrAddNotCalled),
 	)
@@ -160,7 +141,6 @@ var _ = ginkgo.Describe("Link network manager", func() {
 		v4Enabled, v6Enabled, expectErr, expectDelAddrCalled bool) {
 
 		expectedAddr := addrToDel
-		expectedAddr.Label = GetAssignedAddressLabel(getLinkNameFromIndex(addrToDel.LinkIndex))
 		nlLink1Mock.On("Attrs").Return(&netlink.LinkAttrs{Name: linkName1, Index: getLinkIndexFromName(linkName1)}, nil)
 		nlLink2Mock.On("Attrs").Return(&netlink.LinkAttrs{Name: linkName2, Index: getLinkIndexFromName(linkName2)}, nil)
 		nlMock.On("LinkList").Return([]netlink.Link{nlLink1Mock, nlLink2Mock}, nil)
@@ -185,19 +165,19 @@ var _ = ginkgo.Describe("Link network manager", func() {
 		}
 	}, table.Entry("Deletes an IPv4 address which exists in store and is applied",
 		newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{
-			newNetlinkAddrWithIndexLabelSet(v4CIDR1, linkName1),
-			newNetlinkAddrWithIndexLabelSet(v4CIDR2, linkName2),
+			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1),
+			newNetlinkAddrWithIndexSet(v4CIDR2, linkName2),
 		}, map[string][]netlink.Addr{
-			linkName1: {newNetlinkAddrWithIndexLabelSet(v4CIDR1, linkName1)},
-			linkName2: {newNetlinkAddrWithIndexLabelSet(v4CIDR2, linkName2)},
+			linkName1: {newNetlinkAddrWithIndexSet(v4CIDR1, linkName1)},
+			linkName2: {newNetlinkAddrWithIndexSet(v4CIDR2, linkName2)},
 		}, v4Enabled, v6Disabled, noErr, addrDelCalled),
 		table.Entry("Doesn't attempt to delete an IPv4 address which exists in store but not applied",
 			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{
-				newNetlinkAddrWithIndexLabelSet(v4CIDR1, linkName1), // different address than the one attempted to be deleted
-				newNetlinkAddrWithIndexLabelSet(v4CIDR2, linkName2),
+				newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), // different address than the one attempted to be deleted
+				newNetlinkAddrWithIndexSet(v4CIDR2, linkName2),
 			}, map[string][]netlink.Addr{
-				linkName1: {newNetlinkAddrWithIndexLabelSet(v4CIDR1, linkName1)},
-				linkName2: {newNetlinkAddrWithIndexLabelSet(v4CIDR2, linkName2)},
+				linkName1: {newNetlinkAddrWithIndexSet(v4CIDR1, linkName1)},
+				linkName2: {newNetlinkAddrWithIndexSet(v4CIDR2, linkName2)},
 			}, v4Enabled, v6Disabled, noErr, addrDelNotCalled),
 		table.Entry("Doesn't delete IPv4 address when IPv4 is disabled and IPv6 enabled",
 			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{}, map[string][]netlink.Addr{}, v4Disable, v6Enabled, Err, addrDelNotCalled),

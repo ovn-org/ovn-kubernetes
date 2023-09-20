@@ -630,3 +630,10 @@ func filterRouteByDstAndGw(link netlink.Link, subnet *net.IPNet, gw net.IP) (*ne
 		},
 		netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF | netlink.RT_FILTER_GW
 }
+
+func GetIPFamily(v6 bool) int {
+	if v6 {
+		return netlink.FAMILY_V6
+	}
+	return netlink.FAMILY_V4
+}

@@ -13,7 +13,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -358,7 +357,7 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 }
 
 // detects if the IP is valid for a node
-// excludes things like local IPs, mgmt port ip, special masquerade IP
+// excludes things like local IPs, mgmt port ip, special masquerade IP and Egress IPs for non-ovs type interfaces
 func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 	if addr == nil {
 		return false
@@ -383,6 +382,16 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 	if util.IsAddressReservedForInternalUse(addr) {
 		return false
 	}
+	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
+		// IPs assigned to host interfaces to support the egress IP multi NIC feature must be excluded.
+		eipAddresses, err := c.getNonOVNEgressIPs()
+		if err != nil {
+			klog.Errorf("Failed to get non-OVN assigned Egress IPs and ensure they are excluded: %v %v", err)
+		}
+		if eipAddresses.Has(addr.String()) {
+			return false
+		}
+	}
 
 	return true
 }
@@ -397,7 +406,7 @@ func (c *addressManager) sync() {
 			return
 		}
 		for _, link := range links {
-			foundAddrs, err := linkmanager.GetExternallyAvailableAddressesExcludeAssigned(link, config.IPv4Mode, config.IPv6Mode)
+			foundAddrs, err := util.GetFilteredInterfaceAddrs(link, config.IPv4Mode, config.IPv6Mode)
 			if err != nil {
 				klog.Errorf("Unable to retrieve addresses for link %s: %v", link.Attrs().Name, err)
 				return
@@ -426,6 +435,24 @@ func (c *addressManager) sync() {
 		}
 		c.OnChanged()
 	}
+}
+
+// getNonOVNEgressIPs returns the set of egress IPs that are assigned to non-OVN managed interfaces. The
+// addresses are used to support Egress IP multi NIC feature. The addresses must not be included in address manager
+// because the addresses are only to support Egress IP multi NIC feature and must not be exposed via host-cidrs annot.
+func (c *addressManager) getNonOVNEgressIPs() (sets.Set[string], error) {
+	node, err := c.watchFactory.GetNode(c.nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get Node from informer: %v", err)
+	}
+	eipAddrs, err := util.ParseNodeNonOVNEgressIPsAnnotation(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			return sets.New[string](), nil
+		}
+		return nil, err
+	}
+	return eipAddrs, nil
 }
 
 // updateOVNEncapIPAndReconnect updates encap IP to OVS when the node primary IP changed.
