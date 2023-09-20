@@ -22,6 +22,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
+	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	config "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
@@ -867,7 +868,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 					return false, nil
 				}
 				for _, node := range nodes.Items {
-					if nc.name != node.Name && util.GetNodeZone(&node) != config.Default.Zone {
+					if nc.name != node.Name && util.GetNodeZone(&node) != config.Default.Zone && !houtil.IsHybridOverlayNode(&node) {
 						nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
 						if err != nil {
 							err1 = fmt.Errorf("unable to fetch node-subnet annotation for node %s: err, %v", node.Name, err)
