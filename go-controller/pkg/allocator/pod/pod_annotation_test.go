@@ -2,6 +2,7 @@ package pod
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"testing"
 
@@ -155,17 +156,47 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 		},
 		{
-			// on networks with IPAM, expect error if static IP request present
-			// in the network selection annotation
-			name: "expect error, static ip request, IPAM",
+			name: "expect requested static IP, with gateway, with IPAM",
 			ipam: true,
 			args: args{
 				network: &nadapi.NetworkSelectionElement{
-					IPRequest: []string{"192.168.0.3/24"},
+					IPRequest:      []string{"192.168.0.3/24"},
+					GatewayRequest: ovntest.MustParseIPs("192.168.0.1"),
+				},
+				ipAllocator: &ipAllocatorStub{
+					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantUpdatedPod: true,
-			wantErr:        true,
+			wantPodAnnotation: &util.PodAnnotation{
+				IPs:      ovntest.MustParseIPNets("192.168.0.3/24"),
+				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				Gateways: []net.IP{ovntest.MustParseIP("192.168.0.1").To4()},
+				Routes: []util.PodRoute{
+					{
+						Dest:    ovntest.MustParseIPNet("100.64.0.0/16"),
+						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
+					},
+				},
+			},
+			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
+		},
+		{
+			// on networks with IPAM, expect error
+			// if static IP request from another subnet
+			// present in the network selection annotation
+			name: "expect error, static ip request from wrong subnet, IPAM",
+			ipam: true,
+			args: args{
+				network: &nadapi.NetworkSelectionElement{
+					IPRequest: []string{"192.168.0.1/24"},
+				},
+				ipAllocator: &ipAllocatorStub{
+					netxtIPs:         ovntest.MustParseIPNets("1.1.1.0/24"),
+					allocateIPsError: fmt.Errorf("failed to allocate IP: cant find maching IPAM instance"),
+				},
+			},
+			wantErr: true,
 		},
 		{
 			// on networks with IPAM, expect a normal IP, MAC and gateway

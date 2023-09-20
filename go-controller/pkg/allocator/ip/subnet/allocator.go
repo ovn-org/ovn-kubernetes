@@ -191,6 +191,7 @@ func (allocator *allocator) AllocateIPs(name string, ips []*net.IPNet) error {
 	}()
 
 	for _, ipnet := range ips {
+		ipAllocated := false
 		for idx, ipam := range subnetInfo.ipams {
 			cidr := ipam.CIDR()
 			if cidr.Contains(ipnet.IP) {
@@ -201,9 +202,14 @@ func (allocator *allocator) AllocateIPs(name string, ips []*net.IPNet) error {
 				if err = ipam.Allocate(ipnet.IP); err != nil {
 					return err
 				}
+				ipAllocated = true
 				allocated[idx] = ipnet
 				break
 			}
+		}
+		if !ipAllocated {
+			err = fmt.Errorf("failed to allocate IP %s for %s: cant find maching IPAM instance", ipnet.IP, name)
+			return err
 		}
 	}
 	return nil

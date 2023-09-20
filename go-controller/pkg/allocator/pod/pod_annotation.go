@@ -274,20 +274,12 @@ func allocatePodAnnotationWithRollback(
 	hasIPRequest := network != nil && len(network.IPRequest) > 0
 	hasStaticIPRequest := hasIPRequest && !reallocateIP
 
-	if hasIPAM && hasStaticIPRequest {
-		// for now we can't tell apart already allocated IPs from IPs excluded
-		// from allocation so we can't really honor static IP requests when
-		// there is IPAM as we don't really know if the requested IP should not
-		// be allocated or was already allocated by the same pod
-		err = fmt.Errorf("cannot allocate a static IP request with IPAM for pod %s", podDesc)
-		return
-	}
-
 	// we need to update the annotation if it is missing IPs or MAC
 	needsIPOrMAC := len(tentative.IPs) == 0 && (hasIPAM || hasIPRequest)
 	needsIPOrMAC = needsIPOrMAC || len(tentative.MAC) == 0
 	reallocateOnNonStaticIPRequest := len(tentative.IPs) == 0 && hasIPRequest && !hasStaticIPRequest
 
+	staticTentativePresents := false
 	if len(tentative.IPs) == 0 {
 		if hasIPRequest {
 			tentative.IPs, err = util.ParseIPNets(network.IPRequest)
@@ -295,39 +287,52 @@ func allocatePodAnnotationWithRollback(
 				return
 			}
 		}
+	} else if hasIPAM && hasStaticIPRequest {
+		staticTentativePresents = true
 	}
 
 	if hasIPAM {
-		if len(tentative.IPs) > 0 {
-			if err = ipAllocator.AllocateIPs(tentative.IPs); err != nil && !ip.IsErrAllocated(err) {
-				err = fmt.Errorf("failed to ensure requested or annotated IPs %v for %s: %w",
-					util.StringSlice(tentative.IPs), podDesc, err)
-				if !reallocateOnNonStaticIPRequest {
-					return
+		if staticTentativePresents {
+			releaseIPs = util.CopyIPNets(tentative.IPs)
+		} else {
+			if len(tentative.IPs) > 0 {
+				err = ipAllocator.AllocateIPs(tentative.IPs)
+				if err != nil {
+					if hasStaticIPRequest {
+						return
+					}
+
+					if !ip.IsErrAllocated(err) {
+						err = fmt.Errorf("failed to ensure requested or annotated IPs %v for %s: %w",
+							util.StringSlice(tentative.IPs), podDesc, err)
+						if !reallocateOnNonStaticIPRequest {
+							return
+						}
+						klog.Warning(err.Error())
+						needsIPOrMAC = true
+						tentative.IPs = nil
+					}
 				}
-				klog.Warning(err.Error())
-				needsIPOrMAC = true
-				tentative.IPs = nil
+
+				if err == nil {
+					// copy the IPs that would need to be released
+					releaseIPs = util.CopyIPNets(tentative.IPs)
+				}
+
+				// IPs allocated or we will allocate a new set of IPs, reset the error
+				err = nil
 			}
 
-			if err == nil {
+			if len(tentative.IPs) == 0 {
+				tentative.IPs, err = ipAllocator.AllocateNextIPs()
+				if err != nil {
+					err = fmt.Errorf("failed to assign pod addresses for %s: %w", podDesc, err)
+					return
+				}
+
 				// copy the IPs that would need to be released
 				releaseIPs = util.CopyIPNets(tentative.IPs)
 			}
-
-			// IPs allocated or we will allocate a new set of IPs, reset the error
-			err = nil
-		}
-
-		if len(tentative.IPs) == 0 {
-			tentative.IPs, err = ipAllocator.AllocateNextIPs()
-			if err != nil {
-				err = fmt.Errorf("failed to assign pod addresses for %s: %w", podDesc, err)
-				return
-			}
-
-			// copy the IPs that would need to be released
-			releaseIPs = util.CopyIPNets(tentative.IPs)
 		}
 	}
 
