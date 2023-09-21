@@ -21,7 +21,7 @@ type Allocator interface {
 	DeleteSubnet(name string)
 	GetSubnets(name string) ([]*net.IPNet, error)
 	AllocateUntilFull(name string) error
-	AllocateIPs(name string, ips []*net.IPNet) error
+	AllocateIPs(name string, ips []*net.IPNet) (bool, error)
 	AllocateNextIPs(name string) ([]*net.IPNet, error)
 	ReleaseIPs(name string, ips []*net.IPNet) error
 	ConditionalIPRelease(name string, ips []*net.IPNet, predicate func() (bool, error)) (bool, error)
@@ -31,7 +31,7 @@ type Allocator interface {
 
 // NamedAllocator manages the allocation of IPs within a specific subnet
 type NamedAllocator interface {
-	AllocateIPs(ips []*net.IPNet) error
+	AllocateIPs(ips []*net.IPNet) (bool, error)
 	AllocateNextIPs() ([]*net.IPNet, error)
 	ReleaseIPs(ips []*net.IPNet) error
 }
@@ -162,17 +162,17 @@ func (allocator *allocator) AllocateUntilFull(name string) error {
 
 // AllocateIPs will block off IPs in the ipnets slice as already allocated
 // for a given subnet set
-func (allocator *allocator) AllocateIPs(name string, ips []*net.IPNet) error {
+func (allocator *allocator) AllocateIPs(name string, ips []*net.IPNet) (bool, error) {
 	if len(ips) == 0 {
-		return fmt.Errorf("failed to allocate IPs for %s: no IPs provided", name)
+		return false, fmt.Errorf("failed to allocate IPs for %s: no IPs provided", name)
 	}
 	allocator.RLock()
 	defer allocator.RUnlock()
 	subnetInfo, ok := allocator.cache[name]
 	if !ok {
-		return fmt.Errorf("failed to allocate IPs %v for %s: %w", util.StringSlice(ips), name, ErrSubnetNotFound)
+		return false, fmt.Errorf("failed to allocate IPs %v for %s: %w", util.StringSlice(ips), name, ErrSubnetNotFound)
 	} else if len(subnetInfo.ipams) == 0 {
-		return fmt.Errorf("failed to allocate IPs %v for subnet %s: has no IPAM", util.StringSlice(ips), name)
+		return false, fmt.Errorf("failed to allocate IPs %v for subnet %s: has no IPAM", util.StringSlice(ips), name)
 	}
 
 	var err error
@@ -190,6 +190,7 @@ func (allocator *allocator) AllocateIPs(name string, ips []*net.IPNet) error {
 		}
 	}()
 
+	allocatedAllIPS := true
 	for _, ipnet := range ips {
 		ipAllocated := false
 		for idx, ipam := range subnetInfo.ipams {
@@ -197,10 +198,10 @@ func (allocator *allocator) AllocateIPs(name string, ips []*net.IPNet) error {
 			if cidr.Contains(ipnet.IP) {
 				if _, ok = allocated[idx]; ok {
 					err = fmt.Errorf("failed to allocate IP %s for %s: attempted to reserve multiple IPs in the same IPAM instance", ipnet.IP, name)
-					return err
+					return false, err
 				}
 				if err = ipam.Allocate(ipnet.IP); err != nil {
-					return err
+					return false, err
 				}
 				ipAllocated = true
 				allocated[idx] = ipnet
@@ -208,11 +209,11 @@ func (allocator *allocator) AllocateIPs(name string, ips []*net.IPNet) error {
 			}
 		}
 		if !ipAllocated {
-			err = fmt.Errorf("failed to allocate IP %s for %s: cant find maching IPAM instance", ipnet.IP, name)
-			return err
+			allocatedAllIPS = false
+
 		}
 	}
-	return nil
+	return allocatedAllIPS, nil
 }
 
 // reserveSubnets reserves subnet IPs
@@ -370,7 +371,7 @@ type IPAllocator struct {
 }
 
 // AllocateIPs allocates the requested IPs
-func (ipAllocator *IPAllocator) AllocateIPs(ips []*net.IPNet) error {
+func (ipAllocator *IPAllocator) AllocateIPs(ips []*net.IPNet) (bool, error) {
 	return ipAllocator.allocator.AllocateIPs(ipAllocator.name, ips)
 }
 

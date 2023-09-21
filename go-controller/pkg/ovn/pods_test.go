@@ -827,7 +827,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// try to allocate the IP and it should not work
 				annotation, err := util.UnmarshalPodAnnotation(myPod2.Annotations, ovntypes.DefaultNetworkName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.lsManager.AllocateIPs(t.nodeName, annotation.IPs)
+				_, err = fakeOvn.controller.lsManager.AllocateIPs(t.nodeName, annotation.IPs)
 				gomega.Expect(err).To(gomega.Equal(ipallocator.ErrAllocated))
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t2}, []string{"node1"})))
 

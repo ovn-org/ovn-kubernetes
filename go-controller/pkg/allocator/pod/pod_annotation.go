@@ -296,7 +296,8 @@ func allocatePodAnnotationWithRollback(
 			releaseIPs = util.CopyIPNets(tentative.IPs)
 		} else {
 			if len(tentative.IPs) > 0 {
-				err = ipAllocator.AllocateIPs(tentative.IPs)
+				// FIX HERE
+				_, err = ipAllocator.AllocateIPs(tentative.IPs)
 				if err != nil {
 					if hasStaticIPRequest {
 						return

@@ -83,7 +83,7 @@ func (manager *LogicalSwitchManager) AllocateUntilFull(switchName string) error 
 
 // AllocateIPs will block off IPs in the ipnets slice as already allocated
 // for a given switch
-func (manager *LogicalSwitchManager) AllocateIPs(switchName string, ipnets []*net.IPNet) error {
+func (manager *LogicalSwitchManager) AllocateIPs(switchName string, ipnets []*net.IPNet) (bool, error) {
 	return manager.allocator.AllocateIPs(switchName, ipnets)
 }
 
@@ -103,7 +103,7 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(switchName string, hy
 		}
 		// attempt to allocate the IP address that is annotated on the node. The only way there would be a collision is if the annotations of podIP or hybridOverlayDRIP
 		// where manually edited and we do not support that
-		err = manager.AllocateIPs(switchName, allocatedAddresses)
+		_, err = manager.AllocateIPs(switchName, allocatedAddresses)
 		if err != nil && err != ipam.ErrAllocated {
 			return nil, err
 		}
@@ -115,7 +115,7 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(switchName string, hy
 	for _, hostSubnet := range hostSubnets {
 		allocatedAddresses = append(allocatedAddresses, util.GetNodeHybridOverlayIfAddr(hostSubnet))
 	}
-	err = manager.AllocateIPs(switchName, allocatedAddresses)
+	_, err = manager.AllocateIPs(switchName, allocatedAddresses)
 	if err != nil && err != ipam.ErrAllocated {
 		return nil, fmt.Errorf("cannot allocate hybrid overlay interface addresses %s for switch %s: %w",
 			util.StringSlice(allocatedAddresses),

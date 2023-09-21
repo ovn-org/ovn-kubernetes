@@ -30,8 +30,9 @@ type ipAllocatorStub struct {
 	releasedIPs      []*net.IPNet
 }
 
-func (a *ipAllocatorStub) AllocateIPs(ips []*net.IPNet) error {
-	return a.allocateIPsError
+func (a *ipAllocatorStub) AllocateIPs(ips []*net.IPNet) (bool, error) {
+	// TODO fix here
+	return false, a.allocateIPsError
 }
 
 func (a *ipAllocatorStub) AllocateNextIPs() ([]*net.IPNet, error) {
@@ -197,6 +198,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				},
 			},
 			wantErr: true,
+			// TODO update tests to look on the new bool
 		},
 		{
 			// on networks with IPAM, expect a normal IP, MAC and gateway

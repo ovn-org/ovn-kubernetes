@@ -136,7 +136,7 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 				}
 				err = allocator.ReleaseIPs(subnetName, ips)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = allocator.AllocateIPs(subnetName, ips)
+				_, err = allocator.AllocateIPs(subnetName, ips)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 		})
@@ -203,7 +203,7 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 				gomega.Expect(ip.String()).To(gomega.Equal(expectedIPs[i]))
 			}
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = allocator.AllocateIPs(subnetName, ovntest.MustParseIPNets(expectedIPs...))
+			_, err = allocator.AllocateIPs(subnetName, ovntest.MustParseIPNets(expectedIPs...))
 			gomega.Expect(err).To(gomega.MatchError(ipam.ErrAllocated))
 		})
 

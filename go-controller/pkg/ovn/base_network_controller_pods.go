@@ -70,7 +70,7 @@ func (bnc *BaseNetworkController) allocatePodIPsOnSwitch(pod *kapi.Pod,
 		return expectedLogicalPortName, fmt.Errorf("failed to wait for switch %s to be added to cache. IP allocation may fail!",
 			switchName)
 	}
-	if err = bnc.lsManager.AllocateIPs(switchName, annotations.IPs); err != nil {
+	if _, err = bnc.lsManager.AllocateIPs(switchName, annotations.IPs); err != nil {
 		if err == ipallocator.ErrAllocated {
 			// already allocated: log an error but not stop syncPod from continuing
 			klog.Errorf("Already allocated IPs: %s for pod: %s on switchName: %s",
@@ -787,7 +787,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingL
 		if bnc.doesNetworkRequireIPAM() {
 			if zoneContainsPodSubnet {
 				// ensure we have reserved the IPs in the annotation
-				if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+				if _, err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
 					return nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
 						podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
 				}
@@ -818,7 +818,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingL
 	if len(podIfAddrs) == 0 {
 		needsNewMacOrIPAllocation = true
 	} else if bnc.doesNetworkRequireIPAM() {
-		if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+		if _, err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
 			klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s, for pod %s on switch: %s"+
 				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), bnc.GetLogicalPortName(pod, nadName), podDesc, switchName, err)
 
