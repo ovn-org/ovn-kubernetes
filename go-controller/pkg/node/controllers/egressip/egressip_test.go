@@ -21,6 +21,7 @@ import (
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilnet "k8s.io/utils/net"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -461,7 +462,8 @@ var _ = table.XDescribeTable("EgressIP selectors",
 					ips, err := util.DefaultNetworkPodIPs(pod)
 					gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 					for _, ip := range ips {
-						expectedRules = append(expectedRules, generateIPRule(ip, getLinkIndex(expectedEIPConfig.inf)))
+
+						expectedRules = append(expectedRules, generateIPRule(ip, utilnet.IsIPv6(ip), getLinkIndex(expectedEIPConfig.inf)))
 					}
 				}
 			}
