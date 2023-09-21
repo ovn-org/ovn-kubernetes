@@ -1010,11 +1010,11 @@ func (c *Controller) removeStaleIPTableRules(proto utiliptables.Protocol, staleR
 	return nil
 }
 
-func (c *Controller) isIPSupported(ip net.IP) bool {
-	if ip.To4() != nil && c.v4 {
+func (c *Controller) isIPSupported(isIPV6 bool) bool {
+	if !isIPV6 && c.v4 {
 		return true
 	}
-	if ip.To4() == nil && c.v6 {
+	if isIPV6 && c.v6 {
 		return true
 	}
 	return false
@@ -1106,17 +1106,17 @@ func getDefaultRoute(linkIdx int, v6 bool) routemanager.Route {
 
 // generateIPRules generates IP rules at a predefined priority for each pod IP with a custom routing table based
 // from the links 'ifindex'
-func generateIPRule(srcIP net.IP, ifIndex int) netlink.Rule {
+func generateIPRule(srcIP net.IP, isIPv6 bool, ifIndex int) netlink.Rule {
 	r := *netlink.NewRule()
 	r.Table = getRouteTableID(ifIndex)
 	r.Priority = rulePriority
 	var ipFullMask string
-	if srcIP.To4() != nil { // v4
-		ipFullMask = fmt.Sprintf("%s/32", srcIP.String())
-		r.Family = netlink.FAMILY_V4
-	} else { // v6
+	if isIPv6 {
 		ipFullMask = fmt.Sprintf("%s/128", srcIP.String())
 		r.Family = netlink.FAMILY_V6
+	} else {
+		ipFullMask = fmt.Sprintf("%s/32", srcIP.String())
+		r.Family = netlink.FAMILY_V4
 	}
 	_, ipNet, _ := net.ParseCIDR(ipFullMask)
 	r.Src = ipNet
@@ -1142,12 +1142,12 @@ func getPodNamespacedName(pod *corev1.Pod) ktypes.NamespacedName {
 	return ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 }
 
-func generateIPTablesSNATRuleArg(srcIP net.IP, infName, snatIP string) iptables.RuleArg {
+func generateIPTablesSNATRuleArg(srcIP net.IP, isIPv6 bool, infName, snatIP string) iptables.RuleArg {
 	var srcIPFullMask string
-	if srcIP.To4() != nil { // v4
-		srcIPFullMask = fmt.Sprintf("%s/32", srcIP.String())
-	} else { // v6
+	if isIPv6 {
 		srcIPFullMask = fmt.Sprintf("%s/128", srcIP.String())
+	} else {
+		srcIPFullMask = fmt.Sprintf("%s/32", srcIP.String())
 	}
 	return iptables.RuleArg{Args: []string{"-s", srcIPFullMask, "-o", infName, "-j", "SNAT", "--to-source", snatIP}}
 }
