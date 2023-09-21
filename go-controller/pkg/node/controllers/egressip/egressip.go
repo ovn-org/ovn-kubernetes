@@ -529,7 +529,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 		if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 			continue
 		}
-		isV6 := eIPNet.IP.To4() == nil
+		isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
 		found, link, err := findLinkOnSameNetworkAsIP(eIPNet.IP, c.v4, c.v6)
 		if err != nil {
 			return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
@@ -853,7 +853,7 @@ func (c *Controller) RepairNode() error {
 			if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 				continue
 			}
-			isV6 := eIPNet.IP.To4() == nil
+			isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
 			found, link, err := findLinkOnSameNetworkAsIP(eIPNet.IP, c.v4, c.v6)
 			if err != nil {
 				return fmt.Errorf("failed to find a network to host EgressIP %s IP %s: %v", egressIP.Name,
