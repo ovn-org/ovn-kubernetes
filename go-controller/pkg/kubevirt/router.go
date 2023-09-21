@@ -75,7 +75,7 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 	}
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 	if err != nil {
-		return fmt.Errorf("failed reading ovn annotation: %v", err)
+		return fmt.Errorf("failed reading ovn annotation at local zone: %v", err)
 	}
 
 	nodeOwningSubnet, _ := ZoneContainsPodSubnet(lsManager, podAnnotation)
@@ -180,7 +180,7 @@ func EnsureRemoteZonePodAddressesToNodeRoute(controllerName string, watchFactory
 
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 	if err != nil {
-		return fmt.Errorf("failed reading ovn annotation: %v", err)
+		return fmt.Errorf("failed reading ovn annotation at remote zone: %v", err)
 	}
 
 	vmRunningAtNodeOwningSubnet, err := nodeContainsPodSubnet(watchFactory, pod.Spec.NodeName, podAnnotation, nadName)

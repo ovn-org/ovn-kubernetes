@@ -407,7 +407,6 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 			return err
 		}
 	}
-
 	// Add the switch to the logical switch cache
 	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets)
 }
