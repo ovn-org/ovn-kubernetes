@@ -2,7 +2,9 @@ package ovnwebhook
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"golang.org/x/exp/maps"
 
@@ -57,19 +59,54 @@ var interconnectPodAnnotations = map[string]checkPodAnnot{
 	util.DPUConnectionStatusAnnot:  nil,
 }
 
+// PodAdmissionConditionOptions specifies additional validate admission for pod.
+type PodAdmissionConditionOption struct {
+	// CommonNamePrefix specifies common name in Usename
+	CommonNamePrefix string `json:"commonNamePrefix"`
+	// AllowedPodAnnotations contains annotation list to check Pod's annotation for webhook
+	// this is used for Defaut=false because ovn-node case requires more detailed pod annotation
+	// check
+	AllowedPodAnnotations []string `json:"allowedPodAnnotations"`
+	// AllowedPodAnnotationKeys contains AllowedPodAnnotations value as sets.Set[]
+	AllowedPodAnnotationKeys sets.Set[string]
+}
+
+// InitPodAdmissionConditionOptions initializes PodAdmissionConditionOption: Load json from fileName
+func InitPodAdmissionConditionOptions(fileName string) (podAdmissions []PodAdmissionConditionOption, err error) {
+	if fileName != "" {
+		file, err := os.ReadFile(fileName)
+		if err != nil {
+			return nil, err
+		}
+
+		if err = json.Unmarshal(file, &podAdmissions); err != nil {
+			return nil, err
+		}
+	}
+
+	// initialize Sets from slices
+	for i, v := range podAdmissions {
+		podAdmissions[i].AllowedPodAnnotationKeys = sets.New[string](v.AllowedPodAnnotations...)
+	}
+
+	return podAdmissions, nil
+}
+
 type PodAdmission struct {
 	nodeLister        listers.NodeLister
 	annotations       map[string]checkPodAnnot
 	annotationKeys    sets.Set[string]
 	extraAllowedUsers sets.Set[string]
+	podAdmissions     []PodAdmissionConditionOption
 }
 
-func NewPodAdmissionWebhook(nodeLister listers.NodeLister, extraAllowedUsers ...string) *PodAdmission {
+func NewPodAdmissionWebhook(nodeLister listers.NodeLister, podAdmissions []PodAdmissionConditionOption, extraAllowedUsers ...string) *PodAdmission {
 	return &PodAdmission{
 		nodeLister:        nodeLister,
 		annotations:       interconnectPodAnnotations,
 		annotationKeys:    sets.New[string](maps.Keys(interconnectPodAnnotations)...),
 		extraAllowedUsers: sets.New[string](extraAllowedUsers...),
+		podAdmissions:     podAdmissions,
 	}
 }
 
@@ -93,10 +130,18 @@ func (p PodAdmission) ValidateUpdate(ctx context.Context, oldObj, newObj runtime
 	if err != nil {
 		return nil, err
 	}
-	nodeName, isOVNKubeNode := ovnkubeNodeIdentity(req.UserInfo)
+	isOVNKubeNode, podAdmission, nodeName := checkNodeIdentity(p.podAdmissions, req.UserInfo)
 
 	changes := mapDiff(oldPod.Annotations, newPod.Annotations)
 	changedKeys := maps.Keys(changes)
+
+	// user is in additional acceptance condition list
+	if podAdmission != nil {
+		// additional acceptance condition check
+		if !podAdmission.AllowedPodAnnotationKeys.HasAll(changedKeys...) {
+			return nil, fmt.Errorf("%s node: %q is not allowed to set the following annotations on pod: %q: %v", podAdmission.CommonNamePrefix, nodeName, newPod.Name, sets.New[string](changedKeys...).Difference(podAdmission.AllowedPodAnnotationKeys).UnsortedList())
+		}
+	}
 
 	if !isOVNKubeNode {
 		if !p.annotationKeys.HasAny(changedKeys...) {
@@ -123,23 +168,27 @@ func (p PodAdmission) ValidateUpdate(ctx context.Context, oldObj, newObj runtime
 		}
 	}
 
-	// All the checks beyond this point are ovnkube-node specific
-	// If the user is not ovnkube-node exit here
-	if !isOVNKubeNode {
+	// if there is no matched acceptanceCondition as well as ovnkube-node, then skip following check
+	if !isOVNKubeNode && podAdmission == nil {
 		return nil, nil
 	}
 
+	prefixName := "ovnkube-node"
+	if podAdmission != nil {
+		prefixName = podAdmission.CommonNamePrefix
+	}
+
 	if oldPod.Spec.NodeName != nodeName {
-		return nil, fmt.Errorf("ovnkube-node on node: %q is not allowed to modify pods %q annotations", nodeName, oldPod.Name)
+		return nil, fmt.Errorf("%s on node: %q is not allowed to modify pods %q annotations", prefixName, nodeName, oldPod.Name)
 	}
 	if newPod.Spec.NodeName != nodeName {
-		return nil, fmt.Errorf("ovnkube-node on node: %q is not allowed to modify pods %q annotations", nodeName, newPod.Name)
+		return nil, fmt.Errorf("%s on node: %q is not allowed to modify pods %q annotations", prefixName, nodeName, newPod.Name)
 	}
 
 	// ovnkube-node is not allowed to change annotations outside of it's scope
-	if !p.annotationKeys.HasAll(changedKeys...) {
-		return nil, fmt.Errorf("ovnkube-node on node: %q is not allowed to set the following annotations on pod: %q: %v",
-			nodeName, newPod.Name,
+	if isOVNKubeNode && !p.annotationKeys.HasAll(changedKeys...) {
+		return nil, fmt.Errorf("%s on node: %q is not allowed to set the following annotations on pod: %q: %v",
+			prefixName, nodeName, newPod.Name,
 			sets.New[string](changedKeys...).Difference(p.annotationKeys).UnsortedList())
 	}
 
@@ -154,7 +203,7 @@ func (p PodAdmission) ValidateUpdate(ctx context.Context, oldObj, newObj runtime
 	newPodShallowCopy.ManagedFields = nil
 	if !apiequality.Semantic.DeepEqual(oldPodShallowCopy.ObjectMeta, newPodShallowCopy.ObjectMeta) ||
 		!apiequality.Semantic.DeepEqual(oldPodShallowCopy.Status, newPodShallowCopy.Status) {
-		return nil, fmt.Errorf("ovnkube-node on node: %q is not allowed to modify anything other than annotations", nodeName)
+		return nil, fmt.Errorf("%s on node: %q is not allowed to modify anything other than annotations", prefixName, nodeName)
 	}
 
 	return nil, nil
