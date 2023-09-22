@@ -394,6 +394,12 @@ func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
+func primaryAddrChanged(oldNode, newNode *kapi.Node) bool {
+	oldIP, _ := util.GetNodePrimaryIP(oldNode)
+	newIP, _ := util.GetNodePrimaryIP(newNode)
+	return oldIP != newIP
+}
+
 func nodeChassisChanged(oldNode, node *kapi.Node) bool {
 	oldChassis, _ := util.ParseNodeChassisIDAnnotation(oldNode)
 	newChassis, _ := util.ParseNodeChassisIDAnnotation(node)
