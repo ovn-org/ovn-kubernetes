@@ -45,29 +45,24 @@ var (
 )
 
 const (
-	namespace       = "egressip-namespace"
-	namespace2      = "egressip-namespace2"
-	nodeInternalIP  = "def0::56"
-	v4GatewayIP     = "10.128.0.1"
-	podV4IP         = "10.128.0.15"
-	podV4IP2        = "10.128.0.16"
-	podV4IP3        = "10.128.1.3"
-	podV4IP4        = "10.128.1.4"
-	podV6IP         = "ae70::66"
-	v6GatewayIP     = "ae70::1"
-	v6ClusterSubnet = "ae70::66/64"
-	v6Node1Subnet   = "ae70::66/64"
-	v6Node2Subnet   = "be70::66/64"
-	v4ClusterSubnet = "10.128.0.0/14"
-	v4Node1Subnet   = "10.128.0.0/16"
-	v4Node2Subnet   = "10.90.0.0/16"
-	v4Node3Subnet   = "10.80.0.0/16"
-	v4Node4Subnet   = "10.70.0.0/16"
-	podName         = "egress-pod"
-	podName2        = "egress-pod2"
-	egressIPName    = "egressip"
-	egressIP2Name   = "egressip-2"
-	inspectTimeout  = 4 * time.Second // arbitrary, to avoid failures on github CI
+	namespace      = "egressip-namespace"
+	namespace2     = "egressip-namespace2"
+	podV4IP        = "10.128.0.15"
+	podV4IP2       = "10.128.0.16"
+	podV4IP3       = "10.128.1.3"
+	podV4IP4       = "10.128.1.4"
+	podV6IP        = "ae70::66"
+	v6GatewayIP    = "ae70::1"
+	v6Node1Subnet  = "ae70::66/64"
+	v6Node2Subnet  = "be70::66/64"
+	v4Node1Subnet  = "10.128.0.0/16"
+	v4Node2Subnet  = "10.90.0.0/16"
+	v4Node3Subnet  = "10.80.0.0/16"
+	podName        = "egress-pod"
+	podName2       = "egress-pod2"
+	egressIPName   = "egressip"
+	egressIP2Name  = "egressip-2"
+	inspectTimeout = 4 * time.Second // arbitrary, to avoid failures on github CI
 )
 
 var eipExternalID = map[string]string{
@@ -282,8 +277,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						{
 							Node:     node1Name,
 							EgressIP: egressIP,
-							// blank network
-							Network: "",
 						},
 					},
 				},
@@ -450,8 +443,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						{
 							Node:     node1Name,
 							EgressIP: egressIP,
-							// blank network
-							Network: "",
 						},
 					},
 				},
@@ -625,7 +616,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								{
 									Node:     node1Name,
 									EgressIP: egressIP,
-									Network:  node1IPv4OVNManagedNet,
 								},
 							},
 						},
@@ -6270,7 +6260,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						{
 							Node:     node1Name,
 							EgressIP: egressIP3,
-							Network:  node1IPv4Net,
 						},
 					}
 					err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIP2Name, status)

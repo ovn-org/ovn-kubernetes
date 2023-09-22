@@ -429,7 +429,6 @@ func (o *FakeOVN) patchEgressIPObj(nodeName, egressIPName, egressIP, network str
 		{
 			Node:     nodeName,
 			EgressIP: egressIP,
-			Network:  network,
 		},
 	}
 	err := o.controller.patchReplaceEgressIPStatus(egressIPName, status)

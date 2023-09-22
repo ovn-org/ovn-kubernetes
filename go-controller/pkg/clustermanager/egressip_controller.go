@@ -695,7 +695,7 @@ func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node)
 	eIPC.allocator.Lock()
 	for _, egressIP := range egressIPs.Items {
 		for _, status := range egressIP.Status.Items {
-			if status.Node == node.Name && status.Network != "" {
+			if status.Node == node.Name {
 				egressIPIP := net.ParseIP(status.EgressIP)
 				if egressIPIP == nil {
 					return fmt.Errorf("unexpected empty egress IP found in status for egressIP %s", egressIP.Name)
@@ -715,11 +715,9 @@ func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node)
 						"is hosted by non-OVN managed network for node %s: %w", egressIP.Name, egressIPIP.String(), node.Name, err))
 					continue
 				}
-				// do not reconcile if calculated EIP IP assigned network is what is already configured
-				if network == status.Network {
-					continue
+				if network == "" {
+					reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
 				}
-				reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
 			}
 		}
 	}
@@ -1233,7 +1231,6 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				assignments = append(assignments, egressipv1.EgressIPStatusItem{
 					Node:     status.Node,
 					EgressIP: eIP.String(),
-					Network:  eIPNetwork,
 				})
 				continue
 			} else {
@@ -1278,6 +1275,8 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			// if the EIP is hosted by a non OVN managed network, then restrict the assignable nodes to the set of nodes that
 			// may host the non-OVN managed network
 			if len(assignableNodesWithSecondaryNet) > 0 {
+				klog.V(5).Infof("Restricting the number of assignable nodes from %d to %d because EgressIP %s IP %s "+
+					"is going to be hosted by a non-OVN managed network", len(assignableNodes), len(assignableNodesWithSecondaryNet), name, eIP.String())
 				assignableNodes = assignableNodesWithSecondaryNet
 			}
 		}
@@ -1325,11 +1324,10 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			assignments = append(assignments, egressipv1.EgressIPStatusItem{
 				Node:     eNode.name,
 				EgressIP: eIP.String(),
-				Network:  egressIPNetwork,
 			})
 			eNode.allocations[eIP.String()] = name
 			assignmentSuccessful = true
-			klog.Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, eNode)
+			klog.Infof("Successful assignment of egress IP: %s to network %s on node: %+v", egressIP, egressIPNetwork, eNode)
 			break
 		}
 	}

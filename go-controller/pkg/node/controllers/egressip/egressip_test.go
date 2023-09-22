@@ -417,7 +417,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 						if status.Node != node1Name {
 							continue
 						}
-						if status.Network == "" || status.EgressIP == "" {
+						if status.EgressIP == "" {
 							continue
 						}
 						// FIXME: we assume all EIPs are hosted by non-OVN managed network. Skip OVN managed EIPs.
@@ -521,7 +521,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 	table.Entry("configures nothing when EIPs dont select anything",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{},
 			},
 		},
@@ -534,7 +534,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 	table.Entry("configures one EIP and one Pod",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -559,7 +559,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 		// Test pod and namespace selection -
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -590,7 +590,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 	table.Entry("configures one EIP and multiple namespaces and multiple pods",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -623,7 +623,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 	table.Entry("configures one EIP and multiple namespaces and multiple pods",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -655,7 +655,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 	table.Entry("configures multiple EIPs and multiple namespaces and multiple pods",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -675,7 +675,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 				},
 			},
 			{
-				newEgressIP(egressIP2Name, egressIP2IP, dummy2IPv4CIDRNetwork, node1Name, namespace2Label, egressPodLabel),
+				newEgressIP(egressIP2Name, egressIP2IP, node1Name, namespace2Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink2Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -769,7 +769,7 @@ var _ = table.XDescribeTable("repair node", func(expectedStateFollowingClean []t
 }, table.Entry("should not fail when node is clean and nothing to apply",
 	[]testEIPConfig{
 		{
-			newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+			newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 			testConfig{}, // no expected config
 		},
 	},
@@ -782,7 +782,7 @@ var _ = table.XDescribeTable("repair node", func(expectedStateFollowingClean []t
 	table.Entry("should remove stale route",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{
 					inf: dummyLink2Name,
 				}, // no expected config
@@ -805,7 +805,7 @@ var _ = table.XDescribeTable("repair node", func(expectedStateFollowingClean []t
 	table.XEntry("should remove stale address",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{
 					inf: dummyLink2Name,
 				}, // no expected config
@@ -972,11 +972,7 @@ func newEgressIPMeta(name string) metav1.ObjectMeta {
 	}
 }
 
-func newEgressIP(name, ip, network, node string, namespaceLabels, podLabels map[string]string) egressipv1.EgressIP {
-	_, ipnet, err := net.ParseCIDR(network)
-	if err != nil {
-		panic(err.Error())
-	}
+func newEgressIP(name, ip, node string, namespaceLabels, podLabels map[string]string) egressipv1.EgressIP {
 	return egressipv1.EgressIP{
 		ObjectMeta: newEgressIPMeta(name),
 		Spec: egressipv1.EgressIPSpec{
@@ -992,7 +988,6 @@ func newEgressIP(name, ip, network, node string, namespaceLabels, podLabels map[
 			Items: []egressipv1.EgressIPStatusItem{{
 				node,
 				ip,
-				ipnet.String(),
 			}},
 		},
 	}
