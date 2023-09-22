@@ -512,7 +512,31 @@ var _ = table.XDescribeTable("EgressIP selectors",
 							}
 						}
 					}
-
+				}
+				return nil
+			})
+		})
+		ginkgo.By("verify expected egress IPs are assigned to interface")
+		gomega.Eventually(func() error {
+			return testNS.Do(func(netNS ns.NetNS) error {
+				for _, expectedEIPConfig := range expectedEIPConfigs {
+					if expectedEIPConfig.addr == nil {
+						return nil
+					}
+					link, err := netlink.LinkByName(expectedEIPConfig.inf)
+					if err != nil {
+						return err
+					}
+					addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
+					if err != nil {
+						return err
+					}
+					for _, addr := range addrs {
+						if addr.IP.Equal(expectedEIPConfig.addr.IP) {
+							return nil
+						}
+					}
+					return fmt.Errorf("failed to find expected EIP IP %q from link %q addresses (%v)", expectedEIPConfig.addr.String(), expectedEIPConfig.inf, addrs)
 				}
 				return nil
 			})
