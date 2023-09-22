@@ -668,6 +668,10 @@ ovs-server() {
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovsdb-server \
     --system-id=random ${ovs_options} ${USER_ARGS} "$@"
 
+  if [[ $(nproc) -gt 32 ]]; then
+    echo "Warning: Higher memory allocation by ovs-vswitchd is expected due to high number of n-handler-threads and n-revalidator-threads"
+  fi
+
   tail --follow=name ${OVS_LOGDIR}/ovs-vswitchd.log ${OVS_LOGDIR}/ovsdb-server.log &
   ovs_tail_pid=$!
   sleep 10
