@@ -665,6 +665,11 @@ ovs-server() {
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovs-vswitchd \
     --system-id=random ${ovs_options} ${USER_ARGS} "$@"
 
+  # Reduce stack size to 2M from default 8M as per below commit on Openvswitch
+  # https://github.com/openvswitch/ovs/commit/b82a90e266e1246fe2973db97c95df22558174ea
+  # added while troubleshooting on https://bugzilla.redhat.com/show_bug.cgi?id=1572797
+  ulimit -s 2048
+
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovsdb-server \
     --system-id=random ${ovs_options} ${USER_ARGS} "$@"
 
