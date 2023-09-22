@@ -1,6 +1,7 @@
 package egressip
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -19,6 +20,7 @@ import (
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilnet "k8s.io/utils/net"
@@ -187,7 +189,7 @@ func setupFakeTestNode(node testNode, nodeInitialState []testConfig) (ns.NetNS, 
 	return testNS, cleanupFn, nil
 }
 
-func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs []egressipv1.EgressIP, node testNode, v4, v6 bool) (*Controller, error) {
+func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs []egressipv1.EgressIP, node testNode, v4, v6 bool) (*Controller, *egressipfake.Clientset, error) {
 
 	kubeClient := fake.NewSimpleClientset(&corev1.NodeList{Items: []corev1.Node{getNodeObj(node)}},
 		&corev1.NamespaceList{Items: namespaces}, &corev1.PodList{Items: pods})
@@ -197,15 +199,15 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 	ovnconfig.OVNKubernetesFeature.EnableEgressIP = true
 	watchFactory, err := factory.NewNodeWatchFactory(ovnNodeClient, node1Name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := watchFactory.Start(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	c, err := NewController(watchFactory.EgressIPInformer(), watchFactory.NodeInformer(), watchFactory.NamespaceInformer(),
 		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	_, err = c.namespaceInformer.AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -214,7 +216,7 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 			DeleteFunc: c.onNamespaceDelete,
 		}))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	_, err = c.podInformer.AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -223,7 +225,7 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 			DeleteFunc: c.onPodDelete,
 		}))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	_, err = c.eIPInformer.AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -232,9 +234,9 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 			DeleteFunc: c.onEIPDelete,
 		}))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return c, nil
+	return c, egressIPClient, nil
 }
 
 func runController(testNS ns.NetNS, c *Controller) (cleanupFn, error) {
@@ -366,7 +368,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 		ginkgo.By("setting up test environment")
 		testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfig, nil)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-		c, err := initController(namespaces, pods, egressIPList, nodeConfig, true, false) //TODO: test for IPV6
+		c, eIPClient, err := initController(namespaces, pods, egressIPList, nodeConfig, true, false) //TODO: test for IPV6
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		cleanupControllerFn, err := runController(testNS, c)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
@@ -537,6 +539,77 @@ var _ = table.XDescribeTable("EgressIP selectors",
 						}
 					}
 					return fmt.Errorf("failed to find expected EIP IP %q from link %q addresses (%v)", expectedEIPConfig.addr.String(), expectedEIPConfig.inf, addrs)
+				}
+				return nil
+			})
+		})
+		ginkgo.By("remove EIPs in-order to validate cleanup is performed")
+		for _, eIP := range egressIPList {
+			gomega.Expect(eIPClient.K8sV1().EgressIPs().Delete(context.TODO(), eIP.Name, metav1.DeleteOptions{})).Should(gomega.Succeed())
+		}
+		ginkgo.By("verify IPTable rules are removed")
+		gomega.Eventually(func() error {
+			foundIPTRules, err := getIPTableRules(testNS, c.iptablesManager)
+			if err != nil {
+				return err
+			}
+			if len(foundIPTRules) != 0 {
+				return fmt.Errorf("expected zero IPTable rules but found %d", len(foundIPTRules))
+			}
+			return nil
+		}).WithTimeout(oneSec).Should(gomega.Succeed())
+		ginkgo.By("verify IP routes are removed")
+		gomega.Eventually(func() error {
+			return testNS.Do(func(netNS ns.NetNS) error {
+				// loop over all interfaces and ensure no EIP configured routes associated with links
+				for _, infConfig := range nodeConfig.infs {
+					link, err := netlink.LinkByName(infConfig.name)
+					if err != nil {
+						return err
+					}
+					filter, mask := filterRouteByLinkTable(link.Attrs().Index, getRouteTableID(link.Attrs().Index))
+					existingRoutes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, filter, mask)
+					if err != nil {
+						return err
+					}
+					if len(existingRoutes) > 0 {
+						return fmt.Errorf("expected zero routes for link %s but found %d: %v", link.Attrs().Name, len(existingRoutes), existingRoutes)
+					}
+				}
+				return nil
+			})
+		}).WithTimeout(oneSec).Should(gomega.Succeed())
+		ginkgo.By("verify IP rules are removed")
+		gomega.Eventually(func() error {
+			return testNS.Do(func(netNS ns.NetNS) error {
+				filter, mask := filterRuleByPriority(rulePriority)
+				foundRules, err := netlink.RuleListFiltered(netlink.FAMILY_V4, filter, mask)
+				if err != nil {
+					return err
+				}
+				if len(foundRules) > 0 {
+					return fmt.Errorf("expected zero IP rules but found %d: %v", len(foundRules), foundRules)
+				}
+				return nil
+			})
+		}).WithTimeout(oneSec).Should(gomega.Succeed())
+		ginkgo.By("verify assigned IP addresses are removed")
+		gomega.Eventually(func() error {
+			return testNS.Do(func(netNS ns.NetNS) error {
+				for _, infConfig := range nodeConfig.infs {
+					link, err := netlink.LinkByName(infConfig.name)
+					if err != nil {
+						return fmt.Errorf("failed to find link %q: %v", infConfig.name, err)
+					}
+					addresses, err := netlink.AddrList(link, netlink.FAMILY_V4)
+					if err != nil {
+						return fmt.Errorf("failed to list addresses for link %q: %v", infConfig.name, err)
+					}
+					for _, address := range addresses {
+						if address.Label == linkmanager.GetAssignedAddressLabel(link.Attrs().Name) {
+							return fmt.Errorf("assigned EIP address (%s) found on link %s", address.String(), link.Attrs().Name)
+						}
+					}
 				}
 				return nil
 			})
@@ -754,7 +827,7 @@ var _ = table.XDescribeTable("repair node", func(expectedStateFollowingClean []t
 	}
 	testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfig, nodeConfigsBeforeRepair)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	c, err := initController(namespaces, pods, egressIPList, nodeConfig, true, false)
+	c, _, err := initController(namespaces, pods, egressIPList, nodeConfig, true, false)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	// for now, we expect it to always succeed
 	err = testNS.Do(func(netNS ns.NetNS) error {
