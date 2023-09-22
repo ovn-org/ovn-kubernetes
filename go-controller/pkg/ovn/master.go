@@ -854,6 +854,10 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 }
 
 func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIC bool) error {
+	// nothing to do for hybrid nodes
+	if houtil.IsHybridOverlayNode(node) {
+		return nil
+	}
 	start := time.Now()
 	// Check if the remote node is present in the local zone nodes.  If its present
 	// it means it moved from this controller zone to other remote zone. Cleanup the node
