@@ -395,6 +395,7 @@ jobs:
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "node-ip-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "node-ip-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "compact-mode",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "multi-node-zones",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-multi-node-zones", "num-workers": "3", "num-nodes-per-zone": "2"}
