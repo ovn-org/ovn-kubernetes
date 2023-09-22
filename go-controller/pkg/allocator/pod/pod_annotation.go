@@ -280,7 +280,7 @@ func allocatePodAnnotationWithRollback(
 	hasIPAM := util.DoesNetworkRequireIPAM(netInfo)
 	hasIPRequest := network != nil && len(network.IPRequest) > 0
 	hasStaticIPRequest := hasIPRequest && !reallocateIP
-	hasIPAMLease := ipamLease != nil && len(ipamLease.Spec.IPs) > 0
+	hasIPAMLease := ipamLease != nil && len(ipamLease.Status.IPs) > 0
 
 	if hasIPAM && hasStaticIPRequest {
 		// for now we can't tell apart already allocated IPs from IPs excluded
@@ -303,7 +303,7 @@ func allocatePodAnnotationWithRollback(
 				return
 			}
 		} else if hasIPAMLease {
-			tentative.IPs, err = util.ParseIPNets(ipamLease.Spec.IPs)
+			tentative.IPs, err = util.ParseIPNets(ipamLease.Status.IPs)
 			if err != nil {
 				return
 			}

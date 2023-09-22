@@ -15,7 +15,6 @@ import (
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	kapi "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -46,7 +45,7 @@ type InterfaceOVN interface {
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
 	UpdateEgressServiceStatus(namespace, name, host string) error
-	CreatePersistentIPs(namespace, name, network, iface string, ips []string) error
+	UpdateIPAMLeaseIPs(ipamLease *persistentipsv1.IPAMLease, ips []string) error
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -441,40 +440,10 @@ func (k *KubeOVN) UpdateEgressServiceStatus(namespace, name, host string) error 
 	return err
 }
 
-func (k *KubeOVN) CreatePersistentIPs(namespace, name, network, iface string, ips []string) error {
-	_, err := k.PersistentIPsClient.K8sV1alpha1().IPAMLeases(namespace).Get(context.TODO(), name, metav1.GetOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			vmUID, err := k.readUIDFromVM(namespace, name)
-			if err != nil {
-				return err
-			}
-			pips := &persistentipsv1.IPAMLease{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: namespace,
-					Name:      name,
-					OwnerReferences: []metav1.OwnerReference{{
-						APIVersion: "kubevirt.io/v1",
-						Kind:       "VirtualMachine",
-						Name:       name,
-						UID:        vmUID,
-					}},
-				},
-				Spec: persistentipsv1.IPAMLeaseSpec{
-					Network:   network,
-					Interface: iface,
-					IPs:       ips,
-				},
-			}
-			pips, err = k.PersistentIPsClient.K8sV1alpha1().IPAMLeases(pips.Namespace).Create(context.TODO(), pips, metav1.CreateOptions{})
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-	return nil
+func (k *KubeOVN) UpdateIPAMLeaseIPs(currentIPAMLease *persistentipsv1.IPAMLease, ips []string) error {
+	currentIPAMLease.Status.IPs = ips
+	_, err := k.PersistentIPsClient.K8sV1alpha1().IPAMLeases(currentIPAMLease.Namespace).UpdateStatus(context.TODO(), currentIPAMLease, metav1.UpdateOptions{})
+	return err
 }
 
 func (k *KubeOVN) readUIDFromVM(namespace, name string) (types.UID, error) {

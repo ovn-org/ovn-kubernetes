@@ -1208,6 +1208,11 @@ func (wf *WatchFactory) GetPersistentIPs(namespace, name string) (*persistentips
 	return lister.IPAMLeases(namespace).Get(name)
 }
 
+func (wf *WatchFactory) ListPersistentIPs(namespace string, selector labels.Selector) ([]*persistentipsapi.IPAMLease, error) {
+	lister := wf.informers[PersistentIPsType].lister.(persistentipslister.IPAMLeaseLister)
+	return lister.IPAMLeases(namespace).List(selector)
+}
+
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
 	return wf.informers[NodeType].inf
 }

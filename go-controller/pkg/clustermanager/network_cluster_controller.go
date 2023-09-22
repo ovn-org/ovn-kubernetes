@@ -280,7 +280,11 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 		}
 		h.clearInitialNodeNetworkUnavailableCondition(node)
 	case factory.PersistentIPsType:
-		return nil
+		ipamLease, ok := obj.(*persistentipsapi.IPAMLease)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *persistentipsapi.IPAMLease", obj)
+		}
+		return h.ncc.pipsAllocator.Reconcile(ipamLease)
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
 	}
@@ -318,6 +322,10 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 				node.Name, err)
 			return err
 		}
+
+	case factory.PersistentIPsType:
+		return nil
+
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
@@ -420,6 +428,8 @@ func (h *networkClusterControllerEventHandler) GetResourceFromInformerCache(key 
 		obj, err = h.ncc.watchFactory.GetNode(name)
 	case factory.PodType:
 		obj, err = h.ncc.watchFactory.GetPod(namespace, name)
+	case factory.PersistentIPsType:
+		obj, err = h.ncc.watchFactory.GetPersistentIPs(namespace, name)
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
 			h.objType)

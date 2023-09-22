@@ -130,8 +130,9 @@ rules:
 - apiGroups:
   - k8s.cni.cncf.io
   resources:
-  - ipamleases 
-  verbs: ["create", "list", "get", "watch"]
+  - ipamleases
+  - ipamleases/status
+  verbs: ["create", "list", "get", "watch", "update"]
 - apiGroups:
   - kubevirt.io
   resources:

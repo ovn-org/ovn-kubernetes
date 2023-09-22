@@ -11,7 +11,6 @@ import (
 	"k8s.io/klog/v2"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	persistentipsapi "github.com/maiqueb/persistentips/pkg/crd/persistentip/v1alpha1"
@@ -263,18 +262,29 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 		idAllocator = a.idAllocator.ForName(name)
 	}
 
-	// don't reallocate to new IPs if currently annotated IPs fail to alloccate
-	reallocate := false
+	const dontReallocate = false // don't reallocate to new IPs if currently annotated IPs fail to allocate
 	var ipamLease *persistentipsapi.IPAMLease
 	if util.DoesNetworkRequireIPAM(a.netInfo) {
-		pipsKey, ok := pod.Labels[kubevirtv1.VirtualMachineNameLabel]
-		if ok {
-			var err error
-			ipamLease, err = a.watchFactory.GetPersistentIPs(pod.Namespace, pipsKey)
-			if err != nil && !apierrors.IsNotFound(err) {
-				return err
+		klog.Infof("allocate IPAMClaim for pod NAD: %q", nad)
+		//vmName, ok := pod.Labels[kubevirtv1.VirtualMachineNameLabel]
+		//ipamLeaseKey := fmt.Sprintf("%s.%s.%s", vmName, a.netInfo.GetNetworkName(), network.InterfaceRequest)
+		var ipamLeaseKey string
+		if network.CNIArgs != nil {
+			ipamClaim, wasFound := (*network.CNIArgs)["ipamClaim"]
+			if wasFound {
+				ipamLeaseKey = ipamClaim.(string)
 			}
 		}
+		klog.Infof("ipamLease key: %s", ipamLeaseKey)
+		lease, err := a.watchFactory.GetPersistentIPs(pod.Namespace, ipamLeaseKey)
+		if err != nil {
+			return fmt.Errorf("failed to get ipamLease %q", ipamLeaseKey)
+		}
+
+		if len(lease.Status.IPs) == 0 {
+			return fmt.Errorf("cannot create pod yet, the IPAMLease does not yet have a ready IP")
+		}
+		ipamLease = lease
 	}
 
 	updatedPod, podAnnotation, err := a.podAnnotationAllocator.AllocatePodAnnotationWithTunnelID(
@@ -283,25 +293,11 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 		pod,
 		network,
 		ipamLease,
-		reallocate,
+		dontReallocate,
 	)
 
 	if err != nil {
 		return err
-	}
-
-	if util.DoesNetworkRequireIPAM(a.netInfo) {
-		pipsKey, ok := pod.Labels[kubevirtv1.VirtualMachineNameLabel]
-		if ok {
-			ips := []string{}
-			for _, ip := range podAnnotation.IPs {
-				ips = append(ips, ip.String())
-			}
-			//TODO: Owner
-			if err := a.kube.CreatePersistentIPs(pod.Namespace, pipsKey, a.netInfo.GetNetworkName(), "TODO-interface-name", ips); err != nil {
-				return err
-			}
-		}
 	}
 
 	if updatedPod != nil {

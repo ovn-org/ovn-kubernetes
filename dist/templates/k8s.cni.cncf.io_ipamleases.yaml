@@ -37,21 +37,27 @@ spec:
                 description: The pod interface name for which this allocation was
                   created
                 type: string
-              ips:
-                description: The list of IP addresses (v4, v6) that were allocated
-                  for the pod interface
-                items:
-                  type: string
-                type: array
               network:
                 description: The network attachment definition name for which this
                   persistent allocation was created
                 type: string
             required:
             - interface
-            - ips
             - network
+            type: object
+          status:
+            properties:
+              ips:
+                description: The list of IP addresses (v4, v6) that were allocated
+                  for the pod interface
+                items:
+                  type: string
+                type: array
+            required:
+            - ips
             type: object
         type: object
     served: true
     storage: true
+    subresources:
+      status: {}
