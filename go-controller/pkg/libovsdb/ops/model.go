@@ -245,9 +245,10 @@ func copyIndexes(model model.Model) model.Model {
 		}
 	case *sbdb.Encap:
 		return &sbdb.Encap{
-			UUID: t.UUID,
-			Type: t.Type,
-			IP:   t.IP,
+			UUID:        t.UUID,
+			Type:        t.Type,
+			IP:          t.IP,
+			ChassisName: t.ChassisName,
 		}
 	case *sbdb.PortBinding:
 		return &sbdb.PortBinding{
