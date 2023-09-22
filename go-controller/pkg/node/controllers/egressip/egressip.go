@@ -10,6 +10,9 @@ import (
 	"sync"
 	"time"
 
+	eipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
+	egressiplisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
@@ -17,10 +20,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilnet "k8s.io/utils/net"
 
-	eipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
-	egressiplisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -528,7 +529,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 		if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 			continue
 		}
-		isV6 := eIPNet.IP.To4() == nil
+		isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
 		found, link, err := findLinkOnSameNetworkAsIP(eIPNet.IP, c.v4, c.v6)
 		if err != nil {
 			return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
@@ -541,26 +542,28 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 			eip.Name, status.EgressIP, link.Attrs().Name)
 		// go through all selected pods and build a config per pod IP. We know there are at least one pod and these the
 		// pod(s) have IP(s).
-		eIPConfig, podIPConfigs = generateEIPConfigForPods(selectedPodIPs, link, eIPNet, isV6)
+		eIPConfig, podIPConfigs = generateEIPConfigForPods(selectedPodIPs, link, eIPNet, isEIPV6)
 		// ignore other EIP IPs. Multiple EIP IPs cannot be assigned to the same node
 		break
 	}
 	return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods, nil
 }
 
-func generateEIPConfigForPods(pods map[ktypes.NamespacedName][]net.IP, link netlink.Link, eIPNet *net.IPNet, v6 bool) (*eIPConfig, *podIPConfigList) {
+func generateEIPConfigForPods(pods map[ktypes.NamespacedName][]net.IP, link netlink.Link, eIPNet *net.IPNet, isEIPV6 bool) (*eIPConfig, *podIPConfigList) {
 	eipConfig := newEIPConfig()
 	newPodIPConfigs := newPodIPConfigList()
-	eipConfig.routeLink = getDefaultRouteForLink(link, v6)
+	eipConfig.routeLink = getDefaultRouteForLink(link, isEIPV6)
 	eipConfig.ip = getNetlinkAddressWithLabel(eIPNet, link.Attrs().Index, link.Attrs().Name)
-	for _, ips := range pods {
-		for _, ip := range ips {
-			ipConfig := newPodIPConfig()
-			ipConfig.ipTableRule = generateIPTablesSNATRuleArg(ip, link.Attrs().Name, eIPNet.IP.String())
-			ipConfig.ipRule = generateIPRule(ip, link.Attrs().Index)
-			if ip.To4() == nil {
-				ipConfig.v6 = true
+	for _, podIPs := range pods {
+		for _, podIP := range podIPs {
+			isPodIPv6 := utilnet.IsIPv6(podIP)
+			if isPodIPv6 != isEIPV6 {
+				continue
 			}
+			ipConfig := newPodIPConfig()
+			ipConfig.ipTableRule = generateIPTablesSNATRuleArg(podIP, isPodIPv6, link.Attrs().Name, eIPNet.IP.String())
+			ipConfig.ipRule = generateIPRule(podIP, isPodIPv6, link.Attrs().Index)
+			ipConfig.v6 = isPodIPv6
 			newPodIPConfigs.elems = append(newPodIPConfigs.elems, ipConfig)
 		}
 	}
@@ -850,7 +853,7 @@ func (c *Controller) RepairNode() error {
 			if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 				continue
 			}
-			isV6 := eIPNet.IP.To4() == nil
+			isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
 			found, link, err := findLinkOnSameNetworkAsIP(eIPNet.IP, c.v4, c.v6)
 			if err != nil {
 				return fmt.Errorf("failed to find a network to host EgressIP %s IP %s: %v", egressIP.Name,
@@ -861,7 +864,7 @@ func (c *Controller) RepairNode() error {
 			}
 			linkIdx := link.Attrs().Index
 			linkName := link.Attrs().Name
-			expectedIPRoutes.Insert(getDefaultRoute(linkIdx, isV6).String())
+			expectedIPRoutes.Insert(getDefaultRoute(linkIdx, isEIPV6).String())
 			expectedAddrs.Insert(getNetlinkAddressWithLabel(eIPNet, linkIdx, linkName).String())
 			namespaceSelector, err := metav1.LabelSelectorAsSelector(&egressIP.Spec.NamespaceSelector)
 			if err != nil {
@@ -892,17 +895,21 @@ func (c *Controller) RepairNode() error {
 						if err != nil {
 							return err
 						}
-						for _, ip := range podIPs {
-							if !c.isIPSupported(ip) {
+						for _, podIP := range podIPs {
+							isPodIPV6 := utilnet.IsIPv6(podIP)
+							if isPodIPV6 != isEIPV6 {
 								continue
 							}
-							ipTableRule := strings.Join(generateIPTablesSNATRuleArg(ip, linkName, status.EgressIP).Args, " ")
-							if ip.To4() != nil {
-								expectedIPTableV4Rules.Insert(ipTableRule)
-							} else {
-								expectedIPTableV6Rules.Insert(ipTableRule)
+							if !c.isIPSupported(isPodIPV6) {
+								continue
 							}
-							expectedIPRules.Insert(generateIPRule(ip, link.Attrs().Index).String())
+							ipTableRule := strings.Join(generateIPTablesSNATRuleArg(podIP, isPodIPV6, linkName, status.EgressIP).Args, " ")
+							if isPodIPV6 {
+								expectedIPTableV6Rules.Insert(ipTableRule)
+							} else {
+								expectedIPTableV4Rules.Insert(ipTableRule)
+							}
+							expectedIPRules.Insert(generateIPRule(podIP, isPodIPV6, link.Attrs().Index).String())
 						}
 					}
 				}
@@ -1000,11 +1007,11 @@ func (c *Controller) removeStaleIPTableRules(proto utiliptables.Protocol, staleR
 	return nil
 }
 
-func (c *Controller) isIPSupported(ip net.IP) bool {
-	if ip.To4() != nil && c.v4 {
+func (c *Controller) isIPSupported(isIPV6 bool) bool {
+	if !isIPV6 && c.v4 {
 		return true
 	}
-	if ip.To4() == nil && c.v6 {
+	if isIPV6 && c.v6 {
 		return true
 	}
 	return false
@@ -1096,17 +1103,17 @@ func getDefaultRoute(linkIdx int, v6 bool) routemanager.Route {
 
 // generateIPRules generates IP rules at a predefined priority for each pod IP with a custom routing table based
 // from the links 'ifindex'
-func generateIPRule(srcIP net.IP, ifIndex int) netlink.Rule {
+func generateIPRule(srcIP net.IP, isIPv6 bool, ifIndex int) netlink.Rule {
 	r := *netlink.NewRule()
 	r.Table = getRouteTableID(ifIndex)
 	r.Priority = rulePriority
 	var ipFullMask string
-	if srcIP.To4() != nil { // v4
-		ipFullMask = fmt.Sprintf("%s/32", srcIP.String())
-		r.Family = netlink.FAMILY_V4
-	} else { // v6
+	if isIPv6 {
 		ipFullMask = fmt.Sprintf("%s/128", srcIP.String())
 		r.Family = netlink.FAMILY_V6
+	} else {
+		ipFullMask = fmt.Sprintf("%s/32", srcIP.String())
+		r.Family = netlink.FAMILY_V4
 	}
 	_, ipNet, _ := net.ParseCIDR(ipFullMask)
 	r.Src = ipNet
@@ -1132,12 +1139,12 @@ func getPodNamespacedName(pod *corev1.Pod) ktypes.NamespacedName {
 	return ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 }
 
-func generateIPTablesSNATRuleArg(srcIP net.IP, infName, snatIP string) iptables.RuleArg {
+func generateIPTablesSNATRuleArg(srcIP net.IP, isIPv6 bool, infName, snatIP string) iptables.RuleArg {
 	var srcIPFullMask string
-	if srcIP.To4() != nil { // v4
-		srcIPFullMask = fmt.Sprintf("%s/32", srcIP.String())
-	} else { // v6
+	if isIPv6 {
 		srcIPFullMask = fmt.Sprintf("%s/128", srcIP.String())
+	} else {
+		srcIPFullMask = fmt.Sprintf("%s/32", srcIP.String())
 	}
 	return iptables.RuleArg{Args: []string{"-s", srcIPFullMask, "-o", infName, "-j", "SNAT", "--to-source", snatIP}}
 }
