@@ -112,7 +112,6 @@ func (allocator *allocator) AddOrUpdateSubnet(name string, subnets []*net.IPNet,
 			return fmt.Errorf("failed to exclude subnet %s for %s: not contained in any of the subnets", excludeSubnet, name)
 		}
 	}
-
 	return nil
 }
 

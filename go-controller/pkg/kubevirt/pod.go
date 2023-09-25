@@ -285,18 +285,3 @@ func AllocateSyncMigratablePodIPsOnZone(watchFactory *factory.WatchFactory, lsMa
 	// We care about the whole zone so we pass the nodeName empty
 	return allocateSyncMigratablePodIPs(watchFactory, lsManager, nadName, "", pod, allocatePodIPsOnSwitch)
 }
-
-// AllocateSyncMigratablePodIPsOnNode will refill ip pool in
-// case the node has take over the vm subnet for live migrated vms
-func AllocateSyncMigratablePodsIPsOnNode(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, nodeName, nadName string, allocatePodIPsOnSwitch func(*corev1.Pod, *util.PodAnnotation, string, string) (string, error)) error {
-	liveMigratablePods, err := FindLiveMigratablePods(watchFactory)
-	if err != nil {
-		return err
-	}
-	for _, liveMigratablePod := range liveMigratablePods {
-		if _, _, _, err := allocateSyncMigratablePodIPs(watchFactory, lsManager, nodeName, nadName, liveMigratablePod, allocatePodIPsOnSwitch); err != nil {
-			return err
-		}
-	}
-	return nil
-}
