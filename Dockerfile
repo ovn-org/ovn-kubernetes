@@ -63,6 +63,9 @@ RUN mkdir -p /usr/libexec/cni/rhel9
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/rhel9/
 RUN mkdir -p /usr/libexec/cni/rhel8
 COPY --from=rhel8 /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/rhel8/
+# Copy RHEL-8 ovnkube-trace file into /usr/lib/rhel8 directory so that user can download and run it on RHEL-8 platform.
+RUN mkdir -p /usr/lib/rhel8
+COPY --from=rhel8 /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-trace /usr/lib/rhel8/
 
 RUN stat /usr/bin/oc
 
