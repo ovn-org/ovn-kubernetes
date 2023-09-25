@@ -50,8 +50,8 @@ const (
 	// OvnNodeL3GatewayConfig is the constant string representing the l3 gateway annotation key
 	OvnNodeL3GatewayConfig = "k8s.ovn.org/l3-gateway-config"
 
-	// ovnNodeGatewayMtuSupport determines if option:gateway_mtu shall be set for GR router ports.
-	ovnNodeGatewayMtuSupport = "k8s.ovn.org/gateway-mtu-support"
+	// OvnNodeGatewayMtuSupport determines if option:gateway_mtu shall be set for GR router ports.
+	OvnNodeGatewayMtuSupport = "k8s.ovn.org/gateway-mtu-support"
 
 	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
 	ovnDefaultNetworkGateway = "default"
@@ -301,16 +301,16 @@ func SetL3GatewayConfig(nodeAnnotator kube.Annotator, cfg *L3GatewayConfig) erro
 // this node.
 func SetGatewayMTUSupport(nodeAnnotator kube.Annotator, set bool) error {
 	if set {
-		nodeAnnotator.Delete(ovnNodeGatewayMtuSupport)
+		nodeAnnotator.Delete(OvnNodeGatewayMtuSupport)
 		return nil
 	}
-	return nodeAnnotator.Set(ovnNodeGatewayMtuSupport, "false")
+	return nodeAnnotator.Set(OvnNodeGatewayMtuSupport, "false")
 }
 
 // ParseNodeGatewayMTUSupport parses annotation "k8s.ovn.org/gateway-mtu-support". The default behavior should be true,
 // therefore only an explicit string of "false" will make this function return false.
 func ParseNodeGatewayMTUSupport(node *kapi.Node) bool {
-	return node.Annotations[ovnNodeGatewayMtuSupport] != "false"
+	return node.Annotations[OvnNodeGatewayMtuSupport] != "false"
 }
 
 // ParseNodeL3GatewayAnnotation returns the parsed l3-gateway-config annotation

@@ -29,6 +29,7 @@ var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 	util.OvnNodeL3GatewayConfig:          nil,
 	util.OvnNodeManagementPortMacAddress: nil,
 	util.OvnNodeIfAddr:                   nil,
+	util.OvnNodeGatewayMtuSupport:        nil,
 	util.OvnNodeChassisID: func(v annotationChange, nodeName string) error {
 		if v.action == removed {
 			return fmt.Errorf("%s cannot be removed", util.OvnNodeChassisID)
