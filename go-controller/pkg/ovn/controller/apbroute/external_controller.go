@@ -56,6 +56,11 @@ func NewExternalGatewayRouteInfoCache() *ExternalGatewayRouteInfoCache {
 	}
 }
 
+// CreateOrLoad provides a mechanism to initialize keys in the cache before calling the argument function `f`. This approach
+// hides the logic to initialize and retrieval of the key's routeInfo and allows reusability by exposing a function signature as argument
+// that has a routeInfo instance as argument. The function will attempt to retrieve the routeInfo for a given key,
+// and create an empty routeInfo structure in the cache when not found. Then it will execute the function argument `f` passing
+// the routeInfo as argument.
 func (e *ExternalGatewayRouteInfoCache) CreateOrLoad(podName ktypes.NamespacedName, f func(routeInfo *RouteInfo) error) error {
 	return e.routeInfos.DoWithLock(podName, func(key ktypes.NamespacedName) error {
 		routeInfo := &RouteInfo{
@@ -67,8 +72,9 @@ func (e *ExternalGatewayRouteInfoCache) CreateOrLoad(podName ktypes.NamespacedNa
 	})
 }
 
-// Cleanup will call given function with lock and remove empty maps from the routeInfo.
-// If routeInfo is empty after cleanup, it will be deleted from the cache
+// Cleanup will lock the key `podName` and use the routeInfo associated to the key to pass it as an argument to function `f`.
+// After the function `f` completes, it will delete any empty PodExternalRoutes references for each given podIP in the routeInfo object,
+// as well as deleting the key itself if it contains no entries in its `PodExternalRoutes` map.
 func (e *ExternalGatewayRouteInfoCache) Cleanup(podName ktypes.NamespacedName, f func(routeInfo *RouteInfo) error) error {
 	return e.routeInfos.DoWithLock(podName, func(key ktypes.NamespacedName) error {
 		routeInfo, loaded := e.routeInfos.Load(key)
@@ -88,7 +94,8 @@ func (e *ExternalGatewayRouteInfoCache) Cleanup(podName ktypes.NamespacedName, f
 	})
 }
 
-// CleanupNamespace calls e.Cleanup for every pod from namespace=nsName
+// CleanupNamespace wraps the cleanup call for all the pods in a given namespace.
+// The routeInfo reference for each pod in the given namespace is processed by the `f` function inside the `Cleanup` function
 func (e *ExternalGatewayRouteInfoCache) CleanupNamespace(nsName string, f func(routeInfo *RouteInfo) error) error {
 	for _, podName := range e.routeInfos.GetKeys() {
 		if podName.Namespace == nsName {
