@@ -16,8 +16,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -92,7 +92,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		dhcpv6               []testDHCPOptions
 		policies             []testPolicy
 		staticRoutes         []testStaticRoute
-		addNodes             []corev1.Node
 		expectedDhcpv4       []testDHCPOptions
 		expectedDhcpv6       []testDHCPOptions
 		expectedPolicies     []testPolicy
@@ -460,6 +459,9 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
+		// To skip port group not found error
+		config.EnableMulticast = false
+
 		fakeOvn = NewFakeOVN(true)
 	})
 
@@ -724,24 +726,30 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "newNode1",
 							Annotations: map[string]string{
-								"k8s.ovn.org/node-subnets": fmt.Sprintf(`{"default":[%q,%q]}`, nodeByName[t.replaceNode].subnetIPv4, nodeByName[t.replaceNode].subnetIPv6),
+								"k8s.ovn.org/node-subnets":                   fmt.Sprintf(`{"default":[%q,%q]}`, nodeByName[t.replaceNode].subnetIPv4, nodeByName[t.replaceNode].subnetIPv6),
+								"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4": "100.64.0.2/16"}`,
 							},
 						},
 					}
 					fakeOvn.controller.lsManager.DeleteSwitch(t.replaceNode)
-					fakeOvn.controller.lsManager.AddOrUpdateSwitch(newNode.Name, ovntest.MustParseIPNets(
-						nodeByName[t.replaceNode].subnetIPv4,
-						nodeByName[t.replaceNode].subnetIPv6,
-					))
 
-					Expect(fakeOvn.controller.addUpdateLocalNodeEvent(newNode, &nodeSyncs{syncMigratablePods: true})).To(Succeed())
+					// We don't have portgroup
+					fakeOvn.controller.multicastSupport = false
 
 					podToCreate, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), podToCreate.Name, metav1.GetOptions{})
 					Expect(err).ToNot(HaveOccurred())
 					podAnnotation, err := util.UnmarshalPodAnnotation(podToCreate.Annotations, ovntypes.DefaultNetworkName)
 					Expect(err).ToNot(HaveOccurred())
 
+					_, err = fakeOvn.controller.addNode(newNode)
+					Expect(err).ToNot(HaveOccurred())
+
 					Expect(fakeOvn.controller.lsManager.AllocateIPs(newNode.Name, podAnnotation.IPs)).ToNot(Succeed(), "should allocate the pod IPs when node is replaced")
+
+					// Make ovn expectations after pod deletion happy
+					Expect(libovsdbops.DeleteLogicalSwitchPorts(fakeOvn.nbClient, &nbdb.LogicalSwitch{Name: newNode.Name}, &nbdb.LogicalSwitchPort{Name: "stor-newNode1"})).To(Succeed())
+					Expect(fakeOvn.controller.deleteNodeEvent(newNode)).ToNot(HaveOccurred())
+					Expect(err).ToNot(HaveOccurred())
 				}
 
 				if t.podName != "" {
