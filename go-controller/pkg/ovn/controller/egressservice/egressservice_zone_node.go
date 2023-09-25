@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
@@ -154,6 +155,11 @@ func (c *Controller) syncNode(key string) error {
 	}
 
 	// At this point the node exists and is ready
+	if config.OVNKubernetesFeature.EnableInterconnect && c.zone != types.OvnDefaultZone && c.isNodeInLocalZone(n) {
+		if err := c.createDefaultRouteToExternalForIC(c.nbClient, nodeName); err != nil {
+			return err
+		}
+	}
 
 	// If the node is used by any service but is not in cache enqueue it
 	if state == nil {

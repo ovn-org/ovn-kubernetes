@@ -45,24 +45,25 @@ var (
 )
 
 const (
-	namespace      = "egressip-namespace"
-	namespace2     = "egressip-namespace2"
-	podV4IP        = "10.128.0.15"
-	podV4IP2       = "10.128.0.16"
-	podV4IP3       = "10.128.1.3"
-	podV4IP4       = "10.128.1.4"
-	podV6IP        = "ae70::66"
-	v6GatewayIP    = "ae70::1"
-	v6Node1Subnet  = "ae70::66/64"
-	v6Node2Subnet  = "be70::66/64"
-	v4Node1Subnet  = "10.128.0.0/16"
-	v4Node2Subnet  = "10.90.0.0/16"
-	v4Node3Subnet  = "10.80.0.0/16"
-	podName        = "egress-pod"
-	podName2       = "egress-pod2"
-	egressIPName   = "egressip"
-	egressIP2Name  = "egressip-2"
-	inspectTimeout = 4 * time.Second // arbitrary, to avoid failures on github CI
+	namespace       = "egressip-namespace"
+	namespace2      = "egressip-namespace2"
+	podV4IP         = "10.128.0.15"
+	podV4IP2        = "10.128.0.16"
+	podV4IP3        = "10.128.1.3"
+	podV4IP4        = "10.128.1.4"
+	podV6IP         = "ae70::66"
+	v6GatewayIP     = "ae70::1"
+	v6Node1Subnet   = "ae70::66/64"
+	v6Node2Subnet   = "be70::66/64"
+	v4ClusterSubnet = "10.128.0.0/14"
+	v4Node1Subnet   = "10.128.0.0/16"
+	v4Node2Subnet   = "10.90.0.0/16"
+	v4Node3Subnet   = "10.80.0.0/16"
+	podName         = "egress-pod"
+	podName2        = "egress-pod2"
+	egressIPName    = "egressip"
+	egressIP2Name   = "egressip-2"
+	inspectTimeout  = 4 * time.Second // arbitrary, to avoid failures on github CI
 )
 
 var eipExternalID = map[string]string{
@@ -1724,10 +1725,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 					}
 					if node1Zone == "remote" {
-						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(egressPod.Status.PodIP, reroutePolicyNextHop[0]))
-						expectedDatabaseState[6].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
-						expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies = expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies[1:] // remove LRP ref
-						expectedDatabaseState = expectedDatabaseState[1:]                                                                     // remove LRP
+						expectedDatabaseState = append(expectedDatabaseState, getReRoutePolicy(egressPod.Status.PodIP, "4", "remote-reroute-UUID", reroutePolicyNextHop, eipExternalID))
+						expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies = expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies[1:]                            // remove LRP ref
+						expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies = append(expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies, "remote-reroute-UUID") // remove LRP ref
+						expectedDatabaseState = expectedDatabaseState[1:]                                                                                                // remove LRP
 					}
 
 					gomega.Eventually(fakeOvn.nbClient, inspectTimeout).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -1951,7 +1952,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						egressPod4Node2Reroute = []string{"168.254.0.2"} // node1's transit switch portIP
 					}
 					lrps := make([]*nbdb.LogicalRouterPolicy, 0)
-					staticRoutes := make([]*nbdb.LogicalRouterStaticRoute, 0)
 
 					if !interconnect {
 						lrps = append(lrps, getReRoutePolicy(egressPod1Node1.Status.PodIP, "4", "reroute-UUID", egressPod1Node1Reroute, eipExternalID),
@@ -1969,20 +1969,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 					if interconnect && node1Zone == "global" && node2Zone == "remote" {
 						lrps = append(lrps, getReRoutePolicy(egressPod1Node1.Status.PodIP, "4", "reroute-UUID", egressPod1Node1Reroute, eipExternalID),
-							getReRoutePolicy(egressPod2Node1.Status.PodIP, "4", "reroute-UUID2", egressPod2Node1Reroute, eip2ExternalID))
-						staticRoutes = append(staticRoutes, &nbdb.LogicalRouterStaticRoute{
-							UUID:        "egressip-pod3node2",
-							ExternalIDs: eipExternalID,
-							IPPrefix:    podV4IP3,
-							Nexthop:     nodeLogicalRouterIPv4[0],
-							Policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-						}, &nbdb.LogicalRouterStaticRoute{
-							UUID:        "egressip-pod4node2",
-							ExternalIDs: eip2ExternalID,
-							IPPrefix:    podV4IP4,
-							Nexthop:     egressPod4Node2Reroute[0],
-							Policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-						})
+							getReRoutePolicy(egressPod2Node1.Status.PodIP, "4", "reroute-UUID2", egressPod2Node1Reroute, eip2ExternalID),
+							getReRoutePolicy(podV4IP4, "4", "egressip-pod4node2", egressPod4Node2Reroute, eip2ExternalID))
 					}
 
 					if interconnect && node1Zone == "remote" && node2Zone == "global" {
@@ -2106,13 +2094,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 					}
 
-					// ovn cluster router static routes
-					for _, sr := range staticRoutes {
-						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = append(expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes, sr.UUID)
-					}
-					for _, sr := range staticRoutes {
-						expectedDatabaseState = append(expectedDatabaseState, sr)
-					}
 					for _, lrp := range lrps {
 						expectedDatabaseState = append(expectedDatabaseState, lrp)
 					}
@@ -2798,14 +2779,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[10].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 					}
 					if node1Zone == "remote" {
-						expectedDatabaseState = append(expectedDatabaseState, &nbdb.LogicalRouterStaticRoute{
-							UUID:        "static-reroute-UUID",
-							ExternalIDs: eipExternalID,
-							IPPrefix:    podV4IP,
-							Nexthop:     node2MgntIP.To4().String(),
-							Policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-						})
-						expectedDatabaseState[6].(*nbdb.LogicalRouter).StaticRoutes = append(expectedDatabaseState[6].(*nbdb.LogicalRouter).StaticRoutes, "static-reroute-UUID")
+						podPolicy := getReRoutePolicy(podV4IP, "4", "static-reroute-UUID", []string{node2MgntIP.To4().String()}, eipExternalID)
+						expectedDatabaseState = append(expectedDatabaseState, podPolicy)
+						expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies = append(expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies, "static-reroute-UUID")
 						expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies = expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies[1:] // remove ref to LRP since static route is routing the pod
 						expectedDatabaseState = expectedDatabaseState[1:]                                                                     //remove needless LRP since static route is incharge of routing when pod is remote
 					}
@@ -3022,10 +2998,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState = append(expectedDatabaseState, getReRoutePolicy(egressPod.Status.PodIP, "6", "reroute-UUID", []string{"fd97::3"}, eipExternalID))
 					}
 					if !isnode1Local {
-						// case4: egressNode is in different zone than pod and egressNode is in local zone, so static reroute will be visible
-						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(egressPod.Status.PodIP, node2LogicalRouterIPv6[0]))
 						expectedDatabaseState[2].(*nbdb.LogicalRouter).Policies = []string{}
-						expectedDatabaseState[2].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -3237,9 +3210,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					}
 					if podZone == "remote" {
-						// egressNode is in different zone than pod and egressNode is in local zone, so static reroute will be visible
-						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(egressPod.Status.PodIP, node2LogicalRouterIPv6[0]))
-						expectedDatabaseState[2].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState[2].(*nbdb.LogicalRouter).Policies = []string{}
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
@@ -3761,10 +3731,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					}
 					if podZone == "remote" {
-						// egressNode is in different zone than pod and egressNode is in local zone, so static reroute will be visible
-						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(podV6IP, node2LogicalRouterIPv6[0]))
 						expectedDatabaseState[2].(*nbdb.LogicalRouter).Policies = []string{}
-						expectedDatabaseState[2].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -3979,9 +3946,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					}
 					if podZone == "remote" {
 						// egressNode is in different zone than pod and egressNode is in local zone, so static reroute will be visible
-						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(egressPod.Status.PodIP, node2LogicalRouterIPv6[0]))
 						expectedDatabaseState[2].(*nbdb.LogicalRouter).Policies = []string{}
-						expectedDatabaseState[2].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
 
@@ -4191,10 +4156,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					}
 					if podZone == "remote" {
-						// egressNode is in different zone than pod and egressNode is in local zone, so static reroute will be visible
-						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(egressPod.Status.PodIP, nodeLogicalRouterIPv6[0]))
 						expectedDatabaseState[2].(*nbdb.LogicalRouter).Policies = []string{}
-						expectedDatabaseState[2].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -4395,8 +4357,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					}
 					if podZone == "remote" {
 						// pod is in remote zone, its LRP won't be visible
-						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(egressPod.Status.PodIP, node2LogicalRouterIPv6[0]))
-						expectedDatabaseState[1].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState[1].(*nbdb.LogicalRouter).Policies = []string{}
 						expectedDatabaseState = expectedDatabaseState[1:]
 					}
@@ -4645,6 +4605,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					i, n, _ := net.ParseCIDR(podV4IP + "/23")
 					n.IP = i
 					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					if interconnect && node1Zone != node2Zone {
+						fakeOvn.controller.zone = "local"
+					}
 
 					err := fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -4787,17 +4750,25 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Addresses: []string{"fe:1a:c2:3f:0e:fb " + util.GetNodeManagementIfAddr(node2Subnet).IP.String()},
 						},
 					}
-					if !interconnect || node1Zone == "global" {
+					if !interconnect || node1Zone != "remote" {
 						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
 						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState[3].(*nbdb.LogicalRouter).Nat = []string{"egressip-nat-1-UUID"}
 						expectedDatabaseState = append(expectedDatabaseState, natEIP1)
 					}
-					if !interconnect || node2Zone == "global" {
+					if node1Zone == "local" {
+						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(v4ClusterSubnet, nodeLogicalRouterIPv4[0]))
+						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
+					}
+					if !interconnect || node2Zone != "remote" {
 						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
 						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState[4].(*nbdb.LogicalRouter).Nat = []string{"egressip-nat-2-UUID"}
 						expectedDatabaseState = append(expectedDatabaseState, natEIP2)
+					}
+					if node2Zone == "local" {
+						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(v4ClusterSubnet, node2LogicalRouterIPv4[0]))
+						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 					}
 					if node2Zone != node1Zone && node2Zone == "remote" {
 						// the policy reroute will have its second nexthop as transit switchIP
@@ -4805,9 +4776,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[0].(*nbdb.LogicalRouterPolicy).Nexthops = []string{"100.64.0.2", "168.254.0.3"}
 					}
 					if node2Zone != node1Zone && node1Zone == "remote" {
-						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(egressPod.Status.PodIP, "100.64.0.3"))
 						expectedDatabaseState[5].(*nbdb.LogicalRouter).Policies = []string{"default-no-reroute-UUID", "no-reroute-service-UUID", "default-no-reroute-node-UUID"}
-						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState = expectedDatabaseState[1:] // policy is not visible since podNode is remote
 					}
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -4917,19 +4886,27 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Addresses: []string{"fe:1a:c2:3f:0e:fb " + util.GetNodeManagementIfAddr(node2Subnet).IP.String()},
 						},
 					}
-					if !interconnect || node1Zone == "global" {
+					if !interconnect || node1Zone != "remote" {
 						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
 						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState[3].(*nbdb.LogicalRouter).Nat = []string{"egressip-nat-1-UUID"}
 						natEIP1.ExternalIP = assignedEgressIP1
 						expectedDatabaseState = append(expectedDatabaseState, natEIP1)
 					}
-					if !interconnect || node2Zone == "global" {
+					if node1Zone == "local" {
+						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(v4ClusterSubnet, nodeLogicalRouterIPv4[0]))
+						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
+					}
+					if !interconnect || node2Zone != "remote" {
 						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
 						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState[4].(*nbdb.LogicalRouter).Nat = []string{"egressip-nat-2-UUID"}
 						natEIP2.ExternalIP = assignedEgressIP2
 						expectedDatabaseState = append(expectedDatabaseState, natEIP2)
+					}
+					if node2Zone == "local" {
+						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(v4ClusterSubnet, node2LogicalRouterIPv4[0]))
+						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 					}
 					if node2Zone != node1Zone && node2Zone == "remote" {
 						// the policy reroute will have its second nexthop as transit switchIP
@@ -4937,9 +4914,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[0].(*nbdb.LogicalRouterPolicy).Nexthops = []string{"100.64.0.2", "168.254.0.3"}
 					}
 					if node2Zone != node1Zone && node1Zone == "remote" {
-						expectedDatabaseState = append(expectedDatabaseState, getReRouteStaticRoute(egressPod.Status.PodIP, "100.64.0.3"))
 						expectedDatabaseState[5].(*nbdb.LogicalRouter).Policies = []string{"default-no-reroute-UUID", "no-reroute-service-UUID", "default-no-reroute-node-UUID"}
-						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 						expectedDatabaseState = expectedDatabaseState[1:] // policy is not visible since podNode is remote
 					}
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -4950,13 +4925,13 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
 			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
-			ginkgotable.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
+			ginkgotable.Entry("interconnect enabled; node1 and node2 in single zone", true, "global", "global"),
 			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
-			ginkgotable.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
+			ginkgotable.Entry("interconnect enabled; node1 in local and node2 in remote zones", true, "local", "remote"),
 			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
-			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
+			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in local zones", true, "remote", "local"),
 		)
 
 		ginkgo.It("should delete and re-create", func() {
@@ -6482,10 +6457,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						// the policy reroute will have its second nexthop as transit switchIP
 						// so the one with join switchIP is where podNode == egressNode and one with transitIP is where podNode != egressNode
 						podReRoutePolicy.Nexthops = []string{"100.64.0.2", "168.254.0.3"}
-					}
-					if node1Zone == "remote" {
-						finalDatabaseStatewithPod = append(finalDatabaseStatewithPod, getReRouteStaticRoute(egressPodIP[0].String(), node2LogicalRouterIPv4[0]))
-						finalDatabaseStatewithPod[2].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 					}
 					if !interconnect || node2Zone == "global" {
 						node2GR.Nat = []string{"egressip-nat-UUID2"}
@@ -10069,13 +10040,12 @@ func getReRoutePolicy(podIP, ipFamily, uuid string, nextHops []string, externalI
 	}
 }
 
-func getReRouteStaticRoute(podIP, nextHop string) *nbdb.LogicalRouterStaticRoute {
+func getReRouteStaticRoute(clusterSubnet, nextHop string) *nbdb.LogicalRouterStaticRoute {
 	return &nbdb.LogicalRouterStaticRoute{
-		ExternalIDs: map[string]string{"name": egressIPName},
-		Nexthop:     nextHop,
-		Policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-		IPPrefix:    podIP,
-		UUID:        "reroute-static-route-UUID",
+		Nexthop:  nextHop,
+		Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+		IPPrefix: clusterSubnet,
+		UUID:     "reroute-static-route-UUID",
 	}
 }
 
