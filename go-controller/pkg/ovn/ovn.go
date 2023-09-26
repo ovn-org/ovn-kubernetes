@@ -13,6 +13,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
@@ -354,9 +355,9 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 	} else if hostSubnets != nil {
 		var hostAddrs sets.Set[string]
 		if config.Gateway.Mode == config.GatewayModeShared {
-			hostAddrs, err = util.ParseNodeHostAddressesDropNetMask(node)
+			hostAddrs, err = util.ParseNodeHostCIDRsDropNetMask(node)
 			if err != nil && !util.IsAnnotationNotSetError(err) {
-				return fmt.Errorf("failed to get host addresses for node: %s: %v", node.Name, err)
+				return fmt.Errorf("failed to get host CIDRs for node: %s: %v", node.Name, err)
 			}
 		}
 		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
@@ -373,10 +374,10 @@ func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
 }
 
-// hostAddressesChanged compares old annotations to new and returns true if the something has changed.
-func hostAddressesChanged(oldNode, newNode *kapi.Node) bool {
-	oldAddrs, _ := util.ParseNodeHostAddresses(oldNode)
-	Addrs, _ := util.ParseNodeHostAddresses(newNode)
+// hostCIDRsChanged compares old annotations to new and returns true if the something has changed.
+func hostCIDRsChanged(oldNode, newNode *kapi.Node) bool {
+	oldAddrs, _ := util.ParseNodeHostCIDRs(oldNode)
+	Addrs, _ := util.ParseNodeHostCIDRs(newNode)
 	return !oldAddrs.Equal(Addrs)
 }
 
@@ -391,6 +392,12 @@ func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
 	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, ovntypes.DefaultNetworkName)
 	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
+}
+
+func primaryAddrChanged(oldNode, newNode *kapi.Node) bool {
+	oldIP, _ := util.GetNodePrimaryIP(oldNode)
+	newIP, _ := util.GetNodePrimaryIP(newNode)
+	return oldIP != newIP
 }
 
 func nodeChassisChanged(oldNode, node *kapi.Node) bool {
@@ -446,15 +453,19 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		return nil
 	}
 	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string) error { return nil }
+	// used only when IC=true
+	createDefaultNodeRouteToExternal := func(libovsdbclient.Client, string) error { return nil }
 
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies
 		ensureNodeNoReroutePolicies = ensureDefaultNoRerouteNodePolicies
 		deleteLegacyDefaultNoRerouteNodePolicies = DeleteLegacyDefaultNoRerouteNodePolicies
+		createDefaultNodeRouteToExternal = libovsdbutil.CreateDefaultRouteToExternal
 	}
 
 	return egresssvc_zone.NewController(DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
 		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
+		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
 		oc.watchFactory.EndpointSliceCoreInformer(),
 		oc.watchFactory.NodeCoreInformer(), oc.zone)

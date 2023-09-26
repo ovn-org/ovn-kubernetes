@@ -35,7 +35,7 @@ func ipEvent(ipStr string, isAdd bool, addrChan chan netlink.AddrUpdate) *net.IP
 func nodeHasAddress(fakeClient kubernetes.Interface, nodeName string, ipNet *net.IPNet) bool {
 	node, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
-	addrs, err := util.ParseNodeHostAddressesDropNetMask(node)
+	addrs, err := util.ParseNodeHostCIDRsDropNetMask(node)
 	Expect(err).NotTo(HaveOccurred())
 	return addrs.Has(ipNet.IP.String())
 }
@@ -69,7 +69,7 @@ var _ = Describe("Node IP Handler tests", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
-					"k8s.ovn.org/host-addresses":    `["10.1.1.10/24", "2001:db8::10/64"]`,
+					util.OVNNodeHostCIDRs:           `["10.1.1.10/24", "2001:db8::10/64"]`,
 					"k8s.ovn.org/l3-gateway-config": `{"default":{"mac-address":"52:54:00:e2:ed:d0","ip-addresses":["192.168.122.14/24"],"ip-address":"192.168.122.14/24","next-hops":["192.168.122.1"],"next-hop":"192.168.122.1"}}`,
 				},
 			},

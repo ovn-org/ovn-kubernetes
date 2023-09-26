@@ -21,6 +21,7 @@ import (
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilnet "k8s.io/utils/net"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -417,7 +418,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 						if status.Node != node1Name {
 							continue
 						}
-						if status.Network == "" || status.EgressIP == "" {
+						if status.EgressIP == "" {
 							continue
 						}
 						// FIXME: we assume all EIPs are hosted by non-OVN managed network. Skip OVN managed EIPs.
@@ -461,7 +462,8 @@ var _ = table.XDescribeTable("EgressIP selectors",
 					ips, err := util.DefaultNetworkPodIPs(pod)
 					gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 					for _, ip := range ips {
-						expectedRules = append(expectedRules, generateIPRule(ip, getLinkIndex(expectedEIPConfig.inf)))
+
+						expectedRules = append(expectedRules, generateIPRule(ip, utilnet.IsIPv6(ip), getLinkIndex(expectedEIPConfig.inf)))
 					}
 				}
 			}
@@ -521,7 +523,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 	table.Entry("configures nothing when EIPs dont select anything",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{},
 			},
 		},
@@ -534,7 +536,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 	table.Entry("configures one EIP and one Pod",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -559,7 +561,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 		// Test pod and namespace selection -
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -590,7 +592,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 	table.Entry("configures one EIP and multiple namespaces and multiple pods",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -623,7 +625,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 	table.Entry("configures one EIP and multiple namespaces and multiple pods",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -655,7 +657,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 	table.Entry("configures multiple EIPs and multiple namespaces and multiple pods",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -675,7 +677,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 				},
 			},
 			{
-				newEgressIP(egressIP2Name, egressIP2IP, dummy2IPv4CIDRNetwork, node1Name, namespace2Label, egressPodLabel),
+				newEgressIP(egressIP2Name, egressIP2IP, node1Name, namespace2Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink2Name)),
 					getExpectedLinkAddr(egressIP1IP),
@@ -769,7 +771,7 @@ var _ = table.XDescribeTable("repair node", func(expectedStateFollowingClean []t
 }, table.Entry("should not fail when node is clean and nothing to apply",
 	[]testEIPConfig{
 		{
-			newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+			newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 			testConfig{}, // no expected config
 		},
 	},
@@ -782,7 +784,7 @@ var _ = table.XDescribeTable("repair node", func(expectedStateFollowingClean []t
 	table.Entry("should remove stale route",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{
 					inf: dummyLink2Name,
 				}, // no expected config
@@ -805,7 +807,7 @@ var _ = table.XDescribeTable("repair node", func(expectedStateFollowingClean []t
 	table.XEntry("should remove stale address",
 		[]testEIPConfig{
 			{
-				newEgressIP(egressIP1Name, egressIP1IP, dummy1IPv4CIDRNetwork, node1Name, namespace1Label, egressPodLabel),
+				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{
 					inf: dummyLink2Name,
 				}, // no expected config
@@ -897,11 +899,11 @@ func newNamespaceMeta(namespace string, additionalLabels map[string]string) meta
 }
 
 func getNodeObj(testNode testNode) corev1.Node {
-	hostAddrs := make([]string, 0)
-	hostAddrs = append(hostAddrs, fmt.Sprintf("\"%s\"", node1OVNManagedNetworkV4))
+	hostCIDRs := make([]string, 0)
+	hostCIDRs = append(hostCIDRs, fmt.Sprintf("\"%s\"", node1OVNManagedNetworkV4))
 	// we assume all extra interfaces and their addresses are valid for host addr
 	for _, infs := range testNode.infs {
-		hostAddrs = append(hostAddrs, fmt.Sprintf("\"%s\"", infs.addr))
+		hostCIDRs = append(hostCIDRs, fmt.Sprintf("\"%s\"", infs.addr))
 	}
 	return corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -909,7 +911,7 @@ func getNodeObj(testNode testNode) corev1.Node {
 			Annotations: map[string]string{
 				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}",
 					node1OVNManagedNetworkV4, ""),
-				"k8s.ovn.org/host-addresses": fmt.Sprintf("[%s]", strings.Join(hostAddrs, ",")),
+				util.OVNNodeHostCIDRs: fmt.Sprintf("[%s]", strings.Join(hostCIDRs, ",")),
 			}},
 		Status: corev1.NodeStatus{
 			Conditions: []corev1.NodeCondition{
@@ -972,11 +974,7 @@ func newEgressIPMeta(name string) metav1.ObjectMeta {
 	}
 }
 
-func newEgressIP(name, ip, network, node string, namespaceLabels, podLabels map[string]string) egressipv1.EgressIP {
-	_, ipnet, err := net.ParseCIDR(network)
-	if err != nil {
-		panic(err.Error())
-	}
+func newEgressIP(name, ip, node string, namespaceLabels, podLabels map[string]string) egressipv1.EgressIP {
 	return egressipv1.EgressIP{
 		ObjectMeta: newEgressIPMeta(name),
 		Spec: egressipv1.EgressIPSpec{
@@ -992,7 +990,6 @@ func newEgressIP(name, ip, network, node string, namespaceLabels, podLabels map[
 			Items: []egressipv1.EgressIPStatusItem{{
 				node,
 				ip,
-				ipnet.String(),
 			}},
 		},
 	}

@@ -228,7 +228,8 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 					klog.Infof("CloudPrivateIPConfig: %s already assigned to node: %s", cloudPrivateIPConfigName, cloudPrivateIPConfig.Spec.Node)
 					continue
 				}
-				return fmt.Errorf("cloud create request failed for CloudPrivateIPConfig: %s, err: item exists", cloudPrivateIPConfigName)
+				return fmt.Errorf("cloud request failed for CloudPrivateIPConfig: %s, err: cannot be assigned to node %s because cloud has it in node %s",
+					cloudPrivateIPConfigName, op.toAdd, cloudPrivateIPConfig.Spec.Node)
 			}
 			cloudPrivateIPConfig := ocpcloudnetworkapi.CloudPrivateIPConfig{
 				ObjectMeta: metav1.ObjectMeta{
@@ -683,7 +684,7 @@ func (eIPC *egressIPClusterController) setNodeEgressReachable(nodeName string, i
 
 // reconcileNonOVNNetworkEIPs is used to reconsider existing assigned EIPs that are assigned to non-OVN managed
 // networks and will send a 'synthetic' reconcile for any EIPs which are hosted by an invalid network which is determined
-// from the nodes host-address annotation
+// from the nodes host-cidrs annotation
 func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node) error {
 	var errorAggregate []error
 	egressIPs, err := eIPC.kube.GetEgressIPs()
@@ -694,7 +695,7 @@ func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node)
 	eIPC.allocator.Lock()
 	for _, egressIP := range egressIPs.Items {
 		for _, status := range egressIP.Status.Items {
-			if status.Node == node.Name && status.Network != "" {
+			if status.Node == node.Name {
 				egressIPIP := net.ParseIP(status.EgressIP)
 				if egressIPIP == nil {
 					return fmt.Errorf("unexpected empty egress IP found in status for egressIP %s", egressIP.Name)
@@ -714,11 +715,9 @@ func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node)
 						"is hosted by non-OVN managed network for node %s: %w", egressIP.Name, egressIPIP.String(), node.Name, err))
 					continue
 				}
-				// do not reconcile if calculated EIP IP assigned network is what is already configured
-				if network == status.Network {
-					continue
+				if network == "" {
+					reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
 				}
-				reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
 			}
 		}
 	}
@@ -1160,7 +1159,7 @@ func (eIPC *egressIPClusterController) getCloudPrivateIPConfigMap(objs []interfa
 // assign the egress IP to the node with the lowest amount of allocations every
 // time, this does not guarantee complete balance, but mostly complete.
 // For Egress IPs that are hosted by non-OVN managed networks, there must be at least
-// one node that hosts the network and exposed via the nodes host-addresses annotation.
+// one node that hosts the network and exposed via the nodes host-cidrs annotation.
 func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []string) []egressipv1.EgressIPStatusItem {
 	eIPC.allocator.Lock()
 	defer eIPC.allocator.Unlock()
@@ -1191,7 +1190,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				Name: name,
 			}
 			eIPC.recorder.Eventf(&eIPRef, v1.EventTypeWarning, "EgressIPConflict", "Egress IP %s with IP "+
-				"%s is conflicting with a host (%s) IP address and will not be assigned", name, eIP.String(), conflictedHost, name)
+				"%v is conflicting with a host (%s) IP address and will not be assigned", name, eIP, conflictedHost)
 			klog.Errorf("Egress IP: %v address is already assigned on an interface on node %s", eIP, conflictedHost)
 			return assignments
 		}
@@ -1232,7 +1231,6 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				assignments = append(assignments, egressipv1.EgressIPStatusItem{
 					Node:     status.Node,
 					EgressIP: eIP.String(),
-					Network:  eIPNetwork,
 				})
 				continue
 			} else {
@@ -1277,6 +1275,8 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			// if the EIP is hosted by a non OVN managed network, then restrict the assignable nodes to the set of nodes that
 			// may host the non-OVN managed network
 			if len(assignableNodesWithSecondaryNet) > 0 {
+				klog.V(5).Infof("Restricting the number of assignable nodes from %d to %d because EgressIP %s IP %s "+
+					"is going to be hosted by a non-OVN managed network", len(assignableNodes), len(assignableNodesWithSecondaryNet), name, eIP.String())
 				assignableNodes = assignableNodesWithSecondaryNet
 			}
 		}
@@ -1324,11 +1324,10 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			assignments = append(assignments, egressipv1.EgressIPStatusItem{
 				Node:     eNode.name,
 				EgressIP: eIP.String(),
-				Network:  egressIPNetwork,
 			})
 			eNode.allocations[eIP.String()] = name
 			assignmentSuccessful = true
-			klog.Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, eNode)
+			klog.Infof("Successful assignment of egress IP: %s to network %s on node: %+v", egressIP, egressIPNetwork, eNode)
 			break
 		}
 	}
@@ -1387,14 +1386,14 @@ func (eIPC *egressIPClusterController) isEgressIPAddrConflict(egressIP net.IP) (
 	if err != nil {
 		return false, "", fmt.Errorf("failed to get nodes: %v", err)
 	}
-	// iterate through the nodes and ensure no host IP address conflicts with EIP. Note that host-addresses annotation
+	// iterate through the nodes and ensure no host IP address conflicts with EIP. Note that host-cidrs annotation
 	// does not contain EgressIPs that are assigned to interfaces.
 	for _, node := range nodes {
-		nodeHostAddressesSet, err := util.ParseNodeHostAddressesDropNetMask(node)
+		nodeHostAddrsSet, err := util.ParseNodeHostCIDRsDropNetMask(node)
 		if err != nil {
-			return false, "", fmt.Errorf("failed to parse node host addresses for node %s: %v", node.Name, err)
+			return false, "", fmt.Errorf("failed to parse node host cidrs for node %s: %v", node.Name, err)
 		}
-		if nodeHostAddressesSet.Has(egressIP.String()) {
+		if nodeHostAddrsSet.Has(egressIP.String()) {
 			return true, node.Name, nil
 		}
 	}

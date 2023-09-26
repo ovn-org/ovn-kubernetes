@@ -40,7 +40,7 @@ type nodeInfo struct {
 	name string
 	// The list of physical IPs reported by the gatewayconf annotation
 	l3gatewayAddresses []net.IP
-	// The list of physical IPs the node has, as reported by the host-address annotation
+	// The list of physical IPs and subnet masks the node has, as reported by the host-cidrs annotation
 	hostAddresses []net.IP
 	// The pod network subnet(s)
 	podSubnets []net.IPNet
@@ -131,13 +131,13 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.Res
 			// - hostSubnet annotation has changed
 			// - L3Gateway annotation's ip addresses have changed
 			// - the name of the node (very rare) has changed
-			// - the `host-addresses` annotation changed
+			// - the `host-cidrs` annotation changed
 			// - node changes its zone
 			// . No need to trigger update for any other field change.
 			if util.NodeSubnetAnnotationChanged(oldObj, newObj) ||
 				util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
 				oldObj.Name != newObj.Name ||
-				util.NodeHostAddressesAnnotationChanged(oldObj, newObj) ||
+				util.NodeHostCIDRsAnnotationChanged(oldObj, newObj) ||
 				util.NodeZoneAnnotationChanged(oldObj, newObj) ||
 				util.NodeMigratedZoneAnnotationChanged(oldObj, newObj) {
 				nt.updateNode(newObj)
@@ -249,9 +249,9 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		}
 		chassisID = gwConf.ChassisID
 	}
-	hostAddresses, err := util.ParseNodeHostAddressesDropNetMask(node)
+	hostAddresses, err := util.ParseNodeHostCIDRsDropNetMask(node)
 	if err != nil {
-		klog.Warningf("Failed to get node host addresses for [%s]: %s", node.Name, err.Error())
+		klog.Warningf("Failed to get node host CIDRs for [%s]: %s", node.Name, err.Error())
 		hostAddresses = sets.New[string]()
 	}
 

@@ -28,7 +28,7 @@ import (
 type addressManager struct {
 	nodeName       string
 	watchFactory   factory.NodeWatchFactory
-	addresses      sets.Set[string]
+	cidrs          sets.Set[string]
 	nodeAnnotator  kube.Annotator
 	mgmtPortConfig *managementPortConfig
 	// useNetlink indicates the addressManager should use machine
@@ -55,7 +55,7 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, config *manage
 	mgr := &addressManager{
 		nodeName:       nodeName,
 		watchFactory:   watchFactory,
-		addresses:      sets.New[string](),
+		cidrs:          sets.New[string](),
 		mgmtPortConfig: config,
 		gatewayBridge:  gwBridge,
 		OnChanged:      func() {},
@@ -71,9 +71,9 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, config *manage
 func (c *addressManager) addAddr(ipnet net.IPNet) bool {
 	c.Lock()
 	defer c.Unlock()
-	if !c.addresses.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP) {
+	if !c.cidrs.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP) {
 		klog.Infof("Adding IP: %s, to node IP manager", ipnet)
-		c.addresses.Insert(ipnet.String())
+		c.cidrs.Insert(ipnet.String())
 		return true
 	}
 
@@ -85,9 +85,9 @@ func (c *addressManager) addAddr(ipnet net.IPNet) bool {
 func (c *addressManager) delAddr(ipnet net.IPNet) bool {
 	c.Lock()
 	defer c.Unlock()
-	if c.addresses.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP) {
+	if c.cidrs.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP) {
 		klog.Infof("Removing IP: %s, from node IP manager", ipnet)
-		c.addresses.Delete(ipnet.String())
+		c.cidrs.Delete(ipnet.String())
 		return true
 	}
 
@@ -98,7 +98,7 @@ func (c *addressManager) delAddr(ipnet net.IPNet) bool {
 func (c *addressManager) ListAddresses() []net.IP {
 	c.Lock()
 	defer c.Unlock()
-	addrs := sets.List(c.addresses)
+	addrs := sets.List(c.cidrs)
 	out := make([]net.IP, 0, len(addrs))
 	for _, addr := range addrs {
 		ip, _, err := net.ParseCIDR(addr)
@@ -180,8 +180,8 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 				}
 
 				c.handleNodePrimaryAddrChange()
-				if addrChanged || !c.doesNodeHostAddressesMatch() {
-					klog.Infof("Host addresses changed to %v. Updating node address annotation.", c.addresses)
+				if addrChanged || !c.doNodeHostCIDRsMatch() {
+					klog.Infof("Host CIDRs changed to %v. Updating node address annotations.", c.cidrs)
 					err := c.updateNodeAddressAnnotations()
 					if err != nil {
 						klog.Errorf("Address Manager failed to update node address annotations: %v", err)
@@ -220,7 +220,7 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 }
 
 // updateNodeAddressAnnotations updates all relevant annotations for the node including
-// k8s.ovn.org/host-addresses, k8s.ovn.org/node-primary-ifaddr, k8s.ovn.org/l3-gateway-config.
+// k8s.ovn.org/host-cidrs, k8s.ovn.org/node-primary-ifaddr, k8s.ovn.org/l3-gateway-config.
 func (c *addressManager) updateNodeAddressAnnotations() error {
 	var err error
 	var ifAddrs []*net.IPNet
@@ -239,8 +239,8 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 		}
 	}
 
-	// update k8s.ovn.org/host-addresses
-	if err = c.updateHostAddresses(node); err != nil {
+	// update k8s.ovn.org/host-cidrs
+	if err = c.updateHostCIDRs(node); err != nil {
 		return err
 	}
 
@@ -270,7 +270,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	return nil
 }
 
-func (c *addressManager) updateHostAddresses(node *kapi.Node) error {
+func (c *addressManager) updateHostCIDRs(node *kapi.Node) error {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		// For DPU mode, here we need to use the DPU host's IP address which is the tenant cluster's
 		// host internal IP address instead.
@@ -279,24 +279,24 @@ func (c *addressManager) updateHostAddresses(node *kapi.Node) error {
 			return err
 		}
 		nodeAddrSet := sets.New[string](nodeAddrStr)
-		return util.SetNodeHostAddresses(c.nodeAnnotator, nodeAddrSet)
+		return util.SetNodeHostCIDRs(c.nodeAnnotator, nodeAddrSet)
 	}
 
-	return util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses)
+	return util.SetNodeHostCIDRs(c.nodeAnnotator, c.cidrs)
 }
 
-func (c *addressManager) assignAddresses(nodeHostAddresses sets.Set[string]) bool {
+func (c *addressManager) assignCIDRs(nodeHostCIDRs sets.Set[string]) bool {
 	c.Lock()
 	defer c.Unlock()
 
-	if nodeHostAddresses.Equal(c.addresses) {
+	if nodeHostCIDRs.Equal(c.cidrs) {
 		return false
 	}
-	c.addresses = nodeHostAddresses
+	c.cidrs = nodeHostCIDRs
 	return true
 }
 
-func (c *addressManager) doesNodeHostAddressesMatch() bool {
+func (c *addressManager) doNodeHostCIDRsMatch() bool {
 	c.Lock()
 	defer c.Unlock()
 
@@ -306,14 +306,14 @@ func (c *addressManager) doesNodeHostAddressesMatch() bool {
 		return false
 	}
 	// check to see if ips on the node differ from what we stored
-	// in host-address annotation
-	nodeHostAddresses, err := util.ParseNodeHostAddresses(node)
+	// in host-cidrs annotation
+	nodeHostAddresses, err := util.ParseNodeHostCIDRs(node)
 	if err != nil {
 		klog.Errorf("Unable to parse addresses from node host %s: %s", node.Name, err.Error())
 		return false
 	}
 
-	return nodeHostAddresses.Equal(c.addresses)
+	return nodeHostAddresses.Equal(c.cidrs)
 }
 
 // nodePrimaryAddrChanged returns false if there is an error or if the IP does
@@ -336,11 +336,11 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 	}
 	c.Lock()
 	var exists bool
-	for _, hostAddr := range c.addresses.UnsortedList() {
-		ip, _, err := net.ParseCIDR(hostAddr)
+	for _, hostCIDR := range c.cidrs.UnsortedList() {
+		ip, _, err := net.ParseCIDR(hostCIDR)
 		if err != nil {
 			klog.Errorf("Node IP: failed to parse node address %q. Unable to detect if node primary address changed: %w",
-				hostAddr, err)
+				hostCIDR, err)
 			continue
 		}
 		if ip.Equal(nodePrimaryAddr) {
@@ -459,9 +459,9 @@ func (c *addressManager) sync() {
 		currAddresses.Insert(netAddr.String())
 	}
 
-	addrChanged := c.assignAddresses(currAddresses)
+	addrChanged := c.assignCIDRs(currAddresses)
 	c.handleNodePrimaryAddrChange()
-	if addrChanged || !c.doesNodeHostAddressesMatch() {
+	if addrChanged || !c.doNodeHostCIDRsMatch() {
 		klog.Infof("Node address changed to %v. Updating annotations.", currAddresses)
 		err := c.updateNodeAddressAnnotations()
 		if err != nil {
