@@ -126,7 +126,7 @@ jobs:
       run: |
         sudo eatmydata apt-get purge --auto-remove -y \
           azure-cli aspnetcore-* dotnet-* ghc-* firefox \
-          google-chrome-stable google-cloud-sdk \
+          google-chrome-stable \
           llvm-* microsoft-edge-stable mono-* \
           msbuild mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
