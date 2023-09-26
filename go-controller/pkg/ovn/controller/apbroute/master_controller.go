@@ -239,6 +239,19 @@ func (c *ExternalGatewayMasterController) processNextPolicyWorkItem(wg *sync.Wai
 	return true
 }
 
+func (c *ExternalGatewayMasterController) GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespaceName string) (sets.Set[string], error) {
+	gwIPs, err := c.mgr.getDynamicGatewayIPsForTargetNamespace(namespaceName)
+	if err != nil {
+		return nil, err
+	}
+	tmpIPs, err := c.mgr.getStaticGatewayIPsForTargetNamespace(namespaceName)
+	if err != nil {
+		return nil, err
+	}
+
+	return gwIPs.Union(tmpIPs), nil
+}
+
 func (c *ExternalGatewayMasterController) onPolicyAdd(obj interface{}) {
 	_, ok := obj.(*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute)
 	if !ok {

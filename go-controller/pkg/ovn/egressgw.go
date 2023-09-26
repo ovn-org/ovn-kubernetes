@@ -6,6 +6,7 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"sync"
 
 	utilnet "k8s.io/utils/net"
 
@@ -20,6 +21,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
+	"github.com/vishvananda/netlink"
+	utilapierrors "k8s.io/apimachinery/pkg/util/errors"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -89,6 +92,9 @@ func (oc *DefaultNetworkController) addPodExternalGWForNamespace(namespace strin
 	for _, gwInfo := range nsInfo.routingExternalPodGWs {
 		existingGWs.Insert(gwInfo.gws.UnsortedList()...)
 	}
+	if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
+		existingGWs.Insert(nsInfo.routingExternalGWs.gws.UnsortedList()...)
+	}
 	nsUnlock()
 
 	klog.Infof("Adding routes for external gateway pod: %s, next hops: %q, namespace: %s, bfd-enabled: %t",
@@ -98,10 +104,141 @@ func (oc *DefaultNetworkController) addPodExternalGWForNamespace(namespace strin
 		return err
 	}
 	// add the exgw podIP to the namespace's k8s.ovn.org/external-gw-pod-ips list
-	if err := util.UpdateExternalGatewayPodIPsAnnotation(oc.kube, namespace, existingGWs.List()); err != nil {
-		klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", util.ExternalGatewayPodIPsAnnotation, existingGWs, namespace, err)
+	if !config.OVNKubernetesFeature.EnableInterconnect || oc.zone == types.OvnDefaultZone {
+		// If interconnect is disabled OR interconnect is running in single-zone-mode,
+		// the ovnkube-master is responsible for patching ICNI managed namespaces with
+		// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
+		// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
+		// directly on the ovnkube-controller code to avoid an extra namespace annotation
+		if err := util.UpdateExternalGatewayPodIPsAnnotation(oc.kube, namespace, existingGWs.List()); err != nil {
+			klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", util.ExternalGatewayPodIPsAnnotation, existingGWs, namespace, err)
+		}
+	} else {
+		// flush here since we know we have added an egressgw pod and we also know the full list of existing gatewayIPs
+		gatewayIPs, err := oc.apbExternalRouteController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespace)
+		if err != nil {
+			return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects: %w", err)
+		}
+		gatewayIPs = gatewayIPs.Insert(existingGWs.List()...)
+		err = oc.syncConntrackForExternalGateways(namespace, gatewayIPs) // best effort
+		if err != nil {
+			klog.Errorf("Syncing conntrack entries for egressGW pod %v serving the namespace %s failed: %v",
+				egress, namespace, err)
+		}
 	}
 	return nil
+}
+
+func (oc *DefaultNetworkController) syncConntrackForExternalGateways(namespace string, gwIPsToKeep sets.Set[string]) error {
+	var wg sync.WaitGroup
+	wg.Add(len(gwIPsToKeep))
+	validMACs := sync.Map{}
+	for gwIP := range gwIPsToKeep {
+		go func(gwIP string) {
+			defer wg.Done()
+			if len(gwIP) > 0 && !utilnet.IsIPv6String(gwIP) {
+				// TODO: Add support for IPv6 external gateways
+				if hwAddr, err := util.GetMACAddressFromARP(net.ParseIP(gwIP)); err != nil {
+					klog.Errorf("Failed to lookup hardware address for gatewayIP %s: %v", gwIP, err)
+				} else if len(hwAddr) > 0 {
+					// we need to reverse the mac before passing it to the conntrack filter since OVN saves the MAC in the following format
+					// +------------------------------------------------------------ +
+					// | 128 ...  112 ... 96 ... 80 ... 64 ... 48 ... 32 ... 16 ... 0|
+					// +------------------+-------+--------------------+-------------|
+					// |                  | UNUSED|    MAC ADDRESS     |   UNUSED    |
+					// +------------------+-------+--------------------+-------------+
+					for i, j := 0, len(hwAddr)-1; i < j; i, j = i+1, j-1 {
+						hwAddr[i], hwAddr[j] = hwAddr[j], hwAddr[i]
+					}
+					validMACs.Store(gwIP, []byte(hwAddr))
+				}
+			}
+		}(gwIP)
+	}
+	wg.Wait()
+
+	validNextHopMACs := [][]byte{}
+	validMACs.Range(func(key interface{}, value interface{}) bool {
+		validNextHopMACs = append(validNextHopMACs, value.([]byte))
+		return true
+	})
+	// Handle corner case where there are 0 IPs on the annotations OR none of the ARPs were successful; i.e allowMACList={empty}.
+	// This means we *need to* pass a label > 128 bits that will not match on any conntrack entry labels for these pods.
+	// That way any remaining entries with labels having MACs set will get purged.
+	if len(validNextHopMACs) == 0 {
+		validNextHopMACs = append(validNextHopMACs, []byte("does-not-contain-anything"))
+	}
+	pods, err := oc.watchFactory.GetPods(namespace)
+	if err != nil {
+		return fmt.Errorf("unable to get pods from informer: %v", err)
+	}
+
+	var errs []error
+	for _, pod := range pods {
+		pod := pod
+		// Since it's executed in ovnkube-controller only for multi-zone-ic the following hack of filtering
+		// local pods will work. Error will be treated as best-effort and ignored
+		if localPod, _ := oc.isPodInLocalZone(pod); !localPod {
+			continue
+		}
+		podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+		if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
+			errs = append(errs, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
+		}
+		for _, podIP := range podIPs { // flush conntrack only for UDP
+			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
+			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
+			err := util.DeleteConntrack(podIP.String(), 0, kapi.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP.String(), err))
+			}
+		}
+	}
+	return utilapierrors.NewAggregate(errs)
+}
+
+func (oc *DefaultNetworkController) checkAndDeleteStaleConntrackEntries() {
+	namespaces, err := oc.watchFactory.GetNamespaces()
+	if err != nil {
+		klog.Errorf("Unable to get pods from informer: %v", err)
+		return
+	}
+	for _, namespace := range namespaces {
+		// flush here since we know we have added an egressgw pod and we also know the full list of existing gatewayIPs
+		existingGWs, err := oc.apbExternalRouteController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespace.Name)
+		if err != nil {
+			klog.Errorf("Unable to retrieve gateway IPs for Admin Policy Based External Route objects for ns %s: %w", namespace.Name, err)
+			return
+		}
+		// by now the nsInfo cache must be repaired for this feature fully;
+		// however this introduces cache lock scale concern by doing this every minute
+		// versus previously this was done purely using annotations
+		nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(namespace.Name, false, nil)
+		if err != nil {
+			klog.Errorf("Failed to ensure namespace %s locked: %v", namespace, err)
+			return
+		}
+		for _, gwInfo := range nsInfo.routingExternalPodGWs {
+			existingGWs.Insert(gwInfo.gws.UnsortedList()...)
+		}
+		existingGWs.Insert(nsInfo.routingExternalGWs.gws.UnsortedList()...)
+		nsUnlock()
+		if len(existingGWs) > 0 {
+			pods, err := oc.watchFactory.GetPods(namespace.Name)
+			if err != nil {
+				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
+			}
+			if len(pods) > 0 || err != nil {
+				// we only need to proceed if there is at least one pod in this namespace on this node
+				// OR if we couldn't fetch the pods for some reason at this juncture
+				err = oc.syncConntrackForExternalGateways(namespace.Name, existingGWs)
+				if err != nil {
+					klog.Errorf("Syncing conntrack entries for egressGWs %+v serving the namespace %s failed: %v",
+						existingGWs, namespace.Name, err)
+				}
+			}
+		}
+	}
 }
 
 // addExternalGWsForNamespace handles adding annotated gw routes to all pods in namespace
@@ -293,6 +430,9 @@ func (oc *DefaultNetworkController) deletePodGWRoutesForNamespace(pod *kapi.Pod,
 	for _, gwInfo := range nsInfo.routingExternalPodGWs {
 		existingGWs.Insert(gwInfo.gws.UnsortedList()...)
 	}
+	if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
+		existingGWs.Insert(nsInfo.routingExternalGWs.gws.UnsortedList()...)
+	}
 	nsUnlock()
 
 	if !ok || len(foundGws.gws) == 0 {
@@ -313,8 +453,27 @@ func (oc *DefaultNetworkController) deletePodGWRoutesForNamespace(pod *kapi.Pod,
 		return fmt.Errorf("failed to delete GW routes for pod %s: %w", pod.Name, err)
 	}
 	// remove the exgw podIP from the namespace's k8s.ovn.org/external-gw-pod-ips list
-	if err := util.UpdateExternalGatewayPodIPsAnnotation(oc.kube, namespace, sets.List(existingGWs)); err != nil {
-		klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", util.ExternalGatewayPodIPsAnnotation, existingGWs, namespace, err)
+	if !config.OVNKubernetesFeature.EnableInterconnect || oc.zone == types.OvnDefaultZone {
+		// If interconnect is disabled OR interconnect is running in single-zone-mode,
+		// the ovnkube-master is responsible for patching ICNI managed namespaces with
+		// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
+		// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
+		// directly on the ovnkube-controller code to avoid an extra namespace annotation
+		if err := util.UpdateExternalGatewayPodIPsAnnotation(oc.kube, namespace, sets.List(existingGWs)); err != nil {
+			klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", util.ExternalGatewayPodIPsAnnotation, existingGWs, namespace, err)
+		}
+	} else {
+		// flush here since we know we have deleted an egressgw pod and we also know the full list of existing gatewayIPs
+		gatewayIPs, err := oc.apbExternalRouteController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespace)
+		if err != nil {
+			return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects: %w", err)
+		}
+		gatewayIPs = gatewayIPs.Insert(sets.List(existingGWs)...)
+		err = oc.syncConntrackForExternalGateways(namespace, gatewayIPs) // best effort
+		if err != nil {
+			klog.Errorf("Syncing conntrack entries for egressGWs %+v serving the namespace %s failed: %v",
+				gatewayIPs, namespace, err)
+		}
 	}
 	return nil
 }

@@ -512,12 +512,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				}
 
 				// ensure the conntrack deletion tracker annotation is updated
-				ginkgo.By("Check if the k8s.ovn.org/external-gw-pod-ips got updated for the app namespace")
-				err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-					ns := getNamespace(f, f.Namespace.Name)
-					return (ns.Annotations[externalGatewayPodIPsAnnotation] == fmt.Sprintf("%s,%s", addresses.gatewayIPs[0], addresses.gatewayIPs[1])), nil
-				})
-				framework.ExpectNoError(err, "Check if the k8s.ovn.org/external-gw-pod-ips got updated, failed: %v", err)
+				if !isInterconnectEnabled() {
+					ginkgo.By("Check if the k8s.ovn.org/external-gw-pod-ips got updated for the app namespace")
+					err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+						ns := getNamespace(f, f.Namespace.Name)
+						return (ns.Annotations[externalGatewayPodIPsAnnotation] == fmt.Sprintf("%s,%s", addresses.gatewayIPs[0], addresses.gatewayIPs[1])), nil
+					})
+					framework.ExpectNoError(err, "Check if the k8s.ovn.org/external-gw-pod-ips got updated, failed: %v", err)
+				}
 
 				setupIperf3Client := func(container, address string, port int) {
 					// note iperf3 even when using udp also spawns tcp connection first; so we indirectly also have the tcp connection when using "-u" flag
@@ -547,12 +549,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				annotatePodForGateway(gatewayPodName2, servingNamespace, "", addresses.gatewayIPs[1], false)
 
 				// ensure the conntrack deletion tracker annotation is updated
-				ginkgo.By("Check if the k8s.ovn.org/external-gw-pod-ips got updated for the app namespace")
-				err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-					ns := getNamespace(f, f.Namespace.Name)
-					return (ns.Annotations[externalGatewayPodIPsAnnotation] == addresses.gatewayIPs[0]), nil
-				})
-				framework.ExpectNoError(err, "Check if the k8s.ovn.org/external-gw-pod-ips got updated, failed: %v", err)
+				if !isInterconnectEnabled() {
+					ginkgo.By("Check if the k8s.ovn.org/external-gw-pod-ips got updated for the app namespace")
+					err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+						ns := getNamespace(f, f.Namespace.Name)
+						return (ns.Annotations[externalGatewayPodIPsAnnotation] == addresses.gatewayIPs[0]), nil
+					})
+					framework.ExpectNoError(err, "Check if the k8s.ovn.org/external-gw-pod-ips got updated, failed: %v", err)
+				}
 
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 				podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -569,12 +573,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				annotatePodForGateway(gatewayPodName1, servingNamespace, "", addresses.gatewayIPs[0], false)
 
 				// ensure the conntrack deletion tracker annotation is updated
-				ginkgo.By("Check if the k8s.ovn.org/external-gw-pod-ips got updated for the app namespace")
-				err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-					ns := getNamespace(f, f.Namespace.Name)
-					return (ns.Annotations[externalGatewayPodIPsAnnotation] == ""), nil
-				})
-				framework.ExpectNoError(err, "Check if the k8s.ovn.org/external-gw-pod-ips got updated, failed: %v", err)
+				if !isInterconnectEnabled() {
+					ginkgo.By("Check if the k8s.ovn.org/external-gw-pod-ips got updated for the app namespace")
+					err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+						ns := getNamespace(f, f.Namespace.Name)
+						return (ns.Annotations[externalGatewayPodIPsAnnotation] == ""), nil
+					})
+					framework.ExpectNoError(err, "Check if the k8s.ovn.org/external-gw-pod-ips got updated, failed: %v", err)
+				}
 
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 				podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -2205,12 +2211,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				}
 				createAPBExternalRouteCRWithDynamicHop(defaultPolicyName, f.Namespace.Name, servingNamespace, false, addressesv4.gatewayIPs)
 				// ensure the conntrack deletion tracker annotation is updated
-				ginkgo.By("Check if the k8s.ovn.org/external-gw-pod-ips got updated for the app namespace")
-				err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-					ns := getNamespace(f, f.Namespace.Name)
-					return (ns.Annotations[externalGatewayPodIPsAnnotation] == fmt.Sprintf("%s,%s", addresses.gatewayIPs[0], addresses.gatewayIPs[1])), nil
-				})
-				framework.ExpectNoError(err, "Check if the k8s.ovn.org/external-gw-pod-ips got updated, failed: %v", err)
+				if !isInterconnectEnabled() {
+					ginkgo.By("Check if the k8s.ovn.org/external-gw-pod-ips got updated for the app namespace")
+					err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+						ns := getNamespace(f, f.Namespace.Name)
+						return (ns.Annotations[externalGatewayPodIPsAnnotation] == fmt.Sprintf("%s,%s", addresses.gatewayIPs[0], addresses.gatewayIPs[1])), nil
+					})
+					framework.ExpectNoError(err, "Check if the k8s.ovn.org/external-gw-pod-ips got updated, failed: %v", err)
+				}
 				annotatePodForGateway(gatewayPodName2, servingNamespace, "", addresses.gatewayIPs[1], false)
 				annotatePodForGateway(gatewayPodName1, servingNamespace, "", addresses.gatewayIPs[0], false)
 

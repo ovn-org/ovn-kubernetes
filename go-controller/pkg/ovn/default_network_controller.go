@@ -33,6 +33,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -529,6 +530,17 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
 		if err = oc.apbExternalRouteController.Run(oc.wg, 1); err != nil {
 			return err
+		}
+		// If interconnect is enabled and it is a multi-zone setup, then we flush conntrack
+		// on ovnkube-controller side and not on ovnkube-node side, since they are run in the
+		// same process. TODO(tssurya): In upstream ovnk, its possible to run these as different processes
+		// in which case this flushing feature is not supported.
+		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != ovntypes.OvnDefaultZone {
+			util.SetARPTimeout()
+			// every minute cleanup stale conntrack entries if any
+			go wait.Until(func() {
+				oc.checkAndDeleteStaleConntrackEntries()
+			}, time.Minute*1, oc.stopChan)
 		}
 	}
 
