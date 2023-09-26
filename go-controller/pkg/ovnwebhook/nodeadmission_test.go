@@ -11,7 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/csrapprover"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"golang.org/x/exp/maps"
-	"k8s.io/api/admission/v1"
+	v1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -102,16 +102,16 @@ func TestNodeAdmission_ValidateUpdate(t *testing.T) {
 			oldObj: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{util.OvnNodeHostAddresses: "old"},
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: "old"},
 				},
 			},
 			newObj: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{util.OvnNodeHostAddresses: "new"},
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: "new"},
 				},
 			},
-			expectedErr: fmt.Errorf("user %q is not allowed to set the following annotations on node: %q: %v", "system:nodes:node", nodeName, []string{util.OvnNodeHostAddresses}),
+			expectedErr: fmt.Errorf("user %q is not allowed to set the following annotations on node: %q: %v", "system:nodes:node", nodeName, []string{util.OVNNodeHostCIDRs}),
 		},
 		{
 			name: "error out if the request is not in context",
@@ -139,13 +139,13 @@ func TestNodeAdmission_ValidateUpdate(t *testing.T) {
 			oldObj: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{util.OvnNodeHostAddresses: "old"},
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: "old"},
 				},
 			},
 			newObj: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{util.OvnNodeHostAddresses: "new"},
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: "new"},
 				},
 			},
 			expectedErr: fmt.Errorf("ovnkube-node on node: %q is not allowed to modify nodes %q annotations", nodeName+"_rougeOne", nodeName),
@@ -160,16 +160,16 @@ func TestNodeAdmission_ValidateUpdate(t *testing.T) {
 			oldObj: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{util.OvnNodeHostAddresses + "bad": "old"},
+					Annotations: map[string]string{util.OVNNodeHostCIDRs + "bad": "old"},
 				},
 			},
 			newObj: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{util.OvnNodeHostAddresses + "bad": "new"},
+					Annotations: map[string]string{util.OVNNodeHostCIDRs + "bad": "new"},
 				},
 			},
-			expectedErr: fmt.Errorf("ovnkube-node on node: %q is not allowed to set the following annotations: %v", nodeName, []string{util.OvnNodeHostAddresses + "bad"}),
+			expectedErr: fmt.Errorf("ovnkube-node on node: %q is not allowed to set the following annotations: %v", nodeName, []string{util.OVNNodeHostCIDRs + "bad"}),
 		},
 		{
 			name: "ovnkube-node can add util.OvnNodeChassisID",
@@ -340,14 +340,14 @@ func TestNodeAdmission_ValidateUpdate(t *testing.T) {
 			oldObj: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{util.OvnNodeHostAddresses: "old"},
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: "old"},
 					Labels:      map[string]string{"key": "old"},
 				},
 			},
 			newObj: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{util.OvnNodeHostAddresses: "new"},
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: "new"},
 					Labels:      map[string]string{"key": "new"},
 				},
 			},

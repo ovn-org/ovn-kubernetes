@@ -106,14 +106,14 @@ func newPod(namespace, name, node, podIP string) *v1.Pod {
 	}
 }
 
-func newNode(nodeName, nodeIPv4 string) *v1.Node {
+func newNode(nodeName, nodeIPv4CIDR string) *v1.Node {
 	return &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, ""),
+				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
 				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
-				"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", nodeIPv4),
+				util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
 				"k8s.ovn.org/zone-name":           "global",
 			},
 			Labels: map[string]string{
@@ -138,7 +138,7 @@ func newNodeGlobalZoneNotEgressableV4Only(nodeName, nodeIPv4 string) *v1.Node {
 			Annotations: map[string]string{
 				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, ""),
 				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
-				"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", nodeIPv4),
+				util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", nodeIPv4),
 				"k8s.ovn.org/zone-name":           "global",
 			},
 		},
@@ -160,7 +160,7 @@ func newNodeGlobalZoneNotEgressableV6Only(nodeName, nodeIPv6 string) *v1.Node {
 			Annotations: map[string]string{
 				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", "", nodeIPv6),
 				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v6Node1Subnet),
-				"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", nodeIPv6),
+				util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", nodeIPv6),
 				"k8s.ovn.org/zone-name":           "global",
 			},
 		},

@@ -560,16 +560,16 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 	return nil
 }
 
-func (oc *DefaultNetworkController) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, otherHostAddrs []string) error {
+func (oc *DefaultNetworkController) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfCIDR *net.IPNet, otherHostAddrs []string) error {
 	var l3Prefix string
-	if utilnet.IsIPv6(hostIfAddr.IP) {
+	if utilnet.IsIPv6(hostIfCIDR.IP) {
 		l3Prefix = "ip6"
 	} else {
 		l3Prefix = "ip4"
 	}
 
 	matches := sets.New[string]()
-	for _, hostIP := range append(otherHostAddrs, hostIfAddr.IP.String()) {
+	for _, hostIP := range append(otherHostAddrs, hostIfCIDR.IP.String()) {
 		// embed nodeName as comment so that it is easier to delete these rules later on.
 		// logical router policy doesn't support external_ids to stash metadata
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.dst == %s /* %s */`,

@@ -899,11 +899,11 @@ func newNamespaceMeta(namespace string, additionalLabels map[string]string) meta
 }
 
 func getNodeObj(testNode testNode) corev1.Node {
-	hostAddrs := make([]string, 0)
-	hostAddrs = append(hostAddrs, fmt.Sprintf("\"%s\"", node1OVNManagedNetworkV4))
+	hostCIDRs := make([]string, 0)
+	hostCIDRs = append(hostCIDRs, fmt.Sprintf("\"%s\"", node1OVNManagedNetworkV4))
 	// we assume all extra interfaces and their addresses are valid for host addr
 	for _, infs := range testNode.infs {
-		hostAddrs = append(hostAddrs, fmt.Sprintf("\"%s\"", infs.addr))
+		hostCIDRs = append(hostCIDRs, fmt.Sprintf("\"%s\"", infs.addr))
 	}
 	return corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -911,7 +911,7 @@ func getNodeObj(testNode testNode) corev1.Node {
 			Annotations: map[string]string{
 				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}",
 					node1OVNManagedNetworkV4, ""),
-				"k8s.ovn.org/host-addresses": fmt.Sprintf("[%s]", strings.Join(hostAddrs, ",")),
+				util.OVNNodeHostCIDRs: fmt.Sprintf("[%s]", strings.Join(hostCIDRs, ",")),
 			}},
 		Status: corev1.NodeStatus{
 			Conditions: []corev1.NodeCondition{

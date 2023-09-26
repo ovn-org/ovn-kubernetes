@@ -74,8 +74,8 @@ const (
 	// OvnNodeEgressLabel is a user assigned node label indicating to ovn-kubernetes that the node is to be used for egress IP assignment
 	ovnNodeEgressLabel = "k8s.ovn.org/egress-assignable"
 
-	// OvnNodeHostAddresses is used to track the different host IP addresses on the node
-	OvnNodeHostAddresses = "k8s.ovn.org/host-addresses"
+	// OVNNodeHostCIDRs is used to track the different host IP addresses and subnet masks on the node
+	OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
 
 	// egressIPConfigAnnotationKey is used to indicate the cloud subnet and
 	// capacity for each node. It is set by
@@ -699,55 +699,55 @@ func GetNodeEgressLabel() string {
 	return ovnNodeEgressLabel
 }
 
-func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.Set[string]) error {
-	return nodeAnnotator.Set(OvnNodeHostAddresses, sets.List(addresses))
+func SetNodeHostCIDRs(nodeAnnotator kube.Annotator, cidrs sets.Set[string]) error {
+	return nodeAnnotator.Set(OVNNodeHostCIDRs, sets.List(cidrs))
 }
 
-func NodeHostAddressesAnnotationChanged(oldNode, newNode *v1.Node) bool {
-	return oldNode.Annotations[OvnNodeHostAddresses] != newNode.Annotations[OvnNodeHostAddresses]
+func NodeHostCIDRsAnnotationChanged(oldNode, newNode *v1.Node) bool {
+	return oldNode.Annotations[OVNNodeHostCIDRs] != newNode.Annotations[OVNNodeHostCIDRs]
 }
 
-// ParseNodeHostAddresses returns the parsed host addresses living on a node
-func ParseNodeHostAddresses(node *kapi.Node) (sets.Set[string], error) {
-	addrAnnotation, ok := node.Annotations[OvnNodeHostAddresses]
+// ParseNodeHostCIDRs returns the parsed host CIDRS living on a node
+func ParseNodeHostCIDRs(node *kapi.Node) (sets.Set[string], error) {
+	addrAnnotation, ok := node.Annotations[OVNNodeHostCIDRs]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeHostAddresses, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeHostCIDRs, node.Name)
 	}
 
 	var cfg []string
 	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal host addresses annotation %s for node %q: %v",
+		return nil, fmt.Errorf("failed to unmarshal host cidrs annotation %s for node %q: %v",
 			addrAnnotation, node.Name, err)
 	}
 
 	return sets.New(cfg...), nil
 }
 
-// ParseNodeHostAddressesDropNetMask returns the parsed host addresses found on a nodes annotation. Removes the mask.
-func ParseNodeHostAddressesDropNetMask(node *kapi.Node) (sets.Set[string], error) {
-	addrAnnotation, ok := node.Annotations[OvnNodeHostAddresses]
+// ParseNodeHostCIDRsDropNetMask returns the parsed host IP addresses found on a node's host CIDR annotation. Removes the mask.
+func ParseNodeHostCIDRsDropNetMask(node *kapi.Node) (sets.Set[string], error) {
+	addrAnnotation, ok := node.Annotations[OVNNodeHostCIDRs]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeHostAddresses, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeHostCIDRs, node.Name)
 	}
 
 	var cfg []string
 	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal host addresses annotation %s for node %q: %v",
+		return nil, fmt.Errorf("failed to unmarshal host cidrs annotation %s for node %q: %v",
 			addrAnnotation, node.Name, err)
 	}
 
 	for i, cidr := range cfg {
 		ip, _, err := net.ParseCIDR(cidr)
 		if err != nil || ip == nil {
-			return nil, fmt.Errorf("failed to parse node host address: %v", err)
+			return nil, fmt.Errorf("failed to parse node host cidr: %v", err)
 		}
 		cfg[i] = ip.String()
 	}
 	return sets.New(cfg...), nil
 }
 
-func ParseNodeHostAddressesExcludeOVNManagedNetworks(node *kapi.Node) ([]string, error) {
-	networks, err := ParseNodeHostAddressesList(node)
+func ParseNodeHostCIDRsExcludeOVNManagedNetworks(node *kapi.Node) ([]string, error) {
+	networks, err := ParseNodeHostCIDRsList(node)
 	if err != nil {
 		return nil, err
 	}
@@ -764,15 +764,15 @@ func ParseNodeHostAddressesExcludeOVNManagedNetworks(node *kapi.Node) ([]string,
 	return networks, nil
 }
 
-func ParseNodeHostAddressesList(node *kapi.Node) ([]string, error) {
-	addrAnnotation, ok := node.Annotations[OvnNodeHostAddresses]
+func ParseNodeHostCIDRsList(node *kapi.Node) ([]string, error) {
+	addrAnnotation, ok := node.Annotations[OVNNodeHostCIDRs]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeHostAddresses, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeHostCIDRs, node.Name)
 	}
 
 	var cfg []string
 	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal host addresses annotation %s for node %q: %v",
+		return nil, fmt.Errorf("failed to unmarshal host cidrs annotation %s for node %q: %v",
 			addrAnnotation, node.Name, err)
 	}
 	return cfg, nil
@@ -832,9 +832,9 @@ func IsOVNManagedNetwork(eIPConfig *ParsedNodeEgressIPConfiguration, ip net.IP) 
 
 // GetNonOVNNetworkContainingIP attempts to find a non OVN managed network to host the argument IP
 func GetNonOVNNetworkContainingIP(node *v1.Node, ip net.IP) (string, error) {
-	networks, err := ParseNodeHostAddressesExcludeOVNManagedNetworks(node)
+	networks, err := ParseNodeHostCIDRsExcludeOVNManagedNetworks(node)
 	if err != nil {
-		return "", fmt.Errorf("failed to get host-addresses annotation excluding OVN managed networks for node %s: %v",
+		return "", fmt.Errorf("failed to get host-cidrs annotation excluding OVN managed networks for node %s: %v",
 			node.Name, err)
 	}
 	cidrs, err := makeCIDRs(networks...)

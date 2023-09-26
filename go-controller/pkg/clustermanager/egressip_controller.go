@@ -684,7 +684,7 @@ func (eIPC *egressIPClusterController) setNodeEgressReachable(nodeName string, i
 
 // reconcileNonOVNNetworkEIPs is used to reconsider existing assigned EIPs that are assigned to non-OVN managed
 // networks and will send a 'synthetic' reconcile for any EIPs which are hosted by an invalid network which is determined
-// from the nodes host-address annotation
+// from the nodes host-cidrs annotation
 func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node) error {
 	var errorAggregate []error
 	egressIPs, err := eIPC.kube.GetEgressIPs()
@@ -1159,7 +1159,7 @@ func (eIPC *egressIPClusterController) getCloudPrivateIPConfigMap(objs []interfa
 // assign the egress IP to the node with the lowest amount of allocations every
 // time, this does not guarantee complete balance, but mostly complete.
 // For Egress IPs that are hosted by non-OVN managed networks, there must be at least
-// one node that hosts the network and exposed via the nodes host-addresses annotation.
+// one node that hosts the network and exposed via the nodes host-cidrs annotation.
 func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []string) []egressipv1.EgressIPStatusItem {
 	eIPC.allocator.Lock()
 	defer eIPC.allocator.Unlock()
@@ -1386,14 +1386,14 @@ func (eIPC *egressIPClusterController) isEgressIPAddrConflict(egressIP net.IP) (
 	if err != nil {
 		return false, "", fmt.Errorf("failed to get nodes: %v", err)
 	}
-	// iterate through the nodes and ensure no host IP address conflicts with EIP. Note that host-addresses annotation
+	// iterate through the nodes and ensure no host IP address conflicts with EIP. Note that host-cidrs annotation
 	// does not contain EgressIPs that are assigned to interfaces.
 	for _, node := range nodes {
-		nodeHostAddressesSet, err := util.ParseNodeHostAddressesDropNetMask(node)
+		nodeHostAddrsSet, err := util.ParseNodeHostCIDRsDropNetMask(node)
 		if err != nil {
-			return false, "", fmt.Errorf("failed to parse node host addresses for node %s: %v", node.Name, err)
+			return false, "", fmt.Errorf("failed to parse node host cidrs for node %s: %v", node.Name, err)
 		}
-		if nodeHostAddressesSet.Has(egressIP.String()) {
+		if nodeHostAddrsSet.Has(egressIP.String()) {
 			return true, node.Name, nil
 		}
 	}
