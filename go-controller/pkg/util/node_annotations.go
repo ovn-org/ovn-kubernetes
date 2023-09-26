@@ -56,8 +56,8 @@ const (
 	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
 	ovnDefaultNetworkGateway = "default"
 
-	// ovnNodeManagementPort is the constant string representing the annotation key
-	ovnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
+	// OvnNodeManagementPort is the constant string representing the annotation key
+	OvnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
 
 	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
 	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
@@ -371,14 +371,14 @@ func SetNodeManagementPortAnnotation(nodeAnnotator kube.Annotator, PfId int, Fun
 	if err != nil {
 		return fmt.Errorf("failed to marshal mgmtPortDetails with PfId '%v', FuncId '%v'", PfId, FuncId)
 	}
-	return nodeAnnotator.Set(ovnNodeManagementPort, string(bytes))
+	return nodeAnnotator.Set(OvnNodeManagementPort, string(bytes))
 }
 
-// ParseNodeManagementPort returns the parsed host addresses living on a node
+// ParseNodeManagementPortAnnotation returns the parsed host addresses living on a node
 func ParseNodeManagementPortAnnotation(node *kapi.Node) (int, int, error) {
-	mgmtPortAnnotation, ok := node.Annotations[ovnNodeManagementPort]
+	mgmtPortAnnotation, ok := node.Annotations[OvnNodeManagementPort]
 	if !ok {
-		return -1, -1, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeManagementPort, node.Name)
+		return -1, -1, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeManagementPort, node.Name)
 	}
 
 	cfg := ManagementPortDetails{}
