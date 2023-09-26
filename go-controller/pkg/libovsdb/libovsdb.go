@@ -136,6 +136,10 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 	enableMetricsOption := client.WithMetricsRegistryNamespaceSubsystem(promRegistry,
 		"ovnkube", "master_libovsdb")
 
+	dbModel.SetIndexes(map[string][]model.ClientIndex{
+		sbdb.EncapTable: {{Columns: []model.ColumnKey{{Column: "chassis_name"}}}},
+	})
+
 	c, err := newClient(cfg, dbModel, stopCh, enableMetricsOption)
 	if err != nil {
 		return nil, err

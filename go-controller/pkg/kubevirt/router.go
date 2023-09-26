@@ -2,7 +2,6 @@ package kubevirt
 
 import (
 	"fmt"
-	"net"
 
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
@@ -90,38 +89,20 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 		return nil
 	}
 
+	// For interconnect at static route with a cluster-wide src-ip address is
+	// needed to route egress n/s traffic
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		// NOTE: EIP & ESVC use same route and if this is already present thanks to those features,
+		// this will be a no-op
+		if err := libovsdbutil.CreateDefaultRouteToExternal(nbClient, pod.Spec.NodeName); err != nil {
+			return err
+		}
+	}
+
 	lrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + pod.Spec.NodeName
 	lrpAddresses, err := libovsdbutil.GetLRPAddrs(nbClient, lrpName)
 	if err != nil {
 		return fmt.Errorf("failed configuring pod routing when reading LRP %s addresses: %v", lrpName, err)
-	}
-
-	// For interconnect at static route with a cluster-wide src-ip address is
-	// needed to route egress n/s traffic
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			// Policy to with low priority to route traffic to the gateway
-			ipFamily := utilnet.IPFamilyOfCIDR(clusterSubnet.CIDR)
-			nodeGRAddress, err := util.MatchFirstIPNetFamily(ipFamily == utilnet.IPv6, lrpAddresses)
-			if err != nil {
-				return err
-			}
-
-			egressStaticRoute := nbdb.LogicalRouterStaticRoute{
-				IPPrefix: clusterSubnet.CIDR.String(),
-				Nexthop:  nodeGRAddress.IP.String(),
-				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-			}
-			if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, types.OVNClusterRouter, &egressStaticRoute, func(item *nbdb.LogicalRouterStaticRoute) bool {
-				_, itemCIDR, err := net.ParseCIDR(item.IPPrefix)
-				if err != nil {
-					return false
-				}
-				return util.ContainsCIDR(clusterSubnet.CIDR, itemCIDR) && item.Nexthop == egressStaticRoute.Nexthop && item.Policy != nil && *item.Policy == *egressStaticRoute.Policy
-			}); err != nil {
-				return fmt.Errorf("failed adding static route for n/s egress traffic: %v", err)
-			}
-		}
 	}
 	for _, podIP := range podAnnotation.IPs {
 		podAddress := podIP.IP.String()
