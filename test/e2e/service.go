@@ -578,7 +578,7 @@ var _ = ginkgo.Describe("Services", func() {
 		toCurlAddresses := sets.NewString()
 		for i, node := range nodes.Items {
 
-			addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-addresses"]
+			addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-cidrs"]
 			gomega.Expect(ok).To(gomega.BeTrue())
 
 			var addrs []string

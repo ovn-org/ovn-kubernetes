@@ -134,7 +134,7 @@ func GetNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 func GetNodeAddresses(ipv4, ipv6 bool, nodes ...*v1.Node) (ipsv4 []net.IP, ipsv6 []net.IP, err error) {
 	allCIDRs := sets.Set[string]{}
 	for _, node := range nodes {
-		ips, err := ParseNodeHostAddresses(node)
+		ips, err := ParseNodeHostCIDRs(node)
 		if IsAnnotationNotSetError(err) {
 			continue
 		}

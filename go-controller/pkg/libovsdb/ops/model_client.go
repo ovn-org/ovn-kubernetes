@@ -140,12 +140,14 @@ operationModel is a struct which uses reflection to determine and perform
 idempotent operations against OVS DB (NB DB by default).
 */
 type operationModel struct {
-	// Model specifies the model to be created, or to look up in the cache
-	// if ModelPredicate is not specified. The values in the fields of the
-	// Model are used for mutations and updates as well. If this Model is
-	// looked up or created, it will have its UUID set after the operation.
+	// Model specifies the model to be created, or to look up in the cache.
+	// The values in the fields of the Model are used for mutations and updates
+	// as well. If this Model is looked up or created, it will have its UUID set
+	// after the operation.
 	Model interface{}
 	// ModelPredicate specifies a predicate to look up models in the cache.
+	// If Model is provided with non-zero index column values, ModelPredicate
+	// will be ignored.
 	ModelPredicate interface{}
 	// ExistingResult is where the results of the look up are added to.
 	// Required when Model is not specified.

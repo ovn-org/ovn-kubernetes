@@ -878,6 +878,9 @@ func (oc *DefaultNetworkController) syncStaleAddressSetIPs(egressIPCache map[str
 // all the pods that are managed by egressIPs.
 // NOTE: This is done mostly to handle the corner case where one pod has more than one
 // egressIP object matching it, in which case we do the ovn setup only for one of the objects.
+// This corner case  of same pod matching more than one object will not work for IC deployments
+// since internal cache based logic will be different for different ovnkube-controllers
+// zone can think objA is active while zoneb can think objB is active if both have multiple choice options
 func (oc *DefaultNetworkController) syncPodAssignmentCache(egressIPCache map[string]egressIPCacheEntry) error {
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
@@ -889,16 +892,16 @@ func (oc *DefaultNetworkController) syncPodAssignmentCache(egressIPCache map[str
 		if err != nil {
 			return err
 		}
-		p2 := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		p2 := func(item *nbdb.NAT) bool {
 			return item.ExternalIDs["name"] == egressIPName
 		}
-		reRouteStaticRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(oc.nbClient, p2)
+		egressIPSNATs, err := libovsdbops.FindNATsWithPredicate(oc.nbClient, p2)
 		if err != nil {
 			return err
 		}
 		// Because of how we do generateCacheForEgressIP, we will only have pods that are
 		// either local to zone (in which case reRoutePolicies will work) OR pods that are
-		// managed by local egressIP nodes (in which case reRouteStaticRoutes will work)
+		// managed by local egressIP nodes (in which case egressIPSNATs will work)
 		egressPods := make(map[string]sets.Set[string])
 		for podKey, podIPs := range state.egressLocalPods {
 			egressPods[podKey] = podIPs
@@ -933,9 +936,8 @@ func (oc *DefaultNetworkController) syncPodAssignmentCache(egressIPCache map[str
 					klog.Infof("EgressIP %s is managing pod %s", egressIPName, podKey)
 				}
 			}
-			for _, lrsr := range reRouteStaticRoutes {
-				logicalIP := lrsr.IPPrefix
-				if podIPs.Has(logicalIP) { // should match for only one egressIP object
+			for _, snat := range egressIPSNATs {
+				if podIPs.Has(snat.LogicalIP) { // should match for only one egressIP object
 					podState.egressIPName = egressIPName
 					podState.standbyEgressIPNames.Delete(egressIPName)
 					klog.Infof("EgressIP %s is managing pod %s", egressIPName, podKey)
@@ -1250,6 +1252,17 @@ func (oc *DefaultNetworkController) addEgressNode(node *v1.Node) error {
 			return fmt.Errorf("unable to configure GARP on external logical switch port for egress node: %s, "+
 				"this will result in packet drops during egress IP re-assignment,  err: %v", node.Name, err)
 		}
+		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
+			// NOTE: EgressIP is not supported on multi-nodes-in-same-zone case
+			// NOTE2: We don't want this route for all-nodes-in-same-zone (almost nonIC a.k.a single zone) case because
+			// it makes no sense - all nodes are connected via the same ovn_cluster_router
+			// NOTE3: When the node gets deleted we do not remove this route intentionally because
+			// on IC if the node is gone, then the ovn_cluster_router is also gone along with all
+			// the routes on it.
+			if err := libovsdbutil.CreateDefaultRouteToExternal(oc.nbClient, node.Name); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1306,7 +1319,7 @@ func (oc *DefaultNetworkController) initClusterEgressPolicies(nodes []interface{
 // required by the egressIP and egressServices features.
 func InitClusterEgressPolicies(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 	controllerName string) error {
-	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
+	v4ClusterSubnet, v6ClusterSubnet := util.GetClusterSubnets()
 	if err := createDefaultNoReroutePodPolicies(nbClient, v4ClusterSubnet, v6ClusterSubnet); err != nil {
 		return err
 	}
@@ -1348,20 +1361,10 @@ func (e egressStatuses) contains(potentialStatus egressipv1.EgressIPStatusItem) 
 	if _, exists := e.statusMap[potentialStatus]; exists {
 		return true
 	}
-	// handle the case where not network is populated. This may occur if an EIP obj was considered by a cluster
-	// manager egress IP controller that did not support the network field
-	potentialStatus.Network = ""
-	if _, exists := e.statusMap[potentialStatus]; exists {
-		return true
-	}
 	return false
 }
 
 func (e egressStatuses) delete(deleteStatus egressipv1.EgressIPStatusItem) {
-	delete(e.statusMap, deleteStatus)
-	// also remove any keys without networks set. This is may occur when upgrading from a version that didn't set the
-	// network field
-	deleteStatus.Network = ""
 	delete(e.statusMap, deleteStatus)
 }
 
@@ -1496,11 +1499,11 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 				return fmt.Errorf("unable to create NAT rule ops for status: %v, err: %v", status, err)
 			}
 		}
-		if config.OVNKubernetesFeature.EnableInterconnect && (loadedPodNode && !isLocalZonePod) {
+		if config.OVNKubernetesFeature.EnableInterconnect && !isOVNManagedNetwork && (loadedPodNode && !isLocalZonePod) {
 			// configure reroute for non-local-zone pods on egress nodes
-			ops, err = e.createStaticRouteOps(ops, podIPs, status, egressIPName, nextHopIP)
+			ops, err = e.createReroutePolicyOps(ops, podIPs, status, egressIPName, nextHopIP)
 			if err != nil {
-				return fmt.Errorf("unable to create logical router static route ops %v, err: %v", status, err)
+				return fmt.Errorf("unable to create logical router policy ops %v, err: %v", status, err)
 			}
 		}
 	}
@@ -1538,6 +1541,7 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 	isLocalZoneEgressNode, loadedEgressNode := e.nodeZoneState.Load(status.Node)
 	isLocalZonePod, loadedPodNode := e.nodeZoneState.Load(pod.Spec.NodeName)
 	var nextHopIP string
+	var isOVNManagedNetwork bool
 	// node may not exist - attempt to retrieve it
 	eNode, err := e.watchFactory.GetNode(status.Node)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -1550,7 +1554,7 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 		if err != nil {
 			klog.Warningf("Unable to get node %s egress IP config: %v", eNode.Name, err)
 		} else {
-			isOVNManagedNetwork := util.IsOVNManagedNetwork(parsedEIPConfig, eIPIP)
+			isOVNManagedNetwork = util.IsOVNManagedNetwork(parsedEIPConfig, eIPIP)
 			nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, egressIPName, isLocalZoneEgressNode, isOVNManagedNetwork)
 			if err != nil {
 				klog.Warningf("Unable to determine next hop for egress IP %s IP %s assigned to node %s: %v", egressIPName,
@@ -1575,9 +1579,9 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 	}
 
 	if loadedEgressNode && isLocalZoneEgressNode {
-		if config.OVNKubernetesFeature.EnableInterconnect && (!loadedPodNode || !isLocalZonePod) { // node is deleted (we can't determine zone so we always try and nuke OR pod is remote to zone)
+		if config.OVNKubernetesFeature.EnableInterconnect && !isOVNManagedNetwork && (!loadedPodNode || !isLocalZonePod) { // node is deleted (we can't determine zone so we always try and nuke OR pod is remote to zone)
 			// delete reroute for non-local-zone pods on egress nodes
-			ops, err = e.deleteStaticRouteOps(ops, podIPs, status, egressIPName)
+			ops, err = e.deleteReroutePolicyOps(ops, podIPs, status, egressIPName, nextHopIP)
 			if err != nil {
 				return fmt.Errorf("unable to delete logical router static route ops %v, err: %v", status, err)
 			}
@@ -1849,47 +1853,6 @@ func (e *egressIPZoneController) deleteReroutePolicyOps(ops []ovsdb.Operation, p
 	return ops, nil
 }
 
-func (e *egressIPZoneController) createStaticRouteOps(ops []ovsdb.Operation, podIPNets []*net.IPNet, status egressipv1.EgressIPStatusItem, egressIPName, nextHop string) ([]ovsdb.Operation, error) {
-	var err error
-	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
-	// Handle all pod IPs that match the egress IP address family
-	for _, podIPNet := range util.MatchAllIPNetFamily(isEgressIPv6, podIPNets) {
-		lrsr := nbdb.LogicalRouterStaticRoute{
-			IPPrefix: podIPNet.IP.String(),
-			Nexthop:  nextHop,
-			ExternalIDs: map[string]string{
-				"name": egressIPName,
-			},
-			Policy: &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-		}
-		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.IPPrefix == lrsr.IPPrefix && item.Nexthop == lrsr.Nexthop && item.ExternalIDs["name"] == lrsr.ExternalIDs["name"] && item.Policy == lrsr.Policy
-		}
-
-		ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter, &lrsr, p)
-		if err != nil {
-			return nil, fmt.Errorf("error creating logical router static route %+v on router %s: %v", lrsr, types.OVNClusterRouter, err)
-		}
-	}
-	return ops, nil
-}
-
-func (e *egressIPZoneController) deleteStaticRouteOps(ops []ovsdb.Operation, podIPNets []*net.IPNet, status egressipv1.EgressIPStatusItem, egressIPName string) ([]ovsdb.Operation, error) {
-	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
-	var err error
-	// Handle all pod IPs that match the egress IP address family
-	for _, podIPNet := range util.MatchAllIPNetFamily(isEgressIPv6, podIPNets) {
-		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.IPPrefix == podIPNet.IP.String() && item.ExternalIDs["name"] == egressIPName && item.Policy != nil && *item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
-		}
-		ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter, p)
-		if err != nil {
-			return nil, fmt.Errorf("error deleting logical router static route on router %s: %v", types.OVNClusterRouter, err)
-		}
-	}
-	return ops, nil
-}
-
 // deleteEgressIPStatusSetup deletes the entire set up in the NB DB for an
 // EgressIPStatusItem. The set up in the NB DB gets tagged with the name of the
 // EgressIP, hence lookup the LRP and NAT objects which match that as well as
@@ -1943,18 +1906,6 @@ func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status e
 
 	var nats []*nbdb.NAT
 	if loadedEgressNode && isLocalZoneEgressNode {
-		if config.OVNKubernetesFeature.EnableInterconnect && nextHopIP != "" {
-			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-				return item.Nexthop == nextHopIP && item.ExternalIDs["name"] == name && item.Policy != nil && *item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
-			}
-			ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(e.nbClient, ops, types.OVNClusterRouter, p)
-			if err != nil {
-				return nil, fmt.Errorf("error deleting logical router static routes on router %s for %s: %w", types.OVNClusterRouter, name, err)
-			}
-		} else if config.OVNKubernetesFeature.EnableInterconnect {
-			//FIXME: (mk) We need to wipe everything with that external 'name' and the priority we own
-			klog.Errorf("Failed to find next hop IP therefore unable to clean static routes")
-		}
 		routerName := util.GetGatewayRouterFromNode(status.Node)
 		natPred := func(nat *nbdb.NAT) bool {
 			// We should delete NATs only from the status.Node that was passed into this function
@@ -2005,19 +1956,6 @@ func (oc *DefaultNetworkController) deletePodIPsFromAddressSet(addrSetIPs []net.
 		return fmt.Errorf("cannot delete egressPodIPs %v from the address set %v: err: %v", addrSetIPs, EgressIPServedPodsAddrSetName, err)
 	}
 	return nil
-}
-
-func getClusterSubnets() ([]*net.IPNet, []*net.IPNet) {
-	var v4ClusterSubnets = []*net.IPNet{}
-	var v6ClusterSubnets = []*net.IPNet{}
-	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		if !utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-			v4ClusterSubnets = append(v4ClusterSubnets, clusterSubnet.CIDR)
-		} else {
-			v6ClusterSubnets = append(v6ClusterSubnets, clusterSubnet.CIDR)
-		}
-	}
-	return v4ClusterSubnets, v6ClusterSubnets
 }
 
 // createDefaultNoRerouteServicePolicies ensures service reachability from the

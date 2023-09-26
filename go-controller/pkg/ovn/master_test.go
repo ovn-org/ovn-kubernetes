@@ -77,7 +77,6 @@ const (
 
 	// ovnNodeGRLRPAddr is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.5/24)
 	ovnNodeGRLRPAddr     = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
-	ovnHostAddr          = "k8s.ovn.org/host-addresses"
 	ovnNodePrimaryIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 )
 
@@ -86,10 +85,10 @@ func (n tNode) k8sNode(nodeID string) v1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: n.Name,
 			Annotations: map[string]string{
-				ovnNodeID:            nodeID,
-				ovnNodeGRLRPAddr:     "{\"ipv4\": \"100.64.0." + nodeID + "/16\"}",
-				ovnHostAddr:          fmt.Sprintf("[\"%s\"]", fmt.Sprintf("%s/24", n.NodeIP)),
-				ovnNodePrimaryIfAddr: fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", fmt.Sprintf("%s/24", n.NodeIP), ""),
+				ovnNodeID:             nodeID,
+				ovnNodeGRLRPAddr:      "{\"ipv4\": \"100.64.0." + nodeID + "/16\"}",
+				util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", fmt.Sprintf("%s/24", n.NodeIP)),
+				ovnNodePrimaryIfAddr:  fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", fmt.Sprintf("%s/24", n.NodeIP), ""),
 			},
 		},
 		Status: kapi.NodeStatus{
@@ -939,7 +938,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		expectedNBDatabaseState        []libovsdbtest.TestData
 		expectedSBDatabaseState        []libovsdbtest.TestData
 		l3GatewayConfig                *util.L3GatewayConfig
-		nodeHostAddrs                  sets.Set[string]
+		nodeHostCIDRs                  sets.Set[string]
 	)
 
 	const (
@@ -1045,8 +1044,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		nodeHostAddrs = sets.New(fmt.Sprintf("%s/24", node1.NodeIP))
-		err = util.SetNodeHostAddresses(nodeAnnotator, nodeHostAddrs)
+		nodeHostCIDRs = sets.New(fmt.Sprintf("%s/24", node1.NodeIP))
+		err = util.SetNodeHostCIDRs(nodeAnnotator, nodeHostCIDRs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = nodeAnnotator.Run()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1420,6 +1419,11 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			startFakeController(oc, wg)
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
+			nodeHostAddrs := sets.New[string]()
+			for _, nodeHostCIDR := range nodeHostCIDRs.UnsortedList() {
+				ip, _, _ := net.ParseCIDR(nodeHostCIDR)
+				nodeHostAddrs.Insert(ip.String())
+			}
 			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1474,6 +1478,11 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			startFakeController(oc, wg)
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
+			nodeHostAddrs := sets.New[string]()
+			for _, nodeHostCIDR := range nodeHostCIDRs.UnsortedList() {
+				ip, _, _ := net.ParseCIDR(nodeHostCIDR)
+				nodeHostAddrs.Insert(ip.String())
+			}
 			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
