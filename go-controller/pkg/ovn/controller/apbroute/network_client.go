@@ -33,7 +33,7 @@ import (
 
 type networkClient interface {
 	deleteGatewayIPs(podNsName ktypes.NamespacedName, toBeDeletedGWIPs, toBeKept sets.Set[string]) error
-	addGatewayIPs(pod *v1.Pod, egress *gateway_info.GatewayInfoList) error
+	addGatewayIPs(pod *v1.Pod, egress *gateway_info.GatewayInfoList) (bool, error)
 }
 
 type northBoundClient struct {
@@ -159,10 +159,18 @@ func (nb *northBoundClient) deleteGatewayIPs(podNsName ktypes.NamespacedName, to
 	})
 }
 
-func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress *gateway_info.GatewayInfoList) error {
+// addGatewayIPs adds the Gateway IP to the pod's next hops. It returns two values: a boolean and an error
+// In the case of the boolean, it returns false in any of the following conditions:
+// * If the pod wants to use host network
+// * If the pod's phase is either Completed or Failed
+// * If the pod's `PodIPs` status field is empty
+// This value is used to signal the caller that the gateway IPs were not applied to the pod for reasons that are not errors.
+// The error value is populated when an error occurs as usual.
+func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress *gateway_info.GatewayInfoList) (bool, error) {
 	if util.PodCompleted(pod) || util.PodWantsHostNetwork(pod) {
-		return nil
+		return false, nil
 	}
+	klog.V(5).Infof("Processing %s/%s with status %s and IPs %+v", pod.Namespace, pod.Name, pod.Status.Phase, pod.Status.PodIPs)
 	podIPs := make([]*net.IPNet, 0)
 	for _, podIP := range pod.Status.PodIPs {
 		ip := utilnet.ParseIPSloppy(podIP.IP)
@@ -174,8 +182,10 @@ func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress *gateway_info.Gate
 		podIPs = append(podIPs, ipNet)
 	}
 	if len(podIPs) == 0 {
+		// At this stage the pod is either in Pending or Running phase, but Pending should not have an IP, therefore it should not
+		// be processed yet. Return false without error to prevent the pod from being perceived as correctly configured with the gateway IP.
 		klog.Warningf("Will not add gateway routes pod %s/%s. IPs not found!", pod.Namespace, pod.Name)
-		return nil
+		return false, nil
 	}
 	if config.Gateway.DisableSNATMultipleGWs {
 		// delete all perPodSNATs (if this pod was controlled by egressIP controller, it will stop working since
@@ -185,7 +195,7 @@ func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress *gateway_info.Gate
 		}
 	}
 	podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-	return nb.addGWRoutesForPod(egress.Elems(), podIPs, podNsName, pod.Spec.NodeName)
+	return true, nb.addGWRoutesForPod(egress.Elems(), podIPs, podNsName, pod.Spec.NodeName)
 }
 
 // deletePodSNAT removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
@@ -716,6 +726,6 @@ func (c *conntrackClient) deleteGatewayIPs(podNsName ktypes.NamespacedName, _, t
 }
 
 // addGatewayIPs is a NOP (no operation) in the conntrack client as it does not add any entry to the conntrack table.
-func (c *conntrackClient) addGatewayIPs(pod *v1.Pod, egress *gateway_info.GatewayInfoList) error {
-	return nil
+func (c *conntrackClient) addGatewayIPs(pod *v1.Pod, egress *gateway_info.GatewayInfoList) (bool, error) {
+	return true, nil
 }

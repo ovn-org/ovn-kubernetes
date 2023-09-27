@@ -230,7 +230,10 @@ func (m *externalPolicyManager) applyPodConfig(pod *v1.Pod, existingPodConfig *p
 		}
 	}
 	if gwsToAdd.Len() > 0 {
-		err := m.netClient.addGatewayIPs(pod, gwsToAdd)
+		applied, err := m.netClient.addGatewayIPs(pod, gwsToAdd)
+		if !applied {
+			return nil
+		}
 		if err != nil {
 			existingPodConfig.StaticGateways.InsertOverwriteFailed(gwsToAdd.Elems()...)
 			return err
@@ -245,7 +248,10 @@ func (m *externalPolicyManager) applyPodConfig(pod *v1.Pod, existingPodConfig *p
 		}
 	}
 	if gwsToAdd.Len() > 0 {
-		err := m.netClient.addGatewayIPs(pod, gwsToAdd)
+		applied, err := m.netClient.addGatewayIPs(pod, gwsToAdd)
+		if !applied {
+			return nil
+		}
 		if err != nil {
 			existingPodConfig.DynamicGateways.InsertOverwriteFailed(gwsToAdd.Elems()...)
 			return err
@@ -410,8 +416,8 @@ func (m *externalPolicyManager) getPolicyConfigAndUpdatePolicyRefs(policy *admin
 		}
 		podsMap := map[ktypes.NamespacedName]*v1.Pod{}
 		for _, pod := range targetPods {
-			// Ignore completed pods, host networked pods, pods not scheduled
-			if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
+			// Ignore completed pods, host networked pods, pods not scheduled or pods without a status IP
+			if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) || len(pod.Status.PodIPs) == 0 {
 				continue
 			}
 			podsMap[getPodNamespacedName(pod)] = pod
