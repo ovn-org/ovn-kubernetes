@@ -34,10 +34,6 @@ func NewL2SwitchManager() *LogicalSwitchManager {
 // AddOrUpdateSwitch adds/updates a switch to the logical switch manager for subnet
 // and IPAM management.
 func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSubnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {
-	err := manager.allocator.AddOrUpdateSubnet(switchName, hostSubnets)
-	if err != nil {
-		return err
-	}
 	if manager.reserveIPs {
 		for _, hostSubnet := range hostSubnets {
 			for _, ip := range []*net.IPNet{util.GetNodeGatewayIfAddr(hostSubnet), util.GetNodeManagementIfAddr(hostSubnet)} {
