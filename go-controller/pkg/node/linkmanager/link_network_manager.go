@@ -189,7 +189,7 @@ func (c *Controller) delAddressFromStore(linkName string, address netlink.Addr) 
 	temp := addressesSaved[:0]
 	for _, addressSaved := range addressesSaved {
 		if !addressSaved.Equal(address) {
-			temp = append(temp, address)
+			temp = append(temp, addressSaved)
 		}
 	}
 	c.store[linkName] = temp
