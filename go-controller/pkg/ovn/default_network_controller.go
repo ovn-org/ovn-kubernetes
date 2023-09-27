@@ -28,13 +28,11 @@ import (
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	ktypes "k8s.io/apimachinery/pkg/types"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -52,8 +50,7 @@ type DefaultNetworkController struct {
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[kapi.Protocol]string
 
-	externalGWCache map[ktypes.NamespacedName]*apbroutecontroller.ExternalRouteInfo
-	exGWCacheMutex  *sync.RWMutex
+	externalGatewayRouteInfo *apbroutecontroller.ExternalGatewayRouteInfoCache
 
 	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
 	egressFirewalls sync.Map
@@ -206,8 +203,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			zoneICHandler:               zoneICHandler,
 			cancelableCtx:               util.NewCancelableContext(),
 		},
-		externalGWCache: apbExternalRouteController.ExternalGWCache,
-		exGWCacheMutex:  apbExternalRouteController.ExGWCacheMutex,
+		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC: egressIPZoneController{
 			nodeIPUpdateMutex:  &sync.Mutex{},
 			podAssignmentMutex: &sync.Mutex{},
@@ -229,7 +225,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	// allocate the first IPs in the join switch subnets.
 	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
 	if err != nil {
-		return nil, fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
+		return nil, fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", ovntypes.OVNClusterRouter, err)
 	}
 
 	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs

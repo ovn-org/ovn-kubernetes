@@ -37,14 +37,75 @@ func newPodInfo() *podInfo {
 	}
 }
 
-type ExternalRouteInfo struct {
-	sync.Mutex
-	Deleted bool
+type RouteInfo struct {
 	PodName ktypes.NamespacedName
 	// PodExternalRoutes is a cache keeping the LR routes added to the GRs when
 	// external gateways are used. The first map key is the podIP (src-ip of the route),
 	// the second the GW IP (next hop), and the third the GR name
 	PodExternalRoutes map[string]map[string]string
+}
+
+type ExternalGatewayRouteInfoCache struct {
+	// External gateway caches
+	routeInfos *syncmap.SyncMapComparableKey[ktypes.NamespacedName, *RouteInfo]
+}
+
+func NewExternalGatewayRouteInfoCache() *ExternalGatewayRouteInfoCache {
+	return &ExternalGatewayRouteInfoCache{
+		routeInfos: syncmap.NewSyncMapComparableKey[ktypes.NamespacedName, *RouteInfo](),
+	}
+}
+
+// CreateOrLoad provides a mechanism to initialize keys in the cache before calling the argument function `f`. This approach
+// hides the logic to initialize and retrieval of the key's routeInfo and allows reusability by exposing a function signature as argument
+// that has a routeInfo instance as argument. The function will attempt to retrieve the routeInfo for a given key,
+// and create an empty routeInfo structure in the cache when not found. Then it will execute the function argument `f` passing
+// the routeInfo as argument.
+func (e *ExternalGatewayRouteInfoCache) CreateOrLoad(podName ktypes.NamespacedName, f func(routeInfo *RouteInfo) error) error {
+	return e.routeInfos.DoWithLock(podName, func(key ktypes.NamespacedName) error {
+		routeInfo := &RouteInfo{
+			PodExternalRoutes: make(map[string]map[string]string),
+			PodName:           podName,
+		}
+		routeInfo, _ = e.routeInfos.LoadOrStore(key, routeInfo)
+		return f(routeInfo)
+	})
+}
+
+// Cleanup will lock the key `podName` and use the routeInfo associated to the key to pass it as an argument to function `f`.
+// After the function `f` completes, it will delete any empty PodExternalRoutes references for each given podIP in the routeInfo object,
+// as well as deleting the key itself if it contains no entries in its `PodExternalRoutes` map.
+func (e *ExternalGatewayRouteInfoCache) Cleanup(podName ktypes.NamespacedName, f func(routeInfo *RouteInfo) error) error {
+	return e.routeInfos.DoWithLock(podName, func(key ktypes.NamespacedName) error {
+		routeInfo, loaded := e.routeInfos.Load(key)
+		if !loaded {
+			return nil
+		}
+		err := f(routeInfo)
+		for podIP, routes := range routeInfo.PodExternalRoutes {
+			if len(routes) == 0 {
+				delete(routeInfo.PodExternalRoutes, podIP)
+			}
+		}
+		if err == nil && len(routeInfo.PodExternalRoutes) == 0 {
+			e.routeInfos.Delete(key)
+		}
+		return err
+	})
+}
+
+// CleanupNamespace wraps the cleanup call for all the pods in a given namespace.
+// The routeInfo reference for each pod in the given namespace is processed by the `f` function inside the `Cleanup` function
+func (e *ExternalGatewayRouteInfoCache) CleanupNamespace(nsName string, f func(routeInfo *RouteInfo) error) error {
+	for _, podName := range e.routeInfos.GetKeys() {
+		if podName.Namespace == nsName {
+			err := e.Cleanup(podName, f)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // routePolicyState contains current policy state as it was applied.

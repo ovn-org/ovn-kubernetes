@@ -280,6 +280,40 @@ var _ = Describe("OVN External Gateway pod", func() {
 			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
 			eventuallyExpectConfig(dynamicPolicyDiffTargetNS.Name, expectedPolicy2, expectedRefs2)
 		})
+
+		It("deletes a target pod that matches a policy and creates it again", func() {
+			initController([]runtime.Object{namespaceGW, namespaceTarget2, targetPod2, pod1},
+				[]runtime.Object{dynamicPolicy})
+
+			expectedPolicy1, expectedRefs1 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+
+			By("delete one of the target pods")
+			deletePod(targetPod2, fakeClient)
+			expectedPolicy1, expectedRefs1 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{{nsName: targetNamespaceName2}},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+
+			By("create the deleted target pod")
+
+			createPod(targetPod2, fakeClient)
+			expectedPolicy1, expectedRefs1 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+		})
 	})
 
 	var _ = Context("When updating a pod", func() {
