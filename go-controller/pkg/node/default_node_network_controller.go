@@ -871,6 +871,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 					if nc.name != node.Name && util.GetNodeZone(&node) != config.Default.Zone && !houtil.IsHybridOverlayNode(&node) {
 						nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
 						if err != nil {
+							if util.IsAnnotationNotSetError(err) {
+								klog.Infof("Skipping node %q. k8s.ovn.org/node-subnets annotation was not found", node.Name)
+								continue
+							}
 							err1 = fmt.Errorf("unable to fetch node-subnet annotation for node %s: err, %v", node.Name, err)
 							return false, nil
 						}
@@ -883,9 +887,9 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 						}
 					}
 				}
+				klog.Infof("Upgrade Hack: Syncing nodes took %v", time.Since(start))
 				syncNodes = true
 			}
-			klog.Infof("Upgrade Hack: Syncing nodes took %v", time.Since(start))
 			// we loop through all existing services in the cluster and ensure ovnkube-controller has finished creating LoadBalancers required for services to work
 			if !syncServices {
 				services, err := nc.watchFactory.GetServices()
@@ -903,9 +907,9 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 						return false, nil
 					}
 				}
+				klog.Infof("Upgrade Hack: Syncing services took %v", time.Since(start))
 				syncServices = true
 			}
-			klog.Infof("Upgrade Hack: Syncing services took %v", time.Since(start))
 			if !syncPods {
 				pods, err := nc.watchFactory.GetAllPods()
 				if err != nil {
@@ -924,9 +928,9 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 						return false, nil
 					}
 				}
+				klog.Infof("Upgrade Hack: Syncing pods took %v", time.Since(start))
 				syncPods = true
 			}
-			klog.Infof("Upgrade Hack: Syncing pods took %v", time.Since(start))
 			return true, nil
 		})
 		if err != nil {
