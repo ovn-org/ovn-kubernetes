@@ -50,14 +50,14 @@ const (
 	// OvnNodeL3GatewayConfig is the constant string representing the l3 gateway annotation key
 	OvnNodeL3GatewayConfig = "k8s.ovn.org/l3-gateway-config"
 
-	// ovnNodeGatewayMtuSupport determines if option:gateway_mtu shall be set for GR router ports.
-	ovnNodeGatewayMtuSupport = "k8s.ovn.org/gateway-mtu-support"
+	// OvnNodeGatewayMtuSupport determines if option:gateway_mtu shall be set for GR router ports.
+	OvnNodeGatewayMtuSupport = "k8s.ovn.org/gateway-mtu-support"
 
 	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
 	ovnDefaultNetworkGateway = "default"
 
-	// ovnNodeManagementPort is the constant string representing the annotation key
-	ovnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
+	// OvnNodeManagementPort is the constant string representing the annotation key
+	OvnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
 
 	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
 	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
@@ -301,16 +301,16 @@ func SetL3GatewayConfig(nodeAnnotator kube.Annotator, cfg *L3GatewayConfig) erro
 // this node.
 func SetGatewayMTUSupport(nodeAnnotator kube.Annotator, set bool) error {
 	if set {
-		nodeAnnotator.Delete(ovnNodeGatewayMtuSupport)
+		nodeAnnotator.Delete(OvnNodeGatewayMtuSupport)
 		return nil
 	}
-	return nodeAnnotator.Set(ovnNodeGatewayMtuSupport, "false")
+	return nodeAnnotator.Set(OvnNodeGatewayMtuSupport, "false")
 }
 
 // ParseNodeGatewayMTUSupport parses annotation "k8s.ovn.org/gateway-mtu-support". The default behavior should be true,
 // therefore only an explicit string of "false" will make this function return false.
 func ParseNodeGatewayMTUSupport(node *kapi.Node) bool {
-	return node.Annotations[ovnNodeGatewayMtuSupport] != "false"
+	return node.Annotations[OvnNodeGatewayMtuSupport] != "false"
 }
 
 // ParseNodeL3GatewayAnnotation returns the parsed l3-gateway-config annotation
@@ -371,14 +371,14 @@ func SetNodeManagementPortAnnotation(nodeAnnotator kube.Annotator, PfId int, Fun
 	if err != nil {
 		return fmt.Errorf("failed to marshal mgmtPortDetails with PfId '%v', FuncId '%v'", PfId, FuncId)
 	}
-	return nodeAnnotator.Set(ovnNodeManagementPort, string(bytes))
+	return nodeAnnotator.Set(OvnNodeManagementPort, string(bytes))
 }
 
-// ParseNodeManagementPort returns the parsed host addresses living on a node
+// ParseNodeManagementPortAnnotation returns the parsed host addresses living on a node
 func ParseNodeManagementPortAnnotation(node *kapi.Node) (int, int, error) {
-	mgmtPortAnnotation, ok := node.Annotations[ovnNodeManagementPort]
+	mgmtPortAnnotation, ok := node.Annotations[OvnNodeManagementPort]
 	if !ok {
-		return -1, -1, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeManagementPort, node.Name)
+		return -1, -1, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeManagementPort, node.Name)
 	}
 
 	cfg := ManagementPortDetails{}

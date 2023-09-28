@@ -122,6 +122,15 @@ jobs:
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
 
+    - name: Free up disk space
+      run: |
+        sudo eatmydata apt-get purge --auto-remove -y \
+          azure-cli aspnetcore-* dotnet-* ghc-* firefox \
+          google-chrome-stable \
+          llvm-* microsoft-edge-stable mono-* \
+          msbuild mysql-server-core-* php-* php7* \
+          powershell temurin-* zulu-*
+
     - name: Install KIND
       run: |
         sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
