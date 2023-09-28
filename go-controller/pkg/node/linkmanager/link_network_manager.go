@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/j-keck/arping"
 	"github.com/vishvananda/netlink"
@@ -62,14 +63,8 @@ func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 
 // AddAddress stores the address in a store and ensures its applied
 func (c *Controller) AddAddress(address netlink.Addr) error {
-	if address.LinkIndex == 0 {
-		return fmt.Errorf("link index must be non-zero")
-	}
-	if address.IPNet == nil {
-		return fmt.Errorf("IP must be non-nil")
-	}
-	if address.IPNet.IP.IsUnspecified() {
-		return fmt.Errorf("IP must be specified")
+	if !c.isAddressValid(address) {
+		return fmt.Errorf("address (%s) is not valid", address.String())
 	}
 	link, err := util.GetNetLinkOps().LinkByIndex(address.LinkIndex)
 	if err != nil {
@@ -86,15 +81,8 @@ func (c *Controller) AddAddress(address netlink.Addr) error {
 
 // DelAddress removes the address from the store and ensure its removed from a link
 func (c *Controller) DelAddress(address netlink.Addr) error {
-	if address.LinkIndex == 0 {
-		return fmt.Errorf("link index must be non-zero")
-	}
-	if address.IPNet == nil {
-		return fmt.Errorf("IP must be non-nil")
-	}
-	if address.IPNet.IP.IsUnspecified() {
-
-		return fmt.Errorf("IP must be specified")
+	if !c.isAddressValid(address) {
+		return fmt.Errorf("address (%s) is not valid", address.String())
 	}
 	link, err := util.GetNetLinkOps().LinkByIndex(address.LinkIndex)
 	if err != nil && !util.GetNetLinkOps().IsLinkNotFoundError(err) {
@@ -193,6 +181,25 @@ func (c *Controller) delAddressFromStore(linkName string, address netlink.Addr) 
 		}
 	}
 	c.store[linkName] = temp
+}
+
+func (c *Controller) isAddressValid(address netlink.Addr) bool {
+	if address.LinkIndex == 0 {
+		return false
+	}
+	if address.IPNet == nil {
+		return false
+	}
+	if address.IPNet.IP.IsUnspecified() {
+		return false
+	}
+	if utilnet.IsIPv4(address.IP) && !c.ipv4Enabled {
+		return false
+	}
+	if utilnet.IsIPv6(address.IP) && !c.ipv6Enabled {
+		return false
+	}
+	return true
 }
 
 // GetAssignedAddressLabel returns the label that must be assigned to each egress IP address bound to an interface
