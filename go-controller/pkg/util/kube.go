@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -208,8 +207,8 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		// uses the current context in kubeconfig
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
-		if conf.Token == "" || len(conf.CAData) == 0 {
-			return nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
+		if (conf.Token == "" && conf.CertDir == "") || len(conf.CAData) == 0 {
+			return nil, fmt.Errorf("TLS-secured apiservers require token/cert and CA certificate")
 		}
 		if _, err := cert.NewPoolFromBytes(conf.CAData); err != nil {
 			return nil, err
@@ -224,8 +223,8 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 			kconfig = &rest.Config{
 				Host: conf.APIServer,
 				TLSClientConfig: rest.TLSClientConfig{
-					KeyFile:  path.Join(conf.CertDir, certNamePrefix+"-current.pem"),
-					CertFile: path.Join(conf.CertDir, certNamePrefix+"-current.pem"),
+					KeyFile:  filepath.Join(conf.CertDir, certNamePrefix+"-current.pem"),
+					CertFile: filepath.Join(conf.CertDir, certNamePrefix+"-current.pem"),
 					CAData:   conf.CAData,
 				},
 			}
@@ -254,10 +253,9 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 // StartNodeCertificateManager manages the creation and rotation of the node-specific client certificate.
 // When there is no existing certificate, it will use the BootstrapKubeconfig kubeconfig to create a CSR and it will
 // wait for the certificate before returning.
-func StartNodeCertificateManager(ctx context.Context, wg *sync.WaitGroup, conf *config.KubernetesConfig) error {
-	nodeName := os.Getenv("K8S_NODE")
+func StartNodeCertificateManager(ctx context.Context, wg *sync.WaitGroup, nodeName string, conf *config.KubernetesConfig) error {
 	if nodeName == "" {
-		return fmt.Errorf("failed to get the node name required for the certificate from K8S_NODE env")
+		return fmt.Errorf("the provided node name cannot be empty")
 	}
 	defaultKConfig, err := newKubernetesRestConfig(conf)
 	if err != nil {

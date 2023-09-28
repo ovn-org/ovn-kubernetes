@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/urfave/cli/v2"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -99,7 +100,29 @@ func runHybridOverlay(ctx *cli.Context) error {
 		return fmt.Errorf("missing node name; use the 'node' flag to provide one")
 	}
 
-	clientset, err := util.NewKubernetesClientset(&config.Kubernetes)
+	wg := &sync.WaitGroup{}
+	clientCfg := config.Kubernetes
+	if config.Kubernetes.BootstrapKubeconfig != "" {
+		if err := util.StartNodeCertificateManager(ctx.Context, wg, nodeName, &config.Kubernetes); err != nil {
+			return fmt.Errorf("failed to start the node certificate manager: %w", err)
+		}
+
+		bootstrapConfig, err := clientcmd.BuildConfigFromFlags("", config.Kubernetes.BootstrapKubeconfig)
+		if err != nil {
+			return err
+		}
+		// Copy the APIServer and CAData from the bootstrap kubeconfig
+		clientCfg.APIServer = bootstrapConfig.Host
+		clientCfg.CAData = bootstrapConfig.CAData
+		if bootstrapConfig.CAFile != "" {
+			bytes, err := os.ReadFile(bootstrapConfig.CAFile)
+			if err != nil {
+				return err
+			}
+			clientCfg.CAData = bytes
+		}
+	}
+	clientset, err := util.NewKubernetesClientset(&clientCfg)
 	if err != nil {
 		return err
 	}
@@ -121,7 +144,6 @@ func runHybridOverlay(ctx *cli.Context) error {
 	}
 
 	f.Start(stopChan)
-	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
