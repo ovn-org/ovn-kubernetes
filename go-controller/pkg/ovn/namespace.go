@@ -210,6 +210,26 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 				}
 			}
 		}
+		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
+			// If interconnect is disabled OR interconnect is running in single-zone-mode,
+			// the ovnkube-master is responsible for patching ICNI managed namespaces with
+			// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
+			// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
+			// directly on the ovnkube-controller code to avoid an extra namespace annotation
+			gatewayIPs, err := oc.apbExternalRouteController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(old.Name)
+			if err != nil {
+				return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects for namespace %s: %w", old.Name, err)
+			}
+			for _, gwInfo := range nsInfo.routingExternalPodGWs {
+				gatewayIPs.Insert(gwInfo.gws.UnsortedList()...)
+			}
+			gatewayIPs.Insert(nsInfo.routingExternalGWs.gws.UnsortedList()...)
+			err = oc.syncConntrackForExternalGateways(old.Name, gatewayIPs) // best effort
+			if err != nil {
+				klog.Errorf("Syncing conntrack entries for egressGWs %+v serving the namespace %s failed: %v",
+					gatewayIPs, old.Name, err)
+			}
+		}
 		// if new annotation is empty, exgws were removed, may need to add SNAT per pod
 		// check if there are any pod gateways serving this namespace as well
 		if gwAnnotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
