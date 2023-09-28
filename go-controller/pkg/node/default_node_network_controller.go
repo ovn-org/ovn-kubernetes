@@ -1035,7 +1035,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if config.HybridOverlay.Enabled {
 		// Not supported with DPUs, enforced in config
 		// TODO(adrianc): Revisit above comment
-		// TODO(jtanenba): LocalPodInformer informs on all pods
 		nodeController, err := honode.NewNode(
 			nc.Kube,
 			nc.name,
@@ -1080,15 +1079,22 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		util.SetARPTimeout()
-		err := nc.WatchNamespaces()
-		if err != nil {
-			return fmt.Errorf("failed to watch namespaces: %w", err)
+		// If interconnect is disabled OR interconnect is running in single-zone-mode,
+		// the ovnkube-master is responsible for patching ICNI managed namespaces with
+		// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
+		// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
+		// directly on the ovnkube-controller code to avoid an extra namespace annotation
+		if !config.OVNKubernetesFeature.EnableInterconnect || sbZone == types.OvnDefaultZone {
+			util.SetARPTimeout()
+			err := nc.WatchNamespaces()
+			if err != nil {
+				return fmt.Errorf("failed to watch namespaces: %w", err)
+			}
+			// every minute cleanup stale conntrack entries if any
+			go wait.Until(func() {
+				nc.checkAndDeleteStaleConntrackEntries()
+			}, time.Minute*1, nc.stopChan)
 		}
-		// every minute cleanup stale conntrack entries if any
-		go wait.Until(func() {
-			nc.checkAndDeleteStaleConntrackEntries()
-		}, time.Minute*1, nc.stopChan)
 		err = nc.WatchEndpointSlices()
 		if err != nil {
 			return fmt.Errorf("failed to watch endpointSlices: %w", err)
