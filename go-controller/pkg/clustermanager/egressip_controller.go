@@ -635,7 +635,10 @@ func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
 			}
 		} else {
 			klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
-			if err := eIPC.addEgressNode(nodeName); err != nil {
+			nodeToAdd, err := eIPC.watchFactory.GetNode(nodeName)
+			if err != nil {
+				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
+			} else if err := eIPC.retryEgressNodes.AddRetryObjWithAddNoBackoff(nodeToAdd); err != nil {
 				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
 			}
 		}
