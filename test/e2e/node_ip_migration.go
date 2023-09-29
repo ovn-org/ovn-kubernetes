@@ -91,14 +91,17 @@ spec:
 		By("Selecting 2 random worker nodes from the list for IP address migration tests")
 		// Get the primary worker node for IP address migration.
 		// Get the secondary worker node to spawn another pod on for pod to pod reachability tests.
-		workerNodes, err := e2enode.GetReadySchedulableNodes(f.ClientSet)
-		Expect(err).NotTo(HaveOccurred())
-		e2enode.Filter(workerNodes, func(node v1.Node) bool {
-			_, ok1 := node.Labels["node-role.kubernetes.io/control-plane"]
-			_, ok2 := node.Labels["node-role.kubernetes.io/master"]
-			return !ok1 && !ok2
-		})
-		Expect(len(workerNodes.Items)).Should(BeNumerically(">=", 2))
+		var workerNodes *v1.NodeList
+		Eventually(func() bool {
+			workerNodes, err = e2enode.GetReadySchedulableNodes(f.ClientSet)
+			Expect(err).NotTo(HaveOccurred())
+			e2enode.Filter(workerNodes, func(node v1.Node) bool {
+				_, ok1 := node.Labels["node-role.kubernetes.io/control-plane"]
+				_, ok2 := node.Labels["node-role.kubernetes.io/master"]
+				return !ok1 && !ok2
+			})
+			return len(workerNodes.Items) >= 2
+		}, pollingTimeout, pollingInterval).Should(BeTrue())
 		workerNode = workerNodes.Items[0]
 		secondaryWorkerNode = workerNodes.Items[1]
 		framework.Logf("Selected worker node %s and secondary worker node %s", workerNode.Name, secondaryWorkerNode.Name)
