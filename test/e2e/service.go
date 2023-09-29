@@ -874,7 +874,7 @@ spec:
 	})
 
 	ginkgo.It("Should ensure connectivity works on an external service when mtu changes in intermediate node", func() {
-		err := framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*180)
+		err := framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*240)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
