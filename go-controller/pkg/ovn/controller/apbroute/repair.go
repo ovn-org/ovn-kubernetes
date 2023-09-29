@@ -173,7 +173,7 @@ func (c *ExternalGatewayMasterController) Repair() error {
 // After cleanup is completed, regular handling can be started.
 func (c *ExternalGatewayMasterController) syncPoliciesWithoutCleanup() (map[string]*managedGWIPs, error) {
 	clusterRouteCache := make(map[string]*managedGWIPs)
-	externalRoutePolicies, err := c.routeLister.List(labels.Everything())
+	externalRoutePolicies, err := c.mgr.routeLister.List(labels.Everything())
 	if err != nil {
 		return nil, fmt.Errorf("failed to list AdminPolicyBasedExternalRoute: %w", err)
 	}
@@ -261,7 +261,7 @@ func (c *ExternalGatewayMasterController) processOVNRoute(ovnRoute *ovnRoute, gw
 func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations() (map[string]*managedGWIPs, error) {
 	clusterRouteCache := make(map[string]*managedGWIPs, 0)
 
-	nsList, err := c.namespaceLister.List(labels.Everything())
+	nsList, err := c.mgr.namespaceLister.List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +278,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 				bfdEnabled = true
 			}
 			gwInfo := gateway_info.NewGatewayInfo(ips, bfdEnabled)
-			nsPodList, err := c.podLister.Pods(ns.Name).List(labels.Everything())
+			nsPodList, err := c.mgr.podLister.Pods(ns.Name).List(labels.Everything())
 			if err != nil {
 				return nil, err
 			}
@@ -287,7 +287,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 		}
 	}
 
-	podList, err := c.podLister.List(labels.Everything())
+	podList, err := c.mgr.podLister.List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +315,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 		}
 		gwInfo := gateway_info.NewGatewayInfo(foundGws, bfdEnabled)
 		for _, targetNs := range strings.Split(targetNamespaces, ",") {
-			nsPodList, err := c.podLister.Pods(targetNs).List(labels.Everything())
+			nsPodList, err := c.mgr.podLister.Pods(targetNs).List(labels.Everything())
 			if err != nil {
 				return nil, err
 			}
