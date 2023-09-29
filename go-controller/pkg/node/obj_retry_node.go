@@ -8,8 +8,11 @@ import (
 	discovery "k8s.io/api/discovery/v1"
 	cache "k8s.io/client-go/tools/cache"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type nodeEventHandler struct {
@@ -159,8 +162,20 @@ func (h *nodeEventHandler) AddResource(obj interface{}, fromRetryLoop bool) erro
 func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
 	switch h.objType {
 	case factory.NamespaceExGwType:
-		newNs := newObj.(*kapi.Namespace)
-		return h.nc.syncConntrackForExternalGateways(newNs)
+		// If interconnect is disabled OR interconnect is running in single-zone-mode,
+		// the ovnkube-master is responsible for patching ICNI managed namespaces with
+		// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
+		// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
+		// directly on the ovnkube-controller code to avoid an extra namespace annotation
+		node, err := h.nc.watchFactory.GetNode(h.nc.name)
+		if err != nil {
+			return fmt.Errorf("error retrieving node %s: %v", h.nc.name, err)
+		}
+		if !config.OVNKubernetesFeature.EnableInterconnect || util.GetNodeZone(node) == types.OvnDefaultZone {
+			newNs := newObj.(*kapi.Namespace)
+			return h.nc.syncConntrackForExternalGateways(newNs)
+		}
+		return nil
 
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		oldEndpointSlice := oldObj.(*discovery.EndpointSlice)

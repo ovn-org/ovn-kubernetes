@@ -15,7 +15,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	ktypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -38,10 +37,12 @@ import (
 )
 
 const (
-	maxRetries = 15
+	resyncInterval = 0
+	maxRetries     = 15
 )
 
 // Admin Policy Based Route services
+
 type ExternalGatewayMasterController struct {
 	client               kubernetes.Interface
 	apbRoutePolicyClient adminpolicybasedrouteclient.Interface
@@ -62,13 +63,9 @@ type ExternalGatewayMasterController struct {
 	namespaceLister   corev1listers.NamespaceLister
 	namespaceInformer cache.SharedIndexInformer
 
-	// External gateway caches
-	// Make them public so that they can be used by the annotation logic to lock on namespaces and share the same external route information
-	ExternalGWCache map[ktypes.NamespacedName]*ExternalRouteInfo
-	ExGWCacheMutex  *sync.RWMutex
-
-	mgr      *externalPolicyManager
-	nbClient *northBoundClient
+	mgr                      *externalPolicyManager
+	nbClient                 *northBoundClient
+	ExternalGWRouteInfoCache *ExternalGatewayRouteInfoCache
 }
 
 func NewExternalMasterController(
@@ -84,22 +81,20 @@ func NewExternalMasterController(
 	controllerName string,
 ) (*ExternalGatewayMasterController, error) {
 
-	externalGWCache := make(map[ktypes.NamespacedName]*ExternalRouteInfo)
-	exGWCacheMutex := &sync.RWMutex{}
+	externalGWRouteInfo := NewExternalGatewayRouteInfoCache()
 	zone, err := libovsdbutil.GetNBZone(nbClient)
 	if err != nil {
 		return nil, err
 	}
 	nbCli := &northBoundClient{
-		routeLister:       apbRouteInformer.Lister(),
-		nodeLister:        nodeLister,
-		podLister:         podInformer.Lister(),
-		nbClient:          nbClient,
-		addressSetFactory: addressSetFactory,
-		externalGWCache:   externalGWCache,
-		exGWCacheMutex:    exGWCacheMutex,
-		controllerName:    controllerName,
-		zone:              zone,
+		routeLister:              apbRouteInformer.Lister(),
+		nodeLister:               nodeLister,
+		podLister:                podInformer.Lister(),
+		nbClient:                 nbClient,
+		addressSetFactory:        addressSetFactory,
+		controllerName:           controllerName,
+		zone:                     zone,
+		externalGatewayRouteInfo: externalGWRouteInfo,
 	}
 
 	c := &ExternalGatewayMasterController{
@@ -124,9 +119,8 @@ func NewExternalMasterController(
 			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 			"apbexternalroutenamespaces",
 		),
-		ExternalGWCache: externalGWCache,
-		ExGWCacheMutex:  exGWCacheMutex,
-		nbClient:        nbCli,
+		ExternalGWRouteInfoCache: externalGWRouteInfo,
+		nbClient:                 nbCli,
 		mgr: newExternalPolicyManager(
 			stopCh,
 			podInformer.Lister(),
@@ -243,6 +237,19 @@ func (c *ExternalGatewayMasterController) processNextPolicyWorkItem(wg *sync.Wai
 	}
 	c.routeQueue.Forget(key)
 	return true
+}
+
+func (c *ExternalGatewayMasterController) GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespaceName string) (sets.Set[string], error) {
+	gwIPs, err := c.mgr.getDynamicGatewayIPsForTargetNamespace(namespaceName)
+	if err != nil {
+		return nil, err
+	}
+	tmpIPs, err := c.mgr.getStaticGatewayIPsForTargetNamespace(namespaceName)
+	if err != nil {
+		return nil, err
+	}
+
+	return gwIPs.Union(tmpIPs), nil
 }
 
 func (c *ExternalGatewayMasterController) onPolicyAdd(obj interface{}) {
