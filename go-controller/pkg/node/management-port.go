@@ -77,7 +77,7 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 }
 
 func (mp *managementPort) Create(routeManager *routemanager.Controller, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
-	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
+	for _, mgmtPortName := range []string{util.GetK8sMgmtIntfName(), util.GetK8sMgmtIntfName() + "_0"} {
 		if err := syncMgmtPortInterface(mp.hostSubnets, mgmtPortName, true); err != nil {
 			return nil, fmt.Errorf("failed to sync management port: %v", err)
 		}
@@ -87,29 +87,29 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, nodeAnno
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(mp.nodeName)
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
-		"--", "--may-exist", "add-port", "br-int", types.K8sMgmtIntfName,
-		"--", "set", "interface", types.K8sMgmtIntfName,
+		"--", "--may-exist", "add-port", "br-int", util.GetK8sMgmtIntfName(),
+		"--", "set", "interface", util.GetK8sMgmtIntfName(),
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		"external-ids:iface-id="+types.K8sPrefix+mp.nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return nil, err
 	}
-	macAddress, err := util.GetOVSPortMACAddress(types.K8sMgmtIntfName)
+	macAddress, err := util.GetOVSPortMACAddress(util.GetK8sMgmtIntfName())
 	if err != nil {
 		klog.Errorf("Failed to get management port MAC address: %v", err)
 		return nil, err
 	}
 	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", types.K8sMgmtIntfName,
+	_, stderr, err = util.RunOVSVsctl("set", "interface", util.GetK8sMgmtIntfName(),
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
 	if err != nil {
 		klog.Errorf("Failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress.String(),
-			types.K8sMgmtIntfName, stderr, err)
+			util.GetK8sMgmtIntfName(), stderr, err)
 		return nil, err
 	}
 
-	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets)
+	cfg, err := createPlatformManagementPort(routeManager, util.GetK8sMgmtIntfName(), mp.hostSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func (mp *managementPort) HasIpAddr() bool {
 }
 
 func managementPortReady() (bool, error) {
-	k8sMgmtIntfName := types.K8sMgmtIntfName
+	k8sMgmtIntfName := util.GetK8sMgmtIntfName()
 	if config.OvnKubeNode.MgmtPortNetdev != "" {
 		k8sMgmtIntfName += "_0"
 	}

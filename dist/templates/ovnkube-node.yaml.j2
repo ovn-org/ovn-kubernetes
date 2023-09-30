@@ -87,7 +87,7 @@ spec:
         - mountPath: /var/run/netns
           name: host-netns
           mountPropagation: Bidirectional
-       {%- if ovnkube_app_name=="ovnkube-node" %}
+       {%- if ovnkube_app_name!="ovnkube-node-dpu-host" %}
         # ovnkube-node only mounts (non dpu related)
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
@@ -102,7 +102,7 @@ spec:
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
-        {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}
+        {%- else %}
         # ovnkube-node dpu-host mounts
         - mountPath: /var/run/ovn
           name: var-run-ovn
@@ -207,7 +207,7 @@ spec:
           value: "{{ ovn_unprivileged_mode }}"
         - name: OVN_EX_GW_NETWORK_INTERFACE
           value: "{{ ovn_ex_gw_networking_interface }}"
-        {% if ovnkube_app_name=="ovnkube-node" -%}
+        {% if ovnkube_app_name!="ovnkube-node-dpu-host" -%}
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
         - name: OVN_DISABLE_OVN_IFACE_ID_VER
@@ -236,9 +236,15 @@ spec:
         {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
         - name: OVNKUBE_NODE_MODE
           value: "dpu-host"
-        {% endif -%}
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
           value: "{{ ovnkube_node_mgmt_port_netdev }}"
+        {% elif ovnkube_app_name=="ovnkube-node-dpu" -%}
+        - name: OVNKUBE_NODE_MODE
+          value: "dpu"
+        {% else -%}
+        - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
+          value: "{{ ovnkube_node_mgmt_port_netdev }}"
+        {% endif -%}
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:
@@ -257,7 +263,8 @@ spec:
           timeoutSeconds: 30
           periodSeconds: 60
       {% endif %}
-      {% if ovnkube_app_name=="ovnkube-node" -%}
+
+      {% if ovnkube_app_name!="ovnkube-node-dpu-host" and ovnkube_node_standalone is not defined -%}
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
@@ -353,12 +360,16 @@ spec:
             fieldRef:
               fieldPath: status.hostIP
         # end of container
-      {% endif -%}
+      {%- endif %}
 
       {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
       nodeSelector:
         kubernetes.io/os: "linux"
         k8s.ovn.org/dpu-host: ""
+      {% elif ovnkube_app_name=="ovnkube-node-dpu" or ovnkube_app_name=="ovnkube-node-dpu-full" -%}
+      nodeSelector:
+        kubernetes.io/os: "linux"
+        k8s.ovn.org/dpu: ""
       {% else -%}
       nodeSelector:
         kubernetes.io/os: "linux"
@@ -369,7 +380,9 @@ spec:
             - matchExpressions:
               - key: k8s.ovn.org/dpu-host
                 operator: DoesNotExist
-      {% endif -%}
+              - key: k8s.ovn.org/dpu
+                operator: DoesNotExist
+      {%- endif %}
       volumes:
       # Common volumes
       - name: host-var-run-dbus
@@ -396,7 +409,7 @@ spec:
       - name: host-netns
         hostPath:
           path: /var/run/netns
-      {%- if ovnkube_app_name=="ovnkube-node" %}
+      {%- if ovnkube_app_name!="ovnkube-node-dpu-host" %}
       # non DPU related volumes
       - name: host-var-log-ovs
         hostPath:
@@ -417,7 +430,7 @@ spec:
       - name: host-etc-ovs
         hostPath:
           path: /etc/openvswitch
-      {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}
+      {%- else %}
       - name: var-run-ovn
         emptyDir: {}
       {%- endif %}

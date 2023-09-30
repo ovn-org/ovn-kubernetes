@@ -360,6 +360,12 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 
 // updateOVNEncapIP updates encap IP to OVS when the node primary IP changed.
 func (c *addressManager) updateOVNEncapIPAndReconnect() {
+	// Skip updating the encapsulation in the DPU mode, since it can have two instances
+	// of ovnkube which refer to different hosts
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		return
+	}
+
 	checkCmd := []string{
 		"get",
 		"Open_vSwitch",

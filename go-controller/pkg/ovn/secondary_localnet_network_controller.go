@@ -108,6 +108,7 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
+	klog.Infof("Creating localnetport with physNetworkName: %v", oc.GetNetworkName())
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
 		Name:      oc.GetNetworkScopedName(types.OVNLocalnetPort),
 		Addresses: []string{"unknown"},

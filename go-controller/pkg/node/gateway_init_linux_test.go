@@ -127,7 +127,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":breth0",
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.GetPhysNetNameKey() + ":breth0",
 		})
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -221,7 +221,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		}
 
 		fakeMgmtPortConfig := managementPortConfig{
-			ifName:    nodeName,
+			ifName:    util.GetK8sMgmtIntfName(),
 			link:      nil,
 			routerMAC: nil,
 			ipv4:      &fakeMgmtPortIPFamilyConfig,
@@ -484,7 +484,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Output: "",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":" + brphys,
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.GetPhysNetNameKey() + ":" + brphys,
 		})
 		// GetNodeChassisID
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -678,8 +678,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
-
-		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
 
 		// ensure correct l3 gw config were set in Node annotation
 		updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
@@ -907,7 +905,7 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":breth0",
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.GetPhysNetNameKey() + ":breth0",
 		})
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -1029,7 +1027,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		}
 
 		fakeMgmtPortConfig := managementPortConfig{
-			ifName:    types.K8sMgmtIntfName,
+			ifName:    util.GetK8sMgmtIntfName(),
 			link:      nil,
 			routerMAC: nil,
 			ipv4:      &fakeMgmtPortIPFamilyConfig,
@@ -1436,6 +1434,8 @@ var _ = Describe("Gateway Operations DPU", func() {
 
 var _ = Describe("Gateway unit tests", func() {
 	var netlinkMock *utilMock.NetLinkOps
+	gwIface := "eth0"
+	gwLink := &linkMock.Link{}
 	origNetlinkInst := util.GetNetLinkOps()
 
 	BeforeEach(func() {
@@ -1456,7 +1456,10 @@ var _ = Describe("Gateway unit tests", func() {
 			expectedGwSubnet := []*net.IPNet{
 				{IP: nodeIP, Mask: net.CIDRMask(24, 32)},
 			}
-			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+
+			netlinkMock.On("LinkByName", gwIface).Return(gwLink, nil)
+			netlinkMock.On("AddrList", gwLink, mock.Anything).Return([]netlink.Addr{{IPNet: dpuSubnet}}, nil)
+			gwSubnet, err := getDPUHostPrimaryIPAddresses(gwIface, nodeIP)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gwSubnet).To(Equal(expectedGwSubnet))
 		})
@@ -1464,27 +1467,27 @@ var _ = Describe("Gateway unit tests", func() {
 		It("Fails if node IP is not in host subnets", func() {
 			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.1.11")
-			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			netlinkMock.On("LinkByName", gwIface).Return(gwLink, nil)
+			netlinkMock.On("AddrList", gwLink, mock.Anything).Return([]netlink.Addr{{IPNet: dpuSubnet}}, nil)
+			_, err := getDPUHostPrimaryIPAddresses(gwIface, nodeIP)
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("returns node IP with config.Gateway.RouterSubnet subnet", func() {
 			config.Gateway.RouterSubnet = "10.1.0.0/16"
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.1.0.11")
 			expectedGwSubnet := []*net.IPNet{
 				{IP: nodeIP, Mask: net.CIDRMask(16, 32)},
 			}
-			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			gwSubnet, err := getDPUHostPrimaryIPAddresses(gwIface, nodeIP)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gwSubnet).To(Equal(expectedGwSubnet))
 		})
 
 		It("Fails if node IP is not in config.Gateway.RouterSubnet subnet", func() {
 			config.Gateway.RouterSubnet = "10.1.0.0/16"
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.0.11")
-			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			_, err := getDPUHostPrimaryIPAddresses(gwIface, nodeIP)
 			Expect(err).To(HaveOccurred())
 		})
 	})

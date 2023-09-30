@@ -302,7 +302,6 @@ func setupOVNNode(node *kapi.Node) error {
 		// to finish computation specially with complex acl configuration with port range.
 		fmt.Sprintf("other_config:bundle-idle-timeout=%d",
 			config.Default.OpenFlowProbe),
-		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
 		// If Interconnect feature is enabled, we want to tell ovn-controller to
 		// make this node/chassis as an interconnect gateway.
 		fmt.Sprintf("external_ids:ovn-is-interconn=%s", strconv.FormatBool(config.OVNKubernetesFeature.EnableInterconnect)),
@@ -321,6 +320,12 @@ func setupOVNNode(node *kapi.Node) error {
 		setExternalIdsCmd = append(setExternalIdsCmd,
 			fmt.Sprintf("external_ids:ovn-memlimit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
 		)
+	}
+
+	// In the case of DPU, the hostname should be that of the DPU and not the K8s Node.
+	// So, skip setting the incorrect hostname.
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		setExternalIdsCmd = append(setExternalIdsCmd, fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name))
 	}
 
 	_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
@@ -499,7 +504,7 @@ func importManagementPortAnnotation(node *kapi.Node) (string, error) {
 
 // Take care of alternative names for the netdevName by making sure we
 // use the link attribute name as well as handle the case when netdevName
-// was renamed to types.K8sMgmtIntfName
+// was renamed to util.GetK8sMgmtIntfName()
 func getManagementPortNetDev(netdevName string) (string, error) {
 	link, err := util.GetNetLinkOps().LinkByName(netdevName)
 	if err != nil {
@@ -508,7 +513,7 @@ func getManagementPortNetDev(netdevName string) (string, error) {
 		}
 		// this may not the first time invoked on the node after reboot
 		// netdev may have already been renamed to ovn-k8s-mp0.
-		link, err = util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
+		link, err = util.GetNetLinkOps().LinkByName(util.GetK8sMgmtIntfName())
 		if err != nil {
 			return "", fmt.Errorf("failed to get link device for %s. %v", netdevName, err)
 		}
@@ -989,9 +994,9 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				if needLegacySvcRoute {
 					klog.Info("System may be upgrading, falling back to legacy K8S Service via management port")
 					// add back legacy route for service via management port
-					link, err := util.LinkSetUp(types.K8sMgmtIntfName)
+					link, err := util.LinkSetUp(util.GetK8sMgmtIntfName())
 					if err != nil {
-						return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
+						return fmt.Errorf("unable to get link for %s, error: %v", util.GetK8sMgmtIntfName(), err)
 					}
 					var gwIP net.IP
 					var routes []routemanager.Route
@@ -1401,9 +1406,9 @@ func configureSvcRouteViaBridge(routeManager *routemanager.Controller, bridge st
 func upgradeServiceRoute(routeManager *routemanager.Controller, bridgeName string) error {
 	klog.Info("Updating K8S Service route")
 	// Flush old routes
-	link, err := util.LinkSetUp(types.K8sMgmtIntfName)
+	link, err := util.LinkSetUp(util.GetK8sMgmtIntfName())
 	if err != nil {
-		return fmt.Errorf("unable to get link: %s, error: %v", types.K8sMgmtIntfName, err)
+		return fmt.Errorf("unable to get link: %s, error: %v", util.GetK8sMgmtIntfName(), err)
 	}
 	for _, serviceCIDR := range config.Kubernetes.ServiceCIDRs {
 		serviceCIDR := *serviceCIDR

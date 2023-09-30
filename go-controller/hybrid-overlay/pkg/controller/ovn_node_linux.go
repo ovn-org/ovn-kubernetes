@@ -15,7 +15,6 @@ import (
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/vishvananda/netlink"
@@ -204,9 +203,9 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 		// No static cluster subnet is provided in config. Try to detect the hybrid overlay node subnet dynamically
 		// Add a route via the hybrid overlay port IP through the management port
 		// interface for each hybrid overlay cluster subnet
-		mgmtPortLink, err := util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
+		mgmtPortLink, err := util.GetNetLinkOps().LinkByName(util.GetK8sMgmtIntfName())
 		if err != nil {
-			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
+			return fmt.Errorf("failed to lookup link %s: %v", util.GetK8sMgmtIntfName(), err)
 		}
 
 		route := makeRoute(cidr, n.drIP, mgmtPortLink)
@@ -284,9 +283,9 @@ func (n *NodeController) DeleteNode(node *kapi.Node) error {
 		// No static cluster subnet is provided in config. Try to detect the hybrid overlay node subnet dynamically
 		// Add a route via the hybrid overlay port IP through the management port
 		// interface for each hybrid overlay cluster subnet
-		mgmtPortLink, err := util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
+		mgmtPortLink, err := util.GetNetLinkOps().LinkByName(util.GetK8sMgmtIntfName())
 		if err != nil {
-			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
+			return fmt.Errorf("failed to lookup link %s: %v", util.GetK8sMgmtIntfName(), err)
 		}
 
 		route := makeRoute(cidr, n.drIP, mgmtPortLink)
@@ -440,9 +439,9 @@ func (n *NodeController) handleHybridOverlayMACIPChange(node *kapi.Node) error {
 			return fmt.Errorf("updated Hybrid Overlay Dristributed router IP annotation not a valid IP address %s", node.Annotations[hotypes.HybridOverlayDRIP])
 		}
 		n.drIP = newDRIP
-		mgmtPortLink, err := util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
+		mgmtPortLink, err := util.GetNetLinkOps().LinkByName(util.GetK8sMgmtIntfName())
 		if err != nil {
-			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
+			return fmt.Errorf("failed to lookup link %s: %v", util.GetK8sMgmtIntfName(), err)
 		}
 		err = n.createOrReplaceRoutes(mgmtPortLink, oldDRIP)
 		if err != nil {
@@ -610,9 +609,9 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 			"IN_PORT",
 			extVXLANName, subnet.String(), hotypes.HybridOverlayVNI, n.drMAC.String(), portMACRaw))
 
-	mgmtPortLink, err := util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
+	mgmtPortLink, err := util.GetNetLinkOps().LinkByName(util.GetK8sMgmtIntfName())
 	if err != nil {
-		return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
+		return fmt.Errorf("failed to lookup link %s: %v", util.GetK8sMgmtIntfName(), err)
 	}
 
 	err = n.createOrReplaceRoutes(mgmtPortLink, nil)

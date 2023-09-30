@@ -20,7 +20,7 @@ import (
 func genOVSAddMgmtPortCmd(nodeName, repName string) string {
 	return fmt.Sprintf("ovs-vsctl --timeout=15 -- --may-exist add-port br-int %s -- set interface %s external-ids:iface-id=%s"+
 		" external-ids:ovn-orig-mgmt-port-rep-name=%s",
-		types.K8sMgmtIntfName+"_0", types.K8sMgmtIntfName+"_0", types.K8sPrefix+nodeName, repName)
+		util.GetK8sMgmtIntfName(), util.GetK8sMgmtIntfName(), types.K8sPrefix+nodeName, repName)
 }
 
 func mockOVSListInterfaceMgmtPortNotExistCmd(execMock *ovntest.FakeExec, mgmtPortName string) {
@@ -71,7 +71,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			}
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(
 				nil, fmt.Errorf("failed to get interface"))
-			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(
+			netlinkOpsMock.On("LinkByName", util.GetK8sMgmtIntfName()).Return(
 				nil, fmt.Errorf("failed to get interface"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 
@@ -80,6 +80,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 		})
 
 		It("Fails if set Name to ovn-k8s-mp0 fails", func() {
+			config.OvnKubeNode.Mode = types.NodeModeDPU
 			mgmtPortDpu := managementPortRepresentor{
 				repName: "enp3s0f0v0",
 			}
@@ -88,12 +89,12 @@ var _ = Describe("Mananagement port DPU tests", func() {
 
 			netlinkOpsMock.On("LinkByName", "enp3s0f0v0").Return(
 				linkMock, nil)
-			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName+"_0").Return(
+			netlinkOpsMock.On("LinkByName", util.GetK8sMgmtIntfName()).Return(
 				nil, fmt.Errorf("link not found"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 			netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
-			netlinkOpsMock.On("LinkSetName", linkMock, types.K8sMgmtIntfName+"_0").Return(fmt.Errorf("failed to set name"))
-			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, types.K8sMgmtIntfName+"_0")
+			netlinkOpsMock.On("LinkSetName", linkMock, util.GetK8sMgmtIntfName()).Return(fmt.Errorf("failed to set name"))
+			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, util.GetK8sMgmtIntfName())
 
 			_, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
 			Expect(err).To(HaveOccurred())
@@ -104,6 +105,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			expectedMgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipnet).IP)
 			config.Default.MTU = 1400
+			config.OvnKubeNode.Mode = types.NodeModeDPU
 			mgmtPortDpu := managementPortRepresentor{
 				nodeName:    "k8s-worker0",
 				hostSubnets: []*net.IPNet{ipnet},
@@ -115,14 +117,14 @@ var _ = Describe("Mananagement port DPU tests", func() {
 
 			netlinkOpsMock.On("LinkByName", "enp3s0f0v0").Return(
 				linkMock, nil)
-			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName+"_0").Return(
+			netlinkOpsMock.On("LinkByName", util.GetK8sMgmtIntfName()).Return(
 				nil, fmt.Errorf("link not found"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 			netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
-			netlinkOpsMock.On("LinkSetName", linkMock, types.K8sMgmtIntfName+"_0").Return(nil)
+			netlinkOpsMock.On("LinkSetName", linkMock, util.GetK8sMgmtIntfName()).Return(nil)
 			netlinkOpsMock.On("LinkSetMTU", linkMock, config.Default.MTU).Return(nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
-			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, types.K8sMgmtIntfName+"_0")
+			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, util.GetK8sMgmtIntfName())
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddMgmtPortCmd(mgmtPortDpu.nodeName, mgmtPortDpu.repName),
 			})
@@ -130,7 +132,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			mpcfg, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(mpcfg.ifName).To(Equal(types.K8sMgmtIntfName + "_0"))
+			Expect(mpcfg.ifName).To(Equal(util.GetK8sMgmtIntfName()))
 			Expect(mpcfg.link).To(Equal(linkMock))
 		})
 
@@ -139,6 +141,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			expectedMgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipnet).IP)
 			config.Default.MTU = 1400
+			config.OvnKubeNode.Mode = types.NodeModeDPU
 			mgmtPortDpu := managementPortRepresentor{
 				nodeName:    "k8s-worker0",
 				hostSubnets: []*net.IPNet{ipnet},
@@ -146,7 +149,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			}
 			nodeAnnotatorMock.On("Set", mock.Anything, expectedMgmtPortMac.String()).Return(nil)
 			linkMock := &mocks.Link{}
-			linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: "ovn-k8s-mp0_0", MTU: config.Default.MTU})
+			linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: "ovn-k8s-mp0", MTU: config.Default.MTU})
 
 			netlinkOpsMock.On("LinkByName", "enp3s0f0v0").Return(
 				linkMock, nil)
@@ -158,7 +161,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			mpcfg, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(mpcfg.ifName).To(Equal(types.K8sMgmtIntfName + "_0"))
+			Expect(mpcfg.ifName).To(Equal(util.GetK8sMgmtIntfName()))
 			Expect(mpcfg.link).To(Equal(linkMock))
 		})
 	})
@@ -181,7 +184,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			}
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(
 				nil, fmt.Errorf("failed to get interface"))
-			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(
+			netlinkOpsMock.On("LinkByName", util.GetK8sMgmtIntfName()).Return(
 				nil, fmt.Errorf("failed to get interface"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 
@@ -209,10 +212,10 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 			netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 			netlinkOpsMock.On("LinkSetHardwareAddr", linkMock, expectedMgmtPortMac).Return(nil)
-			netlinkOpsMock.On("LinkSetName", linkMock, types.K8sMgmtIntfName).Return(nil)
+			netlinkOpsMock.On("LinkSetName", linkMock, util.GetK8sMgmtIntfName()).Return(nil)
 			netlinkOpsMock.On("LinkSetMTU", linkMock, config.Default.MTU).Return(nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil, nil)
-			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, types.K8sMgmtIntfName)
+			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, util.GetK8sMgmtIntfName())
 			execMock.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external-ids:ovn-orig-mgmt-port-netdev-name=" + mgmtPortDpuHost.netdevName,
 			})
@@ -242,6 +245,14 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			linkMock := &mocks.Link{}
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{
 				Name: "ovn-k8s-mp0", MTU: 1400, HardwareAddr: expectedMgmtPortMac})
+
+			netlinkOpsMock.On("LinkByName", "enp3s0f0v0").Return(
+				linkMock, nil).Once()
+			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil, nil).Once()
+			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
+			execMock.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external-ids:ovn-orig-mgmt-port-netdev-name=" + mgmtPortDpuHost.netdevName,
+			})
 
 			// mock createPlatformManagementPort, we fail it as it covers what we want to test without the
 			// need to mock the entire flow down to routes and iptable rules.

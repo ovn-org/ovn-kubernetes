@@ -233,7 +233,7 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 
 // getDPUHostPrimaryIPAddresses returns the DPU host IP/Network based on K8s Node IP
 // and DPU IP subnet overriden by config config.Gateway.RouterSubnet
-func getDPUHostPrimaryIPAddresses(k8sNodeIP net.IP, ifAddrs []*net.IPNet) ([]*net.IPNet, error) {
+func getDPUHostPrimaryIPAddresses(gatewayIntf string, k8sNodeIP net.IP) ([]*net.IPNet, error) {
 	// Note(adrianc): No Dual-Stack support at this point as we rely on k8s node IP to derive gateway information
 	// for each node.
 	var gwIps []*net.IPNet
@@ -256,6 +256,11 @@ func getDPUHostPrimaryIPAddresses(k8sNodeIP net.IP, ifAddrs []*net.IPNet) ([]*ne
 		addr.IP = k8sNodeIP
 		gwIps = append(gwIps, addr)
 	} else {
+		ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf)
+		if err != nil {
+			return nil, err
+		}
+
 		// Assume Host and DPU share the same subnet
 		// in this case just update the matching IPNet with the Host's IP address
 		for _, addr := range ifAddrs {
@@ -359,18 +364,15 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 		egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
 	}
 
-	ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf)
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
+		ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf)
+	} else {
+		// For DPU, here we need to use the DPU host's IP address which is the tenant cluster's
+		// host internal IP address instead of the DPU's external bridge IP address.
+		ifAddrs, err = getDPUHostPrimaryIPAddresses(gatewayIntf, kubeNodeIP)
+	}
 	if err != nil {
 		return err
-	}
-
-	// For DPU need to use the host IP addr which currently is assumed to be K8s Node cluster
-	// internal IP address.
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		ifAddrs, err = getDPUHostPrimaryIPAddresses(kubeNodeIP, ifAddrs)
-		if err != nil {
-			return err
-		}
 	}
 
 	if err := util.SetNodePrimaryIfAddrs(nodeAnnotator, ifAddrs); err != nil {

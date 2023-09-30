@@ -5,9 +5,9 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
@@ -38,7 +38,7 @@ func genDeleteStaleRepPortCmd(iface string) string {
 
 func genFindInterfaceWithSandboxCmd() string {
 	return fmt.Sprintf("ovs-vsctl --timeout=15 --columns=name,external_ids --data=bare --no-headings " +
-		"--format=csv find Interface external_ids:sandbox!=\"\" external_ids:vf-netdev-name!=\"\"")
+		"--format=csv find Interface external_ids:sandbox!=\"\" external_ids:vf-netdev-name!=\"\" external_ids:ovn_kube_mode=full")
 }
 
 var _ = Describe("Healthcheck tests", func() {
@@ -67,7 +67,7 @@ var _ = Describe("Healthcheck tests", func() {
 			It("removes stale ports from bridge", func() {
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    genListStalePortsCmd(),
-					Output: "foo\n\nbar\n\n" + types.K8sMgmtIntfName + "\n\n",
+					Output: "foo\n\nbar\n\n" + util.GetK8sMgmtIntfName() + "\n\n",
 					Err:    nil,
 				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -84,7 +84,7 @@ var _ = Describe("Healthcheck tests", func() {
 			It("Does not remove any ports from bridge", func() {
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    genListStalePortsCmd(),
-					Output: types.K8sMgmtIntfName + "\n\n",
+					Output: util.GetK8sMgmtIntfName() + "\n\n",
 					Err:    nil,
 				})
 				checkForStaleOVSInternalPorts()
@@ -146,6 +146,7 @@ var _ = Describe("Healthcheck tests", func() {
 					Err:    nil,
 				})
 				ncm.checkForStaleOVSRepresentorInterfaces()
+				config.OvnKubeNode.Mode = "full"
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			})
 		})
@@ -160,6 +161,7 @@ var _ = Describe("Healthcheck tests", func() {
 					Err: nil,
 				})
 				ncm.checkForStaleOVSRepresentorInterfaces()
+				config.OvnKubeNode.Mode = "full"
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			})
 		})

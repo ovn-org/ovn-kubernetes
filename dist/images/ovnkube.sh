@@ -80,8 +80,10 @@ fi
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
 # OVN_EGRESSSERVICE_ENABLE - enable egress Service for ovn-kubernetes
+# OVN_DISABLE_OVN_REQUESTED_CHASIS - disable usage of the OVN requested-chassis for logical switch port option
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
+# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - Name of interface to be used as ovnkubernetes mgmt port (default: ovn-k8s-mp0)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
 # OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME - ovnkube node management port device plugin resource
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
@@ -89,6 +91,11 @@ fi
 # OVN_DISABLE_FORWARDING - disable forwarding on OVNK controlled interfaces
 # OVN_ENABLE_MULTI_EXTERNAL_GATEWAY - enable multi external gateway for ovn-kubernetes
 # OVN_ENABLE_OVNKUBE_IDENTITY - enable per node certificate ovn-kubernetes
+# OVN_CONNTRACK_ZONE - conntrack zone number used for openflow rules (default 64000)
+# OVN_METRICS_MASTER_PORT - metrics port which will be exposed by ovnkube-master (default 9409)
+# OVN_METRICS_WORKER_PORT - metrics port which will be exposed by ovnkube-node (default 9410)
+# OVN_METRICS_BIND_PORT - port for the OVN metrics server to serve on (default 9476)
+# OVN_METRICS_EXPORTER_PORT - ovs-metrics exporter port (default 9310)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -180,6 +187,30 @@ routable_mtu=${OVN_ROUTABLE_MTU:-}
 # set metrics endpoint bind to K8S_NODE_IP.
 metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
+# set metrics endpoint master port bind to K8S_NODE_IP
+metrics_master_port=${OVN_METRICS_MASTER_PORT}
+if [[ -z ${metrics_master_port} ]]; then
+  metrics_master_port=9409
+fi
+
+# set metrics endpoint worker port bind to K8S_NODE_IP
+metrics_worker_port=${OVN_METRICS_WORKER_PORT}
+if [[ -z ${metrics_worker_port} ]]; then
+  metrics_worker_port=9410
+fi
+
+# set metrics endpoint worker port bind to K8S_NODE_IP
+metrics_bind_port=${OVN_METRICS_BIND_PORT}
+if [[ -z ${metrics_bind_port} ]]; then
+  metrics_bind_port=9476
+fi
+
+# set metrics endpoint worker port bind to K8S_NODE_IP
+metrics_exporter_port=${OVN_METRICS_EXPORTER_PORT}
+if [[ -z ${metrics_exporter_port} ]]; then
+  metrics_exporter_port=9310
+fi
+
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
@@ -240,6 +271,8 @@ ovn_egressqos_enable=${OVN_EGRESSQOS_ENABLE:-false}
 ovn_egressservice_enable=${OVN_EGRESSSERVICE_ENABLE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
+#OVN_DISABLE_OVN_REQUESTED_CHASIS - disable usage of the OVN requested-chassis for logical switch port option
+ovn_disable_ovn_requested_chassis=${OVN_DISABLE_OVN_REQUESTED_CHASSIS:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple network support for ovn-kubernetes
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
@@ -260,6 +293,8 @@ ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
+# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - name of interface being used as management port
+ovnkube_node_mgmt_port_intf_name=${OVNKUBE_NODE_MGMT_PORT_INTF_NAME:-}
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 # OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME - is the device plugin resource name that has
@@ -269,6 +304,8 @@ ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
+# OVN_CONNTRACK_ZONE - conntrack zone number used for openflow rules (default 64000)
+ovn_conntrack_zone=${OVN_CONNTRACK_ZONE:-}
 
 ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
 # OVNKUBE_COMPACT_MODE_ENABLE indicate if ovnkube run master and node in one process
@@ -578,6 +615,8 @@ display_env() {
   echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
   echo OVNKUBE_NODE_MODE ${ovnkube_node_mode}
   echo OVN_ENCAP_IP ${ovn_encap_ip}
+  echo OVN_CONNTRACK_ZONE ${ovn_conntrack_zone}
+  echo OVN_DISABLE_OVN_REQUESTED_CHASIS ${disable_ovn_requested_chassis}
   echo ovnkube.sh version ${ovnkube_version}
   echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
 }
@@ -1145,28 +1184,28 @@ ovn-master() {
 
   egressfirewall_enabled_flag=
   if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
-	  egressfirewall_enabled_flag="--enable-egress-firewall"
+    egressfirewall_enabled_flag="--enable-egress-firewall"
   fi
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
 
   egressqos_enabled_flag=
   if [[ ${ovn_egressqos_enable} == "true" ]]; then
-	  egressqos_enabled_flag="--enable-egress-qos"
+    egressqos_enabled_flag="--enable-egress-qos"
   fi
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
+    multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
   echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
-	  egressservice_enabled_flag="--enable-egress-service"
+    egressservice_enabled_flag="--enable-egress-service"
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
   local ovnkube_metrics_tls_opts=""
   if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
     ovnkube_metrics_tls_opts="
@@ -1186,7 +1225,7 @@ ovn-master() {
     ovnkube_metrics_scale_enable_flag="--metrics-enable-scale --metrics-enable-pprof"
   fi
   echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
-  
+
   ovn_stateless_netpol_enable_flag=
   if [[ ${ovn_stateless_netpol_enable} == "true" ]]; then
           ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
@@ -1195,9 +1234,19 @@ ovn-master() {
 
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
-	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
+      ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
   fi
   echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
+
+  ovnkube_node_mgmt_port_intf_name_flag=
+  if [[ ${ovnkube_node_mgmt_port_intf_name} != "" ]]; then
+    ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
+  fi
+
+  disable_ovn_requested_chassis_flag=
+  if [[ ${ovn_disable_ovn_requested_chassis} == "true" ]]; then
+    disable_ovn_requested_chassis_flag="--disable-ovn-requested-chassis"
+  fi
 
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
@@ -1224,6 +1273,7 @@ ovn-master() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
+    ${disable_ovn_requested_chassis_flag} \
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -1244,7 +1294,8 @@ ovn-master() {
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-    --pidfile ${OVN_RUNDIR}/ovnkube-master.pid &
+    --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
+    ${ovnkube_node_mgmt_port_intf_name_flag} &
 
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -1382,29 +1433,29 @@ ovnkube-controller() {
 
   egressfirewall_enabled_flag=
   if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
-	  egressfirewall_enabled_flag="--enable-egress-firewall"
+    egressfirewall_enabled_flag="--enable-egress-firewall"
   fi
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
 
   egressqos_enabled_flag=
   if [[ ${ovn_egressqos_enable} == "true" ]]; then
-	  egressqos_enabled_flag="--enable-egress-qos"
+    egressqos_enabled_flag="--enable-egress-qos"
   fi
   echo "egressqos_enabled_flag=${egressqos_enabled_flag}"
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
+    multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
   echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
-	  egressservice_enabled_flag="--enable-egress-service"
+    egressservice_enabled_flag="--enable-egress-service"
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
   echo "ovnkube_master_metrics_bind_address=${ovnkube_master_metrics_bind_address}"
 
   local ovnkube_metrics_tls_opts=""
@@ -1441,7 +1492,7 @@ ovnkube-controller() {
 
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
-	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
+      ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
   fi
   echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
 
@@ -1648,7 +1699,7 @@ ovnkube-controller-with-node() {
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
+      multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
   echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
 
@@ -2096,9 +2147,14 @@ ovn-controller() {
 
 # ovn-node - all nodes
 ovn-node() {
-  trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
+  trap 'kill $(jobs -p) ; exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
+  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
+    echo "removing OVN CNI conf"
+    rm -vf /etc/cni/net.d/10-ovn-kubernetes.conf
+  fi
+
 
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovn-node - (wait for ovs)"
@@ -2117,7 +2173,7 @@ ovn-node() {
 
   ovn_routable_mtu_flag=
   if [[ -n "${routable_mtu}" ]]; then
-	  routable_mtu_flag="--routable-mtu ${routable_mtu}"
+    routable_mtu_flag="--routable-mtu ${routable_mtu}"
   fi
 
   hybrid_overlay_flags=
@@ -2171,7 +2227,7 @@ ovn-node() {
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
-	  egressservice_enabled_flag="--enable-egress-service"
+      egressservice_enabled_flag="--enable-egress-service"
   fi
 
   disable_ovn_iface_id_ver_flag=
@@ -2181,7 +2237,7 @@ ovn-node() {
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
-	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
+      multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
 
   netflow_targets=
@@ -2253,6 +2309,11 @@ ovn-node() {
     fi
   fi
 
+  ovn_conntrack_zone_flag=
+  if [[ ${ovn_conntrack_zone} != "" ]]; then
+     ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
+  fi
+
   ovnkube_node_mode_flag=
   if [[ ${ovnkube_node_mode} != "" ]]; then
     ovnkube_node_mode_flag="--ovnkube-node-mode=${ovnkube_node_mode}"
@@ -2271,6 +2332,11 @@ ovn-node() {
   fi
   if [[ -n "${ovnkube_node_mgmt_port_dp_resource_name}" ]] ; then
     node_mgmt_port_netdev_flags="$node_mgmt_port_netdev_flags --ovnkube-node-mgmt-port-dp-resource-name ${ovnkube_node_mgmt_port_dp_resource_name}"
+  fi
+
+  ovnkube_node_mgmt_port_intf_name_flag=
+  if [[ ${ovnkube_node_mgmt_port_intf_name} != "" ]]; then
+    ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
   fi
 
   local ovn_node_ssl_opts=""
@@ -2294,8 +2360,17 @@ ovn-node() {
     ovn_unprivileged_flag=""
   fi
 
-  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
-  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
+  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+    # in the case of dpu mode we want the host K8s Node Name and not the DPU K8s Node Name
+    K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d \")
+    if [[ ${K8S_NODE} == "" ]]; then
+      echo "Couldn't get the required Host K8s Nodename. Exiting..."
+      exit 1
+    fi
+  fi
+
+  ovn_metrics_bind_address="${metrics_endpoint_ip}:${metrics_bind_port}"
+  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
 
   local ovnkube_metrics_tls_opts=""
   if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
@@ -2316,7 +2391,7 @@ ovn-node() {
 
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
-	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
+      ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
   fi
   echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
 
@@ -2366,6 +2441,7 @@ ovn-node() {
         ${ovnkube_metrics_tls_opts} \
         ${ovnkube_node_certs_flags} \
         ${ovnkube_node_mgmt_port_netdev_flag} \
+        ${ovnkube_node_mgmt_port_intf_name_flag} \
         ${ovnkube_node_mode_flag} \
         ${ovn_node_ssl_opts} \
         ${ovn_unprivileged_flag} \
@@ -2431,7 +2507,7 @@ ovs-metrics() {
   echo "=============== ovs-metrics - (wait for ovs_ready)"
   wait_for_event ovs_ready
 
-  ovs_exporter_bind_address="${metrics_endpoint_ip}:9310"
+  ovs_exporter_bind_address="${metrics_endpoint_ip}:${metrics_exporter_port}"
   /usr/bin/ovn-kube-util \
     --loglevel=${ovnkube_loglevel} \
     ovs-exporter \

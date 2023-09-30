@@ -99,6 +99,18 @@ func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	return types.K8sPrefix + nodeName
 }
 
+const k8sMgmtIntfDefaultName = "ovn-k8s-mp0"
+
+// GetK8sMgmtIntfName returns name of the management ovs port interface from
+// the configuration or default one if it is missing
+func GetK8sMgmtIntfName() string {
+	// check configuration first
+	if config.OvnKubeNode.MgmtPortIntfName != "" {
+		return config.OvnKubeNode.MgmtPortIntfName
+	}
+	return k8sMgmtIntfDefaultName
+}
+
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name
 func GetWorkerFromGatewayRouter(gr string) string {
 	return strings.TrimPrefix(gr, types.GWRouterPrefix)

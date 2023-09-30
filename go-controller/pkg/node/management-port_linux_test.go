@@ -196,10 +196,10 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	const (
 		nodeName      string = "node1"
 		mgtPortMAC    string = "00:00:00:55:66:77"
-		mgtPort       string = types.K8sMgmtIntfName
 		legacyMgtPort string = types.K8sPrefix + nodeName
 		mtu           string = "1400"
 	)
+	mgtPort := util.GetK8sMgmtIntfName()
 
 	// generic setup
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -318,9 +318,9 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	const (
 		nodeName   string = "node1"
 		mgtPortMAC string = "0a:58:0a:01:01:02"
-		mgtPort    string = types.K8sMgmtIntfName
 		mtu        int    = 1400
 	)
+	mgtPort := util.GetK8sMgmtIntfName()
 
 	// OVS cmd setup
 	fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -412,9 +412,9 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 	const (
 		nodeName   string = "node1"
 		mgtPortMAC string = "0a:58:0a:01:01:02"
-		mgtPort    string = types.K8sMgmtIntfName
 		mtu        int    = 1400
 	)
+	mgtPort := util.GetK8sMgmtIntfName()
 
 	// OVS cmd setup
 	fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -501,7 +501,7 @@ var _ = Describe("Management Port Operations", func() {
 
 		t := GinkgoT()
 		origNetlinkOps := util.GetNetLinkOps()
-		mgmtPortName := types.K8sMgmtIntfName
+		mgmtPortName := util.GetK8sMgmtIntfName()
 		netlinkMockErr := fmt.Errorf("netlink mock error")
 		fakeExecErr := fmt.Errorf("face exec error")
 		hostSubnets := []*net.IPNet{}
@@ -801,7 +801,7 @@ var _ = Describe("Management Port Operations", func() {
 				// Set up a fake k8sMgmt interface
 				err := testNS.Do(func(ns.NetNS) error {
 					defer GinkgoRecover()
-					ovntest.AddLink(types.K8sMgmtIntfName)
+					ovntest.AddLink(util.GetK8sMgmtIntfName())
 					return nil
 				})
 				Expect(err).NotTo(HaveOccurred())

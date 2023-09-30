@@ -185,7 +185,8 @@ var (
 
 	// OvnKubeNode holds ovnkube-node parsed config file parameters and command-line overrides
 	OvnKubeNode = OvnKubeNodeConfig{
-		Mode: types.NodeModeFull,
+		Mode:             types.NodeModeFull,
+		MgmtPortIntfName: "ovn-k8s-mp0",
 	}
 
 	ClusterManager = ClusterManagerConfig{
@@ -212,6 +213,9 @@ type DefaultConfig struct {
 	// that are initiated from the pods so that the reverse connections go back to the pods.
 	// This represents the conntrack zone used for the conntrack flow rules.
 	ConntrackZone int `gcfg:"conntrack-zone"`
+	// DisableRequestedChassis flag to indicate if logical_switch_port requested-chassis
+	// options can be disabled
+	DisableRequestedChassis bool `gcfg:"disable-ovn-requested-chassis"`
 	// EncapType value defines the encapsulation protocol to use to transmit packets between
 	// hypervisors. By default the value is 'geneve'
 	EncapType string `gcfg:"encap-type"`
@@ -415,6 +419,12 @@ type GatewayConfig struct {
 	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
 	NextHop string `gcfg:"next-hop"`
+	// PhysNetNameKey is the key name used to map to an OVS bridge that provides
+	// access to physical/external network. Default is  "physnet".
+	PhysNetNameKey string `gcfg:"physnetname-key"`
+	// UplinkPort is the port used as the uplink on the gateway interface bridge.
+	// Used in scenarios when it cannot be auto detected.
+	UplinkPort string `gcfg:"uplink-port"`
 	// VLANID is the option VLAN tag to apply to gateway traffic for "shared" mode
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
@@ -493,6 +503,7 @@ type OvnKubeNodeConfig struct {
 	DPResourceDeviceIdsMap map[string][]string
 	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
 	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
+	MgmtPortIntfName       string `gcfg:"mgmt-port-netdev-intf-name"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -733,6 +744,12 @@ var CommonFlags = []cli.Flag{
 		Usage:       "For gateway nodes, the conntrack zone used for conntrack flow rules (default: 64000)",
 		Destination: &cliConfig.Default.ConntrackZone,
 		Value:       Default.ConntrackZone,
+	},
+	&cli.BoolFlag{
+		Name:        "disable-ovn-requested-chassis",
+		Usage:       "Flag to indicate if logical switch port requested-chassis options can be disabled",
+		Destination: &cliConfig.Default.DisableRequestedChassis,
+		Value:       Default.DisableRequestedChassis,
 	},
 	&cli.StringFlag{
 		Name:        "encap-type",
@@ -1306,6 +1323,18 @@ var OVNGatewayFlags = []cli.Flag{
 			"\"init-gateways\"",
 		Destination: &cliConfig.Gateway.NextHop,
 	},
+	&cli.StringFlag{
+		Name: "gateway-physnetname-key",
+		Usage: "The key name used to map to an OVS bridge that provides " +
+			"access to physical/external network. Default is  `physnet`",
+		Destination: &cliConfig.Gateway.PhysNetNameKey,
+	},
+	&cli.StringFlag{
+		Name: "gateway-uplink-port",
+		Usage: "The port to be used as the uplink on the gateway interface bridge." +
+			"Used in scenarios when it cannot be auto detected.",
+		Destination: &cliConfig.Gateway.UplinkPort,
+	},
 	&cli.UintFlag{
 		Name: "gateway-vlanid",
 		Usage: "The VLAN on which the external network is available. " +
@@ -1465,6 +1494,12 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "ovnkube-node operating mode full(default), dpu, dpu-host",
 		Value:       OvnKubeNode.Mode,
 		Destination: &cliConfig.OvnKubeNode.Mode,
+	},
+	&cli.StringFlag{
+		Name:        "ovnkube-node-mgmt-port-intf-name",
+		Usage:       "name of the interface to be used as the management port. Default is ovn-k8s-mp0",
+		Value:       OvnKubeNode.MgmtPortIntfName,
+		Destination: &cliConfig.OvnKubeNode.MgmtPortIntfName,
 	},
 	&cli.StringFlag{
 		Name: "ovnkube-node-mgmt-port-netdev",
@@ -2585,5 +2620,6 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	if OvnKubeNode.Mode == types.NodeModeDPUHost && OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
 		return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided")
 	}
+
 	return nil
 }
