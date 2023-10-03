@@ -41,6 +41,8 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 	return bnc.allocatePodIPsOnSwitch(pod, annotations, nadName, switchName)
 }
 
+var nodeNotFoundError = errors.New("node not found")
+
 // allocatePodIPsForSwitch will allocate the the ip from pod annotation at
 // a specified switch, this switch can be different than the one the pod is
 // attachted to, for example hypershift kubevirt provider live migration.
@@ -60,6 +62,7 @@ func (bnc *BaseNetworkController) allocatePodIPsOnSwitch(pod *kapi.Pod,
 	if bnc.lsManager.IsNonHostSubnetSwitch(switchName) {
 		return "", nil
 	}
+
 	expectedLogicalPortName = bnc.GetLogicalPortName(pod, nadName)
 	// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
 	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
@@ -77,8 +80,7 @@ func (bnc *BaseNetworkController) allocatePodIPsOnSwitch(pod *kapi.Pod,
 		}
 	}
 	if err := bnc.waitForNodeLogicalSwitchSubnetsInCache(switchName); err != nil {
-		return expectedLogicalPortName, fmt.Errorf("failed to wait for switch %s to be added to cache. IP allocation may fail",
-			switchName)
+		return expectedLogicalPortName, err
 	}
 	if err = bnc.lsManager.AllocateIPs(switchName, annotations.IPs); err != nil {
 		if err == ipallocator.ErrAllocated {
@@ -378,7 +380,7 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitchSubnetsInCache(switchN
 		subnets = bnc.lsManager.GetSwitchSubnets(switchName)
 		return subnets != nil, nil
 	}); err != nil {
-		return fmt.Errorf("timed out waiting for logical switch %q subnet: %v", switchName, err)
+		return fmt.Errorf("timed out waiting for logical switch %q subnet: %w", switchName, nodeNotFoundError)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"sync/atomic"
@@ -32,6 +33,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 	expectedLogicalPorts := make(map[string]bool)
 	vms := make(map[ktypes.NamespacedName]bool)
 	var err error
+	switchesNotFound := make(map[string]bool)
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
 		if !ok {
@@ -46,7 +48,17 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 				return err
 			}
 		} else if oc.isPodScheduledinLocalZone(pod) {
+			if switchesNotFound[pod.Spec.NodeName] {
+				klog.Warningf("Cannot allocate IPs for %s/%s, node was not found after 30 seconds", pod.Namespace, pod.Name)
+				continue
+			}
 			expectedLogicalPortName, annotations, err = oc.allocateSyncPodsIPs(pod)
+
+			if errors.Is(err, nodeNotFoundError) {
+				klog.Warningf("Cannot allocate IPs for %s/%s, node was not found after 30 seconds", pod.Namespace, pod.Name)
+				switchesNotFound[pod.Spec.NodeName] = true
+				continue
+			}
 			if err != nil {
 				return err
 			}
