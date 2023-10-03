@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"k8s.io/klog/v2"
@@ -357,6 +358,10 @@ func buildLB(lb *LB) *templateLoadBalancer {
 		"skip_snat":          skipSNAT,
 		"neighbor_responder": "none",
 		"hairpin_snat_ip":    fmt.Sprintf("%s %s", config.Gateway.MasqueradeIPs.V4OVNServiceHairpinMasqueradeIP.String(), config.Gateway.MasqueradeIPs.V6OVNServiceHairpinMasqueradeIP.String()),
+	}
+
+	if lb.Protocol == string(v1.ProtocolUDP) {
+		options["ct_flush"] = "true"
 	}
 
 	// Session affinity
