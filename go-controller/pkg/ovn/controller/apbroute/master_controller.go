@@ -228,11 +228,11 @@ func (c *ExternalGatewayMasterController) processNextPolicyWorkItem(wg *sync.Wai
 	}
 	if err != nil {
 		if c.routeQueue.NumRequeues(key) < maxRetries {
-			klog.V(4).Infof("Error found while processing policy %s: %w", key, err)
+			klog.V(4).Infof("Error found while processing policy %s: %v", key, err)
 			c.routeQueue.AddRateLimited(key)
 			return true
 		}
-		klog.Warningf("Dropping policy %q out of the queue: %w", key, err)
+		klog.Warningf("Dropping policy %q out of the queue: %v", key, err)
 		utilruntime.HandleError(err)
 	}
 	c.routeQueue.Forget(key)

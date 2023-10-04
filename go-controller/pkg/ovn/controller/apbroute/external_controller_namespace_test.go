@@ -106,7 +106,6 @@ func newNamespaceWithPods(nsName string, pods ...*corev1.Pod) *namespaceWithPods
 		pods:   pods,
 	}
 }
-
 func expectedPolicyStateAndRefs(targetNamespaces []*namespaceWithPods, staticGWIPs []string,
 	dynamicGws []*namespaceWithPods, bfdEnabled bool) (*routePolicyState, *policyReferencedObjects) {
 	routeState := newRoutePolicyState()
