@@ -13,7 +13,7 @@ func (m *externalPolicyManager) syncNamespace(namespace *v1.Namespace, routeQueu
 		return err
 	}
 
-	klog.V(5).Infof("APB queuing policies: %v for namespace: %s", policyKeys, namespace)
+	klog.V(5).Infof("APB queuing policies: %v for namespace: %s", policyKeys, namespace.Name)
 	for policyKey := range policyKeys {
 		routeQueue.Add(policyKey)
 	}
