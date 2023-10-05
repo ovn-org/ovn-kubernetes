@@ -1554,6 +1554,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				// egress IP should get assigned on the next checkEgressNodesReachabilityIterate call
 				// explicitly call check reachability, periodic checker is not active
 				checkEgressNodesReachabilityIterate(fakeClusterManagerOVN.eIPC)
+				// this will trigger an immediate add retry for the node which we need to simulate for this test
+				fakeClusterManagerOVN.eIPC.retryEgressNodes.RequestRetryObjs()
 				gomega.Eventually(getEgressIPStatusLen(eIP1.Name)).Should(gomega.Equal(1))
 
 				return nil
