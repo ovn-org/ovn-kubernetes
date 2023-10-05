@@ -30,8 +30,8 @@ func newIPGenerator(subnet string) (*ipGenerator, error) {
 
 // GenerateIP generates an IP from the base ip and the provided 'idx'
 // and returns the IPNet with the generated IP and the netmask of
-// cidr. If suppose the subnet was - 168.254.0.0/16 and the specified
-// index is 10, it will return IPNet { IP : 168.254.0.10, Mask : 16}
+// cidr. If suppose the subnet was - 100.88.0.0/16 and the specified
+// index is 10, it will return IPNet { IP : 100.88.0.10, Mask : 16}
 // Returns error if the generated IP is out of network range.
 func (ipGenerator *ipGenerator) GenerateIP(idx int) (*net.IPNet, error) {
 	ip := utilnet.AddIPOffset(ipGenerator.netBaseIP, idx)

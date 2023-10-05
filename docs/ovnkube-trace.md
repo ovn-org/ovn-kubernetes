@@ -183,8 +183,8 @@ ingress(dp="ovn_cluster_router", inport="rtos-ovn-worker2")
 13. lr_in_ip_routing (northd.c:10603): reg7 == 0 && ip4.dst == 10.244.1.0/24, priority 73, uuid 1ed4e720
     ip.ttl--;
     reg8[0..15] = 0;
-    reg0 = 168.254.0.4;
-    reg1 = 168.254.0.2;
+    reg0 = 100.88.0.4;
+    reg1 = 100.88.0.2;
     eth.src = 0a:58:a8:fe:00:02;
     outport = "rtots-ovn-worker2";
     flags.loopback = 1;
@@ -196,7 +196,7 @@ ingress(dp="ovn_cluster_router", inport="rtos-ovn-worker2")
     next;
 16. lr_in_policy_ecmp (northd.c:12452): reg8[0..15] == 0, priority 150, uuid 3841a2fc
     next;
-17. lr_in_arp_resolve (northd.c:12665): outport == "rtots-ovn-worker2" && reg0 == 168.254.0.4, priority 100, uuid 792c14a1
+17. lr_in_arp_resolve (northd.c:12665): outport == "rtots-ovn-worker2" && reg0 == 100.88.0.4, priority 100, uuid 792c14a1
     eth.dst = 0a:58:a8:fe:00:04;
     next;
 21. lr_in_arp_request (northd.c:13083): 1, priority 0, uuid f21b210a
