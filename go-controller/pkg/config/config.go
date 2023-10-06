@@ -189,7 +189,7 @@ var (
 	}
 
 	ClusterManager = ClusterManagerConfig{
-		V4TransitSwitchSubnet: "168.254.0.0/16",
+		V4TransitSwitchSubnet: "100.88.0.0/16",
 		V6TransitSwitchSubnet: "fd97::/64",
 	}
 )
