@@ -147,31 +147,35 @@ func main() {
 			return err
 		}
 
-		startWg := &sync.WaitGroup{}
+		runWg := &sync.WaitGroup{}
 
-		var errorList []error
+		ctx, cancel := context.WithCancel(c.Context)
+		var errWebhook, errApprover error
 		if !cliCfg.disableWebhook {
-			startWg.Add(1)
+			runWg.Add(1)
 			go func() {
-				defer startWg.Done()
-				if err := runWebhook(c, restCfg); err != nil {
-					errorList = append(errorList, err)
+				defer runWg.Done()
+				if err := runWebhook(ctx, restCfg); err != nil {
+					errWebhook = fmt.Errorf("error running webhook: %v", err)
+					cancel()
 				}
 			}()
 		}
 
 		if !cliCfg.disableApprover {
-			startWg.Add(1)
+			runWg.Add(1)
 			go func() {
-				defer startWg.Done()
-				if err := runCSRApproverManager(c.Context, c.App.Name, restCfg); err != nil {
-					errorList = append(errorList, err)
+				defer runWg.Done()
+				if err := runCSRApproverManager(ctx, c.App.Name, restCfg); err != nil {
+					errApprover = fmt.Errorf("error running approver: %v", err)
+					cancel()
 				}
 			}()
 		}
 
-		startWg.Wait()
-		return errors.NewAggregate(errorList)
+		runWg.Wait()
+		cancel()
+		return errors.NewAggregate([]error{errWebhook, errApprover})
 	}
 
 	c.Flags = []cli.Flag{
@@ -304,7 +308,7 @@ func main() {
 	}
 }
 
-func runWebhook(c *cli.Context, restCfg *rest.Config) error {
+func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 	// We cannot use the default implementation of the webhook server because we need to enable SO_REUSEPORT
 	// on the socket to allow for two instances running at the same time (required during upgrades).
 	// The webhook server is set up and started in a very similar way to the default one:
@@ -344,7 +348,7 @@ func runWebhook(c *cli.Context, restCfg *rest.Config) error {
 		nodeInformer := informerFactory.Core().V1().Nodes().Informer()
 		informerFactory.Start(stopCh)
 		klog.Infof("Waiting for caches to sync")
-		cache.WaitForCacheSync(c.Context.Done(), nodeInformer.HasSynced)
+		cache.WaitForCacheSync(ctx.Done(), nodeInformer.HasSynced)
 
 		nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
 		podWebhook := admission.WithCustomValidator(
@@ -379,7 +383,7 @@ func runWebhook(c *cli.Context, restCfg *rest.Config) error {
 	cfg.GetCertificate = certWatcher.GetCertificate
 
 	go func() {
-		if err := certWatcher.Start(c.Context); err != nil {
+		if err := certWatcher.Start(ctx); err != nil {
 			klog.Fatalf("Certificate watcher failed to start: %v", err)
 		}
 	}()
@@ -395,26 +399,25 @@ func runWebhook(c *cli.Context, restCfg *rest.Config) error {
 				// Enable SO_REUSEPORT
 				err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 				if err != nil {
-					klog.Fatalf("Failed to set SO_REUSEPORT:", err)
+					klog.Fatalf("Failed to set SO_REUSEPORT: %v", err)
 				}
 			})
 		},
 	}
+
+	innerListener, err := l.Listen(ctx, "tcp", net.JoinHostPort(cliCfg.host, strconv.Itoa(cliCfg.port)))
+	if err != nil {
+		return fmt.Errorf("failed to create the listener: %v", err)
+	}
+	listener := tls.NewListener(innerListener, cfg)
 
 	idleWebhookConnectionsClosed := make(chan struct{})
 	defer func() {
 		klog.Infof("Waiting for the webhook server to gracefully close")
 		<-idleWebhookConnectionsClosed
 	}()
-	innerListener, err := l.Listen(c.Context, "tcp", net.JoinHostPort(cliCfg.host, strconv.Itoa(cliCfg.port)))
-	if err != nil {
-		return fmt.Errorf("failed to create the listener: %v", err)
-	}
-	listener := tls.NewListener(innerListener, cfg)
-
-	klog.Infof("Starting the webhook server")
 	go func() {
-		<-c.Context.Done()
+		<-ctx.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
@@ -423,6 +426,7 @@ func runWebhook(c *cli.Context, restCfg *rest.Config) error {
 		close(idleWebhookConnectionsClosed)
 	}()
 
+	klog.Infof("Starting the webhook server")
 	return srv.Serve(listener)
 }
 
