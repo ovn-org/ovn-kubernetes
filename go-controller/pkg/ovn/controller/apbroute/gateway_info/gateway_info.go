@@ -154,7 +154,7 @@ type GatewayInfo struct {
 }
 
 func (g *GatewayInfo) String() string {
-	return fmt.Sprintf("BFDEnabled: %t, Gateways: %+v", g.BFDEnabled, g.Gateways)
+	return fmt.Sprintf("BFDEnabled: %t, Gateways: %+v, failedToApply: %t", g.BFDEnabled, g.Gateways, g.failedToApply)
 }
 
 func NewGatewayInfo(items sets.Set[string], bfdEnabled bool) *GatewayInfo {

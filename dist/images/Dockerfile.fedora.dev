@@ -15,7 +15,7 @@
 # this image in any production environment.
 #
 
-FROM fedora:37 AS ovnbuilder
+FROM fedora:38 AS ovnbuilder
 
 USER root
 
