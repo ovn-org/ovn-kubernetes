@@ -294,7 +294,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeZoneNameAnnotation:          "global",
 						ovnNodeIDAnnotaton:                 "2",
 						ovnNodeSubnetsAnnotation:           "{\"default\":[\"10.244.2.0/24\"]}",
-						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"168.254.0.2/16\"}",
+						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.2/16\"}",
 						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.2/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"default\":\"0\"}",
 					},
@@ -312,7 +312,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeZoneNameAnnotation:          "global",
 						ovnNodeIDAnnotaton:                 "3",
 						ovnNodeSubnetsAnnotation:           "{\"default\":[\"10.244.3.0/24\"]}",
-						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"168.254.0.3/16\"}",
+						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.3/16\"}",
 						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.3/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"default\":\"0\"}",
 					},
@@ -330,7 +330,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeZoneNameAnnotation:          "foo",
 						ovnNodeIDAnnotaton:                 "4",
 						ovnNodeSubnetsAnnotation:           "{\"default\":[\"10.244.4.0/24\"]}",
-						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"168.254.0.4/16\"}",
+						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.4/16\"}",
 						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.4/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"default\":\"0\"}",
 					},
@@ -341,9 +341,9 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 			}
 
 			testNodesRouteInfo = map[string]map[string]string{
-				"node1": {"node-subnets": "10.244.2.0/24", "ts-ip": "168.254.0.2", "host-route": "100.64.0.2/32"},
-				"node2": {"node-subnets": "10.244.3.0/24", "ts-ip": "168.254.0.3", "host-route": "100.64.0.3/32"},
-				"node3": {"node-subnets": "10.244.4.0/24", "ts-ip": "168.254.0.4", "host-route": "100.64.0.4/32"},
+				"node1": {"node-subnets": "10.244.2.0/24", "ts-ip": "100.88.0.2", "host-route": "100.64.0.2/32"},
+				"node2": {"node-subnets": "10.244.3.0/24", "ts-ip": "100.88.0.3", "host-route": "100.64.0.3/32"},
+				"node3": {"node-subnets": "10.244.4.0/24", "ts-ip": "100.88.0.4", "host-route": "100.64.0.4/32"},
 			}
 			initialNBDB = []libovsdbtest.TestData{
 				newClusterJoinSwitch(),
@@ -428,7 +428,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				_, node3Ipv4SubnetNet, err := net.ParseCIDR(node3Ipv4Subnet)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				node3Ipv4SubnetPrefix := node3Ipv4SubnetNet.IP.String() + "/24"
-				node3TransitIpv4 := "168.254.0.4"
+				node3TransitIpv4 := "100.88.0.4"
 				node3Ipv6Subnet := "aef0:0:0:4::2895/64"
 				_, node3Ipv6SubnetNet, err := net.ParseCIDR(node3Ipv6Subnet)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -590,7 +590,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeZoneNameAnnotation:          "global",
 						ovnNodeIDAnnotaton:                 "2",
 						ovnNodeSubnetsAnnotation:           "{\"blue\":[\"10.244.2.0/24\"]}",
-						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"168.254.0.2/16\"}",
+						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.2/16\"}",
 						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.2/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"blue\":\"1\"}",
 					},
@@ -608,7 +608,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeZoneNameAnnotation:          "global",
 						ovnNodeIDAnnotaton:                 "3",
 						ovnNodeSubnetsAnnotation:           "{\"blue\":[\"10.244.3.0/24\"]}",
-						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"168.254.0.3/16\"}",
+						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.3/16\"}",
 						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.3/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"blue\":\"1\"}",
 					},
@@ -626,7 +626,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeZoneNameAnnotation:          "foo",
 						ovnNodeIDAnnotaton:                 "4",
 						ovnNodeSubnetsAnnotation:           "{\"blue\":[\"10.244.4.0/24\"]}",
-						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"168.254.0.4/16\"}",
+						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.4/16\"}",
 						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.4/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"blue\":\"1\"}",
 					},
@@ -636,9 +636,9 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				},
 			}
 			testNodesRouteInfo = map[string]map[string]string{
-				"node1": {"node-subnets": "10.244.2.0/24", "ts-ip": "168.254.0.2", "host-route": "100.64.0.2/32"},
-				"node2": {"node-subnets": "10.244.3.0/24", "ts-ip": "168.254.0.3", "host-route": "100.64.0.3/32"},
-				"node3": {"node-subnets": "10.244.4.0/24", "ts-ip": "168.254.0.4", "host-route": "100.64.0.4/32"},
+				"node1": {"node-subnets": "10.244.2.0/24", "ts-ip": "100.88.0.2", "host-route": "100.64.0.2/32"},
+				"node2": {"node-subnets": "10.244.3.0/24", "ts-ip": "100.88.0.3", "host-route": "100.64.0.3/32"},
+				"node3": {"node-subnets": "10.244.4.0/24", "ts-ip": "100.88.0.4", "host-route": "100.64.0.4/32"},
 			}
 			initialNBDB = []libovsdbtest.TestData{
 				newOVNClusterRouter("blue"),
@@ -781,7 +781,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).To(gomega.HaveOccurred(), "failed to get the node transit switch port ips for node node4")
 
 				// Set the node transit switch port ips
-				testNode4.Annotations[ovnTransitSwitchPortAddrAnnotation] = "{\"ipv4\":\"168.254.0.5/16\"}"
+				testNode4.Annotations[ovnTransitSwitchPortAddrAnnotation] = "{\"ipv4\":\"100.88.0.5/16\"}"
 				err = zoneICHandler.AddLocalZoneNode(&testNode4)
 				gomega.Expect(err).To(gomega.HaveOccurred(), "failed to get the network id for the network default on node node4")
 
@@ -810,7 +810,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				testNodesRouteInfo = map[string]map[string]string{
-					"node4": {"node-subnets": "10.244.5.0/24", "ts-ip": "168.254.0.5", "host-route": "100.64.0.5/32"},
+					"node4": {"node-subnets": "10.244.5.0/24", "ts-ip": "100.88.0.5", "host-route": "100.64.0.5/32"},
 				}
 				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode4)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -877,7 +877,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).To(gomega.HaveOccurred(), "failed to get the node transit switch port ips for node node4")
 
 				// Set the node transit switch port ips
-				testNode4.Annotations[ovnTransitSwitchPortAddrAnnotation] = "{\"ipv4\":\"168.254.0.5/16\"}"
+				testNode4.Annotations[ovnTransitSwitchPortAddrAnnotation] = "{\"ipv4\":\"100.88.0.5/16\"}"
 				err = zoneICHandler.AddRemoteZoneNode(&testNode4)
 				gomega.Expect(err).To(gomega.HaveOccurred(), "failed to get the network id for the network default on node node4")
 
@@ -912,7 +912,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				err = zoneICHandler.AddRemoteZoneNode(&testNode4)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				testNodesRouteInfo = map[string]map[string]string{
-					"node4": {"node-subnets": "10.244.5.0/24", "ts-ip": "168.254.0.5", "host-route": "100.64.0.5/32"},
+					"node4": {"node-subnets": "10.244.5.0/24", "ts-ip": "100.88.0.5", "host-route": "100.64.0.5/32"},
 				}
 				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode4)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

@@ -552,7 +552,7 @@ func getRouterPortMacAddress(coreclient *corev1client.CoreV1Client, restconfig *
 	if err != nil {
 		return "", fmt.Errorf("execInPod() failed. err: %s, stderr: %s, stdout: %s, podInfo: %v", err, ipError, ipOutput, podInfo)
 	}
-	// The ipOutput is with the following format: 0a:58:a8:fe:00:03 168.254.0.3/16 or
+	// The ipOutput is with the following format: 0a:58:a8:fe:00:03 100.88.0.3/16 or
 	// 0a:58:0a:f4:02:01 10.244.2.1/24 fd00:10:244:3::1/64 for dual stack cluster.
 	// Parse the mac address from it.
 	macIP := strings.Split(strings.Replace(ipOutput, "\n", "", -1), " ")

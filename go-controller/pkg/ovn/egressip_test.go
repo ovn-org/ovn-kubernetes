@@ -247,7 +247,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			egressIP := "192.168.126.101"
 			zone := "global"
 			node1IPv4OVNManaged := "192.168.126.202/24"
-			node1IPv4TranSwitchIP := "168.254.0.2/16"
+			node1IPv4TranSwitchIP := "100.88.0.2/16"
 			node1IPv4NonOVNManaged1 := "10.10.10.4/24"
 			node1IPv4NonOVNManaged2 := "5.5.5.10/24"
 			node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
@@ -412,7 +412,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			egressIP := "10.10.10.10"
 			zone := "global"
 			node1IPv4OVNManaged := "192.168.126.202/24"
-			node1IPv4TranSwitchIP := "168.254.0.2/16"
+			node1IPv4TranSwitchIP := "100.88.0.2/16"
 			node1IPv4NonOVNManaged1 := "10.10.10.4/24"
 			node1IPv4NonOVNManaged2 := "5.5.5.10/24"
 			_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
@@ -578,10 +578,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					zone := "global"
 					node1IPv4OVNManagedNet := "192.168.126.0/24"
 					node1IPv4OVNManaged := "192.168.126.202/24"
-					node1IPv4TranSwitchIP := "168.254.0.2/16"
+					node1IPv4TranSwitchIP := "100.88.0.2/16"
 					node2IPv4OVNManagedNet := "192.168.126.0/24"
 					node2IPv4OVNManaged := "192.168.126.51/24"
-					node2IPv4TranSwitchIP := "168.254.0.3/16"
+					node2IPv4TranSwitchIP := "100.88.0.3/16"
 					node1IPv4NonOVNManaged1 := "10.10.10.4/24"
 					node1IPv4NonOVNManaged2 := "5.5.5.10/24"
 					node2IPv4NonOVNManaged1 := "10.10.10.5/24"
@@ -828,15 +828,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node1IPv4OVNManaged := "192.168.126.202/24"
 					node1IPv4NonOVNManaged1 := "10.10.10.4/24"
 					node1IPv4NonOVNManaged2 := "5.5.5.10/24"
-					node1IPv4TranSwitchIP := "168.254.0.2/16"
+					node1IPv4TranSwitchIP := "100.88.0.2/16"
 					node2IPv4OVNManagedNet := "192.168.126.0/24"
 					node2IPv4OVNManaged := "192.168.126.51/24"
 					node2IPv4NonOVNManaged1 := "10.10.10.5/24"
 					node2IPv4NonOVNManaged2 := "7.7.7.9/16"
-					node2IPv4TranSwitchIP := "168.254.0.3/16"
+					node2IPv4TranSwitchIP := "100.88.0.3/16"
 					node3IPv4OVNManaged := "192.168.126.5/24"
 					node3IPv4NonOVNManaged1 := "10.10.10.6/24"
-					node3IPv4TranSwitchIP := "168.254.0.4/16"
+					node3IPv4TranSwitchIP := "100.88.0.4/16"
 					node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
 					node2IPv4Addresses := []string{node2IPv4OVNManaged, node2IPv4NonOVNManaged1, node2IPv4NonOVNManaged2}
 					node3IPv4Addresses := []string{node3IPv4OVNManaged, node3IPv4NonOVNManaged1}
@@ -1153,15 +1153,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node1IPv4NonOVNManaged1Net := "10.10.10.0/24"
 					node1IPv4NonOVNManaged1 := "10.10.10.4/24"
 					node1IPv4NonOVNManaged2 := "5.5.5.10/24"
-					node1IPv4TranSwitchIP := "168.254.0.2/16"
+					node1IPv4TranSwitchIP := "100.88.0.2/16"
 					node2IPv4OVNManaged := "192.168.126.51/24"
 					node2IPv4NonOVNManaged1Net := "10.10.10.0/24"
 					node2IPv4NonOVNManaged1 := "10.10.10.5/24"
 					node2IPv4NonOVNManaged2 := "7.7.7.9/16"
-					node2IPv4TranSwitchIP := "168.254.0.3/16"
+					node2IPv4TranSwitchIP := "100.88.0.3/16"
 					node3IPv4OVNManaged := "192.168.126.5/24"
 					node3IPv4NonOVNManaged1 := "12.10.10.6/24"
-					node3IPv4TranSwitchIP := "168.254.0.4/16"
+					node3IPv4TranSwitchIP := "100.88.0.4/16"
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
 					_, node3Subnet, _ := net.ParseCIDR(v4Node3Subnet)
@@ -1486,12 +1486,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node1IPv4NonOVNManaged1Net := "10.10.10.0/24"
 					node1IPv4NonOVNManaged1 := "10.10.10.4/24"
 					node1IPv4NonOVNManaged2 := "5.5.5.10/24"
-					node1IPv4TranSwitchIP := "168.254.0.2/16"
+					node1IPv4TranSwitchIP := "100.88.0.2/16"
 					node2IPv4OVNManaged := "192.168.126.51/24"
 					node2IPv4NonOVNManaged1Net := "10.10.10.0/24"
 					node2IPv4NonOVNManaged1 := "10.10.10.5/24"
 					node2IPv4NonOVNManaged2 := "7.7.7.9/16"
-					node2IPv4TranSwitchIP := "168.254.0.3/16"
+					node2IPv4TranSwitchIP := "100.88.0.3/16"
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
 					node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
@@ -1641,7 +1641,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					if interconnect && node1Zone != node2Zone && node2Zone == "remote" {
 
 						//todo fix me
-						reroutePolicyNextHop = []string{"168.254.0.3"} // node2's transit switch portIP
+						reroutePolicyNextHop = []string{"100.88.0.3"} // node2's transit switch portIP
 					}
 					expectedDatabaseState := []libovsdbtest.TestData{
 						getReRoutePolicy(egressPod.Status.PodIP, "4", "reroute-UUID", reroutePolicyNextHop, eipExternalID),
@@ -1760,12 +1760,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node1IPv4OVNManaged := node1IPv4 + "/24"
 					node1IPv4NonOVNManaged1 := "10.10.10.4/24"
 					node1IPv4NonOVNManaged2 := "5.5.5.10/24"
-					node1IPv4TranSwitchIP := "168.254.0.2/16"
+					node1IPv4TranSwitchIP := "100.88.0.2/16"
 					node2IPv4OVNManaged := "192.168.126.51/24"
 					node2IPv4NonOVNManaged1Net := "10.10.10.0/24"
 					node2IPv4NonOVNManaged1 := "10.10.10.5/24"
 					node2IPv4NonOVNManaged2 := "7.7.7.9/16"
-					node2IPv4TranSwitchIP := "168.254.0.3/16"
+					node2IPv4TranSwitchIP := "100.88.0.3/16"
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
 
@@ -1948,8 +1948,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 					if interconnect && node1Zone != node2Zone && node1Zone == "remote" {
 						//todo fix me
-						egressPod3Node2Reroute = []string{"168.254.0.2"} // node1's transit switch portIP
-						egressPod4Node2Reroute = []string{"168.254.0.2"} // node1's transit switch portIP
+						egressPod3Node2Reroute = []string{"100.88.0.2"} // node1's transit switch portIP
+						egressPod4Node2Reroute = []string{"100.88.0.2"} // node1's transit switch portIP
 					}
 					lrps := make([]*nbdb.LogicalRouterPolicy, 0)
 
@@ -2138,7 +2138,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					annotations := map[string]string{
 						"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
-						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"168.254.0.2/16\"}", // used only for ic=true test
+						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.2/16\"}", // used only for ic=true test
 						"k8s.ovn.org/zone-name":                       node1Zone,
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4),
 					}
@@ -2152,8 +2152,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					annotations = map[string]string{
 						"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
-						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"168.254.0.3/16\"}", // used only for ic=true test
-						"k8s.ovn.org/zone-name":                       node2Zone,                       // used only for ic=true test
+						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.3/16\"}", // used only for ic=true test
+						"k8s.ovn.org/zone-name":                       node2Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4),
 					}
 					if node2Zone != "global" {
@@ -2540,10 +2540,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node1IPv4OVNManaged := "192.168.126.202/24"
 					node1IPv4NonOVNManagedNet := "10.10.0.0/16"
 					node1IPv4NonOVNManaged := "10.10.10.5/16"
-					node1IPv4TranSwitchIP := "168.254.0.2/16"
+					node1IPv4TranSwitchIP := "100.88.0.2/16"
 					node2IPv4OVNManagedNet := "192.168.126.0/24"
 					node2IPv4OVNManaged := "192.168.126.51/24"
-					node2IPv4TranSwitchIP := "168.254.0.3/16"
+					node2IPv4TranSwitchIP := "100.88.0.3/16"
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
 
@@ -2694,7 +2694,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					//expectedNatLogicalPort := "k8s-node2"
 					reroutePolicyNextHop := []string{node2MgntIP.To4().String()}
 					if interconnect && node1Zone != node2Zone && node2Zone == "remote" {
-						reroutePolicyNextHop = []string{"168.254.0.3"} // node2's transit switch portIP
+						reroutePolicyNextHop = []string{"100.88.0.3"} // node2's transit switch portIP
 					}
 					expectedDatabaseState := []libovsdbtest.TestData{
 						getReRoutePolicy(egressPod.Status.PodIP, "4", "reroute-UUID", reroutePolicyNextHop, eipExternalID),
@@ -2823,7 +2823,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					annotations := map[string]string{
 						"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\"}", v4Node1Subnet, v6Node1Subnet),
-						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"168.254.0.2/16\", \"ipv6\": \"fd97::2/64\"}", // used only for ic=true test
+						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.2/16\", \"ipv6\": \"fd97::2/64\"}", // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4),
 					}
 					if isnode1Local {
@@ -2843,7 +2843,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					annotations = map[string]string{
 						"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, node2IPv6),
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\"}", v4Node2Subnet, v6Node2Subnet),
-						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"168.254.0.3/16\", \"ipv6\": \"fd97::3/64\"}", // used only for ic=true test
+						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.3/16\", \"ipv6\": \"fd97::3/64\"}", // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv4, node2IPv6),
 					}
 
@@ -3075,8 +3075,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
 					egressNamespace := newNamespace(namespace)
 					nodes := getIPv6Nodes([]nodeInfo{
-						{[]string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, podZone, "168.254.0.2/16"},
-						{[]string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, "global", "168.254.0.3/16"},
+						{[]string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, podZone, "100.88.0.2/16"},
+						{[]string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, "global", "100.88.0.3/16"},
 					})
 					node1 := nodes[0]
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
@@ -4497,8 +4497,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					annotations := map[string]string{
 						"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
-						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"168.254.0.2/16\"}", // used only for ic=true test
-						"k8s.ovn.org/zone-name":                       node1Zone,                       // used only for ic=true test
+						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.2/16\"}", // used only for ic=true test
+						"k8s.ovn.org/zone-name":                       node1Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					}
 					if node1Zone != "global" {
@@ -4511,8 +4511,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					annotations = map[string]string{
 						"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4CIDR, ""),
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", v4Node2Subnet),
-						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"168.254.0.3/16\"}", // used only for ic=true test
-						"k8s.ovn.org/zone-name":                       node2Zone,                       // used only for ic=true test
+						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.3/16\"}", // used only for ic=true test
+						"k8s.ovn.org/zone-name":                       node2Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
 					}
 					if node2Zone != "global" {
@@ -4773,7 +4773,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					if node2Zone != node1Zone && node2Zone == "remote" {
 						// the policy reroute will have its second nexthop as transit switchIP
 						// so the one with join switchIP is where podNode == egressNode and one with transitIP is where podNode != egressNode
-						expectedDatabaseState[0].(*nbdb.LogicalRouterPolicy).Nexthops = []string{"100.64.0.2", "168.254.0.3"}
+						expectedDatabaseState[0].(*nbdb.LogicalRouterPolicy).Nexthops = []string{"100.64.0.2", "100.88.0.3"}
 					}
 					if node2Zone != node1Zone && node1Zone == "remote" {
 						expectedDatabaseState[5].(*nbdb.LogicalRouter).Policies = []string{"default-no-reroute-UUID", "no-reroute-service-UUID", "default-no-reroute-node-UUID"}
@@ -4911,7 +4911,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					if node2Zone != node1Zone && node2Zone == "remote" {
 						// the policy reroute will have its second nexthop as transit switchIP
 						// so the one with join switchIP is where podNode == egressNode and one with transitIP is where podNode != egressNode
-						expectedDatabaseState[0].(*nbdb.LogicalRouterPolicy).Nexthops = []string{"100.64.0.2", "168.254.0.3"}
+						expectedDatabaseState[0].(*nbdb.LogicalRouterPolicy).Nexthops = []string{"100.64.0.2", "100.88.0.3"}
 					}
 					if node2Zone != node1Zone && node1Zone == "remote" {
 						expectedDatabaseState[5].(*nbdb.LogicalRouter).Policies = []string{"default-no-reroute-UUID", "no-reroute-service-UUID", "default-no-reroute-node-UUID"}
@@ -6085,8 +6085,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
 						"k8s.ovn.org/l3-gateway-config":               `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop":"192.168.126.1"}}`,
 						"k8s.ovn.org/node-chassis-id":                 "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
-						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"168.254.0.2/16\"}", // used only for ic=true test
-						"k8s.ovn.org/zone-name":                       node1Zone,                       // used only for ic=true test
+						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.2/16\"}", // used only for ic=true test
+						"k8s.ovn.org/zone-name":                       node1Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					}
 					if node1Zone != "global" {
@@ -6101,8 +6101,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
 						"k8s.ovn.org/l3-gateway-config":               `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:50", "ip-address":"192.168.126.13/24", "next-hop":"192.168.126.1"}}`,
 						"k8s.ovn.org/node-chassis-id":                 "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
-						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"168.254.0.3/16\"}", // used only for ic=true test
-						"k8s.ovn.org/zone-name":                       node2Zone,                       // used only for ic=true test
+						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.3/16\"}", // used only for ic=true test
+						"k8s.ovn.org/zone-name":                       node2Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
 					}
 					if node2Zone != "global" {
@@ -6456,7 +6456,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					if node2Zone == "remote" {
 						// the policy reroute will have its second nexthop as transit switchIP
 						// so the one with join switchIP is where podNode == egressNode and one with transitIP is where podNode != egressNode
-						podReRoutePolicy.Nexthops = []string{"100.64.0.2", "168.254.0.3"}
+						podReRoutePolicy.Nexthops = []string{"100.64.0.2", "100.88.0.3"}
 					}
 					if !interconnect || node2Zone == "global" {
 						node2GR.Nat = []string{"egressip-nat-UUID2"}
@@ -6578,7 +6578,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					if node2Zone == "remote" {
 						// the policy reroute will have its second nexthop as transit switchIP
 						// so the one with join switchIP is where podNode == egressNode and one with transitIP is where podNode != egressNode
-						podReRoutePolicy.Nexthops = []string{"168.254.0.3"}
+						podReRoutePolicy.Nexthops = []string{"100.88.0.3"}
 					}
 					podNodeSNAT := &nbdb.NAT{
 						UUID:       "node-nat-UUID1",
