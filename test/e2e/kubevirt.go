@@ -607,18 +607,30 @@ passwd:
 				Should(Succeed())
 		}
 
-		By("Create virtual machines")
 		vmLabels := map[string]string{}
 		if td.mode == kubevirtv1.MigrationPostCopy {
 			vmLabels = forcePostCopyMigrationPolicy.Spec.Selectors.VirtualMachineInstanceSelector
 		}
 		vms, err := composeVMs(td.numberOfVMs, vmLabels)
 		Expect(err).ToNot(HaveOccurred())
+
 		for _, vm := range vms {
-			vm, err = kvcli.VirtualMachine(namespace).Create(context.Background(), vm)
-			Expect(err).ToNot(HaveOccurred())
+			By(fmt.Sprintf("Create virtual machine %s", vm.Name))
+			vmCreationRetries := 0
+			Eventually(func() error {
+				if vmCreationRetries > 0 {
+					// retry due to unknown issue where kubevirt webhook gets stuck reading the request body
+					// https://github.com/ovn-org/ovn-kubernetes/issues/3902#issuecomment-1750257559
+					By(fmt.Sprintf("Retrying vm %s creation", vm.Name))
+				}
+				_, err = kvcli.VirtualMachine(namespace).Create(context.Background(), vm)
+				vmCreationRetries++
+				return err
+			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
 		}
+
 		for _, vm := range vms {
+			By(fmt.Sprintf("Waiting for readiness at virtual machine %s", vm.Name))
 			Eventually(func() bool {
 				vm, err = kvcli.VirtualMachine(namespace).Get(context.Background(), vm.Name, &metav1.GetOptions{})
 				Expect(err).ToNot(HaveOccurred())
