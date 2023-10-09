@@ -28,15 +28,22 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func newPod(podName, namespace, hostIP string, labels map[string]string) *corev1.Pod {
-	return &corev1.Pod{
+func newPod(podName, namespace, podIP string, labels map[string]string) *corev1.Pod {
+	return newPodWithPhaseAndIP(podName, namespace, corev1.PodRunning, podIP, labels)
+}
+
+func newPodWithPhaseAndIP(podName, namespace string, phase corev1.PodPhase, podIP string, labels map[string]string) *corev1.Pod {
+	p := &corev1.Pod{
 		ObjectMeta: v1.ObjectMeta{Name: podName, Namespace: namespace,
-			Labels:      labels,
-			Annotations: map[string]string{nettypes.NetworkStatusAnnot: fmt.Sprintf(network_status, hostIP)},
-		},
+			Labels: labels},
 		Spec:   corev1.PodSpec{NodeName: "node"},
-		Status: corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: hostIP}}, Phase: corev1.PodRunning},
+		Status: corev1.PodStatus{Phase: phase},
 	}
+	if len(podIP) > 0 {
+		p.Annotations = map[string]string{nettypes.NetworkStatusAnnot: fmt.Sprintf(network_status, podIP)}
+		p.Status.PodIPs = []corev1.PodIP{{IP: podIP}}
+	}
+	return p
 }
 
 func listRoutePolicyInCache() []string {

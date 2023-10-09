@@ -224,6 +224,11 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 			// if the object already exists and the request is for a different node, that's an error
 		} else if op.toAdd != "" {
 			if err == nil {
+				// Do not add if object is being deleted; either retry the add (if this was an update) OR (if this was a perm-delete)
+				// we will retry till we exhaust our retry count
+				if cloudPrivateIPConfig.GetDeletionTimestamp() != nil && !cloudPrivateIPConfig.GetDeletionTimestamp().IsZero() {
+					return fmt.Errorf("cloud update request failed, CloudPrivateIPConfig: %s is being deleted", cloudPrivateIPConfigName)
+				}
 				if op.toAdd == cloudPrivateIPConfig.Spec.Node {
 					klog.Infof("CloudPrivateIPConfig: %s already assigned to node: %s", cloudPrivateIPConfigName, cloudPrivateIPConfig.Spec.Node)
 					continue
@@ -630,7 +635,10 @@ func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
 			}
 		} else {
 			klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
-			if err := eIPC.addEgressNode(nodeName); err != nil {
+			nodeToAdd, err := eIPC.watchFactory.GetNode(nodeName)
+			if err != nil {
+				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
+			} else if err := eIPC.retryEgressNodes.AddRetryObjWithAddNoBackoff(nodeToAdd); err != nil {
 				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
 			}
 		}

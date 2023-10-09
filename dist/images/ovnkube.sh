@@ -799,6 +799,10 @@ nb-ovsdb() {
     echo "=============== nb-ovsdb ========== reconfigured for ipsec"
   }
 
+  # Let ovn-northd sleep and not use so much CPU
+  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=300
+  echo "=============== nb-ovsdb ========== reconfigured for northd backoff"
+
   ovn-nbctl set NB_Global . name=${ovn_zone}
   ovn-nbctl set NB_Global . options:name=${ovn_zone}
 
@@ -920,6 +924,10 @@ local-nb-ovsdb() {
 
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb (unix sockets only) ========== RUNNING"
+
+  # Let ovn-northd sleep and not use so much CPU
+  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=300
+  echo "=============== nb-ovsdb ========== reconfigured for northd backoff"
 
   ovn-nbctl set NB_Global . name=${K8S_NODE}
   ovn-nbctl set NB_Global . options:name=${K8S_NODE}
