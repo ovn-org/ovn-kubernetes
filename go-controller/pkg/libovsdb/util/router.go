@@ -13,11 +13,11 @@ import (
 )
 
 // CreateDefaultRouteToExternal is called only when IC=true. This function adds a "catch-all" kind of LRSR to ovn-cluster-router
-// 100.64.0.2               168.254.0.2 dst-ip
-// 100.64.0.3               168.254.0.3 dst-ip
+// 100.64.0.2               100.88.0.2 dst-ip
+// 100.64.0.3               100.88.0.3 dst-ip
 // 100.64.0.4               100.64.0.4 dst-ip
-// 10.244.0.0/24            168.254.0.2 dst-ip
-// 10.244.1.0/24            168.254.0.3 dst-ip
+// 10.244.0.0/24            100.88.0.2 dst-ip
+// 10.244.1.0/24            100.88.0.3 dst-ip
 // 10.244.2.0/24            100.64.0.4 src-ip
 // 10.244.0.0/16            100.64.0.4 src-ip ----> This is the reroute added to send all traffic that did not match earlier LRSR's to outside the cluster
 // This logic works under the assumption that we have all other paths covered via routes that exist with higher precedence prefix match

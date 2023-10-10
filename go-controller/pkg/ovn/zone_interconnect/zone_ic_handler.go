@@ -69,7 +69,7 @@ const (
  *   ...
  *   port rtots-ovn-worker
  *      mac: "0a:58:a8:fe:00:08"
- *      networks: ["168.254.0.8/16", "fd97::8/64"]
+ *      networks: ["100.88.0.8/16", "fd97::8/64"]
  *
  * $ ovn-nbctl show transit_switch
  *     port tstor-ovn-worker
@@ -77,15 +77,15 @@ const (
  *        router-port: rtots-ovn-worker
  *     port tstor-ovn-worker3
  *        type: remote
- *        addresses: ["0a:58:a8:fe:00:02 168.254.0.2/16 fd97::2/64"]
+ *        addresses: ["0a:58:a8:fe:00:02 100.88.0.2/16 fd97::2/64"]
  *
  * $ ovn-nbctl lr-route-list ovn_cluster_router
  *    IPv4 Routes
  *    Route Table <main>:
  *    ...
  *    ...
- *    10.244.0.0/24 (ovn-worker3 subnet)            168.254.0.2 (ovn-worker3 transit switch port ip) dst-ip
- *    100.64.0.2/32 (ovn-worker3 gw router port ip) 168.254.0.2 dst-ip
+ *    10.244.0.0/24 (ovn-worker3 subnet)            100.88.0.2 (ovn-worker3 transit switch port ip) dst-ip
+ *    100.64.0.2/32 (ovn-worker3 gw router port ip) 100.88.0.2 dst-ip
  *    ...
  *    IPv6 Routes
  *    Route Table <main>:
@@ -622,10 +622,10 @@ func (zic *ZoneInterconnectHandler) setRemotePortBindingChassis(nodeName, portNa
 // addRemoteNodeStaticRoutes adds static routes in ovn_cluster_router to reach the remote node via the
 // remote node transit switch port.
 // Eg. if node ovn-worker2 is a remote node
-// ovn-worker2 - { node_subnet = 10.244.0.0/24,  node id = 2,  transit switch port ip = 168.254.0.2/16,  join ip connecting to GR_ovn-worker = 100.64.0.2/16}
+// ovn-worker2 - { node_subnet = 10.244.0.0/24,  node id = 2,  transit switch port ip = 100.88.0.2/16,  join ip connecting to GR_ovn-worker = 100.64.0.2/16}
 // Then the below static routes are added
-// ip4.dst == 10.244.0.0/24 , nexthop = 168.254.0.2
-// ip4.dst == 100.64.0.2/16 , nexthop = 168.254.0.2  (only for default primary network)
+// ip4.dst == 10.244.0.0/24 , nexthop = 100.88.0.2
+// ip4.dst == 100.64.0.2/16 , nexthop = 100.88.0.2  (only for default primary network)
 func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node, nodeTransitSwitchPortIPs []*net.IPNet) error {
 	addRoute := func(prefix, nexthop string) error {
 		logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
@@ -738,13 +738,13 @@ type interconnectStaticRoute struct {
 }
 
 // getStaticRoutes returns a list of static routes from the provided ipPrefix'es and nexthops
-// Eg. If ipPrefixes - [10.0.0.4/24, aef0::4/64] and nexthops - [168.254.0.4/16, bef0::4/64] and fullMask is true
+// Eg. If ipPrefixes - [10.0.0.4/24, aef0::4/64] and nexthops - [100.88.0.4/16, bef0::4/64] and fullMask is true
 //
-// It will return [interconnectStaticRoute { prefix : 10.0.0.4/32, nexthop : 168.254.0.4},
+// It will return [interconnectStaticRoute { prefix : 10.0.0.4/32, nexthop : 100.88.0.4},
 // -               interconnectStaticRoute { prefix : aef0::4/128, nexthop : bef0::4}}
 //
 // If fullMask is false, it will return
-// [interconnectStaticRoute { prefix : 10.0.0.4/24, nexthop : 168.254.0.4},
+// [interconnectStaticRoute { prefix : 10.0.0.4/24, nexthop : 100.88.0.4},
 // -               interconnectStaticRoute { prefix : aef0::4/64, nexthop : bef0::4}}
 func (zic *ZoneInterconnectHandler) getStaticRoutes(ipPrefixes []*net.IPNet, nexthops []*net.IPNet, fullMask bool) []*interconnectStaticRoute {
 	var staticRoutes []*interconnectStaticRoute
