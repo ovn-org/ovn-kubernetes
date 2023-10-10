@@ -94,6 +94,8 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	// if the IP/MAC or Annotations have changed
 	ignoreLearn := true
 
+	n.RLock()
+	defer n.RUnlock()
 	if n.drMAC == nil || n.drIP == nil {
 		return fmt.Errorf("empty values for DR MAC: %s or DR IP: %s on node %s", n.drMAC, n.drIP, n.nodeName)
 	}
@@ -209,6 +211,8 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
 		}
 
+		n.RLock()
+		defer n.RUnlock()
 		route := makeRoute(cidr, n.drIP, mgmtPortLink)
 		err = util.GetNetLinkOps().RouteAdd(route)
 		if err != nil && !os.IsExist(err) {
@@ -227,39 +231,43 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 	klog.Info("Add Node ", node.Name)
 	var err error
 
-	if n.drIP == nil {
-		hybridOverlayDRIP, ok := node.Annotations[hotypes.HybridOverlayDRIP]
-		if !ok {
-			return fmt.Errorf("hybrid overlay not initialized on %s, it was not assigned an interface address", node.Name)
-		}
-		drIP := net.ParseIP(hybridOverlayDRIP)
-		if drIP == nil {
-			return fmt.Errorf("hybrid overlay not initialized on %s, the the annotation %s = %s is not an IP address", node.Name, hotypes.HybridOverlayDRIP, hybridOverlayDRIP)
-		}
-	}
-
 	if node.Name == n.nodeName {
+		// Add local node and setup DR
 		// Retry hybrid overlay initialization if the master was
 		// slow to add the hybrid overlay logical network elements
 		err = n.EnsureHybridOverlayBridge(node)
-	} else {
-		klog.Infof("Add hybridOverlay Node %s", node.Name)
-		err = n.hybridOverlayNodeUpdate(node)
-	}
-	if atomic.LoadUint32(n.initState) == hotypes.DistributedRouterInitialized {
-		pods, err := n.localPodLister.List(labels.Everything())
 		if err != nil {
-			return fmt.Errorf("cannot fully initialize node %s for hybrid overlay, cannot list pods: %v", n.nodeName, err)
+			return err
 		}
-		for _, pod := range pods {
-			err := n.AddPod(pod)
-			if err != nil {
-				klog.Errorf("Cannot wire pod %s for hybrid overlay, %v", pod.Name, err)
-			}
-		}
-		atomic.StoreUint32(n.initState, hotypes.PodsInitialized)
 	}
-	return err
+
+	if atomic.LoadUint32(n.initState) >= hotypes.DistributedRouterInitialized {
+		if node.Name != n.nodeName {
+			// add remote node
+			klog.Infof("Add hybridOverlay remote Node %s", node.Name)
+			err = n.hybridOverlayNodeUpdate(node)
+			if err != nil {
+				return err
+			}
+		} else if atomic.LoadUint32(n.initState) < hotypes.PodsInitialized {
+			// add pods local to our node
+			pods, err := n.localPodLister.List(labels.Everything())
+			if err != nil {
+				return fmt.Errorf("cannot fully initialize node %s for hybrid overlay, cannot list pods: %v", n.nodeName, err)
+			}
+			for _, pod := range pods {
+				if pod.Spec.NodeName != n.nodeName {
+					continue
+				}
+				err := n.AddPod(pod)
+				if err != nil {
+					return fmt.Errorf("cannot wire pod %s/%s for hybrid overlay, %w", pod.Namespace, pod.Name, err)
+				}
+			}
+			atomic.StoreUint32(n.initState, hotypes.PodsInitialized)
+		}
+	}
+	return nil
 }
 
 func (n *NodeController) deleteFlowsByCookie(cookie string) {
@@ -288,6 +296,8 @@ func (n *NodeController) DeleteNode(node *kapi.Node) error {
 		if err != nil {
 			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
 		}
+		n.RLock()
+		defer n.RUnlock()
 
 		route := makeRoute(cidr, n.drIP, mgmtPortLink)
 		err = util.GetNetLinkOps().RouteDel(route)
@@ -466,6 +476,8 @@ func (n *NodeController) handleHybridOverlayMACIPChange(node *kapi.Node) error {
 
 // EnsureHybridOverlayBridge sets up the hybrid overlay bridge
 func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
+	n.Lock()
+	defer n.Unlock()
 	if atomic.LoadUint32(n.initState) >= hotypes.DistributedRouterInitialized {
 		if node.Annotations[hotypes.HybridOverlayDRIP] != n.drIP.String() ||
 			node.Annotations[hotypes.HybridOverlayDRMAC] != n.drMAC.String() {
