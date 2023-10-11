@@ -32,59 +32,59 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 )
 
-// IPAMLeaseInformer provides access to a shared informer and lister for
-// IPAMLeases.
-type IPAMLeaseInformer interface {
+// IPAMClaimInformer provides access to a shared informer and lister for
+// IPAMClaims.
+type IPAMClaimInformer interface {
 	Informer() cache.SharedIndexInformer
-	Lister() v1alpha1.IPAMLeaseLister
+	Lister() v1alpha1.IPAMClaimLister
 }
 
-type iPAMLeaseInformer struct {
+type iPAMClaimInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
 	tweakListOptions internalinterfaces.TweakListOptionsFunc
 	namespace        string
 }
 
-// NewIPAMLeaseInformer constructs a new informer for IPAMLease type.
+// NewIPAMClaimInformer constructs a new informer for IPAMClaim type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
-func NewIPAMLeaseInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
-	return NewFilteredIPAMLeaseInformer(client, namespace, resyncPeriod, indexers, nil)
+func NewIPAMClaimInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
+	return NewFilteredIPAMClaimInformer(client, namespace, resyncPeriod, indexers, nil)
 }
 
-// NewFilteredIPAMLeaseInformer constructs a new informer for IPAMLease type.
+// NewFilteredIPAMClaimInformer constructs a new informer for IPAMClaim type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
-func NewFilteredIPAMLeaseInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
+func NewFilteredIPAMClaimInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
 	return cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.K8sV1alpha1().IPAMLeases(namespace).List(context.TODO(), options)
+				return client.K8sV1alpha1().IPAMClaims(namespace).List(context.TODO(), options)
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.K8sV1alpha1().IPAMLeases(namespace).Watch(context.TODO(), options)
+				return client.K8sV1alpha1().IPAMClaims(namespace).Watch(context.TODO(), options)
 			},
 		},
-		&persistentipv1alpha1.IPAMLease{},
+		&persistentipv1alpha1.IPAMClaim{},
 		resyncPeriod,
 		indexers,
 	)
 }
 
-func (f *iPAMLeaseInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredIPAMLeaseInformer(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+func (f *iPAMClaimInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	return NewFilteredIPAMClaimInformer(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
 }
 
-func (f *iPAMLeaseInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&persistentipv1alpha1.IPAMLease{}, f.defaultInformer)
+func (f *iPAMClaimInformer) Informer() cache.SharedIndexInformer {
+	return f.factory.InformerFor(&persistentipv1alpha1.IPAMClaim{}, f.defaultInformer)
 }
 
-func (f *iPAMLeaseInformer) Lister() v1alpha1.IPAMLeaseLister {
-	return v1alpha1.NewIPAMLeaseLister(f.Informer().GetIndexer())
+func (f *iPAMClaimInformer) Lister() v1alpha1.IPAMClaimLister {
+	return v1alpha1.NewIPAMClaimLister(f.Informer().GetIndexer())
 }

@@ -18,10 +18,10 @@ limitations under the License.
 
 package v1alpha1
 
-// IPAMLeaseListerExpansion allows custom methods to be added to
-// IPAMLeaseLister.
-type IPAMLeaseListerExpansion interface{}
+// IPAMClaimListerExpansion allows custom methods to be added to
+// IPAMClaimLister.
+type IPAMClaimListerExpansion interface{}
 
-// IPAMLeaseNamespaceListerExpansion allows custom methods to be added to
-// IPAMLeaseNamespaceLister.
-type IPAMLeaseNamespaceListerExpansion interface{}
+// IPAMClaimNamespaceListerExpansion allows custom methods to be added to
+// IPAMClaimNamespaceLister.
+type IPAMClaimNamespaceListerExpansion interface{}
