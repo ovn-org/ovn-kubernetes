@@ -280,7 +280,7 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 		}
 		h.clearInitialNodeNetworkUnavailableCondition(node)
 	case factory.PersistentIPsType:
-		ipamLease, ok := obj.(*persistentipsapi.IPAMLease)
+		ipamLease, ok := obj.(*persistentipsapi.IPAMClaim)
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *persistentipsapi.IPAMLease", obj)
 		}
@@ -353,7 +353,7 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 		}
 		return h.ncc.nodeAllocator.HandleDeleteNode(node)
 	case factory.PersistentIPsType:
-		pips, ok := obj.(*persistentipsapi.IPAMLease)
+		pips, ok := obj.(*persistentipsapi.IPAMClaim)
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.PersistentIPs", obj)
 		}

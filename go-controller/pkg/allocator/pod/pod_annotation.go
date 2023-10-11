@@ -121,7 +121,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 	idAllocator id.NamedAllocator,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
-	ipamLease *persistentipsapi.IPAMLease,
+	ipamClaim *persistentipsapi.IPAMClaim,
 	reallocateIP bool) (
 	*v1.Pod,
 	*util.PodAnnotation,
@@ -135,7 +135,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		allocator.netInfo,
 		pod,
 		network,
-		ipamLease,
+		ipamClaim,
 		reallocateIP,
 	)
 }
@@ -148,7 +148,7 @@ func allocatePodAnnotationWithTunnelID(
 	netInfo util.NetInfo,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
-	ipamLease *persistentipsapi.IPAMLease,
+	ipamClaim *persistentipsapi.IPAMClaim,
 	reallocateIP bool) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -162,7 +162,7 @@ func allocatePodAnnotationWithTunnelID(
 			netInfo,
 			pod,
 			network,
-			ipamLease,
+			ipamClaim,
 			reallocateIP)
 		return pod, rollback, err
 	}
@@ -204,7 +204,7 @@ func allocatePodAnnotationWithRollback(
 	netInfo util.NetInfo,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
-	ipamLease *persistentipsapi.IPAMLease,
+	ipamClaim *persistentipsapi.IPAMClaim,
 	reallocateIP bool) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -280,7 +280,7 @@ func allocatePodAnnotationWithRollback(
 	hasIPAM := util.DoesNetworkRequireIPAM(netInfo)
 	hasIPRequest := network != nil && len(network.IPRequest) > 0
 	hasStaticIPRequest := hasIPRequest && !reallocateIP
-	hasIPAMLease := ipamLease != nil && len(ipamLease.Status.IPs) > 0
+	hasIPAMClaim := ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
 
 	if hasIPAM && hasStaticIPRequest {
 		// for now we can't tell apart already allocated IPs from IPs excluded
@@ -302,8 +302,8 @@ func allocatePodAnnotationWithRollback(
 			if err != nil {
 				return
 			}
-		} else if hasIPAMLease {
-			tentative.IPs, err = util.ParseIPNets(ipamLease.Status.IPs)
+		} else if hasIPAMClaim {
+			tentative.IPs, err = util.ParseIPNets(ipamClaim.Status.IPs)
 			if err != nil {
 				return
 			}

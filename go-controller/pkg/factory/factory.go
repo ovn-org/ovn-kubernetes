@@ -168,7 +168,7 @@ var (
 	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
 	NetworkAttachmentDefinitionType       reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 	MultiNetworkPolicyType                reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
-	PersistentIPsType                     reflect.Type = reflect.TypeOf(&persistentipsapi.IPAMLease{})
+	PersistentIPsType                     reflect.Type = reflect.TypeOf(&persistentipsapi.IPAMClaim{})
 
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
@@ -639,7 +639,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		if err != nil {
 			return nil, err
 		}
-		wf.informers[PersistentIPsType], err = newQueuedInformer(PersistentIPsType, wf.pipsFactory.K8s().V1alpha1().IPAMLeases().Informer(), wf.stopChan, defaultNumEventQueues)
+		wf.informers[PersistentIPsType], err = newQueuedInformer(PersistentIPsType, wf.pipsFactory.K8s().V1alpha1().IPAMClaims().Informer(), wf.stopChan, defaultNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -712,7 +712,7 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 			return &multinetworkpolicy.ObjectMeta, nil
 		}
 	case PersistentIPsType:
-		if persistentips, ok := obj.(*persistentipsapi.IPAMLease); ok {
+		if persistentips, ok := obj.(*persistentipsapi.IPAMClaim); ok {
 			return &persistentips.ObjectMeta, nil
 		}
 	}
@@ -1203,14 +1203,14 @@ func (wf *WatchFactory) GetEgressFirewall(namespace, name string) (*egressfirewa
 	return egressFirewallLister.EgressFirewalls(namespace).Get(name)
 }
 
-func (wf *WatchFactory) GetPersistentIPs(namespace, name string) (*persistentipsapi.IPAMLease, error) {
-	lister := wf.informers[PersistentIPsType].lister.(persistentipslister.IPAMLeaseLister)
-	return lister.IPAMLeases(namespace).Get(name)
+func (wf *WatchFactory) GetPersistentIPs(namespace, name string) (*persistentipsapi.IPAMClaim, error) {
+	lister := wf.informers[PersistentIPsType].lister.(persistentipslister.IPAMClaimLister)
+	return lister.IPAMClaims(namespace).Get(name)
 }
 
-func (wf *WatchFactory) ListPersistentIPs(namespace string, selector labels.Selector) ([]*persistentipsapi.IPAMLease, error) {
-	lister := wf.informers[PersistentIPsType].lister.(persistentipslister.IPAMLeaseLister)
-	return lister.IPAMLeases(namespace).List(selector)
+func (wf *WatchFactory) ListPersistentIPs(namespace string, selector labels.Selector) ([]*persistentipsapi.IPAMClaim, error) {
+	lister := wf.informers[PersistentIPsType].lister.(persistentipslister.IPAMClaimLister)
+	return lister.IPAMClaims(namespace).List(selector)
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {

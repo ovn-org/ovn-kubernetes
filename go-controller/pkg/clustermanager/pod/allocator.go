@@ -263,7 +263,7 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 	}
 
 	const dontReallocate = false // don't reallocate to new IPs if currently annotated IPs fail to allocate
-	var ipamLease *persistentipsapi.IPAMLease
+	var claim *persistentipsapi.IPAMClaim
 	if util.DoesNetworkRequireIPAM(a.netInfo) {
 		klog.Infof("allocate IPAMClaim for pod NAD: %q", nad)
 		//vmName, ok := pod.Labels[kubevirtv1.VirtualMachineNameLabel]
@@ -275,16 +275,16 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 				ipamLeaseKey = ipamClaim.(string)
 			}
 		}
-		klog.Infof("ipamLease key: %s", ipamLeaseKey)
+		klog.Infof("claim key: %s", ipamLeaseKey)
 		lease, err := a.watchFactory.GetPersistentIPs(pod.Namespace, ipamLeaseKey)
 		if err != nil {
-			return fmt.Errorf("failed to get ipamLease %q", ipamLeaseKey)
+			return fmt.Errorf("failed to get claim %q", ipamLeaseKey)
 		}
 
 		if len(lease.Status.IPs) == 0 {
 			return fmt.Errorf("cannot create pod yet, the IPAMLease does not yet have a ready IP")
 		}
-		ipamLease = lease
+		claim = lease
 	}
 
 	updatedPod, podAnnotation, err := a.podAnnotationAllocator.AllocatePodAnnotationWithTunnelID(
@@ -292,7 +292,7 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 		idAllocator,
 		pod,
 		network,
-		ipamLease,
+		claim,
 		dontReallocate,
 	)
 

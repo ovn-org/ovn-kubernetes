@@ -45,7 +45,7 @@ type InterfaceOVN interface {
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
 	UpdateEgressServiceStatus(namespace, name, host string) error
-	UpdateIPAMLeaseIPs(ipamLease *persistentipsv1.IPAMLease, ips []string) error
+	UpdateIPAMClaimIPs(ipamClaim *persistentipsv1.IPAMClaim, ips []string) error
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -440,9 +440,9 @@ func (k *KubeOVN) UpdateEgressServiceStatus(namespace, name, host string) error 
 	return err
 }
 
-func (k *KubeOVN) UpdateIPAMLeaseIPs(currentIPAMLease *persistentipsv1.IPAMLease, ips []string) error {
-	currentIPAMLease.Status.IPs = ips
-	_, err := k.PersistentIPsClient.K8sV1alpha1().IPAMLeases(currentIPAMLease.Namespace).UpdateStatus(context.TODO(), currentIPAMLease, metav1.UpdateOptions{})
+func (k *KubeOVN) UpdateIPAMClaimIPs(currentIPAMClaim *persistentipsv1.IPAMClaim, ips []string) error {
+	currentIPAMClaim.Status.IPs = ips
+	_, err := k.PersistentIPsClient.K8sV1alpha1().IPAMClaims(currentIPAMClaim.Namespace).UpdateStatus(context.TODO(), currentIPAMClaim, metav1.UpdateOptions{})
 	return err
 }
 

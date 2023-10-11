@@ -523,7 +523,7 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	case EgressServiceType:
 		return egressservicelister.NewEgressServiceLister(sharedInformer.GetIndexer()), nil
 	case PersistentIPsType:
-		return persistentipslister.NewIPAMLeaseLister(sharedInformer.GetIndexer()), nil
+		return persistentipslister.NewIPAMClaimLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)

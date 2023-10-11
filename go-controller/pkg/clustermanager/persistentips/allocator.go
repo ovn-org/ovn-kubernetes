@@ -39,7 +39,7 @@ func NewPersistentIPsAllocator(netInfo util.NetInfo, kube kube.InterfaceOVN, ipA
 
 // Reconcile allocates or releases IPs for persistentips updating the persistentip annotation
 // as necessary with all the additional information derived from those IPs
-func (a *PersistentIPsAllocator) Delete(pips *persistentipsapi.IPAMLease) error {
+func (a *PersistentIPsAllocator) Delete(pips *persistentipsapi.IPAMClaim) error {
 	if len(pips.Status.IPs) == 0 {
 		return nil
 	}
@@ -55,25 +55,25 @@ func (a *PersistentIPsAllocator) Delete(pips *persistentipsapi.IPAMLease) error 
 	return nil
 }
 
-func (a *PersistentIPsAllocator) Reconcile(ipamLease *persistentipsapi.IPAMLease) error {
-	klog.V(5).Infof("reconciling IPAMLease %q", ipamLease.Name)
-	if len(ipamLease.Status.IPs) > 0 {
-		klog.V(5).Infof("already have neat lookin' IPs for: %q. Bail out !", ipamLease.Name)
+func (a *PersistentIPsAllocator) Reconcile(ipamClaim *persistentipsapi.IPAMClaim) error {
+	klog.V(5).Infof("reconciling IPAMClaim %q", ipamClaim.Name)
+	if len(ipamClaim.Status.IPs) > 0 {
+		klog.V(5).Infof("already have neat lookin' IPs for: %q. Bail out !", ipamClaim.Name)
 		return nil
 	}
 	ips, err := a.ipAllocator.AllocateNextIPs()
 	if err != nil {
-		return fmt.Errorf("error allocating persistent IPs for IPAM Lease %q: %v", ipamLease.Name, err)
+		return fmt.Errorf("error allocating persistent IPs for IPAM Claim %q: %v", ipamClaim.Name, err)
 	}
 	var ipsString []string
 	for _, ip := range ips {
 		ipsString = append(ipsString, ip.String())
 	}
 
-	if err := a.kube.UpdateIPAMLeaseIPs(ipamLease, ipsString); err != nil {
+	if err := a.kube.UpdateIPAMClaimIPs(ipamClaim, ipsString); err != nil {
 		return fmt.Errorf(
 			"failed to update the allocation %q with allocations %q: %v",
-			ipamLease.Name,
+			ipamClaim.Name,
 			strings.Join(ipsString, ","),
 			err,
 		)
@@ -86,9 +86,9 @@ func (a *PersistentIPsAllocator) Reconcile(ipamLease *persistentipsapi.IPAMLease
 func (a *PersistentIPsAllocator) Sync(objs []interface{}) error {
 	ips := []*net.IPNet{}
 	for _, obj := range objs {
-		pips, ok := obj.(*persistentipsapi.IPAMLease)
+		pips, ok := obj.(*persistentipsapi.IPAMClaim)
 		if !ok {
-			klog.Errorf("Could not cast %T object to *persistentipsapi.IPAMLease", obj)
+			klog.Errorf("Could not cast %T object to *persistentipsapi.IPAMClaim", obj)
 			continue
 		}
 		if len(pips.Status.IPs) == 0 {
