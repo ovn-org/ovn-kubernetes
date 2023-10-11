@@ -317,14 +317,21 @@ func (nadController *NetAttachDefinitionController) onNetworkAttachDefinitionUpd
 }
 
 func (nadController *NetAttachDefinitionController) onNetworkAttachDefinitionDelete(obj interface{}) {
-	nad := obj.(*nettypes.NetworkAttachmentDefinition)
-	if nad == nil {
-		utilruntime.HandleError(fmt.Errorf("invalid net-attach-def provided to onNetworkAttachDefinitionDelete()"))
-		return
+	nad, ok := obj.(*nettypes.NetworkAttachmentDefinition)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %#v", obj))
+			return
+		}
+		nad, ok = tombstone.Obj.(*nettypes.NetworkAttachmentDefinition)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a NetworkAttachmentDefinition object %#v", obj))
+			return
+		}
 	}
-
 	klog.V(4).Infof("%s: Deleting net-attach-def %s/%s", nadController.name, nad.Namespace, nad.Name)
-	nadController.queueNetworkAttachDefinition(obj)
+	nadController.queueNetworkAttachDefinition(nad)
 }
 
 // getAllNetworkControllers returns a snapshot of all managed NAD associated network controllers.
