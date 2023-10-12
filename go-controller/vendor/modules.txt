@@ -174,7 +174,7 @@ github.com/json-iterator/go
 github.com/juju/errors
 # github.com/juju/testing v0.0.0-20200706033705-4c23f9c453cd
 ## explicit; go 1.14
-# github.com/k8snetworkplumbingwg/govdpa v0.1.4
+# github.com/k8snetworkplumbingwg/govdpa v0.1.5-0.20230926073613-07c1031aea47
 ## explicit; go 1.17
 github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa
 # github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170

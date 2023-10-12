@@ -21,6 +21,7 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -460,7 +461,7 @@ func handleNetdevResources(resourceName string) (string, error) {
 	} else {
 		return "", fmt.Errorf("insufficient device IDs for resource: %s", resourceName)
 	}
-	netdevice, err := util.GetNetdevNameFromDeviceId(deviceId)
+	netdevice, err := util.GetNetdevNameFromDeviceId(deviceId, v1.DeviceInfo{})
 	if err != nil {
 		return "", err
 	}

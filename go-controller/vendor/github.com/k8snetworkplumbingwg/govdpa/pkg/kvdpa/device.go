@@ -1,10 +1,8 @@
 package kvdpa
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/vishvananda/netlink/nl"
@@ -185,7 +183,8 @@ func GetVdpaDevice(name string) (VdpaDevice, error) {
 		return nil, err
 	}
 
-	vdpaDevs, err := parseDevLinkVdpaDevList(msgs)
+	// No filters, expecting to parse attributes for the device with the given name
+	vdpaDevs, err := parseDevLinkVdpaDevList("", "", msgs)
 	if err != nil {
 		return nil, err
 	}
@@ -197,48 +196,25 @@ GetVdpaDevicesByMgmtDev returns the VdpaDevice objects whose MgmtDev
 has the given bus and device names.
 */
 func GetVdpaDevicesByMgmtDev(busName, devName string) ([]VdpaDevice, error) {
-	result := []VdpaDevice{}
-	devices, err := ListVdpaDevices()
-	if err != nil {
-		return nil, err
-	}
-	for _, device := range devices {
-		if device.MgmtDev() != nil &&
-			device.MgmtDev().BusName() == busName &&
-			device.MgmtDev().DevName() == devName {
-			result = append(result, device)
-		}
-	}
-	if len(result) == 0 {
-		return nil, syscall.ENODEV
-	}
-	return result, nil
+	return listVdpaDevicesWithBusDevName(busName, devName)
 }
 
 /*ListVdpaDevices returns a list of all available vdpa devices */
 func ListVdpaDevices() ([]VdpaDevice, error) {
+	return listVdpaDevicesWithBusDevName("", "")
+}
+
+func listVdpaDevicesWithBusDevName(busName, devName string) ([]VdpaDevice, error) {
 	msgs, err := GetNetlinkOps().RunVdpaNetlinkCmd(VdpaCmdDevGet, syscall.NLM_F_DUMP, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	vdpaDevs, err := parseDevLinkVdpaDevList(msgs)
+	vdpaDevs, err := parseDevLinkVdpaDevList(busName, devName, msgs)
 	if err != nil {
 		return nil, err
 	}
 	return vdpaDevs, nil
-}
-
-func extractBusNameAndMgmtDeviceName(fullMgmtDeviceName string) (busName string, mgmtDeviceName string, err error) {
-	numSlashes := strings.Count(fullMgmtDeviceName, "/")
-	if numSlashes > 1 {
-		return "", "", errors.New("expected mgmtDeviceName to be either in the format <mgmtBusName>/<mgmtDeviceName> or <mgmtDeviceName>")
-	} else if numSlashes == 0 {
-		return "", fullMgmtDeviceName, nil
-	} else {
-		values := strings.Split(fullMgmtDeviceName, "/")
-		return values[0], values[1], nil
-	}
 }
 
 /*
@@ -249,7 +225,7 @@ GetVdpaDevicesByPciAddress returns the VdpaDevice objects for the given pciAddre
 	- MgmtDevName
 */
 func GetVdpaDevicesByPciAddress(pciAddress string) ([]VdpaDevice, error) {
-	busName, mgmtDeviceName, err := extractBusNameAndMgmtDeviceName(pciAddress)
+	busName, mgmtDeviceName, err := ExtractBusAndMgmtDevice(pciAddress)
 	if err != nil {
 		return nil, unix.EINVAL
 	}
@@ -263,7 +239,7 @@ func AddVdpaDevice(mgmtDeviceName string, vdpaDeviceName string) error {
 		return unix.EINVAL
 	}
 
-	busName, mgmtDeviceName, err := extractBusNameAndMgmtDeviceName(mgmtDeviceName)
+	busName, mgmtDeviceName, err := ExtractBusAndMgmtDevice(mgmtDeviceName)
 	if err != nil {
 		return unix.EINVAL
 	}
@@ -317,7 +293,7 @@ func DeleteVdpaDevice(vdpaDeviceName string) error {
 	return nil
 }
 
-func parseDevLinkVdpaDevList(msgs [][]byte) ([]VdpaDevice, error) {
+func parseDevLinkVdpaDevList(busName string, mgmtDeviceName string, msgs [][]byte) ([]VdpaDevice, error) {
 	devices := make([]VdpaDevice, 0, len(msgs))
 
 	for _, m := range msgs {
@@ -329,6 +305,15 @@ func parseDevLinkVdpaDevList(msgs [][]byte) ([]VdpaDevice, error) {
 		if err = dev.parseAttributes(attrs); err != nil {
 			return nil, err
 		}
+
+		if busName != "" && busName != dev.mgmtDev.busName {
+			continue
+		}
+
+		if mgmtDeviceName != "" && mgmtDeviceName != dev.mgmtDev.devName {
+			continue
+		}
+
 		if err = dev.getBusInfo(); err != nil {
 			return nil, err
 		}
