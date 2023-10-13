@@ -40,7 +40,6 @@ ENV PYTHONDONTWRITEBYTECODE yes
 RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
-	containernetworking-plugins \
 	tcpdump iputils \
 	libreswan \
 	ethtool conntrack-tools \
