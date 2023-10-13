@@ -192,7 +192,7 @@ func getDefaultPortGroups() (clusterPortGroup, clusterRtrPortGroup *nbdb.PortGro
 
 func getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestData {
 	fakeController := getFakeController(DefaultNetworkControllerName)
-	pg_hash := fakeController.getMulticastPortGroupName(ns)
+	pg_hash := fakeController.getNamespacePortGroupName(ns)
 	egressMatch := libovsdbutil.GetACLMatch(pg_hash, fakeController.getMulticastACLEgrMatch(), libovsdbutil.ACLEgress)
 
 	ip4AddressSet, ip6AddressSet := getNsAddrSetHashNames(ns)
@@ -252,6 +252,20 @@ func getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestDa
 		egressACL,
 		ingressACL,
 		pg,
+	}
+}
+
+func dereferenceAllACLs(testData []libovsdb.TestData) {
+	for _, testItem := range testData {
+		if pg, ok := testItem.(*nbdb.PortGroup); ok {
+			pg.ACLs = nil
+		}
+	}
+}
+
+func dereferenceACLsFromLastPG(testData []libovsdb.TestData) {
+	if pg, ok := testData[len(testData)-1].(*nbdb.PortGroup); ok {
+		pg.ACLs = nil
 	}
 }
 
@@ -345,10 +359,14 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 		config.PrepareTestConfig()
 		config.IPv4Mode = true
 		config.IPv6Mode = false
+		config.EnableMulticast = true
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
+		// flags are written to config.EnableMulticast
+		// if there is no --enable-multicast flag, it will set to false.
+		// alternative approach is to give this flag to app.Run, but that require more changes.
+		//app.Flags = config.Flags
 
 		fakeOvn = NewFakeOVN(true)
 		gomegaFormatMaxLength = format.MaxLength
@@ -407,14 +425,9 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 			app.Action = func(ctx *cli.Context) error {
 				clusterPortGroup, clusterRtrPortGroup := getDefaultPortGroups()
 				initialData := getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup)
-				// test server doesn't delete de-referenced acls, so they will stay
-				expectedData := initialData[:len(initialData)-2]
-				clusterPortGroup, clusterRtrPortGroup = getDefaultPortGroups()
 
 				nsData := getMulticastPolicyExpectedData(namespaceName1, nil)
 				initialData = append(initialData, nsData...)
-				expectedData = append(expectedData, nsData[:len(nsData)-1]...)
-
 				// namespace is still present, but multicast support is disabled
 				namespace1 := *newNamespace(namespaceName1)
 				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: initialData},
@@ -428,10 +441,10 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 				err := fakeOvn.controller.disableMulticast()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// check acls are deleted when multicast is disabled
+				dereferenceAllACLs(initialData)
 
-				expectedData = append(expectedData, clusterPortGroup, clusterRtrPortGroup)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(
-					expectedData))
+					initialData))
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -526,10 +539,9 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// ACLs and port group should be deleted
-				// test server doesn't delete de-referenced acls, so they will stay
-				expectedData := initialData[:len(initialData)-1]
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+				// only namespaced acls should be dereferenced, default acls will stay
+				dereferenceACLsFromLastPG(initialData)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(initialData))
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -571,7 +583,9 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 					// Disable multicast in the namespace.
 					updateMulticast(fakeOvn, ns, false)
 					// test server doesn't delete de-referenced acls, so they will stay
-					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData[:len(expectedData)-1]...))
+					dereferenceAllACLs(expectedData)
+
+					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 					return nil
 				}
 

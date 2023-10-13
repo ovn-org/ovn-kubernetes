@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 
@@ -32,6 +35,9 @@ type namespaceInfo struct {
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
 	addressSet addressset.AddressSet
+	// portGroupName is a name of a port group, that stores all local zone ports for a given namespace.
+	// May be empty if the port group wasn't created.
+	portGroupName string
 
 	// Map of related network policies. Policy will add itself to this list when it's ready to subscribe
 	// to namespace Update events. Retry logic to update network policy based on namespace event is handled by namespace.
@@ -174,6 +180,37 @@ func (bnc *BaseNetworkController) syncNamespaces(namespaces []interface{}) error
 	if err != nil {
 		return fmt.Errorf("error in syncing namespaces: %v", err)
 	}
+
+	// remove stale port groups
+	p := func(pg *nbdb.PortGroup) bool {
+		// there is no way to distinguish namespace-owned port group, since its name is just namespace name.
+		// every newly added port group should use dbIDs, therefore if we filter out port groups
+		// with the new dbIDs, this condition is safe even if we backport the new port groups in the future.
+		if pg.ExternalIDs[libovsdbops.PrimaryIDKey.String()] != "" {
+			return false
+		}
+		if pg.ExternalIDs["name"] == types.ClusterPortGroupNameBase || pg.ExternalIDs["name"] == types.ClusterRtrPortGroupNameBase {
+			// cluster port group
+			return false
+		}
+		if strings.HasPrefix(pg.ExternalIDs["name"], "ANP:") || strings.HasPrefix(pg.ExternalIDs["name"], "BANP:") {
+			// (B)ANP port group
+			return false
+		}
+		if strings.Contains(pg.ExternalIDs["name"], "_") {
+			// network policy port group
+			return false
+		}
+		// here we can be sure it is namespace-owned port group
+		// delete if it is not in the expectedNs
+		return !expectedNs[pg.ExternalIDs["name"]]
+	}
+
+	err = libovsdbops.DeletePortGroupsWithPredicate(bnc.nbClient, p)
+	if err != nil {
+		return fmt.Errorf("unable to delete stale namespace port groups: %v", err)
+	}
+
 	if bnc.multicastSupport {
 		if err = bnc.syncNsMulticast(nsWithMulticast); err != nil {
 			return fmt.Errorf("error in syncing multicast for namespaces: %v", err)
@@ -201,7 +238,7 @@ func (bnc *BaseNetworkController) multicastUpdateNamespace(ns *kapi.Namespace, n
 	if enabled {
 		err = bnc.createMulticastAllowPolicy(ns.Name, nsInfo)
 	} else {
-		err = bnc.deleteMulticastAllowPolicy(bnc.nbClient, ns.Name)
+		err = bnc.deleteMulticastAllowPolicy(ns.Name)
 	}
 	if err != nil {
 		return err
@@ -214,7 +251,7 @@ func (bnc *BaseNetworkController) multicastUpdateNamespace(ns *kapi.Namespace, n
 func (bnc *BaseNetworkController) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) error {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
-		if err := bnc.deleteMulticastAllowPolicy(bnc.nbClient, ns.Name); err != nil {
+		if err := bnc.deleteMulticastAllowPolicy(ns.Name); err != nil {
 			return err
 		}
 	}
@@ -246,6 +283,15 @@ func (bnc *BaseNetworkController) ensureNamespaceLockedCommon(ns string, readOnl
 		nsInfo.addressSet, err = bnc.createNamespaceAddrSetAllPods(ns, ips)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create address set for namespace: %s, error: %v", ns, err)
+		}
+
+		// namespace port groups are only used by egress firewall and multicast for now
+		if bnc.multicastSupport || config.OVNKubernetesFeature.EnableEgressFirewall {
+			portGroupName, err := bnc.createNamespacePortGroup(ns)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create port group for namespace: %s, error: %v", ns, err)
+			}
+			nsInfo.portGroupName = portGroupName
 		}
 		bnc.namespaces[ns] = nsInfo
 	} else {
@@ -381,6 +427,21 @@ func (bnc *BaseNetworkController) getAllNamespacePodAddresses(ns string) []net.I
 func (bnc *BaseNetworkController) createNamespaceAddrSetAllPods(ns string, ips []net.IP) (addressset.AddressSet, error) {
 	dbIDs := getNamespaceAddrSetDbIDs(ns, bnc.controllerName)
 	return bnc.addressSetFactory.NewAddressSet(dbIDs, ips)
+}
+
+func (bnc *BaseNetworkController) createNamespacePortGroup(ns string) (string, error) {
+	// Add all ports from this namespace to the multicast allow group.
+	ports, err := bnc.getNamespaceLSPs(ns)
+	if err != nil {
+		return "", fmt.Errorf("failed to create namespace port group")
+	}
+
+	portGroupName := bnc.getNamespacePortGroupName(ns)
+
+	pg := bnc.buildPortGroup(portGroupName, ns, ports, nil)
+	err = libovsdbops.CreateOrUpdatePortGroups(bnc.nbClient, pg)
+
+	return portGroupName, err
 }
 
 // removeRemoteZonePodFromNamespaceAddressset tries to remove the remote zone pod ips from the pod namespace address set.
