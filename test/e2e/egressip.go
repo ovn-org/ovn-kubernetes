@@ -3,7 +3,6 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"strconv"
@@ -512,7 +511,7 @@ spec:
             name: ` + f.Namespace.Name + `
 `)
 
-				if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+				if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 					framework.Failf("Unable to write CRD config to disk: %v", err)
 				}
 				defer func() {
@@ -710,7 +709,7 @@ spec:
         matchLabels:
             name: ` + f.Namespace.Name + `
 `)
-		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		defer func() {
@@ -865,7 +864,7 @@ spec:
         matchLabels:
             name: ` + f.Namespace.Name + `
 `)
-		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		defer func() {
@@ -1009,7 +1008,7 @@ spec:
         matchLabels:
             name: ` + f.Namespace.Name + `
 `)
-		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		defer func() {
@@ -1061,7 +1060,7 @@ spec:
         matchLabels:
             name: ` + f.Namespace.Name + `
 `)
-		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig2), 0644); err != nil {
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig2), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		defer func() {
@@ -1138,7 +1137,7 @@ spec:
         matchLabels:
             name: ` + f.Namespace.Name + `
 `)
-		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		defer func() {
@@ -1326,7 +1325,7 @@ spec:
         matchLabels:
             name: ` + f.Namespace.Name + `
 `)
-		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		defer func() {
@@ -1492,7 +1491,7 @@ spec:
             name: ` + f.Namespace.Name + `
 `
 
-		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 
@@ -1531,7 +1530,7 @@ spec:
       cidrSelector: ` + firewallDenyAll + `
 `)
 
-		if err := ioutil.WriteFile(egressFirewallYaml, []byte(egressFirewallConfig), 0644); err != nil {
+		if err := os.WriteFile(egressFirewallYaml, []byte(egressFirewallConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 

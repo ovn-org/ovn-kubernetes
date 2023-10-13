@@ -3,7 +3,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"time"
@@ -104,7 +103,7 @@ spec:
         app: test
 `)
 
-			if err := ioutil.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
+			if err := os.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
 				framework.Failf("Unable to write CRD config to disk: %v", err)
 			}
 			defer func() {
@@ -139,7 +138,7 @@ spec:
         app: test
 `)
 
-			if err := ioutil.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
+			if err := os.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
 				framework.Failf("Unable to write CRD config to disk: %v", err)
 			}
 			framework.Logf("Update the EgressQoS configuration")
@@ -185,7 +184,7 @@ spec:
         test2: test2
 `)
 
-			if err := ioutil.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
+			if err := os.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
 				framework.Failf("Unable to write CRD config to disk: %v", err)
 			}
 			defer func() {
@@ -243,7 +242,7 @@ spec:
   - dscp: 50
 `)
 
-		if err := ioutil.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
+		if err := os.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 
@@ -276,7 +275,7 @@ spec:
     dstCIDR: 2001:::::::7334/158
 `)
 
-		if err := ioutil.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
+		if err := os.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 
