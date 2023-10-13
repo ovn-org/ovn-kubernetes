@@ -518,6 +518,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				var err error
 				nodeName := "node1"
 				nodeIP := "9.9.9.9"
+				nodeIP2 := "11.11.11.11"
+				nodeIP3 := "fc00:f853:ccd:e793::2"
+				config.IPv4Mode = true
+				config.IPv6Mode = true
 
 				app.Action = func(ctx *cli.Context) error {
 					namespace1 := *newNamespace("namespace1")
@@ -538,9 +542,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 							{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: nodeName,
-								},
-								Status: v1.NodeStatus{
-									Addresses: []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: nodeIP}},
+									Annotations: map[string]string{
+										util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s/24\",\"%s/24\",\"%s/64\"]", nodeIP, nodeIP2, nodeIP3),
+									},
 								},
 							},
 						})
@@ -562,7 +566,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					expectedDatabaseState := getEFExpectedDb(initialData,
-						fakeOVN, namespace1.Name, fmt.Sprintf("(ip4.dst == %s)", nodeIP), "", nbdb.ACLActionAllow)
+						fakeOVN, namespace1.Name,
+						fmt.Sprintf("(ip4.dst == %s || ip4.dst == %s || ip6.dst == %s)", nodeIP2, nodeIP, nodeIP3), "", nbdb.ACLActionAllow)
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					ginkgo.By("Updating a node to not match nodeSelector on Egress Firewall")
@@ -777,19 +782,21 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 			})
 			for _, ipMode := range []string{"IPv4", "IPv6"} {
 				ginkgo.It(fmt.Sprintf("configures egress firewall correctly with node selector, gateway mode: %s, IP mode: %s", gwMode, ipMode), func() {
-					nodeIP := "10.10.10.1"
-					nodeIP6 := "fc00:f853:ccd:e793::2"
+					nodeIP4CIDR := "10.10.10.1/24"
+					nodeIP, _, _ := net.ParseCIDR(nodeIP4CIDR)
+					nodeIP6CIDR := "fc00:f853:ccd:e793::2/64"
+					nodeIP6, _, _ := net.ParseCIDR(nodeIP6CIDR)
 					config.Gateway.Mode = gwMode
-					var nodeAddr v1.NodeAddress
+					var nodeCIDR string
 					if ipMode == "IPv4" {
 						config.IPv4Mode = true
 						config.IPv6Mode = false
-						nodeAddr = v1.NodeAddress{v1.NodeInternalIP, nodeIP}
+						nodeCIDR = nodeIP4CIDR
 
 					} else {
 						config.IPv4Mode = false
 						config.IPv6Mode = true
-						nodeAddr = v1.NodeAddress{v1.NodeInternalIP, nodeIP6}
+						nodeCIDR = nodeIP6CIDR
 					}
 					app.Action = func(ctx *cli.Context) error {
 						labelKey := "name"
@@ -806,14 +813,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						})
 						mdata := newObjectMeta(node1Name, "")
 						mdata.Labels = map[string]string{labelKey: labelValue}
+						mdata.Annotations = map[string]string{util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", nodeCIDR)}
 
 						startOvnWithNodes(dbSetup, []v1.Namespace{namespace1}, []egressfirewallapi.EgressFirewall{*egressFirewall},
 							[]v1.Node{
 								{
-									Status: v1.NodeStatus{
-										Phase:     v1.NodeRunning,
-										Addresses: []v1.NodeAddress{nodeAddr},
-									},
 									ObjectMeta: mdata,
 								},
 							})
@@ -1051,19 +1055,16 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 		fakeOVN = NewFakeOVN(false)
 		a := newObjectMeta(node1Name, "")
 		a.Labels = nodeLabel
-		node1 := v1.Node{
-			Status: v1.NodeStatus{
-				Phase:     v1.NodeRunning,
-				Addresses: []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: node1Addr}},
-			},
-			ObjectMeta: a,
+		a.Annotations = map[string]string{
+			util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s/24\"]", node1Addr),
+		}
+		node1 := v1.Node{ObjectMeta: a}
+		b := newObjectMeta(node2Name, "")
+		b.Annotations = map[string]string{
+			util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s/24\"]", node2Addr),
 		}
 		node2 := v1.Node{
-			Status: v1.NodeStatus{
-				Phase:     v1.NodeRunning,
-				Addresses: []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: node2Addr}},
-			},
-			ObjectMeta: newObjectMeta(node2Name, ""),
+			ObjectMeta: b,
 		}
 		fakeOVN.startWithDBSetup(dbSetup, &v1.NodeList{Items: []v1.Node{node1, node2}})
 	})
@@ -1412,7 +1413,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{nodeAddrs: sets.New("9.9.9.9", "10.10.10.10"), nodeSelector: &metav1.LabelSelector{}},
+					to:     destination{nodeAddrs: sets.New("10.10.10.10", "9.9.9.9"), nodeSelector: &metav1.LabelSelector{}},
 				},
 			},
 			// match one node

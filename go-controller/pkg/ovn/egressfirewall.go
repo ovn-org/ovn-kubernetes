@@ -113,11 +113,11 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 			return efr, fmt.Errorf("unable to query nodes for egress firewall: %w", err)
 		}
 		for _, node := range nodes {
-			for _, addr := range node.Status.Addresses {
-				if addr.Type == kapi.NodeInternalIP {
-					efr.to.nodeAddrs.Insert(addr.Address)
-				}
+			hostAddresses, err := util.GetNodeHostAddrs(node)
+			if err != nil {
+				return efr, fmt.Errorf("unable to get node host CIDRs for egress firewall, node: %s: %w", node.Name, err)
 			}
+			efr.to.nodeAddrs.Insert(hostAddresses...)
 		}
 	}
 	efr.ports = rawEgressFirewallRule.Ports
@@ -396,7 +396,9 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, p
 			action = nbdb.ACLActionDrop
 		}
 		if len(rule.to.nodeAddrs) > 0 {
-			for addr := range rule.to.nodeAddrs {
+			for _, addr := range sets.List(rule.to.nodeAddrs) {
+				// ideally we don't care about sorting this list, but this is being done to ensure Unit Test consistency
+				// and its not like this nodeAddrs can be super large per node EFW rule to cause scale issues
 				if utilnet.IsIPv6String(addr) {
 					matchTargets = append(matchTargets, matchTarget{matchKindV6CIDR, addr, false})
 				} else {
@@ -731,29 +733,23 @@ func (oc *DefaultNetworkController) getEgressFirewallACLDbIDs(namespace string, 
 		})
 }
 
-func getNodeInternalAddrsToString(node *kapi.Node) []string {
-	v4, v6 := util.GetNodeInternalAddrs(node)
-	var addrs []string
-	for _, addr := range []net.IP{v4, v6} {
-		if addr != nil {
-			addrs = append(addrs, addr.String())
-		}
-	}
-
-	return addrs
-}
-
 func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode *kapi.Node) error {
 
 	var addressesToAdd []string
 	var addressesToRemove []string
-
+	var err error
 	if oldNode != nil {
-		addressesToRemove = getNodeInternalAddrsToString(oldNode)
+		addressesToRemove, err = util.GetNodeHostAddrs(oldNode)
+		if err != nil {
+			return err
+		}
 	}
 
 	if newNode != nil {
-		addressesToAdd = getNodeInternalAddrsToString(newNode)
+		addressesToAdd, err = util.GetNodeHostAddrs(newNode)
+		if err != nil {
+			return err
+		}
 	}
 
 	// cycle through egress firewalls and check if any match this node's labels
