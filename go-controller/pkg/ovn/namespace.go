@@ -56,9 +56,9 @@ func (oc *DefaultNetworkController) getRoutingPodGWs(nsInfo *namespaceInfo) map[
 	return res
 }
 
-// addPodToNamespace returns pod's routing gateway info and the ops needed
-// to add pod's IP to the namespace's address set.
-func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
+// addLocalPodToNamespace returns pod's routing gateway info and the ops needed
+// to add pod's IP to the namespace's address set and port group.
+func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, ips []*net.IPNet, portUUID string) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
@@ -72,19 +72,23 @@ func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNe
 		return nil, nil, nil, err
 	}
 
+	if nsInfo.portGroupName != "" {
+		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
 }
 
 func (oc *DefaultNetworkController) addRemotePodToNamespace(ns string, ips []*net.IPNet) error {
-	_, _, ops, err := oc.addPodToNamespace(ns, ips)
-
-	if err == nil {
-		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-		if err != nil {
-			return fmt.Errorf("could not add pod IPs to the namespace address set - %+v", err)
-		}
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
+	if err != nil {
+		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-	return err
+
+	defer nsUnlock()
+	return nsInfo.addressSet.AddIPs(createIPAddressSlice(ips))
 }
 
 func createIPAddressSlice(ips []*net.IPNet) []net.IP {
@@ -281,7 +285,10 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 func (oc *DefaultNetworkController) deleteNamespace(ns *kapi.Namespace) error {
 	klog.Infof("[%s] deleting namespace", ns.Name)
 
-	nsInfo := oc.deleteNamespaceLocked(ns.Name)
+	nsInfo, err := oc.deleteNamespaceLocked(ns.Name)
+	if err != nil {
+		return err
+	}
 	if nsInfo == nil {
 		return nil
 	}

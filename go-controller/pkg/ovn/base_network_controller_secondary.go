@@ -548,7 +548,10 @@ func (bsnc *BaseSecondaryNetworkController) updateNamespaceForSecondaryNetwork(o
 func (bsnc *BaseSecondaryNetworkController) deleteNamespace4SecondaryNetwork(ns *kapi.Namespace) error {
 	klog.Infof("[%s] deleting namespace for network %s", ns.Name, bsnc.GetNetworkName())
 
-	nsInfo := bsnc.deleteNamespaceLocked(ns.Name)
+	nsInfo, err := bsnc.deleteNamespaceLocked(ns.Name)
+	if err != nil {
+		return err
+	}
 	if nsInfo == nil {
 		return nil
 	}

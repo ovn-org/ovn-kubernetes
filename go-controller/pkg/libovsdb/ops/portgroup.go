@@ -141,7 +141,7 @@ func DeletePortsFromPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.
 	opModel := operationModel{
 		Model:            &pg,
 		OnModelMutations: []interface{}{&pg.Ports},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 
@@ -229,7 +229,7 @@ func DeleteACLsFromPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 	opModel := operationModel{
 		Model:            &pg,
 		OnModelMutations: []interface{}{&pg.ACLs},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 

@@ -216,7 +216,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Ensure the namespace/nsInfo exists
-	routingExternalGWs, routingPodGWs, addOps, err := oc.addPodToNamespace(pod.Namespace, podAnnotation.IPs)
+	routingExternalGWs, routingPodGWs, addOps, err := oc.addLocalPodToNamespace(pod.Namespace, podAnnotation.IPs, lsp.UUID)
 	if err != nil {
 		return err
 	}
@@ -283,20 +283,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(pod, switchName, ovntypes.DefaultNetworkName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
-
-	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
-	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
-	// it's rare and easily worked around for now.
-	ns, err := oc.watchFactory.GetNamespace(pod.Namespace)
-	if err != nil {
-		return err
-	}
-	if oc.multicastSupport && isNamespaceMulticastEnabled(ns.Annotations) {
-		if err := oc.podAddAllowMulticastPolicy(pod.Namespace, portInfo); err != nil {
-			return err
-		}
-	}
+	_ = oc.logicalPortCache.add(pod, switchName, ovntypes.DefaultNetworkName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
 
 	if kubevirt.IsPodLiveMigratable(pod) {
 		if err := kubevirt.EnsureDHCPOptionsForMigratablePod(oc.controllerName, oc.nbClient, oc.watchFactory, pod, podAnnotation.IPs, lsp); err != nil {
