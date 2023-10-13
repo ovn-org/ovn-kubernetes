@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"net"
 	"os"
@@ -85,23 +84,23 @@ spec:
 	BeforeEach(func() {
 		By("Creating the temp directory")
 		var err error
-		tmpDirIPMigration, err = ioutil.TempDir("", "e2e")
+		tmpDirIPMigration, err = os.MkdirTemp("", "e2e")
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Selecting 2 random worker nodes from the list for IP address migration tests")
 		// Get the primary worker node for IP address migration.
 		// Get the secondary worker node to spawn another pod on for pod to pod reachability tests.
 		var workerNodes *v1.NodeList
-		Eventually(func() bool {
+		Eventually(func(g Gomega) {
 			workerNodes, err = e2enode.GetReadySchedulableNodes(f.ClientSet)
-			Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).NotTo(HaveOccurred())
 			e2enode.Filter(workerNodes, func(node v1.Node) bool {
 				_, ok1 := node.Labels["node-role.kubernetes.io/control-plane"]
 				_, ok2 := node.Labels["node-role.kubernetes.io/master"]
 				return !ok1 && !ok2
 			})
-			return len(workerNodes.Items) >= 2
-		}, pollingTimeout, pollingInterval).Should(BeTrue())
+			g.Expect(len(workerNodes.Items)).Should(BeNumerically(">=", 2))
+		}, pollingTimeout, pollingInterval).Should(Succeed())
 		workerNode = workerNodes.Items[0]
 		secondaryWorkerNode = workerNodes.Items[1]
 		framework.Logf("Selected worker node %s and secondary worker node %s", workerNode.Name, secondaryWorkerNode.Name)
@@ -298,7 +297,7 @@ spec:
 
 					var egressIPConfig = fmt.Sprintf(egressIPYamlTemplate, podLabels["app"], egressIP, "app",
 						podLabels["app"], f.Namespace.Name)
-					if err := ioutil.WriteFile(
+					if err := os.WriteFile(
 						tmpDirIPMigration+"/"+egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 						framework.Failf("Unable to write CRD config to disk: %v", err)
 					}

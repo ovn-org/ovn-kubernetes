@@ -52,11 +52,6 @@ var _ = ginkgo.BeforeSuite(func() {
 	framework.ExpectNoError(err)
 })
 
-var _ = ginkgo.AfterSuite(func() {
-	_, err := framework.LoadClientset()
-	framework.ExpectNoError(err)
-})
-
 // required due to go1.13 issue: https://github.com/onsi/ginkgo/issues/602
 func TestMain(m *testing.M) {
 	// Register test flags, then parse flags.

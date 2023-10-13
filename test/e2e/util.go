@@ -906,7 +906,7 @@ func wrappedTestFramework(basename string) *framework.Framework {
 	f := newPrivelegedTestFramework(basename)
 	// inject dumping dbs on failure
 	ginkgo.JustAfterEach(func() {
-		if !ginkgo.CurrentGinkgoTestDescription().Failed {
+		if !ginkgo.CurrentSpecReport().Failed() {
 			return
 		}
 
@@ -916,7 +916,7 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		dbs := []string{"ovnnb_db.db", "ovnsb_db.db"}
 		ovsdb := "conf.db"
 
-		testName := strings.Replace(ginkgo.CurrentGinkgoTestDescription().TestText, " ", "_", -1)
+		testName := strings.Replace(ginkgo.CurrentSpecReport().LeafNodeText, " ", "_", -1)
 		logDir := fmt.Sprintf("%s/e2e-dbs/%s-%s", logLocation, testName, f.UniqueName)
 
 		var args []string

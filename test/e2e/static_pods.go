@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"time"
 
@@ -32,7 +31,7 @@ func waitForPodRunningInNamespaceTimeout(c clientset.Interface, podName, namespa
 func createStaticPod(f *framework.Framework, nodeName string, podYaml string) {
 	//create file
 	var podFile = "static-pod.yaml"
-	if err := ioutil.WriteFile(podFile, []byte(podYaml), 0644); err != nil {
+	if err := os.WriteFile(podFile, []byte(podYaml), 0644); err != nil {
 		framework.Failf("Unable to write static-pod.yaml  to disk: %v", err)
 	}
 	defer func() {

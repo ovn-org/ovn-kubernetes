@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -180,7 +179,7 @@ passwd:
 					return fmt.Errorf("http connection to virtual machine was broken")
 				}
 				//TODO: Check pong
-				if _, err := io.Copy(ioutil.Discard, res.Body); err != nil {
+				if _, err := io.Copy(io.Discard, res.Body); err != nil {
 					return err
 				}
 				res.Body.Close()

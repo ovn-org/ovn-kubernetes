@@ -95,18 +95,18 @@ func InitReporter(kubeconfig, path string, namespaces []string) *k8sreporter.Kub
 	return reporter
 }
 
-// dumpInfo dumps crs, pod container logs, pod specs for namespaces initialized
+// DumpInfo dumps crs, pod container logs, pod specs for namespaces initialized
 // in the reporter into testNameNoSpaces subpath directory. It just collects pod
 // logs for past 10 mins which is more appropriate for test run time.
-func dumpInfo(reporter *k8sreporter.KubernetesReporter, testName string) {
+func DumpInfo(reporter *k8sreporter.KubernetesReporter) {
 	testNameNoSpaces := strings.ReplaceAll(ginkgo.CurrentSpecReport().LeafNodeText, " ", "-")
 	reporter.Dump(10*time.Minute, testNameNoSpaces)
 }
 
-// dumpBGPInfo dumps current bgp specific configuration from frr router container and metallb
+// DumpBGPInfo dumps current bgp specific configuration from frr router container and metallb
 // speaker pod's frr container which helps to troubleshoot if there is any problem with route
 // advertisement for a load balancer service ip address.
-func dumpBGPInfo(basePath, testName string, f *framework.Framework) {
+func DumpBGPInfo(basePath, testName string, f *framework.Framework) {
 	testPath := path.Join(basePath, strings.ReplaceAll(testName, " ", "-"))
 	err := os.MkdirAll(testPath, 0755)
 	if err != nil && !errors.Is(err, os.ErrExist) {
@@ -114,7 +114,7 @@ func dumpBGPInfo(basePath, testName string, f *framework.Framework) {
 		return
 	}
 	frrContainer := &containerExecutor{container: frrContainerName}
-	dump, err := RawDump(frrContainer, "/etc/frr/bgpd.conf", "/tmp/frr.log", "/etc/frr/daemons")
+	dump, err := rawDump(frrContainer, "/etc/frr/bgpd.conf", "/tmp/frr.log", "/etc/frr/daemons")
 	if err != nil {
 		framework.Logf("External frr dump for container %s failed %v", frrContainerName, err)
 	}
@@ -129,14 +129,14 @@ func dumpBGPInfo(basePath, testName string, f *framework.Framework) {
 		return
 	}
 
-	speakerPods, err := SpeakerPods(f.ClientSet)
+	speakerPods, err := speakerPods(f.ClientSet)
 	framework.ExpectNoError(err)
 	for _, pod := range speakerPods {
 		if len(pod.Spec.Containers) == 1 { // we dump only in case of frr
 			break
 		}
 		podExec := ForPod(pod.Namespace, pod.Name, "frr")
-		dump, err := RawDump(podExec, "/etc/frr/frr.conf", "/etc/frr/frr.log")
+		dump, err := rawDump(podExec, "/etc/frr/frr.conf", "/etc/frr/frr.log")
 		if err != nil {
 			framework.Logf("External frr dump for pod %s failed %v", pod.Name, err)
 			continue
@@ -153,7 +153,7 @@ func dumpBGPInfo(basePath, testName string, f *framework.Framework) {
 			continue
 		}
 	}
-	DescribeSvc(f.Namespace.Name)
+	describeSvc(f.Namespace.Name)
 }
 
 func logFileFor(base string, kind string) (*os.File, error) {
@@ -165,9 +165,9 @@ func logFileFor(base string, kind string) (*os.File, error) {
 	return f, nil
 }
 
-// RawDump dumps all the low level info as a single string.
+// rawDump dumps all the low level info as a single string.
 // To be used for debugging in order to print the status of the frr instance.
-func RawDump(exec Executor, filesToDump ...string) (string, error) {
+func rawDump(exec Executor, filesToDump ...string) (string, error) {
 	allerrs := errors.New("")
 
 	res := "####### Show running config\n"
@@ -236,8 +236,8 @@ func RawDump(exec Executor, filesToDump ...string) (string, error) {
 	return res, allerrs
 }
 
-// SpeakerPods returns the set of pods running the speakers.
-func SpeakerPods(cs clientset.Interface) ([]*corev1.Pod, error) {
+// speakerPods returns the set of pods running the speakers.
+func speakerPods(cs clientset.Interface) ([]*corev1.Pod, error) {
 	speakers, err := cs.CoreV1().Pods(metallbNamespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: speakerLabelgSelector,
 	})
@@ -255,8 +255,8 @@ func SpeakerPods(cs clientset.Interface) ([]*corev1.Pod, error) {
 	return speakerPods, nil
 }
 
-// DescribeSvc logs the output of kubectl describe svc for the given namespace.
-func DescribeSvc(ns string) {
+// describeSvc logs the output of kubectl describe svc for the given namespace.
+func describeSvc(ns string) {
 	framework.Logf("\nOutput of kubectl describe svc:\n")
 	desc, _ := e2ekubectl.RunKubectl(
 		ns, "describe", "svc", fmt.Sprintf("--namespace=%v", ns))

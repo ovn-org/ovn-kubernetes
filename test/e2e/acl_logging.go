@@ -3,7 +3,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"time"
 
@@ -639,7 +638,7 @@ spec:
       cidrSelector: 0.0.0.0/0
 `)
 
-	if err := ioutil.WriteFile(egressFirewallYaml, []byte(egressFirewallConfig), 0644); err != nil {
+	if err := os.WriteFile(egressFirewallYaml, []byte(egressFirewallConfig), 0644); err != nil {
 		framework.Failf("Unable to write CRD config to disk: %v", err)
 	}
 

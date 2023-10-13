@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -1055,7 +1054,7 @@ spec:
       cidrSelector: %s
 `, f.Namespace.Name, exFWPermitTcpDnsDest, singleIPMask, exFWPermitCIDR, exFWDenyCIDR)
 		// write the config to a file for application and defer the removal
-		if err := ioutil.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
+		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		defer func() {
@@ -1175,7 +1174,7 @@ spec:
 `, f.Namespace.Name, exFWPermitTcpDnsDest, singleIPMask, exFWPermitCIDR, f.Namespace.Name, labelMatch, exFWDenyCIDR)
 		framework.Logf("Egress Firewall CR generated: %s", egressFirewallConfig)
 		// write the config to a file for application and defer the removal
-		if err := ioutil.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
+		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		defer func() {
@@ -1348,7 +1347,7 @@ spec:
       cidrSelector: %s
 `, f.Namespace.Name, exFWPermitTcpDnsDest, singleIPMask, exFWPermitCIDR, exFWDenyCIDR)
 		// write the config to a file for application and defer the removal
-		if err := ioutil.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
+		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		defer func() {
@@ -1404,7 +1403,7 @@ spec:
       cidrSelector: 0.0.0.0/0
 `, f.Namespace.Name)
 		// write the config to a file for application and defer the removal
-		if err := ioutil.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
+		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		defer func() {

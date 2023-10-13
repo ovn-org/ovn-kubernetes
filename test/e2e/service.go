@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"os"
@@ -865,7 +864,7 @@ spec:
     app: nginx
   type: LoadBalancer
 `)
-		if err := ioutil.WriteFile(loadBalancerYaml, []byte(loadBalancerServiceConfig), 0644); err != nil {
+		if err := os.WriteFile(loadBalancerYaml, []byte(loadBalancerServiceConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		framework.Logf("Create the Load Balancer configuration")
@@ -873,13 +872,16 @@ spec:
 
 	})
 
-	ginkgo.AfterEach(func() {
-		if ginkgo.CurrentGinkgoTestDescription().Failed {
-			dumpBGPInfo(reportPath, ginkgo.CurrentSpecReport().LeafNodeText, f)
+	ginkgo.JustAfterEach(func() {
+		if ginkgo.CurrentSpecReport().Failed() {
+			DumpBGPInfo(reportPath, ginkgo.CurrentSpecReport().LeafNodeText, f)
 			k8sReporter := InitReporter(framework.TestContext.KubeConfig, reportPath,
 				[]string{metallbNamespace, namespaceName})
-			dumpInfo(k8sReporter, ginkgo.CurrentSpecReport().LeafNodeText)
+			DumpInfo(k8sReporter)
 		}
+	})
+
+	ginkgo.AfterEach(func() {
 		framework.Logf("Delete the Load Balancer configuration")
 		e2ekubectl.RunKubectlOrDie("default", "delete", "-f", loadBalancerYaml)
 		defer func() {
