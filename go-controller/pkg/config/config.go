@@ -152,18 +152,21 @@ var (
 		},
 	}
 
+	// Set Leaderelection config values based on
+	// https://github.com/openshift/enhancements/blame/84e894ead7b188a1013556e0ba6973b8463995f1/CONVENTIONS.md#L183
+
 	// MasterHA holds master HA related config options.
 	MasterHA = HAConfig{
-		ElectionLeaseDuration: 60,
-		ElectionRenewDeadline: 30,
-		ElectionRetryPeriod:   20,
+		ElectionRetryPeriod:   26,
+		ElectionRenewDeadline: 107,
+		ElectionLeaseDuration: 137,
 	}
 
 	// ClusterMgrHA holds cluster manager HA related config options.
 	ClusterMgrHA = HAConfig{
-		ElectionLeaseDuration: 60,
-		ElectionRenewDeadline: 30,
-		ElectionRetryPeriod:   20,
+		ElectionRetryPeriod:   26,
+		ElectionRenewDeadline: 107,
+		ElectionLeaseDuration: 137,
 	}
 
 	// HybridOverlay holds hybrid overlay feature config options.
