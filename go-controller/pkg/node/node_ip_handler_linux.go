@@ -242,7 +242,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	}
 
 	// update k8s.ovn.org/host-cidrs
-	if err = c.updateHostCIDRs(node); err != nil {
+	if err = c.updateHostCIDRs(node, ifAddrs); err != nil {
 		return err
 	}
 
@@ -272,15 +272,13 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	return nil
 }
 
-func (c *addressManager) updateHostCIDRs(node *kapi.Node) error {
+func (c *addressManager) updateHostCIDRs(node *kapi.Node, ifAddrs []*net.IPNet) error {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		// For DPU mode, here we need to use the DPU host's IP address which is the tenant cluster's
 		// host internal IP address instead.
-		nodeAddrStr, err := util.GetNodePrimaryIP(node)
-		if err != nil {
-			return err
-		}
-		nodeAddrSet := sets.New[string](nodeAddrStr)
+		// Currently we are only intentionally supporting IPv4 for DPU here.
+		nodeIPNetv4, _ := util.MatchFirstIPNetFamily(false, ifAddrs)
+		nodeAddrSet := sets.New[string](nodeIPNetv4.String())
 		return util.SetNodeHostCIDRs(c.nodeAnnotator, nodeAddrSet)
 	}
 
