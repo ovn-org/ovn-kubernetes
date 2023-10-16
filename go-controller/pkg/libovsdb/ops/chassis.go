@@ -151,7 +151,8 @@ func CreateOrUpdateChassis(sbClient libovsdbclient.Client, chassis *sbdb.Chassis
 		},
 		{
 			Model:            chassis,
-			OnModelMutations: []interface{}{&chassis.OtherConfig, &chassis.Encaps},
+			OnModelMutations: []interface{}{&chassis.OtherConfig},
+			OnModelUpdates:   []interface{}{&chassis.Encaps},
 			ErrNotFound:      false,
 			BulkOp:           false,
 		},
