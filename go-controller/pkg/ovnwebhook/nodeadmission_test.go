@@ -270,6 +270,25 @@ func TestNodeAdmission_ValidateUpdate(t *testing.T) {
 			},
 		},
 		{
+			name: "ovnkube-node can set util.OvnNodeEncapIp",
+			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
+				AdmissionRequest: v1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
+					Username: userName,
+				}},
+			}),
+			oldObj: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+			},
+			newObj: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{util.OvnNodeEncapIp: "192.168.122.156"},
+				},
+			},
+		},
+		{
 			name: "ovnkube-node can set util.OvnNodeGatewayMtuSupport",
 			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
 				AdmissionRequest: v1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{

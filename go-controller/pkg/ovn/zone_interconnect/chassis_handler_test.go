@@ -53,8 +53,11 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 
 		testNode1 = corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:        "node1",
-				Annotations: map[string]string{"k8s.ovn.org/node-chassis-id": "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"},
+				Name: "node1",
+				Annotations: map[string]string{
+					"k8s.ovn.org/node-chassis-id": "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
+					"k8s.ovn.org/encap-ip":        "10.0.0.10",
+				},
 			},
 			Status: corev1.NodeStatus{
 				Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "10.0.0.10"}},
@@ -62,8 +65,11 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 		}
 		testNode2 = corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:        "node2",
-				Annotations: map[string]string{"k8s.ovn.org/node-chassis-id": "cb9ec8fa-b409-4ef3-9f42-d9283c47aac7"},
+				Name: "node2",
+				Annotations: map[string]string{
+					"k8s.ovn.org/node-chassis-id": "cb9ec8fa-b409-4ef3-9f42-d9283c47aac7",
+					"k8s.ovn.org/encap-ip":        "10.0.0.11",
+				},
 			},
 			Status: corev1.NodeStatus{
 				Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "10.0.0.11"}},
@@ -71,8 +77,11 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 		}
 		testNode3 = corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:        "node3",
-				Annotations: map[string]string{"k8s.ovn.org/node-chassis-id": "cb9ec8fa-b409-4ef3-9f42-d9283c47aac8"},
+				Name: "node3",
+				Annotations: map[string]string{
+					"k8s.ovn.org/node-chassis-id": "cb9ec8fa-b409-4ef3-9f42-d9283c47aac8",
+					"k8s.ovn.org/encap-ip":        "10.0.0.12",
+				},
 			},
 			Status: corev1.NodeStatus{
 				Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "10.0.0.12"}},

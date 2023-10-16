@@ -821,6 +821,15 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
 	}
 
+	// NOTE: An assumption we make here is that `setupOVNNode(node)` has already ran above
+	// and updated the `config.Default.EncapIP` configuration.
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		klog.Infof("Setting EncapIp %s in node annotation", config.Default.EncapIP)
+		if err = util.SetNodeEncapIp(nodeAnnotator, config.Default.EncapIP); err != nil {
+			return err
+		}
+	}
+
 	if err := nodeAnnotator.Run(); err != nil {
 		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
 	}
