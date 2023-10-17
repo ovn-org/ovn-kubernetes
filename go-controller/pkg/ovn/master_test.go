@@ -936,7 +936,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		expectedClusterRouterPortGroup *nbdb.PortGroup
 		expectedClusterPortGroup       *nbdb.PortGroup
 		expectedNBDatabaseState        []libovsdbtest.TestData
-		expectedSBDatabaseState        []libovsdbtest.TestData
 		l3GatewayConfig                *util.L3GatewayConfig
 		nodeHostCIDRs                  sets.Set[string]
 	)
@@ -997,12 +996,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		expectedClusterRouterPortGroup = newRouterPortGroup()
 		expectedClusterPortGroup = newClusterPortGroup()
 
-		gr := types.GWRouterPrefix + node1.Name
-		datapath := &sbdb.DatapathBinding{
-			UUID:        gr + "-UUID",
-			ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
-		}
-		expectedSBDatabaseState = []libovsdbtest.TestData{datapath}
 		dbSetup = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				newClusterJoinSwitch(),
@@ -1013,9 +1006,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				expectedClusterLBGroup,
 				expectedSwitchLBGroup,
 				expectedRouterLBGroup,
-			},
-			SBData: []libovsdbtest.TestData{
-				datapath,
 			},
 		}
 		testNode = node1.k8sNode("2")
@@ -1126,8 +1116,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				skipSnat, node1.NodeMgmtPortIP, "1400")
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
 
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
-			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 			return nil
 		}
 
@@ -1204,8 +1192,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
 				skipSnat, node1.NodeMgmtPortIP, "1400")
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
-			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
+
 			return nil
 		}
 
@@ -1281,9 +1268,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			}
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
 
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
-			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
-
 			return nil
 		}
 
@@ -1328,8 +1312,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				return atomic.LoadUint32(&podsWereListed)
 			}, 10).Should(gomega.Equal(uint32(0)))
 
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
-			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 			return nil
 		}
 
@@ -1398,8 +1380,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			}
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
 
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
-			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 			return nil
 		}
 

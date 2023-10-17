@@ -133,6 +133,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		"chassis":                       l3GatewayConfig.ChassisID,
 		"lb_force_snat_ip":              "router_ip",
 		"snat-ct-zone":                  "0",
+		"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 	}
 	logicalRouterExternalIDs := map[string]string{
 		"physical_ip":  physicalIPs[0],
@@ -288,7 +289,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 
 	nextHops := l3GatewayConfig.NextHops
 
-	if err := gateway.CreateDummyGWMacBindings(oc.sbClient, nodeName); err != nil {
+	if err := gateway.CreateDummyGWMacBindings(oc.nbClient, nodeName); err != nil {
 		return err
 	}
 

@@ -3,40 +3,39 @@ package ops
 import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
-// CreateOrUpdateMacBinding creates or updates the provided mac binding
-func CreateOrUpdateMacBinding(sbClient libovsdbclient.Client, mb *sbdb.MACBinding, fields ...interface{}) error {
-	if len(fields) == 0 {
-		fields = onModelUpdatesAllNonDefault()
+// CreateOrUpdateStaticMacBinding creates or updates the provided static mac binding
+func CreateOrUpdateStaticMacBinding(nbClient libovsdbclient.Client, smbs ...*nbdb.StaticMACBinding) error {
+	opModels := make([]operationModel, len(smbs))
+	for i := range smbs {
+		opModel := operationModel{
+			Model:          smbs[i],
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
+			ErrNotFound:    false,
+			BulkOp:         false,
+		}
+		opModels[i] = opModel
 	}
 
-	opModel := operationModel{
-		Model:          mb,
-		OnModelUpdates: fields,
-		ErrNotFound:    false,
-		BulkOp:         false,
-	}
-
-	m := newModelClient(sbClient)
-	_, err := m.CreateOrUpdate(opModel)
+	m := newModelClient(nbClient)
+	_, err := m.CreateOrUpdate(opModels...)
 	return err
 }
 
-type macBindingPredicate func(*sbdb.MACBinding) bool
-
-// DeleteMacBindingWithPredicate looks up mac bindings from the cache based on a
-// given predicate and deletes them
-func DeleteMacBindingWithPredicate(sbClient libovsdbclient.Client, p macBindingPredicate) error {
-	deleted := []*sbdb.MACBinding{}
-	opModel := operationModel{
-		ModelPredicate: p,
-		ExistingResult: &deleted,
-		ErrNotFound:    false,
-		BulkOp:         true,
+// DeleteStaticMacBindings deletes the provided static mac bindings
+func DeleteStaticMacBindings(nbClient libovsdbclient.Client, smbs ...*nbdb.StaticMACBinding) error {
+	opModels := make([]operationModel, len(smbs))
+	for i := range smbs {
+		opModel := operationModel{
+			Model:       smbs[i],
+			ErrNotFound: false,
+			BulkOp:      false,
+		}
+		opModels[i] = opModel
 	}
 
-	m := newModelClient(sbClient)
-	return m.Delete(opModel)
+	m := newModelClient(nbClient)
+	return m.Delete(opModels...)
 }
