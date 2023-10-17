@@ -273,6 +273,13 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 			ipType, service.Namespace, service.Name, externalIPOrLBIngressIP, svcPort.Port, err)
 		cookie = "0"
 	}
+	arp_cookie, err := svcToCookie(service.Namespace, service.Name, externalIPOrLBIngressIP, 0)
+	if err != nil {
+		klog.Warningf("Unable to generate arp cookie for %s svc: %s, %s, %s, error: %v",
+			ipType, service.Namespace, service.Name, externalIPOrLBIngressIP, err)
+		cookie = "0"
+	}
+
 	key := strings.Join([]string{ipType, service.Namespace, service.Name, externalIPOrLBIngressIP, fmt.Sprintf("%d", svcPort.Port)}, "_")
 	// Delete if needed and skip to next protocol
 	if !add {
@@ -280,7 +287,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 		return nil
 	}
 	// add the ARP bypass flow regardless of service type or gateway modes since its applicable in all scenarios.
-	arpFlow := npw.generateArpBypassFlow(protocol, externalIPOrLBIngressIP, cookie)
+	arpFlow := npw.generateArpBypassFlow(protocol, externalIPOrLBIngressIP, arp_cookie)
 	externalIPFlows := []string{arpFlow}
 	// This allows external traffic ingress when the svc's ExternalTrafficPolicy is
 	// set to Local, and the backend pod is HostNetworked. We need to add
