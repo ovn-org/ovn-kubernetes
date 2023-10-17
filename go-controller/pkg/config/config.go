@@ -579,6 +579,7 @@ func init() {
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
 	savedMasterHA = MasterHA
+	savedClusterMgrHA = ClusterMgrHA
 	savedHybridOverlay = HybridOverlay
 	savedOvnKubeNode = OvnKubeNode
 	savedClusterManager = ClusterManager
@@ -2103,6 +2104,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		OvnSouth:             savedOvnSouth,
 		Gateway:              savedGateway,
 		MasterHA:             savedMasterHA,
+		ClusterMgrHA:         savedClusterMgrHA,
 		HybridOverlay:        savedHybridOverlay,
 		OvnKubeNode:          savedOvnKubeNode,
 		ClusterManager:       savedClusterManager,
