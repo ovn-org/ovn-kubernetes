@@ -171,8 +171,8 @@ With the new implementation comes new OpenFlow rules in the shared gateway bridg
  cookie=0xdeff105, duration=793.273s, table=0, n_packets=0, n_bytes=0, priority=500,ip,in_port=LOCAL,nw_dst=10.96.0.0/16 actions=ct(commit,table=2,zone=64001,nat(src=169.254.169.2))
  cookie=0xdeff105, duration=793.273s, table=0, n_packets=0, n_bytes=0, priority=500,ip,in_port="patch-breth0_ov",nw_src=10.96.0.0/16,nw_dst=169.254.169.2 actions=ct(table=3,zone=64001,nat)
 
- cookie=0xdeff105, duration=5.507s, table=2, n_packets=0, n_bytes=0, actions=mod_dl_dst:02:42:ac:12:00:03,output:"patch-breth0_ov"
- cookie=0xdeff105, duration=5.507s, table=3, n_packets=0, n_bytes=0, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst:02:42:ac:12:00:03,LOCAL
+ cookie=0xdeff105, duration=5.507s, table=2, n_packets=0, n_bytes=0, actions=set_field:02:42:ac:12:00:03->eth_dst,output:"patch-breth0_ov"
+ cookie=0xdeff105, duration=5.507s, table=3, n_packets=0, n_bytes=0, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],set_field:02:42:ac:12:00:03->eth_dst,LOCAL
  cookie=0xdeff105, duration=793.273s, table=4, n_packets=0, n_bytes=0, ip actions=ct(commit,table=3,zone=64002,nat(src=169.254.169.1))
  cookie=0xdeff105, duration=793.273s, table=5, n_packets=0, n_bytes=0, ip actions=ct(commit,table=2,zone=64001,nat)
 
@@ -204,7 +204,7 @@ cookie=0xdeff105, duration=1136.261s, table=0, n_packets=12, n_bytes=884, priori
 ```
 4. In table 2, the destination MAC address is modified to be the MAC of the OVN GR. Note, although the source MAC is the host's, OVN does not care so this is left unmodified.
 ```text
-cookie=0xdeff105, duration=1.486s, table=2, n_packets=12, n_bytes=884, actions=mod_dl_dst:02:42:ac:12:00:03,output:"patch-breth0_ov"
+cookie=0xdeff105, duration=1.486s, table=2, n_packets=12, n_bytes=884, actions=set_field:02:42:ac:12:00:03->eth_dst,output:"patch-breth0_ov"
 ```
 CT Entry:
 ```text
@@ -231,7 +231,7 @@ cookie=0xdeff105, duration=1136.261s, table=0, n_packets=11, n_bytes=1670, prior
 ```
 This flow will unDNAT the packet, and send to table 3:
 ```text
-cookie=0xdeff105, duration=1.486s, table=3, n_packets=11, n_bytes=1670, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst:02:42:ac:12:00:03,LOCAL
+cookie=0xdeff105, duration=1.486s, table=3, n_packets=11, n_bytes=1670, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],set_field:02:42:ac:12:00:03->eth_dst,LOCAL
 ```
 This flow will move the dest MAC (next hop MAC) to be the source, and set the new dest MAC to be the MAC of the host.
 This ensures the Linux host thinks it is still talking to the external next hop. The packet is then delivered to the host.
@@ -352,7 +352,7 @@ cookie=0xdeff105, duration=2877.527s, table=5, n_packets=12, n_bytes=1736, ip ac
 ```
 Here the packet will be unDNAT'ed and sent towards table 2:
 ```text
-cookie=0xdeff105, duration=5.520s, table=2, n_packets=47, n_bytes=4314, actions=mod_dl_dst:02:42:ac:12:00:03,output:"patch-breth0_ov"
+cookie=0xdeff105, duration=5.520s, table=2, n_packets=47, n_bytes=4314, actions=set_field:02:42:ac:12:00:03->eth_dst,output:"patch-breth0_ov"
 ```
 Table 2 will modify the MAC accordingly and sent it back into OVN GR. OVN GR will then unSNAT, unDNAT and send the packet back to breth0 in the same fashion as the previous example.
 
