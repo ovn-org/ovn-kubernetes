@@ -194,8 +194,13 @@ func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*n
 				return fmt.Errorf("failed to add policy route '%s' for host %q on %s , error: %v", matchStr, nodeName, ovntypes.OVNClusterRouter, err)
 			}
 
-			logicalPort := ovntypes.RouterToSwitchPrefix + nodeName
-			if err := libovsdbutil.CreateMACBinding(oc.sbClient, logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
+			smb := &nbdb.StaticMACBinding{
+				LogicalPort:        ovntypes.RouterToSwitchPrefix + nodeName,
+				MAC:                portMac.String(),
+				IP:                 drIP.String(),
+				OverrideDynamicMAC: true,
+			}
+			if err := libovsdbops.CreateOrUpdateStaticMacBinding(oc.nbClient, smb); err != nil {
 				return fmt.Errorf("failed to create MAC Binding for hybrid overlay: %v", err)
 			}
 
@@ -283,7 +288,8 @@ func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*n
 	return nil
 }
 
-func (oc *DefaultNetworkController) removeHybridLRPolicySharedGW(nodeName string) error {
+func (oc *DefaultNetworkController) removeHybridLRPolicySharedGW(node *kapi.Node) error {
+	nodeName := node.Name
 	name := ovntypes.HybridSubnetPrefix + nodeName
 
 	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterPolicy) bool {
@@ -302,6 +308,18 @@ func (oc *DefaultNetworkController) removeHybridLRPolicySharedGW(nodeName string
 	}); err != nil {
 		return fmt.Errorf("failed to delete static route %s from %s, error: %v", name+"gr", ovntypes.GWRouterPrefix+nodeName, err)
 	}
+
+	if node.Annotations[hotypes.HybridOverlayDRIP] != "" {
+		smb := &nbdb.StaticMACBinding{
+			IP:          node.Annotations[hotypes.HybridOverlayDRIP],
+			LogicalPort: ovntypes.RouterToSwitchPrefix + nodeName,
+		}
+		err := libovsdbops.DeleteStaticMacBindings(oc.nbClient, smb)
+		if err != nil {
+			return fmt.Errorf("failed to delete static mac binding %+v: %v", smb, err)
+		}
+	}
+
 	return nil
 }
 

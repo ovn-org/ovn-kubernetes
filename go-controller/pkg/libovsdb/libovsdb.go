@@ -158,8 +158,6 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 		c.NewMonitor(
 			// used by unidling controller
 			client.WithTable(&sbdb.ControllerEvent{}),
-			// used for gateway
-			client.WithTable(&sbdb.MACBinding{}),
 			// used by node sync
 			client.WithTable(&sbdb.Chassis{}),
 			// used by zone interconnect
@@ -172,8 +170,6 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 			client.WithTable(&sbdb.SBGlobal{}),
 			// used for metrics
 			client.WithTable(&sbdb.PortBinding{}),
-			// used for hybrid-overlay
-			client.WithTable(&sbdb.DatapathBinding{}),
 		),
 	)
 	if err != nil {

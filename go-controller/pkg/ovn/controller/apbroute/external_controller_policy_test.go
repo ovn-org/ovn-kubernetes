@@ -134,7 +134,7 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 	// this package tests apbRoute controller separately from the legacy functionality, therefore
 	// it is not necessary to pass DefaultNetworkController name
 	controllerName := "test-controller"
-	externalController, err = NewExternalMasterController(fakeClient,
+	externalController, err = NewExternalMasterController(
 		fakeRouteClient,
 		stopChan,
 		iFactory.PodCoreInformer(),
