@@ -293,7 +293,7 @@ cookie=0xdeff105, duration=3189.786s, table=0, n_packets=11, n_bytes=814, priori
 6. In `table2` we have a flow that forwards this to patch port that takes the traffic in OVN:
 
 ```
-cookie=0xdeff105, duration=6.308s, table=2, n_packets=11, n_bytes=814, actions=mod_dl_dst:02:42:ac:12:00:03,output:"patch-breth0_ov"
+cookie=0xdeff105, duration=6.308s, table=2, n_packets=11, n_bytes=814, actions=set_field:02:42:ac:12:00:03->eth_dst,output:"patch-breth0_ov"
 ```
 
 7. Traffic enters the GR on the worker node and hits the load-balancer where we DNAT it correctly to the local backends.
@@ -317,7 +317,7 @@ vips                : {"10.96.115.103:80"="172.19.0.3:8080", "172.19.0.3:31339"=
 ```
   cookie=0xdeff105, duration=839.789s, table=0, n_packets=6, n_bytes=484, priority=175,tcp,in_port="patch-breth0_ov",nw_src=172.19.0.3 actions=ct(table=4,zone=64001)
   cookie=0xdeff105, duration=2334.510s, table=4, n_packets=18, n_bytes=1452, ip actions=ct(commit,table=3,zone=64002,nat(src=169.254.169.1))
-  cookie=0xdeff105, duration=1.612s, table=3, n_packets=10, n_bytes=892, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst:02:42:ac:13:00:03,LOCAL
+  cookie=0xdeff105, duration=1.612s, table=3, n_packets=10, n_bytes=892, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],set_field:02:42:ac:13:00:03->eth_dst,LOCAL
 ```
 
 9. The routes in the host send this back to breth0:
@@ -353,7 +353,7 @@ cookie=0xdeff105, duration=3189.786s, table=0, n_packets=99979, n_bytes=29802921
 ```
  cookie=0xdeff105, duration=2334.510s, table=0, n_packets=14, n_bytes=1356, priority=500,ip,in_port=LOCAL,nw_dst=169.254.169.1 actions=ct(table=5,zone=64002,nat)
  cookie=0xdeff105, duration=2334.510s, table=5, n_packets=14, n_bytes=1356, ip actions=ct(commit,table=2,zone=64001,nat)
- cookie=0xdeff105, duration=0.365s, table=2, n_packets=33, n_bytes=2882, actions=mod_dl_dst:02:42:ac:13:00:03,output:"patch-breth0_ov"
+ cookie=0xdeff105, duration=0.365s, table=2, n_packets=33, n_bytes=2882, actions=set_field:02:42:ac:13:00:03->eth_dst,output:"patch-breth0_ov"
 ```
 
 4. From OVN it gets sent back to host and then back from host into breth0 and into the wire:
@@ -361,7 +361,7 @@ cookie=0xdeff105, duration=3189.786s, table=0, n_packets=99979, n_bytes=29802921
 ```
   cookie=0xdeff105, duration=2334.510s, table=0, n_packets=18, n_bytes=1452, priority=175,ip,in_port="patch-breth0_ov",nw_src=172.19.0.4 actions=ct(table=4,zone=64001,nat)
   cookie=0xdeff105, duration=2334.510s, table=4, n_packets=18, n_bytes=1452, ip actions=ct(commit,table=3,zone=64002,nat(src=169.254.169.1))
-  cookie=0xdeff105, duration=0.365s, table=3, n_packets=32, n_bytes=2808, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst:02:42:ac:13:00:03,LOCAL
+  cookie=0xdeff105, duration=0.365s, table=3, n_packets=32, n_bytes=2808, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],set_field:02:42:ac:13:00:03->eth_dst,LOCAL
   cookie=0xdeff105, duration=2334.510s, table=0, n_packets=7611, n_bytes=754388, priority=100,ip,in_port=LOCAL actions=ct(commit,zone=64000,exec(load:0x2->NXM_NX_CT_MARK[])),output:eth0
 ```
 
@@ -436,7 +436,7 @@ cookie=0xdeff105, duration=3189.786s, table=0, n_packets=11, n_bytes=814, priori
 6. In `table2` we have a flow that forwards this to patch port that takes the traffic in OVN:
 
 ```
-cookie=0xdeff105, duration=6.308s, table=2, n_packets=11, n_bytes=814, actions=mod_dl_dst:02:42:ac:12:00:03,output:"patch-breth0_ov"
+cookie=0xdeff105, duration=6.308s, table=2, n_packets=11, n_bytes=814, actions=set_field:02:42:ac:12:00:03->eth_dst,output:"patch-breth0_ov"
 ```
 
 7. Traffic enters the GR on the worker node and hits the load-balancer where we DNAT it correctly to the local backends.
@@ -466,7 +466,7 @@ cookie=0xdeff105, duration=3189.786s, table=0, n_packets=10, n_bytes=540, priori
 8. In `table3`, we send it to host:
 
 ```
-cookie=0xdeff105, duration=6.308s, table=3, n_packets=10, n_bytes=540, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst:02:42:ac:12:00:03,LOCAL
+cookie=0xdeff105, duration=6.308s, table=3, n_packets=10, n_bytes=540, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],set_field:02:42:ac:12:00:03->eth_dst,LOCAL
 ```
 
 9. From host we send it back to breth0 using:
