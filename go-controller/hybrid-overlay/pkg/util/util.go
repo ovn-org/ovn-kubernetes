@@ -10,6 +10,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -33,7 +34,11 @@ func ParseHybridOverlayHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 // node which does not participate in the ovn-kubernetes overlay network
 func IsHybridOverlayNode(node *kapi.Node) bool {
 	if config.Kubernetes.NoHostSubnetNodes != nil {
-		nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
+		nodeSelector, err := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
+		if err != nil {
+			klog.Errorf("NoHostSubnetNodes label selector is not valid: %v", err)
+			return false
+		}
 		return nodeSelector.Matches(labels.Set(node.Labels))
 	}
 	return false

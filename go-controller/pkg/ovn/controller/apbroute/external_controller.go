@@ -641,14 +641,20 @@ func (m *externalPolicyManager) getPoliciesForNamespaceChange(namespace *v1.Name
 	}
 
 	for _, informerPolicy := range informerPolicies {
-		targetNsSel, _ := metav1.LabelSelectorAsSelector(&informerPolicy.Spec.From.NamespaceSelector)
+		targetNsSel, err := metav1.LabelSelectorAsSelector(&informerPolicy.Spec.From.NamespaceSelector)
+		if err != nil {
+			return nil, err
+		}
 		if targetNsSel.Matches(labels.Set(namespace.Labels)) {
 			policyNames.Insert(informerPolicy.Name)
 			continue
 		}
 
 		for _, hop := range informerPolicy.Spec.NextHops.DynamicHops {
-			gwNsSel, _ := metav1.LabelSelectorAsSelector(&hop.NamespaceSelector)
+			gwNsSel, err := metav1.LabelSelectorAsSelector(&hop.NamespaceSelector)
+			if err != nil {
+				return nil, err
+			}
 			if gwNsSel.Matches(labels.Set(namespace.Labels)) {
 				policyNames.Insert(informerPolicy.Name)
 			}
@@ -690,16 +696,24 @@ func (m *externalPolicyManager) getPoliciesForPodChange(pod *v1.Pod) (sets.Set[s
 	}
 
 	for _, informerPolicy := range informerPolicies {
-		targetNsSel, _ := metav1.LabelSelectorAsSelector(&informerPolicy.Spec.From.NamespaceSelector)
+		targetNsSel, err := metav1.LabelSelectorAsSelector(&informerPolicy.Spec.From.NamespaceSelector)
+		if err != nil {
+			return nil, err
+		}
 		if targetNsSel.Matches(labels.Set(podNs.Labels)) {
 			policyNames.Insert(informerPolicy.Name)
 			continue
 		}
 
 		for _, hop := range informerPolicy.Spec.NextHops.DynamicHops {
-			gwNsSel, _ := metav1.LabelSelectorAsSelector(&hop.NamespaceSelector)
-			gwPodSel, _ := metav1.LabelSelectorAsSelector(&hop.PodSelector)
-
+			gwNsSel, err := metav1.LabelSelectorAsSelector(&hop.NamespaceSelector)
+			if err != nil {
+				return nil, err
+			}
+			gwPodSel, err := metav1.LabelSelectorAsSelector(&hop.PodSelector)
+			if err != nil {
+				return nil, err
+			}
 			if gwNsSel.Matches(labels.Set(podNs.Labels)) && gwPodSel.Matches(labels.Set(pod.Labels)) {
 				policyNames.Insert(informerPolicy.Name)
 			}

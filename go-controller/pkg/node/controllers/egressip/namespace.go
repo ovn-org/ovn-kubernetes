@@ -113,7 +113,10 @@ func (c *Controller) getEIPsForNamespaceChange(namespace *corev1.Namespace) (set
 		return nil, err
 	}
 	for _, informerEIP := range informerEIPs {
-		targetNsSel, _ := metav1.LabelSelectorAsSelector(&informerEIP.Spec.NamespaceSelector)
+		targetNsSel, err := metav1.LabelSelectorAsSelector(&informerEIP.Spec.NamespaceSelector)
+		if err != nil {
+			return nil, err
+		}
 		if targetNsSel.Matches(labels.Set(namespace.Labels)) {
 			eIPNames.Insert(informerEIP.Name)
 			continue

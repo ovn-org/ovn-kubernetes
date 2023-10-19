@@ -1064,9 +1064,14 @@ func (bnc *BaseNetworkController) setupGressPolicy(np *networkPolicy, gp *gressP
 		// nil pod selector is equivalent to empty pod selector, which selects all
 		podSelector = &metav1.LabelSelector{}
 	}
-	podSel, _ := metav1.LabelSelectorAsSelector(podSelector)
-	nsSel, _ := metav1.LabelSelectorAsSelector(peer.NamespaceSelector)
-
+	podSel, err := metav1.LabelSelectorAsSelector(podSelector)
+	if err != nil {
+		return nil, err
+	}
+	nsSel, err := metav1.LabelSelectorAsSelector(peer.NamespaceSelector)
+	if err != nil {
+		return nil, err
+	}
 	if podSel.Empty() && (peer.NamespaceSelector == nil || !nsSel.Empty()) {
 		// namespace-based filtering
 		if peer.NamespaceSelector == nil {
@@ -1439,8 +1444,10 @@ func (bnc *BaseNetworkController) addPeerNamespaceHandler(
 	gress *gressPolicy, np *networkPolicy) error {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
-	sel, _ := metav1.LabelSelectorAsSelector(namespaceSelector)
-
+	sel, err := metav1.LabelSelectorAsSelector(namespaceSelector)
+	if err != nil {
+		return err
+	}
 	// start watching namespaces selected by the namespace selector
 	syncFunc := func(objs []interface{}) error {
 		// ignore returned error, since any namespace that wasn't properly handled will be retried individually.

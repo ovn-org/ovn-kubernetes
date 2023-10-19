@@ -303,8 +303,10 @@ func getGressACLs(gressIdx int, namespace, policyName string, peerNamespaces []s
 			// nil pod selector is equivalent to empty pod selector, which selects all
 			podSelector = &metav1.LabelSelector{}
 		}
-		podSel, _ := metav1.LabelSelectorAsSelector(peer.PodSelector)
-		nsSel, _ := metav1.LabelSelectorAsSelector(peer.NamespaceSelector)
+		podSel, err := metav1.LabelSelectorAsSelector(peer.PodSelector)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		nsSel, err := metav1.LabelSelectorAsSelector(peer.NamespaceSelector)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		if !((peer.PodSelector == nil || podSel.Empty()) && (peer.NamespaceSelector == nil || !nsSel.Empty())) {
 			peerIndex := getPodSelectorAddrSetDbIDs(getPodSelectorKey(podSelector, peer.NamespaceSelector, namespace), controllerName)
 			asv4, _ := addressset.GetHashNamesForAS(peerIndex)

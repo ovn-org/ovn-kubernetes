@@ -712,7 +712,11 @@ func NoHostSubnet(node *v1.Node) bool {
 		return false
 	}
 
-	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
+	nodeSelector, err := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
+	if err != nil {
+		klog.Errorf("NoHostSubnetNodes label selector is not valid: %v", err)
+		return false
+	}
 	return nodeSelector.Matches(labels.Set(node.Labels))
 }
 
