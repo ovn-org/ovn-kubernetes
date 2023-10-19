@@ -665,16 +665,17 @@ ovs-server() {
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovs-vswitchd \
     --system-id=random ${ovs_options} ${USER_ARGS} "$@"
 
-  # Restrict the number of pthreads ovs-vswitchd creates to reduce the
-  # amount of RSS it uses on hosts with many cores
-  # https://bugzilla.redhat.com/show_bug.cgi?id=1571379
-  # https://bugzilla.redhat.com/show_bug.cgi?id=1572797
-  if [[ $(nproc) -gt 12 ]]; then
-    ovs-vsctl --no-wait set Open_vSwitch . other_config:n-revalidator-threads=4
-    ovs-vsctl --no-wait set Open_vSwitch . other_config:n-handler-threads=10
-  fi
+  # Reduce stack size to 2M from default 8M as per below commit on Openvswitch
+  # https://github.com/openvswitch/ovs/commit/b82a90e266e1246fe2973db97c95df22558174ea
+  # added while troubleshooting on https://bugzilla.redhat.com/show_bug.cgi?id=1572797
+  ulimit -s 2048
+
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovsdb-server \
     --system-id=random ${ovs_options} ${USER_ARGS} "$@"
+
+  if [[ $(nproc) -gt 32 ]]; then
+    echo "Warning: Higher memory allocation by ovs-vswitchd is expected due to high number of n-handler-threads and n-revalidator-threads"
+  fi
 
   tail --follow=name ${OVS_LOGDIR}/ovs-vswitchd.log ${OVS_LOGDIR}/ovsdb-server.log &
   ovs_tail_pid=$!

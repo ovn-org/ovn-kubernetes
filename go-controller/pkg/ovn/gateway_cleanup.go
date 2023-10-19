@@ -11,8 +11,8 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	kapi "k8s.io/api/core/v1"
@@ -55,6 +55,12 @@ func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
 	if err != nil {
 		return fmt.Errorf("failed to delete port %s on router %s: %v", logicalRouterPort.Name, gatewayRouter, err)
+	}
+
+	// Remove the static mac bindings of the gateway router
+	err = gateway.DeleteDummyGWMacBindings(oc.nbClient, nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to delete GR dummy mac bindings for node %s: %v", nodeName, err)
 	}
 
 	// Remove the gateway router associated with nodeName
@@ -256,10 +262,7 @@ func (oc *DefaultNetworkController) cleanupDGP(nodes *kapi.NodeList) error {
 		oc.delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
 	}
 	// remove SBDB MAC bindings for DGP
-	p := func(item *sbdb.MACBinding) bool {
-		return item.IP == types.V4NodeLocalNATSubnetNextHop || item.IP == types.V6NodeLocalNATSubnetNextHop
-	}
-	err := libovsdbops.DeleteMacBindingWithPredicate(oc.sbClient, p)
+	err := libovsdbutil.DeleteSbdbMacBindingsWithIPs(oc.sbClient, types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop)
 	if err != nil {
 		return fmt.Errorf("unable to remove mac_binding for DGP: %v", err)
 	}

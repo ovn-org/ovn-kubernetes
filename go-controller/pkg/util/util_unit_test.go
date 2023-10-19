@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"regexp"
 	"strconv"
 	"testing"
 
@@ -237,4 +238,11 @@ func TestFilterIPsSlice(t *testing.T) {
 			assert.Equal(t, tc.want, actual)
 		})
 	}
+}
+
+func TestGenerateId(t *testing.T) {
+	id := GenerateId(10)
+	assert.Equal(t, 10, len(id))
+	matchesPattern, _ := regexp.MatchString("([a-zA-Z0-9-]*)", id)
+	assert.True(t, matchesPattern)
 }

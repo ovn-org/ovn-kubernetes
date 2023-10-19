@@ -910,7 +910,7 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 		if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
 			oc.deleteHybridOverlayPort(node)
 		}
-		if err := oc.removeHybridLRPolicySharedGW(node.Name); err != nil {
+		if err := oc.removeHybridLRPolicySharedGW(node); err != nil {
 			return err
 		}
 	}

@@ -17,11 +17,9 @@ import (
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// bridgedGatewayNodeSetup makes the bridge's MAC address permanent (if needed), sets up
-// the physical network name mappings for the bridge, and returns an ifaceID
-// created from the bridge name and the node name
-func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetworkName string,
-	syncBridgeMAC bool) (string, net.HardwareAddr, error) {
+// bridgedGatewayNodeSetup enables forwarding on bridge interface, sets up the physical network name mappings for the bridge,
+// and returns an ifaceID created from the bridge name and the node name
+func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (string, error) {
 	// enable forwarding on bridge interface always
 	createForwardingRule := func(family string) error {
 		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.%s.conf.%s.forwarding=1", family, bridgeName))
@@ -33,28 +31,12 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 	}
 	if config.IPv4Mode {
 		if err := createForwardingRule("ipv4"); err != nil {
-			return "", nil, fmt.Errorf("could not add IPv4 forwarding rule: %v", err)
+			return "", fmt.Errorf("could not add IPv4 forwarding rule: %v", err)
 		}
 	}
 	if config.IPv6Mode {
 		if err := createForwardingRule("ipv6"); err != nil {
-			return "", nil, fmt.Errorf("could not add IPv6 forwarding rule: %v", err)
-		}
-	}
-	// A OVS bridge's mac address can change when ports are added to it.
-	// We cannot let that happen, so make the bridge mac address permanent.
-	macAddress, err := util.GetOVSPortMACAddress(bridgeInterface)
-	if err != nil {
-		return "", nil, err
-	}
-	if syncBridgeMAC {
-		var err error
-
-		stdout, stderr, err := util.RunOVSVsctl("set", "bridge",
-			bridgeName, "other-config:hwaddr="+macAddress.String())
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to set bridge, stdout: %q, stderr: %q, "+
-				"error: %v", stdout, stderr, err)
+			return "", fmt.Errorf("could not add IPv6 forwarding rule: %v", err)
 		}
 	}
 
@@ -65,7 +47,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+		return "", fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
 	}
 	// skip the existing mapping setting for the specified physicalNetworkName
 	mapString := ""
@@ -87,12 +69,12 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 	_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
 		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s"+
+		return "", fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s"+
 			", stderr:%s (%v)", bridgeName, stderr, err)
 	}
 
 	ifaceID := bridgeName + "_" + nodeName
-	return ifaceID, macAddress, nil
+	return ifaceID, nil
 }
 
 // getNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.

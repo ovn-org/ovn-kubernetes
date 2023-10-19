@@ -36,7 +36,8 @@ const (
 
 // New creates Prober that will skip TLS verification while probing.
 // followNonLocalRedirects configures whether the prober should follow redirects to a different hostname.
-// If disabled, redirects to other hosts will trigger a warning result.
+//
+//	If disabled, redirects to other hosts will trigger a warning result.
 func New(followNonLocalRedirects bool) Prober {
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
 	return NewWithTLSConfig(tlsConfig, followNonLocalRedirects)
@@ -44,7 +45,8 @@ func New(followNonLocalRedirects bool) Prober {
 
 // NewWithTLSConfig takes tls config as parameter.
 // followNonLocalRedirects configures whether the prober should follow redirects to a different hostname.
-// If disabled, redirects to other hosts will trigger a warning result.
+//
+//	If disabled, redirects to other hosts will trigger a warning result.
 func NewWithTLSConfig(config *tls.Config, followNonLocalRedirects bool) Prober {
 	// We do not want the probe use node's local proxy set.
 	transport := utilnet.SetTransportDefaults(
@@ -53,11 +55,7 @@ func NewWithTLSConfig(config *tls.Config, followNonLocalRedirects bool) Prober {
 			DisableKeepAlives:  true,
 			Proxy:              http.ProxyURL(nil),
 			DisableCompression: true, // removes Accept-Encoding header
-			// DialContext creates unencrypted TCP connections
-			// and is also used by the transport for HTTPS connection
-			DialContext: probe.ProbeDialer().DialContext,
 		})
-
 	return httpProber{transport, followNonLocalRedirects}
 }
 
@@ -117,9 +115,7 @@ func DoHTTPProbe(req *http.Request, client GetHTTPInterface) (probe.Result, stri
 		return probe.Success, body, nil
 	}
 	klog.V(4).Infof("Probe failed for %s with request headers %v, response body: %v", url.String(), headers, body)
-	// Note: Until https://issue.k8s.io/99425 is addressed, this user-facing failure message must not contain the response body.
-	failureMsg := fmt.Sprintf("HTTP probe failed with statuscode: %d", res.StatusCode)
-	return probe.Failure, failureMsg, nil
+	return probe.Failure, fmt.Sprintf("HTTP probe failed with statuscode: %d", res.StatusCode), nil
 }
 
 // RedirectChecker returns a function that can be used to check HTTP redirects.
