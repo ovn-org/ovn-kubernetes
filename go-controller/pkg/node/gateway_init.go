@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -540,6 +541,9 @@ func CleanupClusterNode(name string) error {
 
 	// Delete iptable rules for management port
 	DelMgtPortIptRules()
+
+	// Delete nftables rules
+	nodenft.CleanupNFTables()
 
 	return nil
 }
