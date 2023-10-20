@@ -20,8 +20,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
@@ -40,6 +39,7 @@ import (
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	testutils "k8s.io/kubernetes/test/utils"
 )
 
@@ -410,7 +410,7 @@ func createPod(f *framework.Framework, podName, nodeSelector, namespace string, 
 
 // Get the IP address of a pod in the specified namespace
 func getPodAddress(podName, namespace string) string {
-	podIP, err := framework.RunKubectl(namespace, "get", "pods", podName, "--template={{.status.podIP}}")
+	podIP, err := e2ekubectl.RunKubectl(namespace, "get", "pods", podName, "--template={{.status.podIP}}")
 	if err != nil {
 		framework.Failf("Unable to retrieve the IP for pod %s %v", podName, err)
 	}
@@ -419,7 +419,7 @@ func getPodAddress(podName, namespace string) string {
 
 // Get the IP address of the API server
 func getApiAddress() string {
-	apiServerIP, err := framework.RunKubectl("default", "get", "svc", "kubernetes", "-o", "jsonpath='{.spec.clusterIP}'")
+	apiServerIP, err := e2ekubectl.RunKubectl("default", "get", "svc", "kubernetes", "-o", "jsonpath='{.spec.clusterIP}'")
 	apiServerIP = strings.Trim(apiServerIP, "'")
 	if err != nil {
 		framework.Failf("Error: unable to get API-server IP address, err:  %v", err)
@@ -433,7 +433,7 @@ func getApiAddress() string {
 
 // IsGatewayModeLocal returns true if the gateway mode is local
 func IsGatewayModeLocal() bool {
-	anno, err := framework.RunKubectl("default", "get", "node", "ovn-control-plane", "-o", "template", "--template={{.metadata.annotations}}")
+	anno, err := e2ekubectl.RunKubectl("default", "get", "node", "ovn-control-plane", "-o", "template", "--template={{.metadata.annotations}}")
 	if err != nil {
 		return false
 	}
@@ -545,7 +545,7 @@ func getOVNKubePodLogsFiltered(clientset kubernetes.Interface, namespace, nodeNa
 
 func findOvnKubeControlPlaneNode(controlPlanePodName, leaseName string) (string, error) {
 
-	ovnkubeControlPlaneNode, err := framework.RunKubectl(ovnNs, "get", "leases", leaseName,
+	ovnkubeControlPlaneNode, err := e2ekubectl.RunKubectl(ovnNs, "get", "leases", leaseName,
 		"-o", "jsonpath='{.spec.holderIdentity}'")
 
 	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (%s)"+
@@ -1072,7 +1072,7 @@ spec:
 		}
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		// apply the egress firewall configuration
-		framework.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 
@@ -1090,7 +1090,7 @@ spec:
 		// Verify the remote host/port as explicitly allowed by the firewall policy is reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
 		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
-			_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
+			_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
 			if err == nil {
 				return true, nil
 			}
@@ -1103,7 +1103,7 @@ spec:
 		// Verify the remote host/port as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied host %s is not permitted as defined by the external firewall policy", exFWDenyTcpDnsDest))
 		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
-			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWDenyTcpDnsDest, "53")
+			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWDenyTcpDnsDest, "53")
 			if err != nil {
 				return false, nil
 			}
@@ -1116,7 +1116,7 @@ spec:
 		// Verify the explicitly allowed host/port tcp port 80 rule is functional
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
 		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
-			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "80")
+			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "80")
 			if err == nil {
 				return true, nil
 			}
@@ -1129,7 +1129,7 @@ spec:
 		// Verify the remote host/port 443 as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied port on host %s is not permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
 		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
-			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "443")
+			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "443")
 			if err != nil {
 				return false, nil
 			}
@@ -1192,7 +1192,7 @@ spec:
 		}
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		// apply the egress firewall configuration
-		framework.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 		// create host networked pod
@@ -1232,25 +1232,25 @@ spec:
 
 		// Verify basic external connectivity to ensure egress firewall is working for normal conditions
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
-		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
 		if err != nil {
 			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, ovnContainer, serverNodeInfo.name, err)
 		}
 		// Verify the remote host/port as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied host %s is not permitted as defined by the external firewall policy", exFWDenyTcpDnsDest))
-		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWDenyTcpDnsDest, "53")
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWDenyTcpDnsDest, "53")
 		if err == nil {
 			framework.Failf("Succeeded in connecting the implicitly denied remote host %s from container %s on node %s", exFWDenyTcpDnsDest, ovnContainer, serverNodeInfo.name)
 		}
 		// Verify the explicitly allowed host/port tcp port 80 rule is functional
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
-		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "80")
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "80")
 		if err != nil {
 			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
 		}
 		// Verify the remote host/port 443 as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied port on host %s is not permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
-		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "443")
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "443")
 		if err == nil {
 			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
 		}
@@ -1258,7 +1258,7 @@ spec:
 		ginkgo.By("Should NOT be able to reach each host networked pod via node selector")
 		for _, node := range nodes.Items {
 			path := fmt.Sprintf("http://%s:%d/hostname", node.Status.Addresses[0].Address, hostNetworkPort)
-			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "curl", "-g", "--max-time", "2", path)
+			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "curl", "-g", "--max-time", "2", path)
 			if err == nil {
 				framework.Failf("Was able to curl node %s from container %s on node %s with no allow rule for egress firewall", node.Name, srcPodName, serverNodeInfo.name)
 			}
@@ -1281,7 +1281,7 @@ spec:
 		ginkgo.By("Should be able to reach each host networked pod via node selector")
 		for _, node := range nodes.Items {
 			path := fmt.Sprintf("http://%s:%d/hostname", node.Status.Addresses[0].Address, hostNetworkPort)
-			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "curl", "-g", "--max-time", "2", path)
+			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "curl", "-g", "--max-time", "2", path)
 			if err != nil {
 				framework.Failf("Failed to curl node %s from container %s on node %s: %v", node.Name, srcPodName, serverNodeInfo.name, err)
 			}
@@ -1365,9 +1365,9 @@ spec:
 		}
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		// apply the egress firewall configuration
-		framework.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
 		gomega.Eventually(func() bool {
-			output, err := framework.RunKubectl(f.Namespace.Name, "get", "egressfirewall", "default")
+			output, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "egressfirewall", "default")
 			if err != nil {
 				framework.Failf("could not get the egressfirewall default in namespace: %s", f.Namespace.Name)
 			}
@@ -1465,7 +1465,7 @@ spec:
 		// pod -> external container should work
 		ginkgo.By(fmt.Sprintf("Verifying connectivity from pod %s to external container [%s]:%d",
 			efPodName, externalContainerIP, externalContainerPort))
-		_, err = framework.RunKubectl(f.Namespace.Name, "exec", efPodName, testContainerFlag,
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", efPodName, testContainerFlag,
 			"--", "nc", "-vz", "-w", testTimeout, externalContainerIP, strconv.Itoa(externalContainerPort))
 		if err != nil {
 			framework.Failf("Failed to connect from pod to external container, before egress firewall is applied")
@@ -1483,13 +1483,13 @@ spec:
 
 		// 3. Apply deny-all egress firewall
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
-		framework.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
 
 		// 4. Check that only inbound traffic is allowed
 		// pod -> external container should be blocked
 		ginkgo.By(fmt.Sprintf("Verifying connection from pod %s to external container %s is blocked:%d",
 			efPodName, externalContainerIP, externalContainerPort))
-		_, err = framework.RunKubectl(f.Namespace.Name, "exec", efPodName, testContainerFlag,
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", efPodName, testContainerFlag,
 			"--", "nc", "-vz", "-w", testTimeout, externalContainerIP, strconv.Itoa(externalContainerPort))
 		if err == nil {
 			framework.Failf("Egress firewall doesn't block connection from pod to external container")
@@ -1529,10 +1529,10 @@ var _ = ginkgo.Describe("e2e network policy hairpinning validation", func() {
 		// pod1 is a client and a service backend for hairpinned traffic
 		pod1 := newAgnhostPod(namespaceName, "pod1", cmd...)
 		pod1.Labels = hairpinPodSel
-		pod1 = f.PodClient().CreateSync(pod1)
+		pod1 = e2epod.NewPodClient(f).CreateSync(pod1)
 		// pod2 is another pod in the same namespace, that should be denied
 		pod2 := newAgnhostPod(namespaceName, "pod2", cmd...)
-		pod2 = f.PodClient().CreateSync(pod2)
+		pod2 = e2epod.NewPodClient(f).CreateSync(pod2)
 
 		ginkgo.By("creating a service with a single backend")
 		svcIP, err := createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, endpointHTTPPort, "ClusterIP", hairpinPodSel)
@@ -2279,7 +2279,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 		}
 	})
 
-	table.DescribeTable("Should validate flow data of br-int is sent to an external gateway",
+	ginkgo.DescribeTable("Should validate flow data of br-int is sent to an external gateway",
 		func(protocol flowMonitoringProtocol, collectorPort uint16) {
 			protocolStr := string(protocol)
 			ipField := "IPAddress"
@@ -2353,7 +2353,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 
 			for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
 
-				execOptions := framework.ExecOptions{
+				execOptions := e2epod.ExecOptions{
 					Command:       []string{"ovs-vsctl", "find", strings.ToLower(protocolStr)},
 					Namespace:     ovnNs,
 					PodName:       ovnKubeNodePod.Name,
@@ -2362,7 +2362,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 					CaptureStderr: true,
 				}
 
-				targets, stderr, _ := f.ExecWithOptions(execOptions)
+				targets, stderr, _ := e2epod.ExecWithOptions(f, execOptions)
 				framework.Logf("execOptions are %v", execOptions)
 				if err != nil {
 					framework.Failf("could not lookup ovs %s targets: %v", protocolStr, stderr)
@@ -2372,11 +2372,11 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 		},
 		// This is a long test (~5 minutes per run), so let's just validate netflow v5
 		// in an IPv4 cluster and sflow in IPv6 cluster
-		table.Entry("with netflow v5", netflow_v5, uint16(2056)),
+		ginkgo.Entry("with netflow v5", netflow_v5, uint16(2056)),
 		// goflow doesn't currently support OVS ipfix:
 		// https://github.com/cloudflare/goflow/issues/99
-		// table.Entry("ipfix", ipfix, uint16(2055)),
-		table.Entry("with sflow", sflow, uint16(6343)),
+		// ginkgo.Entry("ipfix", ipfix, uint16(2055)),
+		ginkgo.Entry("with sflow", sflow, uint16(6343)),
 	)
 
 })
@@ -2384,7 +2384,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 func getNodePodCIDR(nodeName string) (string, error) {
 	// retrieve the pod cidr for the worker node
 	jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"
-	kubectlOut, err := framework.RunKubectl("default", "get", "node", nodeName, "-o", jsonFlag)
+	kubectlOut, err := e2ekubectl.RunKubectl("default", "get", "node", nodeName, "-o", jsonFlag)
 	if err != nil {
 		return "", err
 	}
@@ -2478,7 +2478,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 
 	fileExistsOnPod := func(f *framework.Framework, namespace string, pod *v1.Pod, file string) bool {
 		containerFlag := fmt.Sprintf("-c=%s", pod.Spec.Containers[0].Name)
-		_, err := framework.RunKubectl(ovnNs, "exec", pod.Name, containerFlag, "--", "ls", file)
+		_, err := e2ekubectl.RunKubectl(ovnNs, "exec", pod.Name, containerFlag, "--", "ls", file)
 		if err == nil {
 			return true
 		}
@@ -2510,7 +2510,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 
 	deleteFileFromPod := func(f *framework.Framework, namespace string, pod *v1.Pod, file string) {
 		containerFlag := fmt.Sprintf("-c=%s", pod.Spec.Containers[0].Name)
-		framework.RunKubectl(ovnNs, "exec", pod.Name, containerFlag, "--", "rm", file)
+		e2ekubectl.RunKubectl(ovnNs, "exec", pod.Name, containerFlag, "--", "rm", file)
 		if fileExistsOnPod(f, namespace, pod, file) {
 			framework.Failf("Error: failed to delete file %s", file)
 		}
@@ -2555,7 +2555,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 
 		ginkgo.By("Checking initial connectivity from one pod to the other and verifying that the connection is achieved")
 
-		stdout, err := framework.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname", net.JoinHostPort(pod2IP, port)))
+		stdout, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname", net.JoinHostPort(pod2IP, port)))
 
 		if err != nil || stdout != pod2Name {
 			errChan <- fmt.Errorf("Error: attempted connection to pod %s found err:  %v", pod2Name, err)
@@ -2570,7 +2570,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 				framework.Logf(msg + ": finish connectivity test.")
 				break L
 			default:
-				stdout, err := framework.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname", net.JoinHostPort(pod2IP, port)))
+				stdout, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname", net.JoinHostPort(pod2IP, port)))
 				if err != nil || stdout != pod2Name {
 					errChan <- err
 					framework.Failf("Error: attempted connection to pod %s found err:  %v", pod2Name, err)
@@ -2582,7 +2582,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		errChan <- nil
 	}
 
-	table.DescribeTable("recovering from deleting db files while maintaining connectivity",
+	ginkgo.DescribeTable("recovering from deleting db files while maintaining connectivity",
 		func(db_pod_num int, DBFileNamesToDelete []string) {
 			var (
 				db_pod_name = fmt.Sprintf("%s-%d", databasePodPrefix, db_pod_num)
@@ -2657,19 +2657,19 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		// One can choose to delete only specific db file (uncomment the requested lines)
 
 		// db pod 0
-		table.Entry("when deleting both db files on ovnkube-db-0", 0, []string{northDBFileName, southDBFileName}),
-		// table.Entry("when delete north db on ovnkube-db-0", 0, []string{northDBFileName}),
-		// table.Entry("when delete south db on ovnkube-db-0", 0, []string{southDBFileName}),
+		ginkgo.Entry("when deleting both db files on ovnkube-db-0", 0, []string{northDBFileName, southDBFileName}),
+		// ginkgo.Entry("when delete north db on ovnkube-db-0", 0, []string{northDBFileName}),
+		// ginkgo.Entry("when delete south db on ovnkube-db-0", 0, []string{southDBFileName}),
 
 		// db pod 1
-		table.Entry("when deleting both db files on ovnkube-db-1", 1, []string{northDBFileName, southDBFileName}),
-		// table.Entry("when delete north db on ovnkube-db-1", 1, []string{northDBFileName}),
-		// table.Entry("when delete south db on ovnkube-db-1", 1, []string{southDBFileName}),
+		ginkgo.Entry("when deleting both db files on ovnkube-db-1", 1, []string{northDBFileName, southDBFileName}),
+		// ginkgo.Entry("when delete north db on ovnkube-db-1", 1, []string{northDBFileName}),
+		// ginkgo.Entry("when delete south db on ovnkube-db-1", 1, []string{southDBFileName}),
 
 		// db pod 2
-		table.Entry("when deleting both db files on ovnkube-db-2", 2, []string{northDBFileName, southDBFileName}),
-		// table.Entry("when delete north db on ovnkube-db-2", 2, []string{northDBFileName}),
-		// table.Entry("when delete south db on ovnkube-db-2", 2, []string{southDBFileName}),
+		ginkgo.Entry("when deleting both db files on ovnkube-db-2", 2, []string{northDBFileName, southDBFileName}),
+		// ginkgo.Entry("when delete north db on ovnkube-db-2", 2, []string{northDBFileName}),
+		// ginkgo.Entry("when delete south db on ovnkube-db-2", 2, []string{southDBFileName}),
 	)
 
 	ginkgo.It("Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode", func() {
@@ -2779,7 +2779,7 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 			f.Namespace.Name,
 			fmt.Sprintf("k8s.ovn.org/multicast-enabled=%s", "true"),
 		}
-		framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
+		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
 
 		// Create a multicast source pod
 		ginkgo.By("creating a multicast source pod in node " + ovnWorkerNode)
@@ -2791,7 +2791,7 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 
 		// Wait for tcpdump on listener pod to be ready
 		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			kubectlOut, err := framework.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", "ls")
+			kubectlOut, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", "ls")
 			if err != nil {
 				framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
 			}
@@ -2806,10 +2806,10 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 
 		// The multicast listener pod join multicast group (-B 224.1.1.1), UDP (-u), during (-t 30) seconds, report every (-i 5) seconds
 		ginkgo.By("multicast listener pod join multicast group")
-		framework.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("iperf -s -B %s -u -t 30 -i 5", mcastGroup))
+		e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("iperf -s -B %s -u -t 30 -i 5", mcastGroup))
 
 		ginkgo.By(fmt.Sprintf("verifying that the IGMP query has been received"))
-		kubectlOut, err := framework.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("cat %s | grep igmp", tcpdumpFileName))
+		kubectlOut, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("cat %s | grep igmp", tcpdumpFileName))
 		if err != nil {
 			framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
 		}

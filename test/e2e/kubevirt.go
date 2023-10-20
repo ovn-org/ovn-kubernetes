@@ -586,7 +586,7 @@ passwd:
 				namespace,
 				selectedNode.Name,
 				"netexec", "--http-port", "8000")
-			_ = fr.PodClient().CreateSync(httpServerWorkerNode)
+			_ = e2epod.NewPodClient(fr).CreateSync(httpServerWorkerNode)
 		}
 
 		By("Waiting until both pods have an IP address")

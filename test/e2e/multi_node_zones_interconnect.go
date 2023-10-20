@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -148,13 +148,13 @@ var _ = ginkgo.Describe("Multi node zones interconnect", func() {
 		cmd := httpServerContainerCmd(8000)
 		serverPod := e2epod.NewAgnhostPod(fr.Namespace.Name, serverPodName, nil, nil, nil, cmd...)
 		serverPod.Spec.NodeName = serverPodNodeName
-		fr.PodClient().CreateSync(serverPod)
+		e2epod.NewPodClient(fr).CreateSync(serverPod)
 
 		// Create a client pod on zone - zone-2
 		cmd = []string{}
 		clientPod := e2epod.NewAgnhostPod(fr.Namespace.Name, clientPodName, nil, nil, nil, cmd...)
 		clientPod.Spec.NodeName = clientPodNodeName
-		fr.PodClient().CreateSync(clientPod)
+		e2epod.NewPodClient(fr).CreateSync(clientPod)
 
 		ginkgo.By("asserting the *client* pod can contact the server pod exposed endpoint")
 		checkPodsInterconnectivity(clientPod, serverPod, fr.Namespace.Name, cs)

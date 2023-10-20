@@ -7,10 +7,11 @@ import (
 	"os"
 	"time"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/util/retry"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -57,7 +58,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 		cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
 		for i := 0; i < 2; i++ {
 			pod := newAgnhostPod(nsName, fmt.Sprintf("pod%d", i+1), cmd...)
-			pod = fr.PodClient().CreateSync(pod)
+			pod = e2epod.NewPodClient(fr).CreateSync(pod)
 			Expect(waitForACLLoggingPod(fr, nsName, pod.GetName())).To(Succeed())
 			pods = append(pods, *pod)
 		}
@@ -206,7 +207,7 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 		By("creating a pod running agnhost netexec")
 		cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
 		pod := newAgnhostPod(nsName, "pod", cmd...)
-		pokePod = fr.PodClient().CreateSync(pod)
+		pokePod = e2epod.NewPodClient(fr).CreateSync(pod)
 		Expect(waitForACLLoggingPod(fr, nsName, pokePod.GetName())).To(Succeed())
 
 		// The secondary Namespace is required to make sure that 2 namespaces with different logging
@@ -228,7 +229,7 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 		cmdSecondary := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
 		podSecondary := newAgnhostPod(nsNameSecondary, "pod-secondary", cmdSecondary...)
 		// There seems to be a bug in CreateSync for secondary pod. Need to do this here instead:
-		pps := fr.PodClientNS(nsNameSecondary).Create(podSecondary)
+		pps := e2epod.PodClientNS(fr, nsNameSecondary).Create(podSecondary)
 		Eventually(func() (bool, error) {
 			time.Sleep(15 * time.Second)
 			pokePodSecondary, err = fr.ClientSet.CoreV1().Pods(nsNameSecondary).Get(context.TODO(), pps.Name, metav1.GetOptions{})
@@ -648,7 +649,7 @@ spec:
 		}
 	}()
 
-	_, err := framework.RunKubectl(ns, "create", "-f", egressFirewallYaml)
+	_, err := e2ekubectl.RunKubectl(ns, "create", "-f", egressFirewallYaml)
 	return err
 }
 

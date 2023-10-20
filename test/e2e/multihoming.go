@@ -9,8 +9,7 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/docker/docker/client"
@@ -27,7 +26,7 @@ import (
 
 const PolicyForAnnotation = "k8s.v1.cni.cncf.io/policy-for"
 
-var _ = Describe("Multi Homing", func() {
+var _ = ginkgo.Describe("Multi Homing", func() {
 	const (
 		podName                      = "tinypod"
 		secondaryNetworkCIDR         = "10.128.0.0/16"
@@ -49,7 +48,7 @@ var _ = Describe("Multi Homing", func() {
 		mnpClient mnpclient.K8sCniCncfIoV1beta1Interface
 	)
 
-	BeforeEach(func() {
+	ginkgo.BeforeEach(func() {
 		cs = f.ClientSet
 
 		var err error
@@ -59,14 +58,14 @@ var _ = Describe("Multi Homing", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	Context("A single pod with an OVN-K secondary network", func() {
-		table.DescribeTable("is able to get to the Running phase", func(netConfigParams networkAttachmentConfigParams, podConfig podConfiguration) {
+	ginkgo.Context("A single pod with an OVN-K secondary network", func() {
+		ginkgo.DescribeTable("is able to get to the Running phase", func(netConfigParams networkAttachmentConfigParams, podConfig podConfiguration) {
 			netConfig := newNetworkAttachmentConfig(netConfigParams)
 
 			netConfig.namespace = f.Namespace.Name
 			podConfig.namespace = f.Namespace.Name
 
-			By("creating the attachment configuration")
+			ginkgo.By("creating the attachment configuration")
 			_, err := nadClient.NetworkAttachmentDefinitions(netConfig.namespace).Create(
 				context.Background(),
 				generateNAD(netConfig),
@@ -74,7 +73,7 @@ var _ = Describe("Multi Homing", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("creating the pod using a secondary network")
+			ginkgo.By("creating the pod using a secondary network")
 			pod, err := cs.CoreV1().Pods(podConfig.namespace).Create(
 				context.Background(),
 				generatePodSpec(podConfig),
@@ -82,7 +81,7 @@ var _ = Describe("Multi Homing", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("asserting the pod gets to the `Ready` phase")
+			ginkgo.By("asserting the pod gets to the `Ready` phase")
 			Eventually(func() v1.PodPhase {
 				updatedPod, err := cs.CoreV1().Pods(podConfig.namespace).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
 				if err != nil {
@@ -103,7 +102,7 @@ var _ = Describe("Multi Homing", func() {
 				}
 			}
 		},
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an L3 - routed - network",
 				networkAttachmentConfigParams{
 					cidr:     netCIDR(secondaryNetworkCIDR, netPrefixLengthPerNode),
@@ -115,7 +114,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an L3 - routed - network with IPv6 network",
 				networkAttachmentConfigParams{
 					cidr:     netCIDR(secondaryIPv6CIDR, netPrefixLengthIPv6PerNode),
@@ -127,7 +126,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an L2 - switched - network",
 				networkAttachmentConfigParams{
 					cidr:     secondaryFlatL2NetworkCIDR,
@@ -139,7 +138,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an L2 - switched - network featuring `excludeCIDR`s",
 				networkAttachmentConfigParams{
 					cidr:         secondaryFlatL2NetworkCIDR,
@@ -152,7 +151,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an L2 - switched - network without IPAM",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -163,7 +162,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an L2 - switched - network with an IPv6 subnet",
 				networkAttachmentConfigParams{
 					cidr:     secondaryIPv6CIDR,
@@ -175,7 +174,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an L2 - switched - network with a dual stack configuration",
 				networkAttachmentConfigParams{
 					cidr:     strings.Join([]string{secondaryFlatL2NetworkCIDR, secondaryIPv6CIDR}, ","),
@@ -187,7 +186,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an localnet - switched - network",
 				networkAttachmentConfigParams{
 					cidr:     secondaryLocalnetNetworkCIDR,
@@ -200,7 +199,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an Localnet - switched - network featuring `excludeCIDR`s",
 				networkAttachmentConfigParams{
 					cidr:         secondaryLocalnetNetworkCIDR,
@@ -214,7 +213,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an localnet - switched - network without IPAM",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -226,7 +225,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an localnet - switched - network with an IPv6 subnet",
 				networkAttachmentConfigParams{
 					cidr:     secondaryIPv6CIDR,
@@ -239,7 +238,7 @@ var _ = Describe("Multi Homing", func() {
 					name:        podName,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"when attaching to an L2 - switched - network with a dual stack configuration",
 				networkAttachmentConfigParams{
 					cidr:     strings.Join([]string{secondaryLocalnetNetworkCIDR, secondaryIPv6CIDR}, ","),
@@ -255,7 +254,7 @@ var _ = Describe("Multi Homing", func() {
 		)
 	})
 
-	Context("multiple pods connected to the same OVN-K secondary network", func() {
+	ginkgo.Context("multiple pods connected to the same OVN-K secondary network", func() {
 		const (
 			clientPodName     = "client-pod"
 			nodeHostnameKey   = "kubernetes.io/hostname"
@@ -266,7 +265,7 @@ var _ = Describe("Multi Homing", func() {
 			staticServerIP    = "192.168.200.20/24"
 		)
 
-		table.DescribeTable(
+		ginkgo.DescribeTable(
 			"can communicate over the secondary network",
 			func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration, serverPodConfig podConfiguration) {
 				netConfig := newNetworkAttachmentConfig(netConfigParams)
@@ -276,11 +275,11 @@ var _ = Describe("Multi Homing", func() {
 				serverPodConfig.namespace = f.Namespace.Name
 
 				if netConfig.topology == "localnet" {
-					By("setting up the localnet underlay")
+					ginkgo.By("setting up the localnet underlay")
 					nodes := ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
 					defer func() {
-						By("tearing down the localnet underlay")
+						ginkgo.By("tearing down the localnet underlay")
 						Expect(teardownUnderlay(nodes)).To(Succeed())
 					}()
 
@@ -288,7 +287,7 @@ var _ = Describe("Multi Homing", func() {
 					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
 				}
 
-				By("creating the attachment configuration")
+				ginkgo.By("creating the attachment configuration")
 				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
 					context.Background(),
 					generateNAD(netConfig),
@@ -296,7 +295,7 @@ var _ = Describe("Multi Homing", func() {
 				)
 				Expect(err).NotTo(HaveOccurred())
 
-				By("instantiating the server pod")
+				ginkgo.By("instantiating the server pod")
 				serverPod, err := cs.CoreV1().Pods(serverPodConfig.namespace).Create(
 					context.Background(),
 					generatePodSpec(serverPodConfig),
@@ -305,7 +304,7 @@ var _ = Describe("Multi Homing", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(serverPod).NotTo(BeNil())
 
-				By("asserting the server pod reaches the `Ready` state")
+				ginkgo.By("asserting the server pod reaches the `Ready` state")
 				Eventually(func() v1.PodPhase {
 					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
 					if err != nil {
@@ -314,7 +313,7 @@ var _ = Describe("Multi Homing", func() {
 					return updatedPod.Status.Phase
 				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 
-				By("instantiating the *client* pod")
+				ginkgo.By("instantiating the *client* pod")
 				clientPod, err := cs.CoreV1().Pods(clientPodConfig.namespace).Create(
 					context.Background(),
 					generatePodSpec(clientPodConfig),
@@ -322,7 +321,7 @@ var _ = Describe("Multi Homing", func() {
 				)
 				Expect(err).NotTo(HaveOccurred())
 
-				By("asserting the client pod reaches the `Ready` state")
+				ginkgo.By("asserting the client pod reaches the `Ready` state")
 				Eventually(func() v1.PodPhase {
 					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), clientPod.GetName(), metav1.GetOptions{})
 					if err != nil {
@@ -333,7 +332,7 @@ var _ = Describe("Multi Homing", func() {
 
 				serverIP := ""
 				if netConfig.cidr == "" {
-					By("configuring static IP addresses in the pods")
+					ginkgo.By("configuring static IP addresses in the pods")
 					const (
 						clientIP       = "192.168.200.10/24"
 						staticServerIP = "192.168.200.20/24"
@@ -349,22 +348,22 @@ var _ = Describe("Multi Homing", func() {
 
 				for i, cidr := range strings.Split(netConfig.cidr, ",") {
 					if cidr != "" {
-						By("asserting the server pod has an IP from the configured range")
+						ginkgo.By("asserting the server pod has an IP from the configured range")
 						serverIP, err = podIPForAttachment(cs, f.Namespace.Name, serverPod.GetName(), netConfig.name, i)
 						Expect(err).NotTo(HaveOccurred())
-						By(fmt.Sprintf("asserting the server pod IP %v is from the configured range %v/%v", serverIP, cidr, netPrefixLengthPerNode))
+						ginkgo.By(fmt.Sprintf("asserting the server pod IP %v is from the configured range %v/%v", serverIP, cidr, netPrefixLengthPerNode))
 						subnet, err := getNetCIDRSubnet(cidr)
 						Expect(err).NotTo(HaveOccurred())
 						Expect(inRange(subnet, serverIP)).To(Succeed())
 					}
 
-					By("asserting the *client* pod can contact the server pod exposed endpoint")
+					ginkgo.By("asserting the *client* pod can contact the server pod exposed endpoint")
 					Eventually(func() error {
 						return reachToServerPodFromClient(cs, serverPodConfig, clientPodConfig, serverIP, port)
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
 				}
 			},
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an L2 secondary network when the pods are scheduled in different nodes",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -383,7 +382,7 @@ var _ = Describe("Multi Homing", func() {
 					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an L2 - switched - secondary network with `excludeCIDR`s",
 				networkAttachmentConfigParams{
 					name:         secondaryNetworkName,
@@ -401,7 +400,7 @@ var _ = Describe("Multi Homing", func() {
 					containerCmd: httpServerContainerCmd(port),
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an L3 - routed - secondary network",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -418,7 +417,7 @@ var _ = Describe("Multi Homing", func() {
 					containerCmd: httpServerContainerCmd(port),
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an L3 - routed - secondary network with IPv6 subnet",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -435,7 +434,7 @@ var _ = Describe("Multi Homing", func() {
 					containerCmd: httpServerContainerCmd(port),
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an L3 - routed - secondary network with a dual stack configuration",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -454,7 +453,7 @@ var _ = Describe("Multi Homing", func() {
 					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an L2 - switched - secondary network without IPAM",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -472,7 +471,7 @@ var _ = Describe("Multi Homing", func() {
 					isPrivileged: true,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an L2 secondary network without IPAM, with static IPs configured via network selection elements",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -494,7 +493,7 @@ var _ = Describe("Multi Homing", func() {
 					containerCmd: httpServerContainerCmd(port),
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an L2 secondary network with an IPv6 subnet when pods are scheduled in different nodes",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -513,7 +512,7 @@ var _ = Describe("Multi Homing", func() {
 					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an L2 secondary network with a dual stack configuration",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -532,7 +531,7 @@ var _ = Describe("Multi Homing", func() {
 					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an localnet secondary network when the pods are scheduled on different nodes",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -552,7 +551,7 @@ var _ = Describe("Multi Homing", func() {
 					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -573,7 +572,7 @@ var _ = Describe("Multi Homing", func() {
 					isPrivileged: true,
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes, with static IPs configured via network selection elements",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -598,7 +597,7 @@ var _ = Describe("Multi Homing", func() {
 					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an localnet secondary network with an IPv6 subnet when pods are scheduled on different nodes",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -618,7 +617,7 @@ var _ = Describe("Multi Homing", func() {
 					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
-			table.Entry(
+			ginkgo.Entry(
 				"can communicate over an localnet secondary network with a dual stack configuration when pods are scheduled on different nodes",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
@@ -640,7 +639,7 @@ var _ = Describe("Multi Homing", func() {
 			),
 		)
 
-		Context("localnet OVN-K secondary network", func() {
+		ginkgo.Context("localnet OVN-K secondary network", func() {
 			const (
 				clientPodName          = "client-pod"
 				nodeHostnameKey        = "kubernetes.io/hostname"
@@ -655,8 +654,8 @@ var _ = Describe("Multi Homing", func() {
 			var underlayBridgeName string
 			var cmdWebServer *exec.Cmd
 
-			Context("with a service running on the underlay", func() {
-				BeforeEach(func() {
+			ginkgo.Context("with a service running on the underlay", func() {
+				ginkgo.BeforeEach(func() {
 					netConfig = newNetworkAttachmentConfig(
 						networkAttachmentConfigParams{
 							name:         secondaryNetworkName,
@@ -667,14 +666,14 @@ var _ = Describe("Multi Homing", func() {
 							excludeCIDRs: []string{underlayServiceIP + "/32"},
 						})
 
-					By("setting up the localnet underlay")
+					ginkgo.By("setting up the localnet underlay")
 					nodes = ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
 					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
 				})
 
-				BeforeEach(func() {
-					By("adding IP to the underlay docker bridge")
+				ginkgo.BeforeEach(func() {
+					ginkgo.By("adding IP to the underlay docker bridge")
 					cli, err := client.NewClientWithOpts(client.FromEnv)
 					Expect(err).NotTo(HaveOccurred())
 
@@ -690,16 +689,16 @@ var _ = Describe("Multi Homing", func() {
 					Expect(err).NotTo(HaveOccurred())
 				})
 
-				BeforeEach(func() {
-					By("starting a service, connected to the underlay")
+				ginkgo.BeforeEach(func() {
+					ginkgo.By("starting a service, connected to the underlay")
 					cmdWebServer = exec.Command("python3", "-m", "http.server", "--bind", underlayServiceIP, strconv.Itoa(servicePort))
 					cmdWebServer.Stderr = os.Stderr
 					err := cmdWebServer.Start()
 					Expect(err).NotTo(HaveOccurred(), "failed to create web server, port might be busy")
 				})
 
-				BeforeEach(func() {
-					By("creating the attachment configuration")
+				ginkgo.BeforeEach(func() {
+					ginkgo.By("creating the attachment configuration")
 					_, err := nadClient.NetworkAttachmentDefinitions(netConfig.namespace).Create(
 						context.Background(),
 						generateNAD(netConfig),
@@ -708,24 +707,24 @@ var _ = Describe("Multi Homing", func() {
 					Expect(err).NotTo(HaveOccurred())
 				})
 
-				AfterEach(func() {
+				ginkgo.AfterEach(func() {
 					err := cmdWebServer.Process.Kill()
 					Expect(err).NotTo(HaveOccurred())
 				})
 
-				AfterEach(func() {
+				ginkgo.AfterEach(func() {
 					cmd := exec.Command("sudo", "ip", "addr", "del", underlayServiceIP+"/24", "dev", underlayBridgeName)
 					cmd.Stderr = os.Stderr
 					err := cmd.Run()
 					Expect(err).NotTo(HaveOccurred())
 				})
 
-				AfterEach(func() {
-					By("tearing down the localnet underlay")
+				ginkgo.AfterEach(func() {
+					ginkgo.By("tearing down the localnet underlay")
 					Expect(teardownUnderlay(nodes)).To(Succeed())
 				})
 
-				It("can communicate over a localnet secondary network from pod to the underlay service", func() {
+				ginkgo.It("can communicate over a localnet secondary network from pod to the underlay service", func() {
 					clientPodConfig := podConfiguration{
 						name:        clientPodName,
 						namespace:   f.Namespace.Name,
@@ -733,17 +732,17 @@ var _ = Describe("Multi Homing", func() {
 					}
 					kickstartPod(cs, clientPodConfig)
 
-					By("asserting the *client* pod can contact the underlay service")
+					ginkgo.By("asserting the *client* pod can contact the underlay service")
 					Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
 				})
 
-				Context("with multi network policy blocking the traffic", func() {
+				ginkgo.Context("with multi network policy blocking the traffic", func() {
 					var clientPodConfig podConfiguration
 					labels := map[string]string{"name": "access-control"}
 
 					const policyName = "allow-egress-ipblock"
 
-					BeforeEach(func() {
+					ginkgo.BeforeEach(func() {
 						clientPodConfig = podConfiguration{
 							name:        clientPodName,
 							namespace:   f.Namespace.Name,
@@ -752,12 +751,12 @@ var _ = Describe("Multi Homing", func() {
 						}
 						kickstartPod(cs, clientPodConfig)
 
-						By("asserting the *client* pod can contact the underlay service before creating the policy")
+						ginkgo.By("asserting the *client* pod can contact the underlay service before creating the policy")
 						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
 					})
 
-					AfterEach(func() {
-						By("deleting the multi-network policy")
+					ginkgo.AfterEach(func() {
+						ginkgo.By("deleting the multi-network policy")
 						err := mnpClient.MultiNetworkPolicies(clientPodConfig.namespace).Delete(
 							context.Background(),
 							policyName,
@@ -765,12 +764,12 @@ var _ = Describe("Multi Homing", func() {
 						)
 						Expect(err).NotTo(HaveOccurred())
 
-						By("asserting the *client* pod can contact the underlay service after deleting the policy")
+						ginkgo.By("asserting the *client* pod can contact the underlay service after deleting the policy")
 						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
 					})
 
-					It("can not communicate over a localnet secondary network from pod to the underlay service", func() {
-						By("creating the multi-network policy")
+					ginkgo.It("can not communicate over a localnet secondary network from pod to the underlay service", func() {
+						ginkgo.By("creating the multi-network policy")
 						_, err := mnpClient.MultiNetworkPolicies(clientPodConfig.namespace).Create(
 							context.Background(),
 							multiNetEgressLimitingIPBlockPolicy(
@@ -788,21 +787,21 @@ var _ = Describe("Multi Homing", func() {
 						)
 						Expect(err).NotTo(HaveOccurred())
 
-						By("asserting the *client* pod cannot contact the underlay service after creating the policy")
+						ginkgo.By("asserting the *client* pod cannot contact the underlay service after creating the policy")
 						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(MatchError(ContainSubstring("Connection timeout")))
 					})
 				})
 			})
 		})
 
-		Context("multi-network policies", func() {
+		ginkgo.Context("multi-network policies", func() {
 			const (
 				generatedNamespaceNamePrefix = "pepe"
 				blockedServerStaticIP        = "192.168.200.30"
 			)
 			var extraNamespace *v1.Namespace
 
-			BeforeEach(func() {
+			ginkgo.BeforeEach(func() {
 				createdNamespace, err := cs.CoreV1().Namespaces().Create(
 					context.Background(),
 					&v1.Namespace{
@@ -817,7 +816,7 @@ var _ = Describe("Multi Homing", func() {
 				extraNamespace = createdNamespace
 			})
 
-			AfterEach(func() {
+			ginkgo.AfterEach(func() {
 				blockUntilEverythingIsGone := metav1.DeletePropagationForeground
 				Expect(cs.CoreV1().Namespaces().Delete(
 					context.Background(),
@@ -831,7 +830,7 @@ var _ = Describe("Multi Homing", func() {
 				}, 2*time.Minute, 5*time.Second).Should(BeTrue())
 			})
 
-			table.DescribeTable(
+			ginkgo.DescribeTable(
 				"multi-network policies configure traffic allow lists",
 				func(netConfigParams networkAttachmentConfigParams, allowedClientPodConfig podConfiguration, blockedClientPodConfig podConfiguration, serverPodConfig podConfiguration, policy *mnpapi.MultiNetworkPolicy) {
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
@@ -851,11 +850,11 @@ var _ = Describe("Multi Homing", func() {
 					serverPodConfig.namespace = f.Namespace.Name
 
 					if netConfig.topology == "localnet" {
-						By("setting up the localnet underlay")
+						ginkgo.By("setting up the localnet underlay")
 						nodes := ovsPods(cs)
 						Expect(nodes).NotTo(BeEmpty())
 						defer func() {
-							By("tearing down the localnet underlay")
+							ginkgo.By("tearing down the localnet underlay")
 							Expect(teardownUnderlay(nodes)).To(Succeed())
 						}()
 
@@ -865,7 +864,7 @@ var _ = Describe("Multi Homing", func() {
 
 					for _, ns := range []v1.Namespace{*f.Namespace, *extraNamespace} {
 						stepInfo := fmt.Sprintf("creating the attachment configuration for namespace %q", ns.Name)
-						By(stepInfo)
+						ginkgo.By(stepInfo)
 						netConfig.namespace = ns.Name
 						_, err := nadClient.NetworkAttachmentDefinitions(ns.Name).Create(
 							context.Background(),
@@ -875,7 +874,7 @@ var _ = Describe("Multi Homing", func() {
 						Expect(err).NotTo(HaveOccurred())
 					}
 
-					By("sitting on our hands for a couple secs we give the controller time to sync all NADs before provisioning policies and pods")
+					ginkgo.By("sitting on our hands for a couple secs we give the controller time to sync all NADs before provisioning policies and pods")
 					// TODO: this is temporary. We hope to eventually sync pods & multi-net policies on NAD C/U/D ops
 					time.Sleep(3 * time.Second)
 
@@ -883,11 +882,11 @@ var _ = Describe("Multi Homing", func() {
 					kickstartPod(cs, allowedClientPodConfig)
 					kickstartPod(cs, blockedClientPodConfig)
 
-					By("asserting the server pod has an IP from the configured range")
+					ginkgo.By("asserting the server pod has an IP from the configured range")
 					serverIP, err := podIPForAttachment(cs, serverPodConfig.namespace, serverPodConfig.name, netConfig.name, 0)
 					Expect(err).NotTo(HaveOccurred())
 					if netConfig.cidr != "" {
-						By(fmt.Sprintf("asserting the server pod IP %v is from the configured range %v/%v", serverIP, netConfig.cidr, netPrefixLengthPerNode))
+						ginkgo.By(fmt.Sprintf("asserting the server pod IP %v is from the configured range %v/%v", serverIP, netConfig.cidr, netPrefixLengthPerNode))
 						subnet, err := getNetCIDRSubnet(netConfig.cidr)
 						Expect(err).NotTo(HaveOccurred())
 						Expect(inRange(subnet, serverIP)).To(Succeed())
@@ -899,7 +898,7 @@ var _ = Describe("Multi Homing", func() {
 						setBlockedClientIPInPolicyIPBlockExcludedRanges(policy, blockedIP)
 					}
 
-					By("provisioning the multi-network policy")
+					ginkgo.By("provisioning the multi-network policy")
 					_, err = mnpClient.MultiNetworkPolicies(f.Namespace.Name).Create(
 						context.Background(),
 						policy,
@@ -907,17 +906,17 @@ var _ = Describe("Multi Homing", func() {
 					)
 					Expect(err).To(Succeed())
 
-					By("asserting the *allowed-client* pod can contact the server pod exposed endpoint")
+					ginkgo.By("asserting the *allowed-client* pod can contact the server pod exposed endpoint")
 					Eventually(func() error {
 						return reachToServerPodFromClient(cs, serverPodConfig, allowedClientPodConfig, serverIP, port)
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
 
-					By("asserting the *blocked-client* pod **cannot** contact the server pod exposed endpoint")
+					ginkgo.By("asserting the *blocked-client* pod **cannot** contact the server pod exposed endpoint")
 					Expect(connectToServer(blockedClientPodConfig, serverIP, port)).To(
 						MatchError(
 							MatchRegexp("Connection timeout after 200[0-9] ms")))
 				},
-				table.Entry(
+				ginkgo.Entry(
 					"for a pure L2 overlay when the multi-net policy describes the allow-list using pod selectors",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
@@ -954,7 +953,7 @@ var _ = Describe("Multi Homing", func() {
 						port,
 					),
 				),
-				table.Entry(
+				ginkgo.Entry(
 					"for a routed topology when the multi-net policy describes the allow-list using pod selectors",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
@@ -991,7 +990,7 @@ var _ = Describe("Multi Homing", func() {
 						port,
 					),
 				),
-				table.Entry(
+				ginkgo.Entry(
 					"for a localnet topology when the multi-net policy describes the allow-list using pod selectors",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
@@ -1028,7 +1027,7 @@ var _ = Describe("Multi Homing", func() {
 						port,
 					),
 				),
-				table.Entry(
+				ginkgo.Entry(
 					"for a pure L2 overlay when the multi-net policy describes the allow-list using IPBlock",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
@@ -1060,7 +1059,7 @@ var _ = Describe("Multi Homing", func() {
 						port,
 					),
 				),
-				table.Entry(
+				ginkgo.Entry(
 					"for a routed topology when the multi-net policy describes the allow-list using IPBlock",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
@@ -1092,7 +1091,7 @@ var _ = Describe("Multi Homing", func() {
 						port,
 					),
 				),
-				table.Entry(
+				ginkgo.Entry(
 					"for a localnet topology when the multi-net policy describes the allow-list using IPBlock",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
@@ -1124,7 +1123,7 @@ var _ = Describe("Multi Homing", func() {
 						port,
 					),
 				),
-				table.Entry(
+				ginkgo.Entry(
 					"for a pure L2 overlay when the multi-net policy describes the allow-list via namespace selectors",
 					networkAttachmentConfigParams{
 						name:        secondaryNetworkName,
@@ -1158,7 +1157,7 @@ var _ = Describe("Multi Homing", func() {
 						port,
 					),
 				),
-				table.Entry(
+				ginkgo.Entry(
 					"for a routed topology when the multi-net policy describes the allow-list via namespace selectors",
 					networkAttachmentConfigParams{
 						name:        secondaryNetworkName,
@@ -1192,7 +1191,7 @@ var _ = Describe("Multi Homing", func() {
 						port,
 					),
 				),
-				table.Entry(
+				ginkgo.Entry(
 					"for a localnet topology when the multi-net policy describes the allow-list via namespace selectors",
 					networkAttachmentConfigParams{
 						name:        secondaryNetworkName,
@@ -1227,7 +1226,7 @@ var _ = Describe("Multi Homing", func() {
 					),
 				),
 
-				table.Entry(
+				ginkgo.Entry(
 					"for an IPAMless pure L2 overlay when the multi-net policy describes the allow-list using IPBlock",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
@@ -1263,10 +1262,10 @@ var _ = Describe("Multi Homing", func() {
 		})
 	})
 
-	Context("A pod with multiple attachments to the same OVN-K networks", func() {
+	ginkgo.Context("A pod with multiple attachments to the same OVN-K networks", func() {
 		var pod *v1.Pod
 
-		BeforeEach(func() {
+		ginkgo.BeforeEach(func() {
 			netAttachDefs := []networkAttachmentConfig{
 				newAttachmentConfigWithOverriddenName(secondaryNetworkName, f.Namespace.Name, secondaryNetworkName, "layer2", secondaryFlatL2NetworkCIDR),
 				newAttachmentConfigWithOverriddenName(secondaryNetworkName+"-alias", f.Namespace.Name, secondaryNetworkName, "layer2", secondaryFlatL2NetworkCIDR),
@@ -1274,7 +1273,7 @@ var _ = Describe("Multi Homing", func() {
 
 			for i := range netAttachDefs {
 				netConfig := netAttachDefs[i]
-				By("creating the attachment configuration")
+				ginkgo.By("creating the attachment configuration")
 				_, err := nadClient.NetworkAttachmentDefinitions(netConfig.namespace).Create(
 					context.Background(),
 					generateNAD(netConfig),
@@ -1283,7 +1282,7 @@ var _ = Describe("Multi Homing", func() {
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			By("sitting on our hands for a couple secs we give the controller time to sync all NADs before provisioning policies and pods")
+			ginkgo.By("sitting on our hands for a couple secs we give the controller time to sync all NADs before provisioning policies and pods")
 			// TODO: this is temporary. We hope to eventually sync pods & multi-net policies on NAD C/U/D ops
 			time.Sleep(3 * time.Second)
 
@@ -1295,7 +1294,7 @@ var _ = Describe("Multi Homing", func() {
 				name:      podName,
 				namespace: f.Namespace.Name,
 			}
-			By("creating the pod using a secondary network")
+			ginkgo.By("creating the pod using a secondary network")
 			var err error
 			pod, err = cs.CoreV1().Pods(podConfig.namespace).Create(
 				context.Background(),
@@ -1304,7 +1303,7 @@ var _ = Describe("Multi Homing", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("asserting the pod gets to the `Ready` phase")
+			ginkgo.By("asserting the pod gets to the `Ready` phase")
 			Eventually(func() v1.PodPhase {
 				updatedPod, err := cs.CoreV1().Pods(podConfig.namespace).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
 				if err != nil {
@@ -1314,7 +1313,7 @@ var _ = Describe("Multi Homing", func() {
 			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 		})
 
-		It("features two different IPs from the same subnet", func() {
+		ginkgo.It("features two different IPs from the same subnet", func() {
 			var err error
 			pod, err = cs.CoreV1().Pods(pod.GetNamespace()).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -1335,7 +1334,7 @@ var _ = Describe("Multi Homing", func() {
 })
 
 func kickstartPod(cs clientset.Interface, configuration podConfiguration) *v1.Pod {
-	By(fmt.Sprintf("instantiating the %q pod", fmt.Sprintf("%s/%s", configuration.namespace, configuration.name)))
+	ginkgo.By(fmt.Sprintf("instantiating the %q pod", fmt.Sprintf("%s/%s", configuration.namespace, configuration.name)))
 	createdPod, err := cs.CoreV1().Pods(configuration.namespace).Create(
 		context.Background(),
 		generatePodSpec(configuration),
@@ -1343,7 +1342,7 @@ func kickstartPod(cs clientset.Interface, configuration podConfiguration) *v1.Po
 	)
 	Expect(err).WithOffset(1).NotTo(HaveOccurred())
 
-	By("asserting the pod reaches the `Ready` state")
+	ginkgo.By("asserting the pod reaches the `Ready` state")
 	EventuallyWithOffset(1, func() v1.PodPhase {
 		updatedPod, err := cs.CoreV1().Pods(configuration.namespace).Get(context.Background(), configuration.name, metav1.GetOptions{})
 		if err != nil {

@@ -11,12 +11,12 @@ import (
 	"golang.org/x/sync/errgroup"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/onsi/ginkgo"
-	ginkgotable "github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 )
 
 var _ = ginkgo.Describe("e2e EgressQoS validation", func() {
@@ -66,12 +66,12 @@ var _ = ginkgo.Describe("e2e EgressQoS validation", func() {
 		dstPod2IPv4, dstPod2IPv6 = getPodAddresses(dstPod2)
 
 		gomega.Eventually(func() error {
-			_, err := framework.RunKubectl(f.Namespace.Name, "exec", dstPod1Name, "--", "which", "tcpdump")
+			_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", dstPod1Name, "--", "which", "tcpdump")
 			if err != nil {
 				return err
 			}
 
-			_, err = framework.RunKubectl(f.Namespace.Name, "exec", dstPod2Name, "--", "which", "tcpdump")
+			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", dstPod2Name, "--", "which", "tcpdump")
 			return err
 		}, 60*time.Second, 1*time.Second).ShouldNot(gomega.HaveOccurred())
 	})
@@ -80,7 +80,7 @@ var _ = ginkgo.Describe("e2e EgressQoS validation", func() {
 	// values corresponding to the EgressQoS resource. Updating the resource should change these values.
 	// We also validate that both current pods and new pods are affected by the EgressQoS resource by
 	// creating the pod before or after it (podBeforeQoS param).
-	ginkgotable.DescribeTable("Should validate correct DSCP value on EgressQoS resource changes",
+	ginkgo.DescribeTable("Should validate correct DSCP value on EgressQoS resource changes",
 		func(tcpDumpTpl string, dst1IP *string, prefix1 string, dst2IP *string, podBeforeQoS bool) {
 			dscpValue := 50
 			if podBeforeQoS {
@@ -114,7 +114,7 @@ spec:
 			}()
 
 			framework.Logf("Create the EgressQoS configuration")
-			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressQoSYaml)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressQoSYaml)
 
 			if !podBeforeQoS {
 				_, err := createPod(f, srcPodName, srcNode, f.Namespace.Name, []string{}, map[string]string{"app": "test"})
@@ -143,21 +143,21 @@ spec:
 				framework.Failf("Unable to write CRD config to disk: %v", err)
 			}
 			framework.Logf("Update the EgressQoS configuration")
-			framework.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressQoSYaml)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressQoSYaml)
 
 			pingAndCheckDSCP(f, srcPodName, dstPod1Name, *dst1IP, dstPod2Name, *dst2IP, tcpDumpTpl, dscpValue-10, dscpValue-20)
 
-			framework.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressQoSYaml)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressQoSYaml)
 
 			pingAndCheckDSCP(f, srcPodName, dstPod1Name, *dst1IP, dstPod2Name, *dst2IP, tcpDumpTpl, 0, 0)
 
 		},
-		ginkgotable.Entry("ipv4 pod before resource", tcpdumpIPv4, &dstPod1IPv4, "/32", &dstPod2IPv4, true),
-		ginkgotable.Entry("ipv4 pod after resource", tcpdumpIPv4, &dstPod1IPv4, "/32", &dstPod2IPv4, false),
-		ginkgotable.Entry("ipv6 pod before resource", tcpdumpIPv6, &dstPod1IPv6, "/128", &dstPod2IPv6, true),
-		ginkgotable.Entry("ipv6 pod after resource", tcpdumpIPv6, &dstPod1IPv6, "/128", &dstPod2IPv6, false))
+		ginkgo.Entry("ipv4 pod before resource", tcpdumpIPv4, &dstPod1IPv4, "/32", &dstPod2IPv4, true),
+		ginkgo.Entry("ipv4 pod after resource", tcpdumpIPv4, &dstPod1IPv4, "/32", &dstPod2IPv4, false),
+		ginkgo.Entry("ipv6 pod before resource", tcpdumpIPv6, &dstPod1IPv6, "/128", &dstPod2IPv6, true),
+		ginkgo.Entry("ipv6 pod after resource", tcpdumpIPv6, &dstPod1IPv6, "/128", &dstPod2IPv6, false))
 
-	ginkgotable.DescribeTable("Should validate correct DSCP value on pod labels changes",
+	ginkgo.DescribeTable("Should validate correct DSCP value on pod labels changes",
 		func(tcpDumpTpl string, dst1IP *string, prefix1 string, dst2IP *string, prefix2 string) {
 			dscpValue := 50
 
@@ -195,7 +195,7 @@ spec:
 			}()
 
 			framework.Logf("Create the EgressQoS configuration")
-			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressQoSYaml)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressQoSYaml)
 
 			pingAndCheckDSCP(f, srcPodName, dstPod1Name, *dst1IP, dstPod2Name, *dst2IP, tcpDumpTpl, 0, 0)
 
@@ -227,8 +227,8 @@ spec:
 
 			pingAndCheckDSCP(f, srcPodName, dstPod1Name, *dst1IP, dstPod2Name, *dst2IP, tcpDumpTpl, 0, 0)
 		},
-		ginkgotable.Entry("ipv4 pod", tcpdumpIPv4, &dstPod1IPv4, "/32", &dstPod2IPv4, "/32"),
-		ginkgotable.Entry("ipv6 pod", tcpdumpIPv6, &dstPod1IPv6, "/128", &dstPod2IPv6, "/128"))
+		ginkgo.Entry("ipv4 pod", tcpdumpIPv4, &dstPod1IPv4, "/32", &dstPod2IPv4, "/32"),
+		ginkgo.Entry("ipv6 pod", tcpdumpIPv6, &dstPod1IPv6, "/128", &dstPod2IPv6, "/128"))
 
 	ginkgo.It("Should deny resources with bad values", func() {
 		ginkgo.By("Creating an EgressQoS not named default")
@@ -253,7 +253,7 @@ spec:
 			}
 		}()
 
-		_, err := framework.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
+		_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
 		framework.ExpectError(err, "a resource not named default should be denied")
 		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"not-default\""))
 
@@ -280,7 +280,7 @@ spec:
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 
-		_, err = framework.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
 		framework.ExpectError(err, "a resource with bad cidrs should be denied")
 		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"1.2.3.256/32\""))
 		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"1.2.3.4/42\""))
@@ -294,13 +294,13 @@ func pingAndCheckDSCP(f *framework.Framework, srcPod, dstPod1, dstPod1IP, dstPod
 	pingSync := errgroup.Group{}
 
 	checkDSCPOnPod := func(pod string, dscp int) error {
-		_, err := framework.RunKubectl(f.Namespace.Name, "exec", pod, "--", "timeout", "10",
+		_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", pod, "--", "timeout", "10",
 			"tcpdump", "-i", "any", "-c", "1", "-v", fmt.Sprintf(tcpDumpTpl, dscp))
 		return err
 	}
 
 	pingFromSrcPod := func(pod, dst string) error {
-		_, err := framework.RunKubectl(f.Namespace.Name, "exec", pod, "--", "ping", "-c", "3", dst)
+		_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", pod, "--", "ping", "-c", "3", dst)
 		return err
 	}
 
