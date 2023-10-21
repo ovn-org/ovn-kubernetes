@@ -856,6 +856,7 @@ func IsOVNManagedNetwork(eIPConfig *ParsedNodeEgressIPConfiguration, ip net.IP) 
 }
 
 // GetNonOVNNetworkContainingIP attempts to find a non OVN managed network to host the argument IP
+// and includes only global unicast addresses.
 func GetNonOVNNetworkContainingIP(node *v1.Node, ip net.IP) (string, error) {
 	networks, err := ParseNodeHostCIDRsExcludeOVNManagedNetworks(node)
 	if err != nil {
@@ -866,10 +867,20 @@ func GetNonOVNNetworkContainingIP(node *v1.Node, ip net.IP) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if len(cidrs) == 0 {
+		return "", nil
+	}
+	isIPv6 := ip.To4() == nil
+	cidrs = filterIPVersion(cidrs, isIPv6)
 	lpmTree := cidrtree.New(cidrs...)
+	for _, prefix := range cidrs {
+		if !prefix.Addr().IsGlobalUnicast() {
+			lpmTree.Delete(prefix)
+		}
+	}
 	addr, err := netip.ParseAddr(ip.String())
 	if err != nil {
-		return "", fmt.Errorf("failed to parse IP %s: %v", ip.String(), err)
+		return "", fmt.Errorf("failed to convert IP %s to netip address: %v", ip.String(), err)
 	}
 	match, found := lpmTree.Lookup(addr)
 	if !found {
@@ -1081,4 +1092,18 @@ func makeCIDRs(s ...string) (cidrs []netip.Prefix, err error) {
 		cidrs = append(cidrs, prefix)
 	}
 	return cidrs, nil
+}
+
+func filterIPVersion(cidrs []netip.Prefix, v6 bool) []netip.Prefix {
+	validCIDRs := make([]netip.Prefix, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		if cidr.Addr().Is4() && v6 {
+			continue
+		}
+		if cidr.Addr().Is6() && !v6 {
+			continue
+		}
+		validCIDRs = append(validCIDRs, cidr)
+	}
+	return validCIDRs
 }
