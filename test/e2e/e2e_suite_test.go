@@ -4,12 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path"
 	"testing"
 
 	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/ginkgo/v2/config"
-	"github.com/onsi/ginkgo/v2/reporters"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/diagnostics"
 	"k8s.io/client-go/tools/clientcmd"
@@ -81,20 +78,14 @@ func TestMain(m *testing.M) {
 }
 
 func TestE2E(t *testing.T) {
-	// Run tests through the Ginkgo runner with output to console + JUnit for reporting
-	var r []ginkgo.Reporter
+	if testing.Short() {
+		return
+	}
 	if framework.TestContext.ReportDir != "" {
-		klog.Infof("Saving reports to %s", framework.TestContext.ReportDir)
-		// TODO: we should probably only be trying to create this directory once
-		// rather than once-per-Ginkgo-node.
 		if err := os.MkdirAll(framework.TestContext.ReportDir, 0755); err != nil {
 			klog.Errorf("Failed creating report directory: %v", err)
-		} else {
-			defaultReporterConfigType := config.DeprecatedGinkgoConfigType{}
-			r = append(r, reporters.NewJUnitReporter(path.Join(framework.TestContext.ReportDir,
-				fmt.Sprintf("junit_%v%02d.xml", framework.TestContext.ReportPrefix, defaultReporterConfigType.ParallelNode))))
 		}
 	}
 	gomega.RegisterFailHandler(framework.Fail)
-	ginkgo.RunSpecsWithDefaultAndCustomReporters(t, "E2e Suite", r)
+	ginkgo.RunSpecs(t, "E2E Suite")
 }
