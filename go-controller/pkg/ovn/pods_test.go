@@ -232,6 +232,10 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 
 	var routeSources []*net.IPNet
 	for _, podIP := range strings.Split(podIPs, " ") {
+		if podIP == "" {
+			continue
+		}
+
 		isIPv6 := ovntest.MustParseIP(podIP).To4() == nil
 
 		for _, subnet := range config.Default.ClusterSubnets {
@@ -2299,6 +2303,75 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				gomega.Eventually(fakeOvn.nbClient).Should(
 					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("won't release a completed pod IP if a running pod has the same IP", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+
+				completedTPod := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"",
+					"10.128.1.1",
+					"myCompletedPod",
+					"10.128.1.30",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				completedPod := newPod(completedTPod.namespace, completedTPod.podName, completedTPod.nodeName, completedTPod.podIP)
+				setPodAnnotations(completedPod, completedTPod)
+				completedPod.UID = types.UID(completedPod.ObjectMeta.Name)
+				completedPod.Status.Phase = v1.PodSucceeded
+
+				runningTPod := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"",
+					"10.128.1.1 fd11::1",
+					"myRunningPod",
+					"10.128.1.30",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				runningPod := newPod(runningTPod.namespace, runningTPod.podName, runningTPod.nodeName, runningTPod.podIP)
+				setPodAnnotations(runningPod, runningTPod)
+				runningPod.UID = types.UID(runningPod.ObjectMeta.Name)
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*runningPod,
+							*completedPod,
+						},
+					},
+				)
+				runningTPod.populateLogicalSwitchCache(fakeOvn)
+
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// use the namespace address set to verify that the IP was not
+				// released
+				fakeOvn.asf.ExpectAddressSetWithIPs(runningTPod.namespace, []string{runningTPod.podIP})
+
 				return nil
 			}
 
