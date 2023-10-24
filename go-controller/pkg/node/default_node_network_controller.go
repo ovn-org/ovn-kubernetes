@@ -342,13 +342,18 @@ func setupOVNNode(node *kapi.Node) error {
 	return nil
 }
 
-func setEncapPort() error {
+func setEncapPort(ctx context.Context) error {
 	systemID, err := util.GetNodeChassisID()
 	if err != nil {
 		return err
 	}
-	uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
-		fmt.Sprintf("chassis_name=%s", systemID))
+	var uuid string
+	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true,
+		func(ctx context.Context) (bool, error) {
+			uuid, _, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
+				fmt.Sprintf("chassis_name=%s", systemID))
+			return len(uuid) != 0, err
+		})
 	if err != nil {
 		return err
 	}
@@ -835,7 +840,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// NOTE: ovnkube-node in DPU-host mode has no SBDB to connect to. The encap port will be handled by the
 	// ovnkube-node running in DPU mode on behalf of the host.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Default.EncapPort != config.DefaultEncapPort {
-		if err := setEncapPort(); err != nil {
+		if err := setEncapPort(ctx); err != nil {
 			return err
 		}
 	}
