@@ -14,6 +14,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/urfave/cli/v2"
 	gcfg "gopkg.in/gcfg.v1"
@@ -344,7 +345,7 @@ type KubernetesConfig struct {
 	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
 	PodIP                string `gcfg:"pod-ip"` // UNUSED
 	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
-	NoHostSubnetNodes    *metav1.LabelSelector
+	NoHostSubnetNodes    labels.Selector
 	HostNetworkNamespace string `gcfg:"host-network-namespace"`
 	PlatformType         string `gcfg:"platform-type"`
 	HealthzBindAddress   string `gcfg:"healthz-bind-address"`
@@ -1714,11 +1715,15 @@ func completeKubernetesConfig(allSubnets *configSubnets) error {
 	}
 
 	if Kubernetes.RawNoHostSubnetNodes != "" {
-		if nodeSelector, err := metav1.ParseToLabelSelector(Kubernetes.RawNoHostSubnetNodes); err == nil {
-			Kubernetes.NoHostSubnetNodes = nodeSelector
-		} else {
+		nodeSelector, err := metav1.ParseToLabelSelector(Kubernetes.RawNoHostSubnetNodes)
+		if err != nil {
 			return fmt.Errorf("labelSelector \"%s\" is invalid: %v", Kubernetes.RawNoHostSubnetNodes, err)
 		}
+		selector, err := metav1.LabelSelectorAsSelector(nodeSelector)
+		if err != nil {
+			return fmt.Errorf("failed to convert %v into a labels.Selector: %v", nodeSelector, err)
+		}
+		Kubernetes.NoHostSubnetNodes = selector
 	}
 
 	return nil

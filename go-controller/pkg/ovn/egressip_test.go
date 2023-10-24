@@ -5106,6 +5106,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 				fakeOvn.patchEgressIPObj(node2Name, egressIPName, updatedEgressIP.String(), "::/64")
+				expectedNAT.ExternalIP = updatedEgressIP.String()
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(func() []string {
@@ -5122,7 +5123,30 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		})
 
 	})
-
+	ginkgo.Context("on invalid EgressIP selectors", func() {
+		ginkgo.It("reconcileEgressIP should return an error", func() {
+			app.Action = func(ctx *cli.Context) error {
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{"egressIP1"},
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{"": ""},
+						},
+						NamespaceSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{"": ""},
+						},
+					},
+				}
+				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{})
+				err := fakeOvn.controller.reconcileEgressIP(&eIP, &eIP)
+				gomega.Expect(err).To(gomega.HaveOccurred())
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
 	ginkgo.Context("WatchEgressNodes", func() {
 
 		ginkgo.It("should populated egress node data as they are tagged `egress assignable` with variants of IPv4/IPv6", func() {

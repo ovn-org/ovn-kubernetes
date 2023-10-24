@@ -5,11 +5,7 @@ import (
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-
 	kapi "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -27,16 +23,6 @@ func ParseHybridOverlayHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 			node.Name, types.HybridOverlayNodeSubnet, sub, err)
 	}
 	return subnet, nil
-}
-
-// IsHybridOverlayNode returns true if the node has been labeled as a
-// node which does not participate in the ovn-kubernetes overlay network
-func IsHybridOverlayNode(node *kapi.Node) bool {
-	if config.Kubernetes.NoHostSubnetNodes != nil {
-		nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
-		return nodeSelector.Matches(labels.Set(node.Labels))
-	}
-	return false
 }
 
 // SameIPNet returns true if both inputs are nil or if both inputs have the
