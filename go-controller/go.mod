@@ -19,7 +19,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.8.0
 	github.com/j-keck/arping v1.0.2
-	github.com/k8snetworkplumbingwg/govdpa v0.1.4
+	github.com/k8snetworkplumbingwg/govdpa v0.1.5-0.20230926073613-07c1031aea47
 	github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0
 	github.com/k8snetworkplumbingwg/sriovnet v1.2.1-0.20230427090635-4929697df2dc

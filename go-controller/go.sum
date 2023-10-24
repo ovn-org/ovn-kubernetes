@@ -489,8 +489,8 @@ github.com/juju/testing v0.0.0-20200706033705-4c23f9c453cd/go.mod h1:hpGvhGHPVbN
 github.com/juju/utils v0.0.0-20180808125547-9dfc6dbfb02b/go.mod h1:6/KLg8Wz/y2KVGWEpkK9vMNGkOnu4k/cqs8Z1fKjTOk=
 github.com/juju/version v0.0.0-20161031051906-1f41e27e54f2/go.mod h1:kE8gK5X0CImdr7qpSKl3xB2PmpySSmfj7zVbkZFs81U=
 github.com/julienschmidt/httprouter v1.2.0/go.mod h1:SYymIcj16QtmaHHD7aYtjjsJG7VTCxuUUipMqKk8s4w=
-github.com/k8snetworkplumbingwg/govdpa v0.1.4 h1:e6mM7JFZkLVJeMQw3px96EigHAhnb4VUlqhNub/2Psk=
-github.com/k8snetworkplumbingwg/govdpa v0.1.4/go.mod h1:UQR1xu7A+nnRK1dkLEi12OnNL0OiBPpIKOYDuaQQkck=
+github.com/k8snetworkplumbingwg/govdpa v0.1.5-0.20230926073613-07c1031aea47 h1:iSncnlC+rtlNOIpPa3fbqQMhpTscGJIlkiWaPl1VcS4=
+github.com/k8snetworkplumbingwg/govdpa v0.1.5-0.20230926073613-07c1031aea47/go.mod h1:SPaDIyUmwN03Bgn0u/mhoiE4o/+koeKh11VUsdsUX0U=
 github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170 h1:rtPle+U5e7Fia0j44gm+p5QMgOIXXB3A8GtFeCCh8Kk=
 github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170/go.mod h1:CF9uYILB8GY25A/6Hhi1AWKc29qbyLu8r7Gs+uINGZE=
 github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0 h1:VzM3TYHDgqPkettiP6I6q2jOeQFL4nrJM+UcAc4f6Fs=

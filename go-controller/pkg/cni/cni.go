@@ -112,7 +112,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	if pr.CNIConf.DeviceID != "" {
 		var err error
 
-		netdevName, err = util.GetNetdevNameFromDeviceId(pr.CNIConf.DeviceID)
+		netdevName, err = util.GetNetdevNameFromDeviceId(pr.CNIConf.DeviceID, pr.deviceInfo)
 		if err != nil {
 			return nil, fmt.Errorf("failed in cmdAdd while getting Netdevice name: %v", err)
 		}

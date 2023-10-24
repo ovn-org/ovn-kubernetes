@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kapi "k8s.io/api/core/v1"
 )
 
@@ -79,6 +80,8 @@ type Request struct {
 	Env map[string]string `json:"env,omitempty"`
 	// CNI configuration passed via stdin to the CNI plugin
 	Config []byte `json:"config,omitempty"`
+	// The DeviceInfo struct
+	nadapi.DeviceInfo
 }
 
 // CNIRequestMetrics info to report from CNI shim to CNI server
@@ -157,6 +160,9 @@ type PodRequest struct {
 	// also, need to find the pod annotation, dpu pod connection/status annotations of the given NAD ("default"
 	// for default network).
 	nadName string
+
+	// the DeviceInfo struct
+	deviceInfo nadapi.DeviceInfo
 }
 
 type podRequestFunc func(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth) ([]byte, error)

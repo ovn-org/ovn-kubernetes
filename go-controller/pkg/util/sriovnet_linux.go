@@ -8,7 +8,9 @@ import (
 	"net"
 
 	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/k8snetworkplumbingwg/sriovnet"
+	"k8s.io/klog/v2"
 )
 
 type SriovnetOps interface {
@@ -136,16 +138,28 @@ func GetFunctionRepresentorName(deviceID string) (string, error) {
 }
 
 // GetNetdevNameFromDeviceId returns the netdevice name from the passed device ID.
-func GetNetdevNameFromDeviceId(deviceId string) (string, error) {
+func GetNetdevNameFromDeviceId(deviceId string, deviceInfo nadapi.DeviceInfo) (string, error) {
 	var netdevices []string
 	var err error
 
 	if IsPCIDeviceName(deviceId) {
-		// If a vDPA device exists, it takes preference over the vendor device, steering-wize
+		if deviceInfo.Vdpa != nil {
+			if deviceInfo.Vdpa.Driver == "vhost" {
+				klog.V(2).Info("deviceInfo.Vdpa.Driver is vhost, returning empty netdev")
+				return "", nil
+			}
+		}
+
+		// If a virtio/vDPA device exists, it takes preference over the vendor device, steering-wize
 		var vdpaDevice kvdpa.VdpaDevice
 		vdpaDevice, err = GetVdpaOps().GetVdpaDeviceByPci(deviceId)
 		if err == nil && vdpaDevice.Driver() == kvdpa.VirtioVdpaDriver {
+			klog.V(2).Infof("deviceInfo.Vdpa.Driver is virtio, returning netdev %s", vdpaDevice.VirtioNet().NetDev())
 			return vdpaDevice.VirtioNet().NetDev(), nil
+		}
+		if err != nil {
+			klog.Errorf("Error when searching for the virtio/vdpa netdev: ", err)
+			return "", err
 		}
 
 		netdevices, err = GetSriovnetOps().GetNetDevicesFromPci(deviceId)
