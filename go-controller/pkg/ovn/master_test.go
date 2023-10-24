@@ -1521,9 +1521,10 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// Don't create clusterManager so that the node has not subnets allocated.
 
-			config.Kubernetes.NoHostSubnetNodes = &metav1.LabelSelector{
+			config.Kubernetes.NoHostSubnetNodes, err = metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 				MatchLabels: nodeNoHostSubnetAnnotation(),
-			}
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			gomega.Expect(
 				oc.retryNodes.ResourceHandler.AddResource(
