@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -279,11 +280,6 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
 		}
 	}
 
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
-	if err != nil {
-		return fmt.Errorf("unable to unmarshal pod annotation to release IPs at removeRemoteZonePod: %v", err)
-	}
-
 	// while this check is only intended for local pods, we also need it for
 	// remote live migrated pods that might have been allocated from this zone
 	if oc.wasPodReleasedBeforeStartup(string(pod.UID), ovntypes.DefaultNetworkName) {
@@ -295,13 +291,17 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
 	}
 
 	if err := oc.removeRemoteZonePodFromNamespaceAddressSet(pod); err != nil {
-		return fmt.Errorf("failed to remove the remote zone pod : %w", err)
+		return fmt.Errorf("failed to remove the remote zone pod: %w", err)
 	}
 
 	if kubevirt.IsPodLiveMigratable(pod) {
-		switchName, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(oc.lsManager, podAnnotation)
+		ips, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+		if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
+			return fmt.Errorf("failed to get pod ips for the pod %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
+		switchName, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(oc.lsManager, ips)
 		if zoneContainsPodSubnet {
-			if err := oc.lsManager.ReleaseIPs(switchName, podAnnotation.IPs); err != nil {
+			if err := oc.lsManager.ReleaseIPs(switchName, ips); err != nil {
 				return err
 			}
 		}
