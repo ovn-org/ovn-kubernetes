@@ -303,7 +303,10 @@ func (oc *DefaultNetworkController) reconcileEgressIPNamespace(old, new *v1.Name
 		return err
 	}
 	for _, egressIP := range egressIPs {
-		namespaceSelector, _ := metav1.LabelSelectorAsSelector(&egressIP.Spec.NamespaceSelector)
+		namespaceSelector, err := metav1.LabelSelectorAsSelector(&egressIP.Spec.NamespaceSelector)
+		if err != nil {
+			return err
+		}
 		if namespaceSelector.Matches(oldLabels) && !namespaceSelector.Matches(newLabels) {
 			if err := oc.deleteNamespaceEgressIPAssignment(egressIP.Name, egressIP.Status.Items, oldNamespace, egressIP.Spec.PodSelector); err != nil {
 				return err
@@ -370,7 +373,10 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 		return err
 	}
 	for _, egressIP := range egressIPs {
-		namespaceSelector, _ := metav1.LabelSelectorAsSelector(&egressIP.Spec.NamespaceSelector)
+		namespaceSelector, err := metav1.LabelSelectorAsSelector(&egressIP.Spec.NamespaceSelector)
+		if err != nil {
+			return err
+		}
 		if namespaceSelector.Matches(namespaceLabels) {
 			// If the namespace the pod belongs to matches this object then
 			// check the if there's a podSelector defined on the EgressIP
@@ -378,7 +384,10 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 			// match only a subset of pods in the namespace, and we'll have to
 			// check that. If there is no podSelector: the user intends it to
 			// match all pods in the namespace.
-			podSelector, _ := metav1.LabelSelectorAsSelector(&egressIP.Spec.PodSelector)
+			podSelector, err := metav1.LabelSelectorAsSelector(&egressIP.Spec.PodSelector)
+			if err != nil {
+				return err
+			}
 			if !podSelector.Empty() {
 				newMatches := podSelector.Matches(newPodLabels)
 				oldMatches := podSelector.Matches(oldPodLabels)
@@ -446,7 +455,10 @@ func (oc *DefaultNetworkController) addEgressIPAssignments(name string, statusAs
 func (oc *DefaultNetworkController) addNamespaceEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, namespace *kapi.Namespace, podSelector metav1.LabelSelector) error {
 	var pods []*kapi.Pod
 	var err error
-	selector, _ := metav1.LabelSelectorAsSelector(&podSelector)
+	selector, err := metav1.LabelSelectorAsSelector(&podSelector)
+	if err != nil {
+		return err
+	}
 	if !selector.Empty() {
 		pods, err = oc.watchFactory.GetPodsBySelector(namespace.Name, podSelector)
 		if err != nil {
@@ -687,7 +699,10 @@ func (oc *DefaultNetworkController) deleteEgressIPAssignments(name string, statu
 func (oc *DefaultNetworkController) deleteNamespaceEgressIPAssignment(name string, statusAssignments []egressipv1.EgressIPStatusItem, namespace *kapi.Namespace, podSelector metav1.LabelSelector) error {
 	var pods []*kapi.Pod
 	var err error
-	selector, _ := metav1.LabelSelectorAsSelector(&podSelector)
+	selector, err := metav1.LabelSelectorAsSelector(&podSelector)
+	if err != nil {
+		return err
+	}
 	if !selector.Empty() {
 		pods, err = oc.watchFactory.GetPodsBySelector(namespace.Name, podSelector)
 		if err != nil {

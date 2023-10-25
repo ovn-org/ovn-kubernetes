@@ -15,12 +15,10 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/pkg/errors"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -534,7 +532,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
 
-		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
+		if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
 			continue
 		}
 
@@ -711,7 +709,6 @@ type nodeSyncs struct {
 	syncGw                bool
 	syncHo                bool
 	syncZoneIC            bool
-	syncMigratablePods    bool
 }
 
 func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
@@ -726,7 +723,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for switch %s: %w", node.Name, err)
 		}
-		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
+		if config.HybridOverlay.Enabled {
 			// Parse the hybrid overlay host subnet for the node to
 			// make sure that cluster manager has allocated the subnet.
 			if _, err := houtil.ParseHybridOverlayHostSubnet(node); err != nil {
@@ -842,20 +839,12 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		}
 	}
 
-	if nSyncs.syncMigratablePods {
-		if err := oc.allocateSyncMigratablePodIPs(node); err != nil {
-			errs = append(errs, err)
-			oc.syncMigratablePodsFailed.Store(node.Name, true)
-		} else {
-			oc.syncMigratablePodsFailed.Delete(node.Name)
-		}
-	}
 	return kerrors.NewAggregate(errs)
 }
 
 func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIC bool) error {
 	// nothing to do for hybrid nodes
-	if houtil.IsHybridOverlayNode(node) {
+	if util.NoHostSubnet(node) {
 		return nil
 	}
 	start := time.Now()
@@ -902,12 +891,12 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 		"various caches", node.Name)
 
 	if config.HybridOverlay.Enabled {
-		if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
+		if util.NoHostSubnet(node) {
 			// noHostSubnet nodes are different, only remove the switch
 			oc.lsManager.DeleteSwitch(node.Name)
 			return nil
 		}
-		if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
+		if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok {
 			oc.deleteHybridOverlayPort(node)
 		}
 		if err := oc.removeHybridLRPolicySharedGW(node); err != nil {
@@ -967,10 +956,4 @@ func (oc *DefaultNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs()
 	}
 
 	return gwLRPIPs, nil
-}
-func (oc *DefaultNetworkController) allocateSyncMigratablePodIPs(node *kapi.Node) error {
-	allocatePodIPsOnSwitchWrapFn := func(liveMigratablePod *kapi.Pod, liveMigratablePodAnnotation *util.PodAnnotation, switchName, nadName string) (string, error) {
-		return oc.allocatePodIPsOnSwitch(liveMigratablePod, liveMigratablePodAnnotation, switchName, nadName)
-	}
-	return kubevirt.AllocateSyncMigratablePodsIPsOnNode(oc.watchFactory, oc.lsManager, node.Name, ovntypes.DefaultNetworkName, allocatePodIPsOnSwitchWrapFn)
 }

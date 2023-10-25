@@ -192,6 +192,7 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 	}
 
 	req.CNIConf = conf
+	req.deviceInfo = cr.DeviceInfo
 	req.timestamp = time.Now()
 	// Match the Kubelet default CRI operation timeout of 2m
 	req.ctx, req.cancel = context.WithTimeout(context.Background(), 2*time.Minute)

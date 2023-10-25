@@ -712,8 +712,7 @@ func NoHostSubnet(node *v1.Node) bool {
 		return false
 	}
 
-	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
-	return nodeSelector.Matches(labels.Set(node.Labels))
+	return config.Kubernetes.NoHostSubnetNodes.Matches(labels.Set(node.Labels))
 }
 
 // ForEachEligibleEndpoint iterates through each eligible endpoint in the given endpointslice and applies the input function fn to it.

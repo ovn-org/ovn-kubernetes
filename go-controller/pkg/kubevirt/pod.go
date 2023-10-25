@@ -2,6 +2,7 @@ package kubevirt
 
 import (
 	"fmt"
+	"net"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -145,8 +146,8 @@ func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bo
 // ZoneContainsPodSubnet will return true if the logical switch tonains
 // the pod subnet and also the switch name owning it, this means that
 // this zone owns the that subnet.
-func ZoneContainsPodSubnet(lsManager *logicalswitchmanager.LogicalSwitchManager, podAnnotation *util.PodAnnotation) (string, bool) {
-	return lsManager.GetSubnetName(podAnnotation.IPs)
+func ZoneContainsPodSubnet(lsManager *logicalswitchmanager.LogicalSwitchManager, ips []*net.IPNet) (string, bool) {
+	return lsManager.GetSubnetName(ips)
 }
 
 // nodeContainsPodSubnet will return true if the node subnet annotation
@@ -266,11 +267,11 @@ func allocateSyncMigratablePodIPs(watchFactory *factory.WatchFactory, lsManager 
 	if err != nil {
 		return nil, "", nil, nil
 	}
-	switchName, zoneContainsPodSubnet := ZoneContainsPodSubnet(lsManager, annotation)
+	switchName, zoneContainsPodSubnet := ZoneContainsPodSubnet(lsManager, annotation.IPs)
 	// If this zone do not own the subnet or the node that is passed
 	// do not match the switch, they should not be deallocated
 	if !zoneContainsPodSubnet || (nodeName != "" && switchName != nodeName) {
-		return vmKey, "", nil, nil
+		return vmKey, "", annotation, nil
 	}
 	expectedLogicalPortName, err := allocatePodIPsOnSwitch(pod, annotation, nadName, switchName)
 	if err != nil {
@@ -286,17 +287,29 @@ func AllocateSyncMigratablePodIPsOnZone(watchFactory *factory.WatchFactory, lsMa
 	return allocateSyncMigratablePodIPs(watchFactory, lsManager, nadName, "", pod, allocatePodIPsOnSwitch)
 }
 
-// AllocateSyncMigratablePodIPsOnNode will refill ip pool in
-// case the node has take over the vm subnet for live migrated vms
-func AllocateSyncMigratablePodsIPsOnNode(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, nodeName, nadName string, allocatePodIPsOnSwitch func(*corev1.Pod, *util.PodAnnotation, string, string) (string, error)) error {
-	liveMigratablePods, err := FindLiveMigratablePods(watchFactory)
-	if err != nil {
-		return err
+// ZoneContainsPodSubnetOrUntracked returns whether a pod with its corresponding
+// allocated IPs as reflected on the annotation come from a subnet that is
+// either assigned to a node of the zone or, not assigned to any node after
+// migrating from a node that has since been deleted and the subnet originally
+// assigned to that node has not yet been re-assigned to a different node. For
+// convenience, the host subnets might not provided in which case they might be
+// parsed and returned if used.
+func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, hostSubnets []*net.IPNet, annotation *util.PodAnnotation) ([]*net.IPNet, bool, error) {
+	_, local := ZoneContainsPodSubnet(lsManager, annotation.IPs)
+	if local {
+		return nil, true, nil
 	}
-	for _, liveMigratablePod := range liveMigratablePods {
-		if _, _, _, err := allocateSyncMigratablePodIPs(watchFactory, lsManager, nodeName, nadName, liveMigratablePod, allocatePodIPsOnSwitch); err != nil {
-			return err
+	if len(hostSubnets) == 0 {
+		nodes, err := watchFactory.GetNodes()
+		if err != nil {
+			return nil, false, err
+		}
+		hostSubnets, err = util.ParseNodesHostSubnetAnnotation(nodes, ovntypes.DefaultNetworkName)
+		if err != nil {
+			return nil, false, err
 		}
 	}
-	return nil
+	// we can just use one of the IPs to check if it belongs to a subnet assigned
+	// to a node
+	return hostSubnets, !util.IsContainedInAnyCIDR(annotation.IPs[0], hostSubnets...), nil
 }
