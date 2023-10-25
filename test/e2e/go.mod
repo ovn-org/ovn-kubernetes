@@ -82,7 +82,7 @@ require (
 	github.com/go-openapi/swag v0.22.3 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang/glog v1.0.0 // indirect
+	github.com/golang/glog v1.1.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
@@ -141,7 +141,7 @@ require (
 	golang.org/x/tools v0.9.1 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.2.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20230209215440-0dfe4f8abfcc // indirect
+	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
@@ -172,7 +172,7 @@ require (
 	github.com/openshift-kni/k8sreporter v1.0.4
 	github.com/ovn-org/ovn-kubernetes/go-controller v0.0.0-20230914190234-9cbdd02db9c6
 	go.universe.tf/metallb v0.0.0-00010101000000-000000000000
-	google.golang.org/grpc v1.53.0
+	google.golang.org/grpc v1.56.3
 	kubevirt.io/api v1.0.0
 	kubevirt.io/client-go v1.0.0
 )
