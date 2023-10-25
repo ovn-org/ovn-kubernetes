@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -2371,6 +2372,67 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// use the namespace address set to verify that the IP was not
 				// released
 				fakeOvn.asf.ExpectAddressSetWithIPs(runningTPod.namespace, []string{runningTPod.podIP})
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("should handle a scheduled or failed remote pod with no IPs annotated", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+
+				// testing how a scheduled non-annotated pod is handled is
+				// tricky, let's settle with a failed pod which should be
+				// handled in a similar way
+				myPod.Status.Phase = v1.PodFailed
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*myPod},
+					},
+				)
+
+				// initialize the localZoneNodes empty so the controller thinks
+				// the node is on a remote zone
+				fakeOvn.controller.localZoneNodes = &sync.Map{}
+
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// check that the pod is not being retried, it should have been
+				// handled synchronously and succesfully in WatchPods
+				podKey, err := retry.GetResourceKey(myPod)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(retry.CheckRetryObj(podKey, fakeOvn.controller.retryPods)).To(gomega.BeFalse())
+
+				// check that the namespace AS is kept empty
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceT.Name, []string{})
 
 				return nil
 			}

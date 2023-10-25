@@ -146,8 +146,8 @@ func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bo
 // ZoneContainsPodSubnet will return true if the logical switch tonains
 // the pod subnet and also the switch name owning it, this means that
 // this zone owns the that subnet.
-func ZoneContainsPodSubnet(lsManager *logicalswitchmanager.LogicalSwitchManager, podAnnotation *util.PodAnnotation) (string, bool) {
-	return lsManager.GetSubnetName(podAnnotation.IPs)
+func ZoneContainsPodSubnet(lsManager *logicalswitchmanager.LogicalSwitchManager, ips []*net.IPNet) (string, bool) {
+	return lsManager.GetSubnetName(ips)
 }
 
 // nodeContainsPodSubnet will return true if the node subnet annotation
@@ -267,7 +267,7 @@ func allocateSyncMigratablePodIPs(watchFactory *factory.WatchFactory, lsManager 
 	if err != nil {
 		return nil, "", nil, nil
 	}
-	switchName, zoneContainsPodSubnet := ZoneContainsPodSubnet(lsManager, annotation)
+	switchName, zoneContainsPodSubnet := ZoneContainsPodSubnet(lsManager, annotation.IPs)
 	// If this zone do not own the subnet or the node that is passed
 	// do not match the switch, they should not be deallocated
 	if !zoneContainsPodSubnet || (nodeName != "" && switchName != nodeName) {
@@ -295,7 +295,7 @@ func AllocateSyncMigratablePodIPsOnZone(watchFactory *factory.WatchFactory, lsMa
 // convenience, the host subnets might not provided in which case they might be
 // parsed and returned if used.
 func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, hostSubnets []*net.IPNet, annotation *util.PodAnnotation) ([]*net.IPNet, bool, error) {
-	_, local := ZoneContainsPodSubnet(lsManager, annotation)
+	_, local := ZoneContainsPodSubnet(lsManager, annotation.IPs)
 	if local {
 		return nil, true, nil
 	}

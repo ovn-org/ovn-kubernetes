@@ -78,7 +78,7 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 		return fmt.Errorf("failed reading local pod annotation: %v", err)
 	}
 
-	nodeOwningSubnet, _ := ZoneContainsPodSubnet(lsManager, podAnnotation)
+	nodeOwningSubnet, _ := ZoneContainsPodSubnet(lsManager, podAnnotation.IPs)
 	vmRunningAtNodeOwningSubnet := nodeOwningSubnet == pod.Spec.NodeName
 	if vmRunningAtNodeOwningSubnet {
 		// Point to point routing is no longer needed if vm

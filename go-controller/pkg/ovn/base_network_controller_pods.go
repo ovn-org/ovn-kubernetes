@@ -430,7 +430,7 @@ func (bnc *BaseNetworkController) ensurePodAnnotation(pod *kapi.Pod, nadName str
 		}
 		// The live migrated pods will have the pod annotation but the switch manager running
 		// at the node will not contain the switch as expected
-		_, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(bnc.lsManager, podAnnotation)
+		_, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(bnc.lsManager, podAnnotation.IPs)
 		return podAnnotation, zoneContainsPodSubnet, nil
 	}
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
