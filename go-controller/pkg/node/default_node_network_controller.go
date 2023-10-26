@@ -21,8 +21,8 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
-	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	config "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
@@ -460,7 +460,7 @@ func handleNetdevResources(resourceName string) (string, error) {
 	} else {
 		return "", fmt.Errorf("insufficient device IDs for resource: %s", resourceName)
 	}
-	netdevice, err := util.GetNetdevNameFromDeviceId(deviceId)
+	netdevice, err := util.GetNetdevNameFromDeviceId(deviceId, v1.DeviceInfo{})
 	if err != nil {
 		return "", err
 	}
@@ -868,7 +868,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 					return false, nil
 				}
 				for _, node := range nodes.Items {
-					if nc.name != node.Name && util.GetNodeZone(&node) != config.Default.Zone && !houtil.IsHybridOverlayNode(&node) {
+					if nc.name != node.Name && util.GetNodeZone(&node) != config.Default.Zone && !util.NoHostSubnet(&node) {
 						nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
 						if err != nil {
 							if util.IsAnnotationNotSetError(err) {

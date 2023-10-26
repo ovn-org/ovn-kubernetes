@@ -151,7 +151,7 @@ func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 	defer na.recordSubnetCount()
 
 	if util.NoHostSubnet(node) {
-		if na.hasHybridOverlayAllocation() && houtil.IsHybridOverlayNode(node) {
+		if na.hasHybridOverlayAllocation() {
 			annotator := kube.NewNodeAnnotator(na.kube, node.Name)
 			allocatedSubnet, err := na.hybridOverlayNodeEnsureSubnet(node, annotator)
 			if err != nil {
@@ -257,7 +257,7 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 		}
 
 		if util.NoHostSubnet(node) {
-			if na.hasHybridOverlayAllocation() && houtil.IsHybridOverlayNode(node) {
+			if na.hasHybridOverlayAllocation() {
 				// this is a hybrid overlay node so mark as allocated from the hybrid overlay subnet allocator
 				hostSubnet, err := houtil.ParseHybridOverlayHostSubnet(node)
 				if err != nil {

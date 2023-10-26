@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"net"
 	"os"
@@ -14,11 +13,12 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	utilnet "k8s.io/utils/net"
@@ -84,20 +84,23 @@ spec:
 	BeforeEach(func() {
 		By("Creating the temp directory")
 		var err error
-		tmpDirIPMigration, err = ioutil.TempDir("", "e2e")
+		tmpDirIPMigration, err = os.MkdirTemp("", "e2e")
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Selecting 2 random worker nodes from the list for IP address migration tests")
 		// Get the primary worker node for IP address migration.
 		// Get the secondary worker node to spawn another pod on for pod to pod reachability tests.
-		workerNodes, err := e2enode.GetReadySchedulableNodes(f.ClientSet)
-		Expect(err).NotTo(HaveOccurred())
-		e2enode.Filter(workerNodes, func(node v1.Node) bool {
-			_, ok1 := node.Labels["node-role.kubernetes.io/control-plane"]
-			_, ok2 := node.Labels["node-role.kubernetes.io/master"]
-			return !ok1 && !ok2
-		})
-		Expect(len(workerNodes.Items)).Should(BeNumerically(">=", 2))
+		var workerNodes *v1.NodeList
+		Eventually(func(g Gomega) {
+			workerNodes, err = e2enode.GetReadySchedulableNodes(f.ClientSet)
+			g.Expect(err).NotTo(HaveOccurred())
+			e2enode.Filter(workerNodes, func(node v1.Node) bool {
+				_, ok1 := node.Labels["node-role.kubernetes.io/control-plane"]
+				_, ok2 := node.Labels["node-role.kubernetes.io/master"]
+				return !ok1 && !ok2
+			})
+			g.Expect(len(workerNodes.Items)).Should(BeNumerically(">=", 2))
+		}, pollingTimeout, pollingInterval).Should(Succeed())
 		workerNode = workerNodes.Items[0]
 		secondaryWorkerNode = workerNodes.Items[1]
 		framework.Logf("Selected worker node %s and secondary worker node %s", workerNode.Name, secondaryWorkerNode.Name)
@@ -147,8 +150,8 @@ spec:
 					secondaryWorkerNode.Name,
 					podLabels,
 					podCommand...)
-				_ = f.PodClient().CreateSync(podWorkerNode)
-				_ = f.PodClient().CreateSync(podSecondaryWorkerNode)
+				_ = e2epod.NewPodClient(f).CreateSync(podWorkerNode)
+				_ = e2epod.NewPodClient(f).CreateSync(podSecondaryWorkerNode)
 
 				By("Waiting until both pods have an IP address")
 				Eventually(func() error {
@@ -276,7 +279,7 @@ spec:
 			Context("when EgressIPs are configured", func() {
 				BeforeEach(func() {
 					By("Adding the \"k8s.ovn.org/egress-assignable\" label to the first node")
-					framework.AddOrUpdateLabelOnNode(f.ClientSet, workerNode.Name, "k8s.ovn.org/egress-assignable", "")
+					e2enode.AddOrUpdateLabelOnNode(f.ClientSet, workerNode.Name, "k8s.ovn.org/egress-assignable", "")
 
 					By("Creating an EgressIP object with one egress IP defined")
 					// Assign the egress IP without conflicting with any node IP,
@@ -294,11 +297,11 @@ spec:
 
 					var egressIPConfig = fmt.Sprintf(egressIPYamlTemplate, podLabels["app"], egressIP, "app",
 						podLabels["app"], f.Namespace.Name)
-					if err := ioutil.WriteFile(
+					if err := os.WriteFile(
 						tmpDirIPMigration+"/"+egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
 						framework.Failf("Unable to write CRD config to disk: %v", err)
 					}
-					_, err = framework.RunKubectl("default", "apply", "-f", tmpDirIPMigration+"/"+egressIPYaml)
+					_, err = e2ekubectl.RunKubectl("default", "apply", "-f", tmpDirIPMigration+"/"+egressIPYaml)
 					Expect(err).NotTo(HaveOccurred())
 
 					By("Verifying egress IP works")
@@ -321,10 +324,10 @@ spec:
 
 				JustAfterEach(func() {
 					By("Deleting the gressip service")
-					framework.RunKubectl("default", "delete", "eip", podLabels["app"])
+					e2ekubectl.RunKubectl("default", "delete", "eip", podLabels["app"])
 
 					By(fmt.Sprintf("Removing the egress assignable label from node %s", workerNode.Name))
-					framework.RunKubectl("default", "label", "node", workerNode.Name, "k8s.ovn.org/egress-assignable-")
+					e2ekubectl.RunKubectl("default", "label", "node", workerNode.Name, "k8s.ovn.org/egress-assignable-")
 				})
 
 				for _, updateKubeletFirst := range []bool{true, false} {
@@ -395,8 +398,9 @@ spec:
 
 // getNodeInternalAddresses returns the first IPv4 and/or IPv6 InternalIP defined for the node. Node IPs are ordered,
 // meaning that the returned IPs should be kubelet's node IPs.
-// Copied from: https://github.com/ovn-org/ovn-kubernetes/blob/\
-//                               2cceeebd4f66ee8dd9e683551b883e549b5cd7da/go-controller/pkg/ovn/egressip.go#L2580
+//
+//	Copied from: https://github.com/ovn-org/ovn-kubernetes/blob/\
+//	                              2cceeebd4f66ee8dd9e683551b883e549b5cd7da/go-controller/pkg/ovn/egressip.go#L2580
 func getNodeInternalAddresses(node *v1.Node) (string, string) {
 	var v4Addr, v6Addr string
 	for _, nodeAddr := range node.Status.Addresses {
@@ -720,7 +724,7 @@ func targetExternalContainerConnectToEndpoint(externalContainerName, externalCon
 	externalContainerEndpoint, podName, podNamespace string, expectedAnswer string) (bool, error) {
 	containerIPAndPort := net.JoinHostPort(externalContainerIP, externalContainerPort)
 	u := path.Join(containerIPAndPort, externalContainerEndpoint)
-	output, err := framework.RunKubectl(podNamespace, "exec", podName, "--", "curl", "--max-time", "2", u)
+	output, err := e2ekubectl.RunKubectl(podNamespace, "exec", podName, "--", "curl", "--max-time", "2", u)
 	if err != nil {
 		return false, fmt.Errorf("running curl failed, err: %q", err)
 	}

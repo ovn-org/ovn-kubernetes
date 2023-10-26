@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -13,8 +12,7 @@ import (
 	"sync"
 	"time"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/ginkgo/extensions/table"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/kubevirt"
@@ -181,7 +179,7 @@ passwd:
 					return fmt.Errorf("http connection to virtual machine was broken")
 				}
 				//TODO: Check pong
-				if _, err := io.Copy(ioutil.Discard, res.Body); err != nil {
+				if _, err := io.Copy(io.Discard, res.Body); err != nil {
 					return err
 				}
 				res.Body.Close()
@@ -326,7 +324,18 @@ passwd:
 			Expect(err).ToNot(HaveOccurred(), "should success retrieving vmi")
 			currentNode := vmi.Status.NodeName
 
-			Expect(kvcli.VirtualMachine(namespace).Migrate(context.Background(), vmName, &kubevirtv1.MigrateOptions{})).WithOffset(1).To(Succeed())
+			vmimCreationRetries := 0
+			Eventually(func() error {
+				if vmimCreationRetries > 0 {
+					// retry due to unknown issue where kubevirt webhook gets stuck reading the request body
+					// https://github.com/ovn-org/ovn-kubernetes/issues/3902#issuecomment-1750257559
+					By(fmt.Sprintf("Retrying vmim %s creation", vmName))
+				}
+				err := kvcli.VirtualMachine(namespace).Migrate(context.Background(), vmName, &kubevirtv1.MigrateOptions{})
+				vmimCreationRetries++
+				return err
+			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
+
 			Eventually(func() *kubevirtv1.VirtualMachineInstanceMigrationState {
 				vmi, err := kvcli.VirtualMachineInstance(namespace).Get(context.TODO(), vmName, &metav1.GetOptions{})
 				Expect(err).ToNot(HaveOccurred())
@@ -586,7 +595,7 @@ passwd:
 				namespace,
 				selectedNode.Name,
 				"netexec", "--http-port", "8000")
-			_ = fr.PodClient().CreateSync(httpServerWorkerNode)
+			_ = e2epod.NewPodClient(fr).CreateSync(httpServerWorkerNode)
 		}
 
 		By("Waiting until both pods have an IP address")

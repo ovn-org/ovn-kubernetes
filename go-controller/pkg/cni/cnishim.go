@@ -21,6 +21,7 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,7 +50,7 @@ func NewCNIPlugin(socketPath string) *Plugin {
 
 // Create and fill a Request with this Plugin's environment and stdin which
 // contain the CNI variables and configuration
-func newCNIRequest(args *skel.CmdArgs) *Request {
+func newCNIRequest(args *skel.CmdArgs, deviceInfo nadapi.DeviceInfo) *Request {
 	envMap := make(map[string]string)
 	for _, item := range os.Environ() {
 		idx := strings.Index(item, "=")
@@ -57,11 +58,12 @@ func newCNIRequest(args *skel.CmdArgs) *Request {
 			envMap[strings.TrimSpace(item[:idx])] = item[idx+1:]
 		}
 	}
-
 	return &Request{
-		Env:    envMap,
-		Config: args.StdinData,
+		Env:        envMap,
+		Config:     args.StdinData,
+		DeviceInfo: deviceInfo,
 	}
+
 }
 
 // Send a CNI request to the CNI server via JSON + HTTP over a root-owned unix socket,
@@ -193,7 +195,18 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	}
 	setupLogging(conf)
 
-	req := newCNIRequest(args)
+	var deviceInfo = nadapi.DeviceInfo{}
+	if len(conf.RuntimeConfig.CNIDeviceInfoFile) != 0 {
+		bytes, err := os.ReadFile(conf.RuntimeConfig.CNIDeviceInfoFile)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(bytes, &deviceInfo); err != nil {
+			return err
+		}
+	}
+
+	req := newCNIRequest(args, deviceInfo)
 
 	body, errB := p.doCNI("http://dummy/", req)
 	if errB != nil {
@@ -275,7 +288,8 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 	}
 	setupLogging(conf)
 
-	req := newCNIRequest(args)
+	var deviceInfo = nadapi.DeviceInfo{}
+	req := newCNIRequest(args, deviceInfo)
 	body, err = p.doCNI("http://dummy/", req)
 	if err != nil {
 		return err

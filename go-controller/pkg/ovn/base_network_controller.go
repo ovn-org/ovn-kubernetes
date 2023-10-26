@@ -33,6 +33,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
@@ -157,6 +158,11 @@ type BaseNetworkController struct {
 	// Interconnect resources are Transit switch and logical ports connecting this transit switch
 	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
 	zoneICHandler *zoneic.ZoneInterconnectHandler
+
+	// releasedPodsBeforeStartup tracks pods per NAD (map of NADs to pods UIDs)
+	// might have been already be released on startup
+	releasedPodsBeforeStartup  map[string]sets.Set[string]
+	releasedPodsOnStartupMutex sync.Mutex
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -404,12 +410,16 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase), logicalSwitchPort.UUID)
 		if err != nil {
 			klog.Errorf(err.Error())
-			return err
+			return fmt.Errorf("failed adding port to portgroup for multicast: %v", err)
 		}
 	}
-
 	// Add the switch to the logical switch cache
-	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets)
+	migratableIPsByPod, err := bnc.findMigratablePodIPsForSubnets(hostSubnets)
+	if err != nil {
+		return fmt.Errorf("failed finding migratable pod IPs belonging to %s: %v", nodeName, err)
+	}
+
+	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets, migratableIPsByPod...)
 }
 
 // UpdateNodeAnnotationWithRetry update node's annotation with the given node annotations.
@@ -807,4 +817,44 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.
 	}
 
 	return false
+}
+
+func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.IPNet) ([]*net.IPNet, error) {
+	ipSet := sets.New[string]()
+	ipList := []*net.IPNet{}
+	liveMigratablePods, err := kubevirt.FindLiveMigratablePods(bnc.watchFactory)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, liveMigratablePod := range liveMigratablePods {
+		if util.PodCompleted(liveMigratablePod) {
+			continue
+		}
+		isMigratedSourcePodStale, err := kubevirt.IsMigratedSourcePodStale(bnc.watchFactory, liveMigratablePod)
+		if err != nil {
+			return nil, err
+		}
+		if isMigratedSourcePodStale {
+			continue
+		}
+		podAnnotation, err := util.UnmarshalPodAnnotation(liveMigratablePod.Annotations, bnc.GetNetworkName())
+		if err != nil {
+			return nil, err
+		}
+		for _, podIP := range podAnnotation.IPs {
+			if util.IsContainedInAnyCIDR(podIP, subnets...) {
+				podIPString := podIP.String()
+				// Skip duplicate IPs
+				if !ipSet.Has(podIPString) {
+					ipSet = ipSet.Insert(podIPString)
+					ipList = append(ipList, &net.IPNet{
+						IP:   podIP.IP,
+						Mask: util.GetIPFullMask(podIP.IP),
+					})
+				}
+			}
+		}
+	}
+	return ipList, nil
 }

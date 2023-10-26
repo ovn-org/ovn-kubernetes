@@ -150,7 +150,7 @@ func nameToCookie(nodeName string) string {
 // hybridOverlayNodeUpdate sets up or tears down VXLAN tunnels to hybrid overlay
 // nodes in the cluster
 func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
-	if !houtil.IsHybridOverlayNode(node) {
+	if !util.NoHostSubnet(node) {
 		return nil
 	}
 
@@ -278,7 +278,7 @@ func (n *NodeController) deleteFlowsByCookie(cookie string) {
 
 // DeleteNode handles node deletions
 func (n *NodeController) DeleteNode(node *kapi.Node) error {
-	if node.Name == n.nodeName || !houtil.IsHybridOverlayNode(node) {
+	if node.Name == n.nodeName || !util.NoHostSubnet(node) {
 		return nil
 	}
 

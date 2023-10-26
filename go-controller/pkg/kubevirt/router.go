@@ -75,10 +75,10 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 	}
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 	if err != nil {
-		return fmt.Errorf("failed reading ovn annotation: %v", err)
+		return fmt.Errorf("failed reading local pod annotation: %v", err)
 	}
 
-	nodeOwningSubnet, _ := ZoneContainsPodSubnet(lsManager, podAnnotation)
+	nodeOwningSubnet, _ := ZoneContainsPodSubnet(lsManager, podAnnotation.IPs)
 	vmRunningAtNodeOwningSubnet := nodeOwningSubnet == pod.Spec.NodeName
 	if vmRunningAtNodeOwningSubnet {
 		// Point to point routing is no longer needed if vm
@@ -180,7 +180,7 @@ func EnsureRemoteZonePodAddressesToNodeRoute(controllerName string, watchFactory
 
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 	if err != nil {
-		return fmt.Errorf("failed reading ovn annotation: %v", err)
+		return fmt.Errorf("failed reading remote pod annotation: %v", err)
 	}
 
 	vmRunningAtNodeOwningSubnet, err := nodeContainsPodSubnet(watchFactory, pod.Spec.NodeName, podAnnotation, nadName)
@@ -230,7 +230,7 @@ func EnsureRemoteZonePodAddressesToNodeRoute(controllerName string, watchFactory
 			matches := item.IPPrefix == route.IPPrefix && item.Nexthop == route.Nexthop && item.Policy != nil && *item.Policy == *route.Policy
 			return matches
 		}); err != nil {
-			return fmt.Errorf("failed adding static route at remote zone: %v", err)
+			return fmt.Errorf("failed adding static route to remote pod: %v", err)
 		}
 	}
 	return nil

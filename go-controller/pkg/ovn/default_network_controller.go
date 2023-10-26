@@ -121,7 +121,6 @@ type DefaultNetworkController struct {
 	nodeClusterRouterPortFailed sync.Map
 	hybridOverlayFailed         sync.Map
 	syncZoneICFailed            sync.Map
-	syncMigratablePodsFailed    sync.Map
 
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
@@ -745,19 +744,15 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 				_, gwSync := h.oc.gatewaysFailed.Load(node.Name)
 				_, hoSync := h.oc.hybridOverlayFailed.Load(node.Name)
 				_, zoneICSync := h.oc.syncZoneICFailed.Load(node.Name)
-				_, syncMigratablePods := h.oc.syncMigratablePodsFailed.Load(node.Name)
 				nodeParams = &nodeSyncs{
 					nodeSync,
 					clusterRtrSync,
 					mgmtSync,
 					gwSync,
 					hoSync,
-					zoneICSync,
-					syncMigratablePods}
+					zoneICSync}
 			} else {
-				nodeHostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
-				syncMigratablePods := nodeHostSubnets != nil
-				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect, syncMigratablePods}
+				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect}
 			}
 
 			if err = h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
@@ -901,21 +896,18 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged || primaryAddrChanged(oldNode, newNode)
-				_, failed = h.oc.syncMigratablePodsFailed.Load(newNode.Name)
-				syncMigratablePods := failed || nodeSubnetChanged
 				nodeSyncsParam = &nodeSyncs{
 					nodeSync,
 					clusterRtrSync,
 					mgmtSync,
 					gwSync,
 					hoSync,
-					syncZoneIC,
-					syncMigratablePods}
+					syncZoneIC}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node.  Trigger a full node sync.
-				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect, true}
+				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect}
 			}
 
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)

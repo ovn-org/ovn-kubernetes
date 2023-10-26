@@ -341,7 +341,10 @@ func (m *externalPolicyManager) processDynamicHopsGatewayInformation(hops []*adm
 	selectedNamespaces := sets.Set[string]{}
 	selectedPods := sets.Set[ktypes.NamespacedName]{}
 	for _, h := range hops {
-		gwNsSel, _ := metav1.LabelSelectorAsSelector(&h.NamespaceSelector)
+		gwNsSel, err := metav1.LabelSelectorAsSelector(&h.NamespaceSelector)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		gwNamespaces, err := m.namespaceLister.List(gwNsSel)
 		if err != nil {
 			return podsInfo, selectedNamespaces, selectedPods, fmt.Errorf("failed to list namespaces: %w", err)

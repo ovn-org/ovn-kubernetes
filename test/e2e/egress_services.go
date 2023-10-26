@@ -9,15 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/onsi/ginkgo"
-	ginkgotable "github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -64,7 +65,7 @@ var _ = ginkgo.Describe("Egress Services", func() {
 		flushCustomRoutingTablesOnNodes(nodes, blackholeRoutingTable)
 	})
 
-	ginkgotable.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip without selectors",
+	ginkgo.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip without selectors",
 		func(protocol v1.IPFamily, dstIP *string) {
 			ginkgo.By("Creating the backend pods")
 			podsCreateSync := errgroup.Group{}
@@ -102,7 +103,7 @@ spec:
 					framework.Logf("Unable to remove the CRD config from disk: %v", err)
 				}
 			}()
-			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
 			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, podsLabels, podHTTPPort)
 			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
@@ -149,7 +150,7 @@ spec:
 			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
 				framework.Failf("Unable to write CRD config to disk: %v", err)
 			}
-			framework.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressServiceYAML)
 
 			ginkgo.By("Verifying the pods can't reach the external container due to the blackhole in the custom network")
 			gomega.Consistently(func() error {
@@ -178,7 +179,7 @@ spec:
 			}, 2*time.Second, 400*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach external container with loadbalancer's ingress ip")
 
 			ginkgo.By("Deleting the EgressService the backend pods should exit with their node's IP")
-			framework.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressServiceYAML)
 
 			for i, pod := range pods {
 				node := &nodes[i]
@@ -197,11 +198,11 @@ spec:
 				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach external container with node's ip")
 			}
 		},
-		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol, &externalKindIPv4),
-		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalKindIPv6),
+		ginkgo.Entry("ipv4 pods", v1.IPv4Protocol, &externalKindIPv4),
+		ginkgo.Entry("ipv6 pods", v1.IPv6Protocol, &externalKindIPv6),
 	)
 
-	ginkgotable.DescribeTable("[LGW] Should validate pods' egress uses node's IP when setting Network without SNAT",
+	ginkgo.DescribeTable("[LGW] Should validate pods' egress uses node's IP when setting Network without SNAT",
 		func(protocol v1.IPFamily, dstIP *string) {
 			ginkgo.By("Creating the backend pods")
 			podsCreateSync := errgroup.Group{}
@@ -240,7 +241,7 @@ spec:
 					framework.Logf("Unable to remove the CRD config from disk: %v", err)
 				}
 			}()
-			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
 			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, podsLabels, podHTTPPort)
 			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
@@ -301,7 +302,7 @@ spec:
 			}, 2*time.Second, 400*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "managed to reach external container despite blackhole")
 
 			ginkgo.By("Deleting the EgressService the backend pods should exit with their node's IP (via the main network)")
-			framework.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressServiceYAML)
 
 			for i, pod := range pods {
 				node := &nodes[i]
@@ -320,11 +321,11 @@ spec:
 				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach external container with node's ip")
 			}
 		},
-		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol, &externalKindIPv4),
-		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalKindIPv6),
+		ginkgo.Entry("ipv4 pods", v1.IPv4Protocol, &externalKindIPv4),
+		ginkgo.Entry("ipv6 pods", v1.IPv6Protocol, &externalKindIPv6),
 	)
 
-	ginkgotable.DescribeTable("Should validate the egress SVC SNAT functionality against host-networked pods",
+	ginkgo.DescribeTable("Should validate the egress SVC SNAT functionality against host-networked pods",
 		func(protocol v1.IPFamily) {
 			ginkgo.By("Creating the backend pods")
 			podsCreateSync := errgroup.Group{}
@@ -362,7 +363,7 @@ spec:
 					framework.Logf("Unable to remove the CRD config from disk: %v", err)
 				}
 			}()
-			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
 			_ = createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, podsLabels, podHTTPPort)
 
 			ginkgo.By("Getting the IPs of the node in charge of the service")
@@ -426,11 +427,11 @@ spec:
 				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach other node with node's secondary ip")
 			}
 		},
-		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol),
-		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol),
+		ginkgo.Entry("ipv4 pods", v1.IPv4Protocol),
+		ginkgo.Entry("ipv6 pods", v1.IPv6Protocol),
 	)
 
-	ginkgotable.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip with selectors",
+	ginkgo.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip with selectors",
 		func(protocol v1.IPFamily, dstIP *string) {
 			ginkgo.By("Creating the backend pods")
 			podsCreateSync := errgroup.Group{}
@@ -471,7 +472,7 @@ spec:
 					framework.Logf("Unable to remove the CRD config from disk: %v", err)
 				}
 			}()
-			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
 			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, podsLabels, podHTTPPort)
 			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
@@ -519,7 +520,7 @@ spec:
 			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
 				framework.Failf("Unable to write CRD config to disk: %v", err)
 			}
-			framework.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressServiceYAML)
 
 			ginkgo.By("Verifying the second node now handles the service's egress traffic")
 			node, egressHostV4IP, egressHostV6IP = getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
@@ -566,7 +567,7 @@ spec:
 			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
 				framework.Failf("Unable to write CRD config to disk: %v", err)
 			}
-			framework.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressServiceYAML)
 
 			gomega.Eventually(func() error {
 				nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s=", f.Namespace.Name, serviceName)})
@@ -644,11 +645,11 @@ spec:
 
 			reachAllServiceBackendsFromExternalContainer(externalKindContainerName, svcIP, podHTTPPort, pods)
 		},
-		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol, &externalKindIPv4),
-		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalKindIPv6),
+		ginkgo.Entry("ipv4 pods", v1.IPv4Protocol, &externalKindIPv4),
+		ginkgo.Entry("ipv6 pods", v1.IPv6Protocol, &externalKindIPv6),
 	)
 
-	ginkgotable.DescribeTable("Should validate egress service has higher priority than EgressIP when not assigned to the same node",
+	ginkgo.DescribeTable("Should validate egress service has higher priority than EgressIP when not assigned to the same node",
 		func(protocol v1.IPFamily, dstIP *string) {
 			labels := map[string]string{"wants": "egress"}
 			ginkgo.By("Creating the backend pods")
@@ -689,7 +690,7 @@ spec:
 					framework.Logf("Unable to remove the CRD config from disk: %v", err)
 				}
 			}()
-			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
 			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, labels, podHTTPPort)
 			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
@@ -703,9 +704,9 @@ spec:
 			// the kind subnet is /16 or /64 so the following should be fine.
 			ginkgo.By("Assigning the EgressIP to a different node")
 			eipNode := nodes[0]
-			framework.AddOrUpdateLabelOnNode(f.ClientSet, eipNode.Name, "k8s.ovn.org/egress-assignable", "dummy")
+			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, eipNode.Name, "k8s.ovn.org/egress-assignable", "dummy")
 			defer func() {
-				framework.RunKubectlOrDie("default", "label", "node", eipNode.Name, "k8s.ovn.org/egress-assignable-")
+				e2ekubectl.RunKubectlOrDie("default", "label", "node", eipNode.Name, "k8s.ovn.org/egress-assignable-")
 			}()
 			nodev4IP, nodev6IP := getNodeAddresses(&eipNode)
 			egressNodeIP := net.ParseIP(nodev4IP)
@@ -742,9 +743,9 @@ spec:
 			}()
 
 			framework.Logf("Create the EgressIP configuration")
-			framework.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+			e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
 			defer func() {
-				framework.RunKubectlOrDie("default", "delete", "eip", "egress-svc-test-eip")
+				e2ekubectl.RunKubectlOrDie("default", "delete", "eip", "egress-svc-test-eip")
 			}()
 
 			ginkgo.By("Verifying the pods reach the external container with the service's ingress ip")
@@ -768,7 +769,7 @@ spec:
 			reachAllServiceBackendsFromExternalContainer(externalKindContainerName, svcIP, podHTTPPort, pods)
 
 			ginkgo.By("Deleting the EgressService the backend pods should exit with the EgressIP")
-			framework.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", egressServiceYAML)
 
 			for _, pod := range pods {
 				gomega.Eventually(func() error {
@@ -780,11 +781,11 @@ spec:
 				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach external container with eip")
 			}
 		},
-		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol, &externalKindIPv4),
-		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalKindIPv6),
+		ginkgo.Entry("ipv4 pods", v1.IPv4Protocol, &externalKindIPv4),
+		ginkgo.Entry("ipv6 pods", v1.IPv6Protocol, &externalKindIPv6),
 	)
 
-	ginkgotable.DescribeTable("Should validate a node with a local ep is selected when ETP=Local",
+	ginkgo.DescribeTable("Should validate a node with a local ep is selected when ETP=Local",
 		func(protocol v1.IPFamily, dstIP *string) {
 			ginkgo.By("Creating two backend pods on the second node")
 			firstNode := nodes[0].Name
@@ -827,7 +828,7 @@ spec:
 					framework.Logf("Unable to remove the CRD config from disk: %v", err)
 				}
 			}()
-			framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
 			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, podsLabels, podHTTPPort,
 				func(svc *v1.Service) {
 					svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
@@ -926,8 +927,8 @@ spec:
 				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach external container with node's ip")
 			}
 		},
-		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol, &externalKindIPv4),
-		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalKindIPv6),
+		ginkgo.Entry("ipv4 pods", v1.IPv4Protocol, &externalKindIPv4),
+		ginkgo.Entry("ipv6 pods", v1.IPv6Protocol, &externalKindIPv6),
 	)
 
 	ginkgo.Describe("Multiple Networks, external clients sharing ip", func() {
@@ -1064,7 +1065,7 @@ spec:
 			}
 		})
 
-		ginkgotable.DescribeTable("[LGW] Should validate pods on different networks can reach different clients with same ip without SNAT",
+		ginkgo.DescribeTable("[LGW] Should validate pods on different networks can reach different clients with same ip without SNAT",
 			func(protocol v1.IPFamily) {
 				ginkgo.By("Creating the backend pods for the networks")
 				podsCreateSync := errgroup.Group{}
@@ -1109,7 +1110,7 @@ spec:
 							framework.Logf("Unable to remove the CRD config from disk: %v", err)
 						}
 					}()
-					framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", net.egressServiceYAML)
+					e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", net.egressServiceYAML)
 
 					svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, net.serviceName, protocol, net.podLabels, podHTTPPort)
 					svcIP := svc.Status.LoadBalancer.Ingress[0].IP
@@ -1147,8 +1148,8 @@ spec:
 				}
 
 				ginkgo.By("Deleting the EgressServices the backend pods should not be able to reach the client (no routes to the shared IPs)")
-				framework.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", net1.egressServiceYAML)
-				framework.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", net2.egressServiceYAML)
+				e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", net1.egressServiceYAML)
+				e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "-f", net2.egressServiceYAML)
 
 				dst := sharedIPv4
 				if protocol == v1.IPv6Protocol {
@@ -1170,8 +1171,8 @@ spec:
 				reachAllServiceBackendsFromExternalContainer(net1.containerName, net1.serviceIP, podHTTPPort, net1.createdPods)
 				reachAllServiceBackendsFromExternalContainer(net2.containerName, net2.serviceIP, podHTTPPort, net2.createdPods)
 			},
-			ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol),
-			ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol),
+			ginkgo.Entry("ipv4 pods", v1.IPv4Protocol),
+			ginkgo.Entry("ipv6 pods", v1.IPv6Protocol),
 		)
 	})
 })
@@ -1233,7 +1234,7 @@ type egressService struct {
 
 func getEgressServiceStatus(ns, name string) (egressServiceStatus, error) {
 	egressService := &egressService{}
-	egressServiceStdout, err := framework.RunKubectl(ns, "get", "egressservice", "-o", "json", name)
+	egressServiceStdout, err := e2ekubectl.RunKubectl(ns, "get", "egressservice", "-o", "json", name)
 	if err != nil {
 		framework.Logf("Error: failed to get the EgressService object, err: %v", err)
 		return egressServiceStatus{}, err
@@ -1306,7 +1307,7 @@ func setSVCRouteOnContainer(container, svcIP, v4Via, v6Via string) {
 func curlAgnHostClientIPFromPod(namespace, pod, expectedIP, dstIP string, containerPort int) error {
 	dst := net.JoinHostPort(dstIP, fmt.Sprint(containerPort))
 	curlCmd := fmt.Sprintf("curl -s --retry-connrefused --retry 2 --max-time 0.5 --connect-timeout 0.5 --retry-delay 1 http://%s/clientip", dst)
-	out, err := framework.RunHostCmd(namespace, pod, curlCmd)
+	out, err := e2epodoutput.RunHostCmd(namespace, pod, curlCmd)
 	if err != nil {
 		return fmt.Errorf("failed to curl agnhost on %s from %s, err: %w", dstIP, pod, err)
 	}
@@ -1325,7 +1326,7 @@ func curlAgnHostClientIPFromPod(namespace, pod, expectedIP, dstIP string, contai
 func curlAgnHostHostnameFromPod(namespace, pod, expectedHostname, dstIP string, containerPort int) error {
 	dst := net.JoinHostPort(dstIP, fmt.Sprint(containerPort))
 	curlCmd := fmt.Sprintf("curl -s --retry-connrefused --retry 2 --max-time 0.5 --connect-timeout 0.5 --retry-delay 1 http://%s/hostname", dst)
-	out, err := framework.RunHostCmd(namespace, pod, curlCmd)
+	out, err := e2epodoutput.RunHostCmd(namespace, pod, curlCmd)
 	if err != nil {
 		return fmt.Errorf("failed to curl agnhost on %s from %s, err: %w", dstIP, pod, err)
 	}

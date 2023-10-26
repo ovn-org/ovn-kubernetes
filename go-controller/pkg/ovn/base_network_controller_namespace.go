@@ -400,38 +400,37 @@ func (bsnc *BaseNetworkController) removeRemoteZonePodFromNamespaceAddressSet(po
 		return fmt.Errorf("failed to get pod ips for the pod  %s/%s : %w", pod.Namespace, pod.Name, err)
 	}
 
+	// If this pod applies to live migration it could have migrated so get the
+	// correct node name corresponding with the subnet. If the subnet is not
+	// tracked within the zone, nodeName will be empty which will force
+	// canReleasePodIPs to lookup all nodes.
+	nodeName := pod.Spec.NodeName
+	if !bsnc.IsSecondary() && kubevirt.IsPodLiveMigratable(pod) {
+		nodeName, _ = bsnc.lsManager.GetSubnetName(podIfAddrs)
+	}
+
 	// Remove the pod ips from the namespace address set. Before that check if its a completed pod and
 	// make sure that the ips are not colliding with other pod.
-	shouldRelease := true
-	if util.PodCompleted(pod) {
-		// if this pod applies to live migration, it could have migrated do not filter node name
-		nodeName := ""
-		if !kubevirt.IsPodLiveMigratable(pod) {
-			nodeName = pod.Spec.NodeName
-		}
-		shouldRelease, err := bsnc.canReleasePodIPs(podIfAddrs, nodeName)
-		if err != nil {
-			klog.Errorf("Unable to determine if completed remote pod IP is in use by another pod. "+
-				"Will not release pod %s/%s IP: %#v from namespace addressset. %w", pod.Namespace, pod.Name, podIfAddrs, err)
-			shouldRelease = false
-		}
-
-		if !shouldRelease {
-			klog.Infof("Cannot release IP address: %s for %s/%s from namespace address set. Detected another pod"+
-				" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), pod.Namespace, pod.Name)
-		}
+	shouldRelease, err := bsnc.canReleasePodIPs(podIfAddrs, nodeName)
+	if err != nil {
+		return err
 	}
 
-	if shouldRelease {
-		ops, err := bsnc.deletePodFromNamespace(pod.Namespace, podIfAddrs, "")
-		if err != nil {
-			return fmt.Errorf("failed to delete remote pod %s's IP from namespace: %w", podDesc, err)
-		}
-
-		_, err = libovsdbops.TransactAndCheck(bsnc.nbClient, ops)
-		if err != nil {
-			return fmt.Errorf("could not delete remote pod IPs from the namespace address set - %w", err)
-		}
+	if !shouldRelease {
+		klog.Infof("Cannot release IP address: %s for %s/%s from namespace address set. Detected another pod"+
+			" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), pod.Namespace, pod.Name)
+		return nil
 	}
+
+	ops, err := bsnc.deletePodFromNamespace(pod.Namespace, podIfAddrs, "")
+	if err != nil {
+		return fmt.Errorf("failed to delete remote pod %s's IP from namespace: %w", podDesc, err)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(bsnc.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("could not delete remote pod IPs from the namespace address set - %w", err)
+	}
+
 	return nil
 }

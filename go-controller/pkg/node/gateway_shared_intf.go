@@ -1327,12 +1327,12 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	// table 2, dispatch from Host -> OVN
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, table=2, "+
-			"actions=mod_dl_dst=%s,output:%s", defaultOpenFlowCookie, bridgeMacAddress, ofPortPatch))
+			"actions=set_field:%s->eth_dst,output:%s", defaultOpenFlowCookie, bridgeMacAddress, ofPortPatch))
 
 	// table 3, dispatch from OVN -> Host
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, table=3, "+
-			"actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst=%s,output:%s",
+			"actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],set_field:%s->eth_dst,output:%s",
 			defaultOpenFlowCookie, bridgeMacAddress, ofPortHost))
 
 	// table 4, hairpinned pkts that need to go from OVN -> Host

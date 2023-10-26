@@ -120,15 +120,21 @@ export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
 export KUBE_CONTAINER_RUNTIME_NAME=containerd
 export NUM_NODES=2
 
+# Silence deprecations warnings at the end of test result.
+# Custom Ginkgo test reporters which are deprecated in Ginkgo 2.0.
+# For a migration path https://onsi.github.io/ginkgo/MIGRATING_TO_V2#removed-custom-reporters.
+export ACK_GINKGO_DEPRECATIONS=2.4.0
+
 FOCUS=$(echo ${@:1} | sed 's/ /\\s/g')
 
 pushd e2e
 
 go mod download
-go test -timeout=0 -v . \
+go test -test.timeout 180m -v . \
         -ginkgo.v \
         -ginkgo.focus ${FOCUS:-.} \
-        -ginkgo.flakeAttempts ${FLAKE_ATTEMPTS:-2} \
+        -ginkgo.timeout 3h \
+        -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
         -ginkgo.skip="${SKIPPED_TESTS}" \
         -provider skeleton \
         -kubeconfig ${KUBECONFIG} \

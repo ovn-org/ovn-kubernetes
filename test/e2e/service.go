@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"os"
@@ -13,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,9 +24,20 @@ import (
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
 
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
+)
+
+const (
+	metallbNamespace      = "metallb-system"
+	speakerLabelgSelector = "component=speaker"
+)
+
+var (
+	reportPath string
 )
 
 var _ = ginkgo.Describe("Services", func() {
@@ -83,7 +93,7 @@ var _ = ginkgo.Describe("Services", func() {
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.HostNetwork = true
 
-		serverPod = f.PodClient().CreateSync(serverPod)
+		serverPod = e2epod.NewPodClient(f).CreateSync(serverPod)
 		nodeName := serverPod.Spec.NodeName
 
 		ginkgo.By("Connecting to the service from another host-network pod on node " + nodeName)
@@ -100,7 +110,7 @@ var _ = ginkgo.Describe("Services", func() {
 			net.JoinHostPort(service.Spec.ClusterIP, "80"))
 
 		err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
-			stdout, err := framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 			if err != nil {
 				return false, err
 			}
@@ -166,7 +176,7 @@ var _ = ginkgo.Describe("Services", func() {
 						clientPod.Spec.Containers[k].SecurityContext.Privileged = pointer.Bool(true)
 					}
 				}
-				f.PodClient().CreateSync(clientPod)
+				e2epod.NewPodClient(f).CreateSync(clientPod)
 
 				ginkgo.By(fmt.Sprintf("Creating the server pod with hostNetwork:%t", hostNetwork))
 				// Create the server pod.
@@ -186,14 +196,14 @@ var _ = ginkgo.Describe("Services", func() {
 					}
 					serverPod.Spec.HostNetwork = hostNetwork
 					serverPod.Spec.NodeName = serverPodNodeName
-					f.PodClient().Create(serverPod)
+					e2epod.NewPodClient(f).Create(serverPod)
 
 					err := e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, serverPod.Name, f.Namespace.Name, 1*time.Minute)
 					if err != nil {
-						f.PodClient().Delete(context.TODO(), serverPod.Name, metav1.DeleteOptions{})
+						e2epod.NewPodClient(f).Delete(context.TODO(), serverPod.Name, metav1.DeleteOptions{})
 						return err
 					}
-					serverPod, err = f.PodClient().Get(context.TODO(), serverPod.Name, metav1.GetOptions{})
+					serverPod, err = e2epod.NewPodClient(f).Get(context.TODO(), serverPod.Name, metav1.GetOptions{})
 					return err
 				}, 5*time.Minute, 1*time.Second).Should(gomega.Succeed())
 
@@ -245,7 +255,7 @@ var _ = ginkgo.Describe("Services", func() {
 								echoPayloads[size],
 							)
 							framework.Logf("Testing TCP %s with command %q", size, cmd)
-							stdout, err := framework.RunHostCmdWithRetries(
+							stdout, err := e2epodoutput.RunHostCmdWithRetries(
 								clientPod.Namespace,
 								clientPod.Name,
 								cmd,
@@ -289,7 +299,7 @@ var _ = ginkgo.Describe("Services", func() {
 								// Flushing the IP route cache will remove any routes in the cache
 								// that are a result of receiving a "need to frag" packet.
 								ginkgo.By("Flushing the ip route cache")
-								_, err := framework.RunHostCmdWithRetries(
+								_, err := e2epodoutput.RunHostCmdWithRetries(
 									clientPod.Namespace,
 									clientPod.Name,
 									"ip route flush cache",
@@ -299,7 +309,7 @@ var _ = ginkgo.Describe("Services", func() {
 
 								// List the current IP route cache for informative purposes.
 								cmd := fmt.Sprintf("ip route get %s", serviceNodeIP)
-								stdout, err := framework.RunHostCmd(
+								stdout, err := e2epodoutput.RunHostCmd(
 									clientPod.Namespace,
 									clientPod.Name,
 									cmd)
@@ -320,7 +330,7 @@ var _ = ginkgo.Describe("Services", func() {
 									servicePort,
 								)
 								framework.Logf("Testing UDP %s with command %q", size, cmd)
-								stdout, err := framework.RunHostCmd(
+								stdout, err := e2epodoutput.RunHostCmd(
 									clientPod.Namespace,
 									clientPod.Name,
 									cmd)
@@ -336,7 +346,7 @@ var _ = ginkgo.Describe("Services", func() {
 									ginkgo.By("Making sure that the ip route cache contains an MTU route")
 									// Get IP route cache and make sure that it contains an MTU route.
 									cmd = fmt.Sprintf("ip route get %s", serviceNodeIP)
-									stdout, err = framework.RunHostCmd(
+									stdout, err = e2epodoutput.RunHostCmd(
 										clientPod.Namespace,
 										clientPod.Name,
 										cmd)
@@ -366,7 +376,7 @@ var _ = ginkgo.Describe("Services", func() {
 								if isInterconnectEnabled() {
 									containerName = "ovnkube-controller"
 								}
-								_, err := framework.RunKubectl(ovnNs, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
+								_, err := e2ekubectl.RunKubectl(ovnNs, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
 									"ip", "route", "flush", "cache")
 								framework.ExpectNoError(err, "Flushing the ip route cache failed")
 							}
@@ -423,7 +433,7 @@ var _ = ginkgo.Describe("Services", func() {
 		}
 
 		cmd := fmt.Sprintf(`ip -br addr; ip addr del %s dev lo; ip addr add %s dev lo; ip -br addr`, extraCIDR, extraCIDR)
-		_, err = framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+		_, err = e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 		framework.ExpectNoError(err)
 		cleanupFn = func() {
 			// initial pod used for host command may be deleted at this point, refetch
@@ -435,7 +445,7 @@ var _ = ginkgo.Describe("Services", func() {
 			gomega.Expect(pods.Items).To(gomega.HaveLen(1))
 			clientPod := &pods.Items[0]
 			cmd := fmt.Sprintf(`ip addr del %s dev lo || true`, extraCIDR)
-			_, err = framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			_, err = e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 		}
 
 		ginkgo.By("Starting a UDP server listening on the additional IP")
@@ -447,7 +457,7 @@ var _ = ginkgo.Describe("Services", func() {
 		serverPod.Spec.NodeName = nodeName
 		serverPod.Spec.HostNetwork = true
 		serverPod.Spec.Containers[0].TerminationMessagePolicy = v1.TerminationMessageFallbackToLogsOnError
-		f.PodClient().CreateSync(serverPod)
+		e2epod.NewPodClient(f).CreateSync(serverPod)
 
 		ginkgo.By("Ensuring the server is listening on the additional IP")
 		// Connect from host -> additional IP. This shouldn't touch OVN at all, just acting as a basic
@@ -455,7 +465,7 @@ var _ = ginkgo.Describe("Services", func() {
 		err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
 			cmd = fmt.Sprintf(`echo hostname | /usr/bin/socat -t 5 - "udp:%s"`,
 				net.JoinHostPort(extraIP, udpPortS))
-			stdout, err := framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 			if err != nil {
 				return false, err
 			}
@@ -492,7 +502,7 @@ var _ = ginkgo.Describe("Services", func() {
 		err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
 			cmd = fmt.Sprintf(`/bin/sh -c 'echo hostname | /usr/bin/socat -t 5 - "udp:%s"'`,
 				net.JoinHostPort(service.Spec.ClusterIP, "80"))
-			stdout, err := framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 			if err != nil {
 				return false, err
 			}
@@ -505,8 +515,8 @@ var _ = ginkgo.Describe("Services", func() {
 		clientServerPod := e2epod.NewAgnhostPod(namespace, "client", nil, nil, []v1.ContainerPort{{ContainerPort: (udpPort)}, {ContainerPort: (udpPort), Protocol: "UDP"}},
 			"netexec")
 		clientServerPod.Spec.NodeName = nodeName
-		f.PodClient().CreateSync(clientServerPod)
-		clientServerPod, err = f.PodClient().Get(context.TODO(), clientServerPod.Name, metav1.GetOptions{})
+		e2epod.NewPodClient(f).CreateSync(clientServerPod)
+		clientServerPod, err = e2epod.NewPodClient(f).Get(context.TODO(), clientServerPod.Name, metav1.GetOptions{})
 		framework.ExpectNoError(err)
 
 		// annoying: need to issue a curl to the test pod to tell it to connect to the service
@@ -517,7 +527,7 @@ var _ = ginkgo.Describe("Services", func() {
 				"udp",
 				service.Spec.ClusterIP,
 				80)
-			stdout, err := framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 			if err != nil {
 				return false, err
 			}
@@ -770,7 +780,6 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 		backendName      = "lb-backend-pod"
 		endpointHTTPPort = 80
 		loadBalancerYaml = "loadbalancer.yaml"
-		namespaceName    = "default"
 		svcIP            = "192.168.10.0"
 		clientContainer  = "lbclient"
 		routerContainer  = "frr"
@@ -778,8 +787,8 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 
 	var (
 		backendNodeName string
+		namespaceName   = "default"
 	)
-
 	f := wrappedTestFramework(svcName)
 	ginkgo.BeforeEach(func() {
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 2)
@@ -855,17 +864,26 @@ spec:
     app: nginx
   type: LoadBalancer
 `)
-		if err := ioutil.WriteFile(loadBalancerYaml, []byte(loadBalancerServiceConfig), 0644); err != nil {
+		if err := os.WriteFile(loadBalancerYaml, []byte(loadBalancerServiceConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
 		}
 		framework.Logf("Create the Load Balancer configuration")
-		framework.RunKubectlOrDie("default", "create", "-f", loadBalancerYaml)
+		e2ekubectl.RunKubectlOrDie("default", "create", "-f", loadBalancerYaml)
 
+	})
+
+	ginkgo.JustAfterEach(func() {
+		if ginkgo.CurrentSpecReport().Failed() {
+			DumpBGPInfo(reportPath, ginkgo.CurrentSpecReport().LeafNodeText, f)
+			k8sReporter := InitReporter(framework.TestContext.KubeConfig, reportPath,
+				[]string{metallbNamespace, namespaceName})
+			DumpInfo(k8sReporter)
+		}
 	})
 
 	ginkgo.AfterEach(func() {
 		framework.Logf("Delete the Load Balancer configuration")
-		framework.RunKubectlOrDie("default", "delete", "-f", loadBalancerYaml)
+		e2ekubectl.RunKubectlOrDie("default", "delete", "-f", loadBalancerYaml)
 		defer func() {
 			if err := os.Remove(loadBalancerYaml); err != nil {
 				framework.Logf("Unable to remove the CRD config from disk: %v", err)
@@ -1056,13 +1074,13 @@ spec:
 		err = patchServiceBoolValue(f.ClientSet, svcName, "default", "/spec/allocateLoadBalancerNodePorts", false)
 		framework.ExpectNoError(err)
 
-		output := framework.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.allocateLoadBalancerNodePorts}'")
+		output := e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.allocateLoadBalancerNodePorts}'")
 		framework.ExpectEqual(output, "'false'")
 
 		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/externalTrafficPolicy", "Local")
 		framework.ExpectNoError(err)
 
-		output = framework.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.externalTrafficPolicy}'")
+		output = e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.externalTrafficPolicy}'")
 		framework.ExpectEqual(output, "'Local'")
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
@@ -1083,7 +1101,7 @@ spec:
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
 		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
-		framework.RunKubectlOrDie("default", "scale", "deployment", backendName, "--replicas=3")
+		e2ekubectl.RunKubectlOrDie("default", "scale", "deployment", backendName, "--replicas=3")
 		err = framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, svcName, 3, time.Second, time.Second*120)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 

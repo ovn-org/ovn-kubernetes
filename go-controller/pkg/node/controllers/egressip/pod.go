@@ -253,8 +253,14 @@ func (c *Controller) getEIPsForPodChange(pod *corev1.Pod) (sets.Set[string], err
 		return nil, err
 	}
 	for _, informerEIP := range informerEIPs {
-		eipNsSel, _ := metav1.LabelSelectorAsSelector(&informerEIP.Spec.NamespaceSelector)
-		eipPodSel, _ := metav1.LabelSelectorAsSelector(&informerEIP.Spec.PodSelector)
+		eipNsSel, err := metav1.LabelSelectorAsSelector(&informerEIP.Spec.NamespaceSelector)
+		if err != nil {
+			return nil, err
+		}
+		eipPodSel, err := metav1.LabelSelectorAsSelector(&informerEIP.Spec.PodSelector)
+		if err != nil {
+			return nil, err
+		}
 		if eipNsSel.Matches(labels.Set(podNs.Labels)) && eipPodSel.Matches(labels.Set(pod.Labels)) {
 			eipNames.Insert(informerEIP.Name)
 		}

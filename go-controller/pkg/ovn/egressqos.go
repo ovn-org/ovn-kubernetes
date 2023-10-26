@@ -125,7 +125,10 @@ func (oc *DefaultNetworkController) cloneEgressQoSRule(raw egressqosapi.EgressQo
 func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.LabelSelector, namespace string, priority int) (addressset.AddressSet, *sync.Map, error) {
 	var addrSet addressset.AddressSet
 
-	selector, _ := metav1.LabelSelectorAsSelector(&podSelector)
+	selector, err := metav1.LabelSelectorAsSelector(&podSelector)
+	if err != nil {
+		return nil, nil, err
+	}
 	if selector.Empty() { // empty selector means that the rule applies to all pods in the namespace
 		asIndex := getNamespaceAddrSetDbIDs(namespace, oc.controllerName)
 		addrSet, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
@@ -737,7 +740,10 @@ func (oc *DefaultNetworkController) syncEgressQoSPod(key string) error {
 	podLabels := labels.Set(pod.Labels)
 	podMapOps := []mapAndOp{}
 	for _, r := range eq.rules {
-		selector, _ := metav1.LabelSelectorAsSelector(&r.podSelector)
+		selector, err := metav1.LabelSelectorAsSelector(&r.podSelector)
+		if err != nil {
+			return err
+		}
 		if selector.Empty() { // rule applies to all pods in the namespace, no need to modify address set
 			continue
 		}
