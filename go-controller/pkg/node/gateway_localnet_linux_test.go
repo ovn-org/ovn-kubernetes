@@ -30,6 +30,7 @@ import (
 const (
 	v4localnetGatewayIP = "10.244.0.1"
 	v6localnetGatewayIP = "fd00:96:1::1"
+	gwMAC               = "0a:0b:0c:0d:0e:0f"
 )
 
 func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher {
@@ -47,6 +48,8 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 	err = f6.MatchState(initIPTable)
 	Expect(err).NotTo(HaveOccurred())
 
+	gwMACParsed, _ := net.ParseMAC(gwMAC)
+
 	fNPW := nodePortWatcher{
 		ofportPhys:  "eth0",
 		ofportPatch: "patch-breth0_ov",
@@ -54,7 +57,8 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 		gatewayIPv6: v6localnetGatewayIP,
 		serviceInfo: make(map[k8stypes.NamespacedName]*serviceConfig),
 		ofm: &openflowManager{
-			flowCache: map[string][]string{},
+			flowCache:     map[string][]string{},
+			defaultBridge: &bridgeConfiguration{macAddress: gwMACParsed},
 		},
 	}
 	return &fNPW
@@ -238,6 +242,9 @@ var _ = Describe("Node Operations", func() {
 		app.Flags = config.Flags
 		fExec = ovntest.NewFakeExec()
 		fakeOvnNode = NewFakeOVNNode(fExec)
+		fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=15 --no-heading --data=bare --format=csv --columns name list interface",
+		})
 
 		iptV4, iptV6 = util.SetFakeIPTablesHelpers()
 		_, nodeNet, err := net.ParseCIDR("10.1.1.0/24")
@@ -1167,19 +1174,22 @@ var _ = Describe("Node Operations", func() {
 				}
 				expectedNodePortFlows := []string{
 					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=output:patch-breth0_ov",
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, tcp, tp_src=31111, actions=output:eth0",
+					fmt.Sprintf("cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, dl_src=%s, tcp, tp_src=31111, actions=output:eth0",
+						gwMAC),
 				}
 				expectedLBIngressFlows := []string{
 					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
 					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, icmp, nw_dst=5.5.5.5, icmp_type=3, icmp_code=4, actions=output:patch-breth0_ov",
 					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, tcp, nw_dst=5.5.5.5, tp_dst=8080, actions=output:patch-breth0_ov",
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=patch-breth0_ov, tcp, nw_src=5.5.5.5, tp_src=8080, actions=output:eth0",
+					fmt.Sprintf("cookie=0x10c6b89e483ea111, priority=110, in_port=patch-breth0_ov, dl_src=%s, tcp, nw_src=5.5.5.5, tp_src=8080, actions=output:eth0",
+						gwMAC),
 				}
 				expectedLBExternalIPFlows := []string{
 					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
 					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, icmp, nw_dst=1.1.1.1, icmp_type=3, icmp_code=4, actions=output:patch-breth0_ov",
 					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, tcp, nw_dst=1.1.1.1, tp_dst=8080, actions=output:patch-breth0_ov",
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=patch-breth0_ov, tcp, nw_src=1.1.1.1, tp_src=8080, actions=output:eth0",
+					fmt.Sprintf("cookie=0x71765945a31dc2f1, priority=110, in_port=patch-breth0_ov, dl_src=%s, tcp, nw_src=1.1.1.1, tp_src=8080, actions=output:eth0",
+						gwMAC),
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -2130,7 +2140,8 @@ var _ = Describe("Node Operations", func() {
 				expectedFlows := []string{
 					// default
 					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=output:patch-breth0_ov",
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, tcp, tp_src=31111, actions=output:eth0",
+					fmt.Sprintf("cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, dl_src=%s, tcp, tp_src=31111, actions=output:eth0",
+						gwMAC),
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -2420,7 +2431,8 @@ var _ = Describe("Node Operations", func() {
 				expectedFlows := []string{
 					// default
 					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=output:patch-breth0_ov",
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, tcp, tp_src=31111, actions=output:eth0",
+					fmt.Sprintf("cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, dl_src=%s, tcp, tp_src=31111, actions=output:eth0",
+						gwMAC),
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)

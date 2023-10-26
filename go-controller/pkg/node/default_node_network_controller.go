@@ -699,6 +699,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		nc.routeManager.Run(nc.stopChan, 4*time.Minute)
 	}()
 
+	// Bootstrap flows in OVS if just normal flow is present
+	if err := bootstrapOVSFlows(); err != nil {
+		return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
+	}
+
 	if node, err = nc.Kube.GetNode(nc.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 	}

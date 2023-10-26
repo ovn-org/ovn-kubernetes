@@ -1,7 +1,13 @@
 package node
 
 import (
+	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"net"
 	"os"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,5 +151,93 @@ func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys string) error {
 			physIntf, ofPortPhys, curOfportPhys)
 		os.Exit(1)
 	}
+	return nil
+}
+
+// bootstrapOVSFlows handles ensuring basic, required flows are in place. This is done before OpenFlow manager has
+// been created/started, and only done when there is just a NORMAL flow programmed and OVN/OVS is already setup
+func bootstrapOVSFlows() error {
+	// see if patch port exists already
+	var portsOutput string
+	var stderr string
+	var err error
+	if portsOutput, stderr, err = util.RunOVSVsctl("--no-heading", "--data=bare", "--format=csv", "--columns",
+		"name", "list", "interface"); err != nil {
+		// bridge exists, but could not list ports
+		return fmt.Errorf("failed to list ports on existing bridge br-int: %s, %w", stderr, err)
+	}
+
+	var bridge string
+	var patchPort string
+	// patch-br-int-to-<bridge name>_<node>
+	r := regexp.MustCompile("^patch-(.*)_.*?-to-br-int$")
+	for _, line := range strings.Split(portsOutput, "\n") {
+		matches := r.FindStringSubmatch(line)
+		if len(matches) == 2 {
+			patchPort = matches[0]
+			bridge = matches[1]
+			break
+		}
+	}
+
+	if len(bridge) == 0 {
+		// bridge exists but no patch port was found
+		return nil
+	}
+
+	// get the current flows and if there is more than just default flow, we dont need to bootstrap as we already
+	// have flows
+	flows, err := util.GetOFFlows(bridge)
+	if err != nil {
+		return err
+	}
+	if len(flows) > 1 {
+		// more than 1 flow, assume the OVS has retained previous flows from previous running OVNK instance
+		return nil
+	}
+
+	// only have 1 flow, need to install required flows
+	klog.Infof("Default NORMAL flow installed on OVS bridge: %s, will bootstrap with required port security flows", bridge)
+
+	// Get ofport of patchPort
+	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", patchPort, "ofport")
+	if err != nil {
+		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
+			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
+	}
+
+	var bridgeMACAddress net.HardwareAddr
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		hostRep, err := util.GetDPUHostInterface(bridge)
+		if err != nil {
+			return err
+		}
+		bridgeMACAddress, err = util.GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
+		if err != nil {
+			return err
+		}
+	} else {
+		bridgeMACAddress, err = util.GetOVSPortMACAddress(bridge)
+		if err != nil {
+			return errors.Wrapf(err, "failed to get MAC address for ovs port %s", bridge)
+		}
+	}
+
+	var dftFlows []string
+	// table 0, check packets coming from OVN have the correct mac address. Low priority flows that are a catch all
+	// for non-IP packets that would normally be forwarded with NORMAL action (table 0, priority 0 flow).
+	dftFlows = append(dftFlows,
+		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_src=%s, actions=output:NORMAL",
+			defaultOpenFlowCookie, ofportPatch, bridgeMACAddress))
+	dftFlows = append(dftFlows,
+		fmt.Sprintf("cookie=%s, priority=9, table=0, in_port=%s, actions=drop",
+			defaultOpenFlowCookie, ofportPatch))
+	dftFlows = append(dftFlows, "priority=0, table=0, actions=output:NORMAL")
+
+	_, stderr, err = util.ReplaceOFFlows(bridge, dftFlows)
+	if err != nil {
+		return fmt.Errorf("failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, dftFlows)
+	}
+
 	return nil
 }

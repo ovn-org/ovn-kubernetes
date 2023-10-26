@@ -134,6 +134,10 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 		// if LGW mode and no uplink gateway bridge, ingress traffic enters host from node physical interface instead of the breth0. Skip adding these service flows to br-ex.
 		return nil
 	}
+
+	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
+	// that dl_src is included in match criteria!
+
 	npw.gatewayIPLock.Lock()
 	defer npw.gatewayIPLock.Unlock()
 	var cookie, key string
@@ -208,9 +212,9 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 							"actions=%s",
 							cookie, npw.ofportPhys, flowProtocol, svcPort.NodePort, actions),
 						// table=0, matches on return traffic from service nodePort and sends it out to primary node interface (br-ex)
-						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_src=%d, "+
+						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, dl_src=%s, %s, tp_src=%d, "+
 							"actions=output:%s",
-							cookie, npw.ofportPatch, flowProtocol, svcPort.NodePort, npw.ofportPhys)})
+							cookie, npw.ofportPatch, npw.ofm.defaultBridge.macAddress, flowProtocol, svcPort.NodePort, npw.ofportPhys)})
 				}
 			}
 		}
@@ -259,6 +263,10 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 	if net.ParseIP(externalIPOrLBIngressIP) == nil {
 		return fmt.Errorf("failed to parse %s IP: %q", ipType, externalIPOrLBIngressIP)
 	}
+
+	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
+	// that dl_src is included in match criteria!
+
 	flowProtocol := protocol
 	nwDst := "nw_dst"
 	nwSrc := "nw_src"
@@ -326,9 +334,9 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 				"actions=%s",
 				cookie, npw.ofportPhys, flowProtocol, nwDst, externalIPOrLBIngressIP, svcPort.Port, actions),
 			// table=0, matches on return traffic from service externalIP or LB ingress and sends it out to primary node interface (br-ex)
-			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
+			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, dl_src=%s, %s, %s=%s, tp_src=%d, "+
 				"actions=output:%s",
-				cookie, npw.ofportPatch, flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort.Port, npw.ofportPhys))
+				cookie, npw.ofportPatch, npw.ofm.defaultBridge.macAddress, flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort.Port, npw.ofportPhys))
 	}
 	npw.ofm.updateFlowCacheEntry(key, externalIPFlows)
 
@@ -1083,6 +1091,9 @@ func (ofm *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs
 	ofm.defaultBridge.Lock()
 	defer ofm.defaultBridge.Unlock()
 
+	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
+	// that dl_src is included in match criteria!
+
 	dftFlows, err := flowsForDefaultBridge(ofm.defaultBridge, extraIPs)
 	if err != nil {
 		return err
@@ -1109,6 +1120,9 @@ func (ofm *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs
 }
 
 func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]string, error) {
+	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
+	// that dl_src is included in match criteria!
+
 	ofPortPhys := bridge.ofPortPhys
 	bridgeMacAddress := bridge.macAddress.String()
 	ofPortPatch := bridge.ofPortPatch
@@ -1377,6 +1391,8 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 }
 
 func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, error) {
+	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
+	// that dl_src is included in match criteria!
 	ofPortPhys := bridge.ofPortPhys
 	bridgeMacAddress := bridge.macAddress.String()
 	ofPortPatch := bridge.ofPortPatch
