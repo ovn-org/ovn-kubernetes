@@ -1336,6 +1336,29 @@ function install_kubevirt() {
             kubectl logs --all-containers=true -n kubevirt $p || true
         done
     fi
+    
+    if [ ! -d "./bin" ]
+    then
+        mkdir -p ./bin
+        if_error_exit "Failed to create bin dir!"
+    fi
+
+    if [[ "$OSTYPE" == "linux-gnu" ]]; then
+        OS_TYPE="linux"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        OS_TYPE="darwin"
+    fi
+
+    pushd ./bin
+       if [ ! -f ./virtctl ]; then
+           cli_name="virtctl-${kubevirt_version}-${OS_TYPE}-${ARCH}"
+           curl -LO "${kubevirt_release_url}/${cli_name}"
+           mv ${cli_name} virtctl
+           if_error_exit "Failed to download virtctl!"
+       fi
+    popd
+
+    chmod +x ./bin/virtctl
 }
 
 check_dependencies
