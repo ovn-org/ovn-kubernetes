@@ -6,7 +6,6 @@ import (
 	"time"
 
 	v1 "kubevirt.io/api/core/v1"
-	"kubevirt.io/client-go/kubecli"
 )
 
 type Address struct {
@@ -28,8 +27,8 @@ type NetworkState struct {
 	Interfaces []Interface `json:"interfaces"`
 }
 
-func RetrieveNetworkState(virtClient kubecli.KubevirtClient, vmi *v1.VirtualMachineInstance) (*NetworkState, error) {
-	output, err := RunCommand(virtClient, vmi, "nmstatectl show --json", 2*time.Second)
+func RetrieveNetworkState(vmi *v1.VirtualMachineInstance) (*NetworkState, error) {
+	output, err := RunCommand(vmi, "nmstatectl show --json", 2*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %v", output, err)
 	}

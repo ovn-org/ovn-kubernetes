@@ -23,38 +23,46 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	butaneconfig "github.com/coreos/butane/config"
 	butanecommon "github.com/coreos/butane/config/common"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	kvmigrationsv1alpha1 "kubevirt.io/api/migrations/v1alpha1"
-	"kubevirt.io/client-go/kubecli"
 )
 
-func newKubevirtClient() (kubecli.KubevirtClient, error) {
+func newControllerRuntimeClient() (crclient.Client, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
 	if err != nil {
 		return nil, err
 	}
-	clientSet, err := kubecli.GetKubevirtClientFromRESTConfig(config)
+	scheme := runtime.NewScheme()
+	err = kubevirtv1.AddToScheme(scheme)
 	if err != nil {
-		return nil, fmt.Errorf("unexpected error creating kubevirt client: %v", err)
+		return nil, err
 	}
-	return clientSet, nil
+	err = kvmigrationsv1alpha1.AddToScheme(scheme)
+	if err != nil {
+		return nil, err
+	}
+	return crclient.New(config, crclient.Options{
+		Scheme: scheme,
+	})
 }
 
 var _ = Describe("Kubevirt Virtual Machines", func() {
 
 	var (
 		fr                         = wrappedTestFramework("kv-live-migration")
-		kvcli                      kubecli.KubevirtClient
+		crClient                   crclient.Client
 		namespace                  string
 		httpServerPort             = int32(9900)
 		isDualStack                = false
@@ -77,6 +85,10 @@ passwd:
 		namespace = fr.Namespace.Name
 		// So we can use it at AfterEach, since fr.ClientSet is nil there
 		clientSet = fr.ClientSet
+
+		var err error
+		crClient, err = newControllerRuntimeClient()
+		Expect(err).ToNot(HaveOccurred())
 
 		workerNodeList, err := fr.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{LabelSelector: labels.FormatLabels(map[string]string{"node-role.kubernetes.io/worker": ""})})
 		Expect(err).ToNot(HaveOccurred())
@@ -253,8 +265,13 @@ passwd:
 
 		checkConnectivity = func(vmName string, endpoints []string, stage string) {
 			by(vmName, "Check connectivity "+stage)
-
-			vmi, err := kvcli.VirtualMachineInstance(namespace).Get(context.TODO(), vmName, &metav1.GetOptions{})
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace,
+					Name:      vmName,
+				},
+			}
+			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
 			Expect(err).ToNot(HaveOccurred())
 			polling := 15 * time.Second
 			timeout := time.Minute
@@ -270,7 +287,7 @@ passwd:
 				for _, podIP := range pod.Status.PodIPs {
 					output := ""
 					Eventually(func() error {
-						output, err = kubevirt.RunCommand(kvcli, vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP.IP, "8000")), polling)
+						output, err = kubevirt.RunCommand(vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP.IP, "8000")), polling)
 						return err
 					}).
 						WithOffset(1).
@@ -283,7 +300,7 @@ passwd:
 			step = by(vmName, stage+": Check n/s tcp traffic")
 			output := ""
 			Eventually(func() error {
-				output, err = kubevirt.RunCommand(kvcli, vmi, "curl -kL https://www.ovn.org", polling)
+				output, err = kubevirt.RunCommand(vmi, "curl -kL https://www.ovn.org", polling)
 				return err
 			}).
 				WithOffset(1).
@@ -320,7 +337,13 @@ passwd:
 		}
 
 		liveMigrateVirtualMachine = func(vmName string, migrationMode kubevirtv1.MigrationMode) {
-			vmi, err := kvcli.VirtualMachineInstance(namespace).Get(context.TODO(), vmName, &metav1.GetOptions{})
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace,
+					Name:      vmName,
+				},
+			}
+			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
 			Expect(err).ToNot(HaveOccurred(), "should success retrieving vmi")
 			currentNode := vmi.Status.NodeName
 
@@ -331,27 +354,36 @@ passwd:
 					// https://github.com/ovn-org/ovn-kubernetes/issues/3902#issuecomment-1750257559
 					By(fmt.Sprintf("Retrying vmim %s creation", vmName))
 				}
-				err := kvcli.VirtualMachine(namespace).Migrate(context.Background(), vmName, &kubevirtv1.MigrateOptions{})
+				vmim := &kubevirtv1.VirtualMachineInstanceMigration{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace:    namespace,
+						GenerateName: vmName,
+					},
+					Spec: kubevirtv1.VirtualMachineInstanceMigrationSpec{
+						VMIName: vmName,
+					},
+				}
+				err := crClient.Create(context.Background(), vmim)
 				vmimCreationRetries++
 				return err
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
 
 			Eventually(func() *kubevirtv1.VirtualMachineInstanceMigrationState {
-				vmi, err := kvcli.VirtualMachineInstance(namespace).Get(context.TODO(), vmName, &metav1.GetOptions{})
+				err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
 				Expect(err).ToNot(HaveOccurred())
 				return vmi.Status.MigrationState
 			}).WithOffset(1).WithPolling(time.Second).WithTimeout(10*time.Minute).ShouldNot(BeNil(), "should have a MigrationState")
 			Eventually(func() string {
-				vmi, err := kvcli.VirtualMachineInstance(namespace).Get(context.TODO(), vmName, &metav1.GetOptions{})
+				err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
 				Expect(err).ToNot(HaveOccurred())
 				return vmi.Status.MigrationState.TargetNode
 			}).WithOffset(1).WithPolling(time.Second).WithTimeout(10*time.Minute).ShouldNot(Equal(currentNode), "should refresh MigrationState")
 			Eventually(func() bool {
-				vmi, err := kvcli.VirtualMachineInstance(namespace).Get(context.TODO(), vmName, &metav1.GetOptions{})
+				err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
 				Expect(err).ToNot(HaveOccurred())
 				return vmi.Status.MigrationState.Completed
 			}).WithOffset(1).WithPolling(time.Second).WithTimeout(20*time.Minute).Should(BeTrue(), "should complete migration")
-			vmi, err = kvcli.VirtualMachineInstance(namespace).Get(context.TODO(), vmName, &metav1.GetOptions{})
+			err = crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
 			Expect(err).WithOffset(1).ToNot(HaveOccurred(), "should success retrieving vmi after migration")
 			Expect(vmi.Status.MigrationState.Failed).WithOffset(1).To(BeFalse(), func() string {
 				vmiJSON, err := json.Marshal(vmi)
@@ -380,9 +412,9 @@ passwd:
 			return nil
 		}
 
-		addressByFamily = func(familyFn func(iface kubevirt.Interface) []kubevirt.Address, virtClient kubecli.KubevirtClient, vmi *kubevirtv1.VirtualMachineInstance) func() ([]kubevirt.Address, error) {
+		addressByFamily = func(familyFn func(iface kubevirt.Interface) []kubevirt.Address, vmi *kubevirtv1.VirtualMachineInstance) func() ([]kubevirt.Address, error) {
 			return func() ([]kubevirt.Address, error) {
-				networkState, err := kubevirt.RetrieveNetworkState(kvcli, vmi)
+				networkState, err := kubevirt.RetrieveNetworkState(vmi)
 				if err != nil {
 					return nil, err
 				}
@@ -401,7 +433,8 @@ passwd:
 			}
 			return &kubevirtv1.VirtualMachine{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: fmt.Sprintf("worker%d", idx),
+					Namespace: namespace,
+					Name:      fmt.Sprintf("worker%d", idx),
 				},
 				Spec: kubevirtv1.VirtualMachineSpec{
 					Running: pointer.Bool(true),
@@ -501,32 +534,38 @@ passwd:
 			defer GinkgoRecover()
 			defer wg.Done()
 			step := by(vm.Name, "Login to virtual machine")
-			vmi, err := kvcli.VirtualMachineInstance(namespace).Get(context.TODO(), vm.Name, &metav1.GetOptions{})
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace,
+					Name:      vm.Name,
+				},
+			}
+			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(kubevirt.LoginToFedora(kvcli, vmi, "core", "fedora")).To(Succeed(), step)
+			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
 
 			step = by(vm.Name, "Wait for virtual machine to receive IPv4 address from DHCP")
-			Eventually(addressByFamily(ipv4, kvcli, vmi)).
+			Eventually(addressByFamily(ipv4, vmi)).
 				WithPolling(time.Second).
 				WithTimeout(5*time.Minute).
 				Should(HaveLen(1), step)
 
 			if isDualStack {
-				output, err := kubevirt.RunCommand(kvcli, vmi, `echo '{"interfaces":[{"name":"enp1s0","type":"ethernet","state":"up","ipv4":{"enabled":true,"dhcp":true},"ipv6":{"enabled":true,"dhcp":true,"autoconf":false}}],"routes":{"config":[{"destination":"::/0","next-hop-interface":"enp1s0","next-hop-address":"fe80::1"}]}}' |nmstatectl apply`, 5*time.Second)
+				output, err := kubevirt.RunCommand(vmi, `echo '{"interfaces":[{"name":"enp1s0","type":"ethernet","state":"up","ipv4":{"enabled":true,"dhcp":true},"ipv6":{"enabled":true,"dhcp":true,"autoconf":false}}],"routes":{"config":[{"destination":"::/0","next-hop-interface":"enp1s0","next-hop-address":"fe80::1"}]}}' |nmstatectl apply`, 5*time.Second)
 				Expect(err).ToNot(HaveOccurred(), output)
 				step = by(vm.Name, "Wait for virtual machine to receive IPv6 address from DHCP")
-				Eventually(addressByFamily(ipv6, kvcli, vmi)).
+				Eventually(addressByFamily(ipv6, vmi)).
 					WithPolling(time.Second).
 					WithTimeout(5*time.Minute).
 					Should(HaveLen(2), func() string {
-						output, _ := kubevirt.RunCommand(kvcli, vmi, "journalctl -u nmstate", 2*time.Second)
+						output, _ := kubevirt.RunCommand(vmi, "journalctl -u nmstate", 2*time.Second)
 						return step + " -> journal nmstate: " + output
 					})
 			}
 
 			step = by(vm.Name, "Start httpServer")
 			httpServerCommand := fmt.Sprintf("podman run -d --tls-verify=false --privileged --net=host %s netexec --http-port %d", agnhostImage, httpServerPort)
-			output, err := kubevirt.RunCommand(kvcli, vmi, httpServerCommand, time.Minute)
+			output, err := kubevirt.RunCommand(vmi, httpServerCommand, time.Minute)
 			Expect(err).ToNot(HaveOccurred(), step+": "+output)
 
 			step = by(vm.Name, "Expose httpServer as a service")
@@ -561,7 +600,6 @@ passwd:
 			err error
 		)
 
-		kvcli, err = newKubevirtClient()
 		Expect(err).ToNot(HaveOccurred())
 
 		bandwidthPerMigration := resource.MustParse("40Mi")
@@ -581,10 +619,10 @@ passwd:
 			},
 		}
 		if td.mode == kubevirtv1.MigrationPostCopy {
-			_, err = kvcli.MigrationPolicy().Create(context.TODO(), forcePostCopyMigrationPolicy, metav1.CreateOptions{})
+			err = crClient.Create(context.TODO(), forcePostCopyMigrationPolicy)
 			Expect(err).ToNot(HaveOccurred())
 			defer func() {
-				Expect(kvcli.MigrationPolicy().Delete(context.TODO(), forcePostCopyMigrationPolicy.Name, metav1.DeleteOptions{})).To(Succeed())
+				Expect(crClient.Delete(context.TODO(), forcePostCopyMigrationPolicy)).To(Succeed())
 			}()
 		}
 
@@ -632,7 +670,7 @@ passwd:
 					// https://github.com/ovn-org/ovn-kubernetes/issues/3902#issuecomment-1750257559
 					By(fmt.Sprintf("Retrying vm %s creation", vm.Name))
 				}
-				_, err = kvcli.VirtualMachine(namespace).Create(context.Background(), vm)
+				err = crClient.Create(context.Background(), vm)
 				vmCreationRetries++
 				return err
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
@@ -641,7 +679,7 @@ passwd:
 		for _, vm := range vms {
 			By(fmt.Sprintf("Waiting for readiness at virtual machine %s", vm.Name))
 			Eventually(func() bool {
-				vm, err = kvcli.VirtualMachine(namespace).Get(context.Background(), vm.Name, &metav1.GetOptions{})
+				err = crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vm), vm)
 				Expect(err).ToNot(HaveOccurred())
 				return vm.Status.Ready
 			}).WithPolling(time.Second).WithTimeout(5 * time.Minute).Should(BeTrue())
