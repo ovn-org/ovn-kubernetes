@@ -153,7 +153,7 @@ func GetNetdevNameFromDeviceId(deviceId string, deviceInfo nadapi.DeviceInfo) (s
 		// If a virtio/vDPA device exists, it takes preference over the vendor device, steering-wize
 		var vdpaDevice kvdpa.VdpaDevice
 		vdpaDevice, err = GetVdpaOps().GetVdpaDeviceByPci(deviceId)
-		if err == nil && vdpaDevice.Driver() == kvdpa.VirtioVdpaDriver {
+		if err == nil && vdpaDevice != nil && vdpaDevice.Driver() == kvdpa.VirtioVdpaDriver {
 			klog.V(2).Infof("deviceInfo.Vdpa.Driver is virtio, returning netdev %s", vdpaDevice.VirtioNet().NetDev())
 			return vdpaDevice.VirtioNet().NetDev(), nil
 		}
