@@ -123,15 +123,18 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 	return podAnnotation, nil
 }
 
-// IsMigratedSourcePodStale return true if there are other pods related to
-// to it and any of them has newer creation timestamp.
+// IsMigratedSourcePodStale return false is the pod is live migratable and not completed
+// and is the running vm pod with newest creation timestamp
 func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
+	if util.PodCompleted(pod) {
+		return true, nil
+	}
 	if !IsPodLiveMigratable(pod) {
-		return false, nil
+		return true, nil
 	}
 	vmPods, err := findVMRelatedPods(client, pod)
 	if err != nil {
-		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking live migration left overs: %v", pod.Namespace, pod.Name, err)
+		return true, fmt.Errorf("failed finding related pods for pod %s/%s when checking live migration left overs: %v", pod.Namespace, pod.Name, err)
 	}
 
 	for _, vmPod := range vmPods {
