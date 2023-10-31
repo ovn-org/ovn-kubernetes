@@ -67,6 +67,7 @@ type ExternalNextHops struct {
 type StaticHop struct {
 	//IP defines the static IP to be used for egress traffic. The IP can be either IPv4 or IPv6.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Format=ip
 	// +required
 	IP string `json:"ip"`
 	// BFDEnabled determines if the interface implements the Bidirectional Forward Detection protocol. Defaults to false.
