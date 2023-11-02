@@ -250,6 +250,36 @@ func DeleteACLsFromPortGroups(nbClient libovsdbclient.Client, names []string, ac
 	return err
 }
 
+func DeleteACLsFromAllPortGroups(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
+	if len(acls) == 0 {
+		return nil
+	}
+
+	pg := nbdb.PortGroup{
+		ACLs: make([]string, 0, len(acls)),
+	}
+
+	for _, acl := range acls {
+		pg.ACLs = append(pg.ACLs, acl.UUID)
+	}
+
+	opModel := operationModel{
+		Model:            &pg,
+		ModelPredicate:   func(item *nbdb.PortGroup) bool { return true },
+		OnModelMutations: []interface{}{&pg.ACLs},
+		ErrNotFound:      false,
+		BulkOp:           true,
+	}
+
+	m := newModelClient(nbClient)
+	ops, err := m.DeleteOps(nil, opModel)
+	if err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
+}
+
 // DeletePortGroupsOps deletes the provided port groups and returns the
 // corresponding ops
 func DeletePortGroupsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, names ...string) ([]libovsdb.Operation, error) {
