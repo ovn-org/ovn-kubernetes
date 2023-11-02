@@ -139,12 +139,12 @@ func (c *ExternalGatewayMasterController) GetStaticGatewayIPsForTargetNamespace(
 }
 
 func updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, gwIPs string, err error) {
+	route.Status.LastTransitionTime = metav1.Time{Time: time.Now()}
 	if err != nil {
 		route.Status.Status = adminpolicybasedrouteapi.FailStatus
 		route.Status.Messages = append(route.Status.Messages, fmt.Sprintf("Failed to apply policy: %v", err.Error()))
 		return
 	}
-	route.Status.LastTransitionTime = metav1.Time{Time: time.Now()}
 	route.Status.Status = adminpolicybasedrouteapi.SuccessStatus
 	route.Status.Messages = append(route.Status.Messages, fmt.Sprintf("Configured external gateway IPs: %s", gwIPs))
 	klog.V(4).Infof("Updating Admin Policy Based External Route %s with Status: %s, Message: %s", route.Name, route.Status.Status, route.Status.Messages[len(route.Status.Messages)-1])
