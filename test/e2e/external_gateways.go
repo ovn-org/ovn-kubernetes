@@ -2563,6 +2563,54 @@ var _ = ginkgo.Describe("External Gateway", func() {
 		})
 
 	})
+
+	var _ = ginkgo.Context("When validating the Admin Policy Based External Route status", func() {
+		const (
+			svcname          string = "novxlan-externalgw-ecmp"
+			gwContainer1     string = "gw-test-container1"
+			gwContainer2     string = "gw-test-container2"
+			testTimeout      string = "30"
+			ecmpRetry        int    = 20
+			srcPodName              = "e2e-exgw-src-pod"
+			externalTCPPort         = 80
+			externalUDPPort         = 90
+			duplicatedPolicy        = "duplicated"
+		)
+
+		f := wrappedTestFramework(svcname)
+
+		var addressesv4 gatewayTestIPs
+
+		ginkgo.BeforeEach(func() {
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			framework.ExpectNoError(err)
+			if len(nodes.Items) < 3 {
+				framework.Failf(
+					"Test requires >= 3 Ready nodes, but there are only %v nodes",
+					len(nodes.Items))
+			}
+
+			if externalContainerNetwork == "host" {
+				skipper.Skipf("Skipping as host network doesn't support multiple external gateways")
+			}
+			_, addressesv4, _ = setupGatewayContainers(f, nodes, gwContainer1, gwContainer2, srcPodName, externalUDPPort, externalTCPPort, ecmpRetry)
+		})
+
+		ginkgo.AfterEach(func() {
+			deleteClusterExternalContainer(gwContainer1)
+			deleteClusterExternalContainer(gwContainer2)
+			deleteAPBExternalRouteCR(defaultPolicyName)
+			deleteAPBExternalRouteCR(duplicatedPolicy)
+		})
+
+		ginkgo.It("Should update the status of a successful and failed CRs", func() {
+			if addressesv4.srcPodIP == "" || addressesv4.nodeIP == "" {
+				skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addressesv4.srcPodIP, addressesv4.nodeIP)
+			}
+			createAPBExternalRouteCRWithStaticHopAndStatus(defaultPolicyName, f.Namespace.Name, false, "Success", addressesv4.gatewayIPs...)
+			createAPBExternalRouteCRWithStaticHopAndStatus(duplicatedPolicy, f.Namespace.Name, false, "Fail", addressesv4.gatewayIPs...)
+		})
+	})
 })
 
 // setupGatewayContainers sets up external containers, adds routes to the nodes, sets up udp / tcp listeners
@@ -2951,7 +2999,16 @@ func checkAPBExternalRouteStatus(policyName string) {
 }
 
 func createAPBExternalRouteCRWithStaticHop(policyName, namespaceName string, bfd bool, gateways ...string) {
+	createAPBExternalRouteCRWithStaticHopAndStatus(policyName, namespaceName, bfd, "Success", gateways...)
+	gwIPs := sets.NewString(gateways...).List()
+	gomega.Eventually(func() string {
+		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		return lastMsg
+	}, time.Minute, 1).Should(gomega.Equal(fmt.Sprintf("Configured external gateway IPs: %s", strings.Join(gwIPs, ","))))
+}
 
+func createAPBExternalRouteCRWithStaticHopAndStatus(policyName, namespaceName string, bfd bool, status string, gateways ...string) {
 	data := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: AdminPolicyBasedExternalRoute
 metadata:
@@ -2968,17 +3025,11 @@ spec:
 	stdout, err := e2ekubectl.RunKubectlInput("", data, "create", "-f", "-", "--save-config")
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Expect(stdout).To(gomega.Equal(fmt.Sprintf("adminpolicybasedexternalroute.k8s.ovn.org/%s created\n", policyName)))
-	gwIPs := sets.NewString(gateways...).List()
-	gomega.Eventually(func() string {
-		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		return lastMsg
-	}, time.Minute, 1).Should(gomega.Equal(fmt.Sprintf("Configured external gateway IPs: %s", strings.Join(gwIPs, ","))))
 	gomega.Eventually(func() string {
 		status, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.status}")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		return status
-	}, time.Minute, 1).Should(gomega.Equal("Success"))
+	}, time.Minute, 1).Should(gomega.Equal(status))
 }
 
 func updateAPBExternalRouteCRWithStaticHop(policyName, namespaceName string, bfd bool, gateways ...string) {
