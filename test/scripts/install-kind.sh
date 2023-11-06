@@ -65,4 +65,8 @@ popd # go out of $TMP_DIR
 
 pushd $SCRIPT_DIR/../../contrib
 ./kind.sh
+if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
+    sudo mv ./bin/virtctl /usr/local/bin/virtctl
+fi
 popd # go our of $SCRIPT_DIR/../../contrib
+

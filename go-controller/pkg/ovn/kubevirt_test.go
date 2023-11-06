@@ -73,6 +73,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		suffix                                                   string
 		skipPodAnnotations                                       bool
 		extraLabels, extraAnnotations                            map[string]string
+		updatePhase                                              *corev1.PodPhase
 	}
 	type testMigrationTarget struct {
 		testVirtLauncherPod
@@ -149,6 +150,17 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			return strings.Split(network, "/")[0]
 		}
 
+		phasePointer = func(phase corev1.PodPhase) *corev1.PodPhase {
+			return &phase
+		}
+
+		virtLauncherCompleted = func(t testVirtLauncherPod) bool {
+			if t.updatePhase == nil {
+				return false
+			}
+			return *t.updatePhase == corev1.PodSucceeded || *t.updatePhase == corev1.PodFailed
+		}
+
 		externalIDs = func(namespace, vmName, ovnZone string) map[string]string {
 			if vmName == "" {
 				return nil
@@ -187,11 +199,15 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			testPods := []testPod{}
 			nodeSet := map[string]bool{t.nodeName: true}
 			if t.podName != "" && isLocalNode(t, t.nodeName) {
-				testPods = append(testPods, t.testPod)
+				if !virtLauncherCompleted(t.testVirtLauncherPod) {
+					testPods = append(testPods, t.testPod)
+				}
 			}
 			if t.migrationTarget.nodeName != "" && isLocalNode(t, t.migrationTarget.nodeName) {
-				testVirtLauncherPods = append(testVirtLauncherPods, t.migrationTarget.testVirtLauncherPod)
-				testPods = append(testPods, t.migrationTarget.testVirtLauncherPod.testPod)
+				if !virtLauncherCompleted(t.migrationTarget.testVirtLauncherPod) {
+					testVirtLauncherPods = append(testVirtLauncherPods, t.migrationTarget.testVirtLauncherPod)
+					testPods = append(testPods, t.migrationTarget.testVirtLauncherPod.testPod)
+				}
 				nodeSet[t.migrationTarget.nodeName] = true
 			}
 
@@ -588,9 +604,10 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			}
 
 			pods := []v1.Pod{}
-			sourcePod := newPodFromTestVirtLauncherPod(t.testVirtLauncherPod)
+			sourceVirtLauncherPod := t.testVirtLauncherPod
+			sourcePod := newPodFromTestVirtLauncherPod(sourceVirtLauncherPod)
 			if sourcePod != nil {
-				addOVNPodAnnotations(sourcePod, t.testVirtLauncherPod)
+				addOVNPodAnnotations(sourcePod, sourceVirtLauncherPod)
 				if t.migrationTarget.nodeName != "" {
 					pods = append(pods, *sourcePod)
 				}
@@ -650,10 +667,12 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				Expect(fakeOvn.controller.WatchNamespaces()).ToNot(HaveOccurred())
 				Expect(fakeOvn.controller.WatchPods()).ToNot(HaveOccurred())
 
+				virtLauncherPodToCreate := sourceVirtLauncherPod
 				podToCreate := sourcePod
 				if podToCreate != nil {
 					if t.migrationTarget.nodeName != "" {
-						podToCreate = newPodFromTestVirtLauncherPod(t.migrationTarget.testVirtLauncherPod)
+						virtLauncherPodToCreate = t.migrationTarget.testVirtLauncherPod
+						podToCreate = newPodFromTestVirtLauncherPod(virtLauncherPodToCreate)
 						podToCreate.Labels = t.migrationTarget.labels
 						podToCreate.Annotations = t.migrationTarget.annotations
 					}
@@ -670,6 +689,21 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						WithTimeout(time.Minute).
 						WithPolling(time.Second).
 						Should(Succeed(), "should fill in the cache with the pod")
+
+					// Change the phase by updating to emulate the logic of transition
+					if virtLauncherPodToCreate.updatePhase != nil {
+						podToCreate.Status.Phase = *virtLauncherPodToCreate.updatePhase
+						_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).UpdateStatus(context.TODO(), podToCreate, metav1.UpdateOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						Eventually(func() (corev1.PodPhase, error) {
+							updatedPod, err := fakeOvn.controller.watchFactory.GetPod(podToCreate.Namespace, podToCreate.Name)
+							return updatedPod.Status.Phase, err
+						}).
+							WithTimeout(time.Minute).
+							WithPolling(time.Second).
+							Should(Equal(podToCreate.Status.Phase), "should be in the updated phase")
+
+					}
 				}
 
 				expectedOVN := []libovsdbtest.TestData{}
@@ -1187,6 +1221,120 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					dns:      dnsServiceIPv6,
 					hostname: vm1,
 				}},
+			}),
+			Entry("for failing live migration", testData{
+				ipv4:          true,
+				ipv6:          true,
+				lrpNetworks:   []string{nodeByName[node2].lrpNetworkIPv4, nodeByName[node2].lrpNetworkIPv6},
+				dnsServiceIPs: []string{dnsServiceIPv4, dnsServiceIPv6},
+				testVirtLauncherPod: testVirtLauncherPod{
+					suffix: "1",
+					testPod: testPod{
+						nodeName: node2,
+					},
+					vmName:             vm1,
+					skipPodAnnotations: false, /* add ovn pod annotation */
+				},
+				migrationTarget: testMigrationTarget{
+					lrpNetworks: []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
+					testVirtLauncherPod: testVirtLauncherPod{
+						suffix:             "2",
+						testPod:            testPod{nodeName: node1},
+						vmName:             vm1,
+						skipPodAnnotations: true,
+						extraLabels:        map[string]string{kubevirtv1.NodeNameLabel: node2},
+						updatePhase:        phasePointer(corev1.PodSucceeded),
+					},
+				},
+				expectedDhcpv4: []testDHCPOptions{{
+					cidr:     nodeByName[node1].subnetIPv4,
+					dns:      dnsServiceIPv4,
+					hostname: vm1,
+				}},
+				expectedDhcpv6: []testDHCPOptions{{
+					cidr:     nodeByName[node1].subnetIPv6,
+					dns:      dnsServiceIPv6,
+					hostname: vm1,
+				}},
+				expectedPolicies: []testPolicy{
+					{
+						match:   "ip4.src == " + vmByName[vm1].addressIPv4,
+						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv4),
+					},
+					{
+						match:   "ip6.src == " + vmByName[vm1].addressIPv6,
+						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv6),
+					},
+				},
+				expectedStaticRoutes: []testStaticRoute{
+					{
+						prefix:     vmByName[vm1].addressIPv4,
+						nexthop:    vmByName[vm1].addressIPv4,
+						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+					{
+						prefix:     vmByName[vm1].addressIPv6,
+						nexthop:    vmByName[vm1].addressIPv6,
+						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+				},
+			}),
+			Entry("for failing target virt-launcher after live migration", testData{
+				ipv4:          true,
+				ipv6:          true,
+				lrpNetworks:   []string{nodeByName[node2].lrpNetworkIPv4, nodeByName[node2].lrpNetworkIPv6},
+				dnsServiceIPs: []string{dnsServiceIPv4, dnsServiceIPv6},
+				testVirtLauncherPod: testVirtLauncherPod{
+					suffix: "1",
+					testPod: testPod{
+						nodeName: node2,
+					},
+					vmName:             vm1,
+					skipPodAnnotations: false, /* add ovn pod annotation */
+				},
+				migrationTarget: testMigrationTarget{
+					lrpNetworks: []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
+					testVirtLauncherPod: testVirtLauncherPod{
+						suffix:             "2",
+						testPod:            testPod{nodeName: node1},
+						vmName:             vm1,
+						skipPodAnnotations: true,
+						extraLabels:        map[string]string{kubevirtv1.NodeNameLabel: node2},
+						updatePhase:        phasePointer(corev1.PodFailed),
+					},
+				},
+				expectedDhcpv4: []testDHCPOptions{{
+					cidr:     nodeByName[node1].subnetIPv4,
+					dns:      dnsServiceIPv4,
+					hostname: vm1,
+				}},
+				expectedDhcpv6: []testDHCPOptions{{
+					cidr:     nodeByName[node1].subnetIPv6,
+					dns:      dnsServiceIPv6,
+					hostname: vm1,
+				}},
+				expectedPolicies: []testPolicy{
+					{
+						match:   "ip4.src == " + vmByName[vm1].addressIPv4,
+						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv4),
+					},
+					{
+						match:   "ip6.src == " + vmByName[vm1].addressIPv6,
+						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv6),
+					},
+				},
+				expectedStaticRoutes: []testStaticRoute{
+					{
+						prefix:     vmByName[vm1].addressIPv4,
+						nexthop:    vmByName[vm1].addressIPv4,
+						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+					{
+						prefix:     vmByName[vm1].addressIPv6,
+						nexthop:    vmByName[vm1].addressIPv6,
+						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+				},
 			}),
 			Entry("should remove orphan routes and policies and keep not kubevirt related on startup", testData{
 				ipv4: true,
