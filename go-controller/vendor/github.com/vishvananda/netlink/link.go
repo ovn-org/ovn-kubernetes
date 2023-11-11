@@ -22,35 +22,39 @@ type (
 
 // LinkAttrs represents data shared by most link types
 type LinkAttrs struct {
-	Index        int
-	MTU          int
-	TxQLen       int // Transmit Queue Length
-	Name         string
-	HardwareAddr net.HardwareAddr
-	Flags        net.Flags
-	RawFlags     uint32
-	ParentIndex  int         // index of the parent link device
-	MasterIndex  int         // must be the index of a bridge
-	Namespace    interface{} // nil | NsPid | NsFd
-	Alias        string
-	Statistics   *LinkStatistics
-	Promisc      int
-	Allmulti     int
-	Multi        int
-	Xdp          *LinkXdp
-	EncapType    string
-	Protinfo     *Protinfo
-	OperState    LinkOperState
-	PhysSwitchID int
-	NetNsID      int
-	NumTxQueues  int
-	NumRxQueues  int
-	GSOMaxSize   uint32
-	GSOMaxSegs   uint32
-	GROMaxSize   uint32
-	Vfs          []VfInfo // virtual functions available on link
-	Group        uint32
-	Slave        LinkSlave
+	Index          int
+	MTU            int
+	TxQLen         int // Transmit Queue Length
+	Name           string
+	HardwareAddr   net.HardwareAddr
+	Flags          net.Flags
+	RawFlags       uint32
+	ParentIndex    int         // index of the parent link device
+	MasterIndex    int         // must be the index of a bridge
+	Namespace      interface{} // nil | NsPid | NsFd
+	Alias          string
+	Statistics     *LinkStatistics
+	Promisc        int
+	Allmulti       int
+	Multi          int
+	Xdp            *LinkXdp
+	EncapType      string
+	Protinfo       *Protinfo
+	OperState      LinkOperState
+	PhysSwitchID   int
+	NetNsID        int
+	NumTxQueues    int
+	NumRxQueues    int
+	TSOMaxSegs     uint32
+	TSOMaxSize     uint32
+	GSOMaxSegs     uint32
+	GSOMaxSize     uint32
+	GROMaxSize     uint32
+	GSOIPv4MaxSize uint32
+	GROIPv4MaxSize uint32
+	Vfs            []VfInfo // virtual functions available on link
+	Group          uint32
+	Slave          LinkSlave
 }
 
 // LinkSlave represents a slave device.
@@ -64,6 +68,7 @@ type VfInfo struct {
 	Mac       net.HardwareAddr
 	Vlan      int
 	Qos       int
+	VlanProto int
 	TxRate    int // IFLA_VF_TX_RATE  Max TxRate
 	Spoofchk  bool
 	LinkState uint32
@@ -1066,6 +1071,7 @@ type Ip6tnl struct {
 	EncapFlags uint16
 	EncapSport uint16
 	EncapDport uint16
+	FlowBased  bool
 }
 
 func (ip6tnl *Ip6tnl) Attrs() *LinkAttrs {
