@@ -1565,13 +1565,14 @@ var _ = Describe("Gateway unit tests", func() {
 				Index: 5,
 			}
 			lnk.On("Attrs").Return(lnkAttr)
-			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("LinkByName", lnkAttr.Name).Return(lnk, nil)
+			netlinkMock.On("LinkByIndex", lnkAttr.Index).Return(lnk, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 			netlinkMock.On("RouteAdd", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			wg := &sync.WaitGroup{}
 			rm := routemanager.NewController()
-			rm.SetNetLinkOpMockInst(netlinkMock)
+			util.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {
@@ -1613,13 +1614,14 @@ var _ = Describe("Gateway unit tests", func() {
 			}
 
 			lnk.On("Attrs").Return(lnkAttr)
-			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("LinkByName", lnkAttr.Name).Return(lnk, nil)
+			netlinkMock.On("LinkByIndex", lnkAttr.Index).Return(lnk, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*previousRoute}, nil)
 			netlinkMock.On("RouteReplace", expectedRoute).Return(nil)
 			wg := &sync.WaitGroup{}
 			rm := routemanager.NewController()
-			rm.SetNetLinkOpMockInst(netlinkMock)
+			util.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {
@@ -1638,10 +1640,11 @@ var _ = Describe("Gateway unit tests", func() {
 
 		It("Fails if link set up fails", func() {
 			netlinkMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf("failed to find interface"))
+			netlinkMock.On("LinkByIndex", mock.Anything).Return(nil, fmt.Errorf("failed to find interface"))
 			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
 			wg := &sync.WaitGroup{}
 			rm := routemanager.NewController()
-			rm.SetNetLinkOpMockInst(netlinkMock)
+			util.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {
@@ -1666,7 +1669,7 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			wg := &sync.WaitGroup{}
 			rm := routemanager.NewController()
-			rm.SetNetLinkOpMockInst(netlinkMock)
+			util.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {

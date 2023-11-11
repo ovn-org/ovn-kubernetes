@@ -288,7 +288,6 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 		return fmt.Errorf("unable to get link for %s, error: %v", iface, err)
 	}
 
-	var routes []routemanager.Route
 	for _, subnet := range config.Kubernetes.ServiceCIDRs {
 		gwIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(subnet), gwIPs)
 		if err != nil {
@@ -302,15 +301,7 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 		}
 		subnetCopy := *subnet
 		gwIPCopy := gwIP[0]
-		routes = append(routes, routemanager.Route{
-			GwIP:   gwIPCopy,
-			Subnet: &subnetCopy,
-			MTU:    mtu,
-			SrcIP:  nil,
-		})
-	}
-	if len(routes) > 0 {
-		routeManager.Add(routemanager.RoutesPerLink{Link: link, Routes: routes})
+		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Gw: gwIPCopy, Dst: &subnetCopy, MTU: mtu})
 	}
 	return nil
 }

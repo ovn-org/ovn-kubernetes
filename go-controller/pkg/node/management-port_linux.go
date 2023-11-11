@@ -191,7 +191,6 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 		return warnings, err
 	}
 
-	var routes []routemanager.Route
 	for _, subnet := range cfg.allSubnets {
 		exists, err = util.LinkRouteExists(mpcfg.link, cfg.gwIP, subnet)
 		if err != nil {
@@ -204,15 +203,7 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 		warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
 			subnet, cfg.gwIP, mpcfg.ifName))
 		subnetCopy := *subnet
-		routes = append(routes, routemanager.Route{
-			GwIP:   cfg.gwIP,
-			Subnet: &subnetCopy,
-			MTU:    config.Default.RoutableMTU,
-			SrcIP:  nil,
-		})
-	}
-	if len(routes) > 0 {
-		routeManager.Add(routemanager.RoutesPerLink{Link: mpcfg.link, Routes: routes})
+		routeManager.Add(netlink.Route{LinkIndex: mpcfg.link.Attrs().Index, Gw: cfg.gwIP, Dst: &subnetCopy, MTU: config.Default.RoutableMTU})
 	}
 
 	// Add a neighbour entry on the K8s node to map routerIP with routerMAC. This is
