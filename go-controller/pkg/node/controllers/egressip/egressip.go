@@ -229,6 +229,18 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 	if len(syncErrs) != 0 {
 		return kerrors.NewAggregate(syncErrs)
 	}
+
+	wg.Add(1)
+	go func() {
+		c.iptablesManager.Run(stopCh, 6*time.Minute)
+		wg.Done()
+	}()
+	wg.Add(1)
+	go func() {
+		c.ruleManager.Run(stopCh, 5*time.Minute)
+		wg.Done()
+	}()
+
 	// Tell rule manager and IPTable manager that we want to fully own all rules at a particular priority/table.
 	// Any rules created with this priority or in that particular IPTables chain, that we do not recognize it, will be
 	// removed by relevant manager.
@@ -299,16 +311,6 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		c.eIPQueue.ShutDown()
 		c.podQueue.ShutDown()
 		c.namespaceQueue.ShutDown()
-	}()
-	wg.Add(1)
-	go func() {
-		c.iptablesManager.Run(stopCh, 6*time.Minute)
-		wg.Done()
-	}()
-	wg.Add(1)
-	go func() {
-		c.ruleManager.Run(stopCh, 5*time.Minute)
-		wg.Done()
 	}()
 	return nil
 }
