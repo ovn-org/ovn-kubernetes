@@ -762,17 +762,12 @@ func (c *Controller) RepairNode() error {
 		if err != nil {
 			return fmt.Errorf("unable to get link addresses for link %s: %v", linkName, err)
 		}
-		var assignedAddrFound bool
 		for _, address := range addresses {
 			if address.Label == linkmanager.GetAssignedAddressLabel(linkName) {
-				assignedAddrFound = true
 				addressStr := address.String()
 				assignedAddr.Insert(addressStr)
 				assignedAddrStrToAddrs[addressStr] = address
 			}
-		}
-		if !assignedAddrFound {
-			continue
 		}
 		filter, mask := filterRouteByLinkTable(linkIdx, getRouteTableID(linkIdx))
 		existingRoutes, err := util.GetNetLinkOps().RouteListFiltered(netlink.FAMILY_ALL, filter, mask)
