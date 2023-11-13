@@ -1901,7 +1901,7 @@ func cleanupSharedGateway() error {
 	bridgeMappings := strings.Split(stdout, ",")
 	for _, bridgeMapping := range bridgeMappings {
 		m := strings.Split(bridgeMapping, ":")
-		if network := m[0]; network == types.PhysicalNetworkName {
+		if network := m[0]; network == util.GetPhysNetNameKey() {
 			bridgeName = m[1]
 			break
 		}

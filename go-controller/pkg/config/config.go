@@ -419,6 +419,9 @@ type GatewayConfig struct {
 	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
 	NextHop string `gcfg:"next-hop"`
+	// PhysNetNameKey is the key name used to map to an OVS bridge that provides
+	// access to physical/external network. Default is  "physnet".
+	PhysNetNameKey string `gcfg:"physnetname-key"`
 	// VLANID is the option VLAN tag to apply to gateway traffic for "shared" mode
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
@@ -1311,6 +1314,12 @@ var OVNGatewayFlags = []cli.Flag{
 			"configured in the node is used. Only useful with " +
 			"\"init-gateways\"",
 		Destination: &cliConfig.Gateway.NextHop,
+	},
+	&cli.StringFlag{
+		Name: "gateway-physnetname-key",
+		Usage: "The key name used to map to an OVS bridge that provides " +
+			"access to physical/external network. Default is  `physnet`",
+		Destination: &cliConfig.Gateway.PhysNetNameKey,
 	},
 	&cli.UintFlag{
 		Name: "gateway-vlanid",
