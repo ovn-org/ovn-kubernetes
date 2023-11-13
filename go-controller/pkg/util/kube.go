@@ -906,3 +906,7 @@ func IsHostEndpoint(endpointIPstr string) bool {
 	}
 	return true
 }
+
+func GetConntrackZone() int {
+	return config.Default.ConntrackZone
+}

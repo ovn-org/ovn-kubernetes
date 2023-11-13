@@ -93,6 +93,7 @@ fi
 # OVN_METRICS_WORKER_PORT - metrics port which will be exposed by ovnkube-node (default 9410)
 # OVN_METRICS_BIND_PORT - port for the OVN metrics server to serve on (default 9476)
 # OVN_METRICS_EXPORTER_PORT - ovs-metrics exporter port (default 9310)
+# OVN_KUBERNETES_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -290,6 +291,8 @@ ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
+# OVN_KUBERNETES_CONNTRACK_ZONE - conntrack zone number used for openflow rules (default 64000)
+ovn_conntrack_zone=${OVN_KUBERNETES_CONNTRACK_ZONE:-64000}
 
 ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
 # OVNKUBE_COMPACT_MODE_ENABLE indicate if ovnkube run master and node in one process
@@ -599,6 +602,7 @@ display_env() {
   echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
   echo OVNKUBE_NODE_MODE ${ovnkube_node_mode}
   echo OVN_ENCAP_IP ${ovn_encap_ip}
+  echo OVN_KUBERNETES_CONNTRACK_ZONE ${ovn_conntrack_zone}
   echo ovnkube.sh version ${ovnkube_version}
   echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
 }
@@ -2395,6 +2399,12 @@ ovn-node() {
   fi
   echo "ovnkube_node_certs_flags=${ovnkube_node_certs_flags}"
 
+  ovn_conntrack_zone_flag=
+  if [[ ${ovn_conntrack_zone} != "" ]]; then
+     ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
+  fi
+  echo "ovn_conntrack_zone_flag=${ovn_conntrack_zone_flag}"
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
@@ -2420,6 +2430,7 @@ ovn-node() {
         ${ovn_dbs} \
         ${ovn_encap_ip_flag} \
         ${ovn_encap_port_flag} \
+        ${ovn_conntrack_zone_flag} \
         ${ovnkube_enable_interconnect_flag} \
         ${ovnkube_enable_multi_external_gateway_flag} \
         ${ovnkube_metrics_tls_opts} \

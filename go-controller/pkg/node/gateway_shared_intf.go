@@ -57,11 +57,13 @@ const (
 	ovnKubeNodeSNATMark = "0x3f0"
 )
 
-var (
-	HostMasqCTZone     = config.Default.ConntrackZone + 1 //64001
-	OVNMasqCTZone      = HostMasqCTZone + 1               //64002
-	HostNodePortCTZone = config.Default.ConntrackZone + 3 //64003
-)
+var HostMasqCTZone, OVNMasqCTZone, HostNodePortCTZone, HostXDPCTZone int
+
+func initCTZones() {
+	HostMasqCTZone = util.GetConntrackZone() + 1
+	OVNMasqCTZone = util.GetConntrackZone() + 2
+	HostNodePortCTZone = util.GetConntrackZone() + 3
+}
 
 // nodePortWatcherIptables manages iptables rules for shared gateway
 // to ensure that services using NodePorts are accessible.
@@ -1691,6 +1693,8 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
+	klog.Info("Initializing the ovn-kubernetes conntrack zones")
+	initCTZones()
 
 	gwBridge, exGwBridge, err := gatewayInitInternal(
 		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
