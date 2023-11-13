@@ -2085,6 +2085,8 @@ var _ = Describe("Watch Factory Operations", func() {
 			})
 
 		pods = append(pods, pod)
+		podCopy := pod.DeepCopy()
+		podCopy2 := pod.DeepCopy()
 
 		// Pod doesn't pass filter; shouldn't be added
 		podWatch.Add(pod)
@@ -2093,7 +2095,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		// Update pod to pass filter; should be treated as add.  Need
 		// to deep-copy pod when modifying because it's a pointer all
 		// the way through when using FakeClient
-		podCopy := pod.DeepCopy()
 		podCopy.ObjectMeta.Labels["blah"] = "foobar"
 		pods = []*v1.Pod{podCopy}
 		equalPod = podCopy
@@ -2101,8 +2102,8 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(c.getAdded, 2).Should(Equal(1))
 
 		// Update pod to fail filter; should be treated as delete
-		pod.ObjectMeta.Labels["blah"] = "baz"
-		podWatch.Modify(pod)
+		podCopy2.ObjectMeta.Labels["blah"] = "baz"
+		podWatch.Modify(podCopy2)
 		Eventually(c.getDeleted, 2).Should(Equal(1))
 		Consistently(c.getAdded, 2).Should(Equal(1))
 		Consistently(c.getUpdated, 2).Should(Equal(0))
