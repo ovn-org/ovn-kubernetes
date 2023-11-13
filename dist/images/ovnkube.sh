@@ -80,6 +80,7 @@ fi
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
 # OVN_EGRESSSERVICE_ENABLE - enable egress Service for ovn-kubernetes
+# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - Name of interface to be used as ovnkubernetes mgmt port (default: ovn-k8s-mp0)
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
@@ -257,6 +258,8 @@ ovn_egressqos_enable=${OVN_EGRESSQOS_ENABLE:-false}
 ovn_egressservice_enable=${OVN_EGRESSSERVICE_ENABLE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
+#OVN_DISABLE_OVN_REQUESTED_CHASSIS - disable usage of the OVN requested-chassis for logical switch port option
+ovn_disable_ovn_requested_chassis=${OVN_DISABLE_OVN_REQUESTED_CHASSIS:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple network support for ovn-kubernetes
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
@@ -595,6 +598,7 @@ display_env() {
   echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
   echo OVNKUBE_NODE_MODE ${ovnkube_node_mode}
   echo OVN_ENCAP_IP ${ovn_encap_ip}
+  echo OVN_DISABLE_OVN_REQUESTED_CHASSIS ${ovn_disable_ovn_requested_chassis}
   echo ovnkube.sh version ${ovnkube_version}
   echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
 }
@@ -1226,6 +1230,12 @@ ovn-master() {
   fi
   echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
 
+  disable_ovn_requested_chassis_flag=
+  if [[ ${ovn_disable_ovn_requested_chassis} == "true" ]]; then
+    disable_ovn_requested_chassis_flag="--disable-ovn-requested-chassis"
+  fi
+  echo "disable_ovn_requested_chassis_flag=${disable_ovn_requested_chassis_flag}"
+
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
     init_node_flags="--init-node ${K8S_NODE} --nodeport"
@@ -1251,6 +1261,7 @@ ovn-master() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
+    ${disable_ovn_requested_chassis_flag} \
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_scale_enable_flag} \

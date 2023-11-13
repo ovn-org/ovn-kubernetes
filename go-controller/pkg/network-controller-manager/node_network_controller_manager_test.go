@@ -5,6 +5,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -38,7 +39,7 @@ func genDeleteStaleRepPortCmd(iface string) string {
 
 func genFindInterfaceWithSandboxCmd() string {
 	return fmt.Sprintf("ovs-vsctl --timeout=15 --columns=name,external_ids --data=bare --no-headings " +
-		"--format=csv find Interface external_ids:sandbox!=\"\" external_ids:vf-netdev-name!=\"\"")
+		"--format=csv find Interface external_ids:sandbox!=\"\" external_ids:vf-netdev-name!=\"\" external_ids:ovn_kube_mode=full")
 }
 
 var _ = Describe("Healthcheck tests", func() {
@@ -146,6 +147,7 @@ var _ = Describe("Healthcheck tests", func() {
 					Err:    nil,
 				})
 				ncm.checkForStaleOVSRepresentorInterfaces()
+				config.OvnKubeNode.Mode = "full"
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			})
 		})
@@ -160,6 +162,7 @@ var _ = Describe("Healthcheck tests", func() {
 					Err: nil,
 				})
 				ncm.checkForStaleOVSRepresentorInterfaces()
+				config.OvnKubeNode.Mode = "full"
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			})
 		})
