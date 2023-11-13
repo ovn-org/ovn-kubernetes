@@ -89,6 +89,10 @@ fi
 # OVN_DISABLE_FORWARDING - disable forwarding on OVNK controlled interfaces
 # OVN_ENABLE_MULTI_EXTERNAL_GATEWAY - enable multi external gateway for ovn-kubernetes
 # OVN_ENABLE_OVNKUBE_IDENTITY - enable per node certificate ovn-kubernetes
+# OVN_METRICS_MASTER_PORT - metrics port which will be exposed by ovnkube-master (default 9409)
+# OVN_METRICS_WORKER_PORT - metrics port which will be exposed by ovnkube-node (default 9410)
+# OVN_METRICS_BIND_PORT - port for the OVN metrics server to serve on (default 9476)
+# OVN_METRICS_EXPORTER_PORT - ovs-metrics exporter port (default 9310)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -180,6 +184,19 @@ routable_mtu=${OVN_ROUTABLE_MTU:-}
 # set metrics endpoint bind to K8S_NODE_IP.
 metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
+
+# set metrics master port
+metrics_master_port=${OVN_METRICS_MASTER_PORT:-9409}
+
+# set metrics worker port
+metrics_worker_port=${OVN_METRICS_WORKER_PORT:-9410}
+
+# set metrics bind port
+metrics_bind_port=${OVN_METRICS_BIND_PORT:-9476}
+
+# set metrics exporter port
+metrics_exporter_port=${OVN_METRICS_EXPORTER_PORT:-9310}
+
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
@@ -1176,6 +1193,7 @@ ovn-master() {
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
   local ovnkube_metrics_tls_opts=""
   if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
     ovnkube_metrics_tls_opts="
@@ -1413,7 +1431,7 @@ ovnkube-controller() {
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
   echo "ovnkube_master_metrics_bind_address=${ovnkube_master_metrics_bind_address}"
 
   local ovnkube_metrics_tls_opts=""
@@ -1765,9 +1783,11 @@ ovnkube-controller-with-node() {
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
     ovn_unprivileged_flag=""
   fi
-  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
-  metrics_bind_address="${metrics_endpoint_ip}:9410"
-  echo "ovnkube_master_metrics_bind_address=${ovnkube_master_metrics_bind_address}"
+  
+  ovn_metrics_bind_address="${metrics_endpoint_ip}:${metrics_bind_port}"
+  metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
+  echo "ovn_metrics_bind_address=${ovn_metrics_bind_address}"
+  echo "metrics_bind_address=${metrics_bind_address}"
 
   local ovnkube_metrics_tls_opts=""
   if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
@@ -2447,7 +2467,7 @@ ovs-metrics() {
   echo "=============== ovs-metrics - (wait for ovs_ready)"
   wait_for_event ovs_ready
 
-  ovs_exporter_bind_address="${metrics_endpoint_ip}:9310"
+  ovs_exporter_bind_address="${metrics_endpoint_ip}:${metrics_exporter_port}"
   /usr/bin/ovn-kube-util \
     --loglevel=${ovnkube_loglevel} \
     ovs-exporter \
