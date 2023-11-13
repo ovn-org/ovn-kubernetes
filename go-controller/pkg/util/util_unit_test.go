@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
@@ -245,4 +246,32 @@ func TestGenerateId(t *testing.T) {
 	assert.Equal(t, 10, len(id))
 	matchesPattern, _ := regexp.MatchString("([a-zA-Z0-9-]*)", id)
 	assert.True(t, matchesPattern)
+}
+
+func TestGetK8sMgmtIntfName(t *testing.T) {
+	tests := []struct {
+		desc                   string
+		configMgmtPortIntfName string
+		expectedValue          string
+	}{
+		{
+			desc:                   "use config value",
+			configMgmtPortIntfName: "configValue",
+			expectedValue:          "configValue",
+		},
+		{
+			desc:                   "use const value",
+			configMgmtPortIntfName: "",
+			expectedValue:          GetK8sMgmtIntfName(),
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			config.OvnKubeNode.MgmtPortIntfName = tc.configMgmtPortIntfName
+			ret := GetK8sMgmtIntfName()
+			if tc.expectedValue != ret {
+				t.Fail()
+			}
+		})
+	}
 }

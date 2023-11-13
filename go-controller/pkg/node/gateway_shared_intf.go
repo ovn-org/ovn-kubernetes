@@ -1636,7 +1636,7 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 		gatewayIP := util.GetNodeGatewayIfAddr(hostSubnet).IP.String()
 		for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 			if isIPv6 == utilnet.IsIPv6CIDR(svcCIDR) {
-				if stdout, stderr, err := util.RunIP("route", "replace", "table", ovnkubeSvcViaMgmPortRT, svcCIDR.String(), "via", gatewayIP, "dev", types.K8sMgmtIntfName); err != nil {
+				if stdout, stderr, err := util.RunIP("route", "replace", "table", ovnkubeSvcViaMgmPortRT, svcCIDR.String(), "via", gatewayIP, "dev", util.GetK8sMgmtIntfName()); err != nil {
 					return fmt.Errorf("error adding routing table entry into custom routing table: %s: stdout: %s, stderr: %s, err: %v", ovnkubeSvcViaMgmPortRT, stdout, stderr, err)
 				}
 				klog.V(5).Infof("Successfully added route into custom routing table: %s", ovnkubeSvcViaMgmPortRT)
@@ -1673,11 +1673,11 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 	// NOTE: v6 doesn't have rp_filter strict mode block
 	rpFilterLooseMode := "2"
 	// TODO: Convert testing framework to mock golang module utilities. Example:
-	// result, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", types.K8sMgmtIntfName), rpFilterLooseMode)
-	stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", types.K8sMgmtIntfName, rpFilterLooseMode))
-	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", types.K8sMgmtIntfName, rpFilterLooseMode) {
+	// result, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", util.GetK8sMgmtIntfName()), rpFilterLooseMode)
+	stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", util.GetK8sMgmtIntfName(), rpFilterLooseMode))
+	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", util.GetK8sMgmtIntfName(), rpFilterLooseMode) {
 		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
-			types.K8sMgmtIntfName, stdout, stderr, err)
+			util.GetK8sMgmtIntfName(), stdout, stderr, err)
 	}
 
 	return nil

@@ -1033,7 +1033,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		}
 
 		fakeMgmtPortConfig := managementPortConfig{
-			ifName:    types.K8sMgmtIntfName,
+			ifName:    util.GetK8sMgmtIntfName(),
 			link:      nil,
 			routerMAC: nil,
 			ipv4:      &fakeMgmtPortIPFamilyConfig,

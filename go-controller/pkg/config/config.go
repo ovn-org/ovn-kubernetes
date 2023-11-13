@@ -189,7 +189,8 @@ var (
 
 	// OvnKubeNode holds ovnkube-node parsed config file parameters and command-line overrides
 	OvnKubeNode = OvnKubeNodeConfig{
-		Mode: types.NodeModeFull,
+		Mode:             types.NodeModeFull,
+		MgmtPortIntfName: "ovn-k8s-mp0",
 	}
 
 	ClusterManager = ClusterManagerConfig{
@@ -497,6 +498,7 @@ type OvnKubeNodeConfig struct {
 	DPResourceDeviceIdsMap map[string][]string
 	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
 	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
+	MgmtPortIntfName       string `gcfg:"mgmt-port-netdev-intf-name"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -1478,6 +1480,12 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortNetdev,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortNetdev,
+	},
+	&cli.StringFlag{
+		Name:        "ovnkube-node-mgmt-port-intf-name",
+		Usage:       "name of the interface to be used as the management port. Default is ovn-k8s-mp0",
+		Value:       OvnKubeNode.MgmtPortIntfName,
+		Destination: &cliConfig.OvnKubeNode.MgmtPortIntfName,
 	},
 	&cli.StringFlag{
 		Name: "ovnkube-node-mgmt-port-dp-resource-name",

@@ -7,7 +7,6 @@ import (
 	. "github.com/onsi/gomega"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
@@ -67,7 +66,7 @@ var _ = Describe("Healthcheck tests", func() {
 			It("removes stale ports from bridge", func() {
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    genListStalePortsCmd(),
-					Output: "foo\n\nbar\n\n" + types.K8sMgmtIntfName + "\n\n",
+					Output: "foo\n\nbar\n\n" + util.GetK8sMgmtIntfName() + "\n\n",
 					Err:    nil,
 				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -84,7 +83,7 @@ var _ = Describe("Healthcheck tests", func() {
 			It("Does not remove any ports from bridge", func() {
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    genListStalePortsCmd(),
-					Output: types.K8sMgmtIntfName + "\n\n",
+					Output: util.GetK8sMgmtIntfName() + "\n\n",
 					Err:    nil,
 				})
 				checkForStaleOVSInternalPorts()
