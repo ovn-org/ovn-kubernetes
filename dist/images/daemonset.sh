@@ -547,6 +547,56 @@ ovn_image=${ovnkube_image} \
   ovnkube_app_name=ovnkube-node \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
+ovn_image=${ovnkube_image} \
+  ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
+  ovnkube_node_loglevel=${node_loglevel} \
+  ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
+  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+  ovn_monitor_all=${ovn_monitor_all} \
+  ovn_ofctrl_wait_before_clear=${ovn_ofctrl_wait_before_clear} \
+  ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
+  ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
+  ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
+  ovn_netflow_targets=${ovn_netflow_targets} \
+  ovn_sflow_targets=${ovn_sflow_targets} \
+  ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovn_ipfix_sampling=${ovn_ipfix_sampling} \
+  ovn_ipfix_cache_max_flows=${ovn_ipfix_cache_max_flows} \
+  ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
+  ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  ovnkube_app_name=ovnkube-node-dpu \
+  jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu.yaml
+
 # ovnkube node for dpu-host daemonset
 # TODO: we probably dont need all of these when running on dpu host
 ovn_image=${image} \
