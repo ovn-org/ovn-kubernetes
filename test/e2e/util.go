@@ -39,6 +39,8 @@ const (
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
 	// ovnNodeZoneNameAnnotation is the node annotation name to store the node zone name.
 	ovnNodeZoneNameAnnotation = "k8s.ovn.org/zone-name"
+	// ovnGatewayMTUSupport annotation determines if options:gateway_mtu shall be set for a node's gateway router
+	ovnGatewayMTUSupport = "k8s.ovn.org/gateway-mtu-support"
 )
 
 var containerRuntime = "docker"
@@ -1220,4 +1222,21 @@ func CaptureContainerOutput(ctx context.Context, c clientset.Interface, namespac
 	}
 
 	return matchMap, nil
+}
+
+// It checks whether config.DisablePacketMTUCheck is set or not
+func isDisablePacketMTUCheckEnabled() bool {
+	val, present := os.LookupEnv("OVN_DISABLE_PKT_MTU_CHECK")
+	return present && val == "true"
+}
+
+// getGatewayMTUSupport returns true if gateway-mtu-support annotataion
+// is not set on the node, otherwise it returns false as the value of the
+// annotation also get set to false
+func getGatewayMTUSupport(node *v1.Node) bool {
+	_, ok := node.Annotations[ovnGatewayMTUSupport]
+	if !ok {
+		return true
+	}
+	return false
 }
