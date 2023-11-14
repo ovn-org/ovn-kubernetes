@@ -9,16 +9,14 @@ if [ -z "${crds}" ]; then
   exit
 fi
 
-if  ! ( command -v controller-gen > /dev/null ); then
-  echo "controller-gen not found, installing sigs.k8s.io/controller-tools"
-  olddir="${PWD}"
-  builddir="$(mktemp -d)"
-  cd "${builddir}"
-  GO111MODULE=on go get -u sigs.k8s.io/controller-tools/cmd/controller-gen # currently on v0.13.0
-  cd "${olddir}"
-  if [[ "${builddir}" == /tmp/* ]]; then #paranoia
-      rm -rf "${builddir}"
-  fi
+SCRIPT_ROOT=$(dirname ${BASH_SOURCE})/..
+olddir="${PWD}"
+builddir="$(mktemp -d)"
+cd "${builddir}"
+GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+cd "${olddir}"
+if [[ "${builddir}" == /tmp/* ]]; then #paranoia
+    rm -rf "${builddir}"
 fi
 
 for crd in ${crds}; do
@@ -29,6 +27,12 @@ for crd in ${crds}; do
     -O zz_generated.deepcopy \
     --bounding-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd
 
+  echo "Generating apply configuration for $crd"
+  applyconfiguration-gen \
+    --go-header-file hack/boilerplate.go.txt \
+    --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
+    --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/applyconfiguration \
+    "$@"
 
   echo "Generating clientset for $crd"
   client-gen \
@@ -37,6 +41,7 @@ for crd in ${crds}; do
     --input-base "" \
     --input github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/clientset \
+    --apply-configuration-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/applyconfiguration \
     --plural-exceptions="EgressQoS:EgressQoSes" \
     "$@"
 
@@ -57,6 +62,11 @@ for crd in ${crds}; do
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/informers \
     --plural-exceptions="EgressQoS:EgressQoSes" \
     "$@"
+
+  echo "Copying apis for $crd"
+  rm -rf $SCRIPT_ROOT/pkg/crd/$crd/v1/apis
+  cp -r github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis $SCRIPT_ROOT/pkg/crd/$crd/v1
+
 done
 
 echo "Generating CRDs"
@@ -86,3 +96,7 @@ echo "Copying Admin Network Policy CRD"
 curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.2/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_adminnetworkpolicies.yaml
 echo "Copying Baseline Admin Network Policy CRD"
 curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.2/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
+echo "Copying adminpolicybasedexternalroutes CRD"
+cp _output/crds/k8s.ovn.org_adminpolicybasedexternalroutes.yaml ../dist/templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2
+echo "Copying egressService CRD"
+cp _output/crds/k8s.ovn.org_egressservices.yaml ../dist/templates/k8s.ovn.org_egressservices.yaml.j2

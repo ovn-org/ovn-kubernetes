@@ -19,9 +19,12 @@ package v1
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 	"time"
 
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/applyconfiguration/egressfirewall/v1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -46,6 +49,8 @@ type EgressFirewallInterface interface {
 	List(ctx context.Context, opts metav1.ListOptions) (*v1.EgressFirewallList, error)
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.EgressFirewall, err error)
+	Apply(ctx context.Context, egressFirewall *egressfirewallv1.EgressFirewallApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressFirewall, err error)
+	ApplyStatus(ctx context.Context, egressFirewall *egressfirewallv1.EgressFirewallApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressFirewall, err error)
 	EgressFirewallExpansion
 }
 
@@ -187,6 +192,62 @@ func (c *egressFirewalls) Patch(ctx context.Context, name string, pt types.Patch
 		Name(name).
 		SubResource(subresources...).
 		VersionedParams(&opts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied egressFirewall.
+func (c *egressFirewalls) Apply(ctx context.Context, egressFirewall *egressfirewallv1.EgressFirewallApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressFirewall, err error) {
+	if egressFirewall == nil {
+		return nil, fmt.Errorf("egressFirewall provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(egressFirewall)
+	if err != nil {
+		return nil, err
+	}
+	name := egressFirewall.Name
+	if name == nil {
+		return nil, fmt.Errorf("egressFirewall.Name must be provided to Apply")
+	}
+	result = &v1.EgressFirewall{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Namespace(c.ns).
+		Resource("egressfirewalls").
+		Name(*name).
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *egressFirewalls) ApplyStatus(ctx context.Context, egressFirewall *egressfirewallv1.EgressFirewallApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressFirewall, err error) {
+	if egressFirewall == nil {
+		return nil, fmt.Errorf("egressFirewall provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(egressFirewall)
+	if err != nil {
+		return nil, err
+	}
+
+	name := egressFirewall.Name
+	if name == nil {
+		return nil, fmt.Errorf("egressFirewall.Name must be provided to Apply")
+	}
+
+	result = &v1.EgressFirewall{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Namespace(c.ns).
+		Resource("egressfirewalls").
+		Name(*name).
+		SubResource("status").
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
 		Body(data).
 		Do(ctx).
 		Into(result)

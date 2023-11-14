@@ -58,6 +58,7 @@ require (
 	kubevirt.io/api v1.0.0-alpha.0
 	sigs.k8s.io/controller-runtime v0.15.1
 	sigs.k8s.io/network-policy-api v0.1.2
+	sigs.k8s.io/structured-merge-diff/v4 v4.2.3
 )
 
 require (
@@ -124,7 +125,6 @@ require (
 	kubevirt.io/containerized-data-importer-api v1.55.0 // indirect
 	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
-	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 

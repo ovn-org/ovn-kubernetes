@@ -20,6 +20,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// AdminPolicyBasedExternalRoute is a CRD allowing the cluster administrators to configure policies for external gateway IPs to be applied to all the pods contained in selected namespaces.
+// Egress traffic from the pods that belong to the selected namespaces to outside the cluster is routed through these external gateway IPs.
 // +genclient
 // +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -28,8 +30,6 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Last Update",type="date",JSONPath=`.status.lastTransitionTime`
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=`.status.status`
-// AdminPolicyBasedExternalRoute is a CRD allowing the cluster administrators to configure policies for external gateway IPs to be applied to all the pods contained in selected namespaces.
-// Egress traffic from the pods that belong to the selected namespaces to outside the cluster is routed through these external gateway IPs.
 type AdminPolicyBasedExternalRoute struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -114,9 +114,9 @@ type DynamicHop struct {
 	// SkipHostSNAT bool `json:"skipHostSNAT,omitempty"`
 }
 
+// AdminPolicyBasedExternalRouteList contains a list of AdminPolicyBasedExternalRoutes
 // +kubebuilder:object:root=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// AdminPolicyBasedExternalRouteList contains a list of AdminPolicyBasedExternalRoutes
 type AdminPolicyBasedExternalRouteList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
