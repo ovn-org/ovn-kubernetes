@@ -98,7 +98,7 @@ func (c *FakeEgressIPs) Update(ctx context.Context, egressIP *egressipv1.EgressI
 // Delete takes name of the egressIP and deletes it. Returns an error if one occurs.
 func (c *FakeEgressIPs) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewRootDeleteActionWithOptions(egressipsResource, name, opts), &egressipv1.EgressIP{})
+		Invokes(testing.NewRootDeleteAction(egressipsResource, name), &egressipv1.EgressIP{})
 	return err
 }
 
