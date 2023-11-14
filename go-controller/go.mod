@@ -57,7 +57,7 @@ require (
 	k8s.io/utils v0.0.0-20230505201702-9f6742963106
 	kubevirt.io/api v1.0.0-alpha.0
 	sigs.k8s.io/controller-runtime v0.15.1
-	sigs.k8s.io/network-policy-api v0.1.1
+	sigs.k8s.io/network-policy-api v0.1.2
 )
 
 require (
@@ -70,7 +70,7 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.9.0 // indirect
-	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
+	github.com/evanphx/json-patch v5.6.0+incompatible // indirect
 	github.com/evanphx/json-patch/v5 v5.6.0 // indirect
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect

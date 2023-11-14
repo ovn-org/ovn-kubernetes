@@ -116,7 +116,7 @@ func (c *FakeEgressQoSes) UpdateStatus(ctx context.Context, egressQoS *egressqos
 // Delete takes name of the egressQoS and deletes it. Returns an error if one occurs.
 func (c *FakeEgressQoSes) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteActionWithOptions(egressqosesResource, c.ns, name, opts), &egressqosv1.EgressQoS{})
+		Invokes(testing.NewDeleteAction(egressqosesResource, c.ns, name), &egressqosv1.EgressQoS{})
 
 	return err
 }

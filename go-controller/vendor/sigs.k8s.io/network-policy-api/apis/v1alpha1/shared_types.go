@@ -51,15 +51,25 @@ type NamespacedPodSubject struct {
 // +kubebuilder:validation:MinProperties=1
 type AdminNetworkPolicyPort struct {
 	// Port selects a port on a pod(s) based on number.
+	//
+	// Support: Core
+	//
 	// +optional
 	PortNumber *Port `json:"portNumber,omitempty"`
 
 	// NamedPort selects a port on a pod(s) based on name.
+	//
+	// Support: Extended
+	//
+	// <network-policy-api:experimental>
 	// +optional
 	NamedPort *string `json:"namedPort,omitempty"`
 
 	// PortRange selects a port range on a pod(s) based on provided start and end
 	// values.
+	//
+	// Support: Core
+	//
 	// +optional
 	PortRange *PortRange `json:"portRange,omitempty"`
 }
@@ -67,11 +77,17 @@ type AdminNetworkPolicyPort struct {
 type Port struct {
 	// Protocol is the network protocol (TCP, UDP, or SCTP) which traffic must
 	// match. If not specified, this field defaults to TCP.
+	//
+	// Support: Core
+	//
 	Protocol v1.Protocol `json:"protocol"`
 
 	// Number defines a network port value.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
+	//
+	// Support: Core
+	//
 	Port int32 `json:"port"`
 }
 
@@ -80,18 +96,27 @@ type Port struct {
 type PortRange struct {
 	// Protocol is the network protocol (TCP, UDP, or SCTP) which traffic must
 	// match. If not specified, this field defaults to TCP.
+	//
+	// Support: Core
+	//
 	Protocol v1.Protocol `json:"protocol,omitempty"`
 
 	// Start defines a network port that is the start of a port range, the Start
 	// value must be less than End.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
+	//
+	// Support: Core
+	//
 	Start int32 `json:"start"`
 
 	// End defines a network port that is the end of a port range, the End value
 	// must be greater than Start.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
+	//
+	// Support: Core
+	//
 	End int32 `json:"end"`
 }
 
@@ -103,10 +128,16 @@ type PortRange struct {
 // +kubebuilder:validation:MinProperties=1
 type AdminNetworkPolicyPeer struct {
 	// Namespaces defines a way to select a set of Namespaces.
+	//
+	// Support: Core
+	//
 	// +optional
 	Namespaces *NamespacedPeer `json:"namespaces,omitempty"`
 	// Pods defines a way to select a set of pods in
 	// in a set of namespaces.
+	//
+	// Support: Core
+	//
 	// +optional
 	Pods *NamespacedPodPeer `json:"pods,omitempty"`
 }
@@ -121,6 +152,9 @@ type NamespacedPeer struct {
 	// NamespaceSelector is a labelSelector used to select Namespaces, This field
 	// follows standard label selector semantics; if present but empty, it selects
 	// all Namespaces.
+	//
+	// Support: Core
+	//
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
@@ -129,6 +163,10 @@ type NamespacedPeer struct {
 	// To be selected a Namespace must have all of the labels defined in SameLabels,
 	// AND they must all have the same value as the subject of this policy.
 	// If Samelabels is Empty then nothing is selected.
+	//
+	// Support: Extended
+	//
+	// <network-policy-api:experimental>
 	// +optional
 	// +kubebuilder:validation:MaxItems=100
 	SameLabels []string `json:"sameLabels,omitempty"`
@@ -138,6 +176,10 @@ type NamespacedPeer struct {
 	// To be selected a Namespace must have all of the labels defined in NotSameLabels,
 	// AND at least one of them must have different values than the subject of this policy.
 	// If NotSameLabels is empty then nothing is selected.
+	//
+	// Support: Extended
+	//
+	// <network-policy-api:experimental>
 	// +optional
 	// +kubebuilder:validation:MaxItems=100
 	NotSameLabels []string `json:"notSameLabels,omitempty"`
@@ -147,10 +189,16 @@ type NamespacedPeer struct {
 // cluster. The `Namespaces` and `PodSelector` fields are required.
 type NamespacedPodPeer struct {
 	// Namespaces is used to select a set of Namespaces.
+	//
+	// Support: Core
+	//
 	Namespaces NamespacedPeer `json:"namespaces"`
 
 	// PodSelector is a labelSelector used to select Pods, This field is NOT optional,
 	// follows standard label selector semantics and if present but empty, it selects
 	// all Pods.
+	//
+	// Support: Core
+	//
 	PodSelector metav1.LabelSelector `json:"podSelector"`
 }
