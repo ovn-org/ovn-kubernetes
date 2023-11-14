@@ -109,7 +109,7 @@ Determine which version of Kubernetes is currently used in CI (See
 and set the environmental variable `K8S_VERSION` to the same value. Also make sure to export a GOPATH which points to your go directory with `export GOPATH=(...)`.
 
 ```
-K8S_VERSION=v1.26.0
+K8S_VERSION=v1.28.0
 git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
 pushd $GOPATH/src/k8s.io/kubernetes/
 make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
@@ -263,7 +263,7 @@ For example:
 + NUM_NODES=20
 + export NUM_WORKER_NODES=3
 + NUM_WORKER_NODES=3
-+ ginkgo --nodes=20 '--focus=should\sbe\sable\sto\spreserve\sUDP\straffic\swhen\sserver\spod\scycles\sfor\sa\sNodePort\sservice' '--skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|Disruptive|DisruptionController|\[sig-apps\]\sCronJob|\[sig-storage\]|\[Feature:Federation\]|should\shave\sipv4\sand\sipv6\sinternal\snode\sip|should\shave\sipv4\sand\sipv6\snode\spodCIDRs|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout|should\shave\ssession\saffinity\stimeout\swork|named\sport.+\[Feature:NetworkPolicy\]|\[Feature:SCTP\]|service.kubernetes.io/headless|should\sresolve\sconnection\sreset\sissue\s#74839|sig-api-machinery|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer)|configMap\snameserver|ClusterDns\s\[Feature:Example\]|should\sset\sdefault\svalue\son\snew\sIngressClass|should\sprevent\sIngress\screation\sif\smore\sthan\s1\sIngressClass\smarked\sas\sdefault|\[Feature:Networking-IPv6\]|\[Feature:.*DualStack.*\]' --flakeAttempts=5 /usr/local/bin/e2e.test -- --kubeconfig=/root/ovn.conf --provider=local --dump-logs-on-failure=false --report-dir=/root/ovn-kubernetes/test/_artifacts --disable-log-dump=true --num-nodes=3
++ ginkgo --nodes=20 '--focus=should\sbe\sable\sto\spreserve\sUDP\straffic\swhen\sserver\spod\scycles\sfor\sa\sNodePort\sservice' '--skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|Disruptive|DisruptionController|\[sig-apps\]\sCronJob|\[sig-storage\]|\[Feature:Federation\]|should\shave\sipv4\sand\sipv6\sinternal\snode\sip|should\shave\sipv4\sand\sipv6\snode\spodCIDRs|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout|should\shave\ssession\saffinity\stimeout\swork|named\sport.+\[Feature:NetworkPolicy\]|\[Feature:SCTP\]|service.kubernetes.io/headless|should\sresolve\sconnection\sreset\sissue\s#74839|sig-api-machinery|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer)|configMap\snameserver|ClusterDns\s\[Feature:Example\]|should\sset\sdefault\svalue\son\snew\sIngressClass|should\sprevent\sIngress\screation\sif\smore\sthan\s1\sIngressClass\smarked\sas\sdefault|\[Feature:Networking-IPv6\]|\[Feature:.*DualStack.*\]' --flake-attempts=5 /usr/local/bin/e2e.test -- --kubeconfig=/root/ovn.conf --provider=local --dump-logs-on-failure=false --report-dir=/root/ovn-kubernetes/test/_artifacts --disable-log-dump=true --num-nodes=3
 Running Suite: Kubernetes e2e suite
 (...)
 • [SLOW TEST:28.091 seconds]
