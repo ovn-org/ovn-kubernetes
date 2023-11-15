@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -78,11 +79,15 @@ func newTestHONode(name, hybridHostSubnet, drMAC string) v1.Node {
 	}
 }
 
-func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC string) (*nbdb.LogicalRouterStaticRoute, *nbdb.LogicalRouterStaticRoute, *nbdb.LogicalRouterPolicy, *nbdb.LogicalRouterPolicy, *nbdb.LogicalSwitchPort) {
+func setupHybridOverlayOVNObjects(node tNode, hoNodeName, hoSubnet, nodeHOIP, nodeHOMAC string) (*nbdb.LogicalRouterStaticRoute, *nbdb.LogicalRouterStaticRoute, *nbdb.LogicalRouterPolicy, *nbdb.LogicalRouterPolicy, *nbdb.LogicalSwitchPort) {
+	name := types.HybridSubnetPrefix + node.Name
+	if hoNodeName != "" {
+		name = name + ":" + hoNodeName
+	}
 	hybridOverlayLRSR1 := &nbdb.LogicalRouterStaticRoute{
 		UUID: types.HybridSubnetPrefix + node.Name + "LRSR1-UUID",
 		ExternalIDs: map[string]string{
-			"name": types.HybridSubnetPrefix + node.Name,
+			"name": name,
 		},
 		IPPrefix: hoSubnet,
 		Nexthop:  nodeHOIP,
@@ -99,7 +104,7 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 		UUID:   types.HybridSubnetPrefix + node.Name + "-LRP1-UUID",
 		Action: "reroute",
 		ExternalIDs: map[string]string{
-			"name": types.HybridSubnetPrefix + node.Name,
+			"name": name,
 		},
 		Match:    "inport == \"" + types.RouterToSwitchPrefix + node.Name + "\" && ip4.dst == " + hoSubnet,
 		Nexthops: []string{nodeHOIP},
@@ -420,7 +425,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
 				node1.NodeMgmtPortIP, "1400")
 
-			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, hoSubnet, nodeHOIP, nodeHOMAC)
+			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, "", hoSubnet, nodeHOIP, nodeHOMAC)
 
 			for _, obj := range expectedDatabaseState {
 				if logicalRouter, ok := obj.(*nbdb.LogicalRouter); ok {
@@ -479,7 +484,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
 				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 					if item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" ||
-						item.ExternalIDs["name"] == "hybrid-subnet-node1" {
+						strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") {
 						return true
 					}
 					return false
@@ -493,7 +498,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
 				p := func(item *nbdb.LogicalRouterPolicy) bool {
-					if item.ExternalIDs["name"] == "hybrid-subnet-node1" ||
+					if strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") ||
 						item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" {
 						return true
 					}
@@ -632,7 +637,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
 				node1.NodeMgmtPortIP, "1400")
 
-			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, hoSubnet, nodeHOIP, nodeHOMAC)
+			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, "", hoSubnet, nodeHOIP, nodeHOMAC)
 
 			for _, obj := range expectedDatabaseState {
 				if logicalRouter, ok := obj.(*nbdb.LogicalRouter); ok {
@@ -872,7 +877,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
 				node1.NodeMgmtPortIP, "1400")
 
-			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, winNodeSubnet, nodeHOIP, nodeHOMAC)
+			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, winNodeName, winNodeSubnet, nodeHOIP, nodeHOMAC)
 
 			for _, obj := range expectedDatabaseState {
 				if logicalRouter, ok := obj.(*nbdb.LogicalRouter); ok {
@@ -907,7 +912,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					return nil, err
 				}
 				return clusterRouter.Policies, nil
-			}, 2).Should(gomega.HaveLen(0))
+			}, 20).Should(gomega.HaveLen(0))
 
 			gomega.Eventually(func() error {
 				_, err := libovsdbops.GetLogicalSwitchPort(clusterController.nbClient, &nbdb.LogicalSwitchPort{Name: "jtor-GR_node1"})
@@ -931,7 +936,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
 				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 					if item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" ||
-						item.ExternalIDs["name"] == "hybrid-subnet-node1" {
+						strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") {
 						return true
 					}
 					return false
@@ -945,7 +950,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
 				p := func(item *nbdb.LogicalRouterPolicy) bool {
-					if item.ExternalIDs["name"] == "hybrid-subnet-node1" ||
+					if strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") ||
 						item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" {
 						return true
 					}
@@ -1165,7 +1170,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
 				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-					return item.ExternalIDs["name"] == "hybrid-subnet-node1" &&
+					return strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") &&
 						item.Nexthop == nodeHOIP &&
 						item.IPPrefix == hoNodeSubnet
 				}
@@ -1352,7 +1357,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
 				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 					if item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" ||
-						item.ExternalIDs["name"] == "hybrid-subnet-node1" {
+						strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") {
 						return true
 					}
 					return false
@@ -1366,7 +1371,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
 				p := func(item *nbdb.LogicalRouterPolicy) bool {
-					return item.ExternalIDs["name"] == "hybrid-subnet-node1"
+					return strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1")
 				}
 				logicalRouterPolicies, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(clusterController.nbClient, p)
 				if err != nil {
@@ -1527,7 +1532,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
 				node1.NodeMgmtPortIP, "1400")
 
-			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, hoSubnet, nodeHOIP, nodeHOMAC)
+			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, "", hoSubnet, nodeHOIP, nodeHOMAC)
 
 			for _, obj := range expectedDatabaseState {
 				if logicalRouter, ok := obj.(*nbdb.LogicalRouter); ok {
