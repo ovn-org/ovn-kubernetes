@@ -28,6 +28,7 @@ var (
 	logicalSwitchPortTestName = "test-switch-port"
 	logicalSwitchPortTestUUID = "test-switch-port-uuid"
 	logicalSwitchPortAddress  = "test-switch-port-address"
+	logicalSwitchPortAddress2 = "test-switch-port-address2"
 )
 
 type OperationModelTestCase struct {
@@ -687,6 +688,54 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Name:      logicalSwitchPortTestName,
 					UUID:      logicalSwitchPortTestUUID,
 					Addresses: []string{logicalSwitchPortAddress},
+				},
+			},
+		},
+		{
+			name: "Test update existing no-root by model mutation and update on the same row",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
+				m := nbdb.LogicalSwitchPort{
+					Name:        logicalSwitchPortTestName,
+					Addresses:   []string{logicalSwitchPortAddress2}, // to replace initial's column
+					ExternalIDs: map[string]string{"two": "2"},       // to be inserted to initial's column
+				}
+				return []operationModel{
+					{
+						Model: &m,
+						OnModelMutations: []interface{}{
+							&m.ExternalIDs,
+						},
+						OnModelUpdates: []interface{}{
+							&m.Addresses,
+						},
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.LogicalSwitch{
+					Name:  logicalSwitchTestName,
+					UUID:  logicalSwitchTestUUID,
+					Ports: []string{logicalSwitchPortTestUUID},
+				},
+				&nbdb.LogicalSwitchPort{
+					Name:        logicalSwitchPortTestName,
+					UUID:        logicalSwitchPortTestUUID,
+					Addresses:   []string{logicalSwitchPortAddress}, // to be replaced
+					ExternalIDs: map[string]string{"one": "1"},      // to be insert mutated
+				},
+			},
+			expectedDB: []libovsdbtest.TestData{
+				&nbdb.LogicalSwitch{
+					Name:  logicalSwitchTestName,
+					UUID:  logicalSwitchTestUUID,
+					Ports: []string{logicalSwitchPortTestUUID},
+				},
+				&nbdb.LogicalSwitchPort{
+					Name:        logicalSwitchPortTestName,
+					UUID:        logicalSwitchPortTestUUID,
+					Addresses:   []string{logicalSwitchPortAddress2},
+					ExternalIDs: map[string]string{"one": "1", "two": "2"},
 				},
 			},
 		},

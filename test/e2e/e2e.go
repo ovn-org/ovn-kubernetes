@@ -1480,9 +1480,17 @@ spec:
 				externalContainerName, err)
 		}
 
-		// 3. Apply deny-all egress firewall
+		// 3. Apply deny-all egress firewall and wait for it to be applied
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+
+		gomega.Eventually(func() bool {
+			output, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "egressfirewall", "default")
+			if err != nil {
+				framework.Failf("could not get the egressfirewall default in namespace: %s", f.Namespace.Name)
+			}
+			return strings.Contains(output, "EgressFirewall Rules applied")
+		}, 10*time.Second).Should(gomega.BeTrue())
 
 		// 4. Check that only inbound traffic is allowed
 		// pod -> external container should be blocked

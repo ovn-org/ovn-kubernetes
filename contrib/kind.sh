@@ -1309,6 +1309,7 @@ function is_nested_virt_enabled() {
 }
 
 function install_kubevirt() {
+    local kubevirt_version="$(curl -L https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)"
     for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_instances=512' >> /etc/sysctl.conf"
@@ -1317,13 +1318,12 @@ function install_kubevirt() {
             kubectl label nodes $node node-role.kubernetes.io/worker="" --overwrite=true
         fi
     done
-    local nightly_build_base_url="https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt"
-    local latest=$(curl -sL "${nightly_build_base_url}/latest")
+    local kubevirt_release_url="https://github.com/kubevirt/kubevirt/releases/download/${kubevirt_version}"
 
     echo "Deploy latest nighly build Kubevirt"
     if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
-      kubectl apply -f "${nightly_build_base_url}/${latest}/kubevirt-operator.yaml"
-      kubectl apply -f "${nightly_build_base_url}/${latest}/kubevirt-cr.yaml"
+      kubectl apply -f "${kubevirt_release_url}/kubevirt-operator.yaml"
+      kubectl apply -f "${kubevirt_release_url}/kubevirt-cr.yaml"
       if ! is_nested_virt_enabled; then
         kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
       fi
@@ -1336,6 +1336,29 @@ function install_kubevirt() {
             kubectl logs --all-containers=true -n kubevirt $p || true
         done
     fi
+    
+    if [ ! -d "./bin" ]
+    then
+        mkdir -p ./bin
+        if_error_exit "Failed to create bin dir!"
+    fi
+
+    if [[ "$OSTYPE" == "linux-gnu" ]]; then
+        OS_TYPE="linux"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        OS_TYPE="darwin"
+    fi
+
+    pushd ./bin
+       if [ ! -f ./virtctl ]; then
+           cli_name="virtctl-${kubevirt_version}-${OS_TYPE}-${ARCH}"
+           curl -LO "${kubevirt_release_url}/${cli_name}"
+           mv ${cli_name} virtctl
+           if_error_exit "Failed to download virtctl!"
+       fi
+    popd
+
+    chmod +x ./bin/virtctl
 }
 
 check_dependencies
