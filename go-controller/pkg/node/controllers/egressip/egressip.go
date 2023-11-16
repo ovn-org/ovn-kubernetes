@@ -53,7 +53,7 @@ const (
 var (
 	_, defaultV4AnyCIDR, _ = net.ParseCIDR("0.0.0.0/0")
 	_, defaultV6AnyCIDR, _ = net.ParseCIDR("0:0:0:0:0:0:0:0")
-	iptJumpRule            = []iptables.RuleArg{{Args: []string{"-j", chainName}}}
+	iptJumpRule            = iptables.RuleArg{Args: []string{"-j", chainName}}
 )
 
 // eIPConfig represents exactly one EgressIP IP. It contains non-pod related EIP configuration information only.
@@ -236,7 +236,7 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		if err := c.iptablesManager.OwnChain(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4); err != nil {
 			return fmt.Errorf("unable to own chain %s: %v", iptChainName, err)
 		}
-		if err = c.iptablesManager.EnsureRules(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv4, iptJumpRule); err != nil {
+		if err = c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv4, iptJumpRule); err != nil {
 			return fmt.Errorf("failed to create rule in chain %s to jump to chain %s: %v", utiliptables.ChainPostrouting, iptChainName, err)
 		}
 	}
@@ -244,7 +244,7 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		if err := c.iptablesManager.OwnChain(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6); err != nil {
 			return fmt.Errorf("unable to own chain %s: %v", iptChainName, err)
 		}
-		if err = c.iptablesManager.EnsureRules(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv6, iptJumpRule); err != nil {
+		if err = c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv6, iptJumpRule); err != nil {
 			return fmt.Errorf("unable to ensure iptables rules for jump rule: %v", err)
 		}
 	}
@@ -711,12 +711,12 @@ func (c *Controller) applyPodConfig(existingConfig *podIPConfigList, updatedPoli
 		}
 		// v4
 		if newConfig.v6 {
-			if err := c.iptablesManager.EnsureRules(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6, []iptables.RuleArg{newConfig.ipTableRule}); err != nil {
+			if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6, newConfig.ipTableRule); err != nil {
 				existingConfig.InsertOverwriteFailed(*newConfig)
 				return fmt.Errorf("unable to ensure iptables rules: %v", err)
 			}
 		} else {
-			if err := c.iptablesManager.EnsureRules(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4, []iptables.RuleArg{newConfig.ipTableRule}); err != nil {
+			if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4, newConfig.ipTableRule); err != nil {
 				existingConfig.InsertOverwriteFailed(*newConfig)
 				return fmt.Errorf("failed to ensure rules (%+v) in chain %s: %v", newConfig.ipTableRule, iptChainName, err)
 			}
