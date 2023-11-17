@@ -1897,6 +1897,7 @@ ovnkube-controller-with-node() {
     ${sflow_targets} \
     ${ssl_opts} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
+    --export-ovs-metrics \
     --gateway-mode=${ovn_gateway_mode} \
     --gateway-router-subnet=${ovn_gateway_router_subnet} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -2381,6 +2382,7 @@ ovn-node() {
         ${routable_mtu_flag} \
         ${sflow_targets} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
+        --export-ovs-metrics \
         --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
         --gateway-router-subnet=${ovn_gateway_router_subnet} \
         --host-network-namespace ${ovn_host_network_namespace} \
