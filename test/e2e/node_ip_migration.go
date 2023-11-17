@@ -92,7 +92,7 @@ spec:
 		// Get the secondary worker node to spawn another pod on for pod to pod reachability tests.
 		var workerNodes *v1.NodeList
 		Eventually(func(g Gomega) {
-			workerNodes, err = e2enode.GetReadySchedulableNodes(f.ClientSet)
+			workerNodes, err = e2enode.GetReadySchedulableNodes(context.TODO(), f.ClientSet)
 			g.Expect(err).NotTo(HaveOccurred())
 			e2enode.Filter(workerNodes, func(node v1.Node) bool {
 				_, ok1 := node.Labels["node-role.kubernetes.io/control-plane"]
@@ -150,8 +150,8 @@ spec:
 					secondaryWorkerNode.Name,
 					podLabels,
 					podCommand...)
-				_ = e2epod.NewPodClient(f).CreateSync(podWorkerNode)
-				_ = e2epod.NewPodClient(f).CreateSync(podSecondaryWorkerNode)
+				_ = e2epod.NewPodClient(f).CreateSync(context.TODO(), podWorkerNode)
+				_ = e2epod.NewPodClient(f).CreateSync(context.TODO(), podSecondaryWorkerNode)
 
 				By("Waiting until both pods have an IP address")
 				Eventually(func() error {
@@ -220,7 +220,7 @@ spec:
 						return isOVNEncapIPReady(workerNode.Name, workerNodeIPs[ipAddrFamily], ovnkubePodWorkerNode.Name)
 					}, pollingTimeout, pollingInterval).Should(BeTrue())
 
-					err = e2epod.DeletePodWithWait(f.ClientSet, &ovnkubePodWorkerNode)
+					err = e2epod.DeletePodWithWait(context.TODO(), f.ClientSet, &ovnkubePodWorkerNode)
 					Expect(err).NotTo(HaveOccurred())
 
 					By(fmt.Sprintf("Sleeping for %d seconds to give things time to settle", settleTimeout))

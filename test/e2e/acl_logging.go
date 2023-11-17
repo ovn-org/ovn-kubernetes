@@ -57,7 +57,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 		cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
 		for i := 0; i < 2; i++ {
 			pod := newAgnhostPod(nsName, fmt.Sprintf("pod%d", i+1), cmd...)
-			pod = e2epod.NewPodClient(fr).CreateSync(pod)
+			pod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), pod)
 			Expect(waitForACLLoggingPod(fr, nsName, pod.GetName())).To(Succeed())
 			pods = append(pods, *pod)
 		}
@@ -206,14 +206,14 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 		By("creating a pod running agnhost netexec")
 		cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
 		pod := newAgnhostPod(nsName, "pod", cmd...)
-		pokePod = e2epod.NewPodClient(fr).CreateSync(pod)
+		pokePod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), pod)
 		Expect(waitForACLLoggingPod(fr, nsName, pokePod.GetName())).To(Succeed())
 
 		// The secondary Namespace is required to make sure that 2 namespaces with different logging
 		// settings can coexist and that updates to a specific namespace only affect that namespace and
 		// not other namespaces.
 		By("creating a secondary namespace")
-		ns2, err := fr.CreateNamespace(secondaryNamespacePrefix, map[string]string{})
+		ns2, err := fr.CreateNamespace(context.TODO(), secondaryNamespacePrefix, map[string]string{})
 		Expect(err).NotTo(HaveOccurred(), "failed to create secondary namespace")
 
 		By("configuring the ACL logging level within the secondary namespace")
@@ -228,7 +228,7 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 		cmdSecondary := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
 		podSecondary := newAgnhostPod(nsNameSecondary, "pod-secondary", cmdSecondary...)
 		// There seems to be a bug in CreateSync for secondary pod. Need to do this here instead:
-		pps := e2epod.PodClientNS(fr, nsNameSecondary).Create(podSecondary)
+		pps := e2epod.PodClientNS(fr, nsNameSecondary).Create(context.TODO(), podSecondary)
 		Eventually(func() (bool, error) {
 			time.Sleep(15 * time.Second)
 			pokePodSecondary, err = fr.ClientSet.CoreV1().Pods(nsNameSecondary).Get(context.TODO(), pps.Name, metav1.GetOptions{})
@@ -653,7 +653,7 @@ spec:
 }
 
 func waitForACLLoggingPod(f *framework.Framework, namespace string, podName string) error {
-	return e2epod.WaitForPodCondition(f.ClientSet, namespace, podName, "running", 5*time.Second, func(pod *v1.Pod) (bool, error) {
+	return e2epod.WaitForPodCondition(context.TODO(), f.ClientSet, namespace, podName, "running", 5*time.Second, func(pod *v1.Pod) (bool, error) {
 		podIP := pod.Status.PodIP
 		return podIP != "" && pod.Status.Phase != v1.PodPending, nil
 	})

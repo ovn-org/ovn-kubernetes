@@ -41,7 +41,7 @@ var _ = ginkgo.Describe("e2e EgressQoS validation", func() {
 
 	ginkgo.BeforeEach(func() {
 		clientSet := f.ClientSet
-		nodes, err := e2enode.GetBoundedReadySchedulableNodes(clientSet, 3)
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), clientSet, 3)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 3 {
 			framework.Failf(
