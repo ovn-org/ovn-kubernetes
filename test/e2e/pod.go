@@ -68,7 +68,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 		var echoMtuRegex = regexp.MustCompile(`cache expires.*mtu.*`)
 		ginkgo.BeforeEach(func() {
 			ginkgo.By("Selecting 3 schedulable nodes")
-			nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(len(nodes.Items)).To(gomega.BeNumerically(">", 2))
 
@@ -92,7 +92,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 					}
 				}
 			}
-			e2epod.NewPodClient(f).CreateSync(clientPod)
+			e2epod.NewPodClient(f).CreateSync(context.TODO(), clientPod)
 
 			ginkgo.By("Creating the server pod with hostNetwork:true")
 			// Create the server pod.
@@ -112,9 +112,9 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 				}
 				serverPod.Spec.HostNetwork = true
 				serverPod.Spec.NodeName = serverPodNodeName
-				e2epod.NewPodClient(f).Create(serverPod)
+				e2epod.NewPodClient(f).Create(context.TODO(), serverPod)
 
-				err := e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, serverPod.Name, f.Namespace.Name, 1*time.Minute)
+				err := e2epod.WaitTimeoutForPodReadyInNamespace(context.TODO(), f.ClientSet, serverPod.Name, f.Namespace.Name, 1*time.Minute)
 				if err != nil {
 					e2epod.NewPodClient(f).Delete(context.TODO(), serverPod.Name, metav1.DeleteOptions{})
 					return err
