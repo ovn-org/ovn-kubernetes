@@ -66,7 +66,9 @@ type ExternalNextHops struct {
 // StaticHop defines the configuration of a static IP that acts as an external Gateway Interface. IP field is mandatory.
 type StaticHop struct {
 	//IP defines the static IP to be used for egress traffic. The IP can be either IPv4 or IPv6.
+	// + Regex taken from: https://blog.markhatton.co.uk/2011/03/15/regular-expressions-for-ip-addresses-cidr-ranges-and-hostnames/
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$|^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s*`
 	// +required
 	IP string `json:"ip"`
 	// BFDEnabled determines if the interface implements the Bidirectional Forward Detection protocol. Defaults to false.
@@ -139,28 +141,3 @@ const (
 	SuccessStatus StatusType = "Success"
 	FailStatus    StatusType = "Fail"
 )
-
-// // +genclient
-// // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// // +kubebuilder:resource:path=adminpolicybasedexternalroute,scope=Cluster
-// // +kubebuilder:object:root=true
-// // +kubebuilder:subresource:status
-// type AdminPolicyBasedInternalRoute struct {
-// 	metav1.TypeMeta   `json:",inline"`
-// 	metav1.ObjectMeta `json:"metadata,omitempty"`
-// 	Spec              AdminPolicyBasedInternalRouteSpec `json:"spec,omitempty"`
-// 	Status            AdminPolicyBasedRouteStatus       `json:"status,omitempty"`
-// }
-
-// // AdminPolicyBasedInternalRouteSpec defines the desired state of AdminPolicyBasedInternalRoute
-// type AdminPolicyBasedInternalRouteSpec struct {
-// }
-
-// // +kubebuilder:object:root=true
-// // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// // AdminPolicyBasedExternalRouteList contains a list of AdminPolicyBasedExternalRoutes
-// type AdminPolicyBasedInternalRouteList struct {
-// 	metav1.TypeMeta `json:",inline"`
-// 	metav1.ListMeta `json:"metadata,omitempty"`
-// 	Items           []AdminPolicyBasedInternalRoute `json:"items"`
-// }
