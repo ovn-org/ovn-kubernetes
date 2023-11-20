@@ -505,10 +505,12 @@ func IsAddressReservedForInternalUse(addr net.IP) bool {
 }
 
 // IsAddressAddedByKeepAlived returns true if the input interface address obtained
-// through netlink has a label that ends with ":vip", which is how keepalived
-// marks the IP addresses it adds (https://github.com/openshift/machine-config-operator/pull/3683)
+// through netlink has a "vip" label which is how keepalived
+// marks the IP addresses it adds (https://github.com/openshift/machine-config-operator/pull/4040)
+// A previous implementation made the label end with ":vip", so for backwards compatibility
+// "HasSuffix" is used.
 func IsAddressAddedByKeepAlived(addr netlink.Addr) bool {
-	return strings.HasSuffix(addr.Label, ":vip")
+	return strings.HasSuffix(addr.Label, "vip")
 }
 
 // GetIPv6OnSubnet when given an IPv6 address with a 128 prefix for an interface,
