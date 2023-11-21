@@ -165,8 +165,9 @@ passwd:
 	})
 
 	type liveMigrationTestData struct {
-		mode        kubevirtv1.MigrationMode
-		numberOfVMs int
+		mode            kubevirtv1.MigrationMode
+		numberOfVMs     int
+		expectedFailure error
 	}
 
 	var (
@@ -336,7 +337,7 @@ passwd:
 			return agnHostPod
 		}
 
-		liveMigrateVirtualMachine = func(vmName string, migrationMode kubevirtv1.MigrationMode) {
+		liveMigrateVirtualMachine = func(vmName string, migrationMode kubevirtv1.MigrationMode, shouldFail bool) {
 			vmi := &kubevirtv1.VirtualMachineInstance{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: namespace,
@@ -368,31 +369,33 @@ passwd:
 				return err
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
 
-			Eventually(func() *kubevirtv1.VirtualMachineInstanceMigrationState {
-				err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-				Expect(err).ToNot(HaveOccurred())
-				return vmi.Status.MigrationState
-			}).WithOffset(1).WithPolling(time.Second).WithTimeout(10*time.Minute).ShouldNot(BeNil(), "should have a MigrationState")
-			Eventually(func() string {
-				err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-				Expect(err).ToNot(HaveOccurred())
-				return vmi.Status.MigrationState.TargetNode
-			}).WithOffset(1).WithPolling(time.Second).WithTimeout(10*time.Minute).ShouldNot(Equal(currentNode), "should refresh MigrationState")
-			Eventually(func() bool {
-				err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-				Expect(err).ToNot(HaveOccurred())
-				return vmi.Status.MigrationState.Completed
-			}).WithOffset(1).WithPolling(time.Second).WithTimeout(20*time.Minute).Should(BeTrue(), "should complete migration")
-			err = crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-			Expect(err).WithOffset(1).ToNot(HaveOccurred(), "should success retrieving vmi after migration")
-			Expect(vmi.Status.MigrationState.Failed).WithOffset(1).To(BeFalse(), func() string {
-				vmiJSON, err := json.Marshal(vmi)
-				if err != nil {
-					return fmt.Sprintf("failed marshaling migrated VM: %v", vmiJSON)
-				}
-				return fmt.Sprintf("should live migrate successfully: %s", string(vmiJSON))
-			})
-			Expect(vmi.Status.MigrationState.Mode).WithOffset(1).To(Equal(migrationMode), "should be the expected migration mode %s", migrationMode)
+			if !shouldFail {
+				Eventually(func() *kubevirtv1.VirtualMachineInstanceMigrationState {
+					err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
+					Expect(err).ToNot(HaveOccurred())
+					return vmi.Status.MigrationState
+				}).WithOffset(1).WithPolling(time.Second).WithTimeout(10*time.Minute).ShouldNot(BeNil(), "should have a MigrationState")
+				Eventually(func() string {
+					err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
+					Expect(err).ToNot(HaveOccurred())
+					return vmi.Status.MigrationState.TargetNode
+				}).WithOffset(1).WithPolling(time.Second).WithTimeout(10*time.Minute).ShouldNot(Equal(currentNode), "should refresh MigrationState")
+				Eventually(func() bool {
+					err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
+					Expect(err).ToNot(HaveOccurred())
+					return vmi.Status.MigrationState.Completed
+				}).WithOffset(1).WithPolling(time.Second).WithTimeout(20*time.Minute).Should(BeTrue(), "should complete migration")
+				err = crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
+				Expect(err).WithOffset(1).ToNot(HaveOccurred(), "should success retrieving vmi after migration")
+				Expect(vmi.Status.MigrationState.Failed).WithOffset(1).To(BeFalse(), func() string {
+					vmiJSON, err := json.Marshal(vmi)
+					if err != nil {
+						return fmt.Sprintf("failed marshaling migrated VM: %v", vmiJSON)
+					}
+					return fmt.Sprintf("should live migrate successfully: %s", string(vmiJSON))
+				})
+				Expect(vmi.Status.MigrationState.Mode).WithOffset(1).To(Equal(migrationMode), "should be the expected migration mode %s", migrationMode)
+			}
 		}
 
 		ipv4 = func(iface kubevirt.Interface) []kubevirt.Address {
@@ -585,7 +588,7 @@ passwd:
 			for i := 1; i <= len(selectedNodes); i++ {
 
 				by(vm.Name, fmt.Sprintf("Live migrate virtual machine, migration #%d", i))
-				liveMigrateVirtualMachine(vm.Name, td.mode)
+				liveMigrateVirtualMachine(vm.Name, td.mode, td.expectedFailure != nil)
 
 				checkConnectivityAndNetworkPolicies(vm.Name, endpoints, fmt.Sprintf("after live migrate, migration #%d", i))
 			}
@@ -676,6 +679,19 @@ passwd:
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
 		}
 
+		if td.expectedFailure != nil {
+			By("annotating the VMI with `fail fast`")
+			vmKey := types.NamespacedName{Namespace: namespace, Name: "worker1"}
+			var vmi kubevirtv1.VirtualMachineInstance
+			Eventually(func() error {
+				return crClient.Get(context.TODO(), vmKey, &vmi)
+			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
+
+			vmi.ObjectMeta.Annotations["kubevirt.io/func-test-virt-launcher-fail-fast"] = "true"
+
+			Expect(crClient.Update(context.TODO(), &vmi)).To(Succeed())
+		}
+
 		for _, vm := range vms {
 			By(fmt.Sprintf("Waiting for readiness at virtual machine %s", vm.Name))
 			Eventually(func() bool {
@@ -698,6 +714,11 @@ passwd:
 		Entry("with post-copy should keep connectivity", liveMigrationTestData{
 			mode:        kubevirtv1.MigrationPostCopy,
 			numberOfVMs: 1,
+		}),
+		Entry("failed migration", liveMigrationTestData{
+			mode:            kubevirtv1.MigrationPreCopy,
+			numberOfVMs:     1,
+			expectedFailure: fmt.Errorf("boom"),
 		}),
 	)
 })
