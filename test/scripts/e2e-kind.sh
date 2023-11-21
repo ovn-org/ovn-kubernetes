@@ -24,7 +24,6 @@ should have ipv4 and ipv6 internal node ip
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
 should set TCP CLOSE_WAIT timeout
-\[Feature:ProxyTerminatingEndpoints\]
 
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
@@ -123,6 +122,13 @@ fi
 # If dulastack conversion, skip certain tests due to unknown flakes upstream (FIXME)
 if [ "$DUALSTACK_CONVERSION" == true ]; then
   SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_CONVERSION_TESTS
+fi
+
+if [ "$OVN_GATEWAY_MODE" == "local" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+    SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="should fallback to local terminating endpoints when there are no ready endpoints with externalTrafficPolicy=Local"
 fi
 
 SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
