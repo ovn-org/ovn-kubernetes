@@ -440,10 +440,10 @@ command_exists() {
   command -v ${cmd} >/dev/null 2>&1
 }
 
-install_j2_renderer() {
-  # ensure j2 renderer installed
+install_jinjanator_renderer() {
+  # ensure jinjanator renderer installed
   pip install wheel --user
-  pip freeze | grep j2cli || pip install j2cli[yaml] --user
+  pip freeze | grep jinjanator || pip install jinjanator[yaml] --user
   export PATH=~/.local/bin:$PATH
 }
 
@@ -473,13 +473,13 @@ check_dependencies() {
     exit 1
   fi
 
-  if ! command_exists j2 ; then
+  if ! command_exists jinjanate ; then
     if ! command_exists pip ; then
-      echo "Dependency not met: 'j2' not installed and cannot install with 'pip'"
+      echo "Dependency not met: 'jinjanator' not installed and cannot install with 'pip'"
       exit 1
     fi
-    echo "'j2' not found, installing with 'pip'"
-    install_j2_renderer
+    echo "'jinjanate' not found, installing with 'pip'"
+    install_jinjanator_renderer
   fi
 
   if ! command_exists docker && ! command_exists podman; then
@@ -726,7 +726,7 @@ EOF
 }
 
 create_kind_cluster() {
-  # Output of the j2 command
+  # Output of the jinjanate command
   KIND_CONFIG_LCL=${DIR}/kind-${KIND_CLUSTER_NAME}.yaml
 
   ovn_ip_family=${IP_FAMILY} \
@@ -740,7 +740,7 @@ create_kind_cluster() {
   cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
   kind_local_registry_port=${KIND_LOCAL_REGISTRY_PORT} \
   kind_local_registry_name=${KIND_LOCAL_REGISTRY_NAME} \
-  j2 "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
+  jinjanate "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
 
   # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
   if kind get clusters | grep ovn; then

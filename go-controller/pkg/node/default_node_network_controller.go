@@ -342,13 +342,18 @@ func setupOVNNode(node *kapi.Node) error {
 	return nil
 }
 
-func setEncapPort() error {
+func setEncapPort(ctx context.Context) error {
 	systemID, err := util.GetNodeChassisID()
 	if err != nil {
 		return err
 	}
-	uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
-		fmt.Sprintf("chassis_name=%s", systemID))
+	var uuid string
+	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true,
+		func(ctx context.Context) (bool, error) {
+			uuid, _, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
+				fmt.Sprintf("chassis_name=%s", systemID))
+			return len(uuid) != 0, err
+		})
 	if err != nil {
 		return err
 	}
@@ -711,25 +716,28 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// Wait for 300s before giving up
 	var sbZone string
 	var err1 error
-	err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
-		sbZone, err = getOVNSBZone()
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		// There is no SBDB to connect to in DPU Host mode, so we will just take the default input config zone
+		sbZone = config.Default.Zone
+	} else {
+		err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+			sbZone, err = getOVNSBZone()
+			if err != nil {
+				err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+				return false, nil
+			}
+
+			if config.Default.Zone != sbZone {
+				err1 = fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
+				return false, nil
+			}
+			return true, nil
+		})
 		if err != nil {
-			err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
-			return false, nil
+			return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err: %v, err1: %v", config.Default.Zone, err, err1)
 		}
 
-		if config.Default.Zone != sbZone {
-			err1 = fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
-			return false, nil
-		}
-		return true, nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err: %v, err1: %v", config.Default.Zone, err, err1)
-	}
-
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// if its nonIC OR IC=true and if its phase1 OR if its IC to IC upgrades
 		if !config.OVNKubernetesFeature.EnableInterconnect || sbZone == types.OvnDefaultZone || util.HasNodeMigratedZone(node) { // if its nonIC or if its phase1
 			for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
@@ -829,8 +837,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// We set the encap port after annotating the zone name so that ovnkube-controller has come up
 	// and configured the chassis in SBDB (ovnkube-controller waits for ovnkube-node to set annotation
 	// for at least one node in the given zone)
-	if config.Default.EncapPort != config.DefaultEncapPort {
-		if err := setEncapPort(); err != nil {
+	// NOTE: ovnkube-node in DPU-host mode has no SBDB to connect to. The encap port will be handled by the
+	// ovnkube-node running in DPU mode on behalf of the host.
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Default.EncapPort != config.DefaultEncapPort {
+		if err := setEncapPort(ctx); err != nil {
 			return err
 		}
 	}
@@ -854,8 +864,9 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// STEP5: Legacy ovnkube-master sees "k8s.ovn.org/remote-zone-migrated" annotation on this node and now knows that
 	//        this node has remote-zone-migrated successfully and tears down old setup and creates new IC resource
 	//        plumbing (takes 80ms based on what we saw in CI runs so we might still have that small window of disruption).
+	// NOTE: ovnkube-node in DPU host mode doesn't go through upgrades for OVN-IC and has no SBDB to connect to. Thus this part shall be skipped.
 	var syncNodes, syncServices, syncPods bool
-	if config.OVNKubernetesFeature.EnableInterconnect && sbZone != types.OvnDefaultZone && !util.HasNodeMigratedZone(node) { // so this should be done only once in phase2 (not in phase1)
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableInterconnect && sbZone != types.OvnDefaultZone && !util.HasNodeMigratedZone(node) { // so this should be done only once in phase2 (not in phase1)
 		klog.Info("Upgrade Hack: Interconnect is enabled")
 		var err1 error
 		start := time.Now()
