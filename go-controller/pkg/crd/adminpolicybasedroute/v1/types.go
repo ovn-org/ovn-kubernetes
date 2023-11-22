@@ -128,9 +128,11 @@ type AdminPolicyBasedRouteStatus struct {
 	// Captures the time when the last change was applied.
 	LastTransitionTime metav1.Time `json:"lastTransitionTime"`
 	// An array of Human-readable messages indicating details about the status of the object.
+	// +patchStrategy=merge
+	// +listType=set
 	Messages []string `json:"messages"`
 	// A concise indication of whether the AdminPolicyBasedRoute resource is applied with success
-	Status StatusType `json:"status"`
+	Status StatusType `json:"status,omitempty"`
 }
 
 // StatusType defines the types of status used in the Status field. The value determines if the

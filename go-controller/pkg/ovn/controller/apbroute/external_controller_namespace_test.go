@@ -513,18 +513,12 @@ var _ = Describe("OVN External Gateway namespace", func() {
 			eventuallyExpectConfig(policyName1, expectedPolicy1, expectedRefs1)
 			eventuallyExpectConfig(policyName2, expectedPolicy2, expectedRefs2)
 
-			pol, err := fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), dynamicPolicy.Name, v1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(pol.Status.Status).To(Equal(adminpolicybasedrouteapi.SuccessStatus))
+			eventuallyCheckAPBRouteStatus(dynamicPolicy.Name, false)
 
 			aggregatedLabels := map[string]string{"name": targetNamespaceName, "extra": "label"}
 			updateNamespaceLabel(namespaceTarget.Name, aggregatedLabels, fakeClient)
 
-			Eventually(func() bool {
-				pol, err := fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), dynamicPolicy.Name, v1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				return pol.Status.Status == adminpolicybasedrouteapi.FailStatus
-			}).Should(BeTrue())
+			eventuallyCheckAPBRouteStatus(dynamicPolicy.Name, true)
 
 			eventuallyExpectNumberOfPolicies(2)
 			eventuallyExpectConfig(policyName1, expectedPolicy1, expectedRefs1)
