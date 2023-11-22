@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -10,8 +11,10 @@ import (
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/applyconfiguration/egressfirewall/v1"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -22,14 +25,12 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
 const (
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
-	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
 	aclDeleteBatchSize             = 1000
 	// transaction time to delete 80K ACLs from 2 port groups is ~4.5 sec.
 	// transaction time to delete 80K acls from one port group and add them to another
@@ -294,6 +295,7 @@ func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfire
 	defer ef.Unlock()
 	// egressFirewall may already exist, if previous add failed, cleanup
 	if _, loaded := oc.egressFirewalls.Load(egressFirewall.Namespace); loaded {
+		klog.Infof("Egress firewall in namespace %s already exists, cleanup", egressFirewall.Namespace)
 		err := oc.deleteEgressFirewall(egressFirewall)
 		if err != nil {
 			return fmt.Errorf("failed to cleanup existing egress firewall %s on add: %v", egressFirewall.Namespace, err)
@@ -304,8 +306,8 @@ func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfire
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
 		// process Rules into egressFirewallRules for egressFirewall struct
 		if i > types.EgressFirewallStartPriority-types.MinimumReservedEgressFirewallPriority {
-			klog.Warningf("egressFirewall for namespace %s has too many rules, the rest will be ignored",
-				egressFirewall.Namespace)
+			errorList = append(errorList, fmt.Errorf("egressFirewall for namespace %s has too many rules, max allowed number is %v",
+				egressFirewall.Namespace, types.EgressFirewallStartPriority-types.MinimumReservedEgressFirewallPriority))
 			break
 		}
 		efr, err := oc.newEgressFirewallRule(egressFirewallRule, i)
@@ -365,23 +367,6 @@ func (oc *DefaultNetworkController) deleteEgressFirewall(egressFirewallObj *egre
 		}
 	}
 	oc.egressFirewalls.Delete(egressFirewallObj.Namespace)
-	return nil
-}
-
-func (oc *DefaultNetworkController) updateEgressFirewallStatusWithRetry(egressFirewall *egressfirewallapi.EgressFirewall) error {
-	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		ef, err := oc.watchFactory.GetEgressFirewall(egressFirewall.Namespace, egressFirewall.Name)
-		if err != nil {
-			return err
-		}
-		c := ef.DeepCopy()
-		c.Status.Status = egressFirewall.Status.Status
-		return oc.kube.UpdateEgressFirewall(c)
-	})
-	if retryErr != nil {
-		return fmt.Errorf("error in updating status on EgressFirewall %s/%s: %v",
-			egressFirewall.Namespace, egressFirewall.Name, retryErr)
-	}
 	return nil
 }
 
@@ -814,4 +799,38 @@ func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode
 	})
 
 	return efErr
+}
+
+func (oc *DefaultNetworkController) setEgressFirewallStatus(egressFirewall *egressfirewallapi.EgressFirewall, handlerErr error) error {
+	newMsg := oc.zone + ": "
+	if handlerErr != nil {
+		newMsg += types.EgressFirewallErrorMsg + ": " + handlerErr.Error()
+	} else {
+		newMsg += egressFirewallAppliedCorrectly
+		metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
+		metrics.IncrementEgressFirewallCount()
+	}
+	needsUpdate := true
+	for _, message := range egressFirewall.Status.Messages {
+		if message == newMsg {
+			// found previous status
+			needsUpdate = false
+			break
+		}
+	}
+	if !needsUpdate {
+		return nil
+	}
+
+	applyOptions := metav1.ApplyOptions{
+		Force:        true,
+		FieldManager: oc.zone,
+	}
+
+	applyObj := egressfirewallapply.EgressFirewall(egressFirewall.Name, egressFirewall.Namespace).
+		WithStatus(egressfirewallapply.EgressFirewallStatus().
+			WithMessages(newMsg))
+	_, err := oc.kube.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).ApplyStatus(context.TODO(), applyObj, applyOptions)
+
+	return err
 }

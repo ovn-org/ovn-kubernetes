@@ -103,6 +103,7 @@ type OVNClusterManagerClientset struct {
 	NetworkAttchDefClient  networkattchmentdefclientset.Interface
 	EgressServiceClient    egressserviceclientset.Interface
 	AdminPolicyRouteClient adminpolicybasedrouteclientset.Interface
+	EgressFirewallClient   egressfirewallclientset.Interface
 }
 
 const (
@@ -163,6 +164,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		NetworkAttchDefClient:  cs.NetworkAttchDefClient,
 		EgressServiceClient:    cs.EgressServiceClient,
 		AdminPolicyRouteClient: cs.AdminPolicyRouteClient,
+		EgressFirewallClient:   cs.EgressFirewallClient,
 	}
 }
 

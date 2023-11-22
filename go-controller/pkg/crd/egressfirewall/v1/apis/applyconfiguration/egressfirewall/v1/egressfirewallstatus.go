@@ -20,7 +20,8 @@ package v1
 // EgressFirewallStatusApplyConfiguration represents an declarative configuration of the EgressFirewallStatus type for use
 // with apply.
 type EgressFirewallStatusApplyConfiguration struct {
-	Status *string `json:"status,omitempty"`
+	Status   *string  `json:"status,omitempty"`
+	Messages []string `json:"messages,omitempty"`
 }
 
 // EgressFirewallStatusApplyConfiguration constructs an declarative configuration of the EgressFirewallStatus type for use with
@@ -34,5 +35,15 @@ func EgressFirewallStatus() *EgressFirewallStatusApplyConfiguration {
 // If called multiple times, the Status field is set to the value of the last call.
 func (b *EgressFirewallStatusApplyConfiguration) WithStatus(value string) *EgressFirewallStatusApplyConfiguration {
 	b.Status = &value
+	return b
+}
+
+// WithMessages adds the given value to the Messages field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Messages field.
+func (b *EgressFirewallStatusApplyConfiguration) WithMessages(values ...string) *EgressFirewallStatusApplyConfiguration {
+	for i := range values {
+		b.Messages = append(b.Messages, values[i])
+	}
 	return b
 }

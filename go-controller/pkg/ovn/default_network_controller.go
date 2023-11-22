@@ -768,16 +768,9 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		}
 
 	case factory.EgressFirewallType:
-		var err error
 		egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-		if err = h.oc.addEgressFirewall(egressFirewall); err != nil {
-			egressFirewall.Status.Status = egressFirewallAddError
-		} else {
-			egressFirewall.Status.Status = egressFirewallAppliedCorrectly
-			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
-			metrics.IncrementEgressFirewallCount()
-		}
-		if statusErr := h.oc.updateEgressFirewallStatusWithRetry(egressFirewall); statusErr != nil {
+		err := h.oc.addEgressFirewall(egressFirewall)
+		if statusErr := h.oc.setEgressFirewallStatus(egressFirewall, err); statusErr != nil {
 			klog.Errorf("Failed to update egress firewall status %s, error: %v",
 				getEgressFirewallNamespacedName(egressFirewall), statusErr)
 		}

@@ -17,6 +17,7 @@ const (
 // +resource:path=egressfirewall
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:printcolumn:name="EgressFirewall Status",type=string,JSONPath=".status.status"
+// +kubebuilder:subresource:status
 // EgressFirewall describes the current egress firewall for a Namespace.
 // Traffic from a pod to an IP address outside the cluster will be checked against
 // each EgressFirewallRule in the pod's namespace's EgressFirewall, in
@@ -35,6 +36,9 @@ type EgressFirewall struct {
 
 type EgressFirewallStatus struct {
 	Status string `json:"status,omitempty"`
+	// +patchStrategy=merge
+	// +listType=set
+	Messages []string `json:"messages"`
 }
 
 // EgressFirewallSpec is a desired state description of EgressFirewall.
