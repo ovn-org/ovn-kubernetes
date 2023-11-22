@@ -1952,6 +1952,12 @@ ovn-cluster-manager() {
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
+  egressfirewall_enabled_flag=
+  if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
+	  egressfirewall_enabled_flag="--enable-egress-firewall"
+  fi
+  echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
+
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
@@ -2029,6 +2035,7 @@ ovn-cluster-manager() {
 
   echo "=============== ovn-cluster-manager ========== MASTER ONLY"
   /usr/bin/ovnkube --init-cluster-manager ${K8S_NODE} \
+    ${egressfirewall_enabled_flag} \
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
     ${egressservice_enabled_flag} \

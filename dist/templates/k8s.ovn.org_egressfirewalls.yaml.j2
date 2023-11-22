@@ -156,12 +156,20 @@ spec:
           status:
             description: Observed status of EgressFirewall
             properties:
+              messages:
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               status:
                 type: string
+            required:
+            - messages
             type: object
         required:
         - spec
         type: object
     served: true
     storage: true
-    subresources: {}
+    subresources:
+      status: {}

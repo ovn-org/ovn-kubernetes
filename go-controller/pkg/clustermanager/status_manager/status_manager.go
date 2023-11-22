@@ -7,6 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
+	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -114,6 +115,15 @@ func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManage
 			newAPBRouteManager(wf.APBRouteInformer().Lister(), ovnClient.AdminPolicyRouteClient),
 		)
 		sm.typedManagers["adminpolicybasedexternalroutes"] = apbRouteManager
+	}
+	if config.OVNKubernetesFeature.EnableEgressFirewall {
+		egressFirewallManager := newStatusManager[egressfirewallapi.EgressFirewall](
+			"egressfirewalls_statusmanager",
+			wf.EgressFirewallInformer().Informer(),
+			wf.EgressFirewallInformer().Lister().List,
+			newEgressFirewallManager(wf.EgressFirewallInformer().Lister(), ovnClient.EgressFirewallClient),
+		)
+		sm.typedManagers["egressfirewalls"] = egressFirewallManager
 	}
 	return sm
 }
