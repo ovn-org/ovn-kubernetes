@@ -178,6 +178,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		cnci.nbClient,
 		addressSetFactory,
 		DefaultNetworkControllerName,
+		cnci.zone,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new admin policy based external route controller while creating new default network controller :%w", err)
