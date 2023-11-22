@@ -2,7 +2,6 @@ package status_manager
 
 import (
 	"context"
-	"reflect"
 	"strings"
 
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -30,12 +29,13 @@ func (m *egressFirewallManager) get(namespace, name string) (*egressfirewallapi.
 	return m.lister.EgressFirewalls(namespace).Get(name)
 }
 
-func (m *egressFirewallManager) statusChanged(oldObj, newObj *egressfirewallapi.EgressFirewall) bool {
-	return !reflect.DeepEqual(oldObj.Status.Messages, newObj.Status.Messages)
+func (m *egressFirewallManager) getMessages(egressFirewall *egressfirewallapi.EgressFirewall) []string {
+	return egressFirewall.Status.Messages
 }
 
-func (m *egressFirewallManager) updateStatus(egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions) error {
-	if egressFirewall == nil || len(egressFirewall.Status.Messages) == 0 {
+func (m *egressFirewallManager) updateStatus(egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions,
+	applyEmptyOrFailed bool) error {
+	if egressFirewall == nil {
 		return nil
 	}
 	newStatus := "EgressFirewall Rules applied"
@@ -45,13 +45,31 @@ func (m *egressFirewallManager) updateStatus(egressFirewall *egressfirewallapi.E
 			break
 		}
 	}
+	if applyEmptyOrFailed && newStatus != types.EgressFirewallErrorMsg {
+		newStatus = ""
+	}
+
 	if egressFirewall.Status.Status == newStatus {
+		// already set to the same value
 		return nil
 	}
 
+	applyStatus := egressfirewallapply.EgressFirewallStatus()
+	if newStatus != "" {
+		applyStatus.WithStatus(newStatus)
+	}
+
 	applyObj := egressfirewallapply.EgressFirewall(egressFirewall.Name, egressFirewall.Namespace).
-		WithStatus(egressfirewallapply.EgressFirewallStatus().
-			WithStatus(newStatus))
+		WithStatus(applyStatus)
+
+	_, err := m.client.K8sV1().EgressFirewalls(egressFirewall.Namespace).ApplyStatus(context.TODO(), applyObj, *applyOpts)
+	return err
+}
+
+func (m *egressFirewallManager) cleanupStatus(egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions) error {
+	applyObj := egressfirewallapply.EgressFirewall(egressFirewall.Name, egressFirewall.Namespace).
+		WithStatus(egressfirewallapply.EgressFirewallStatus())
+
 	_, err := m.client.K8sV1().EgressFirewalls(egressFirewall.Namespace).ApplyStatus(context.TODO(), applyObj, *applyOpts)
 	return err
 }

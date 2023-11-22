@@ -119,10 +119,11 @@ func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(policyNam
 		}
 		return err
 	}
-	newMsg := fmt.Sprintf("%s configured external gateway IPs: %s", c.zoneID, strings.Join(sets.List(gwIPs), ","))
+	newMsg := fmt.Sprintf("configured external gateway IPs: %s", strings.Join(sets.List(gwIPs), ","))
 	if syncError != nil {
 		newMsg = fmt.Sprintf("%s %s: %v", c.zoneID, types.APBRouteErrorMsg, syncError.Error())
 	}
+	newMsg = types.GetZoneStatus(c.zoneID, newMsg)
 	needsUpdate := true
 	for _, message := range routePolicy.Status.Messages {
 		if message == newMsg {

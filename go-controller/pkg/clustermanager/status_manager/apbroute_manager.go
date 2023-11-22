@@ -2,7 +2,6 @@ package status_manager
 
 import (
 	"context"
-	"reflect"
 	"strings"
 
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
@@ -30,12 +29,13 @@ func (m *apbRouteManager) get(namespace, name string) (*adminpolicybasedrouteapi
 	return m.lister.Get(name)
 }
 
-func (m *apbRouteManager) statusChanged(oldObj, newObj *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) bool {
-	return !reflect.DeepEqual(oldObj.Status.Messages, newObj.Status.Messages)
+func (m *apbRouteManager) getMessages(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) []string {
+	return route.Status.Messages
 }
 
-func (m *apbRouteManager) updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, applyOpts *metav1.ApplyOptions) error {
-	if route == nil || len(route.Status.Messages) == 0 {
+func (m *apbRouteManager) updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, applyOpts *metav1.ApplyOptions,
+	applyEmptyOrFailed bool) error {
+	if route == nil {
 		return nil
 	}
 	newStatus := adminpolicybasedrouteapi.SuccessStatus
@@ -45,13 +45,31 @@ func (m *apbRouteManager) updateStatus(route *adminpolicybasedrouteapi.AdminPoli
 			break
 		}
 	}
+	if applyEmptyOrFailed && newStatus != adminpolicybasedrouteapi.FailStatus {
+		newStatus = ""
+	}
+
 	if route.Status.Status == newStatus {
+		// already set to the same value
 		return nil
 	}
 
+	applyStatus := adminpolicybasedrouteapply.AdminPolicyBasedRouteStatus()
+
+	if newStatus != "" {
+		applyStatus.WithStatus(newStatus)
+	}
+
 	applyObj := adminpolicybasedrouteapply.AdminPolicyBasedExternalRoute(route.Name).
-		WithStatus(adminpolicybasedrouteapply.AdminPolicyBasedRouteStatus().
-			WithStatus(newStatus))
+		WithStatus(applyStatus)
+
+	_, err := m.client.K8sV1().AdminPolicyBasedExternalRoutes().ApplyStatus(context.TODO(), applyObj, *applyOpts)
+	return err
+}
+
+func (m *apbRouteManager) cleanupStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, applyOpts *metav1.ApplyOptions) error {
+	applyObj := adminpolicybasedrouteapply.AdminPolicyBasedExternalRoute(route.Name).
+		WithStatus(adminpolicybasedrouteapply.AdminPolicyBasedRouteStatus())
 	_, err := m.client.K8sV1().AdminPolicyBasedExternalRoutes().ApplyStatus(context.TODO(), applyObj, *applyOpts)
 	return err
 }
