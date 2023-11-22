@@ -802,14 +802,16 @@ func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode
 }
 
 func (oc *DefaultNetworkController) setEgressFirewallStatus(egressFirewall *egressfirewallapi.EgressFirewall, handlerErr error) error {
-	newMsg := oc.zone + ": "
+	var newMsg string
 	if handlerErr != nil {
-		newMsg += types.EgressFirewallErrorMsg + ": " + handlerErr.Error()
+		newMsg = types.EgressFirewallErrorMsg + ": " + handlerErr.Error()
 	} else {
-		newMsg += egressFirewallAppliedCorrectly
+		newMsg = egressFirewallAppliedCorrectly
 		metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
 		metrics.IncrementEgressFirewallCount()
 	}
+
+	newMsg = types.GetZoneStatus(oc.zone, newMsg)
 	needsUpdate := true
 	for _, message := range egressFirewall.Status.Messages {
 		if message == newMsg {
