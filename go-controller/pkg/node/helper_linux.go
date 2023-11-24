@@ -13,6 +13,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
+var physicalInterfaceTypes = map[string]struct{}{
+	"device": {},
+	"vlan":   {},
+}
+
 type GatewayInterfaceMismatchError struct {
 	msg string
 }
@@ -212,4 +217,33 @@ func multipathRouteMatchesIfIndex(r netlink.Route, ifIdx int) bool {
 		}
 	}
 	return true
+}
+
+// isPhysicalInterface reports true when l is of type "device" or "vlan" and if it is not the "lo" interface.
+func isPhysicalInterface(l netlink.Link) bool {
+	if l.Attrs().Name == "lo" {
+		return false
+	}
+	_, ok := physicalInterfaceTypes[l.Type()]
+	return ok
+}
+
+// listPhysicalInterfaces uses the netlink library to return a list of all physical interfaces.
+// Physical interfaces are currenctly defined as those of types "device" and "vlan", minus the "lo" interface.
+func listPhysicalInterfaces() ([]string, error) {
+	var physicalInterfaceList []string
+
+	ll, err := util.GetNetLinkOps().LinkList()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, l := range ll {
+		if !isPhysicalInterface(l) {
+			continue
+		}
+		physicalInterfaceList = append(physicalInterfaceList, l.Attrs().Name)
+	}
+
+	return physicalInterfaceList, nil
 }

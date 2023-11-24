@@ -1,6 +1,8 @@
 package iptables
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
@@ -15,6 +17,28 @@ type Rule struct {
 	Chain    string
 	Args     []string
 	Protocol iptables.Protocol
+}
+
+// Equals uses reflect.DeepEqual to determine equality of rule r with rule rr.
+func (r Rule) Equals(rr Rule) bool {
+	return reflect.DeepEqual(r, rr)
+}
+
+// ParseAppendRule parses the provided string into an object of type Rule. The rule must start with `-A`.
+func ParseAppendRule(protocol iptables.Protocol, table, s string) (Rule, error) {
+	if !strings.HasPrefix(s, "-A") {
+		return Rule{}, fmt.Errorf("could not parse string into IPTables rule, only '-A' rules are accepted: %s", s)
+	}
+	components := strings.Split(s, " ")
+	if len(components) < 3 {
+		return Rule{}, fmt.Errorf("could not parse string into IPTables rule: %s", s)
+	}
+	return Rule{
+		Protocol: protocol,
+		Table:    table,
+		Chain:    components[1],
+		Args:     components[2:],
+	}, nil
 }
 
 // AddRules adds the given rules to iptables.
@@ -79,4 +103,31 @@ func DelRules(rules []Rule) error {
 		delErrors = nil
 	}
 	return delErrors
+}
+
+// ListRules lists rules for a given iptables chain. This will ignore the -N / --new-chain rule which is returned by
+// ipt.List(...).
+func ListRules(protocol iptables.Protocol, table, chain string) ([]Rule, error) {
+	var rules []Rule
+
+	ipt, err := util.GetIPTablesHelper(protocol)
+	if err != nil {
+		return nil, err
+	}
+
+	list, err := ipt.List(table, chain)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, item := range list {
+		// ParseAppendRule will return errors for rules like `-P FORWARD ACCEPT` or `-N OVN-KUBE-FORWARD-DROP`, so
+		// silently ignore parse errors.
+		r, err := ParseAppendRule(protocol, table, item)
+		if err != nil {
+			continue
+		}
+		rules = append(rules, r)
+	}
+	return rules, nil
 }

@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
@@ -443,5 +445,62 @@ func TestGetDefaultGatewayInterfaceDetails(t *testing.T) {
 			mockNetLinkOps.AssertExpectations(t)
 			mockLink.AssertExpectations(t)
 		})
+	}
+}
+
+func TestListPhysicalInterfaces(t *testing.T) {
+	var netlinkMock utilMock.NetLinkOps
+	util.SetNetLinkOpMockInst(&netlinkMock)
+	defer util.ResetNetLinkOpMockInst()
+
+	links := []struct {
+		linkName   string
+		linkType   string
+		isPhysical bool
+	}{
+		{
+			linkName:   "ens1f0",
+			linkType:   "device",
+			isPhysical: true,
+		},
+		{
+			linkName: "lo",
+			linkType: "device",
+		},
+		{
+			linkName:   "ens1f0.100",
+			linkType:   "vlan",
+			isPhysical: true,
+		},
+		{
+			linkName: "veth0",
+			linkType: "veth",
+		},
+	}
+
+	var expectedPhysicalLinks []string
+	var mockLinks []netlink.Link
+	for _, l := range links {
+		if l.isPhysical {
+			expectedPhysicalLinks = append(expectedPhysicalLinks, l.linkName)
+		}
+		mockLink := &linkMock.Link{}
+		lnkAttr := &netlink.LinkAttrs{
+			Name: l.linkName,
+		}
+		mockLink.On("Attrs").Return(lnkAttr)
+		mockLink.On("Type").Return(l.linkType)
+		mockLinks = append(mockLinks, mockLink)
+	}
+	netlinkMock.On("LinkList").Return(mockLinks, nil)
+
+	returnedPhysicalInterfaces, err := listPhysicalInterfaces()
+	if err != nil {
+		t.Fatalf("TestListPhysicalInterfaces: listPhysicalInterfaces returned an error, expected none; err: %q", err)
+
+	}
+	if !reflect.DeepEqual(returnedPhysicalInterfaces, expectedPhysicalLinks) {
+		t.Fatalf("TestListPhysicalInterfaces: Expected list of physical interfaces and returned list of physical "+
+			"interfaces does not match. Expected: %v. Returned: %v", expectedPhysicalLinks, returnedPhysicalInterfaces)
 	}
 }

@@ -19,10 +19,13 @@ import (
 )
 
 const (
-	iptableNodePortChain   = "OVN-KUBE-NODEPORT"   // called from nat-PREROUTING and nat-OUTPUT
-	iptableExternalIPChain = "OVN-KUBE-EXTERNALIP" // called from nat-PREROUTING and nat-OUTPUT
-	iptableETPChain        = "OVN-KUBE-ETP"        // called from nat-PREROUTING only
-	iptableITPChain        = "OVN-KUBE-ITP"        // called from mangle-OUTPUT and nat-OUTPUT
+	iptableNodePortChain    = "OVN-KUBE-NODEPORT"     // called from nat-PREROUTING and nat-OUTPUT
+	iptableExternalIPChain  = "OVN-KUBE-EXTERNALIP"   // called from nat-PREROUTING and nat-OUTPUT
+	iptableETPChain         = "OVN-KUBE-ETP"          // called from nat-PREROUTING only
+	iptableITPChain         = "OVN-KUBE-ITP"          // called from mangle-OUTPUT and nat-OUTPUT
+	iptableForwardDropChain = "OVN-KUBE-FORWARD-DROP" // Called from FORWARD.
+	iptableFilterTable      = "filter"
+	iptableForwardChain     = "FORWARD"
 )
 
 func clusterIPTablesProtocols() []iptables.Protocol {
@@ -62,6 +65,16 @@ func insertIptRules(rules []nodeipt.Rule) error {
 // i.e each rule gets added at the last position in the chain
 func appendIptRules(rules []nodeipt.Rule) error {
 	return nodeipt.AddRules(rules, true)
+}
+
+// deleteIptRules deletes the provided rules.
+func deleteIptRules(rules []nodeipt.Rule) error {
+	return nodeipt.DelRules(rules)
+}
+
+// listIptRules lists rules for the given tuple of protocol, table and chain.
+func listIptRules(protocol iptables.Protocol, table, chain string) ([]nodeipt.Rule, error) {
+	return nodeipt.ListRules(protocol, table, chain)
 }
 
 func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
@@ -341,13 +354,15 @@ func getGatewayForwardRules(cidrs []*net.IPNet) []nodeipt.Rule {
 	return returnRules
 }
 
-func getGatewayDropRules(ifName string) []nodeipt.Rule {
+// getTableChainDropRules returns inbound and outbound IPTables DROP rules for the provided tuple of table, chain
+// and interface name. It does so for all enabled IP address modes (IPv4 and/or IPv6).
+func getTableChainDropRules(table, chain, ifName string) []nodeipt.Rule {
 	var dropRules []nodeipt.Rule
 	for _, protocol := range clusterIPTablesProtocols() {
 		dropRules = append(dropRules, []nodeipt.Rule{
 			{
-				Table: "filter",
-				Chain: "FORWARD",
+				Table: table,
+				Chain: chain,
 				Args: []string{
 					"-i", ifName,
 					"-j", "DROP",
@@ -355,8 +370,8 @@ func getGatewayDropRules(ifName string) []nodeipt.Rule {
 				Protocol: protocol,
 			},
 			{
-				Table: "filter",
-				Chain: "FORWARD",
+				Table: table,
+				Chain: chain,
 				Args: []string{
 					"-o", ifName,
 					"-j", "DROP",
@@ -366,6 +381,13 @@ func getGatewayDropRules(ifName string) []nodeipt.Rule {
 		}...)
 	}
 	return dropRules
+}
+
+// getGatewayDropRules returns inbound and outbound IPTables DROP rules for the provided interface. It does so for all
+// enabled IP address modes (IPv4 and/or IPv6).
+func getGatewayDropRules(ifName string) []nodeipt.Rule {
+	return getTableChainDropRules("filter", "FORWARD", ifName)
+
 }
 
 // initExternalBridgeForwardingRules sets up iptables rules for br-* interface svc traffic forwarding
@@ -383,6 +405,116 @@ func initExternalBridgeServiceForwardingRules(cidrs []*net.IPNet) error {
 // -A FORWARD -o breth1 -j DROP
 func initExternalBridgeDropForwardingRules(ifName string) error {
 	return appendIptRules(getGatewayDropRules(ifName))
+}
+
+// syncPhysicalInterfaceDropRules sets up iptables rules to block forwarding in all physical interfaces.
+// syncPhysicalInterfaceDropForwardingRules adds a jump to chain iptableForwardDropChain from filter and add
+// iptables block rules per physical interface to iptableForwardDropChain. We define a physical interface as any
+// interface of types "device" and "vlan" (exluding the loopback). When an interface is removed,
+// syncEnforcePhysicalInterfaceDropRules will make sure to delete the iptables rules for it:
+// -A FORWARD -j OVN-KUBE-FORWARD-DROP
+// -A OVN-KUBE-FORWARD-DROP -i eth1 -j DROP
+// -A OVN-KUBE-FORWARD-DROP -o eth1 -j DROP
+// -A OVN-KUBE-FORWARD-DROP -i eth2 -j DROP
+// -A OVN-KUBE-FORWARD-DROP -o eth2 -j DROP
+// -A OVN-KUBE-FORWARD-DROP -i eth2.100 -j DROP
+// -A OVN-KUBE-FORWARD-DROP -o eth2.100 -j DROP
+func syncPhysicalInterfaceDropForwardingRules() error {
+	var existingRules []nodeipt.Rule
+	var generatedRules []nodeipt.Rule
+	var rulesToDelete []nodeipt.Rule
+
+	// Get list of all physical interfaces (physical devices and VLANs).
+	interfaces, err := listPhysicalInterfaces()
+	if err != nil {
+		return fmt.Errorf("could not list interfaces during attempt to sync forwarding drop rules, err: %q", err)
+	}
+
+	// Create forwardDropChains and jump to them from the FORWARDING chain.
+	for _, protocol := range clusterIPTablesProtocols() {
+		ipt, err := util.GetIPTablesHelper(protocol)
+		if err != nil {
+			return fmt.Errorf("could not get IPTables helper during attempt to sync forwarding drop rules, err: %q",
+				err)
+		}
+		addChainToTable(ipt, iptableFilterTable, iptableForwardDropChain)
+		jumpToDropChain := nodeipt.Rule{
+			Protocol: protocol,
+			Table:    iptableFilterTable,
+			Chain:    iptableForwardChain,
+			Args:     []string{"-j", iptableForwardDropChain},
+		}
+		if err := appendIptRules([]nodeipt.Rule{jumpToDropChain}); err != nil {
+			return fmt.Errorf("could append IPTables rule for chain %q during attempt to sync forwarding drop rules, "+
+				"err: %q", jumpToDropChain, err)
+		}
+	}
+
+	// List all IPTables rules inside jumpToDropChain for each protocol.
+	for _, protocol := range clusterIPTablesProtocols() {
+		existingRulesForProto, err := listIptRules(protocol, iptableFilterTable, iptableForwardDropChain)
+		if err != nil {
+			return fmt.Errorf("could not list existing IPTables rules during attempt to sync forwarding drop rules, "+
+				"protocol: %d, table: %q, chain: %q, err: %q", protocol, iptableFilterTable, iptableForwardDropChain, err)
+		}
+		existingRules = append(existingRules, existingRulesForProto...)
+	}
+
+	// Generate all rules that we need for the current list of physical interfaces.
+	for _, intf := range interfaces {
+		generatedRules = append(generatedRules, getTableChainDropRules(iptableFilterTable, iptableForwardDropChain, intf)...)
+	}
+
+	// Find all rules inside forwardDropChain but that are not part of the generatedRules. Those rules must be deleted.
+outer:
+	for _, existingRule := range existingRules {
+		for _, generatedRule := range generatedRules {
+			if existingRule.Equals(generatedRule) {
+				continue outer
+			}
+		}
+		rulesToDelete = append(rulesToDelete, existingRule)
+	}
+
+	// Send rules for deletion. Only log errors, as this is not critical.
+	if err := deleteIptRules(rulesToDelete); err != nil {
+		klog.Infof("Could not clean up all IPTables rules during sync of forwarding drop rules, err: %q", err)
+	}
+
+	// Send all rules for creation. Rules that already exist will be ignored.
+	return appendIptRules(generatedRules)
+}
+
+// syncCleanupPhysicalInterfaceDropForwardingRules cleans up IPTables rules for the interface FORWARD DROP. This
+// has to happen when ovnkube-node is first started with --disable-forwarding, and is then restarted without the
+// CLI parameter.
+func syncCleanupPhysicalInterfaceDropForwardingRules() error {
+	for _, protocol := range clusterIPTablesProtocols() {
+		ipt, err := util.GetIPTablesHelper(protocol)
+		if err != nil {
+			return fmt.Errorf("could not get IPTables helper during attempt to cleanup forwarding drop rules, err: %q",
+				err)
+		}
+		jumpToDropChain := nodeipt.Rule{
+			Protocol: protocol,
+			Table:    iptableFilterTable,
+			Chain:    iptableForwardChain,
+			Args:     []string{"-j", iptableForwardDropChain},
+		}
+		if err := deleteIptRules([]nodeipt.Rule{jumpToDropChain}); err != nil {
+			return fmt.Errorf("could delete IPTables rule for chain %q during attempt to cleanup forwarding drop rules, "+
+				"err: %q", jumpToDropChain, err)
+		}
+		if err = ipt.ClearChain(iptableFilterTable, iptableForwardDropChain); err != nil {
+			return fmt.Errorf("could not clear chain %q during attempt to cleanup forwarding drop rules, err: %q",
+				iptableForwardDropChain, err)
+		}
+		if err = ipt.DeleteChain(iptableFilterTable, iptableForwardDropChain); err != nil {
+			return fmt.Errorf("could not remove chain %q during attempt to cleanup forwarding drop rules, err: %q",
+				iptableForwardDropChain, err)
+		}
+	}
+	return nil
 }
 
 func getLocalGatewayFilterRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
@@ -463,7 +595,7 @@ func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
 	return appendIptRules(getLocalGatewayNATRules(ifname, cidr))
 }
 
-func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {
+func addChainToTable(ipt util.IPTablesHelper, tableName, chain string) {
 	if err := ipt.NewChain(tableName, chain); err != nil {
 		klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation: %v", chain, tableName, err)
 	}
@@ -478,9 +610,9 @@ func handleGatewayIPTables(iptCallback func(rules []nodeipt.Rule) error, genGate
 			if err != nil {
 				return err
 			}
-			addChaintoTable(ipt, "nat", chain)
+			addChainToTable(ipt, "nat", chain)
 			if chain == iptableITPChain {
-				addChaintoTable(ipt, "mangle", chain)
+				addChainToTable(ipt, "mangle", chain)
 			}
 			rules = append(rules, genGatewayChainRules(chain, proto)...)
 		}

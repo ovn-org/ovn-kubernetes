@@ -1175,6 +1175,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		ovspinning.Run(nc.stopChan)
 	}()
 
+	nc.syncPhysicalInterfaceDropForwardingRules(config.Gateway.DisableForwarding)
+
 	klog.Infof("Default node network controller initialized and ready.")
 	return nil
 }
@@ -1408,6 +1410,60 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). ",
 		mtu, interfaceName, requiredMTU)
 	return nil
+}
+
+// syncPhysicalInterfaceDropForwardingRules synchronizes the IPTables rules in filter FORWARD and OVN-KUBE-FORWARD-DROP.
+// If add == true, it adds block rules. Synchronization occurs on startup, every 5 minutes and whenever a link event
+// for physical interfaces is detected.
+// If add == false, remove the rules (this is required for transitions where ovnkube-node is started first with
+// --disable-forwarding and then subsequently is started without the CLI parameter).
+func (nc *DefaultNodeNetworkController) syncPhysicalInterfaceDropForwardingRules(add bool) {
+	if !add {
+		if err := syncCleanupPhysicalInterfaceDropForwardingRules(); err != nil {
+			klog.Fatal("Could not synchronize physical interface drop forwarding rules, err: %q", err)
+		}
+		return
+	}
+
+	nc.wg.Add(1)
+	go func() {
+		defer nc.wg.Done()
+
+		// We will have to use sync() in 3 different locations below, so let's define it once here to save us some
+		// typing.
+		sync := func() {
+			if err := syncPhysicalInterfaceDropForwardingRules(); err != nil {
+				klog.Fatal("Could not synchronize physical interface drop forwarding rules, err: %q", err)
+			}
+		}
+		// Synchronize at least once at startup, regardless if we are to add or to remove rules.
+		sync()
+
+		// Watch all link changes on the node.
+		linkUpdateCh := make(chan (netlink.LinkUpdate))
+		if err := netlink.LinkSubscribe(linkUpdateCh, nc.stopChan); err != nil {
+			klog.Fatal("Could not subscribe to link events in DefaultNodeNetworkController, err: %q", err)
+		}
+
+		// Tick every 5 minutes in case we missed link updates for some reason.
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		// Block for interface events, timer ticks, or for the stop signal.
+		for {
+			select {
+			case <-nc.stopChan:
+				return
+			case le := <-linkUpdateCh:
+				// Synchronize on every link change for a physical interface on the node.
+				if isPhysicalInterface(le.Link) {
+					sync()
+				}
+			case <-ticker.C:
+				sync()
+			}
+		}
+	}()
 }
 
 func configureSvcRouteViaBridge(routeManager *routemanager.Controller, bridge string) error {
