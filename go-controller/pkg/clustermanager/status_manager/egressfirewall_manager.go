@@ -25,14 +25,17 @@ func newEgressFirewallManager(lister egressfirewalllisters.EgressFirewallLister,
 	}
 }
 
+//lint:ignore U1000 generic interfaces throw false-positives https://github.com/dominikh/go-tools/issues/1440
 func (m *egressFirewallManager) get(namespace, name string) (*egressfirewallapi.EgressFirewall, error) {
 	return m.lister.EgressFirewalls(namespace).Get(name)
 }
 
+//lint:ignore U1000 generic interfaces throw false-positives
 func (m *egressFirewallManager) getMessages(egressFirewall *egressfirewallapi.EgressFirewall) []string {
 	return egressFirewall.Status.Messages
 }
 
+//lint:ignore U1000 generic interfaces throw false-positives
 func (m *egressFirewallManager) updateStatus(egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions,
 	applyEmptyOrFailed bool) error {
 	if egressFirewall == nil {
@@ -66,6 +69,7 @@ func (m *egressFirewallManager) updateStatus(egressFirewall *egressfirewallapi.E
 	return err
 }
 
+//lint:ignore U1000 generic interfaces throw false-positives
 func (m *egressFirewallManager) cleanupStatus(egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions) error {
 	applyObj := egressfirewallapply.EgressFirewall(egressFirewall.Name, egressFirewall.Namespace).
 		WithStatus(egressfirewallapply.EgressFirewallStatus())
