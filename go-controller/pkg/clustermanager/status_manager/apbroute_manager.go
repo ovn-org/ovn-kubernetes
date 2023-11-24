@@ -25,14 +25,17 @@ func newAPBRouteManager(lister adminpolicybasedroutelisters.AdminPolicyBasedExte
 	}
 }
 
+//lint:ignore U1000 generic interfaces throw false-positives https://github.com/dominikh/go-tools/issues/1440
 func (m *apbRouteManager) get(namespace, name string) (*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, error) {
 	return m.lister.Get(name)
 }
 
+//lint:ignore U1000 generic interfaces throw false-positives
 func (m *apbRouteManager) getMessages(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) []string {
 	return route.Status.Messages
 }
 
+//lint:ignore U1000 generic interfaces throw false-positives
 func (m *apbRouteManager) updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, applyOpts *metav1.ApplyOptions,
 	applyEmptyOrFailed bool) error {
 	if route == nil {
@@ -67,6 +70,7 @@ func (m *apbRouteManager) updateStatus(route *adminpolicybasedrouteapi.AdminPoli
 	return err
 }
 
+//lint:ignore U1000 generic interfaces throw false-positives
 func (m *apbRouteManager) cleanupStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, applyOpts *metav1.ApplyOptions) error {
 	applyObj := adminpolicybasedrouteapply.AdminPolicyBasedExternalRoute(route.Name).
 		WithStatus(adminpolicybasedrouteapply.AdminPolicyBasedRouteStatus())
