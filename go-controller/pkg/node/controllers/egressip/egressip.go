@@ -62,8 +62,6 @@ var (
 
 // eIPConfig represents exactly one EgressIP IP. It contains non-pod related EIP configuration information only.
 type eIPConfig struct {
-	// EgressIP name
-	name string
 	// EgressIP IP
 	addr   *netlink.Addr
 	routes []netlink.Route
@@ -91,10 +89,10 @@ func newState() *state {
 // config is used to update an EIP to the latest state, it stores all required information for an
 // update.
 type config struct {
-	// namespacesWithPods[namespaceName[podNamespacedName] = Pod
-	namespacesWithPods map[string]map[ktypes.NamespacedName]*corev1.Pod
-	eIPConfig          *eIPConfig
-	podIPConfigs       *podIPConfigList
+	// namespaceName -> pod ns/name -> pod IP configuration
+	namespacesWithPodIPConfigs map[string]map[ktypes.NamespacedName]*podIPConfigList
+	// eIPConfig IP contains all applied configuration for a given EgressIP IP. It does not contain any pod specific config
+	eIPConfig *eIPConfig
 }
 
 // referencedObjects is used by pod and namespace handlers to find what is selected for an EgressIP
@@ -454,7 +452,7 @@ func (c *Controller) syncEIP(eIPName string) error {
 func (c *Controller) getConfigAndUpdateRefs(eIP *eipv1.EgressIP, updateRefs bool) (*config, error) {
 	c.referencedObjectsLock.Lock()
 	defer c.referencedObjectsLock.Unlock()
-	eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, namespacePods, err := c.processEIP(eIP)
+	eIPConfig, selectedNamespaces, selectedPods, namespacesWithPodIPConfigs, err := c.processEIP(eIP)
 	if err != nil {
 		return nil, err
 	}
@@ -465,65 +463,27 @@ func (c *Controller) getConfigAndUpdateRefs(eIP *eipv1.EgressIP, updateRefs bool
 		}
 		c.referencedObjects[eIP.Name] = refObjs
 	}
-	if eIPConfig == nil || podIPConfigs == nil {
+	if eIPConfig == nil || len(namespacesWithPodIPConfigs) == 0 {
 		return nil, nil
 	}
 	return &config{
-		namespacesWithPods: namespacePods,
-		eIPConfig:          eIPConfig,
-		podIPConfigs:       podIPConfigs,
+		namespacesWithPodIPConfigs: namespacesWithPodIPConfigs,
+		eIPConfig:                  eIPConfig,
 	}, nil
 
 }
 
 // processEIP attempts to find namespaces and pods that match the EIP selectors and then attempts to find a network
 // that can host one of the EIP IPs returning egress IP configuration, selected namespaces and pods
-func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigList, sets.Set[string], sets.Set[ktypes.NamespacedName],
-	map[string]map[ktypes.NamespacedName]*corev1.Pod, error) {
+func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[string], sets.Set[ktypes.NamespacedName],
+	map[string]map[ktypes.NamespacedName]*podIPConfigList, error) {
 	selectedNamespaces := sets.Set[string]{}
 	selectedPods := sets.Set[ktypes.NamespacedName]{}
-	selectedPodIPs := make(map[ktypes.NamespacedName][]net.IP)
-	selectedNamespacesPods := map[string]map[ktypes.NamespacedName]*corev1.Pod{}
-
-	// namespace selector is mandatory for EIP
-	namespaces, err := c.listNamespacesBySelector(&eip.Spec.NamespaceSelector)
-	if err != nil {
-		return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, fmt.Errorf("failed to list namespaces: %w", err)
-	}
-	for _, namespace := range namespaces {
-		pods, err := c.listPodsByNamespaceAndSelector(namespace.Name, &eip.Spec.PodSelector)
-		if err != nil {
-			return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, fmt.Errorf("failed to list pods in namespace %s: %w",
-				namespace.Name, err)
-		}
-		podsNsName := map[ktypes.NamespacedName]*corev1.Pod{}
-		for _, pod := range pods {
-			// Ignore completed pods, host networked pods, pods not scheduled
-			if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
-				continue
-			}
-			ips, err := util.DefaultNetworkPodIPs(pod)
-			if err != nil {
-				return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, fmt.Errorf("failed to get pod ips: %w", err)
-			}
-			if len(ips) == 0 {
-				continue
-			}
-			key := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-			selectedPods.Insert(key)
-			selectedPodIPs[key] = ips
-			podsNsName[key] = pod
-		}
-		selectedNamespacesPods[namespace.Name] = podsNsName
-		selectedNamespaces.Insert(namespace.Name)
-	}
-	if selectedPods.Len() == 0 {
-		return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, nil
-	}
-
+	selectedNamespacesPodIPs := map[string]map[ktypes.NamespacedName]*podIPConfigList{}
+	var eipSpecificConfig *eIPConfig
 	parsedNodeEIPConfig, err := c.getNodeEgressIPConfig()
 	if err != nil {
-		return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods,
+		return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
 			fmt.Errorf("failed to determine egress IP config for node %s: %w", c.nodeName, err)
 	}
 	// max of 1 EIP IP is selected. Return when 1 is found.
@@ -533,59 +493,94 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 		}
 		eIPNet, err := util.GetIPNetFullMask(status.EgressIP)
 		if err != nil {
-			return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods,
+			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
 				fmt.Errorf("failed to generate mask for EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
 		if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 			continue
 		}
-		isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
 		found, link, err := findLinkOnSameNetworkAsIP(eIPNet.IP, c.v4, c.v6)
 		if err != nil {
-			return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods,
+			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
 				fmt.Errorf("failed to find a network to host EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
 		if !found {
 			continue
 		}
-		klog.Infof("Generating config for EgressIP %s IP %s which is hosted by a non-OVN managed interface (name %s)",
-			eip.Name, status.EgressIP, link.Attrs().Name)
-		// go through all selected pods and build a config per pod IP. We know there are at least one pod and these the
-		// pod(s) have IP(s).
-		eIPConfig, podIPConfigs, err := generateEIPConfigForPods(selectedPodIPs, link, eIPNet, isEIPV6)
+		// namespace selector is mandatory for EIP
+		namespaces, err := c.listNamespacesBySelector(&eip.Spec.NamespaceSelector)
 		if err != nil {
-			return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods,
-				fmt.Errorf("failed to generated config for EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
+			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, fmt.Errorf("failed to list namespaces: %w", err)
 		}
-		// ignore other EIP IPs. Multiple EIP IPs cannot be assigned to the same node
-		return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods, nil
+		isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
+		for _, namespace := range namespaces {
+			selectedNamespaces.Insert(namespace.Name)
+			pods, err := c.listPodsByNamespaceAndSelector(namespace.Name, &eip.Spec.PodSelector)
+			if err != nil {
+				return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, fmt.Errorf("failed to list pods in namespace %s: %w",
+					namespace.Name, err)
+			}
+			for _, pod := range pods {
+				// Ignore completed pods, host networked pods, pods not scheduled
+				if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
+					continue
+				}
+				ips, err := util.DefaultNetworkPodIPs(pod)
+				if err != nil {
+					return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, fmt.Errorf("failed to get pod ips: %w", err)
+				}
+				if len(ips) == 0 {
+					continue
+				}
+				podNamespaceName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+				// generate pod specific configuration
+				if selectedNamespacesPodIPs[namespace.Name] == nil {
+					selectedNamespacesPodIPs[namespace.Name] = make(map[ktypes.NamespacedName]*podIPConfigList)
+				}
+				selectedNamespacesPodIPs[namespace.Name][podNamespaceName] = generatePodConfig(ips, link, eIPNet, isEIPV6)
+				selectedPods.Insert(podNamespaceName)
+			}
+		}
+		// ensure at least one pod is selected before generating config
+		if len(selectedNamespacesPodIPs) > 0 {
+			eipSpecificConfig, err = generateEIPConfig(link, eIPNet, isEIPV6)
+			if err != nil {
+				return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
+					fmt.Errorf("failed to generate EIP configuration for EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
+			}
+		}
+		break
 	}
-	return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, nil
+
+	return eipSpecificConfig, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, nil
 }
 
-func generateEIPConfigForPods(pods map[ktypes.NamespacedName][]net.IP, link netlink.Link, eIPNet *net.IPNet, isEIPV6 bool) (*eIPConfig, *podIPConfigList, error) {
-	eipConfig := newEIPConfig()
+func generatePodConfig(podIPs []net.IP, link netlink.Link, eIPNet *net.IPNet, isEIPV6 bool) *podIPConfigList {
 	newPodIPConfigs := newPodIPConfigList()
+	for _, podIP := range podIPs {
+		isPodIPv6 := utilnet.IsIPv6(podIP)
+		if isPodIPv6 != isEIPV6 {
+			continue
+		}
+		ipConfig := newPodIPConfig()
+		ipConfig.ipTableRule = generateIPTablesSNATRuleArg(podIP, isPodIPv6, link.Attrs().Name, eIPNet.IP.String())
+		ipConfig.ipRule = generateIPRule(podIP, isPodIPv6, link.Attrs().Index)
+		ipConfig.v6 = isPodIPv6
+		newPodIPConfigs.elems = append(newPodIPConfigs.elems, ipConfig)
+	}
+	return newPodIPConfigs
+}
+
+// generateEIPConfig generates configuration that isn't related to any pod EIPs to support config of a single EIP
+func generateEIPConfig(link netlink.Link, eIPNet *net.IPNet, isEIPV6 bool) (*eIPConfig, error) {
+	eipConfig := newEIPConfig()
 	linkRoutes, err := generateRoutesForLink(link, isEIPV6)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	eipConfig.routes = linkRoutes
 	eipConfig.addr = getNetlinkAddress(eIPNet, link.Attrs().Index)
-	for _, podIPs := range pods {
-		for _, podIP := range podIPs {
-			isPodIPv6 := utilnet.IsIPv6(podIP)
-			if isPodIPv6 != isEIPV6 {
-				continue
-			}
-			ipConfig := newPodIPConfig()
-			ipConfig.ipTableRule = generateIPTablesSNATRuleArg(podIP, isPodIPv6, link.Attrs().Name, eIPNet.IP.String())
-			ipConfig.ipRule = generateIPRule(podIP, isPodIPv6, link.Attrs().Index)
-			ipConfig.v6 = isPodIPv6
-			newPodIPConfigs.elems = append(newPodIPConfigs.elems, ipConfig)
-		}
-	}
-	return eipConfig, newPodIPConfigs, nil
+	return eipConfig, nil
 }
 
 func generateRoutesForLink(link netlink.Link, isV6 bool) ([]netlink.Route, error) {
@@ -623,28 +618,30 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 					// 3. Is not present in update
 					// 3. Target pod is not listed in update.targetNamespaces
 					// 4. Pod IP config has changed
-					if update == nil || !update.podIPConfigs.has(existingPodIPConfig) ||
-						update.namespacesWithPods[targetNamespace][podNamespacedName] == nil {
-						podIPConfigsToDelete.Insert(*existingPodIPConfig)
+					if update == nil || update.namespacesWithPodIPConfigs[targetNamespace][podNamespacedName] == nil ||
+						// delete if IPs dont match
+						(update.namespacesWithPodIPConfigs[targetNamespace][podNamespacedName] != nil &&
+							!update.namespacesWithPodIPConfigs[targetNamespace][podNamespacedName].has(existingPodIPConfig)) {
+						podIPConfigsToDelete.insert(*existingPodIPConfig)
 					}
 				}
-				if podIPConfigsToDelete.Len() > 0 {
+				if podIPConfigsToDelete.len() > 0 {
 					for _, podIPConfigToDelete := range podIPConfigsToDelete.elems {
 						if err := c.deleteIPConfig(podIPConfigToDelete); err != nil {
-							existingPodConfig.InsertOverwriteFailed(*podIPConfigToDelete)
+							existingPodConfig.insertOverwriteFailed(*podIPConfigToDelete)
 							return err
 						}
-						existingPodConfig.Delete(*podIPConfigToDelete)
+						existingPodConfig.delete(*podIPConfigToDelete)
 					}
 				}
-				if update == nil || update.namespacesWithPods[targetNamespace][podNamespacedName] == nil {
+				if update == nil || update.namespacesWithPodIPConfigs[targetNamespace][podNamespacedName] == nil {
 					podsToDelete = append(podsToDelete, podNamespacedName)
 				}
 			}
 			for _, podToDelete := range podsToDelete {
 				delete(targetPods, podToDelete)
 			}
-			if update == nil || update.namespacesWithPods[targetNamespace] == nil {
+			if update == nil || update.namespacesWithPodIPConfigs[targetNamespace] == nil {
 				namespacesToDelete = append(namespacesToDelete, targetNamespace)
 			}
 		}
@@ -699,22 +696,22 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 	}
 	// apply new changes
 	if update != nil && update.eIPConfig != nil && update.eIPConfig.addr != nil && len(update.eIPConfig.routes) > 0 {
-		for updatedTargetNS, updatedTargetPod := range update.namespacesWithPods {
+		for updatedTargetNS, updatedTargetPod := range update.namespacesWithPodIPConfigs {
 			existingNs, found := existing.namespacesWithPodIPConfigs[updatedTargetNS]
 			if !found {
 				existingNs = map[ktypes.NamespacedName]*podIPConfigList{}
 				existing.namespacesWithPodIPConfigs[updatedTargetNS] = existingNs
 			}
-			for updatedPodNamespacedName, updatedPod := range updatedTargetPod {
-				existingTargetPodConfig, found := existingNs[updatedPodNamespacedName]
+			for updatedPodNamespacedName, updatedPodIPConfig := range updatedTargetPod {
+				existingTargetPodIPConfig, found := existingNs[updatedPodNamespacedName]
 				if !found {
-					existingTargetPodConfig = newPodIPConfigList()
-					existingNs[updatedPodNamespacedName] = existingTargetPodConfig
+					existingTargetPodIPConfig = newPodIPConfigList()
+					existingNs[updatedPodNamespacedName] = existingTargetPodIPConfig
 				}
 				// applyPodConfig will apply pod specific configuration - ip rules and iptables rules
-				err := c.applyPodConfig(existingTargetPodConfig, update)
+				err := c.applyPodConfig(existingTargetPodIPConfig, updatedPodIPConfig)
 				if err != nil {
-					return fmt.Errorf("failed to apply pod %s/%s configuration: %v", updatedPod.Namespace, updatedPod.Name, err)
+					return fmt.Errorf("failed to apply pod %s configuration: %v", updatedPodNamespacedName.String(), err)
 				}
 			}
 		}
@@ -754,31 +751,36 @@ func (c *Controller) deleteIPConfig(podIPConfigToDelete *podIPConfig) error {
 	return nil
 }
 
-func (c *Controller) applyPodConfig(existingConfig *podIPConfigList, updatedPolicy *config) error {
-	configToAdd := newPodIPConfigList()
-	for _, newConfig := range updatedPolicy.podIPConfigs.elems {
-		if !existingConfig.hasWithoutError(newConfig) {
-			configToAdd.Insert(*newConfig)
+func (c *Controller) applyPodConfig(existingPodIPsConfig *podIPConfigList, updatedPodIPsConfig *podIPConfigList) error {
+	if existingPodIPsConfig == nil {
+		return fmt.Errorf("unexpected nil existing config")
+	}
+	if updatedPodIPsConfig == nil {
+		return fmt.Errorf("unexpected nil updated config")
+	}
+	newPodIPConfigs := newPodIPConfigList()
+	for _, newConfig := range updatedPodIPsConfig.elems {
+		if !existingPodIPsConfig.hasWithoutError(newConfig) {
+			newPodIPConfigs.insert(*newConfig)
 		}
 	}
-	for _, newConfig := range configToAdd.elems {
-		if err := c.ruleManager.Add(newConfig.ipRule); err != nil {
-			existingConfig.InsertOverwriteFailed(*newConfig)
+	for _, newPodIPConfig := range newPodIPConfigs.elems {
+		if err := c.ruleManager.Add(newPodIPConfig.ipRule); err != nil {
+			existingPodIPsConfig.insertOverwriteFailed(*newPodIPConfig)
 			return err
 		}
-		// v4
-		if newConfig.v6 {
-			if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6, newConfig.ipTableRule); err != nil {
-				existingConfig.InsertOverwriteFailed(*newConfig)
+		if newPodIPConfig.v6 {
+			if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6, newPodIPConfig.ipTableRule); err != nil {
+				existingPodIPsConfig.insertOverwriteFailed(*newPodIPConfig)
 				return fmt.Errorf("unable to ensure iptables rules: %v", err)
 			}
 		} else {
-			if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4, newConfig.ipTableRule); err != nil {
-				existingConfig.InsertOverwriteFailed(*newConfig)
-				return fmt.Errorf("failed to ensure rules (%+v) in chain %s: %v", newConfig.ipTableRule, iptChainName, err)
+			if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4, newPodIPConfig.ipTableRule); err != nil {
+				existingPodIPsConfig.insertOverwriteFailed(*newPodIPConfig)
+				return fmt.Errorf("failed to ensure rules (%+v) in chain %s: %v", newPodIPConfig.ipTableRule, iptChainName, err)
 			}
 		}
-		existingConfig.insertOverwrite(*newConfig)
+		existingPodIPsConfig.insertOverwrite(*newPodIPConfig)
 	}
 	return nil
 }

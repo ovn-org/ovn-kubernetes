@@ -55,7 +55,7 @@ func newPodIPConfigList() *podIPConfigList {
 	return &podIPConfigList{elems: []*podIPConfig{}}
 }
 
-func (pICL *podIPConfigList) Len() int {
+func (pICL *podIPConfigList) len() int {
 	return len(pICL.elems)
 }
 
@@ -92,16 +92,16 @@ func (pICL *podIPConfigList) remove(idxs ...int) {
 	pICL.elems = newElems
 }
 
-// InsertOverwriteFailed should be used to add elements to the podIPConfigList that have failed to be applied.
-func (pICL *podIPConfigList) InsertOverwriteFailed(pICs ...podIPConfig) {
+// insertOverwriteFailed should be used to add elements to the podIPConfigList that have failed to be applied.
+func (pICL *podIPConfigList) insertOverwriteFailed(pICs ...podIPConfig) {
 	for _, pIC := range pICs {
 		pIC.failed = true
 		pICL.insertOverwrite(pIC)
 	}
 }
 
-// Insert should be used to add elements to the podIPConfigList
-func (pICL *podIPConfigList) Insert(pICs ...podIPConfig) {
+// insert should be used to add elements to the podIPConfigList
+func (pICL *podIPConfigList) insert(pICs ...podIPConfig) {
 	for _, pc := range pICs {
 		pICL.insertOverwrite(pc)
 	}
@@ -118,7 +118,7 @@ func (pICL *podIPConfigList) insertOverwrite(pIC podIPConfig) {
 	pICL.elems = append(pICL.elems, &pIC)
 }
 
-func (pICL *podIPConfigList) Delete(pICs ...podIPConfig) {
+func (pICL *podIPConfigList) delete(pICs ...podIPConfig) {
 	elems := make([]*podIPConfig, 0, len(pICL.elems))
 	for _, existingPIC := range pICL.elems {
 		removed := false
