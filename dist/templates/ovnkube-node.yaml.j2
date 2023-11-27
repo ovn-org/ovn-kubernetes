@@ -207,6 +207,8 @@ spec:
           value: "{{ ovn_unprivileged_mode }}"
         - name: OVN_EX_GW_NETWORK_INTERFACE
           value: "{{ ovn_ex_gw_networking_interface }}"
+        - name: OVN_ENABLE_OVNKUBE_IDENTITY
+          value: "{{ ovn_enable_ovnkube_identity }}"
         {% if ovnkube_app_name=="ovnkube-node" -%}
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
@@ -230,8 +232,6 @@ spec:
           value: "{{ ovn_enable_interconnect }}"
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: "{{ ovn_enable_multi_external_gateway }}"
-        - name: OVN_ENABLE_OVNKUBE_IDENTITY
-          value: "{{ ovn_enable_ovnkube_identity }}"
         {% endif -%}
         {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
         - name: OVNKUBE_NODE_MODE

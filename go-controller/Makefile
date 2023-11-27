@@ -26,7 +26,7 @@ OVN_SCHEMA_VERSION ?= v23.06.0
 ifeq ($(NOROOT),TRUE)
 C_ARGS = -e NOROOT=TRUE
 else
-C_ARGS = --cap-add=NET_ADMIN --cap-add=SYS_ADMIN
+C_ARGS = --cap-add=NET_ADMIN --cap-add=SYS_ADMIN --privileged
 endif
 export NOROOT
 

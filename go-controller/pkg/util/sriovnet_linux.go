@@ -158,8 +158,7 @@ func GetNetdevNameFromDeviceId(deviceId string, deviceInfo nadapi.DeviceInfo) (s
 			return vdpaDevice.VirtioNet().NetDev(), nil
 		}
 		if err != nil {
-			klog.Errorf("Error when searching for the virtio/vdpa netdev: ", err)
-			return "", err
+			klog.Warningf("Error when searching for the virtio/vdpa netdev: ", err)
 		}
 
 		netdevices, err = GetSriovnetOps().GetNetDevicesFromPci(deviceId)

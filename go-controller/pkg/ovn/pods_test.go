@@ -2440,5 +2440,46 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+		ginkgo.It("should correctly handle a pod running on no node", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				myPod.Status.Phase = v1.PodRunning
+				setPodAnnotations(myPod, t)
+				initialDB = libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{},
+				}
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*myPod},
+					},
+				)
+
+				fakeOvn.controller.localZoneNodes = nil
+				err := fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 	})
 })

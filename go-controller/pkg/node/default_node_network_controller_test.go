@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -315,8 +316,7 @@ var _ = Describe("Node", func() {
 				_, err = config.InitConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				config.Default.EncapPort = encapPort
-
-				err = setEncapPort()
+				err = setEncapPort(context.Background())
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)

@@ -1,10 +1,10 @@
 # OVN overlay network on Openshift
 
-This section describes how an OVN overlay network is setup on Openshift 3.10 and later.
+This section describes how an OVN overlay network is setup on Openshift 4.10 and later.
 It explains the various components and how they come together to establish the OVN overlay network.
 People that are interested in understanding how the ovn cni plugin is installed will find this useful.
 
-As of OCP-3.10, the Openshift overlay network is managed using daemonsets. The ovs/ovn components are
+As of OCP-4.10, the Openshift overlay network is managed using daemonsets. The ovs/ovn components are
 built into a Docker image that has all of the needed packages. Daemonsets are deployed on the nodes
 in the cluster to provide the network. The daemonsets use a common Docker image when creating the needed pods.
 
