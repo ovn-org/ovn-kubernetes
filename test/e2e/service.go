@@ -342,9 +342,7 @@ var _ = ginkgo.Describe("Services", func() {
 									return fmt.Errorf("stdout does not match payloads[%s], %s != %s", size, stdout, echoPayloads[size])
 								}
 
-								if size == "large" && !hostNetwork {
-									ginkgo.By("Making sure that the ip route cache contains an MTU route")
-									// Get IP route cache and make sure that it contains an MTU route.
+								if size == "large" {
 									cmd = fmt.Sprintf("ip route get %s", serviceNodeIP)
 									stdout, err = e2epodoutput.RunHostCmd(
 										clientPod.Namespace,
@@ -353,8 +351,23 @@ var _ = ginkgo.Describe("Services", func() {
 									if err != nil {
 										return fmt.Errorf("could not list IP route cache, err: %q", err)
 									}
-									if !echoMtuRegex.Match([]byte(stdout)) {
-										return fmt.Errorf("cannot find MTU cache entry in route: %s", stdout)
+									if !hostNetwork || isLocalGWModeEnabled() {
+										// with local gateway mode the packet will be sent:
+										// client -> intermediary node -> server
+										// With local gw mode, the packet will go into the host of intermediary node, where
+										// nodeport will be DNAT'ed to cluster IP service, and then hit the MTU 1400 route
+										// and trigger ICMP needs frag.
+										// MTU 1400 should be removed after bumping to OVS with https://bugzilla.redhat.com/show_bug.cgi?id=2170920
+										// fixed.
+										ginkgo.By("Making sure that the ip route cache contains an MTU route")
+										if !echoMtuRegex.Match([]byte(stdout)) {
+											return fmt.Errorf("cannot find MTU cache entry in route: %s", stdout)
+										}
+									} else {
+										ginkgo.By("Making sure that the ip route cache does NOT contain an MTU route")
+										if echoMtuRegex.Match([]byte(stdout)) {
+											framework.Failf("found unexpected MTU cache route: %s", stdout)
+										}
 									}
 								}
 								return nil
