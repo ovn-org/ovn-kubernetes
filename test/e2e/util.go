@@ -1079,6 +1079,11 @@ func isInterconnectEnabled() bool {
 	return present && val == "true"
 }
 
+func isLocalGWModeEnabled() bool {
+	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
+	return present && val == "local"
+}
+
 func singleNodePerZone() bool {
 	if singleNodePerZoneResult == nil {
 		args := []string{"get", "pods", "--selector=app=ovnkube-node", "-o", "jsonpath={.items[0].spec.containers[*].name}"}
