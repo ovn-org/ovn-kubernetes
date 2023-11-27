@@ -266,8 +266,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		l3GatewayConfig.MACAddress.String(),
 		types.PhysicalNetworkName,
 		l3GatewayConfig.IPAddresses,
-		l3GatewayConfig.VLANID,
-		enableGatewayMTU); err != nil {
+		l3GatewayConfig.VLANID); err != nil {
 		return err
 	}
 
@@ -279,8 +278,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 			l3GatewayConfig.EgressGWMACAddress.String(),
 			types.PhysicalNetworkExGwName,
 			l3GatewayConfig.EgressGWIPAddresses,
-			nil,
-			enableGatewayMTU); err != nil {
+			nil); err != nil {
 			return err
 		}
 	}
@@ -483,10 +481,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 
 // addExternalSwitch creates a switch connected to the external bridge and connects it to
 // the gateway router
-// enableGatewayMTU enables options:gateway_mtu for gateway routers. Setting it on
-// the external ports of the GR will mimic the older behaviour of using br-ex flows
-func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRouter, macAddress, physNetworkName string,
-	ipAddresses []*net.IPNet, vlanID *uint, enableGatewayMTU bool) error {
+func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRouter, macAddress, physNetworkName string, ipAddresses []*net.IPNet, vlanID *uint) error {
 	// Create the GR port that connects to external_switch with mac address of
 	// external interface and that IP address. In the case of `local` gateway
 	// mode, whenever ovnkube-node container restarts a new br-local bridge will
@@ -497,12 +492,6 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 	for _, ip := range ipAddresses {
 		externalRouterPortNetworks = append(externalRouterPortNetworks, ip.String())
 	}
-	var options map[string]string
-	if enableGatewayMTU {
-		options = map[string]string{
-			"gateway_mtu": strconv.Itoa(config.Default.MTU),
-		}
-	}
 	externalLogicalRouterPort := nbdb.LogicalRouterPort{
 		MAC: macAddress,
 		ExternalIDs: map[string]string{
@@ -510,14 +499,12 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 		},
 		Networks: externalRouterPortNetworks,
 		Name:     externalRouterPort,
-		Options:  options,
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: gatewayRouter}
 
 	err := libovsdbops.CreateOrUpdateLogicalRouterPort(oc.nbClient, &logicalRouter,
 		&externalLogicalRouterPort, nil, &externalLogicalRouterPort.MAC,
-		&externalLogicalRouterPort.Networks, &externalLogicalRouterPort.ExternalIDs,
-		&externalLogicalRouterPort.Options)
+		&externalLogicalRouterPort.Networks, &externalLogicalRouterPort.ExternalIDs)
 	if err != nil {
 		return fmt.Errorf("failed to add logical router port %+v to router %s: %v", externalLogicalRouterPort, gatewayRouter, err)
 	}
