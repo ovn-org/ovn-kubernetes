@@ -384,7 +384,7 @@ func (h *zoneClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interfa
 	return false, nil
 }
 
-// getResourceFromInformerCache returns the latest state of the object from the informers cache
+// GetResourceFromInformerCache returns the latest state of the object from the informers cache
 // given an object key and its type
 func (h *zoneClusterControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
 	var obj interface{}
