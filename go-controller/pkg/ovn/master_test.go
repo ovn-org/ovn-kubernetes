@@ -1258,11 +1258,12 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			expectedNBDatabaseState = append(expectedNBDatabaseState,
 				newNodeSNAT("stale-nodeNAT-UUID-3", "10.0.0.3", externalIP.String()), // won't be deleted since pod exists on this node
 				newNodeSNAT("stale-nodeNAT-UUID-4", "10.0.0.3", "172.16.16.3"))       // won't be deleted on this node but will be deleted on the node whose IP is 172.16.16.3 since this pod belongs to this node
+			newNodeSNAT("nat-join-0-UUID", node1.LrpIP, externalIP.String()) // join subnet SNAT won't be affected by sync
 			for _, testObj := range expectedNBDatabaseState {
 				uuid := reflect.ValueOf(testObj).Elem().FieldByName("UUID").Interface().(string)
 				if uuid == types.GWRouterPrefix+node1.Name+"-UUID" {
 					GR := testObj.(*nbdb.LogicalRouter)
-					GR.Nat = []string{"stale-nodeNAT-UUID-3", "stale-nodeNAT-UUID-4"}
+					GR.Nat = []string{"stale-nodeNAT-UUID-3", "stale-nodeNAT-UUID-4", "nat-join-0-UUID"}
 					*testObj.(*nbdb.LogicalRouter) = *GR
 					break
 				}

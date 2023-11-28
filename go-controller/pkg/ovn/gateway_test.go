@@ -199,6 +199,19 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		}
 	}
 
+	for i, physicalIP := range l3GatewayConfig.IPAddresses {
+		natUUID := fmt.Sprintf("nat-join-%d-UUID", i)
+		natUUIDs = append(natUUIDs, natUUID)
+		joinLRPIP, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(physicalIP), joinLRPIPs)
+		testData = append(testData, &nbdb.NAT{
+			UUID:       natUUID,
+			ExternalIP: physicalIP.IP.String(),
+			LogicalIP:  joinLRPIP.IP.String(),
+			Options:    map[string]string{"stateless": "false"},
+			Type:       nbdb.NATTypeSNAT,
+		})
+	}
+
 	testData = append(testData, &nbdb.MeterBand{
 		UUID:   "25-pktps-rate-limiter-UUID",
 		Action: types.MeterAction,
@@ -577,6 +590,99 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedDatabaseState = generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
 				"1400")
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+		})
+
+		ginkgo.It("updates SNAT when join IP changes", func() {
+			expectedOVNClusterRouter := &nbdb.LogicalRouter{
+				UUID:         types.OVNClusterRouter + "-UUID",
+				Name:         types.OVNClusterRouter,
+				StaticRoutes: []string{},
+			}
+			expectedNodeSwitch := &nbdb.LogicalSwitch{
+				UUID: nodeName + "-UUID",
+				Name: nodeName,
+			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
+			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterSwitchLBGroupName + "-UUID",
+				Name: types.ClusterSwitchLBGroupName,
+			}
+			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterRouterLBGroupName + "-UUID",
+				Name: types.ClusterRouterLBGroupName,
+			}
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID: types.OVNJoinSwitch + "-UUID",
+						Name: types.OVNJoinSwitch,
+					},
+					expectedOVNClusterRouter,
+					expectedNodeSwitch,
+					expectedClusterLBGroup,
+					expectedSwitchLBGroup,
+					expectedRouterLBGroup,
+				},
+			})
+
+			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
+			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
+			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
+			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
+			l3GatewayConfig := &util.L3GatewayConfig{
+				Mode:           config.GatewayModeLocal,
+				ChassisID:      "SYSTEM-ID",
+				InterfaceID:    "INTERFACE-ID",
+				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				NodePortEnable: true,
+			}
+			sctpSupport := false
+
+			var err error
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			testData := []libovsdb.TestData{}
+			skipSnat := false
+			expectedOVNClusterRouter.StaticRoutes = []string{}
+			// We don't set up the Allow from mgmt port ACL here
+			mgmtPortIP := ""
+
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"")
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+			ginkgo.By("modifying the node join IP")
+			oldJoinLRPIPs := joinLRPIPs
+			joinLRPIPs = ovntest.MustParseIPNets("100.64.0.99/16")
+			expectedOVNClusterRouter.StaticRoutes = []string{}
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			expectedDatabaseState = generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
+			// FIXME(trozet): we do not clean up stale routes after join IP changes
+			for i, joinLRPIP := range oldJoinLRPIPs {
+				joinStaticRouteNamedUUID := fmt.Sprintf("hack-join-static-route-ovn-cluster-router-%v-UUID", i)
+				expectedOVNClusterRouter.StaticRoutes = append(expectedOVNClusterRouter.StaticRoutes, joinStaticRouteNamedUUID)
+				expectedDatabaseState = append(expectedDatabaseState, &nbdb.LogicalRouterStaticRoute{
+					UUID:     joinStaticRouteNamedUUID,
+					IPPrefix: joinLRPIP.IP.String(),
+					Nexthop:  joinLRPIP.IP.String(),
+				})
+			}
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
