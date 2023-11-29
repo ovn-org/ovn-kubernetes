@@ -427,6 +427,7 @@ jobs:
       KIND_NUM_WORKER: "${{ matrix.num-workers }}"
       KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
+      KIND_CREATE_EXTRANETS: "${{ matrix.target == 'control-plane' }}"
     steps:
 
     - name: Free up disk space

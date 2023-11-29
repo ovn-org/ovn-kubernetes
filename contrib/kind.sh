@@ -80,6 +80,7 @@ run_kubectl() {
 # The root cause is unknown, this also can not be reproduced in Ubuntu 20.04 or
 # with Fedora32 Cloud, but it does not happen if we clean first the ovn-kubernetes resources.
 delete() {
+  delete_extranets
   if [ "$KIND_INSTALL_METALLB" == true ]; then
     destroy_metallb
   fi
@@ -143,6 +144,7 @@ usage() {
     echo "-ii  | --install-ingress               Flag to install Ingress Components."
     echo "                                       DEFAULT: Don't install ingress components."
     echo "-mlb | --install-metallb               Install metallb to test service type LoadBalancer deployments"
+    echo "-en  | --extranets                     Create and attach 2 extra networks to all containers"
     echo "-n4  | --no-ipv4                       Disable IPv4. DEFAULT: IPv4 Enabled."
     echo "-i6  | --ipv6                          Enable IPv6. DEFAULT: IPv6 Disabled."
     echo "-wk  | --num-workers                   Number of worker nodes. DEFAULT: HA - 2 worker"
@@ -194,6 +196,8 @@ parse_args() {
             -ii | --install-ingress )           KIND_INSTALL_INGRESS=true
                                                 ;;
             -mlb | --install-metallb )          KIND_INSTALL_METALLB=true
+                                                ;;
+            -en | --extranets )                 KIND_CREATE_EXTRANETS=true
                                                 ;;
             -pl | --install-cni-plugins )       KIND_INSTALL_PLUGINS=true
                                                 ;;
@@ -377,6 +381,7 @@ print_params() {
      echo "MANIFEST_OUTPUT_DIR = $MANIFEST_OUTPUT_DIR"
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
      echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
+     echo "KIND_CREATE_EXTRANETS = $KIND_CREATE_EXTRANETS"
      echo "KIND_INSTALL_PLUGINS = $KIND_INSTALL_PLUGINS"
      echo "KIND_INSTALL_KUBEVIRT = $KIND_INSTALL_KUBEVIRT"
      echo "OVN_HA = $OVN_HA"
@@ -532,6 +537,7 @@ set_default_params() {
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
+  KIND_CREATE_EXTRANETS=${KIND_CREATE_EXTRANETS:-false}
   KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
   KIND_INSTALL_KUBEVIRT=${KIND_INSTALL_KUBEVIRT:-false}
   OVN_HA=${OVN_HA:-false}
@@ -1085,6 +1091,51 @@ install_metallb() {
   sleep 30
 }
 
+EXTRANET0_NAME="extranet0"
+EXTRANET1_NAME="extranet1"
+
+create_extranets() {
+    local ipv6=""
+
+    local containers=$(kind get nodes -n ovn)
+    if docker ps --format '{{.Names}}' | grep -Eq '^frr$'; then
+        containers="${containers} frr"
+    fi
+
+    if [ "${KIND_IPV6_SUPPORT}" == true ]; then
+        ipv6="--ipv6 --subnet fc00:0:0:1230::/64"
+    fi
+    docker network create --driver bridge ${ipv6} "${EXTRANET0_NAME}"
+    for n in ${containers}; do
+        docker network connect "${EXTRANET0_NAME}" "${n}"
+    done
+
+    if [ "${KIND_IPV6_SUPPORT}" == true ]; then
+        ipv6="--ipv6 --subnet fc00:0:0:1231::/64"
+    fi
+    docker network create --driver bridge ${ipv6} "${EXTRANET1_NAME}"
+    for n in ${containers}; do
+        docker network connect "${EXTRANET1_NAME}" "${n}"
+    done
+}
+
+# delete_extranets checks if extranets exist and if so disconnects them from containers and deletes them.
+delete_extranets() {
+    if docker network ls --format '{{.Name}}' | grep -q "${EXTRANET0_NAME}"; then
+        for n in $(docker network inspect "${EXTRANET0_NAME}" | jq -r '.[0].Containers[].Name'); do
+            docker network disconnect "${EXTRANET0_NAME}" "${n}"
+        done
+        docker network rm "${EXTRANET0_NAME}"
+    fi
+
+    if docker network ls --format '{{.Name}}' | grep -q "${EXTRANET1_NAME}"; then
+        for n in $(docker network inspect "${EXTRANET1_NAME}" | jq -r '.[0].Containers[].Name'); do
+            docker network disconnect "${EXTRANET1_NAME}" "${n}"
+        done
+        docker network rm "${EXTRANET1_NAME}"
+    fi
+}
+
 install_plugins() {
   git clone https://github.com/containernetworking/plugins.git
   pushd plugins
@@ -1442,6 +1493,9 @@ if [ "${ENABLE_IPSEC}" == true ]; then
 fi
 if [ "$KIND_INSTALL_METALLB" == true ]; then
   install_metallb
+fi
+if [ "${KIND_CREATE_EXTRANETS}" == true ]; then
+  create_extranets
 fi
 if [ "$KIND_INSTALL_PLUGINS" == true ]; then
   install_plugins

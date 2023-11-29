@@ -559,6 +559,8 @@ var _ = ginkgo.Describe("Services", func() {
 			endpointUDPPort     = 90
 			clusterHTTPPort     = 81
 			clusterUDPPort      = 91
+			extranet0           = "extranet0"
+			extranet1           = "extranet1"
 			clientContainerName = "npclient"
 		)
 
@@ -616,12 +618,14 @@ var _ = ginkgo.Describe("Services", func() {
 
 			// If `kindexgw` exists, connect client container to it
 			runCommand(containerRuntime, "network", "connect", "kindexgw", clientContainerName)
+			// Add `extranet0`/`extranet1` to the client container if they exist (for kind environments with
+			// --extranets set).
+			runCommand(containerRuntime, "network", "connect", extranet0, clientContainerName)
+			runCommand(containerRuntime, "network", "connect", extranet1, clientContainerName)
 
-			ginkgo.By("Selecting additional IP addresses for each node")
-			// add new secondary IP from node subnet to all nodes, if the cluster is v6 add an ipv6 address
+			ginkgo.By("Adding all node IPs to the set of NodePort test targets")
 			toCurlAddresses := sets.NewString()
-			for i, node := range nodes.Items {
-
+			for _, node := range nodes.Items {
 				addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-cidrs"]
 				gomega.Expect(ok).To(gomega.BeTrue())
 
@@ -635,7 +639,10 @@ var _ = ginkgo.Describe("Services", func() {
 					addrs[i] = addrSplit[0]
 				}
 				toCurlAddresses.Insert(addrs...)
+			}
 
+			ginkgo.By("Selecting additional IP addresses for each node")
+			for i, node := range nodes.Items {
 				// Calculate and store for AfterEach new target IP addresses.
 				var newIP string
 				if nodeIPs[node.Name] == nil {
@@ -650,7 +657,7 @@ var _ = ginkgo.Describe("Services", func() {
 				}
 			}
 
-			ginkgo.By("Adding additional IP addresses to each node")
+			ginkgo.By("Adding additional IP addresses to each node and adding them to the test target list")
 			for nodeName, ipFamilies := range nodeIPs {
 				for _, ip := range ipFamilies {
 					// manually add the a secondary IP to each node
