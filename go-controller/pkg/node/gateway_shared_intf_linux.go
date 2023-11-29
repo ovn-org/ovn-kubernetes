@@ -8,10 +8,12 @@ import (
 	"strings"
 
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 )
 
@@ -55,23 +57,51 @@ func deleteLocalNodeAccessBridge() error {
 	return nil
 }
 
-// addGatewayIptRules adds the necessary iptable rules for a service on the node
-func addGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) error {
-	rules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+// addGatewayNFRules adds the necessary netfilter (iptables and nftables) rules for a
+// service on the node
+func addGatewayNFRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) error {
+	var errs []error
 
-	if err := insertIptRules(rules); err != nil {
-		return fmt.Errorf("failed to add iptables rules for service %s/%s: %v",
-			service.Namespace, service.Name, err)
+	iptRules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+	if len(iptRules) > 0 {
+		if err := insertIptRules(iptRules); err != nil {
+			err = fmt.Errorf("failed to add iptables rules for service %s/%s: %v",
+				service.Namespace, service.Name, err)
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	nftElems := getGatewayNFTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+	if len(nftElems) > 0 {
+		if err := nodenft.UpdateNFTElements(nftElems); err != nil {
+			err = fmt.Errorf("failed to update nftables rules for service %s/%s: %v",
+				service.Namespace, service.Name, err)
+			errs = append(errs, err)
+		}
+	}
+
+	return apierrors.NewAggregate(errs)
 }
 
-// delGatewayIptRules removes the iptable rules for a service from the node
-func delGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) error {
-	rules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+// delGatewayNFRules removes the iptables and nftables rules for a service from the node
+func delGatewayNFRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) error {
+	var errs []error
 
-	if err := nodeipt.DelRules(rules); err != nil {
-		return fmt.Errorf("failed to delete iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
+	iptRules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+	if len(iptRules) > 0 {
+		if err := nodeipt.DelRules(iptRules); err != nil {
+			err := fmt.Errorf("failed to delete iptables rules for service %s/%s: %v",
+				service.Namespace, service.Name, err)
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	nftElems := getGatewayNFTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+	if len(nftElems) > 0 {
+		if err := nodenft.DeleteNFTElements(nftElems); err != nil {
+			err = fmt.Errorf("failed to delete nftables rules for service %s/%s: %v",
+				service.Namespace, service.Name, err)
+			errs = append(errs, err)
+		}
+	}
+
+	return apierrors.NewAggregate(errs)
 }

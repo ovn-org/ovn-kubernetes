@@ -180,25 +180,6 @@ func getITPLocalIPTRules(svcPort kapi.ServicePort, clusterIP string, svcHasLocal
 	}
 }
 
-// getNodePortETPLocalIPTRules returns the IPTable REDIRECT or RETURN rules for a service of type nodePort if ETP=local
-// `svcPort` corresponds to port details for this service as specified in the service object
-// `targetIP` corresponds to svc.spec.ClusterIP
-// This function returns a RETURN rule in iptableMgmPortChain to prevent SNAT of sourceIP
-func getNodePortETPLocalIPTRules(svcPort kapi.ServicePort, targetIP string) []nodeipt.Rule {
-	return []nodeipt.Rule{
-		{
-			Table: "nat",
-			Chain: iptableMgmPortChain,
-			Args: []string{
-				"-p", string(svcPort.Protocol),
-				"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-				"-j", "RETURN",
-			},
-			Protocol: getIPTablesProtocol(targetIP),
-		},
-	}
-}
-
 func computeProbability(n, i int) string {
 	return fmt.Sprintf("%0.10f", 1.0/float64(n-i+1))
 }
@@ -225,17 +206,6 @@ func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, 
 					"-m", "statistic",
 					"--mode", "random",
 					"--probability", computeProbability(numLocalEndpoints, i+1),
-				},
-				Protocol: getIPTablesProtocol(externalIP),
-			},
-			{
-				Table: "nat",
-				Chain: iptableMgmPortChain,
-				Args: []string{
-					"-p", string(svcPort.Protocol),
-					"-d", ip,
-					"--dport", fmt.Sprintf("%v", int32(svcPort.TargetPort.IntValue())),
-					"-j", "RETURN",
 				},
 				Protocol: getIPTablesProtocol(externalIP),
 			},
@@ -538,7 +508,9 @@ func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 	return apierrors.NewAggregate(errors)
 }
 
-// getGatewayIPTRules returns ClusterIP, NodePort, ExternalIP and LoadBalancer iptables rules for service.
+// getGatewayIPTRules returns ClusterIP, NodePort, ExternalIP and LoadBalancer iptables
+// rules for service. This must be used in conjunction with getGatewayNFTRules.
+//
 // case1: If !svcHasLocalHostNetEndPnt and svcTypeIsETPLocal rules that redirect traffic
 // to ovn-k8s-mp0 preserving sourceIP are added.
 //
@@ -571,8 +543,7 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 					if config.Gateway.Mode == config.GatewayModeLocal {
 						rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.NodePort, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
 					}
-					// add a skip SNAT rule to OVN-KUBE-SNAT-MGMTPORT to preserve sourceIP for etp=local traffic.
-					rules = append(rules, getNodePortETPLocalIPTRules(svcPort, clusterIP)...)
+					// Note: getGatewayNFTRules will add rules to ensure that sourceIP is preserved
 				}
 				// case2 (see function description for details)
 				rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port, svcHasLocalHostNetEndPnt, false)...)
@@ -591,7 +562,7 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 				if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt {
 					// case1 (see function description for details)
 					// DNAT traffic to masqueradeIP:nodePort instead of clusterIP:Port. We are leveraging the existing rules for NODEPORT
-					// service so no need to add skip SNAT rule to OVN-KUBE-SNAT-MGMTPORT since the corresponding nodePort svc would have one.
+					// service so no need to add a rule to skip SNAT since the corresponding nodePort svc would have one.
 					if !util.ServiceTypeHasNodePort(service) {
 						rules = append(rules, generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort, externalIP, service, localEndpoints)...)
 					} else {
