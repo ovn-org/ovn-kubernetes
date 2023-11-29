@@ -1063,11 +1063,12 @@ install_metallb() {
   echo $kind_network
   local client_network=$(echo $frr_ips | cut -d '#' -f 1)
   echo $client_network
-  local subnet=$(echo ${client_network%?}0)
-  echo $subnet
+  # The following only works for single stack, to be modified if dualstack is to be supported:
+  local client_subnet=$(docker network inspect clientnet -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+  echo $client_subnet
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
-    docker exec "$n" ip route add $subnet/16 via $kind_network
+    docker exec "$n" ip route add $client_subnet via $kind_network
   done
   # TODO(tssurya): expand this to be more dynamic in the future when needed.
   # for now, we only run one test with metalLB load balancer for which this
