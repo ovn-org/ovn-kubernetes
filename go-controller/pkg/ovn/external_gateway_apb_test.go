@@ -2379,10 +2379,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
 								Networks: []string{"100.64.0.4/32"},
 							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 						},
 					},
 				)
@@ -2454,10 +2451,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 								UUID: "GR_node1-UUID",
 								Name: "GR_node1",
 							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -2591,10 +2585,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
 								Networks: []string{"100.64.0.4/32"},
 							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 						},
 					},
 				)
@@ -2950,10 +2941,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				_, err = fakeOvn.asf.NewAddressSet(asIndex, []net.IP{net.ParseIP("10.128.1.3"), net.ParseIP("1.1.1.1")})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				finalNB := []libovsdbtest.TestData{
-					&nbdb.LogicalRouter{
-						Name: ovntypes.OVNClusterRouter,
-						UUID: ovntypes.OVNClusterRouter + "-UUID",
-					},
+					clusterRouter(),
 					&nbdb.LogicalRouter{
 						UUID: "GR_node1-UUID",
 						Name: "GR_node1",

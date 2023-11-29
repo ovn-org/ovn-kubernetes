@@ -32,7 +32,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
-	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -41,90 +40,6 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
 )
-
-// Please use following subnets for various networks that we have
-// 172.16.1.0/24 -- physical network that k8s nodes connect to
-// 100.64.0.0/16 -- the join subnet that connects all the L3 gateways with the distributed router
-// 169.254.33.0/24 -- the subnet that connects OVN logical network to physical network
-// 10.1.0.0/16 -- the overlay subnet that Pods connect to.
-
-type tNode struct {
-	Name                 string
-	NodeIP               string
-	NodeLRPMAC           string
-	LrpIP                string
-	LrpIPv6              string
-	DrLrpIP              string
-	PhysicalBridgeMAC    string
-	SystemID             string
-	NodeSubnet           string
-	GWRouter             string
-	ClusterIPNet         string
-	ClusterCIDR          string
-	GatewayRouterIPMask  string
-	GatewayRouterIP      string
-	GatewayRouterNextHop string
-	PhysicalBridgeName   string
-	NodeGWIP             string
-	NodeMgmtPortIP       string
-	NodeMgmtPortMAC      string
-	DnatSnatIP           string
-}
-
-const (
-	// ovnNodeID is the id (of type integer) of a node. It is set by cluster-manager.
-	ovnNodeID = "k8s.ovn.org/node-id"
-
-	// ovnNodeGRLRPAddr is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.5/24)
-	ovnNodeGRLRPAddr     = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
-	ovnNodePrimaryIfAddr = "k8s.ovn.org/node-primary-ifaddr"
-	ovnNodeSubnets       = "k8s.ovn.org/node-subnets"
-)
-
-func (n tNode) k8sNode(nodeID string) v1.Node {
-	node := v1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: n.Name,
-			Annotations: map[string]string{
-				ovnNodeID:             nodeID,
-				ovnNodeGRLRPAddr:      "{\"ipv4\": \"100.64.0." + nodeID + "/16\"}",
-				util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", fmt.Sprintf("%s/24", n.NodeIP)),
-				ovnNodePrimaryIfAddr:  fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", fmt.Sprintf("%s/24", n.NodeIP), ""),
-			},
-		},
-		Status: kapi.NodeStatus{
-			Addresses: []kapi.NodeAddress{{Type: kapi.NodeExternalIP, Address: n.NodeIP}},
-		},
-	}
-
-	return node
-}
-
-func (n tNode) ifaceID() string {
-	return n.PhysicalBridgeName + "_" + n.Name
-}
-
-func (n tNode) gatewayConfig(gatewayMode config.GatewayMode, vlanID uint) *util.L3GatewayConfig {
-	return &util.L3GatewayConfig{
-		Mode:           gatewayMode,
-		ChassisID:      n.SystemID,
-		InterfaceID:    n.ifaceID(),
-		MACAddress:     ovntest.MustParseMAC(n.PhysicalBridgeMAC),
-		IPAddresses:    ovntest.MustParseIPNets(n.GatewayRouterIPMask),
-		NextHops:       ovntest.MustParseIPs(n.GatewayRouterNextHop),
-		NodePortEnable: true,
-		VLANID:         &vlanID,
-	}
-}
-
-func (n tNode) logicalSwitch(loadBalancerGroupUUIDs []string) *nbdb.LogicalSwitch {
-	return &nbdb.LogicalSwitch{
-		UUID:              n.Name + "-UUID",
-		Name:              n.Name,
-		OtherConfig:       map[string]string{"subnet": n.NodeSubnet},
-		LoadBalancerGroup: loadBalancerGroupUUIDs,
-	}
-}
 
 /*
 func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string, clusterCIDR string, nextHop string) {
@@ -992,8 +907,9 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		expectedClusterLBGroup = newLoadBalancerGroup(types.ClusterLBGroupName)
 		expectedSwitchLBGroup = newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
 		expectedRouterLBGroup = newLoadBalancerGroup(types.ClusterRouterLBGroupName)
-		expectedNodeSwitch = node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
-		expectedOVNClusterRouter = newOVNClusterRouter()
+		node1.LoadBalancerGroupUUIDs = []string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID}
+		expectedNodeSwitch = node1.logicalSwitch()
+		expectedOVNClusterRouter = clusterRouter()
 		expectedClusterRouterPortGroup = newRouterPortGroup()
 		expectedClusterPortGroup = newClusterPortGroup()
 
@@ -1001,7 +917,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			NBData: []libovsdbtest.TestData{
 				newClusterJoinSwitch(),
 				expectedNodeSwitch,
-				newOVNClusterRouter(),
+				clusterRouter(),
 				newRouterPortGroup(),
 				newClusterPortGroup(),
 				expectedClusterLBGroup,
@@ -1712,13 +1628,6 @@ func newRouterPortGroup() *nbdb.PortGroup {
 		ExternalIDs: map[string]string{
 			"name": types.ClusterRtrPortGroupNameBase,
 		},
-	}
-}
-
-func newOVNClusterRouter() *nbdb.LogicalRouter {
-	return &nbdb.LogicalRouter{
-		UUID: types.OVNClusterRouter + "-UUID",
-		Name: types.OVNClusterRouter,
 	}
 }
 

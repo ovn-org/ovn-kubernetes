@@ -344,14 +344,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
 			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
 			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
-			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedOVNClusterRouter := clusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
 				Networks: []string{"100.64.0.1/16"},
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			node1.LoadBalancerGroupUUIDs = []string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID}
+			expectedNodeSwitch := node1.logicalSwitch()
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -610,14 +611,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
 			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
 			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
-			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedOVNClusterRouter := clusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
 				Networks: []string{"100.64.0.1/16"},
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			node1.LoadBalancerGroupUUIDs = []string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID}
+			expectedNodeSwitch := node1.logicalSwitch()
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -804,14 +806,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
 			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
 			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
-			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedOVNClusterRouter := clusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
 				Networks: []string{"100.64.0.1/16"},
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			node1.LoadBalancerGroupUUIDs = []string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID}
+			expectedNodeSwitch := node1.logicalSwitch()
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -1087,14 +1090,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
 			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
 			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
-			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedOVNClusterRouter := clusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
 				Networks: []string{"100.64.0.1/16"},
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			node1.LoadBalancerGroupUUIDs = []string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID}
+			expectedNodeSwitch := node1.logicalSwitch()
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -1288,14 +1292,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
 			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
 			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
-			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedOVNClusterRouter := clusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
 				Networks: []string{"100.64.0.1/16"},
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			node1.LoadBalancerGroupUUIDs = []string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID}
+			expectedNodeSwitch := node1.logicalSwitch()
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -1468,14 +1473,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
 			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
 			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
-			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedOVNClusterRouter := clusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
 				Networks: []string{"100.64.0.1/16"},
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			node1.LoadBalancerGroupUUIDs = []string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID}
+			expectedNodeSwitch := node1.logicalSwitch()
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -1675,14 +1681,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
 			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
 			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
-			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedOVNClusterRouter := clusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
 				Networks: []string{"100.64.0.1/16"},
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			node1.LoadBalancerGroupUUIDs = []string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID}
+			expectedNodeSwitch := node1.logicalSwitch()
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
