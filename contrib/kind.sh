@@ -1056,7 +1056,7 @@ install_metallb() {
   docker network connect clientnet frr
   docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
   popd
-  sudo rm -rf metallb
+  delete_metallb_dir
   local frr_ips=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}#{{end}}' frr)
   echo $frr_ips
   local kind_network=$(echo $frr_ips | cut -d '#' -f 2)
@@ -1096,7 +1096,16 @@ destroy_metallb() {
   docker stop lbclient || true # its possible the lbclient doesn't exist which is fine, ignore error
   docker stop frr || true # its possible the lbclient doesn't exist which is fine, ignore error
   docker network rm clientnet || true # its possible the clientnet network doesn't exist which is fine, ignore error
-  sudo rm -rf metallb || true # this repo is removed in install_metallb(), but in case of trouble it may still be around
+  delete_metallb_dir
+}
+
+delete_metallb_dir() {
+  # The build directory will contain read only directories after building. Files cannot be deleted, even by the owner.
+  # Therefore, set all dirs to u+rwx.
+  if [ -d "${DIR}/../metallb" ]; then
+      find "${DIR}/../metallb" -type d -exec chmod u+rwx "{}" \;
+      rm -rf "${DIR}/../metallb"
+  fi
 }
 
 install_multus() {
