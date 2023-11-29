@@ -158,6 +158,10 @@ func (zcc *zoneClusterController) Stop() {
 
 // handleAddUpdateNodeEvent handles the add or update node event
 func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) error {
+	if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
+		// skip hybrid overlay nodes
+		return nil
+	}
 	allocatedNodeID, err := zcc.nodeIDAllocator.AllocateID(node.Name)
 	if err != nil {
 		return fmt.Errorf("failed to allocate an id to the node %s : err - %w", node.Name, err)
@@ -368,6 +372,10 @@ func (h *zoneClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interfa
 			return false, nil
 		}
 		if util.NodeTransitSwitchPortAddrAnnotationChanged(node1, node2) {
+			return false, nil
+		}
+		// Check if a node is switched between ho node to ovn node
+		if util.NoHostSubnet(node1) != util.NoHostSubnet(node2) {
 			return false, nil
 		}
 		return true, nil

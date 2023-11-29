@@ -125,6 +125,12 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 		return nil
 	}
 
+	// skip the pods on no host subnet nodes
+	switchName := pod.Spec.NodeName
+	if oc.lsManager.IsNonHostSubnetSwitch(switchName) {
+		return nil
+	}
+
 	if oc.isPodScheduledinLocalZone(pod) {
 		klog.V(5).Infof("Ensuring zone local for Pod %s/%s in node %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
 		return oc.ensureLocalZonePod(oldPod, pod, addPort)
@@ -435,10 +441,6 @@ func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
 
 	if oldNoHostSubnet && newNoHostSubnet {
 		return false, nil
-	} else if oldNoHostSubnet && !newNoHostSubnet {
-		return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)
-	} else if !oldNoHostSubnet && newNoHostSubnet {
-		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate.", node.Name)
 	}
 
 	return true, nil

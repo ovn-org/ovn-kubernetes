@@ -1002,4 +1002,116 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		}
 		appRun(app)
 	})
+	ovntest.OnSupportedPlatformsIt("node updates itself vxlan tunnel when a node is switched to hybrid overlay node", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				node1Name   string = "node1"
+				node1Subnet string = "10.11.12.0/24"
+				node1DRMAC  string = "00:00:00:7f:af:03"
+				node1IP     string = "10.11.12.1"
+
+				pod1IP   string = "1.2.3.5"
+				pod1CIDR string = pod1IP + "/24"
+				pod1MAC  string = "aa:bb:cc:dd:ee:ff"
+
+				updatedDRMAC string = "77:66:55:44:33:22"
+			)
+
+			annotations := createNodeAnnotationsForSubnet(thisNodeSubnet)
+			annotations[hotypes.HybridOverlayDRMAC] = thisNodeDRMAC
+			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
+			node := createNode(thisNode, "linux", thisNodeIP, annotations)
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{
+					*node,
+				},
+			})
+
+			// Node setup from initial node sync
+			addNodeSetupCmds(fexec, thisNode)
+			_, err := config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+				informer.NewTestEventHandler,
+				false,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			linuxNode, okay := n.controller.(*NodeController)
+			Expect(okay).To(BeTrue())
+			// setting the flowCacheSyncPeriod to 1 hour effectively disabling for testing
+			linuxNode.flowCacheSyncPeriod = 1 * time.Hour
+
+			addEnsureHybridOverlayBridgeMocks(nlMock, thisNodeDRIP, "")
+			// initial flowSync
+			addSyncFlows(fexec)
+			// flowsync after EnsureHybridOverlayBridge()
+			addSyncFlows(fexec)
+
+			f.Start(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				n.Run(stopChan)
+			}()
+
+			Eventually(func() bool {
+				return atomic.LoadUint32(linuxNode.initState) == hotypes.PodsInitialized
+			}).Should(BeTrue())
+
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			initialFlowCache := map[string]*flowCacheEntry{
+				"0x0": generateInitialFlowCacheEntry(mgmtIfAddr.IP.String(), thisNodeDRIP, thisNodeDRMAC),
+			}
+			Eventually(func() error {
+				linuxNode.flowMutex.Lock()
+				defer linuxNode.flowMutex.Unlock()
+				return compareFlowCache(linuxNode.flowCache, initialFlowCache)
+			}, 2).Should(BeNil())
+
+			// setup hybrid overlay node
+			windowsAnnotation := createNodeAnnotationsForSubnet(node1Subnet)
+			windowsAnnotation[hotypes.HybridOverlayDRMAC] = node1DRMAC
+			_, err = fakeClient.CoreV1().Nodes().Create(context.TODO(), createNode(node1Name, "windows", node1IP, windowsAnnotation), metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			// flowsync after AddNode
+			addSyncFlows(fexec)
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+
+			node1Cookie := nameToCookie(node1Name)
+			initialFlowCache[node1Cookie] = &flowCacheEntry{
+				flows: []string{
+					"cookie=0x" + node1Cookie + ",table=0,priority=100,arp,in_port=ext,arp_tpa=" + node1Subnet + ",actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:" + node1DRMAC + ",load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],load:0x" + strings.ReplaceAll(node1DRMAC, ":", "") + "->NXM_NX_ARP_SHA[],move:NXM_OF_ARP_TPA[]->NXM_NX_REG0[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],move:NXM_NX_REG0[]->NXM_OF_ARP_SPA[],IN_PORT",
+					"cookie=0x" + node1Cookie + ",table=0,priority=100,ip,nw_dst=" + node1Subnet + ",actions=load:4097->NXM_NX_TUN_ID[0..31],set_field:" + node1IP + "->tun_dst,set_field:" + node1DRMAC + "->eth_dst,output:ext-vxlan",
+					"cookie=0x" + node1Cookie + ",table=0,priority=101,ip,nw_dst=" + node1Subnet + ",nw_src=100.64.0.3,actions=load:4097->NXM_NX_TUN_ID[0..31],set_field:" + thisNodeDRIP + "->nw_src,set_field:" + node1IP + "->tun_dst,set_field:" + node1DRMAC + "->eth_dst,output:ext-vxlan",
+				},
+			}
+
+			Eventually(func() error {
+				linuxNode.flowMutex.Lock()
+				defer linuxNode.flowMutex.Unlock()
+				return compareFlowCache(linuxNode.flowCache, initialFlowCache)
+			}, 2).Should(BeNil())
+
+			// node is swiched to ovn node
+			_, err = fakeClient.CoreV1().Nodes().Update(context.TODO(), createNode(node1Name, "linux", node1IP, windowsAnnotation), metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() bool {
+				linuxNode.flowMutex.Lock()
+				defer linuxNode.flowMutex.Unlock()
+				_, ok := linuxNode.flowCache[node1Cookie]
+				return ok
+			}, 2).Should(BeFalse())
+			return nil
+		}
+		appRun(app)
+	})
 })
