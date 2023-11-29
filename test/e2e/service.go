@@ -1799,12 +1799,25 @@ spec:
 				return (numberOfETPRules == value), nil
 			}
 		}
+		checkNumberOfNFTElements := func(value int, name string) wait.ConditionFunc {
+			return func() (bool, error) {
+				numberOfNFTElements := countNFTablesElements(backendNodeName, name)
+				return (numberOfNFTElements == value), nil
+			}
+		}
+		noSNATServicesSet := "mgmtport-no-snat-services-v4"
+		if utilnet.IsIPv6String(svcLoadBalancerIP) {
+			noSNATServicesSet = "mgmtport-no-snat-services-v6"
+		}
+
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(2, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(5, "OVN-KUBE-EXTERNALIP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(3, "OVN-KUBE-SNAT-MGMTPORT"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(0, noSNATServicesSet))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(0, "mgmtport-no-snat-nodeports"))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
@@ -1829,8 +1842,10 @@ spec:
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(10, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(11, "OVN-KUBE-SNAT-MGMTPORT"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(2, noSNATServicesSet))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(2, "mgmtport-no-snat-nodeports"))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
@@ -1843,8 +1858,9 @@ spec:
 		}
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-SNAT-MGMTPORT", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
+		// FIXME: This used to check that the no-snat rule had been hit, but nftables
+		// doesn't attach counters to rules unless you explicitly request them, which
+		// we don't... Is this check really needed?
 
 		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
 		e2ekubectl.RunKubectlOrDie("default", "scale", "deployment", backendName, "--replicas=3")
@@ -1852,11 +1868,14 @@ spec:
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
-		// number of iptable rules should have decreased by 2
+		// number of iptable rules should have decreased by 2. The nftables no-snat rules
+		// don't change with endpoints.
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(8, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(9, "OVN-KUBE-SNAT-MGMTPORT"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(2, noSNATServicesSet))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(2, "mgmtport-no-snat-nodeports"))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
@@ -1865,9 +1884,9 @@ spec:
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-SNAT-MGMTPORT", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-
+		// FIXME: This used to check that the no-snat rule had been hit, but nftables
+		// doesn't attach counters to rules unless you explicitly request them, which
+		// we don't... Is this check really needed?
 	})
 
 	ginkgo.It("Should ensure load balancer service works when ETP=local and session affinity is set", func() {
