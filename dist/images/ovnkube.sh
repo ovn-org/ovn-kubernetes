@@ -224,6 +224,7 @@ ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 ovn_disable_forwarding=${OVN_DISABLE_FORWARDING:-}
+ovn_disable_forwarding_interfaces=${OVN_DISABLE_FORWARDING_INTERFACES:-}
 ovn_disable_pkt_mtu_check=${OVN_DISABLE_PKT_MTU_CHECK:-}
 ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS:-}
 # OVN_V4_JOIN_SUBNET - v4 join subnet
@@ -1095,6 +1096,11 @@ ovn-master() {
       disable_forwarding_flag="--disable-forwarding"
   fi
 
+  disable_forwarding_interfaces=
+  if [[ -n "${ovn_disable_forwarding_interfaces}" ]]; then
+      disable_forwarding_interfaces="--disable-forwarding-interfaces=${ovn_disable_forwarding_interfaces}"
+  fi
+
   disable_pkt_mtu_check_flag=
   if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
       disable_pkt_mtu_check_flag="--disable-pkt-mtu-check"
@@ -1238,6 +1244,7 @@ ovn-master() {
   /usr/bin/ovnkube --init-master ${K8S_NODE} \
     ${anp_enabled_flag} \
     ${disable_forwarding_flag} \
+    ${disable_forwarding_interfaces} \
     ${disable_snat_multiple_gws_flag} \
     ${egressfirewall_enabled_flag} \
     ${egressip_enabled_flag} \
@@ -1591,6 +1598,11 @@ ovnkube-controller-with-node() {
       disable_forwarding_flag="--disable-forwarding"
   fi
 
+  disable_forwarding_interfaces=
+  if [[ -n "${ovn_disable_forwarding_interfaces}" ]]; then
+      disable_forwarding_interfaces="--disable-forwarding-interfaces=${ovn_disable_forwarding_interfaces}"
+  fi
+
   ovn_encap_port_flag=
   if [[ -n "${ovn_encap_port}" ]]; then
       ovn_encap_port_flag="--encap-port=${ovn_encap_port}"
@@ -1874,6 +1886,7 @@ ovnkube-controller-with-node() {
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} --init-node ${K8S_NODE} \
     ${anp_enabled_flag} \
     ${disable_forwarding_flag} \
+    ${disable_forwarding_interfaces} \
     ${disable_ovn_iface_id_ver_flag} \
     ${disable_pkt_mtu_check_flag} \
     ${disable_snat_multiple_gws_flag} \
@@ -2181,6 +2194,11 @@ ovn-node() {
       disable_forwarding_flag="--disable-forwarding"
   fi
 
+  disable_forwarding_interfaces=
+  if [[ -n "${ovn_disable_forwarding_interfaces}" ]]; then
+      disable_forwarding_interfaces="--disable-forwarding-interfaces=${ovn_disable_forwarding_interfaces}"
+  fi
+
   disable_pkt_mtu_check_flag=
   if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
       disable_pkt_mtu_check_flag="--disable-pkt-mtu-check"
@@ -2377,6 +2395,7 @@ ovn-node() {
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
         ${disable_forwarding_flag} \
+        ${disable_forwarding_interfaces} \
         ${disable_ovn_iface_id_ver_flag} \
         ${disable_pkt_mtu_check_flag} \
         ${disable_snat_multiple_gws_flag} \

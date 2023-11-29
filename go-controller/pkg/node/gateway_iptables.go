@@ -419,13 +419,15 @@ func initExternalBridgeDropForwardingRules(ifName string) error {
 // -A OVN-KUBE-FORWARD-DROP -o eth2 -j DROP
 // -A OVN-KUBE-FORWARD-DROP -i eth2.100 -j DROP
 // -A OVN-KUBE-FORWARD-DROP -o eth2.100 -j DROP
-func syncPhysicalInterfaceDropForwardingRules() error {
+// If interfaceFilterOverride != "", use the provided regex to filter for physical interfaces (instead of the default search
+// for physical and VLAN interfaces).
+func syncPhysicalInterfaceDropForwardingRules(interfaceFilterOverride string) error {
 	var existingRules []nodeipt.Rule
 	var generatedRules []nodeipt.Rule
 	var rulesToDelete []nodeipt.Rule
 
 	// Get list of all physical interfaces (physical devices and VLANs).
-	interfaces, err := listPhysicalInterfaces()
+	interfaces, err := listPhysicalInterfaces(interfaceFilterOverride)
 	if err != nil {
 		return fmt.Errorf("could not list interfaces during attempt to sync forwarding drop rules, err: %q", err)
 	}

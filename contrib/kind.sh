@@ -94,6 +94,7 @@ usage() {
     echo "                 [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
     echo "                 [-dp |--disable-pkt-mtu-check]"
     echo "                 [-df |--disable-forwarding]"
+    echo "                 [-dfi |--disable-forwarding-interfaces <interface regex>]"
     echo "                 [-ecp | --encap-port |"
     echo "                 [-pl]|--install-cni-plugins ]"
     echo "                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>]"
@@ -118,63 +119,64 @@ usage() {
     echo "                 [--isolated]"
     echo "                 [-h]]"
     echo ""
-    echo "-cf  | --config-file                Name of the KIND J2 configuration file."
-    echo "                                    DEFAULT: ./kind.yaml.j2"
-    echo "-kt  | --keep-taint                 Do not remove taint components."
-    echo "                                    DEFAULT: Remove taint components."
-    echo "-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled."
-    echo "-scm | --separate-cluster-manager   Separate cluster manager from ovnkube-master and run as a separate container within ovnkube-master deployment."
-    echo "-me  | --multicast-enabled          Enable multicast. DEFAULT: Disabled."
-    echo "-ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled."
-    echo "-ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled."
-    echo "-dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled"
-    echo "-df  | --disable-forwarding         Disable forwarding on OVNK managed interfaces. Default: Disabled"
-    echo "-ecp | --encap-port                 UDP port used for geneve overlay. DEFAULT: 6081"
-    echo "-pl  | --install-cni-plugins ]      Installs additional CNI network plugins. DEFAULT: Disabled"
-    echo "-nf  | --netflow-targets            Comma delimited list of ip:port or :port (using node IP) netflow collectors. DEFAULT: Disabled."
-    echo "-sf  | --sflow-targets              Comma delimited list of ip:port or :port (using node IP) sflow collectors. DEFAULT: Disabled."
-    echo "-if  | --ipfix-targets              Comma delimited list of ip:port or :port (using node IP) ipfix collectors. DEFAULT: Disabled."
-    echo "-ifs | --ipfix-sampling             Fraction of packets that are sampled and sent to each target collector: 1 packet out of every <num>. DEFAULT: 400 (1 out of 400 packets)."
-    echo "-ifm | --ipfix-cache-max-flows      Maximum number of IPFIX flow records that can be cached at a time. If 0, caching is disabled. DEFAULT: Disabled."
-    echo "-ifa | --ipfix-cache-active-timeout Maximum period in seconds for which an IPFIX flow record is cached and aggregated before being sent. If 0, caching is disabled. DEFAULT: 60."
-    echo "-el  | --ovn-empty-lb-events        Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
-    echo "-ii  | --install-ingress            Flag to install Ingress Components."
-    echo "                                    DEFAULT: Don't install ingress components."
-    echo "-mlb | --install-metallb            Install metallb to test service type LoadBalancer deployments"
-    echo "-n4  | --no-ipv4                    Disable IPv4. DEFAULT: IPv4 Enabled."
-    echo "-i6  | --ipv6                       Enable IPv6. DEFAULT: IPv6 Disabled."
-    echo "-wk  | --num-workers                Number of worker nodes. DEFAULT: HA - 2 worker"
-    echo "                                    nodes and no HA - 0 worker nodes."
-    echo "-sw  | --allow-system-writes        Allow script to update system. Intended to allow"
-    echo "                                    github CI to be updated with IPv6 settings."
-    echo "                                    DEFAULT: Don't allow."
-    echo "-gm  | --gateway-mode               Enable 'shared' or 'local' gateway mode."
-    echo "                                    DEFAULT: shared."
-    echo "-ov  | --ovn-image            	    Use the specified docker image instead of building locally. DEFAULT: local build."
-    echo "-ml  | --master-loglevel            Log level for ovnkube (master), DEFAULT: 5."
-    echo "-nl  | --node-loglevel              Log level for ovnkube (node), DEFAULT: 5"
-    echo "-dbl | --dbchecker-loglevel         Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5."
-    echo "-ndl | --ovn-loglevel-northd        Log config for ovn northd, DEFAULT: '-vconsole:info -vfile:info'."
-    echo "-nbl | --ovn-loglevel-nb            Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'."
-    echo "-sbl | --ovn-loglevel-sb            Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'."
-    echo "-cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'."
-    echo "-lcl | --libovsdb-client-logfile    Separate logs for libovsdb client into provided file. DEFAULT: do not separate."
-    echo "-ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled."
-    echo "-eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge."
-    echo "-lr  | --local-kind-registry        Configure kind to use a local docker registry rather than manually loading images"
-    echo "-dd  | --dns-domain                 Configure a custom dnsDomain for k8s services, Defaults to 'cluster.local'"
-    echo "-cn  | --cluster-name               Configure the kind cluster's name"
-    echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane"
-    echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
-    echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
-    echo "-sm  | --scale-metrics              Enable scale metrics"
-    echo "-cm  | --compact-mode               Enable compact mode, ovnkube master and node run in the same process."
-    echo "-ic  | --enable-interconnect        Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
-    echo "--disable-ovnkube-identity          Disable per-node cert and ovnkube-identity webhook"
-    echo "-npz | --nodes-per-zone             If interconnect is enabled, number of nodes per zone (Default 1). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
-    echo "--isolated                          Deploy with an isolated environment (no default gateway)"
-    echo "--delete                            Delete current cluster"
-    echo "--deploy                            Deploy ovn kubernetes without restarting kind"
+    echo "-cf  | --config-file                   Name of the KIND J2 configuration file."
+    echo "                                       DEFAULT: ./kind.yaml.j2"
+    echo "-kt  | --keep-taint                    Do not remove taint components."
+    echo "                                       DEFAULT: Remove taint components."
+    echo "-ha  | --ha-enabled                    Enable high availability. DEFAULT: HA Disabled."
+    echo "-scm | --separate-cluster-manager      Separate cluster manager from ovnkube-master and run as a separate container within ovnkube-master deployment."
+    echo "-me  | --multicast-enabled             Enable multicast. DEFAULT: Disabled."
+    echo "-ho  | --hybrid-enabled                Enable hybrid overlay. DEFAULT: Disabled."
+    echo "-ds  | --disable-snat-multiple-gws     Disable SNAT for multiple gws. DEFAULT: Disabled."
+    echo "-dp  | --disable-pkt-mtu-check         Disable checking packet size greater than MTU. Default: Disabled"
+    echo "-df  | --disable-forwarding            Disable forwarding on OVNK managed interfaces. Default: Disabled"
+    echo "-dfi | --disable-forwarding-interfaces Regex to select interfaces for disable forwarding. Default: ''"
+    echo "-ecp | --encap-port                    UDP port used for geneve overlay. DEFAULT: 6081"
+    echo "-pl  | --install-cni-plugins ]         Installs additional CNI network plugins. DEFAULT: Disabled"
+    echo "-nf  | --netflow-targets               Comma delimited list of ip:port or :port (using node IP) netflow collectors. DEFAULT: Disabled."
+    echo "-sf  | --sflow-targets                 Comma delimited list of ip:port or :port (using node IP) sflow collectors. DEFAULT: Disabled."
+    echo "-if  | --ipfix-targets                 Comma delimited list of ip:port or :port (using node IP) ipfix collectors. DEFAULT: Disabled."
+    echo "-ifs | --ipfix-sampling                Fraction of packets that are sampled and sent to each target collector: 1 packet out of every <num>. DEFAULT: 400 (1 out of 400 packets)."
+    echo "-ifm | --ipfix-cache-max-flows         Maximum number of IPFIX flow records that can be cached at a time. If 0, caching is disabled. DEFAULT: Disabled."
+    echo "-ifa | --ipfix-cache-active-timeout    Maximum period in seconds for which an IPFIX flow record is cached and aggregated before being sent. If 0, caching is disabled. DEFAULT: 60."
+    echo "-el  | --ovn-empty-lb-events           Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
+    echo "-ii  | --install-ingress               Flag to install Ingress Components."
+    echo "                                       DEFAULT: Don't install ingress components."
+    echo "-mlb | --install-metallb               Install metallb to test service type LoadBalancer deployments"
+    echo "-n4  | --no-ipv4                       Disable IPv4. DEFAULT: IPv4 Enabled."
+    echo "-i6  | --ipv6                          Enable IPv6. DEFAULT: IPv6 Disabled."
+    echo "-wk  | --num-workers                   Number of worker nodes. DEFAULT: HA - 2 worker"
+    echo "                                       nodes and no HA - 0 worker nodes."
+    echo "-sw  | --allow-system-writes           Allow script to update system. Intended to allow"
+    echo "                                       github CI to be updated with IPv6 settings."
+    echo "                                       DEFAULT: Don't allow."
+    echo "-gm  | --gateway-mode                  Enable 'shared' or 'local' gateway mode."
+    echo "                                       DEFAULT: shared."
+    echo "-ov  | --ovn-image            	       Use the specified docker image instead of building locally. DEFAULT: local build."
+    echo "-ml  | --master-loglevel               Log level for ovnkube (master), DEFAULT: 5."
+    echo "-nl  | --node-loglevel                 Log level for ovnkube (node), DEFAULT: 5"
+    echo "-dbl | --dbchecker-loglevel            Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5."
+    echo "-ndl | --ovn-loglevel-northd           Log config for ovn northd, DEFAULT: '-vconsole:info -vfile:info'."
+    echo "-nbl | --ovn-loglevel-nb               Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'."
+    echo "-sbl | --ovn-loglevel-sb               Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'."
+    echo "-cl  | --ovn-loglevel-controller       Log config for ovn-controller DEFAULT: '-vconsole:info'."
+    echo "-lcl | --libovsdb-client-logfile       Separate logs for libovsdb client into provided file. DEFAULT: do not separate."
+    echo "-ep  | --experimental-provider         Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled."
+    echo "-eb  | --egress-gw-separate-bridge     The external gateway traffic uses a separate bridge."
+    echo "-lr  | --local-kind-registry           Configure kind to use a local docker registry rather than manually loading images"
+    echo "-dd  | --dns-domain                    Configure a custom dnsDomain for k8s services, Defaults to 'cluster.local'"
+    echo "-cn  | --cluster-name                  Configure the kind cluster's name"
+    echo "-ric | --run-in-container              Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane"
+    echo "-ehp | --egress-ip-healthcheck-port    TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
+    echo "-is  | --ipsec                         Enable IPsec encryption (spawns ovn-ipsec pods)"
+    echo "-sm  | --scale-metrics                 Enable scale metrics"
+    echo "-cm  | --compact-mode                  Enable compact mode, ovnkube master and node run in the same process."
+    echo "-ic  | --enable-interconnect           Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
+    echo "--disable-ovnkube-identity             Disable per-node cert and ovnkube-identity webhook"
+    echo "-npz | --nodes-per-zone                If interconnect is enabled, number of nodes per zone (Default 1). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
+    echo "--isolated                             Deploy with an isolated environment (no default gateway)"
+    echo "--delete                               Delete current cluster"
+    echo "--deploy                               Deploy ovn kubernetes without restarting kind"
     echo ""
 }
 
@@ -206,6 +208,9 @@ parse_args() {
             -ds | --disable-snat-multiple-gws ) OVN_DISABLE_SNAT_MULTIPLE_GWS=true
                                                 ;;
             -df | --disable-forwarding )        OVN_DISABLE_FORWARDING=true
+                                                ;;
+            -dfi | --disable-forwarding-interfaces ) shift
+                                                OVN_DISABLE_FORWARDING_INTERFACES=$1
                                                 ;;
             -ecp | --encap-port )               shift
                                                 OVN_ENCAP_PORT=$1
@@ -393,6 +398,7 @@ print_params() {
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
      echo "OVN_DISABLE_FORWARDING = $OVN_DISABLE_FORWARDING"
+     echo "OVN_DISABLE_FORWARDING_INTERFACES = $OVN_DISABLE_FORWARDING_INTERFACES"
      echo "OVN_ENCAP_PORT = $OVN_ENCAP_PORT"
      echo "OVN_DISABLE_PKT_MTU_CHECK = $OVN_DISABLE_PKT_MTU_CHECK"
      echo "OVN_NETFLOW_TARGETS = $OVN_NETFLOW_TARGETS"
@@ -541,6 +547,10 @@ set_default_params() {
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
   OVN_DISABLE_FORWARDING=${OVN_DISABLE_FORWARDING:=false}
+  if [ "$OVN_DISABLE_FORWARDING" == true ]; then
+    OVN_DISABLE_FORWARDING_INTERFACES=${OVN_DISABLE_FORWARDING_INTERFACES:="^eth.*"}
+  fi
+  OVN_DISABLE_FORWARDING_INTERFACES=${OVN_DISABLE_FORWARDING_INTERFACES:=""}
   OVN_ENCAP_PORT=${OVN_ENCAP_PORT:-""}
   OVN_DISABLE_PKT_MTU_CHECK=${OVN_DISABLE_PKT_MTU_CHECK:-false}
   OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
@@ -865,6 +875,7 @@ create_ovn_kube_manifests() {
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
     --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
     --disable-forwarding="${OVN_DISABLE_FORWARDING}" \
+    --disable-forwarding-interfaces="${OVN_DISABLE_FORWARDING_INTERFACES}" \
     --ovn-encap-port="${OVN_ENCAP_PORT}" \
     --disable-pkt-mtu-check="${OVN_DISABLE_PKT_MTU_CHECK}" \
     --ovn-empty-lb-events="${OVN_EMPTY_LB_EVENTS}" \

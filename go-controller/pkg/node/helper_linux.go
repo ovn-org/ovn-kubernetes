@@ -6,6 +6,7 @@ package node
 import (
 	"fmt"
 	"net"
+	"regexp"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
@@ -220,7 +221,25 @@ func multipathRouteMatchesIfIndex(r netlink.Route, ifIdx int) bool {
 }
 
 // isPhysicalInterface reports true when l is of type "device" or "vlan" and if it is not the "lo" interface.
-func isPhysicalInterface(l netlink.Link) bool {
+// If interfaceFilterOverride != "", use the provided regex to filter for physical interfaces (instead of the default
+// search for physical and VLAN interfaces).
+func isPhysicalInterface(l netlink.Link, interfaceFilterOverride string) bool {
+	var r *regexp.Regexp
+	var err error
+
+	// If a regex is provided, try to compile it ...
+	if interfaceFilterOverride != "" {
+		if r, err = regexp.Compile(interfaceFilterOverride); err != nil {
+			klog.Infof("Invalid filter expression provided, falling back to filtering physical and VLAN interfaces; "+
+				"expression: %q; err: %q", interfaceFilterOverride, err)
+		}
+	}
+	// ... and if it compiles, return the Match result for the regex.
+	if r != nil {
+		return r.MatchString(l.Attrs().Name)
+	}
+
+	// Otherwise, filter for physical interfaces and VLANs.
 	if l.Attrs().Name == "lo" {
 		return false
 	}
@@ -230,7 +249,9 @@ func isPhysicalInterface(l netlink.Link) bool {
 
 // listPhysicalInterfaces uses the netlink library to return a list of all physical interfaces.
 // Physical interfaces are currenctly defined as those of types "device" and "vlan", minus the "lo" interface.
-func listPhysicalInterfaces() ([]string, error) {
+// If interfaceFilterOverride != "", use the provided regex to filter for physical interfaces (instead of the default
+// search for physical and VLAN interfaces).
+func listPhysicalInterfaces(interfaceFilterOverride string) ([]string, error) {
 	var physicalInterfaceList []string
 
 	ll, err := util.GetNetLinkOps().LinkList()
@@ -239,7 +260,7 @@ func listPhysicalInterfaces() ([]string, error) {
 	}
 
 	for _, l := range ll {
-		if !isPhysicalInterface(l) {
+		if !isPhysicalInterface(l, interfaceFilterOverride) {
 			continue
 		}
 		physicalInterfaceList = append(physicalInterfaceList, l.Attrs().Name)

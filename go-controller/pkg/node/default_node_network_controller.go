@@ -1175,7 +1175,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		ovspinning.Run(nc.stopChan)
 	}()
 
-	nc.syncPhysicalInterfaceDropForwardingRules(config.Gateway.DisableForwarding)
+	nc.syncPhysicalInterfaceDropForwardingRules(config.Gateway.DisableForwarding,
+		config.Gateway.DisableForwardingInterfaces)
 
 	klog.Infof("Default node network controller initialized and ready.")
 	return nil
@@ -1417,7 +1418,10 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 // for physical interfaces is detected.
 // If add == false, remove the rules (this is required for transitions where ovnkube-node is started first with
 // --disable-forwarding and then subsequently is started without the CLI parameter).
-func (nc *DefaultNodeNetworkController) syncPhysicalInterfaceDropForwardingRules(add bool) {
+// If interfaceFilterOverride != "", use the provided regex to filter for physical interfaces (instead of the default
+// search for physical and VLAN interfaces).
+func (nc *DefaultNodeNetworkController) syncPhysicalInterfaceDropForwardingRules(add bool,
+	interfaceFilterOverride string) {
 	if !add {
 		if err := syncCleanupPhysicalInterfaceDropForwardingRules(); err != nil {
 			klog.Fatal("Could not synchronize physical interface drop forwarding rules, err: %q", err)
@@ -1432,7 +1436,7 @@ func (nc *DefaultNodeNetworkController) syncPhysicalInterfaceDropForwardingRules
 		// We will have to use sync() in 3 different locations below, so let's define it once here to save us some
 		// typing.
 		sync := func() {
-			if err := syncPhysicalInterfaceDropForwardingRules(); err != nil {
+			if err := syncPhysicalInterfaceDropForwardingRules(interfaceFilterOverride); err != nil {
 				klog.Fatal("Could not synchronize physical interface drop forwarding rules, err: %q", err)
 			}
 		}
@@ -1456,7 +1460,7 @@ func (nc *DefaultNodeNetworkController) syncPhysicalInterfaceDropForwardingRules
 				return
 			case le := <-linkUpdateCh:
 				// Synchronize on every link change for a physical interface on the node.
-				if isPhysicalInterface(le.Link) {
+				if isPhysicalInterface(le.Link, interfaceFilterOverride) {
 					sync()
 				}
 			case <-ticker.C:

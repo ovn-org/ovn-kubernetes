@@ -448,6 +448,8 @@ type GatewayConfig struct {
 	SingleNode bool `gcfg:"single-node"`
 	// DisableForwarding (enabled by default) controls if forwarding is allowed on OVNK controlled interfaces
 	DisableForwarding bool `gcfg:"disable-forwarding"`
+	// DisableForwardingInterfaces overwrites the selection mechanism for forwarding disabled interfaces. Accepts a regex.
+	DisableForwardingInterfaces string `gcfg:"disable-forwarding-interfaces"`
 	// AllowNoUplink (disabled by default) controls if the external gateway bridge without an uplink port is allowed in local gateway mode.
 	AllowNoUplink bool `gcfg:"allow-no-uplink"`
 }
@@ -1331,6 +1333,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "disable-forwarding",
 		Usage:       "Disable forwarding on OVNK controlled interfaces.",
 		Destination: &cliConfig.Gateway.DisableForwarding,
+	},
+	&cli.StringFlag{
+		Name:        "disable-forwarding-interfaces",
+		Usage:       "Select forwarding disabled interfaces via regex (default: select all physical and VLAN interfaces)",
+		Destination: &cliConfig.Gateway.DisableForwardingInterfaces,
 	},
 	&cli.StringFlag{
 		Name:        "gateway-v4-join-subnet",

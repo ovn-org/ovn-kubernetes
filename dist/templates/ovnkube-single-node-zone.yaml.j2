@@ -374,6 +374,10 @@ spec:
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
           value: "{{ ovn_disable_snat_multiple_gws }}"
+        - name: OVN_DISABLE_FORWARDING
+          value: "{{ ovn_disable_forwarding }}"
+        - name: OVN_DISABLE_FORWARDING_INTERFACES
+          value: "{{ ovn_disable_forwarding_interfaces }}"
         - name: OVN_ENCAP_PORT
           value: "{{ ovn_encap_port }}"
         - name: OVN_DISABLE_PKT_MTU_CHECK

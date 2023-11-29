@@ -86,7 +86,7 @@ func TestSyncPhysicalInterfaceDropForwardingRule(t *testing.T) {
 	// Run the sync for both IP AFs.
 	config.IPv4Mode = true
 	config.IPv6Mode = true
-	if err := syncPhysicalInterfaceDropForwardingRules(); err != nil {
+	if err := syncPhysicalInterfaceDropForwardingRules(""); err != nil {
 		t.Fatalf("creation of drop forwarding rules failed, err: %q", err)
 	}
 
