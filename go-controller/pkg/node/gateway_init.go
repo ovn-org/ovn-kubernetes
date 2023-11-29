@@ -571,8 +571,8 @@ func CleanupClusterNode(name string) error {
 		klog.Errorf("Failed to delete ovn-bridge-mappings, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 	}
 
-	// Delete iptable rules for management port
-	DelMgtPortIptRules()
+	// Clean up legacy IPTables rules for management port
+	DelLegacyMgtPortIptRules()
 
 	// Delete nftables rules
 	nodenft.CleanupNFTables()
