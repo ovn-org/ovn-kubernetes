@@ -35,10 +35,12 @@ type EgressFirewall struct {
 }
 
 type EgressFirewallStatus struct {
+	// +optional
 	Status string `json:"status,omitempty"`
 	// +patchStrategy=merge
 	// +listType=set
-	Messages []string `json:"messages"`
+	// +optional
+	Messages []string `json:"messages,omitempty"`
 }
 
 // EgressFirewallSpec is a desired state description of EgressFirewall.
