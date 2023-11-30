@@ -277,6 +277,7 @@ jobs:
 
     - name: Free up disk space
       run: |
+        sudo apt-get update
         sudo eatmydata apt-get purge --auto-remove -y \
           azure-cli aspnetcore-* dotnet-* ghc-* firefox \
           google-chrome-stable \
@@ -427,6 +428,7 @@ jobs:
 
     - name: Free up disk space
       run: |
+        sudo apt-get update
         sudo eatmydata apt-get purge --auto-remove -y \
           azure-cli aspnetcore-* dotnet-* ghc-* firefox \
           google-chrome-stable \
@@ -636,7 +638,9 @@ jobs:
     steps:
 
       - name: Free up disk space
-        run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
+        run: |
+          sudo apt-get update
+          sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
 
       - name: Set up Go
         uses: actions/setup-go@v3
