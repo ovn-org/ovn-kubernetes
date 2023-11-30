@@ -424,7 +424,8 @@ jobs:
       KIND_NUM_WORKER: "${{ matrix.num-workers }}"
       KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
     steps:
-
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
     - name: Free up disk space
       run: |
         sudo eatmydata apt-get purge --auto-remove -y \
