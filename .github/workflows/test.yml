@@ -521,7 +521,7 @@ jobs:
           - {"ha": "HA", "interconnect": "interconnect-disabled"}
           - {"ha": "noHA", "interconnect": "interconnect-single-node-zones", "num-zones": "3", "num-nodes-per-zone": "1"}
           # - {"ha": "noHA", "interconnect": "interconnect-multi-node-zones", "num-zones": "2", "num-nodes-per-zone": "2"}
-    needs: [ build-pr ]
+#    needs: [ build-pr ]
     env:
       JOB_NAME: "DualStack-conversion-shared-${{ matrix.ha }}-${{ matrix.interconnect }}"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
@@ -550,6 +550,7 @@ jobs:
 
     - name: Set up environment
       run: |
+        sleep 3600
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
