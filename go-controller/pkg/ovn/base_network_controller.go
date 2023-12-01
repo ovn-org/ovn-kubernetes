@@ -779,7 +779,7 @@ func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
 }
 
 func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.Node, newNodeIsLocalZone bool) bool {
-	// Check if the annotations have changed. Use network topology and local params to skip unecessary checks
+	// Check if the annotations have changed. Use network topology and local params to skip unnecessary checks
 
 	// NodeIDAnnotationChanged and NodeTransitSwitchPortAddrAnnotationChanged affects local and remote nodes
 	if util.NodeIDAnnotationChanged(oldNode, newNode) {

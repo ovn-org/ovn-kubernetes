@@ -3191,13 +3191,13 @@ func checkAPBRouteStatus(fakeOVN *FakeOVN, policyName string, expectFailure bool
 		if err != nil {
 			return false
 		}
-		return status.Status != ""
+		return len(status.Messages) == 1
 	}).Should(gomega.BeTrue())
 
 	// as soon as status is set, it should match expected status, without extra retries
-	expectedStatus := adminpolicybasedrouteapi.SuccessStatus
 	if expectFailure {
-		expectedStatus = adminpolicybasedrouteapi.FailStatus
+		gomega.Expect(status.Messages[0]).To(gomega.ContainSubstring(types.APBRouteErrorMsg))
+	} else {
+		gomega.Expect(status.Messages[0]).ToNot(gomega.ContainSubstring(types.APBRouteErrorMsg))
 	}
-	gomega.Expect(status.Status).To(gomega.Equal(expectedStatus))
 }

@@ -46,7 +46,7 @@ var _ = ginkgo.Describe("Egress Services", func() {
 	ginkgo.BeforeEach(func() {
 		var err error
 		clientSet := f.ClientSet
-		n, err := e2enode.GetBoundedReadySchedulableNodes(clientSet, 3)
+		n, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), clientSet, 3)
 		framework.ExpectNoError(err)
 		if len(n.Items) < 3 {
 			framework.Failf(
@@ -1001,7 +1001,7 @@ spec:
 
 			var err error
 			clientSet := f.ClientSet
-			n, err := e2enode.GetBoundedReadySchedulableNodes(clientSet, 3)
+			n, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), clientSet, 3)
 			framework.ExpectNoError(err)
 			if len(n.Items) < 3 {
 				framework.Failf(

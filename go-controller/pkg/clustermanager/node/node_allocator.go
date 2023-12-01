@@ -91,7 +91,8 @@ func (na *NodeAllocator) Init() error {
 }
 
 func (na *NodeAllocator) hasHybridOverlayAllocation() bool {
-	return config.HybridOverlay.Enabled && !na.netInfo.IsSecondary()
+	// When config.HybridOverlay.ClusterSubnets is empty, assume the subnet allocation will be managed by an external component.
+	return config.HybridOverlay.Enabled && !na.netInfo.IsSecondary() && len(config.HybridOverlay.ClusterSubnets) > 0
 }
 
 func (na *NodeAllocator) recordSubnetCount() {

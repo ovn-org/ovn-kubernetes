@@ -60,6 +60,8 @@ rules:
       resources:
           - egressips
           - egressservices
+          - adminpolicybasedexternalroutes
+          - egressfirewalls
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.ovn.org"]
       resources:
@@ -75,4 +77,9 @@ rules:
           - pods/status # used in multi-homing: https://github.com/ovn-org/ovn-kubernetes/blob/a9beb6fd4f8ea32b264999a8ebec25cd6bdc2281/go-controller/pkg/util/pod.go#L49
           - nodes/status
           - services/status
+      verbs: [ "patch", "update" ]
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+        - adminpolicybasedexternalroutes/status
+        - egressfirewalls/status
       verbs: [ "patch", "update" ]

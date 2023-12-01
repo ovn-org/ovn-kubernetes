@@ -16,6 +16,7 @@ import (
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
+	egressfirewallinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions/egressfirewall/v1"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -564,9 +565,11 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset) (*WatchFactory, error) {
 	wf := &WatchFactory{
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
+		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		cpipcFactory:         ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.EgressServiceClient, resyncInterval),
+		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
 	}
@@ -641,6 +644,16 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
+		// make sure shared informer is created for a factory, so on wf.apbRouteFactory.Start() it is initialized and caches are synced.
+		wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer()
+	}
+
+	if config.OVNKubernetesFeature.EnableEgressFirewall {
+		// make sure shared informer is created for a factory, so on wf.efFactory.Start() it is initialized and caches are synced.
+		wf.efFactory.K8s().V1().EgressFirewalls().Informer()
 	}
 
 	return wf, nil
@@ -1253,6 +1266,10 @@ func (wf *WatchFactory) BANPInformer() anpinformer.BaselineAdminNetworkPolicyInf
 
 func (wf *WatchFactory) EgressIPInformer() egressipinformer.EgressIPInformer {
 	return wf.eipFactory.K8s().V1().EgressIPs()
+}
+
+func (wf *WatchFactory) EgressFirewallInformer() egressfirewallinformer.EgressFirewallInformer {
+	return wf.efFactory.K8s().V1().EgressFirewalls()
 }
 
 // withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the

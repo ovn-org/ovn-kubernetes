@@ -60,6 +60,7 @@ func newOVNNodeController(
 	localPodLister listers.PodLister,
 ) (nodeController, error) {
 	node := &NodeController{
+		kube:                kube,
 		nodeName:            nodeName,
 		initState:           new(uint32),
 		vxlanPort:           uint16(config.HybridOverlay.VXLANPort),
@@ -151,7 +152,8 @@ func nameToCookie(nodeName string) string {
 // nodes in the cluster
 func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 	if !util.NoHostSubnet(node) {
-		return nil
+		// remove possible hybrid overlay remaining
+		return n.DeleteNode(node)
 	}
 
 	cidr, nodeIP, drMAC, err := getNodeDetails(node)
@@ -230,7 +232,6 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 func (n *NodeController) AddNode(node *kapi.Node) error {
 	klog.Info("Add Node ", node.Name)
 	var err error
-
 	if node.Name == n.nodeName {
 		// Add local node and setup DR
 		// Retry hybrid overlay initialization if the master was
@@ -239,21 +240,12 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 		if err != nil {
 			return err
 		}
-	}
 
-	if atomic.LoadUint32(n.initState) >= hotypes.DistributedRouterInitialized {
-		if node.Name != n.nodeName {
-			// add remote node
-			klog.Infof("Add hybridOverlay remote Node %s", node.Name)
-			err = n.hybridOverlayNodeUpdate(node)
-			if err != nil {
-				return err
-			}
-		} else if atomic.LoadUint32(n.initState) < hotypes.PodsInitialized {
+		if atomic.LoadUint32(n.initState) < hotypes.PodsInitialized {
 			// add pods local to our node
 			pods, err := n.localPodLister.List(labels.Everything())
 			if err != nil {
-				return fmt.Errorf("cannot fully initialize node %s for hybrid overlay, cannot list pods: %v", n.nodeName, err)
+				return fmt.Errorf("cannot fully initialize node %s for hybrid overlay, cannot list pods: %w", n.nodeName, err)
 			}
 			for _, pod := range pods {
 				if pod.Spec.NodeName != n.nodeName {
@@ -265,6 +257,25 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 				}
 			}
 			atomic.StoreUint32(n.initState, hotypes.PodsInitialized)
+		}
+	} else {
+		// Make sure the local node has been initialized before adding a hybridOverlay remote node
+		if atomic.LoadUint32(n.initState) < hotypes.DistributedRouterInitialized {
+			localNode, err := n.kube.GetNode(n.nodeName)
+			if err != nil {
+				return fmt.Errorf("cannot get local node: %s: %w", n.nodeName, err)
+			}
+			klog.Info("Initialize local node before adding a hybridOverlay remote node")
+			err = n.EnsureHybridOverlayBridge(localNode)
+			if err != nil {
+				return err
+			}
+		}
+		// add remote node
+		klog.Infof("Add hybridOverlay remote Node %s", node.Name)
+		err = n.hybridOverlayNodeUpdate(node)
+		if err != nil {
+			return err
 		}
 	}
 	return nil
@@ -278,7 +289,7 @@ func (n *NodeController) deleteFlowsByCookie(cookie string) {
 
 // DeleteNode handles node deletions
 func (n *NodeController) DeleteNode(node *kapi.Node) error {
-	if node.Name == n.nodeName || !util.NoHostSubnet(node) {
+	if node.Name == n.nodeName {
 		return nil
 	}
 
@@ -301,7 +312,7 @@ func (n *NodeController) DeleteNode(node *kapi.Node) error {
 
 		route := makeRoute(cidr, n.drIP, mgmtPortLink)
 		err = util.GetNetLinkOps().RouteDel(route)
-		if err != nil && !os.IsExist(err) {
+		if err != nil && !strings.Contains(err.Error(), "no such process") {
 			return fmt.Errorf("failed to delete route for subnet %s via gateway %s: %v",
 				route.Dst, route.Gw, err)
 		}

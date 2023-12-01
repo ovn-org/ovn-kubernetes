@@ -19,8 +19,11 @@ package fake
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
+	egressservicev1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/applyconfiguration/egressservice/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
 	types "k8s.io/apimachinery/pkg/types"
@@ -132,6 +135,51 @@ func (c *FakeEgressServices) DeleteCollection(ctx context.Context, opts metav1.D
 func (c *FakeEgressServices) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.EgressService, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewPatchSubresourceAction(egressservicesResource, c.ns, name, pt, data, subresources...), &v1.EgressService{})
+
+	if obj == nil {
+		return nil, err
+	}
+	return obj.(*v1.EgressService), err
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied egressService.
+func (c *FakeEgressServices) Apply(ctx context.Context, egressService *egressservicev1.EgressServiceApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressService, err error) {
+	if egressService == nil {
+		return nil, fmt.Errorf("egressService provided to Apply must not be nil")
+	}
+	data, err := json.Marshal(egressService)
+	if err != nil {
+		return nil, err
+	}
+	name := egressService.Name
+	if name == nil {
+		return nil, fmt.Errorf("egressService.Name must be provided to Apply")
+	}
+	obj, err := c.Fake.
+		Invokes(testing.NewPatchSubresourceAction(egressservicesResource, c.ns, *name, types.ApplyPatchType, data), &v1.EgressService{})
+
+	if obj == nil {
+		return nil, err
+	}
+	return obj.(*v1.EgressService), err
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *FakeEgressServices) ApplyStatus(ctx context.Context, egressService *egressservicev1.EgressServiceApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressService, err error) {
+	if egressService == nil {
+		return nil, fmt.Errorf("egressService provided to Apply must not be nil")
+	}
+	data, err := json.Marshal(egressService)
+	if err != nil {
+		return nil, err
+	}
+	name := egressService.Name
+	if name == nil {
+		return nil, fmt.Errorf("egressService.Name must be provided to Apply")
+	}
+	obj, err := c.Fake.
+		Invokes(testing.NewPatchSubresourceAction(egressservicesResource, c.ns, *name, types.ApplyPatchType, data, "status"), &v1.EgressService{})
 
 	if obj == nil {
 		return nil, err

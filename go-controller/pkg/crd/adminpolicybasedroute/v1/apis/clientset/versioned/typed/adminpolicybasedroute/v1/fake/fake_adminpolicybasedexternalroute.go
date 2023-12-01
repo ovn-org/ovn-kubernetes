@@ -19,11 +19,13 @@ package fake
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 
-	adminpolicybasedroutev1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
+	adminpolicybasedroutev1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/applyconfiguration/adminpolicybasedroute/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
-	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	testing "k8s.io/client-go/testing"
@@ -34,24 +36,24 @@ type FakeAdminPolicyBasedExternalRoutes struct {
 	Fake *FakeK8sV1
 }
 
-var adminpolicybasedexternalroutesResource = schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "adminpolicybasedexternalroutes"}
+var adminpolicybasedexternalroutesResource = v1.SchemeGroupVersion.WithResource("adminpolicybasedexternalroutes")
 
-var adminpolicybasedexternalroutesKind = schema.GroupVersionKind{Group: "k8s.ovn.org", Version: "v1", Kind: "AdminPolicyBasedExternalRoute"}
+var adminpolicybasedexternalroutesKind = v1.SchemeGroupVersion.WithKind("AdminPolicyBasedExternalRoute")
 
 // Get takes name of the adminPolicyBasedExternalRoute, and returns the corresponding adminPolicyBasedExternalRoute object, and an error if there is any.
-func (c *FakeAdminPolicyBasedExternalRoutes) Get(ctx context.Context, name string, options v1.GetOptions) (result *adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, err error) {
+func (c *FakeAdminPolicyBasedExternalRoutes) Get(ctx context.Context, name string, options metav1.GetOptions) (result *v1.AdminPolicyBasedExternalRoute, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootGetAction(adminpolicybasedexternalroutesResource, name), &adminpolicybasedroutev1.AdminPolicyBasedExternalRoute{})
+		Invokes(testing.NewRootGetAction(adminpolicybasedexternalroutesResource, name), &v1.AdminPolicyBasedExternalRoute{})
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*adminpolicybasedroutev1.AdminPolicyBasedExternalRoute), err
+	return obj.(*v1.AdminPolicyBasedExternalRoute), err
 }
 
 // List takes label and field selectors, and returns the list of AdminPolicyBasedExternalRoutes that match those selectors.
-func (c *FakeAdminPolicyBasedExternalRoutes) List(ctx context.Context, opts v1.ListOptions) (result *adminpolicybasedroutev1.AdminPolicyBasedExternalRouteList, err error) {
+func (c *FakeAdminPolicyBasedExternalRoutes) List(ctx context.Context, opts metav1.ListOptions) (result *v1.AdminPolicyBasedExternalRouteList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootListAction(adminpolicybasedexternalroutesResource, adminpolicybasedexternalroutesKind, opts), &adminpolicybasedroutev1.AdminPolicyBasedExternalRouteList{})
+		Invokes(testing.NewRootListAction(adminpolicybasedexternalroutesResource, adminpolicybasedexternalroutesKind, opts), &v1.AdminPolicyBasedExternalRouteList{})
 	if obj == nil {
 		return nil, err
 	}
@@ -60,8 +62,8 @@ func (c *FakeAdminPolicyBasedExternalRoutes) List(ctx context.Context, opts v1.L
 	if label == nil {
 		label = labels.Everything()
 	}
-	list := &adminpolicybasedroutev1.AdminPolicyBasedExternalRouteList{ListMeta: obj.(*adminpolicybasedroutev1.AdminPolicyBasedExternalRouteList).ListMeta}
-	for _, item := range obj.(*adminpolicybasedroutev1.AdminPolicyBasedExternalRouteList).Items {
+	list := &v1.AdminPolicyBasedExternalRouteList{ListMeta: obj.(*v1.AdminPolicyBasedExternalRouteList).ListMeta}
+	for _, item := range obj.(*v1.AdminPolicyBasedExternalRouteList).Items {
 		if label.Matches(labels.Set(item.Labels)) {
 			list.Items = append(list.Items, item)
 		}
@@ -70,63 +72,106 @@ func (c *FakeAdminPolicyBasedExternalRoutes) List(ctx context.Context, opts v1.L
 }
 
 // Watch returns a watch.Interface that watches the requested adminPolicyBasedExternalRoutes.
-func (c *FakeAdminPolicyBasedExternalRoutes) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+func (c *FakeAdminPolicyBasedExternalRoutes) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 	return c.Fake.
 		InvokesWatch(testing.NewRootWatchAction(adminpolicybasedexternalroutesResource, opts))
 }
 
 // Create takes the representation of a adminPolicyBasedExternalRoute and creates it.  Returns the server's representation of the adminPolicyBasedExternalRoute, and an error, if there is any.
-func (c *FakeAdminPolicyBasedExternalRoutes) Create(ctx context.Context, adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, opts v1.CreateOptions) (result *adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, err error) {
+func (c *FakeAdminPolicyBasedExternalRoutes) Create(ctx context.Context, adminPolicyBasedExternalRoute *v1.AdminPolicyBasedExternalRoute, opts metav1.CreateOptions) (result *v1.AdminPolicyBasedExternalRoute, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootCreateAction(adminpolicybasedexternalroutesResource, adminPolicyBasedExternalRoute), &adminpolicybasedroutev1.AdminPolicyBasedExternalRoute{})
+		Invokes(testing.NewRootCreateAction(adminpolicybasedexternalroutesResource, adminPolicyBasedExternalRoute), &v1.AdminPolicyBasedExternalRoute{})
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*adminpolicybasedroutev1.AdminPolicyBasedExternalRoute), err
+	return obj.(*v1.AdminPolicyBasedExternalRoute), err
 }
 
 // Update takes the representation of a adminPolicyBasedExternalRoute and updates it. Returns the server's representation of the adminPolicyBasedExternalRoute, and an error, if there is any.
-func (c *FakeAdminPolicyBasedExternalRoutes) Update(ctx context.Context, adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, opts v1.UpdateOptions) (result *adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, err error) {
+func (c *FakeAdminPolicyBasedExternalRoutes) Update(ctx context.Context, adminPolicyBasedExternalRoute *v1.AdminPolicyBasedExternalRoute, opts metav1.UpdateOptions) (result *v1.AdminPolicyBasedExternalRoute, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootUpdateAction(adminpolicybasedexternalroutesResource, adminPolicyBasedExternalRoute), &adminpolicybasedroutev1.AdminPolicyBasedExternalRoute{})
+		Invokes(testing.NewRootUpdateAction(adminpolicybasedexternalroutesResource, adminPolicyBasedExternalRoute), &v1.AdminPolicyBasedExternalRoute{})
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*adminpolicybasedroutev1.AdminPolicyBasedExternalRoute), err
+	return obj.(*v1.AdminPolicyBasedExternalRoute), err
 }
 
 // UpdateStatus was generated because the type contains a Status member.
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakeAdminPolicyBasedExternalRoutes) UpdateStatus(ctx context.Context, adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, opts v1.UpdateOptions) (*adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, error) {
+func (c *FakeAdminPolicyBasedExternalRoutes) UpdateStatus(ctx context.Context, adminPolicyBasedExternalRoute *v1.AdminPolicyBasedExternalRoute, opts metav1.UpdateOptions) (*v1.AdminPolicyBasedExternalRoute, error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootUpdateSubresourceAction(adminpolicybasedexternalroutesResource, "status", adminPolicyBasedExternalRoute), &adminpolicybasedroutev1.AdminPolicyBasedExternalRoute{})
+		Invokes(testing.NewRootUpdateSubresourceAction(adminpolicybasedexternalroutesResource, "status", adminPolicyBasedExternalRoute), &v1.AdminPolicyBasedExternalRoute{})
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*adminpolicybasedroutev1.AdminPolicyBasedExternalRoute), err
+	return obj.(*v1.AdminPolicyBasedExternalRoute), err
 }
 
 // Delete takes name of the adminPolicyBasedExternalRoute and deletes it. Returns an error if one occurs.
-func (c *FakeAdminPolicyBasedExternalRoutes) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
+func (c *FakeAdminPolicyBasedExternalRoutes) Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewRootDeleteAction(adminpolicybasedexternalroutesResource, name), &adminpolicybasedroutev1.AdminPolicyBasedExternalRoute{})
+		Invokes(testing.NewRootDeleteActionWithOptions(adminpolicybasedexternalroutesResource, name, opts), &v1.AdminPolicyBasedExternalRoute{})
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
-func (c *FakeAdminPolicyBasedExternalRoutes) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
+func (c *FakeAdminPolicyBasedExternalRoutes) DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error {
 	action := testing.NewRootDeleteCollectionAction(adminpolicybasedexternalroutesResource, listOpts)
 
-	_, err := c.Fake.Invokes(action, &adminpolicybasedroutev1.AdminPolicyBasedExternalRouteList{})
+	_, err := c.Fake.Invokes(action, &v1.AdminPolicyBasedExternalRouteList{})
 	return err
 }
 
 // Patch applies the patch and returns the patched adminPolicyBasedExternalRoute.
-func (c *FakeAdminPolicyBasedExternalRoutes) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, err error) {
+func (c *FakeAdminPolicyBasedExternalRoutes) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.AdminPolicyBasedExternalRoute, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootPatchSubresourceAction(adminpolicybasedexternalroutesResource, name, pt, data, subresources...), &adminpolicybasedroutev1.AdminPolicyBasedExternalRoute{})
+		Invokes(testing.NewRootPatchSubresourceAction(adminpolicybasedexternalroutesResource, name, pt, data, subresources...), &v1.AdminPolicyBasedExternalRoute{})
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*adminpolicybasedroutev1.AdminPolicyBasedExternalRoute), err
+	return obj.(*v1.AdminPolicyBasedExternalRoute), err
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied adminPolicyBasedExternalRoute.
+func (c *FakeAdminPolicyBasedExternalRoutes) Apply(ctx context.Context, adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRouteApplyConfiguration, opts metav1.ApplyOptions) (result *v1.AdminPolicyBasedExternalRoute, err error) {
+	if adminPolicyBasedExternalRoute == nil {
+		return nil, fmt.Errorf("adminPolicyBasedExternalRoute provided to Apply must not be nil")
+	}
+	data, err := json.Marshal(adminPolicyBasedExternalRoute)
+	if err != nil {
+		return nil, err
+	}
+	name := adminPolicyBasedExternalRoute.Name
+	if name == nil {
+		return nil, fmt.Errorf("adminPolicyBasedExternalRoute.Name must be provided to Apply")
+	}
+	obj, err := c.Fake.
+		Invokes(testing.NewRootPatchSubresourceAction(adminpolicybasedexternalroutesResource, *name, types.ApplyPatchType, data), &v1.AdminPolicyBasedExternalRoute{})
+	if obj == nil {
+		return nil, err
+	}
+	return obj.(*v1.AdminPolicyBasedExternalRoute), err
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *FakeAdminPolicyBasedExternalRoutes) ApplyStatus(ctx context.Context, adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRouteApplyConfiguration, opts metav1.ApplyOptions) (result *v1.AdminPolicyBasedExternalRoute, err error) {
+	if adminPolicyBasedExternalRoute == nil {
+		return nil, fmt.Errorf("adminPolicyBasedExternalRoute provided to Apply must not be nil")
+	}
+	data, err := json.Marshal(adminPolicyBasedExternalRoute)
+	if err != nil {
+		return nil, err
+	}
+	name := adminPolicyBasedExternalRoute.Name
+	if name == nil {
+		return nil, fmt.Errorf("adminPolicyBasedExternalRoute.Name must be provided to Apply")
+	}
+	obj, err := c.Fake.
+		Invokes(testing.NewRootPatchSubresourceAction(adminpolicybasedexternalroutesResource, *name, types.ApplyPatchType, data, "status"), &v1.AdminPolicyBasedExternalRoute{})
+	if obj == nil {
+		return nil, err
+	}
+	return obj.(*v1.AdminPolicyBasedExternalRoute), err
 }

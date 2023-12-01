@@ -6,7 +6,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -14,15 +13,15 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
+	adminpolicybasedrouteapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/applyconfiguration/adminpolicybasedroute/v1"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
 	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // Admin Policy Based Route services
@@ -33,6 +32,8 @@ type ExternalGatewayMasterController struct {
 	mgr                      *externalPolicyManager
 	nbClient                 *northBoundClient
 	ExternalGWRouteInfoCache *ExternalGatewayRouteInfoCache
+
+	zoneID string
 }
 
 func NewExternalMasterController(
@@ -45,6 +46,7 @@ func NewExternalMasterController(
 	nbClient libovsdbclient.Client,
 	addressSetFactory addressset.AddressSetFactory,
 	controllerName string,
+	zoneID string,
 ) (*ExternalGatewayMasterController, error) {
 
 	externalGWRouteInfo := NewExternalGatewayRouteInfoCache()
@@ -67,6 +69,7 @@ func NewExternalMasterController(
 		apbRoutePolicyClient:     apbRoutePolicyClient,
 		ExternalGWRouteInfoCache: externalGWRouteInfo,
 		nbClient:                 nbCli,
+		zoneID:                   zoneID,
 	}
 	c.mgr = newExternalPolicyManager(
 		stopCh,
@@ -100,32 +103,51 @@ func (c *ExternalGatewayMasterController) GetAdminPolicyBasedExternalRouteIPsFor
 
 // updateStatusAPBExternalRoute updates the CR with the current status of the CR instance, including errors captured while processing the CR during its lifetime
 func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(policyName string, gwIPs sets.Set[string],
-	processedError error) error {
+	syncError error) error {
 	if gwIPs == nil {
 		// policy doesn't exist anymore, nothing to do
 		return nil
 	}
 
-	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
-		routePolicy, err := c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), policyName, metav1.GetOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				// policy doesn't exist, no need to update status
-				return nil
-			}
-			return err
+	// get object from the informer cache. No need to get the object from the kube-apiserver, since patch
+	// doesn't check resource versions, and no one else can update status message owned by current zone.
+	routePolicy, err := c.mgr.routeLister.Get(policyName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// policy doesn't exist, no need to update status
+			return nil
 		}
-
-		updateStatus(routePolicy, strings.Join(sets.List(gwIPs), ","), processedError)
-
-		_, err = c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().UpdateStatus(context.TODO(), routePolicy, metav1.UpdateOptions{})
-		if !apierrors.IsNotFound(err) {
-			return err
+		return err
+	}
+	newMsg := fmt.Sprintf("configured external gateway IPs: %s", strings.Join(sets.List(gwIPs), ","))
+	if syncError != nil {
+		newMsg = fmt.Sprintf("%s %s: %v", c.zoneID, types.APBRouteErrorMsg, syncError.Error())
+	}
+	newMsg = types.GetZoneStatus(c.zoneID, newMsg)
+	needsUpdate := true
+	for _, message := range routePolicy.Status.Messages {
+		if message == newMsg {
+			// found previous status
+			needsUpdate = false
+			break
 		}
+	}
+	if !needsUpdate {
 		return nil
-	})
-	if resultErr != nil {
-		return fmt.Errorf("failed to update AdminPolicyBasedExternalRoutes %s status: %v", policyName, resultErr)
+	}
+
+	applyOptions := metav1.ApplyOptions{
+		Force:        true,
+		FieldManager: c.zoneID,
+	}
+	applyObj := adminpolicybasedrouteapply.AdminPolicyBasedExternalRoute(policyName).
+		WithStatus(adminpolicybasedrouteapply.AdminPolicyBasedRouteStatus().
+			WithMessages(newMsg).
+			WithLastTransitionTime(metav1.Now()))
+	_, err = c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().ApplyStatus(context.TODO(), applyObj, applyOptions)
+
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -136,18 +158,6 @@ func (c *ExternalGatewayMasterController) GetDynamicGatewayIPsForTargetNamespace
 
 func (c *ExternalGatewayMasterController) GetStaticGatewayIPsForTargetNamespace(namespaceName string) (sets.Set[string], error) {
 	return c.mgr.getStaticGatewayIPsForTargetNamespace(namespaceName)
-}
-
-func updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, gwIPs string, err error) {
-	route.Status.LastTransitionTime = metav1.Time{Time: time.Now()}
-	if err != nil {
-		route.Status.Status = adminpolicybasedrouteapi.FailStatus
-		route.Status.Messages = append(route.Status.Messages, fmt.Sprintf("Failed to apply policy: %v", err.Error()))
-		return
-	}
-	route.Status.Status = adminpolicybasedrouteapi.SuccessStatus
-	route.Status.Messages = append(route.Status.Messages, fmt.Sprintf("Configured external gateway IPs: %s", gwIPs))
-	klog.V(4).Infof("Updating Admin Policy Based External Route %s with Status: %s, Message: %s", route.Name, route.Status.Status, route.Status.Messages[len(route.Status.Messages)-1])
 }
 
 // AddHybridRoutePolicyForPod exposes the function addHybridRoutePolicyForPod

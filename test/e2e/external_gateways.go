@@ -273,7 +273,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 		ginkgo.BeforeEach(func() {
 
 			// retrieve worker node names
-			nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 			framework.ExpectNoError(err)
 			if len(nodes.Items) < 3 {
 				framework.Failf(
@@ -416,7 +416,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			ginkgo.BeforeEach(func() {
 				clientSet = f.ClientSet // so it can be used in AfterEach
 				// retrieve worker node names
-				nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 				framework.ExpectNoError(err)
 				if len(nodes.Items) < 3 {
 					framework.Failf(
@@ -424,7 +424,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						len(nodes.Items))
 				}
 
-				ns, err := f.CreateNamespace("exgw-serving", nil)
+				ns, err := f.CreateNamespace(context.TODO(), "exgw-serving", nil)
 				framework.ExpectNoError(err)
 				servingNamespace = ns.Name
 
@@ -559,7 +559,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 			ginkgo.BeforeEach(func() {
 				// retrieve worker node names
-				nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 				framework.ExpectNoError(err)
 				if len(nodes.Items) < 3 {
 					framework.Failf(
@@ -710,7 +710,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			ginkgo.BeforeEach(func() {
 				clientSet = f.ClientSet // so it can be used in AfterEach
 				// retrieve worker node names
-				nodes, err = e2enode.GetBoundedReadySchedulableNodes(clientSet, 3)
+				nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), clientSet, 3)
 				framework.ExpectNoError(err)
 				if len(nodes.Items) < 3 {
 					framework.Failf(
@@ -722,7 +722,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					skipper.Skipf("Skipping as host network doesn't support multiple external gateways")
 				}
 
-				ns, err := f.CreateNamespace("exgw-conntrack-serving", nil)
+				ns, err := f.CreateNamespace(context.TODO(), "exgw-conntrack-serving", nil)
 				framework.ExpectNoError(err)
 				servingNamespace = ns.Name
 
@@ -944,7 +944,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.BeforeEach(func() {
 					clientSet = f.ClientSet // so it can be used in AfterEach
 					// retrieve worker node names
-					nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+					nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 					framework.ExpectNoError(err)
 					if len(nodes.Items) < 3 {
 						framework.Failf(
@@ -952,7 +952,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 							len(nodes.Items))
 					}
 
-					ns, err := f.CreateNamespace("exgw-bfd-serving", nil)
+					ns, err := f.CreateNamespace(context.TODO(), "exgw-bfd-serving", nil)
 					framework.ExpectNoError(err)
 					servingNamespace = ns.Name
 
@@ -1136,7 +1136,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				var addressesv4, addressesv6 gatewayTestIPs
 
 				ginkgo.BeforeEach(func() {
-					nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+					nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 					framework.ExpectNoError(err)
 					if len(nodes.Items) < 3 {
 						framework.Failf(
@@ -1350,7 +1350,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			ginkgo.BeforeEach(func() {
 				clientSet = f.ClientSet // so it can be used in AfterEach
 				// retrieve worker node names
-				nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 				framework.ExpectNoError(err)
 				if len(nodes.Items) < 3 {
 					framework.Failf(
@@ -1358,7 +1358,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						len(nodes.Items))
 				}
 
-				ns, err := f.CreateNamespace("exgw-serving", nil)
+				ns, err := f.CreateNamespace(context.TODO(), "exgw-serving", nil)
 				framework.ExpectNoError(err)
 				servingNamespace = ns.Name
 
@@ -1496,7 +1496,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 			ginkgo.BeforeEach(func() {
 				// retrieve worker node names
-				nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 				framework.ExpectNoError(err)
 				if len(nodes.Items) < 3 {
 					framework.Failf(
@@ -1643,7 +1643,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			ginkgo.BeforeEach(func() {
 				clientSet = f.ClientSet // so it can be used in AfterEach
 				// retrieve worker node names
-				nodes, err = e2enode.GetBoundedReadySchedulableNodes(clientSet, 3)
+				nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), clientSet, 3)
 				framework.ExpectNoError(err)
 				if len(nodes.Items) < 3 {
 					framework.Failf(
@@ -1655,7 +1655,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					skipper.Skipf("Skipping as host network doesn't support multiple external gateways")
 				}
 
-				ns, err := f.CreateNamespace("exgw-conntrack-serving", nil)
+				ns, err := f.CreateNamespace(context.TODO(), "exgw-conntrack-serving", nil)
 				framework.ExpectNoError(err)
 				servingNamespace = ns.Name
 
@@ -1865,7 +1865,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.BeforeEach(func() {
 					clientSet = f.ClientSet // so it can be used in AfterEach
 					// retrieve worker node names
-					nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+					nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 					framework.ExpectNoError(err)
 					if len(nodes.Items) < 3 {
 						framework.Failf(
@@ -1873,7 +1873,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 							len(nodes.Items))
 					}
 
-					ns, err := f.CreateNamespace("exgw-bfd-serving", nil)
+					ns, err := f.CreateNamespace(context.TODO(), "exgw-bfd-serving", nil)
 					framework.ExpectNoError(err)
 					servingNamespace = ns.Name
 
@@ -2065,7 +2065,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				var addressesv4, addressesv6 gatewayTestIPs
 
 				ginkgo.BeforeEach(func() {
-					nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+					nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 					framework.ExpectNoError(err)
 					if len(nodes.Items) < 3 {
 						framework.Failf(
@@ -2274,7 +2274,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			ginkgo.BeforeEach(func() {
 				clientSet = f.ClientSet // so it can be used in AfterEach
 				// retrieve worker node names
-				nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 				framework.ExpectNoError(err)
 				if len(nodes.Items) < 3 {
 					framework.Failf(
@@ -2282,7 +2282,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						len(nodes.Items))
 				}
 
-				ns, err := f.CreateNamespace("exgw-serving", nil)
+				ns, err := f.CreateNamespace(context.TODO(), "exgw-serving", nil)
 				framework.ExpectNoError(err)
 				servingNamespace = ns.Name
 
@@ -2426,7 +2426,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			ginkgo.BeforeEach(func() {
 				clientSet = f.ClientSet // so it can be used in AfterEach
 				// retrieve worker node names
-				nodes, err = e2enode.GetBoundedReadySchedulableNodes(clientSet, 3)
+				nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), clientSet, 3)
 				framework.ExpectNoError(err)
 				if len(nodes.Items) < 3 {
 					framework.Failf(
@@ -2438,7 +2438,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					skipper.Skipf("Skipping as host network doesn't support multiple external gateways")
 				}
 
-				ns, err := f.CreateNamespace("exgw-conntrack-serving", nil)
+				ns, err := f.CreateNamespace(context.TODO(), "exgw-conntrack-serving", nil)
 				framework.ExpectNoError(err)
 				servingNamespace = ns.Name
 
@@ -2582,7 +2582,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 		var addressesv4 gatewayTestIPs
 
 		ginkgo.BeforeEach(func() {
-			nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 			framework.ExpectNoError(err)
 			if len(nodes.Items) < 3 {
 				framework.Failf(
@@ -2984,7 +2984,7 @@ spec:
 		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		return lastMsg
-	}, time.Minute, 1).Should(gomega.Equal(fmt.Sprintf("Configured external gateway IPs: %s", strings.Join(gwIPs, ","))))
+	}, time.Minute, 1).Should(gomega.ContainSubstring(fmt.Sprintf("configured external gateway IPs: %s", strings.Join(gwIPs, ","))))
 	gomega.Eventually(func() string {
 		status, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.status}")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3005,7 +3005,7 @@ func createAPBExternalRouteCRWithStaticHop(policyName, namespaceName string, bfd
 		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		return lastMsg
-	}, time.Minute, 1).Should(gomega.Equal(fmt.Sprintf("Configured external gateway IPs: %s", strings.Join(gwIPs, ","))))
+	}, time.Minute, 1).Should(gomega.ContainSubstring(fmt.Sprintf("configured external gateway IPs: %s", strings.Join(gwIPs, ","))))
 }
 
 func createAPBExternalRouteCRWithStaticHopAndStatus(policyName, namespaceName string, bfd bool, status string, gateways ...string) {
@@ -3056,7 +3056,7 @@ spec:
 		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		return lastMsg
-	}, 10).Should(gomega.Equal(fmt.Sprintf("Configured external gateway IPs: %s", strings.Join(gateways, ","))))
+	}, 10).Should(gomega.ContainSubstring(fmt.Sprintf("configured external gateway IPs: %s", strings.Join(gateways, ","))))
 
 	gomega.Eventually(func() string {
 		s, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.status}")
