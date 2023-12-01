@@ -126,12 +126,15 @@ type AdminPolicyBasedExternalRouteList struct {
 // AdminPolicyBasedRouteStatus contains the observed status of the AdminPolicyBased route types.
 type AdminPolicyBasedRouteStatus struct {
 	// Captures the time when the last change was applied.
-	LastTransitionTime metav1.Time `json:"lastTransitionTime"`
+	// +optional
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
 	// An array of Human-readable messages indicating details about the status of the object.
 	// +patchStrategy=merge
 	// +listType=set
-	Messages []string `json:"messages"`
+	// +optional
+	Messages []string `json:"messages,omitempty"`
 	// A concise indication of whether the AdminPolicyBasedRoute resource is applied with success
+	// +optional
 	Status StatusType `json:"status,omitempty"`
 }
 

@@ -67,6 +67,9 @@ for crd in ${crds}; do
   rm -rf $SCRIPT_ROOT/pkg/crd/$crd/v1/apis
   cp -r github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis $SCRIPT_ROOT/pkg/crd/$crd/v1
 
+  echo "Copying zz_generated for $crd"
+  cp github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/zz_generated.deepcopy.go $SCRIPT_ROOT/pkg/crd/$crd/v1
+
 done
 
 echo "Generating CRDs"
