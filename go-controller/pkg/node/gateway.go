@@ -28,6 +28,8 @@ type Gateway interface {
 	Init(factory.NodeWatchFactory, <-chan struct{}, *sync.WaitGroup) error
 	Start()
 	GetGatewayBridgeIface() string
+	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
+	Reconcile() error
 }
 
 type gateway struct {
@@ -362,6 +364,31 @@ func (g *gateway) GetGatewayBridgeIface() string {
 // getMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
 func getMaxFrameLength() int {
 	return config.Default.MTU + 14
+}
+
+// SetDefaultGatewayBridgeMAC updates the mac address for the OFM used to render flows with
+func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
+	g.openflowManager.defaultBridge.Lock()
+	defer g.openflowManager.defaultBridge.Unlock()
+	g.openflowManager.defaultBridge.macAddress = macAddr
+	klog.Infof("Default gateway bridge MAC address updated to %s", macAddr)
+}
+
+// Reconcile handles triggering updates to different components of a gateway, like OFM
+func (g *gateway) Reconcile() error {
+	klog.Info("Reconciling gateway with updates")
+	node, err := g.watchFactory.GetNode(g.nodeIPManager.nodeName)
+	if err != nil {
+		return err
+	}
+	subnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	if err != nil {
+		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update", node.Name)
+	}
+	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses()); err != nil {
+		return err
+	}
+	return nil
 }
 
 type bridgeConfiguration struct {

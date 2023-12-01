@@ -44,17 +44,17 @@ func NewController(name string, v4, v6 bool) *Controller {
 }
 
 // Run starts the controller and syncs at least every syncPeriod
-func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
+// linkHandlerFunc fires as an additional handler when reconcile runs
+func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration, linkHandlerFunc func(link netlink.Link) error) {
 	ticker := time.NewTicker(syncPeriod)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-stopCh:
 			return
 		case <-ticker.C:
 			c.mu.Lock()
-			c.reconcile()
+			c.reconcile(linkHandlerFunc)
 			c.mu.Unlock()
 		}
 	}
@@ -75,7 +75,7 @@ func (c *Controller) AddAddress(address netlink.Addr) error {
 	// overwrite label to the name of this component in-order to aid address ownership. Label must start with link name.
 	address.Label = GetAssignedAddressLabel(link.Attrs().Name)
 	c.addAddressToStore(link.Attrs().Name, address)
-	c.reconcile()
+	c.reconcile(nil)
 	return nil
 }
 
@@ -91,11 +91,11 @@ func (c *Controller) DelAddress(address netlink.Addr) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.delAddressFromStore(link.Attrs().Name, address)
-	c.reconcile()
+	c.reconcile(nil)
 	return nil
 }
 
-func (c *Controller) reconcile() {
+func (c *Controller) reconcile(linkHandlerFunc func(link netlink.Link) error) {
 	// 1. get all the links on the node
 	// 2. iterate over the links and get the addresses associated with it
 	// 3. cleanup any stale addresses from link that we no longer managed
@@ -107,6 +107,11 @@ func (c *Controller) reconcile() {
 		return
 	}
 	for _, link := range links {
+		if linkHandlerFunc != nil {
+			if err := linkHandlerFunc(link); err != nil {
+				klog.Errorf("Failed to execute link handler function on link: %s, error: %v", link.Attrs().Name, err)
+			}
+		}
 		linkName := link.Attrs().Name
 		// get all addresses associated with the link depending on which IP families we support
 		foundAddresses, err := getAllLinkAddressesByIPFamily(link, c.ipv4Enabled, c.ipv6Enabled)

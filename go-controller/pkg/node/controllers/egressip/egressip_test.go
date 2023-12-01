@@ -204,8 +204,9 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 	if err := watchFactory.Start(); err != nil {
 		return nil, nil, err
 	}
+	linkManager := linkmanager.NewController(node1Name, v4, v6)
 	c, err := NewController(watchFactory.EgressIPInformer(), watchFactory.NodeInformer(), watchFactory.NamespaceInformer(),
-		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name)
+		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name, linkManager)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -262,7 +263,7 @@ func runController(testNS ns.NetNS, c *Controller) (cleanupFn, error) {
 	// normally executed during Run but we call it manually here because run spawns a go routine that we cannot control its netns during test
 	wg.Add(1)
 	go testNS.Do(func(netNS ns.NetNS) error {
-		c.linkManager.Run(stopCh, 10*time.Millisecond)
+		c.linkManager.Run(stopCh, 10*time.Millisecond, nil)
 		wg.Done()
 		return nil
 	})
