@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.19.6"
-  K8S_VERSION: v1.24.0
+  GO_VERSION: "1.20.6"
+  K8S_VERSION: v1.28.0
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true

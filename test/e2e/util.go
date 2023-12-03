@@ -601,7 +601,7 @@ func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, control
 		}
 
 		// Check that every node is schedulable
-		afterNodes, err := e2enode.GetReadySchedulableNodes(f.ClientSet)
+		afterNodes, err := e2enode.GetReadySchedulableNodes(context.TODO(), f.ClientSet)
 		if err != nil {
 			return false, fmt.Errorf("failed to look for healthy nodes: %w", err)
 		}
@@ -730,6 +730,7 @@ func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error 
 		targetIP = fmt.Sprintf("[%s]", dstPodIP)
 	}
 	stdout, stderr, err := e2epod.ExecShellInPodWithFullOutput(
+		context.TODO(),
 		fr,
 		srcPodName,
 		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:8000 | head -n1", targetIP))
@@ -956,8 +957,8 @@ func wrappedTestFramework(basename string) *framework.Framework {
 func newPrivelegedTestFramework(basename string) *framework.Framework {
 	f := framework.NewDefaultFramework(basename)
 	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
-	f.DumpAllNamespaceInfo = func(f *framework.Framework, namespace string) {
-		debug.DumpAllNamespaceInfo(f.ClientSet, namespace)
+	f.DumpAllNamespaceInfo = func(ctx context.Context, f *framework.Framework, namespace string) {
+		debug.DumpAllNamespaceInfo(context.TODO(), f.ClientSet, namespace)
 	}
 	return f
 }
@@ -1076,6 +1077,11 @@ func randStr(n int) string {
 func isInterconnectEnabled() bool {
 	val, present := os.LookupEnv("OVN_ENABLE_INTERCONNECT")
 	return present && val == "true"
+}
+
+func isLocalGWModeEnabled() bool {
+	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
+	return present && val == "local"
 }
 
 func singleNodePerZone() bool {

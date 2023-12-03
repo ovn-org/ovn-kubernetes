@@ -2,8 +2,9 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/network-policy-api/pull/106
-    policy.networking.k8s.io/bundle-version: v0.1.0
+    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/network-policy-api/pull/135
+    policy.networking.k8s.io/bundle-version: v0.1.1
+    policy.networking.k8s.io/channel: experimental
   creationTimestamp: null
   name: baselineadminnetworkpolicies.policy.networking.k8s.io
 spec:
@@ -43,30 +44,31 @@ spec:
             description: Specification of the desired behavior of BaselineAdminNetworkPolicy.
             properties:
               egress:
-                description: Egress is the list of Egress rules to be applied to the
-                  selected pods if they are not matched by any AdminNetworkPolicy
+                description: "Egress is the list of Egress rules to be applied to
+                  the selected pods if they are not matched by any AdminNetworkPolicy
                   or NetworkPolicy rules. A total of 100 Egress rules will be allowed
                   in each BANP instance. The relative precedence of egress rules within
                   a single BANP object will be determined by the order in which the
                   rule is written. Thus, a rule that appears at the top of the egress
                   rules would take the highest precedence. BANPs with no egress rules
-                  do not affect egress traffic.
+                  do not affect egress traffic. \n Support: Core"
                 items:
                   description: BaselineAdminNetworkPolicyEgressRule describes an action
                     to take on a particular set of traffic originating from pods selected
                     by a BaselineAdminNetworkPolicy's Subject field.
                   properties:
                     action:
-                      description: 'Action specifies the effect this rule will have
+                      description: "Action specifies the effect this rule will have
                         on matching traffic. Currently the following actions are supported:
                         Allow: allows the selected traffic Deny: denies the selected
-                        traffic'
+                        traffic \n Support: Core"
                       type: string
                     name:
-                      description: Name is an identifier for this rule, that may be
-                        no more than 100 characters in length. This field should be
-                        used by the implementation to help improve observability,
+                      description: "Name is an identifier for this rule, that may
+                        be no more than 100 characters in length. This field should
+                        be used by the implementation to help improve observability,
                         readability and error-reporting for any applied BaselineAdminNetworkPolicies.
+                        \n Support: Core"
                       maxLength: 100
                       type: string
                     ports:
@@ -81,51 +83,53 @@ spec:
                         minProperties: 1
                         properties:
                           namedPort:
-                            description: NamedPort selects a port on a pod(s) based
-                              on name.
+                            description: "NamedPort selects a port on a pod(s) based
+                              on name. \n Support: Extended \n <network-policy-api:experimental>"
                             type: string
                           portNumber:
-                            description: Port selects a port on a pod(s) based on
-                              number.
+                            description: "Port selects a port on a pod(s) based on
+                              number. \n Support: Core"
                             properties:
                               port:
-                                description: Number defines a network port value.
+                                description: "Number defines a network port value.
+                                  \n Support: Core"
                                 format: int32
                                 maximum: 65535
                                 minimum: 1
                                 type: integer
                               protocol:
                                 default: TCP
-                                description: Protocol is the network protocol (TCP,
+                                description: "Protocol is the network protocol (TCP,
                                   UDP, or SCTP) which traffic must match. If not specified,
-                                  this field defaults to TCP.
+                                  this field defaults to TCP. \n Support: Core"
                                 type: string
                             required:
                             - port
                             - protocol
                             type: object
                           portRange:
-                            description: PortRange selects a port range on a pod(s)
-                              based on provided start and end values.
+                            description: "PortRange selects a port range on a pod(s)
+                              based on provided start and end values. \n Support:
+                              Core"
                             properties:
                               end:
-                                description: End defines a network port that is the
+                                description: "End defines a network port that is the
                                   end of a port range, the End value must be greater
-                                  than Start.
+                                  than Start. \n Support: Core"
                                 format: int32
                                 maximum: 65535
                                 minimum: 1
                                 type: integer
                               protocol:
                                 default: TCP
-                                description: Protocol is the network protocol (TCP,
+                                description: "Protocol is the network protocol (TCP,
                                   UDP, or SCTP) which traffic must match. If not specified,
-                                  this field defaults to TCP.
+                                  this field defaults to TCP. \n Support: Core"
                                 type: string
                               start:
-                                description: Start defines a network port that is
+                                description: "Start defines a network port that is
                                   the start of a port range, the Start value must
-                                  be less than End.
+                                  be less than End. \n Support: Core"
                                 format: int32
                                 maximum: 65535
                                 minimum: 1
@@ -138,11 +142,11 @@ spec:
                       maxItems: 100
                       type: array
                     to:
-                      description: To is the list of destinations whose traffic this
+                      description: "To is the list of destinations whose traffic this
                         rule applies to. If any AdminNetworkPolicyPeer matches the
                         destination of outgoing traffic then the specified action
                         is applied. This field must be defined and contain at least
-                        one item.
+                        one item. \n Support: Core"
                       items:
                         description: AdminNetworkPolicyPeer defines an in-cluster
                           peer to allow traffic to/from. Exactly one of the selector
@@ -153,16 +157,16 @@ spec:
                         minProperties: 1
                         properties:
                           namespaces:
-                            description: Namespaces defines a way to select a set
-                              of Namespaces.
+                            description: "Namespaces defines a way to select a set
+                              of Namespaces. \n Support: Core"
                             maxProperties: 1
                             minProperties: 1
                             properties:
                               namespaceSelector:
-                                description: NamespaceSelector is a labelSelector
+                                description: "NamespaceSelector is a labelSelector
                                   used to select Namespaces, This field follows standard
                                   label selector semantics; if present but empty,
-                                  it selects all Namespaces.
+                                  it selects all Namespaces. \n Support: Core"
                                 properties:
                                   matchExpressions:
                                     description: matchExpressions is a list of label
@@ -210,44 +214,47 @@ spec:
                                 type: object
                                 x-kubernetes-map-type: atomic
                               notSameLabels:
-                                description: NotSameLabels is used to select a set
+                                description: "NotSameLabels is used to select a set
                                   of Namespaces that do not have certain values for
                                   a set of label(s). To be selected a Namespace must
                                   have all of the labels defined in NotSameLabels,
                                   AND at least one of them must have different values
                                   than the subject of this policy. If NotSameLabels
-                                  is empty then nothing is selected.
+                                  is empty then nothing is selected. \n Support: Extended
+                                  \n <network-policy-api:experimental>"
                                 items:
                                   type: string
                                 maxItems: 100
                                 type: array
                               sameLabels:
-                                description: SameLabels is used to select a set of
+                                description: "SameLabels is used to select a set of
                                   Namespaces that share the same values for a set
                                   of labels. To be selected a Namespace must have
                                   all of the labels defined in SameLabels, AND they
                                   must all have the same value as the subject of this
                                   policy. If Samelabels is Empty then nothing is selected.
+                                  \n Support: Extended \n <network-policy-api:experimental>"
                                 items:
                                   type: string
                                 maxItems: 100
                                 type: array
                             type: object
                           pods:
-                            description: Pods defines a way to select a set of pods
-                              in in a set of namespaces.
+                            description: "Pods defines a way to select a set of pods
+                              in in a set of namespaces. \n Support: Core"
                             properties:
                               namespaces:
-                                description: Namespaces is used to select a set of
-                                  Namespaces.
+                                description: "Namespaces is used to select a set of
+                                  Namespaces. \n Support: Core"
                                 maxProperties: 1
                                 minProperties: 1
                                 properties:
                                   namespaceSelector:
-                                    description: NamespaceSelector is a labelSelector
+                                    description: "NamespaceSelector is a labelSelector
                                       used to select Namespaces, This field follows
                                       standard label selector semantics; if present
-                                      but empty, it selects all Namespaces.
+                                      but empty, it selects all Namespaces. \n Support:
+                                      Core"
                                     properties:
                                       matchExpressions:
                                         description: matchExpressions is a list of
@@ -298,35 +305,37 @@ spec:
                                     type: object
                                     x-kubernetes-map-type: atomic
                                   notSameLabels:
-                                    description: NotSameLabels is used to select a
-                                      set of Namespaces that do not have certain values
-                                      for a set of label(s). To be selected a Namespace
-                                      must have all of the labels defined in NotSameLabels,
-                                      AND at least one of them must have different
-                                      values than the subject of this policy. If NotSameLabels
-                                      is empty then nothing is selected.
+                                    description: "NotSameLabels is used to select
+                                      a set of Namespaces that do not have certain
+                                      values for a set of label(s). To be selected
+                                      a Namespace must have all of the labels defined
+                                      in NotSameLabels, AND at least one of them must
+                                      have different values than the subject of this
+                                      policy. If NotSameLabels is empty then nothing
+                                      is selected. \n Support: Extended \n <network-policy-api:experimental>"
                                     items:
                                       type: string
                                     maxItems: 100
                                     type: array
                                   sameLabels:
-                                    description: SameLabels is used to select a set
+                                    description: "SameLabels is used to select a set
                                       of Namespaces that share the same values for
                                       a set of labels. To be selected a Namespace
                                       must have all of the labels defined in SameLabels,
                                       AND they must all have the same value as the
                                       subject of this policy. If Samelabels is Empty
-                                      then nothing is selected.
+                                      then nothing is selected. \n Support: Extended
+                                      \n <network-policy-api:experimental>"
                                     items:
                                       type: string
                                     maxItems: 100
                                     type: array
                                 type: object
                               podSelector:
-                                description: PodSelector is a labelSelector used to
-                                  select Pods, This field is NOT optional, follows
+                                description: "PodSelector is a labelSelector used
+                                  to select Pods, This field is NOT optional, follows
                                   standard label selector semantics and if present
-                                  but empty, it selects all Pods.
+                                  but empty, it selects all Pods. \n Support: Core"
                                 properties:
                                   matchExpressions:
                                     description: matchExpressions is a list of label
@@ -378,6 +387,7 @@ spec:
                             - podSelector
                             type: object
                         type: object
+                      maxItems: 100
                       minItems: 1
                       type: array
                   required:
@@ -387,30 +397,31 @@ spec:
                 maxItems: 100
                 type: array
               ingress:
-                description: Ingress is the list of Ingress rules to be applied to
+                description: "Ingress is the list of Ingress rules to be applied to
                   the selected pods if they are not matched by any AdminNetworkPolicy
                   or NetworkPolicy rules. A total of 100 Ingress rules will be allowed
                   in each BANP instance. The relative precedence of ingress rules
                   within a single BANP object will be determined by the order in which
                   the rule is written. Thus, a rule that appears at the top of the
                   ingress rules would take the highest precedence. BANPs with no ingress
-                  rules do not affect ingress traffic.
+                  rules do not affect ingress traffic. \n Support: Core"
                 items:
                   description: BaselineAdminNetworkPolicyIngressRule describes an
                     action to take on a particular set of traffic destined for pods
                     selected by a BaselineAdminNetworkPolicy's Subject field.
                   properties:
                     action:
-                      description: 'Action specifies the effect this rule will have
+                      description: "Action specifies the effect this rule will have
                         on matching traffic. Currently the following actions are supported:
                         Allow: allows the selected traffic Deny: denies the selected
-                        traffic'
+                        traffic \n Support: Core"
                       type: string
                     from:
-                      description: From is the list of sources whose traffic this
+                      description: "From is the list of sources whose traffic this
                         rule applies to. If any AdminNetworkPolicyPeer matches the
                         source of incoming traffic then the specified action is applied.
                         This field must be defined and contain at least one item.
+                        \n Support: Core"
                       items:
                         description: AdminNetworkPolicyPeer defines an in-cluster
                           peer to allow traffic to/from. Exactly one of the selector
@@ -421,16 +432,16 @@ spec:
                         minProperties: 1
                         properties:
                           namespaces:
-                            description: Namespaces defines a way to select a set
-                              of Namespaces.
+                            description: "Namespaces defines a way to select a set
+                              of Namespaces. \n Support: Core"
                             maxProperties: 1
                             minProperties: 1
                             properties:
                               namespaceSelector:
-                                description: NamespaceSelector is a labelSelector
+                                description: "NamespaceSelector is a labelSelector
                                   used to select Namespaces, This field follows standard
                                   label selector semantics; if present but empty,
-                                  it selects all Namespaces.
+                                  it selects all Namespaces. \n Support: Core"
                                 properties:
                                   matchExpressions:
                                     description: matchExpressions is a list of label
@@ -478,44 +489,47 @@ spec:
                                 type: object
                                 x-kubernetes-map-type: atomic
                               notSameLabels:
-                                description: NotSameLabels is used to select a set
+                                description: "NotSameLabels is used to select a set
                                   of Namespaces that do not have certain values for
                                   a set of label(s). To be selected a Namespace must
                                   have all of the labels defined in NotSameLabels,
                                   AND at least one of them must have different values
                                   than the subject of this policy. If NotSameLabels
-                                  is empty then nothing is selected.
+                                  is empty then nothing is selected. \n Support: Extended
+                                  \n <network-policy-api:experimental>"
                                 items:
                                   type: string
                                 maxItems: 100
                                 type: array
                               sameLabels:
-                                description: SameLabels is used to select a set of
+                                description: "SameLabels is used to select a set of
                                   Namespaces that share the same values for a set
                                   of labels. To be selected a Namespace must have
                                   all of the labels defined in SameLabels, AND they
                                   must all have the same value as the subject of this
                                   policy. If Samelabels is Empty then nothing is selected.
+                                  \n Support: Extended \n <network-policy-api:experimental>"
                                 items:
                                   type: string
                                 maxItems: 100
                                 type: array
                             type: object
                           pods:
-                            description: Pods defines a way to select a set of pods
-                              in in a set of namespaces.
+                            description: "Pods defines a way to select a set of pods
+                              in in a set of namespaces. \n Support: Core"
                             properties:
                               namespaces:
-                                description: Namespaces is used to select a set of
-                                  Namespaces.
+                                description: "Namespaces is used to select a set of
+                                  Namespaces. \n Support: Core"
                                 maxProperties: 1
                                 minProperties: 1
                                 properties:
                                   namespaceSelector:
-                                    description: NamespaceSelector is a labelSelector
+                                    description: "NamespaceSelector is a labelSelector
                                       used to select Namespaces, This field follows
                                       standard label selector semantics; if present
-                                      but empty, it selects all Namespaces.
+                                      but empty, it selects all Namespaces. \n Support:
+                                      Core"
                                     properties:
                                       matchExpressions:
                                         description: matchExpressions is a list of
@@ -566,35 +580,37 @@ spec:
                                     type: object
                                     x-kubernetes-map-type: atomic
                                   notSameLabels:
-                                    description: NotSameLabels is used to select a
-                                      set of Namespaces that do not have certain values
-                                      for a set of label(s). To be selected a Namespace
-                                      must have all of the labels defined in NotSameLabels,
-                                      AND at least one of them must have different
-                                      values than the subject of this policy. If NotSameLabels
-                                      is empty then nothing is selected.
+                                    description: "NotSameLabels is used to select
+                                      a set of Namespaces that do not have certain
+                                      values for a set of label(s). To be selected
+                                      a Namespace must have all of the labels defined
+                                      in NotSameLabels, AND at least one of them must
+                                      have different values than the subject of this
+                                      policy. If NotSameLabels is empty then nothing
+                                      is selected. \n Support: Extended \n <network-policy-api:experimental>"
                                     items:
                                       type: string
                                     maxItems: 100
                                     type: array
                                   sameLabels:
-                                    description: SameLabels is used to select a set
+                                    description: "SameLabels is used to select a set
                                       of Namespaces that share the same values for
                                       a set of labels. To be selected a Namespace
                                       must have all of the labels defined in SameLabels,
                                       AND they must all have the same value as the
                                       subject of this policy. If Samelabels is Empty
-                                      then nothing is selected.
+                                      then nothing is selected. \n Support: Extended
+                                      \n <network-policy-api:experimental>"
                                     items:
                                       type: string
                                     maxItems: 100
                                     type: array
                                 type: object
                               podSelector:
-                                description: PodSelector is a labelSelector used to
-                                  select Pods, This field is NOT optional, follows
+                                description: "PodSelector is a labelSelector used
+                                  to select Pods, This field is NOT optional, follows
                                   standard label selector semantics and if present
-                                  but empty, it selects all Pods.
+                                  but empty, it selects all Pods. \n Support: Core"
                                 properties:
                                   matchExpressions:
                                     description: matchExpressions is a list of label
@@ -646,22 +662,24 @@ spec:
                             - podSelector
                             type: object
                         type: object
+                      maxItems: 100
                       minItems: 1
                       type: array
                     name:
-                      description: Name is an identifier for this rule, that may be
-                        no more than 100 characters in length. This field should be
-                        used by the implementation to help improve observability,
+                      description: "Name is an identifier for this rule, that may
+                        be no more than 100 characters in length. This field should
+                        be used by the implementation to help improve observability,
                         readability and error-reporting for any applied BaselineAdminNetworkPolicies.
+                        \n Support: Core"
                       maxLength: 100
                       type: string
                     ports:
-                      description: Ports allows for matching traffic based on port
+                      description: "Ports allows for matching traffic based on port
                         and protocols. This field is a list of ports which should
                         be matched on the pods selected for this policy i.e the subject
                         of the policy. So it matches on the destination port for the
                         ingress traffic. If Ports is not set then the rule does not
-                        filter traffic via port.
+                        filter traffic via port. \n Support: Core"
                       items:
                         description: AdminNetworkPolicyPort describes how to select
                           network ports on pod(s). Exactly one field must be set.
@@ -669,51 +687,53 @@ spec:
                         minProperties: 1
                         properties:
                           namedPort:
-                            description: NamedPort selects a port on a pod(s) based
-                              on name.
+                            description: "NamedPort selects a port on a pod(s) based
+                              on name. \n Support: Extended \n <network-policy-api:experimental>"
                             type: string
                           portNumber:
-                            description: Port selects a port on a pod(s) based on
-                              number.
+                            description: "Port selects a port on a pod(s) based on
+                              number. \n Support: Core"
                             properties:
                               port:
-                                description: Number defines a network port value.
+                                description: "Number defines a network port value.
+                                  \n Support: Core"
                                 format: int32
                                 maximum: 65535
                                 minimum: 1
                                 type: integer
                               protocol:
                                 default: TCP
-                                description: Protocol is the network protocol (TCP,
+                                description: "Protocol is the network protocol (TCP,
                                   UDP, or SCTP) which traffic must match. If not specified,
-                                  this field defaults to TCP.
+                                  this field defaults to TCP. \n Support: Core"
                                 type: string
                             required:
                             - port
                             - protocol
                             type: object
                           portRange:
-                            description: PortRange selects a port range on a pod(s)
-                              based on provided start and end values.
+                            description: "PortRange selects a port range on a pod(s)
+                              based on provided start and end values. \n Support:
+                              Core"
                             properties:
                               end:
-                                description: End defines a network port that is the
+                                description: "End defines a network port that is the
                                   end of a port range, the End value must be greater
-                                  than Start.
+                                  than Start. \n Support: Core"
                                 format: int32
                                 maximum: 65535
                                 minimum: 1
                                 type: integer
                               protocol:
                                 default: TCP
-                                description: Protocol is the network protocol (TCP,
+                                description: "Protocol is the network protocol (TCP,
                                   UDP, or SCTP) which traffic must match. If not specified,
-                                  this field defaults to TCP.
+                                  this field defaults to TCP. \n Support: Core"
                                 type: string
                               start:
-                                description: Start defines a network port that is
+                                description: "Start defines a network port that is
                                   the start of a port range, the Start value must
-                                  be less than End.
+                                  be less than End. \n Support: Core"
                                 format: int32
                                 maximum: 65535
                                 minimum: 1
@@ -732,8 +752,8 @@ spec:
                 maxItems: 100
                 type: array
               subject:
-                description: Subject defines the pods to which this BaselineAdminNetworkPolicy
-                  applies.
+                description: "Subject defines the pods to which this BaselineAdminNetworkPolicy
+                  applies. \n Support: Core"
                 maxProperties: 1
                 minProperties: 1
                 properties:

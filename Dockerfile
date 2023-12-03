@@ -56,6 +56,7 @@ COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_o
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/windows/hybrid-overlay-node.exe /root/windows/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovndbchecker /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-trace /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/hybrid-overlay-node /usr/bin/
 
 # Copy RHEL-8 and RHEL-9 shim binaries where the CNO's ovnkube-node container startup script can find them
 RUN mkdir -p /usr/libexec/cni/rhel9

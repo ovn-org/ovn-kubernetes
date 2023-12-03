@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
@@ -32,7 +33,6 @@ type ClusterManager struct {
 	defaultNetClusterController *networkClusterController
 	zoneClusterController       *zoneClusterController
 	wf                          *factory.WatchFactory
-	wg                          *sync.WaitGroup
 	secondaryNetClusterManager  *secondaryNetworkClusterManager
 	// Controller used for programming node allocation for egress IP
 	// The OVN DB setup is handled by egressIPZoneController that runs in ovnkube-controller
@@ -43,7 +43,8 @@ type ClusterManager struct {
 
 	// unique identity for clusterManager running on different ovnkube-cluster-manager instance,
 	// used for leader election
-	identity string
+	identity      string
+	statusManager *status_manager.StatusManager
 }
 
 // NewClusterManager creates a new cluster manager to manage the cluster nodes.
@@ -61,10 +62,10 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		client:                      ovnClient.KubeClient,
 		defaultNetClusterController: defaultNetClusterController,
 		zoneClusterController:       zoneClusterController,
-		wg:                          wg,
 		wf:                          wf,
 		recorder:                    recorder,
 		identity:                    identity,
+		statusManager:               status_manager.NewStatusManager(wf, ovnClient),
 	}
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
@@ -145,6 +146,11 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 			return err
 		}
 	}
+
+	if err := cm.statusManager.Start(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -162,4 +168,5 @@ func (cm *ClusterManager) Stop() {
 	if config.OVNKubernetesFeature.EnableEgressService {
 		cm.egressServiceController.Stop()
 	}
+	cm.statusManager.Stop()
 }

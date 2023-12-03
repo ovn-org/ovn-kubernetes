@@ -19,9 +19,12 @@ package v1
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 	"time"
 
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
+	adminpolicybasedroutev1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/applyconfiguration/adminpolicybasedroute/v1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -46,6 +49,8 @@ type AdminPolicyBasedExternalRouteInterface interface {
 	List(ctx context.Context, opts metav1.ListOptions) (*v1.AdminPolicyBasedExternalRouteList, error)
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.AdminPolicyBasedExternalRoute, err error)
+	Apply(ctx context.Context, adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRouteApplyConfiguration, opts metav1.ApplyOptions) (result *v1.AdminPolicyBasedExternalRoute, err error)
+	ApplyStatus(ctx context.Context, adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRouteApplyConfiguration, opts metav1.ApplyOptions) (result *v1.AdminPolicyBasedExternalRoute, err error)
 	AdminPolicyBasedExternalRouteExpansion
 }
 
@@ -176,6 +181,60 @@ func (c *adminPolicyBasedExternalRoutes) Patch(ctx context.Context, name string,
 		Name(name).
 		SubResource(subresources...).
 		VersionedParams(&opts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied adminPolicyBasedExternalRoute.
+func (c *adminPolicyBasedExternalRoutes) Apply(ctx context.Context, adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRouteApplyConfiguration, opts metav1.ApplyOptions) (result *v1.AdminPolicyBasedExternalRoute, err error) {
+	if adminPolicyBasedExternalRoute == nil {
+		return nil, fmt.Errorf("adminPolicyBasedExternalRoute provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(adminPolicyBasedExternalRoute)
+	if err != nil {
+		return nil, err
+	}
+	name := adminPolicyBasedExternalRoute.Name
+	if name == nil {
+		return nil, fmt.Errorf("adminPolicyBasedExternalRoute.Name must be provided to Apply")
+	}
+	result = &v1.AdminPolicyBasedExternalRoute{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Resource("adminpolicybasedexternalroutes").
+		Name(*name).
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *adminPolicyBasedExternalRoutes) ApplyStatus(ctx context.Context, adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRouteApplyConfiguration, opts metav1.ApplyOptions) (result *v1.AdminPolicyBasedExternalRoute, err error) {
+	if adminPolicyBasedExternalRoute == nil {
+		return nil, fmt.Errorf("adminPolicyBasedExternalRoute provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(adminPolicyBasedExternalRoute)
+	if err != nil {
+		return nil, err
+	}
+
+	name := adminPolicyBasedExternalRoute.Name
+	if name == nil {
+		return nil, fmt.Errorf("adminPolicyBasedExternalRoute.Name must be provided to Apply")
+	}
+
+	result = &v1.AdminPolicyBasedExternalRoute{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Resource("adminpolicybasedexternalroutes").
+		Name(*name).
+		SubResource("status").
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
 		Body(data).
 		Do(ctx).
 		Into(result)

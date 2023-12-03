@@ -3,6 +3,7 @@ package apbroute
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -19,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/klog/v2"
 )
 
 func newPod(podName, namespace, podIP string, labels map[string]string) *corev1.Pod {
@@ -143,7 +146,8 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 		iFactory.NodeCoreInformer().Lister(),
 		nbClient,
 		addressset.NewFakeAddressSetFactory(controllerName),
-		controllerName)
+		controllerName,
+		"single-zone")
 	Expect(err).NotTo(HaveOccurred())
 
 	if nbZoneFailed {
@@ -447,11 +451,7 @@ var _ = Describe("OVN External Gateway policy", func() {
 			_, err = fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Create(context.TODO(), staticPolicy2, v1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			Eventually(func() bool {
-				pol, err := fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), staticPolicy2.Name, v1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				return pol.Status.Status == adminpolicybasedrouteapi.FailStatus
-			}).Should(BeTrue())
+			eventuallyCheckAPBRouteStatus(staticPolicy2.Name, true)
 
 			eventuallyExpectNumberOfPolicies(1)
 			eventuallyExpectConfig(policyName1, expectedPolicy1, expectedRefs1)
@@ -517,20 +517,12 @@ var _ = Describe("OVN External Gateway policy", func() {
 			_, err = fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Create(context.TODO(), staticPolicy2, v1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			Eventually(func() bool {
-				pol, err := fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), staticPolicy2.Name, v1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				return pol.Status.Status == adminpolicybasedrouteapi.FailStatus
-			}).Should(BeTrue())
+			eventuallyCheckAPBRouteStatus(staticPolicy2.Name, true)
 			eventuallyExpectNumberOfPolicies(1)
 			eventuallyExpectConfig(policyName1, expectedPolicy1, expectedRefs1)
 
 			deletePolicy(staticPolicy.Name, fakeRouteClient)
-			Eventually(func() bool {
-				pol, err := fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), staticPolicy2.Name, v1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				return pol.Status.Status == adminpolicybasedrouteapi.SuccessStatus
-			}, 5).Should(BeTrue())
+			eventuallyCheckAPBRouteStatus(staticPolicy2.Name, false)
 
 			expectedPolicy2, expectedRefs2 := expectedPolicyStateAndRefs(
 				[]*namespaceWithPods{namespaceTargetWithPod},
@@ -738,19 +730,10 @@ var _ = Describe("OVN External Gateway policy", func() {
 				},
 			}
 			p.Generation++
-			lastUpdate := p.Status.LastTransitionTime
 			_, err = fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Update(context.Background(), p, v1.UpdateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			Eventually(func() v1.Time {
-				// Retrieve the CR and ensure the last update timestamp is different before comparing it against the slice.
-				p, err = fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), staticMultiIPPolicy.Name, v1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				return p.Status.LastTransitionTime
-			}).ShouldNot(Equal(lastUpdate))
-
-			By("Validating the static refernces don't contain the last element")
-
+			By("Validating the static references don't contain the last element")
 			expectedPolicy1, expectedRefs1 = expectedPolicyStateAndRefs(
 				[]*namespaceWithPods{namespaceTarget2WithPod},
 				[]string{"20.10.10.1", "20.10.10.2", "20.10.10.3", "20.10.10.4"},
@@ -821,3 +804,23 @@ var _ = Describe("OVN External Gateway policy", func() {
 		})
 	})
 })
+
+func eventuallyCheckAPBRouteStatus(policyName string, expectFailure bool) {
+	Eventually(func() bool {
+		pol, err := fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), policyName, v1.GetOptions{})
+		if err != nil {
+			klog.Infof("Failed getting policy: %v", err)
+			return false
+		}
+		if len(pol.Status.Messages) != 1 {
+			klog.Infof("Policy has unexpected number of Status.Messages: %v", pol.Status.Messages)
+			return false
+		}
+		// as soon as status is set, it should match expected status, without extra retries
+		if expectFailure {
+			return strings.Contains(pol.Status.Messages[0], types.APBRouteErrorMsg)
+		} else {
+			return !strings.Contains(pol.Status.Messages[0], types.APBRouteErrorMsg)
+		}
+	}, 5).Should(BeTrue())
+}

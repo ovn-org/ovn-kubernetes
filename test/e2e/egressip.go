@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -377,7 +378,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
-		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 3 {
 			framework.Failf("Test requires >= 3 Ready nodes, but there are only %v nodes", len(nodes.Items))
@@ -646,7 +647,7 @@ spec:
 		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to egress1Node node")
 		e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 		framework.Logf("Added egress-assignable label to node %s", egress1Node.name)
-		e2enode.ExpectNodeHasLabel(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+		e2enode.ExpectNodeHasLabel(context.TODO(), f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 		ginkgo.By("1. By setting a secondary IP on non-egress node acting as \"another node\"")
 		var otherDstIP string
@@ -756,7 +757,7 @@ spec:
 		ginkgo.By("9. Add the \"k8s.ovn.org/egress-assignable\" label to egress2Node")
 		e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 		framework.Logf("Added egress-assignable label to node %s", egress2Node.name)
-		e2enode.ExpectNodeHasLabel(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+		e2enode.ExpectNodeHasLabel(context.TODO(), f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 		ginkgo.By("10. Remove the \"k8s.ovn.org/egress-assignable\" label from egress1Node")
 		e2enode.RemoveLabelOffNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable")
@@ -835,7 +836,7 @@ spec:
 		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to egress1Node node")
 		e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 		framework.Logf("Added egress-assignable label to node %s", egress1Node.name)
-		e2enode.ExpectNodeHasLabel(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+		e2enode.ExpectNodeHasLabel(context.TODO(), f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 		podNamespace := f.Namespace
 		podNamespace.Labels = map[string]string{
@@ -960,7 +961,7 @@ spec:
 		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to egress1Node node")
 		e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 		framework.Logf("Added egress-assignable label to node %s", egress1Node.name)
-		e2enode.ExpectNodeHasLabel(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+		e2enode.ExpectNodeHasLabel(context.TODO(), f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 		podNamespace := f.Namespace
 		podNamespace.Labels = map[string]string{
@@ -1185,7 +1186,7 @@ spec:
 		ginkgo.By("13. Mark egress2Node as assignable and egress1Node as unassignable")
 		e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 		framework.Logf("Added egress-assignable label to node %s", egress2Node.name)
-		e2enode.ExpectNodeHasLabel(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+		e2enode.ExpectNodeHasLabel(context.TODO(), f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 		e2enode.RemoveLabelOffNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable")
 		framework.Logf("Removed egress-assignable label from node %s", egress1Node.name)
 

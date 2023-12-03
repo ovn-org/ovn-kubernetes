@@ -51,6 +51,9 @@ type BaselineAdminNetworkPolicyStatus struct {
 // BaselineAdminNetworkPolicy.
 type BaselineAdminNetworkPolicySpec struct {
 	// Subject defines the pods to which this BaselineAdminNetworkPolicy applies.
+	//
+	// Support: Core
+	//
 	Subject AdminNetworkPolicySubject `json:"subject"`
 
 	// Ingress is the list of Ingress rules to be applied to the selected pods
@@ -61,6 +64,9 @@ type BaselineAdminNetworkPolicySpec struct {
 	// Thus, a rule that appears at the top of the ingress rules
 	// would take the highest precedence.
 	// BANPs with no ingress rules do not affect ingress traffic.
+	//
+	// Support: Core
+	//
 	// +optional
 	// +kubebuilder:validation:MaxItems=100
 	Ingress []BaselineAdminNetworkPolicyIngressRule `json:"ingress,omitempty"`
@@ -73,6 +79,9 @@ type BaselineAdminNetworkPolicySpec struct {
 	// Thus, a rule that appears at the top of the egress rules
 	// would take the highest precedence.
 	// BANPs with no egress rules do not affect egress traffic.
+	//
+	// Support: Core
+	//
 	// +optional
 	// +kubebuilder:validation:MaxItems=100
 	Egress []BaselineAdminNetworkPolicyEgressRule `json:"egress,omitempty"`
@@ -86,6 +95,9 @@ type BaselineAdminNetworkPolicyIngressRule struct {
 	// in length. This field should be used by the implementation to help
 	// improve observability, readability and error-reporting for any applied
 	// BaselineAdminNetworkPolicies.
+	//
+	// Support: Core
+	//
 	// +optional
 	// +kubebuilder:validation:MaxLength=100
 	Name string `json:"name,omitempty"`
@@ -94,13 +106,20 @@ type BaselineAdminNetworkPolicyIngressRule struct {
 	// Currently the following actions are supported:
 	// Allow: allows the selected traffic
 	// Deny: denies the selected traffic
+	//
+	// Support: Core
+	//
 	Action BaselineAdminNetworkPolicyRuleAction `json:"action"`
 
 	// From is the list of sources whose traffic this rule applies to.
 	// If any AdminNetworkPolicyPeer matches the source of incoming
 	// traffic then the specified action is applied.
 	// This field must be defined and contain at least one item.
+	//
+	// Support: Core
+	//
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	From []AdminNetworkPolicyPeer `json:"from"`
 
 	// Ports allows for matching traffic based on port and protocols.
@@ -108,6 +127,9 @@ type BaselineAdminNetworkPolicyIngressRule struct {
 	// the pods selected for this policy i.e the subject of the policy.
 	// So it matches on the destination port for the ingress traffic.
 	// If Ports is not set then the rule does not filter traffic via port.
+	//
+	// Support: Core
+	//
 	// +optional
 	// +kubebuilder:validation:MaxItems=100
 	Ports *[]AdminNetworkPolicyPort `json:"ports,omitempty"`
@@ -121,6 +143,9 @@ type BaselineAdminNetworkPolicyEgressRule struct {
 	// in length. This field should be used by the implementation to help
 	// improve observability, readability and error-reporting for any applied
 	// BaselineAdminNetworkPolicies.
+	//
+	// Support: Core
+	//
 	// +optional
 	// +kubebuilder:validation:MaxLength=100
 	Name string `json:"name,omitempty"`
@@ -129,6 +154,9 @@ type BaselineAdminNetworkPolicyEgressRule struct {
 	// Currently the following actions are supported:
 	// Allow: allows the selected traffic
 	// Deny: denies the selected traffic
+	//
+	// Support: Core
+	//
 	Action BaselineAdminNetworkPolicyRuleAction `json:"action"`
 
 	// To is the list of destinations whose traffic this rule applies to.
@@ -136,6 +164,10 @@ type BaselineAdminNetworkPolicyEgressRule struct {
 	// traffic then the specified action is applied.
 	// This field must be defined and contain at least one item.
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
+	//
+	// Support: Core
+	//
 	To []AdminNetworkPolicyPeer `json:"to"`
 
 	// Ports allows for matching traffic based on port and protocols.
@@ -148,6 +180,9 @@ type BaselineAdminNetworkPolicyEgressRule struct {
 
 // BaselineAdminNetworkPolicyRuleAction string describes the BaselineAdminNetworkPolicy
 // action type.
+//
+// Support: Core
+//
 // +enum
 type BaselineAdminNetworkPolicyRuleAction string
 

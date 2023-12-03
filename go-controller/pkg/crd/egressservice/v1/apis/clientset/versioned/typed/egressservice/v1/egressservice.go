@@ -19,9 +19,12 @@ package v1
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 	"time"
 
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
+	egressservicev1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/applyconfiguration/egressservice/v1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -46,6 +49,8 @@ type EgressServiceInterface interface {
 	List(ctx context.Context, opts metav1.ListOptions) (*v1.EgressServiceList, error)
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.EgressService, err error)
+	Apply(ctx context.Context, egressService *egressservicev1.EgressServiceApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressService, err error)
+	ApplyStatus(ctx context.Context, egressService *egressservicev1.EgressServiceApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressService, err error)
 	EgressServiceExpansion
 }
 
@@ -187,6 +192,62 @@ func (c *egressServices) Patch(ctx context.Context, name string, pt types.PatchT
 		Name(name).
 		SubResource(subresources...).
 		VersionedParams(&opts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied egressService.
+func (c *egressServices) Apply(ctx context.Context, egressService *egressservicev1.EgressServiceApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressService, err error) {
+	if egressService == nil {
+		return nil, fmt.Errorf("egressService provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(egressService)
+	if err != nil {
+		return nil, err
+	}
+	name := egressService.Name
+	if name == nil {
+		return nil, fmt.Errorf("egressService.Name must be provided to Apply")
+	}
+	result = &v1.EgressService{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Namespace(c.ns).
+		Resource("egressservices").
+		Name(*name).
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *egressServices) ApplyStatus(ctx context.Context, egressService *egressservicev1.EgressServiceApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressService, err error) {
+	if egressService == nil {
+		return nil, fmt.Errorf("egressService provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(egressService)
+	if err != nil {
+		return nil, err
+	}
+
+	name := egressService.Name
+	if name == nil {
+		return nil, fmt.Errorf("egressService.Name must be provided to Apply")
+	}
+
+	result = &v1.EgressService{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Namespace(c.ns).
+		Resource("egressservices").
+		Name(*name).
+		SubResource("status").
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
 		Body(data).
 		Do(ctx).
 		Into(result)

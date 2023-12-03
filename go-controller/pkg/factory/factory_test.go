@@ -355,10 +355,11 @@ var _ = Describe("Watch Factory Operations", func() {
 			EgressServiceClient:  egressServiceFakeClient,
 		}
 		ovnCMClientset = &util.OVNClusterManagerClientset{
-			KubeClient:          fakeClient,
-			EgressIPClient:      egressIPFakeClient,
-			CloudNetworkClient:  cloudNetworkFakeClient,
-			EgressServiceClient: egressServiceFakeClient,
+			KubeClient:           fakeClient,
+			EgressIPClient:       egressIPFakeClient,
+			CloudNetworkClient:   cloudNetworkFakeClient,
+			EgressServiceClient:  egressServiceFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
 		}
 
 		pods = make([]*v1.Pod, 0)

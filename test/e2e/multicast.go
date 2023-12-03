@@ -41,7 +41,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 		cs = fr.ClientSet
 		ns = fr.Namespace.Name
 
-		nodes, err := e2enode.GetBoundedReadySchedulableNodes(cs, 2)
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 2 {
 			e2eskipper.Skipf(
@@ -90,7 +90,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 		cmd := []string{"/bin/sh", "-c", iperf}
 		clientPod := newAgnhostPod(fr.Namespace.Name, mcastSource, cmd...)
 		clientPod.Spec.NodeName = clientNodeInfo.name
-		e2epod.NewPodClient(fr).CreateSync(clientPod)
+		e2epod.NewPodClient(fr).CreateSync(context.TODO(), clientPod)
 
 		// Start a multicast listener on the same groups and verify it received the traffic (iperf server is the multicast listener)
 		// join multicast group (-B 224.3.3.3), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
@@ -102,7 +102,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 		cmd = []string{"/bin/sh", "-c", iperf}
 		mcastServerPod1 := newAgnhostPod(fr.Namespace.Name, mcastServer1, cmd...)
 		mcastServerPod1.Spec.NodeName = serverNodeInfo.name
-		e2epod.NewPodClient(fr).CreateSync(mcastServerPod1)
+		e2epod.NewPodClient(fr).CreateSync(context.TODO(), mcastServerPod1)
 
 		// Start a multicast listener on on other group and verify it does not receive the traffic (iperf server is the multicast listener)
 		// join multicast group (-B 224.4.4.4), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
@@ -114,17 +114,17 @@ var _ = ginkgo.Describe("Multicast", func() {
 		cmd = []string{"/bin/sh", "-c", iperf}
 		mcastServerPod2 := newAgnhostPod(fr.Namespace.Name, mcastServer2, cmd...)
 		mcastServerPod2.Spec.NodeName = serverNodeInfo.name
-		e2epod.NewPodClient(fr).CreateSync(mcastServerPod2)
+		e2epod.NewPodClient(fr).CreateSync(context.TODO(), mcastServerPod2)
 
 		ginkgo.By("checking if pod server1 received multicast traffic")
 		gomega.Eventually(func() (string, error) {
-			return e2epod.GetPodLogs(cs, ns, mcastServer1, mcastServer1)
+			return e2epod.GetPodLogs(context.TODO(), cs, ns, mcastServer1, mcastServer1)
 		},
 			30*time.Second, 1*time.Second).Should(gomega.ContainSubstring("connected"))
 
 		ginkgo.By("checking if pod server2 does not received multicast traffic")
 		gomega.Eventually(func() (string, error) {
-			return e2epod.GetPodLogs(cs, ns, mcastServer2, mcastServer2)
+			return e2epod.GetPodLogs(context.TODO(), cs, ns, mcastServer2, mcastServer2)
 		},
 			30*time.Second, 1*time.Second).ShouldNot(gomega.ContainSubstring("connected"))
 	})
