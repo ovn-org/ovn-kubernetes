@@ -1531,7 +1531,7 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 		if err != nil {
 			return fmt.Errorf("unable to create logical router policy ops, err: %v", err)
 		}
-		ops, err = e.deleteExternalGWPodSNATOps(ops, pod, podIPs, status)
+		ops, err = e.deleteExternalGWPodSNATOps(ops, pod, podIPs, status, isOVNManagedNetwork)
 		if err != nil {
 			return err
 		}
@@ -1675,8 +1675,8 @@ func (e *egressIPZoneController) addExternalGWPodSNATOps(ops []ovsdb.Operation, 
 }
 
 // deleteExternalGWPodSNATOps creates ops for the required external GW teardown for the given pod
-func (e *egressIPZoneController) deleteExternalGWPodSNATOps(ops []ovsdb.Operation, pod *kapi.Pod, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem) ([]ovsdb.Operation, error) {
-	if config.Gateway.DisableSNATMultipleGWs && status.Node == pod.Spec.NodeName {
+func (e *egressIPZoneController) deleteExternalGWPodSNATOps(ops []ovsdb.Operation, pod *kapi.Pod, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem, isOVNManagedNetwork bool) ([]ovsdb.Operation, error) {
+	if config.Gateway.DisableSNATMultipleGWs && status.Node == pod.Spec.NodeName && isOVNManagedNetwork {
 		// remove snats to->nodeIP (from the node where pod exists if that node is also serving
 		// as an egress node for this pod) for these podIPs before adding the snat to->egressIP
 		extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)
@@ -1689,7 +1689,7 @@ func (e *egressIPZoneController) deleteExternalGWPodSNATOps(ops []ovsdb.Operatio
 		}
 	} else if config.Gateway.DisableSNATMultipleGWs {
 		// it means the pod host is different from the egressNode that is managing the pod
-		klog.V(5).Infof("Not deleting SNAT on %s since egress node managing %s/%s is %s", pod.Spec.NodeName, pod.Namespace, pod.Name, status.Node)
+		klog.V(5).Infof("Not deleting SNAT on %s since egress node managing %s/%s is %s or Egress IP is not SNAT'd by OVN", pod.Spec.NodeName, pod.Namespace, pod.Name, status.Node)
 	}
 	return ops, nil
 }
