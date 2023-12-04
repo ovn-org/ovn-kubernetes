@@ -1758,7 +1758,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				setupIperf3Client := func(container, address string, port int) {
 					// note iperf3 even when using udp also spawns tcp connection first; so we indirectly also have the tcp connection when using "-u" flag
 					cmd := []string{containerRuntime, "exec", container, "iperf3", "-u", "-c", address, "-p", fmt.Sprintf("%d", port), "-b", "1M", "-i", "1", "-t", "3", "&"}
-					klog.Infof("run command %+v", cmd)
+					klog.Infof("Run command %+v", cmd)
 					_, err := runCommand(cmd...)
 					framework.ExpectNoError(err, "failed to setup iperf3 client for %s", container)
 				}
