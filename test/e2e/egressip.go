@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -168,6 +171,8 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) Disable(nodeName string) {
 var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	const (
 		servicePort          int32  = 9999
+		echoServerPodPortMin        = 9900
+		echoServerPodPortMax        = 9999
 		podHTTPPort          string = "8080"
 		egressIPName         string = "egressip"
 		egressIPName2        string = "egressip-2"
@@ -1590,5 +1595,142 @@ spec:
 		servicePortAsString := strconv.Itoa(int(servicePort))
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name, fmt.Sprintf("http://%s/hostname", net.JoinHostPort(serviceIP, servicePortAsString)), []string{pod1Name, pod2Name}))
 		framework.ExpectNoError(err, "8. Check connectivity to the service IP and verify that it works, failed, err %v", err)
+	})
+
+	// In SGW mode we don't support doing IP fragmentation when routing for most
+	// of the flows because they don't go through the host kernel and OVN/OVS
+	// does not support fragmentation. This is by design.
+	// In LGW mode we support doing IP fragmentation when routing for the
+	// opposite reason. However, egress IP is an exception since it doesn't go
+	// through the host network stack even in LGW mode. To support fragmentation
+	// for this type of flow we need to explicitly send replies to egress IP
+	// traffic that requires fragmentation to the host kernel and this test
+	// verifies it.
+	// This test is specific to IPv4 LGW mode.
+	ginkgo.It("of replies to egress IP packets that require fragmentation [LGW][IPv4]", func() {
+		usedEgressNodeAvailabilityHandler = &egressNodeAvailabilityHandlerViaLabel{f}
+
+		ginkgo.By("Setting a node as available for egress")
+		usedEgressNodeAvailabilityHandler.Enable(egress1Node.name)
+
+		podNamespace := f.Namespace
+		podNamespace.Labels = map[string]string{
+			"name": f.Namespace.Name,
+		}
+		updateNamespace(f, podNamespace)
+
+		ginkgo.By("Creating an EgressIP object with one egress IPs defined")
+		// Assign the egress IP without conflicting with any node IP,
+		// the kind subnet is /16 or /64 so the following should be fine.
+		egressNodeIP := net.ParseIP(egress1Node.nodeIP)
+		egressIP1 := dupIP(egressNodeIP)
+		egressIP1[len(egressIP1)-2]++
+
+		var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: ` + egressIPName + `
+spec:
+    egressIPs:
+    - ` + egressIP1.String() + `
+    podSelector:
+        matchLabels:
+            wants: egress
+    namespaceSelector:
+        matchLabels:
+            name: ` + f.Namespace.Name + `
+`)
+
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove(egressIPYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+
+		framework.Logf("Create the EgressIP configuration")
+		e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+
+		ginkgo.By("Checking that the status is of length one and assigned to node 1")
+		statuses := verifyEgressIPStatusLengthEquals(1, nil)
+		if statuses[0].Node != egress1Node.name {
+			framework.Failf("egress IP not assigend to node 1")
+		}
+
+		ginkgo.By("Creating a client pod labeled to use the EgressIP running on a non egress node")
+		command := []string{"/agnhost", "pause"}
+		_, err := createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "can't create a client pod: %v", err)
+
+		ginkgo.By("Creating an external kind container as server to send the traffic to/from")
+		externalKindContainerName := "kind-external-container-for-egressip-mtu-test"
+		serverPodPort := rand.Intn(echoServerPodPortMax-echoServerPodPortMin) + echoServerPodPortMin
+
+		deleteClusterExternalContainer(targetNode.name)
+		targetNode.name = externalKindContainerName
+		externalKindIPv4, _ := createClusterExternalContainer(
+			externalKindContainerName,
+			agnhostImage,
+			[]string{"--privileged", "--network", "kind"},
+			[]string{"pause"},
+		)
+
+		// First disable PMTUD
+		_, err = runCommand(containerRuntime, "exec", externalKindContainerName, "sysctl", "-w", "net.ipv4.ip_no_pmtu_disc=2")
+		framework.ExpectNoError(err, "disabling PMTUD in the external kind container failed: %v", err)
+
+		// Then run the server
+		httpPort := fmt.Sprintf("--http-port=%d", serverPodPort)
+		udpPort := fmt.Sprintf("--udp-port=%d", serverPodPort)
+		_, err = runCommand(containerRuntime, "exec", "-d", externalKindContainerName, "/agnhost", "netexec", httpPort, udpPort)
+		framework.ExpectNoError(err, "running netexec server in the external kind container failed: %v", err)
+
+		ginkgo.By("Checking connectivity to the external kind container and verify that the source IP is the egress IP")
+		var curlErr error
+		_ = wait.PollUntilContextTimeout(
+			context.Background(),
+			retryInterval,
+			retryTimeout,
+			true,
+			func(ctx context.Context) (bool, error) {
+				curlErr := curlAgnHostClientIPFromPod(podNamespace.Name, pod1Name, egressIP1.String(), externalKindIPv4, serverPodPort)
+				return curlErr == nil, nil
+			},
+		)
+		framework.ExpectNoError(curlErr, "connectivity check to the external kind container failed: %v", curlErr)
+
+		// We will ask the server to reply with a UDP packet bigger than the pod
+		// network MTU. Since PMTUD has been disabled on the server, the reply
+		// won't have the DF flag set. If the reply is not forwarded through the
+		// cluster host kernel then OVN will just drop the reply and send back
+		// an ICMP needs frag that the server will ignore. If the reply is
+		// forwarded through cluster host kernel, it will be fragmented and sent
+		// back to OVN reaching the client pod.
+		ginkgo.By("Making the external kind container reply an oversized UDP packet and checking that it is recieved")
+		payload := fmt.Sprintf("%01420d", 1)
+		cmd := fmt.Sprintf("echo 'echo %s' | nc -w2 -u %s %d",
+			payload,
+			externalKindIPv4,
+			serverPodPort,
+		)
+		stdout, err := e2epodoutput.RunHostCmd(
+			podNamespace.Name,
+			pod1Name,
+			cmd)
+		framework.ExpectNoError(err, "sending echo request to external kind container failed: %v", err)
+
+		if stdout != payload {
+			framework.Failf("external kind container did not reply with the requested payload")
+		}
+
+		ginkgo.By("Checking that there is no IP route exception and thus reply was fragmented")
+		stdout, err = runCommand(containerRuntime, "exec", externalKindContainerName, "ip", "route", "get", egressIP1.String())
+		framework.ExpectNoError(err, "listing the server IP route cache failed: %v", err)
+
+		if regexp.MustCompile(`cache expires.*mtu.*`).Match([]byte(stdout)) {
+			framework.Failf("unexpected server IP route cache: %s", stdout)
+		}
 	})
 })
