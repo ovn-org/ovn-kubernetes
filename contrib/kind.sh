@@ -1047,9 +1047,6 @@ install_metallb() {
   fi
   git clone https://github.com/metallb/metallb.git
   pushd metallb
-  # temporary fix for metallb issue
-  # https://github.com/metallb/metallb/commit/fdf92741c7fac20eedf3caa0aa922f9ff0f0e7dd#r110009241
-  git reset --hard f5ba918
   pip install -r dev-env/requirements.txt
   inv dev-env -n ovn -b frr -p bgp
   docker network create --driver bridge clientnet
