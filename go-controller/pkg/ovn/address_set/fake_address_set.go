@@ -31,8 +31,9 @@ type FakeAddressSetFactory struct {
 	asf            *ovnAddressSetFactory
 	sync.Mutex
 	// maps address set name to object
-	sets                map[string]*fakeAddressSets
-	errOnNextNewAddrSet bool
+	sets                   map[string]*fakeAddressSets
+	errOnNextNewAddrSet    bool
+	errOnNextEnsureAddrSet bool
 }
 
 // fakeFactory implements the AddressSetFactory interface
@@ -43,6 +44,11 @@ const FakeASFError = "fake asf error"
 // ErrOnNextNewASCall will make FakeAddressSetFactory return FakeASFError on the next NewAddressSet call
 func (f *FakeAddressSetFactory) ErrOnNextNewASCall() {
 	f.errOnNextNewAddrSet = true
+}
+
+// ErrOnNextEnsureASCall will make FakeAddressSetFactory return FakeASFError on the next NewAddressSet call
+func (f *FakeAddressSetFactory) ErrOnNextEnsureASCall() {
+	f.errOnNextEnsureAddrSet = true
 }
 
 // NewAddressSet returns a new address set object
@@ -93,6 +99,10 @@ func (f *FakeAddressSetFactory) NewAddressSetOps(dbIDs *libovsdbops.DbObjectIDs,
 
 // EnsureAddressSet returns set object
 func (f *FakeAddressSetFactory) EnsureAddressSet(dbIDs *libovsdbops.DbObjectIDs) (AddressSet, error) {
+	if f.errOnNextEnsureAddrSet {
+		f.errOnNextEnsureAddrSet = false
+		return nil, fmt.Errorf(FakeASFError)
+	}
 	if err := f.asf.validateDbIDs(dbIDs); err != nil {
 		return nil, fmt.Errorf("failed to ensure address set: %w", err)
 	}

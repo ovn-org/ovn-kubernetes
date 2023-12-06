@@ -240,8 +240,8 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			"", "label1", true, true)
 		peer := networkPolicy.Spec.Ingress[0].From[0]
 
-		// make asf return error on the next NewAddressSet call
-		fakeOvn.asf.ErrOnNextNewASCall()
+		// make asf return error on the next EnsureAddressSet call
+		fakeOvn.asf.ErrOnNextEnsureASCall()
 		peerASKey, _, _, err := fakeOvn.controller.EnsurePodSelectorAddressSet(
 			peer.PodSelector, peer.NamespaceSelector, networkPolicy.Namespace, getPolicyKeyWithKind(networkPolicy))
 		// error should happen on address set add
@@ -271,8 +271,8 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			"", "label1", true, true)
 		peer := networkPolicy.Spec.Ingress[0].From[0]
 
-		// make asf return error on the next NewAddressSet call
-		fakeOvn.asf.ErrOnNextNewASCall()
+		// make asf return error on the next EnsureAddressSet call
+		fakeOvn.asf.ErrOnNextEnsureASCall()
 		peerASKey, _, _, err := fakeOvn.controller.EnsurePodSelectorAddressSet(
 			peer.PodSelector, peer.NamespaceSelector, networkPolicy.Namespace, getPolicyKeyWithKind(networkPolicy))
 		// error should happen on address set add

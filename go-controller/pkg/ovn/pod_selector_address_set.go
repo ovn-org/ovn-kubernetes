@@ -168,7 +168,10 @@ func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 		psas.cancelableContext = &cancelableContext
 	}
 	if psas.handlerResources == nil {
-		as, err := bnc.addressSetFactory.NewAddressSet(psas.addrSetDbIDs, nil)
+		// Do not to reset IPs in the address set if it already exists, as it might be a result of ovnkube controller
+		// restart. The IPs in the address set will be updated to correct set in handlePodAddUpdate() when sync all
+		// selected Pods
+		as, err := bnc.addressSetFactory.EnsureAddressSet(psas.addrSetDbIDs)
 		if err != nil {
 			return err
 		}
@@ -249,8 +252,7 @@ func (bnc *BaseNetworkController) addPodSelectorHandler(psAddrSet *PodSelectorAd
 	podHandlerResources := psAddrSet.handlerResources
 	syncFunc := func(objs []interface{}) error {
 		// ignore returned error, since any pod that wasn't properly handled will be retried individually.
-		_ = bnc.handlePodAddUpdate(podHandlerResources, objs...)
-		return nil
+		return bnc.handlePodAddUpdate(podHandlerResources, true, objs...)
 	}
 	retryFramework := bnc.newNetpolRetryFramework(
 		factory.AddressSetPodSelectorType,
@@ -357,10 +359,10 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) GetASHashNames() (string, stri
 	return v4Hash, v6Hash, nil
 }
 
-// addPods will get all currently assigned ips for given pods, and add them to the address set.
+// addPods will get all currently assigned ips for given pods, and add or update them to the address set as requested.
 // If pod ips change, this function should be called again.
 // must be called with PodSelectorAddrSetHandlerInfo read lock
-func (handlerInfo *PodSelectorAddrSetHandlerInfo) addPods(pods ...*v1.Pod) error {
+func (handlerInfo *PodSelectorAddrSetHandlerInfo) addPods(update bool, pods ...*v1.Pod) error {
 	if handlerInfo.addressSet == nil {
 		return fmt.Errorf("pod selector AddressSet %s is nil, cannot add pod(s)", handlerInfo.key)
 	}
@@ -378,7 +380,11 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) addPods(pods ...*v1.Pod) error
 		}
 		ips = append(ips, podIPs...)
 	}
-	return handlerInfo.addressSet.AddIPs(ips)
+	if !update {
+		return handlerInfo.addressSet.AddIPs(ips)
+	} else {
+		return handlerInfo.addressSet.SetIPs(ips)
+	}
 }
 
 // must be called with PodSelectorAddrSetHandlerInfo read lock
@@ -395,7 +401,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) deletePod(pod *v1.Pod) error {
 
 // handlePodAddUpdate adds the IP address of a pod that has been
 // selected by PodSelectorAddressSet.
-func (bnc *BaseNetworkController) handlePodAddUpdate(podHandlerInfo *PodSelectorAddrSetHandlerInfo, objs ...interface{}) error {
+func (bnc *BaseNetworkController) handlePodAddUpdate(podHandlerInfo *PodSelectorAddrSetHandlerInfo, update bool, objs ...interface{}) error {
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -418,7 +424,7 @@ func (bnc *BaseNetworkController) handlePodAddUpdate(podHandlerInfo *PodSelector
 		pods = append(pods, pod)
 	}
 	// podHandlerInfo.addPods must be called with PodSelectorAddressSet RLock.
-	return podHandlerInfo.addPods(pods...)
+	return podHandlerInfo.addPods(update, pods...)
 }
 
 // handlePodDelete removes the IP address of a pod that no longer
@@ -561,9 +567,7 @@ func (bnc *BaseNetworkController) handleNamespaceAddUpdate(podHandlerInfo *PodSe
 
 	// start watching pods in this namespace and selected by the label selector in extraParameters.podSelector
 	syncFunc := func(objs []interface{}) error {
-		// ignore returned error, since any pod that wasn't properly handled will be retried individually.
-		_ = bnc.handlePodAddUpdate(podHandlerInfo, objs...)
-		return nil
+		return bnc.handlePodAddUpdate(podHandlerInfo, true, objs...)
 	}
 	retryFramework := bnc.newNetpolRetryFramework(
 		factory.AddressSetPodSelectorType,

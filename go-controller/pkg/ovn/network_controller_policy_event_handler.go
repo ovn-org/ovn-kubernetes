@@ -123,7 +123,7 @@ func (h *networkControllerPolicyEventHandler) AddResource(obj interface{}, fromR
 	switch h.objType {
 	case factory.AddressSetPodSelectorType:
 		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
-		return h.bnc.handlePodAddUpdate(peerAS, obj)
+		return h.bnc.handlePodAddUpdate(peerAS, false, obj)
 
 	case factory.AddressSetNamespaceAndPodSelectorType:
 		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
@@ -161,7 +161,7 @@ func (h *networkControllerPolicyEventHandler) UpdateResource(oldObj, newObj inte
 	switch h.objType {
 	case factory.AddressSetPodSelectorType:
 		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
-		return h.bnc.handlePodAddUpdate(peerAS, newObj)
+		return h.bnc.handlePodAddUpdate(peerAS, false, newObj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
