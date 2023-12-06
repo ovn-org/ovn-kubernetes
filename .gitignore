@@ -3,5 +3,6 @@
 
 # Temporary binaries for bulding the cluster (i.e: kubectl)
 contrib/bin
+metallb
 
 ovn-kubernetes-anp-test-report.yaml
