@@ -424,11 +424,10 @@ print_params() {
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
        echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
-     fi
-
-     if [ "${KIND_NUM_NODES_PER_ZONE}" -gt 1 ] && [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" = "true" ]; then
-       echo "multi_node_zone is not compatible with ovnkube_identity, disabling ovnkube_identity"
-       OVN_ENABLE_OVNKUBE_IDENTITY="false"
+       if [ "${KIND_NUM_NODES_PER_ZONE}" -gt 1 ] && [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" = "true" ]; then
+         echo "multi_node_zone is not compatible with ovnkube_identity, disabling ovnkube_identity"
+         OVN_ENABLE_OVNKUBE_IDENTITY="false"
+       fi
      fi
      echo "OVN_ENABLE_OVNKUBE_IDENTITY = $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
