@@ -508,20 +508,32 @@ func restartOVNKubeNodePodsInParallel(clientset kubernetes.Interface, namespace 
 	return utilerrors.AggregateGoroutines(restartFuncs...)
 }
 
-// getOVNKubePodLogsFiltered retrieves logs from ovnkube-node pods and filters logs lines according to filteringRegexp
-func getOVNKubePodLogsFiltered(clientset kubernetes.Interface, namespace, nodeName, filteringRegexp string) (string, error) {
+func getOVNKubePod(clientset kubernetes.Interface, nodeName string) (*v1.Pod, error) {
 	ovnKubeNodePods, err := clientset.CoreV1().Pods(ovnNamespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: "name=ovnkube-node",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil {
-		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node pods: %w", err)
+		return nil, fmt.Errorf("getOVNKubePod: error while getting ovnkube-node pod: %w", err)
 	}
 
-	logs, err := e2epod.GetPodLogs(context.TODO(), clientset, ovnNamespace, ovnKubeNodePods.Items[0].Name, getNodeContainerName())
+	if len(ovnKubeNodePods.Items) == 0 {
+		return nil, fmt.Errorf("getOVNKubePod: no ovnk pod exists on node: %s", nodeName)
+	}
+	return &ovnKubeNodePods.Items[0], nil
+}
+
+// getOVNKubePodLogsFiltered retrieves logs from ovnkube-node pods and filters logs lines according to filteringRegexp
+func getOVNKubePodLogsFiltered(clientset kubernetes.Interface, nodeName, filteringRegexp string) (string, error) {
+	ovnkPod, err := getOVNKubePod(clientset, nodeName)
+	if err != nil {
+		return "", err
+	}
+
+	logs, err := e2epod.GetPodLogs(context.TODO(), clientset, ovnNamespace, ovnkPod.Name, getNodeContainerName())
 	if err != nil {
 		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node [%s/%s] logs: %w",
-			ovnNamespace, ovnKubeNodePods.Items[0].Name, err)
+			ovnNamespace, ovnkPod.Name, err)
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(logs))

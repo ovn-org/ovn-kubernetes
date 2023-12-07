@@ -1153,6 +1153,26 @@ func routeToNode(nodeName string, ips []string, mtu int, add bool) error {
 		if err != nil {
 			return err
 		}
+
+		cmd = []string{"docker", "exec", nodeName}
+		cmd = append(cmd, ipCmd...)
+		cmd = append(cmd, "addr", "show")
+		var stdout string
+		stdout, err = runCommand(cmd...)
+		if err != nil {
+			return err
+		}
+		framework.Logf("addr output for node  %q:\n%s", nodeName, stdout)
+
+		cmd = []string{"docker", "exec", nodeName}
+		cmd = append(cmd, ipCmd...)
+		cmd = append(cmd, "route", "show")
+
+		stdout, err = runCommand(cmd...)
+		if err != nil {
+			return err
+		}
+		framework.Logf("route output for node  %q:\n%s", nodeName, stdout)
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"math/rand"
 	"regexp"
 	"time"
@@ -260,7 +261,7 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 		cleanupFn()
 	})
 
-	ginkgo.When("a client ovnk pod targeting an ovnk pod server(running on another node) with low mtu", func() {
+	ginkgo.When("a client ovnk pod targeting an ovnk pod server(running on another node)", func() {
 		var serverPod *v1.Pod
 		var serverPodNodeName string
 		var serverPodName string
@@ -342,6 +343,26 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 		ginkgo.When("MTU is lowered between the two nodes", func() {
 			ginkgo.It("large queries to the server pod on another node shall work for TCP", func() {
 				for _, serverPodIP := range serverPod.Status.PodIPs {
+
+					// setup packet capture on each node
+					tcpDumpSync := errgroup.Group{}
+
+					runPacketCapture := func(pod string, node string) error {
+						stdout, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", pod, "--", "timeout", "10",
+							"tcpdump", "-i", "any", "-c", "10", "-v", fmt.Sprintf("icmp or port %d", serverPodPort))
+						framework.Logf("TCPDUMP on pod: %s, node: %s \n: %s", pod, node, stdout)
+						return err
+					}
+
+					for _, nodeName := range []string{serverPodNodeName, clientPodNodeName} {
+						// get the ovnk pod running on the node
+						ovnkPod, err := getOVNKubePod(f.ClientSet, nodeName)
+						framework.ExpectNoError(err, "Could not get OVNK pod to setup TCP capture")
+						tcpDumpSync.Go(func() error {
+							return runPacketCapture(ovnkPod.Name, nodeName)
+						})
+					}
+
 					ginkgo.By(fmt.Sprintf("Sending TCP large payload to server IP %s "+
 						"and expecting to receive the same payload", serverPodIP))
 					cmd := fmt.Sprintf("curl --max-time 10 -g -q -s http://%s:%d/echo?msg=%s",
@@ -368,6 +389,9 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 					framework.ExpectNoError(err, "Checking ip route cache output failed")
 					framework.Logf(" ip route output in client pod: %s", stdout)
 					gomega.Expect(stdout).To(gomega.MatchRegexp("mtu 1342"))
+
+					err = tcpDumpSync.Wait()
+					framework.ExpectNoError(err, "Failed to detect correct TCP packets in capture")
 				}
 			})
 
