@@ -359,6 +359,11 @@ func (g *gateway) GetGatewayBridgeIface() string {
 	return g.openflowManager.defaultBridge.bridgeName
 }
 
+// getMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
+func getMaxFrameLength() int {
+	return config.Default.MTU + 14
+}
+
 type bridgeConfiguration struct {
 	sync.Mutex
 	bridgeName  string

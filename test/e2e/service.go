@@ -458,7 +458,7 @@ var _ = ginkgo.Describe("Services", func() {
 			gomega.Expect(pods.Items).To(gomega.HaveLen(1))
 			clientPod := &pods.Items[0]
 			cmd := fmt.Sprintf(`ip addr del %s dev lo || true`, extraCIDR)
-			_, err = e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			_, _ = e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 		}
 
 		ginkgo.By("Starting a UDP server listening on the additional IP")
@@ -549,7 +549,11 @@ var _ = ginkgo.Describe("Services", func() {
 		framework.ExpectNoError(err)
 	})
 
-	ginkgo.It("of type NodePort should listen on each host addresses", func() {
+	ginkgo.Context("of type NodePort", func() {
+		var nodes *v1.NodeList
+		var err error
+		nodeIPs := make(map[string]map[int]string)
+
 		const (
 			endpointHTTPPort    = 80
 			endpointUDPPort     = 90
@@ -558,130 +562,163 @@ var _ = ginkgo.Describe("Services", func() {
 			clientContainerName = "npclient"
 		)
 
-		endPoints := make([]*v1.Pod, 0)
-		endpointsSelector := map[string]string{"servicebackend": "true"}
-		nodesHostnames := sets.NewString()
-
-		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
-		framework.ExpectNoError(err)
-
-		if len(nodes.Items) < 3 {
-			framework.Failf(
-				"Test requires >= 3 Ready nodes, but there are only %v nodes",
-				len(nodes.Items))
-		}
-
-		ginkgo.By("Creating the endpoints pod, one for each worker")
-		for _, node := range nodes.Items {
-			args := []string{
-				"netexec",
-				fmt.Sprintf("--http-port=%d", endpointHTTPPort),
-				fmt.Sprintf("--udp-port=%d", endpointUDPPort),
+		ginkgo.AfterEach(func() {
+			ginkgo.By("Cleaning up external container")
+			deleteClusterExternalContainer(clientContainerName)
+			ginkgo.By("Deleting additional IP addresses from nodes")
+			for nodeName, ipFamilies := range nodeIPs {
+				for _, ip := range ipFamilies {
+					_, err := runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "delete",
+						fmt.Sprintf("%s/32", ip), "dev", "breth0")
+					if err != nil && !strings.Contains(err.Error(),
+						"RTNETLINK answers: Cannot assign requested address") {
+						framework.Failf("failed to remove ip address %s from node %s, err: %q", ip, nodeName, err)
+					}
+				}
 			}
-			pod, err := createPod(f, node.Name+"-ep", node.Name, f.Namespace.Name, []string{},
-				endpointsSelector, func(p *v1.Pod) {
-					p.Spec.Containers[0].Args = args
-				})
+		})
+
+		ginkgo.It("should listen on each host addresses", func() {
+			endPoints := make([]*v1.Pod, 0)
+			endpointsSelector := map[string]string{"servicebackend": "true"}
+			nodesHostnames := sets.NewString()
+
+			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 			framework.ExpectNoError(err)
 
-			endPoints = append(endPoints, pod)
-			nodesHostnames.Insert(pod.Name)
-		}
-
-		ginkgo.By("Creating an external container to send the traffic from")
-		createClusterExternalContainer(clientContainerName, agnhostImage,
-			[]string{"--network", "kind", "-P"},
-			[]string{"netexec", "--http-port=80"})
-
-		// If `kindexgw` exists, connect client container to it
-		runCommand(containerRuntime, "network", "connect", "kindexgw", clientContainerName)
-
-		ginkgo.By("Adding ip addresses to each node")
-		// add new secondary IP from node subnet to all nodes, if the cluster is v6 add an ipv6 address
-		toCurlAddresses := sets.NewString()
-		for i, node := range nodes.Items {
-
-			addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-cidrs"]
-			gomega.Expect(ok).To(gomega.BeTrue())
-
-			var addrs []string
-			err := json.Unmarshal([]byte(addrAnnotation), &addrs)
-			framework.ExpectNoError(err, "failed to parse node[%s] host-address annotation[%s]", node.Name, addrAnnotation)
-			for i, addr := range addrs {
-				addrSplit := strings.Split(addr, "/")
-				gomega.Expect(addrSplit).Should(gomega.HaveLen(2))
-				addrs[i] = addrSplit[0]
-			}
-			toCurlAddresses.Insert(addrs...)
-
-			var newIP string
-			if utilnet.IsIPv6String(e2enode.GetAddresses(&node, v1.NodeInternalIP)[0]) {
-				newIP = "fc00:f853:ccd:e794::" + strconv.Itoa(i)
-			} else {
-				newIP = "172.18.1." + strconv.Itoa(i+1)
-			}
-			// manually add the a secondary IP to each node
-			_, err = runCommand(containerRuntime, "exec", node.Name, "ip", "addr", "add", newIP, "dev", "breth0")
-			if err != nil {
-				framework.Failf("failed to add new Addresses to node %s: %v", node.Name, err)
+			if len(nodes.Items) < 3 {
+				framework.Failf(
+					"Test requires >= 3 Ready nodes, but there are only %v nodes",
+					len(nodes.Items))
 			}
 
-			nodeName := node.Name
-			defer func() {
-				runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "delete", newIP+"/32", "dev", "breth0")
-				framework.ExpectNoError(err, "failed to remove ip address %s from node %s", newIP, nodeName)
-			}()
-
-			toCurlAddresses.Insert(newIP)
-		}
-
-		defer deleteClusterExternalContainer(clientContainerName)
-
-		isIPv6Cluster := IsIPv6Cluster(f.ClientSet)
-
-		ginkgo.By("Creating NodePort services")
-
-		etpLocalServiceName := "etp-local-svc"
-		etpLocalSvc := nodePortServiceSpecFrom(etpLocalServiceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
-		etpLocalSvc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), etpLocalSvc, metav1.CreateOptions{})
-		framework.ExpectNoError(err)
-
-		etpClusterServiceName := "etp-cluster-svc"
-		etpClusterSvc := nodePortServiceSpecFrom(etpClusterServiceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeCluster)
-		etpClusterSvc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), etpClusterSvc, metav1.CreateOptions{})
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Waiting for the endpoints to pop up")
-
-		err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, etpLocalServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
-		framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", etpLocalServiceName, f.Namespace.Name)
-
-		err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, etpClusterServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
-		framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", etpClusterServiceName, f.Namespace.Name)
-
-		for _, serviceSpec := range []*v1.Service{etpLocalSvc, etpClusterSvc} {
-			tcpNodePort, udpNodePort := nodePortsFromService(serviceSpec)
-
-			for _, protocol := range []string{"http", "udp"} {
-				toCurlPort := int32(tcpNodePort)
-				if protocol == "udp" {
-					toCurlPort = int32(udpNodePort)
+			ginkgo.By("Creating the endpoints pod, one for each worker")
+			for _, node := range nodes.Items {
+				args := []string{
+					"netexec",
+					fmt.Sprintf("--http-port=%d", endpointHTTPPort),
+					fmt.Sprintf("--udp-port=%d", endpointUDPPort),
 				}
+				pod, err := createPod(f, node.Name+"-ep", node.Name, f.Namespace.Name, []string{},
+					endpointsSelector, func(p *v1.Pod) {
+						p.Spec.Containers[0].Args = args
+					})
+				framework.ExpectNoError(err)
 
-				for _, address := range toCurlAddresses.List() {
-					if !isIPv6Cluster && utilnet.IsIPv6String(address) {
-						continue
+				endPoints = append(endPoints, pod)
+				nodesHostnames.Insert(pod.Name)
+			}
+
+			ginkgo.By("Creating an external container to send the traffic from")
+			createClusterExternalContainer(clientContainerName, agnhostImage,
+				[]string{"--network", "kind", "-P"},
+				[]string{"netexec", "--http-port=80"})
+
+			// If `kindexgw` exists, connect client container to it
+			runCommand(containerRuntime, "network", "connect", "kindexgw", clientContainerName)
+
+			ginkgo.By("Selecting additional IP addresses for each node")
+			// add new secondary IP from node subnet to all nodes, if the cluster is v6 add an ipv6 address
+			toCurlAddresses := sets.NewString()
+			for i, node := range nodes.Items {
+
+				addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-cidrs"]
+				gomega.Expect(ok).To(gomega.BeTrue())
+
+				var addrs []string
+				err := json.Unmarshal([]byte(addrAnnotation), &addrs)
+				framework.ExpectNoError(err, "failed to parse node[%s] host-address annotation[%s]", node.Name,
+					addrAnnotation)
+				for i, addr := range addrs {
+					addrSplit := strings.Split(addr, "/")
+					gomega.Expect(addrSplit).Should(gomega.HaveLen(2))
+					addrs[i] = addrSplit[0]
+				}
+				toCurlAddresses.Insert(addrs...)
+
+				// Calculate and store for AfterEach new target IP addresses.
+				var newIP string
+				if nodeIPs[node.Name] == nil {
+					nodeIPs[node.Name] = make(map[int]string)
+				}
+				if utilnet.IsIPv6String(e2enode.GetAddresses(&node, v1.NodeInternalIP)[0]) {
+					newIP = "fc00:f853:ccd:e794::" + strconv.Itoa(i)
+					nodeIPs[node.Name][6] = newIP
+				} else {
+					newIP = "172.18.1." + strconv.Itoa(i+1)
+					nodeIPs[node.Name][4] = newIP
+				}
+			}
+
+			ginkgo.By("Adding additional IP addresses to each node")
+			for nodeName, ipFamilies := range nodeIPs {
+				for _, ip := range ipFamilies {
+					// manually add the a secondary IP to each node
+					_, err = runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "add", ip, "dev", "breth0")
+					if err != nil {
+						framework.Failf("failed to add new IP address %s to node %s: %v", ip, nodeName, err)
+					}
+					toCurlAddresses.Insert(ip)
+				}
+			}
+
+			isIPv6Cluster := IsIPv6Cluster(f.ClientSet)
+
+			ginkgo.By("Creating NodePort services")
+
+			etpLocalServiceName := "etp-local-svc"
+			etpLocalSvc := nodePortServiceSpecFrom(etpLocalServiceName, v1.IPFamilyPolicyPreferDualStack,
+				endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector,
+				v1.ServiceExternalTrafficPolicyTypeLocal)
+			etpLocalSvc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), etpLocalSvc,
+				metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+
+			etpClusterServiceName := "etp-cluster-svc"
+			etpClusterSvc := nodePortServiceSpecFrom(etpClusterServiceName, v1.IPFamilyPolicyPreferDualStack,
+				endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector,
+				v1.ServiceExternalTrafficPolicyTypeCluster)
+			etpClusterSvc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(),
+				etpClusterSvc, metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the endpoints to pop up")
+
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name,
+				etpLocalServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s",
+				etpLocalServiceName, f.Namespace.Name)
+
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name,
+				etpClusterServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s",
+				etpClusterServiceName, f.Namespace.Name)
+
+			for _, serviceSpec := range []*v1.Service{etpLocalSvc, etpClusterSvc} {
+				tcpNodePort, udpNodePort := nodePortsFromService(serviceSpec)
+
+				for _, protocol := range []string{"http", "udp"} {
+					toCurlPort := int32(tcpNodePort)
+					if protocol == "udp" {
+						toCurlPort = int32(udpNodePort)
 					}
 
-					ginkgo.By("Hitting service " + serviceSpec.Name + " on " + address + " via " + protocol)
-					gomega.Eventually(func() bool {
-						epHostname := pokeEndpoint("", clientContainerName, protocol, address, toCurlPort, "hostname")
-						// Expect to receive a valid hostname
-						return nodesHostnames.Has(epHostname)
-					}, "20s", "1s").Should(gomega.BeTrue())
+					for _, address := range toCurlAddresses.List() {
+						if !isIPv6Cluster && utilnet.IsIPv6String(address) {
+							continue
+						}
+
+						ginkgo.By("Hitting service " + serviceSpec.Name + " on " + address + " via " + protocol)
+						gomega.Eventually(func() bool {
+							epHostname := pokeEndpoint("", clientContainerName, protocol, address, toCurlPort,
+								"hostname")
+							// Expect to receive a valid hostname
+							return nodesHostnames.Has(epHostname)
+						}, "20s", "1s").Should(gomega.BeTrue())
+					}
 				}
 			}
-		}
+		})
 	})
 })
 

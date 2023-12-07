@@ -36,7 +36,7 @@ const (
 )
 
 // cleanup obsolete *gressDefaultDeny port groups
-func (oc *DefaultNetworkController) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
+func (oc *DefaultNetworkController) upgradeToNamespacedDenyPGOVNTopology(existingNodeList []*kapi.Node) error {
 	err := libovsdbops.DeletePortGroups(oc.nbClient, "ingressDefaultDeny", "egressDefaultDeny")
 	if err != nil {
 		klog.Errorf("%v", err)
@@ -46,9 +46,9 @@ func (oc *DefaultNetworkController) upgradeToNamespacedDenyPGOVNTopology(existin
 
 // delete obsoleted logical OVN entities that are specific for Multiple join switches OVN topology. Also cleanup
 // OVN entities for deleted nodes (similar to syncNodes() but for obsoleted Multiple join switches OVN topology)
-func (oc *DefaultNetworkController) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
+func (oc *DefaultNetworkController) upgradeToSingleSwitchOVNTopology(existingNodeList []*kapi.Node) error {
 	existingNodes := make(map[string]bool)
-	for _, node := range existingNodeList.Items {
+	for _, node := range existingNodeList {
 		existingNodes[node.Name] = true
 
 		// delete the obsoleted node-join-subnets annotation
@@ -85,7 +85,7 @@ func (oc *DefaultNetworkController) upgradeToSingleSwitchOVNTopology(existingNod
 	return nil
 }
 
-func (oc *DefaultNetworkController) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
+func (oc *DefaultNetworkController) upgradeOVNTopology(existingNodes []*kapi.Node) error {
 	err := oc.determineOVNTopoVersionFromOVN()
 	if err != nil {
 		return err
@@ -991,7 +991,8 @@ func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *kapi.Node) error 
 	}
 	annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
 
-	for _, node := range nodes.Items {
+	for _, node := range nodes {
+		node := *node
 		// reconcile hybrid overlay subnets for local zone nodes.
 		if !util.NoHostSubnet(&node) && oc.isLocalZoneNode(&node) {
 			if err := oc.handleHybridOverlayPort(&node, annotator); err != nil {

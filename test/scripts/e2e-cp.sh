@@ -27,6 +27,10 @@ if [ "$KIND_IPV4_SUPPORT" == true ]; then
     fi
 fi
 
+if [ "$KIND_IPV4_SUPPORT" == false ]; then
+  SKIPPED_TESTS+="\[IPv4\]"
+fi
+
 if [ "$OVN_HA" == false ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
   	SKIPPED_TESTS+="|"

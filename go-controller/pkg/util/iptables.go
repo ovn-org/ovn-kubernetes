@@ -138,6 +138,9 @@ func (f *FakeIPTables) List(tableName, chainName string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	for i := range chain {
+		chain[i] = fmt.Sprintf("-A %s %s", chainName, chain[i])
+	}
 	return chain, nil
 }
 

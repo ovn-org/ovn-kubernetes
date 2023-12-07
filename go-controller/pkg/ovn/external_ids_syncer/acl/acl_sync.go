@@ -62,7 +62,7 @@ func NewACLSyncer(nbClient libovsdbclient.Client, controllerName string) *aclSyn
 	}
 }
 
-func (syncer *aclSyncer) SyncACLs(existingNodes *v1.NodeList) error {
+func (syncer *aclSyncer) SyncACLs(existingNodes []*v1.Node) error {
 	// stale acls don't have controller ID
 	legacyAclPred := libovsdbops.GetNoOwnerPredicate[*nbdb.ACL]()
 	legacyACLs, err := libovsdbops.FindACLsWithPredicate(syncer.nbClient, legacyAclPred)
@@ -76,7 +76,7 @@ func (syncer *aclSyncer) SyncACLs(existingNodes *v1.NodeList) error {
 		klog.Infof("Found %d stale multicast ACLs", len(multicastACLs))
 		updatedACLs = append(updatedACLs, multicastACLs...)
 
-		allowFromNodeACLs := syncer.updateStaleNetpolNodeACLs(legacyACLs, existingNodes.Items)
+		allowFromNodeACLs := syncer.updateStaleNetpolNodeACLs(legacyACLs, existingNodes)
 		klog.Infof("Found %d stale allow from node ACLs", len(allowFromNodeACLs))
 		updatedACLs = append(updatedACLs, allowFromNodeACLs...)
 
@@ -279,7 +279,7 @@ func (syncer *aclSyncer) getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP string) *
 // updateStaleNetpolNodeACLs updates allow from node ACLs, that don't have new ExternalIDs based
 // on DbObjectIDs set. Allow from node acls are applied on the node switch, therefore the cleanup for deleted is not needed,
 // since acl will be deleted toegther with the node switch.
-func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []v1.Node) []*nbdb.ACL {
+func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []*v1.Node) []*nbdb.ACL {
 	// ACL to allow traffic from host via management port has no name or ExternalIDs
 	// The only way to find it is by exact match
 	type aclInfo struct {
@@ -288,6 +288,7 @@ func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, exist
 	}
 	matchToNode := map[string]aclInfo{}
 	for _, node := range existingNodes {
+		node := *node
 		hostSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
 		if err != nil {
 			klog.Warningf("Couldn't parse hostSubnet annotation for node %s: %v", node.Name, err)

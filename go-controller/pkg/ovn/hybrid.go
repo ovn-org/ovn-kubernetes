@@ -169,7 +169,8 @@ func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*n
 			if err != nil {
 				return err
 			}
-			for _, node := range nodes.Items {
+			for _, node := range nodes {
+				node := *node
 				if util.NoHostSubnet(&node) {
 					if subnet, _ := houtil.ParseHybridOverlayHostSubnet(&node); subnet != nil {
 						hybridCIDRs[node.Name] = subnet
@@ -398,7 +399,8 @@ func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeSubnet *net.I
 	if err != nil {
 		return err
 	}
-	for _, node := range nodes.Items {
+	for _, node := range nodes {
+		node := *node
 		// Check existence of Gateway Router before removing the static route from it.
 		if _, err := libovsdbops.GetLogicalRouter(oc.nbClient, &nbdb.LogicalRouter{Name: ovntypes.GWRouterPrefix + node.Name}); err != nil {
 			if err == libovsdbclient.ErrNotFound {
