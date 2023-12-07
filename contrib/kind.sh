@@ -1090,9 +1090,15 @@ install_plugins() {
 }
 
 destroy_metallb() {
-  docker stop lbclient || true # its possible the lbclient doesn't exist which is fine, ignore error
-  docker stop frr || true # its possible the lbclient doesn't exist which is fine, ignore error
-  docker network rm clientnet || true # its possible the clientnet network doesn't exist which is fine, ignore error
+  if docker ps --format '{{.Names}}' | grep -Eq '^lbclient$'; then
+      docker stop lbclient
+  fi
+  if docker ps --format '{{.Names}}' | grep -Eq '^frr$'; then
+      docker stop frr
+  fi
+  if docker network ls --format '{{.Name}}' | grep -q '^clientnet$'; then
+      docker network rm clientnet
+  fi
   delete_metallb_dir
 }
 
