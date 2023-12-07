@@ -660,6 +660,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 
 			// check that the masquerade route was not added
 			l, err := netlink.LinkByName(brphys)
+			Expect(err).NotTo(HaveOccurred())
 			expRoute := &netlink.Route{
 				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())),
 				LinkIndex: l.Attrs().Index,
@@ -742,6 +743,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 		ip, ipnet, err := net.ParseCIDR(hostIP + "/24")
+		Expect(err).NotTo(HaveOccurred())
 		ipnet.IP = ip
 		cnnci := NewCommonNodeNetworkControllerInfo(nil, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName)
 		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
