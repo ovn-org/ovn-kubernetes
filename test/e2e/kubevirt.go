@@ -22,8 +22,10 @@ import (
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -165,8 +167,9 @@ passwd:
 	})
 
 	type liveMigrationTestData struct {
-		mode        kubevirtv1.MigrationMode
-		numberOfVMs int
+		mode                kubevirtv1.MigrationMode
+		numberOfVMs         int
+		shouldExpectFailure bool
 	}
 
 	var (
@@ -337,16 +340,6 @@ passwd:
 		}
 
 		liveMigrateVirtualMachine = func(vmName string, migrationMode kubevirtv1.MigrationMode) {
-			vmi := &kubevirtv1.VirtualMachineInstance{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: namespace,
-					Name:      vmName,
-				},
-			}
-			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-			Expect(err).ToNot(HaveOccurred(), "should success retrieving vmi")
-			currentNode := vmi.Status.NodeName
-
 			vmimCreationRetries := 0
 			Eventually(func() error {
 				if vmimCreationRetries > 0 {
@@ -367,6 +360,19 @@ passwd:
 				vmimCreationRetries++
 				return err
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
+		}
+
+		checkLiveMigrationSucceeded = func(vmName string, migrationMode kubevirtv1.MigrationMode) {
+			By("checking the VM live-migrated correctly")
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace,
+					Name:      vmName,
+				},
+			}
+			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
+			Expect(err).ToNot(HaveOccurred(), "should success retrieving vmi")
+			currentNode := vmi.Status.NodeName
 
 			Eventually(func() *kubevirtv1.VirtualMachineInstanceMigrationState {
 				err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
@@ -393,6 +399,31 @@ passwd:
 				return fmt.Sprintf("should live migrate successfully: %s", string(vmiJSON))
 			})
 			Expect(vmi.Status.MigrationState.Mode).WithOffset(1).To(Equal(migrationMode), "should be the expected migration mode %s", migrationMode)
+		}
+
+		checkLiveMigrationFailed = func(vmName string) {
+			By("checking the VM live-migrated failed to migrate")
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace,
+					Name:      vmName,
+				},
+			}
+			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
+			Expect(err).ToNot(HaveOccurred(), "should success retrieving vmi")
+
+			Eventually(func() (kubevirtv1.VirtualMachineInstanceMigrationPhase, error) {
+				migrations, err := vmiMigrations(crClient)
+				if err != nil {
+					return kubevirtv1.MigrationPhaseUnset, err
+				}
+				if len(migrations) > 1 {
+					return kubevirtv1.MigrationPhaseUnset, fmt.Errorf("expected one migration, got %d", len(migrations))
+				}
+				return migrations[0].Status.Phase, nil
+			}).WithOffset(1).WithPolling(time.Second).WithTimeout(5 * time.Minute).Should(
+				Equal(kubevirtv1.MigrationFailed),
+			)
 		}
 
 		ipv4 = func(iface kubevirt.Interface) []kubevirt.Address {
@@ -586,13 +617,20 @@ passwd:
 
 				by(vm.Name, fmt.Sprintf("Live migrate virtual machine, migration #%d", i))
 				liveMigrateVirtualMachine(vm.Name, td.mode)
-
+				if td.shouldExpectFailure {
+					checkLiveMigrationFailed(vm.Name)
+				} else {
+					checkLiveMigrationSucceeded(vm.Name, td.mode)
+				}
 				checkConnectivityAndNetworkPolicies(vm.Name, endpoints, fmt.Sprintf("after live migrate, migration #%d", i))
+				if td.shouldExpectFailure {
+					break
+				}
 			}
 
 		}
 	)
-	DescribeTable("when live migrated", func(td liveMigrationTestData) {
+	DescribeTable("when live migration", func(td liveMigrationTestData) {
 		if td.mode == kubevirtv1.MigrationPostCopy && os.Getenv("GITHUB_ACTIONS") == "true" {
 			Skip("Post copy live migration not working at github actions")
 		}
@@ -676,6 +714,19 @@ passwd:
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
 		}
 
+		if td.shouldExpectFailure {
+			By("annotating the VMI with `fail fast`")
+			vmKey := types.NamespacedName{Namespace: namespace, Name: "worker1"}
+			var vmi kubevirtv1.VirtualMachineInstance
+			Eventually(func() error {
+				return crClient.Get(context.TODO(), vmKey, &vmi)
+			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
+
+			vmi.ObjectMeta.Annotations[kubevirtv1.FuncTestLauncherFailFastAnnotation] = "true"
+
+			Expect(crClient.Update(context.TODO(), &vmi)).To(Succeed())
+		}
+
 		for _, vm := range vms {
 			By(fmt.Sprintf("Waiting for readiness at virtual machine %s", vm.Name))
 			Eventually(func() bool {
@@ -691,13 +742,48 @@ passwd:
 		}
 		wg.Wait()
 	},
-		Entry("with pre-copy should keep connectivity", liveMigrationTestData{
+		Entry("with pre-copy succeeds, should keep connectivity", liveMigrationTestData{
 			mode:        kubevirtv1.MigrationPreCopy,
 			numberOfVMs: 1,
 		}),
-		Entry("with post-copy should keep connectivity", liveMigrationTestData{
+		Entry("with post-copy succeeds, should keep connectivity", liveMigrationTestData{
 			mode:        kubevirtv1.MigrationPostCopy,
 			numberOfVMs: 1,
 		}),
+		Entry("with pre-copy fails, should keep connectivity", liveMigrationTestData{
+			mode:                kubevirtv1.MigrationPreCopy,
+			numberOfVMs:         1,
+			shouldExpectFailure: true,
+		}),
 	)
 })
+
+func vmiMigrations(client crclient.Client) ([]kubevirtv1.VirtualMachineInstanceMigration, error) {
+	unstructuredVMIMigrations := &unstructured.UnstructuredList{}
+	unstructuredVMIMigrations.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   kubevirtv1.GroupVersion.Group,
+		Kind:    "VirtualMachineInstanceMigrationList",
+		Version: kubevirtv1.GroupVersion.Version,
+	})
+
+	if err := client.List(context.Background(), unstructuredVMIMigrations); err != nil {
+		return nil, err
+	}
+	if len(unstructuredVMIMigrations.Items) == 0 {
+		return nil, fmt.Errorf("empty migration list")
+	}
+
+	var migrations []kubevirtv1.VirtualMachineInstanceMigration
+	for i := range unstructuredVMIMigrations.Items {
+		var vmiMigration kubevirtv1.VirtualMachineInstanceMigration
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(
+			unstructuredVMIMigrations.Items[i].Object,
+			&vmiMigration,
+		); err != nil {
+			return nil, err
+		}
+		migrations = append(migrations, vmiMigration)
+	}
+
+	return migrations, nil
+}

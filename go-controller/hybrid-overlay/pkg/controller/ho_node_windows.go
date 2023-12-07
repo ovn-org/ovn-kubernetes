@@ -349,7 +349,8 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 		return fmt.Errorf("error in initializing/fetching nodes: %v", err)
 	}
 
-	for _, node := range nodes.Items {
+	for _, node := range nodes {
+		node := *node
 		// Add VXLAN tunnel to the remote nodes
 		if node.Status.NodeInfo.MachineID != n.machineID {
 			n.AddNode(&node)
@@ -374,7 +375,8 @@ func (n *NodeController) uninitSelf(node *kapi.Node) error {
 	}
 
 	// Delete VXLAN tunnel to the remote nodes
-	for _, node := range nodes.Items {
+	for _, node := range nodes {
+		node := *node
 		if node.Status.NodeInfo.MachineID != n.machineID {
 			n.DeleteNode(&node)
 		}

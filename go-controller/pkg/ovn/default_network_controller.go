@@ -343,7 +343,7 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 		klog.Errorf("Error in fetching nodes: %v", err)
 		return err
 	}
-	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes.Items))
+	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes))
 	err = oc.upgradeOVNTopology(existingNodes)
 	if err != nil {
 		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
@@ -388,7 +388,8 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 
 	networkID := util.InvalidNetworkID
 	nodeNames := []string{}
-	for _, node := range existingNodes.Items {
+	for _, node := range existingNodes {
+		node := *node
 		nodeNames = append(nodeNames, node.Name)
 
 		if config.OVNKubernetesFeature.EnableInterconnect && networkID == util.InvalidNetworkID {

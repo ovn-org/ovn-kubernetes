@@ -198,7 +198,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 
 	existingNodes, err := o.controller.kube.GetNodes()
 	if err == nil {
-		for _, node := range existingNodes.Items {
+		for _, node := range existingNodes {
 			o.controller.localZoneNodes.Store(node.Name, true)
 			for _, secondaryController := range o.secondaryControllers {
 				if secondaryController.bnc.localZoneNodes != nil {

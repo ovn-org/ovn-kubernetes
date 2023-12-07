@@ -1116,6 +1116,8 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	bridgeIPs := bridge.ips
 
 	var dftFlows []string
+	// 14 bytes of overhead for ethernet header (does not include VLAN)
+	maxPktLength := getMaxFrameLength()
 
 	if config.IPv4Mode {
 		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
@@ -1267,7 +1269,16 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				"actions=drop", defaultOpenFlowCookie, ofPortPatch, protoPrefix, protoPrefix, svcCIDR))
 	}
 
-	actions := fmt.Sprintf("output:%s", ofPortPatch)
+	var actions string
+	if config.Gateway.Mode != config.GatewayModeLocal || config.Gateway.DisablePacketMTUCheck {
+		actions = fmt.Sprintf("output:%s", ofPortPatch)
+	} else {
+		// packets larger than known acceptable MTU need to go to kernel for
+		// potential fragmentation
+		// introduced specifically for replies to egress traffic not routed
+		// through the host
+		actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
+	}
 
 	if ofPortPhys != "" {
 		if config.IPv4Mode {
@@ -1583,6 +1594,20 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 						defaultOpenFlowCookie, ofPortPhys, ofPortPatch, ofPortHost))
 			}
 		}
+
+		// packets larger than known acceptable MTU need to go to kernel for
+		// potential fragmentation
+		// introduced specifically for replies to egress traffic not routed
+		// through the host
+		if config.Gateway.Mode == config.GatewayModeLocal && !config.Gateway.DisablePacketMTUCheck {
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=10, table=11, reg0=0x1, "+
+					"actions=output:%s", defaultOpenFlowCookie, ofPortHost))
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=1, table=11, "+
+					"actions=output:%s", defaultOpenFlowCookie, ofPortPatch))
+		}
+
 		// table 1, all other connections do normal processing
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))
