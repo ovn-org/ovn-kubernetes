@@ -407,6 +407,19 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 						30*time.Second)
 					_ = tcpDumpSync.Wait()
 					_ = datapathDumpSync.Wait()
+					for _, nodeName := range []string{serverPodNodeName, clientPodNodeName} {
+						nodeName := nodeName
+						framework.Logf("Node name is: %s", nodeName)
+						// get the ovnk pod running on the node
+						ovnkPod, err := getOVNKubePod(f.ClientSet, nodeName)
+						framework.ExpectNoError(err, "Could not get OVNK pod to setup OF dump")
+						stdout, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", ovnkPod.Name, "--", "ovs-ofctl",
+							"dump-flows", "br-int")
+						if err != nil {
+							framework.ExpectNoError(err, "Could not dump OF flows")
+						}
+						framework.Logf("OFDUMP on pod: %s, node: %s \n: %s", ovnkPod.Name, nodeName, stdout)
+					}
 					framework.ExpectNoError(err, "Sending large TCP payload from client failed")
 					gomega.Expect(stdout).To(gomega.Equal(payload),
 						"Received TCP payload from server does not equal expected payload")
