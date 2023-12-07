@@ -279,50 +279,66 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svc
 	}
 }
 
-func getGatewayForwardRules(svcCIDR *net.IPNet) []nodeipt.Rule {
-	protocol := getIPTablesProtocol(svcCIDR.IP.String())
-	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
-	if protocol == iptables.ProtocolIPv6 {
-		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
+func getGatewayForwardRules(cidrs []*net.IPNet) []nodeipt.Rule {
+	var returnRules []nodeipt.Rule
+	protocols := make(map[iptables.Protocol]struct{})
+
+	// Add rules for all CIDRs.
+	for _, cidr := range cidrs {
+		protocol := getIPTablesProtocol(cidr.IP.String())
+		protocols[protocol] = struct{}{}
+
+		returnRules = append(returnRules, []nodeipt.Rule{
+			{
+				Table: "filter",
+				Chain: "FORWARD",
+				Args: []string{
+					"-s", cidr.String(),
+					"-j", "ACCEPT",
+				},
+				Protocol: protocol,
+			},
+			{
+				Table: "filter",
+				Chain: "FORWARD",
+				Args: []string{
+					"-d", cidr.String(),
+					"-j", "ACCEPT",
+				},
+				Protocol: protocol,
+			},
+		}...)
 	}
-	return []nodeipt.Rule{
-		{
-			Table: "filter",
-			Chain: "FORWARD",
-			Args: []string{
-				"-s", svcCIDR.String(),
-				"-j", "ACCEPT",
+
+	// Add rules for MasqueraIPs.
+	for protocol := range protocols {
+		masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
+		if protocol == iptables.ProtocolIPv6 {
+			masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
+		}
+		returnRules = append(returnRules, []nodeipt.Rule{
+			{
+				Table: "filter",
+				Chain: "FORWARD",
+				Args: []string{
+					"-s", masqueradeIP.String(),
+					"-j", "ACCEPT",
+				},
+				Protocol: protocol,
 			},
-			Protocol: protocol,
-		},
-		{
-			Table: "filter",
-			Chain: "FORWARD",
-			Args: []string{
-				"-d", svcCIDR.String(),
-				"-j", "ACCEPT",
+			{
+				Table: "filter",
+				Chain: "FORWARD",
+				Args: []string{
+					"-d", masqueradeIP.String(),
+					"-j", "ACCEPT",
+				},
+				Protocol: protocol,
 			},
-			Protocol: protocol,
-		},
-		{
-			Table: "filter",
-			Chain: "FORWARD",
-			Args: []string{
-				"-s", masqueradeIP.String(),
-				"-j", "ACCEPT",
-			},
-			Protocol: protocol,
-		},
-		{
-			Table: "filter",
-			Chain: "FORWARD",
-			Args: []string{
-				"-d", masqueradeIP.String(),
-				"-j", "ACCEPT",
-			},
-			Protocol: protocol,
-		},
+		}...)
 	}
+
+	return returnRules
 }
 
 func getGatewayDropRules(ifName string) []nodeipt.Rule {
@@ -357,8 +373,8 @@ func getGatewayDropRules(ifName string) []nodeipt.Rule {
 // -A FORWARD -d 10.96.0.0/16 -j ACCEPT
 // -A FORWARD -s 169.254.169.1 -j ACCEPT
 // -A FORWARD -d 169.254.169.1 -j ACCEPT
-func initExternalBridgeServiceForwardingRules(cidr *net.IPNet) error {
-	return insertIptRules(getGatewayForwardRules(cidr))
+func initExternalBridgeServiceForwardingRules(cidrs []*net.IPNet) error {
+	return insertIptRules(getGatewayForwardRules(cidrs))
 }
 
 // initExternalBridgeDropRules sets up iptables rules to block forwarding

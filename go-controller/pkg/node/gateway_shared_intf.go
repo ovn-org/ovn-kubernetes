@@ -1855,10 +1855,13 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 	}
 
 	if config.Gateway.DisableForwarding {
-		for _, subnet := range config.Kubernetes.ServiceCIDRs {
-			if err := initExternalBridgeServiceForwardingRules(subnet); err != nil {
-				return nil, fmt.Errorf("failed to add forwarding rules for bridge %s: err %v", gwBridge.bridgeName, err)
-			}
+		var subnets []*net.IPNet
+		for _, subnet := range config.Default.ClusterSubnets {
+			subnets = append(subnets, subnet.CIDR)
+		}
+		subnets = append(subnets, config.Kubernetes.ServiceCIDRs...)
+		if err := initExternalBridgeServiceForwardingRules(subnets); err != nil {
+			return nil, fmt.Errorf("failed to add forwarding rules for bridge %s: err %v", gwBridge.bridgeName, err)
 		}
 		if err := initExternalBridgeDropForwardingRules(gwBridge.bridgeName); err != nil {
 			return nil, fmt.Errorf("failed to add forwarding rules for bridge %s: err %v", gwBridge.bridgeName, err)
