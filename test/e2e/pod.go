@@ -346,6 +346,27 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 					framework.Logf("Server pod running on node: %s, with IP: %s", serverPodNodeName, serverPodIP.IP)
 					// setup packet capture on each node
 					tcpDumpSync := errgroup.Group{}
+					datapathDumpSync := errgroup.Group{}
+
+					runDatapathDump := func(pod string, node string) error {
+						ticker := time.NewTicker(1 * time.Second)
+						defer ticker.Stop()
+						maxTicks := 15
+						ticks := 0
+						for range ticker.C {
+							if ticks > maxTicks {
+								return nil
+							}
+							ticks++
+							stdout, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", pod, "--", "ovs-dpctl",
+								"dump-flows")
+							if err != nil {
+								return err
+							}
+							framework.Logf("DATAPTH FLOWS on pod: %s, node: %s \n: %s", pod, node, stdout)
+						}
+						return nil
+					}
 
 					runPacketCapture := func(pod string, node string) error {
 						stdout, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", pod, "--", "timeout", "20",
@@ -362,6 +383,9 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 						framework.ExpectNoError(err, "Could not get OVNK pod to setup TCP capture")
 						tcpDumpSync.Go(func() error {
 							return runPacketCapture(ovnkPod.Name, nodeName)
+						})
+						datapathDumpSync.Go(func() error {
+							return runDatapathDump(ovnkPod.Name, nodeName)
 						})
 					}
 					// give tcpdump a chance to start
@@ -382,6 +406,7 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 						framework.Poll,
 						30*time.Second)
 					_ = tcpDumpSync.Wait()
+					_ = datapathDumpSync.Wait()
 					framework.ExpectNoError(err, "Sending large TCP payload from client failed")
 					gomega.Expect(stdout).To(gomega.Equal(payload),
 						"Received TCP payload from server does not equal expected payload")
