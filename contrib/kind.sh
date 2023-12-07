@@ -1028,8 +1028,8 @@ install_ovn() {
 }
 
 install_ingress() {
-  run_kubectl apply -f ingress/mandatory.yaml
-  run_kubectl apply -f ingress/service-nodeport.yaml
+  run_kubectl apply -f "${DIR}/ingress/mandatory.yaml"
+  run_kubectl apply -f "${DIR}/ingress/service-nodeport.yaml"
 }
 
 install_metallb() {
