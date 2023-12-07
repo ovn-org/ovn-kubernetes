@@ -1032,45 +1032,46 @@ install_ingress() {
   run_kubectl apply -f "${DIR}/ingress/service-nodeport.yaml"
 }
 
+METALLB_DIR="/tmp/metallb"
 install_metallb() {
-  if  ! ( command -v controller-gen > /dev/null ); then
-    echo "controller-gen not found, installing sigs.k8s.io/controller-tools"
-    olddir="${PWD}"
-    builddir="$(mktemp -d)"
-    cd "${builddir}"
-    GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
-    cd "${olddir}"
-    if [[ "${builddir}" == /tmp/* ]]; then #paranoia
-        rm -rf "${builddir}"
-    fi
-  fi
+  mkdir -p /tmp/metallb
+  local builddir
+  builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
+
+  pushd "${builddir}"
   git clone https://github.com/metallb/metallb.git
-  pushd metallb
+  cd metallb
   pip install -r dev-env/requirements.txt
-  inv dev-env -n ovn -b frr -p bgp
+  # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
+  GOBIN="" inv dev-env -n ovn -b frr -p bgp
   docker network create --driver bridge clientnet
   docker network connect clientnet frr
   docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
   popd
   delete_metallb_dir
-  local frr_ips=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}#{{end}}' frr)
-  echo $frr_ips
-  local kind_network=$(echo $frr_ips | cut -d '#' -f 2)
-  echo $kind_network
-  local client_network=$(echo $frr_ips | cut -d '#' -f 1)
-  echo $client_network
+
+  local frr_ips
+  frr_ips=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}#{{end}}' frr)
+  echo "${frr_ips}"
+  local kind_network
+  kind_network=$(echo "${frr_ips}" | cut -d '#' -f 2)
+  echo "${kind_network}"
+  local client_network
+  client_network=$(echo "${frr_ips}" | cut -d '#' -f 1)
+  echo "${client_network}"
   # The following only works for single stack, to be modified if dualstack is to be supported:
-  local client_subnet=$(docker network inspect clientnet -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
-  echo $client_subnet
+  local client_subnet
+  client_subnet=$(docker network inspect clientnet -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+  echo "${client_subnet}"
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  for n in $KIND_NODES; do
-    docker exec "$n" ip route add $client_subnet via $kind_network
+  for n in ${KIND_NODES}; do
+    docker exec "${n}" ip route add "${client_subnet}" via "${kind_network}"
   done
   # TODO(tssurya): expand this to be more dynamic in the future when needed.
   # for now, we only run one test with metalLB load balancer for which this
   # one svcVIP (192.168.10.0) is more than enough since at a time we will only
   # have one load balancer service
-  docker exec lbclient ip route add 192.168.10.0 via $client_network dev eth0
+  docker exec lbclient ip route add 192.168.10.0 via "${client_network}" dev eth0
   sleep 30
 }
 
@@ -1090,19 +1091,27 @@ install_plugins() {
 }
 
 destroy_metallb() {
-  docker stop lbclient || true # its possible the lbclient doesn't exist which is fine, ignore error
-  docker stop frr || true # its possible the lbclient doesn't exist which is fine, ignore error
-  docker network rm clientnet || true # its possible the clientnet network doesn't exist which is fine, ignore error
+  if docker ps --format '{{.Names}}' | grep -Eq '^lbclient$'; then
+      docker stop lbclient
+  fi
+  if docker ps --format '{{.Names}}' | grep -Eq '^frr$'; then
+      docker stop frr
+  fi
+  if docker network ls --format '{{.Name}}' | grep -q '^clientnet$'; then
+      docker network rm clientnet
+  fi
   delete_metallb_dir
 }
 
 delete_metallb_dir() {
+  if ! [ -d "${METALLB_DIR}" ]; then
+      return
+  fi
+
   # The build directory will contain read only directories after building. Files cannot be deleted, even by the owner.
   # Therefore, set all dirs to u+rwx.
-  if [ -d "${DIR}/../metallb" ]; then
-      find "${DIR}/../metallb" -type d -exec chmod u+rwx "{}" \;
-      rm -rf "${DIR}/../metallb"
-  fi
+  find "${METALLB_DIR}" -type d -exec chmod u+rwx "{}" \;
+  rm -rf "${METALLB_DIR}"
 }
 
 install_multus() {
