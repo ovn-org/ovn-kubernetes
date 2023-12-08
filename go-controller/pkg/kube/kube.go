@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
+	ocpnetworkclientset "github.com/openshift/client-go/network/clientset/versioned"
 	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
@@ -77,6 +79,7 @@ type KubeOVN struct {
 	ANPClient            anpclientset.Interface
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
+	NetworkClient        ocpnetworkclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
 	EgressServiceClient  egressserviceclientset.Interface
 	APBRouteClient       adminpolicybasedrouteclientset.Interface
@@ -430,6 +433,17 @@ func (k *KubeOVN) GetEgressFirewalls() ([]*egressfirewall.EgressFirewall, error)
 		return nil
 	})
 	return list, err
+}
+
+// CreateDNSNameResolver creates the DNSNameResolver object in the namespace with the provided
+// DNSNameResolver data
+func (k *KubeOVN) CreateDNSNameResolver(dnsNameResolver *ocpnetworkapiv1alpha1.DNSNameResolver, namespace string) (*ocpnetworkapiv1alpha1.DNSNameResolver, error) {
+	return k.NetworkClient.NetworkV1alpha1().DNSNameResolvers(namespace).Create(context.TODO(), dnsNameResolver, metav1.CreateOptions{})
+}
+
+// DeleteDNSNameResolver deletes the DNSNameResolver object in the namespace from kubernetes
+func (k *KubeOVN) DeleteDNSNameResolver(name, namespace string) error {
+	return k.NetworkClient.NetworkV1alpha1().DNSNameResolvers(namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
 }
 
 func (k *KubeOVN) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {

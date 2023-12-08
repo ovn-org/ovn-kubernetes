@@ -376,3 +376,9 @@ func GenerateId(length int) string {
 	}
 	return string(b)
 }
+
+// IsWildcard checks if the domain name is wildcard.
+func IsWildcard(dnsName string) bool {
+	trimmedString := strings.TrimPrefix(dnsName, "*")
+	return trimmedString != dnsName
+}

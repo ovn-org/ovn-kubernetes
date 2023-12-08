@@ -10,6 +10,7 @@ import (
 	"k8s.io/klog/v2"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -31,7 +32,8 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		factory.EgressNodeType,
 		factory.EgressFwNodeType,
 		factory.NamespaceType,
-		factory.MultiNetworkPolicyType:
+		factory.MultiNetworkPolicyType,
+		factory.DNSNameResolverType:
 		return true
 	}
 	return false
@@ -88,6 +90,17 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 			return false, fmt.Errorf("could not cast obj2 of type %T to *egressfirewall.EgressFirewall", obj2)
 		}
 		return reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec), nil
+
+	case factory.DNSNameResolverType:
+		oldDNSNameResolver, ok := obj1.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+		if !ok {
+			return false, fmt.Errorf("could not cast obj1 of type %T to *ocpnetworkapiv1alpha1.DNSNameResolver", obj1)
+		}
+		newDNSNameResolver, ok := obj2.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+		if !ok {
+			return false, fmt.Errorf("could not cast obj2 of type %T to *ocpnetworkapiv1alpha1.DNSNameResolver", obj2)
+		}
+		return reflect.DeepEqual(oldDNSNameResolver.Status, newDNSNameResolver.Status), nil
 
 	case factory.EgressIPType,
 		factory.EgressIPNamespaceType,
@@ -162,6 +175,9 @@ func (h *baseNetworkControllerEventHandler) getResourceFromInformerCache(objType
 	case factory.EgressFirewallType:
 		obj, err = watchFactory.GetEgressFirewall(namespace, name)
 
+	case factory.DNSNameResolverType:
+		obj, err = watchFactory.GetDNSNameResolver(namespace, name)
+
 	case factory.EgressIPType:
 		obj, err = watchFactory.GetEgressIP(name)
 
@@ -194,7 +210,8 @@ func needsUpdateDuringRetry(objType reflect.Type) bool {
 		factory.EgressIPType,
 		factory.EgressIPPodType,
 		factory.EgressIPNamespaceType,
-		factory.MultiNetworkPolicyType:
+		factory.MultiNetworkPolicyType,
+		factory.DNSNameResolverType:
 		return true
 	}
 	return false

@@ -22,6 +22,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	certificatesinformers "k8s.io/client-go/informers/certificates/v1"
 
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
+	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
+	ocpnetworklister "github.com/openshift/client-go/network/listers/network/v1alpha1"
+
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
@@ -85,6 +90,7 @@ type WatchFactory struct {
 	anpFactory           anpinformerfactory.SharedInformerFactory
 	eipFactory           egressipinformerfactory.SharedInformerFactory
 	efFactory            egressfirewallinformerfactory.SharedInformerFactory
+	dnrFactory           ocpnetworkinformerfactory.SharedInformerFactory
 	cpipcFactory         ocpcloudnetworkinformerfactory.SharedInformerFactory
 	egressQoSFactory     egressqosinformerfactory.SharedInformerFactory
 	mnpFactory           mnpinformerfactory.SharedInformerFactory
@@ -148,6 +154,7 @@ var (
 	NamespaceType                         reflect.Type = reflect.TypeOf(&kapi.Namespace{})
 	NodeType                              reflect.Type = reflect.TypeOf(&kapi.Node{})
 	EgressFirewallType                    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
+	DNSNameResolverType                   reflect.Type = reflect.TypeOf(&ocpnetworkapiv1alpha1.DNSNameResolver{})
 	EgressIPType                          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 	EgressIPNamespaceType                 reflect.Type = reflect.TypeOf(&egressIPNamespace{})
 	EgressIPPodType                       reflect.Type = reflect.TypeOf(&egressIPPod{})
@@ -223,6 +230,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		anpFactory:           anpinformerfactory.NewSharedInformerFactory(ovnClientset.ANPClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
+		dnrFactory:           ocpnetworkinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.NetworkClient, resyncInterval, ocpnetworkinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
 		egressQoSFactory:     egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
 		mnpFactory:           mnpinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
@@ -239,6 +247,9 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		return nil, err
 	}
 	if err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := ocpnetworkapiv1alpha1.Install(ocpnetworkscheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := egressqosapi.AddToScheme(egressqosscheme.Scheme); err != nil {
@@ -329,6 +340,13 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		if err != nil {
 			return nil, err
 		}
+
+		if config.OVNKubernetesFeature.EnableDNSNameResolver {
+			wf.informers[DNSNameResolverType], err = newInformer(DNSNameResolverType, wf.dnrFactory.Network().V1alpha1().DNSNameResolvers().Informer())
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressQoS {
 		wf.informers[EgressQoSType], err = newInformer(EgressQoSType, wf.egressQoSFactory.K8s().V1().EgressQoSes().Informer())
@@ -388,6 +406,15 @@ func (wf *WatchFactory) Start() error {
 		for oType, synced := range waitForCacheSyncWithTimeout(wf.efFactory, wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+
+		if config.OVNKubernetesFeature.EnableDNSNameResolver && wf.dnrFactory != nil {
+			wf.dnrFactory.Start(wf.stopChan)
+			for oType, synced := range waitForCacheSyncWithTimeout(wf.dnrFactory, wf.stopChan) {
+				if !synced {
+					return fmt.Errorf("error in syncing cache for %v informer", oType)
+				}
 			}
 		}
 	}
@@ -569,6 +596,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		cpipcFactory:         ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.EgressServiceClient, resyncInterval),
+		dnrFactory:           ocpnetworkinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.NetworkClient, resyncInterval, ocpnetworkinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
 		egressQoSFactory:     egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
@@ -579,6 +607,12 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 	}
 
 	if err := egressserviceapi.AddToScheme(egressservicescheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := ocpnetworkapiv1alpha1.Install(ocpnetworkscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -657,6 +691,18 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		wf.efFactory.K8s().V1().EgressFirewalls().Informer()
 	}
 
+	if config.OVNKubernetesFeature.EnableEgressFirewall && config.OVNKubernetesFeature.EnableDNSNameResolver {
+		wf.informers[EgressFirewallType], err = newInformer(EgressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
+		if err != nil {
+			return nil, err
+		}
+
+		wf.informers[DNSNameResolverType], err = newInformer(DNSNameResolverType, wf.dnrFactory.Network().V1alpha1().DNSNameResolvers().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -702,6 +748,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case EgressFirewallType:
 		if egressFirewall, ok := obj.(*egressfirewallapi.EgressFirewall); ok {
 			return &egressFirewall.ObjectMeta, nil
+		}
+	case DNSNameResolverType:
+		if dnsNameResolver, ok := obj.(*ocpnetworkapiv1alpha1.DNSNameResolver); ok {
+			return &dnsNameResolver.ObjectMeta, nil
 		}
 	case EgressIPType:
 		if egressIP, ok := obj.(*egressipapi.EgressIP); ok {
@@ -810,6 +860,12 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddEgressFirewallHandler(funcs, processExisting)
+		}, nil
+
+	case DNSNameResolverType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+			return wf.AddFilteredDNSNameResolverHandler(namespace, funcs, processExisting)
 		}, nil
 
 	case EgressIPType:
@@ -952,6 +1008,16 @@ func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEven
 // RemoveEgressFirewallHandler removes an EgressFirewall object event handler function
 func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
 	wf.removeHandler(EgressFirewallType, handler)
+}
+
+// AddFilteredDNSNameResolverHandler adds a handler function that will be executed on DNSNameResolver object changes
+func (wf *WatchFactory) AddFilteredDNSNameResolverHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(DNSNameResolverType, namespace, nil, handlerFuncs, processExisting, defaultHandlerPriority)
+}
+
+// RemoveDNSNameResolverHandler removes an DNSNameResolver object event handler function
+func (wf *WatchFactory) RemoveDNSNameResolverHandler(handler *Handler) {
+	wf.removeHandler(DNSNameResolverType, handler)
 }
 
 // RemoveEgressQoSHandler removes an EgressQoS object event handler function
@@ -1193,6 +1259,24 @@ func (wf *WatchFactory) GetMultiNetworkPolicy(namespace, name string) (*mnpapi.M
 func (wf *WatchFactory) GetEgressFirewall(namespace, name string) (*egressfirewallapi.EgressFirewall, error) {
 	egressFirewallLister := wf.informers[EgressFirewallType].lister.(egressfirewalllister.EgressFirewallLister)
 	return egressFirewallLister.EgressFirewalls(namespace).Get(name)
+}
+
+// GetEgressFirewalls returns a list of all the egress firewalls in the cluster
+func (wf *WatchFactory) GetEgressFirewalls() ([]*egressfirewallapi.EgressFirewall, error) {
+	egressFirewallLister := wf.informers[EgressFirewallType].lister.(egressfirewalllister.EgressFirewallLister)
+	return egressFirewallLister.List(labels.Everything())
+}
+
+// GetDNSNameResolver gets a specific dns name resolver by the namespace/name
+func (wf *WatchFactory) GetDNSNameResolver(namespace, name string) (*ocpnetworkapiv1alpha1.DNSNameResolver, error) {
+	dnsNameResolverLister := wf.informers[DNSNameResolverType].lister.(ocpnetworklister.DNSNameResolverLister)
+	return dnsNameResolverLister.DNSNameResolvers(namespace).Get(name)
+}
+
+// GetDNSNameResolvers returns a list of all the dns name resolvers in the namespace
+func (wf *WatchFactory) GetDNSNameResolvers(namespace string) ([]*ocpnetworkapiv1alpha1.DNSNameResolver, error) {
+	dnsNameResolverLister := wf.informers[DNSNameResolverType].lister.(ocpnetworklister.DNSNameResolverLister)
+	return dnsNameResolverLister.DNSNameResolvers(namespace).List(labels.Everything())
 }
 
 func (wf *WatchFactory) CertificateSigningRequestInformer() certificatesinformers.CertificateSigningRequestInformer {

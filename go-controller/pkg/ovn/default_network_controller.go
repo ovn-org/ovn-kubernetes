@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -100,9 +101,12 @@ type DefaultNetworkController struct {
 	apbExternalRouteController *apbroutecontroller.ExternalGatewayMasterController
 
 	egressFirewallDNS *EgressDNS
+	resolver          *Resolver
 
 	// retry framework for egress firewall
 	retryEgressFirewalls *retry.RetryFramework
+	// retry framework for dns name resolver
+	retryDNSNameResolvers *retry.RetryFramework
 
 	// retry framework for egress IP
 	retryEgressIPs *retry.RetryFramework
@@ -242,6 +246,7 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryEgressFirewalls = oc.newRetryFramework(factory.EgressFirewallType)
+	oc.retryDNSNameResolvers = oc.newRetryFramework(factory.DNSNameResolverType)
 	oc.retryEgressIPs = oc.newRetryFramework(factory.EgressIPType)
 	oc.retryEgressIPNamespaces = oc.newRetryFramework(factory.EgressIPNamespaceType)
 	oc.retryEgressIPPods = oc.newRetryFramework(factory.EgressIPPodType)
@@ -484,12 +489,22 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		var err error
-		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan)
-		if err != nil {
-			return err
+		// If DNSNameResolver is enabled, then initialize the resolver for maintaining the
+		// address sets corresponding to the DNS names and start watching DNSNameResolver
+		// resources. Otherwise initialize the egressFirewallDNS.
+		if config.OVNKubernetesFeature.EnableDNSNameResolver {
+			oc.resolver = NewResolver(oc.addressSetFactory, oc.controllerName)
+			if err = WithSyncDurationMetric("dns name resolver", oc.WatchDNSNameResolver); err != nil {
+				return err
+			}
+		} else {
+			var err error
+			oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan)
+			if err != nil {
+				return err
+			}
+			oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 		}
-		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 		err = WithSyncDurationMetric("egress firewall", oc.WatchEgressFirewall)
 		if err != nil {
 			return err
@@ -785,6 +800,17 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		}
 		return err
 
+	case factory.DNSNameResolverType:
+		dnsNameResolver := obj.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+		addresses := []string{}
+		for _, resolvedName := range dnsNameResolver.Status.ResolvedNames {
+			for _, resolvedAddress := range resolvedName.ResolvedAddresses {
+				addresses = append(addresses, resolvedAddress.IP)
+			}
+		}
+		_, err := h.oc.resolver.Add(string(dnsNameResolver.Spec.Name), addresses, true)
+		return err
+
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
 		return h.oc.reconcileEgressIP(nil, eIP)
@@ -997,6 +1023,18 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
 		return h.oc.updateNamespace(oldNs, newNs)
+
+	case factory.DNSNameResolverType:
+		dnsNameResolver := newObj.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+		addresses := []string{}
+		for _, resolvedName := range dnsNameResolver.Status.ResolvedNames {
+			for _, resolvedAddress := range resolvedName.ResolvedAddresses {
+				addresses = append(addresses, resolvedAddress.IP)
+			}
+		}
+		_, err := h.oc.resolver.Add(string(dnsNameResolver.Spec.Name), addresses, true)
+		return err
+
 	}
 	return fmt.Errorf("no update function for object type %s", h.objType)
 }
@@ -1037,6 +1075,11 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
 		metrics.DecrementEgressFirewallCount()
 		return nil
+
+	case factory.DNSNameResolverType:
+		dnsNameResolver := obj.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+		err := h.oc.resolver.Delete(string(dnsNameResolver.Spec.Name))
+		return err
 
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
@@ -1102,6 +1145,9 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 
 		case factory.EgressFirewallType:
 			syncFunc = h.oc.syncEgressFirewall
+
+		case factory.DNSNameResolverType:
+			syncFunc = nil
 
 		case factory.EgressIPNamespaceType:
 			syncFunc = h.oc.syncEgressIPs

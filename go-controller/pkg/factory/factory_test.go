@@ -41,6 +41,9 @@ import (
 	ocpconfigapi "github.com/openshift/api/config/v1"
 	ocpcloudnetworkclientsetfake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
 
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	ocpnetworkclientsetfake "github.com/openshift/client-go/network/clientset/versioned/fake"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -145,6 +148,15 @@ func newEgressFirewall(name, namespace string) *egressfirewall.EgressFirewall {
 	}
 }
 
+func newDNSNameResolver(name, namespace, dnsName string) *ocpnetworkapiv1alpha1.DNSNameResolver {
+	return &ocpnetworkapiv1alpha1.DNSNameResolver{
+		ObjectMeta: newObjectMeta(name, namespace),
+		Spec: ocpnetworkapiv1alpha1.DNSNameResolverSpec{
+			Name: ocpnetworkapiv1alpha1.DNSName(dnsName),
+		},
+	}
+}
+
 func newEgressIP(name, namespace string) *egressip.EgressIP {
 	return &egressip.EgressIP{
 		ObjectMeta: newObjectMeta(name, namespace),
@@ -231,6 +243,13 @@ func egressFirewallObjSetup(c *egressfirewallfake.Clientset, objType string, lis
 	return w
 }
 
+func dnsNameResolverObjSetup(c *ocpnetworkclientsetfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
 func egressIPObjSetup(c *egressipfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
@@ -291,6 +310,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		fakeClient                          *fake.Clientset
 		egressIPFakeClient                  *egressipfake.Clientset
 		egressFirewallFakeClient            *egressfirewallfake.Clientset
+		networkFakeClient                   *ocpnetworkclientsetfake.Clientset
 		cloudNetworkFakeClient              *ocpcloudnetworkclientsetfake.Clientset
 		egressQoSFakeClient                 *egressqosfake.Clientset
 		egressServiceFakeClient             *egressservicefake.Clientset
@@ -299,6 +319,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		policyWatch, serviceWatch           *watch.FakeWatcher
 		endpointSliceWatch                  *watch.FakeWatcher
 		egressFirewallWatch                 *watch.FakeWatcher
+		dnsNameResolverWatch                *watch.FakeWatcher
 		egressIPWatch                       *watch.FakeWatcher
 		cloudPrivateIPConfigWatch           *watch.FakeWatcher
 		egressQoSWatch                      *watch.FakeWatcher
@@ -315,6 +336,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		cloudPrivateIPConfigs               []*ocpcloudnetworkapi.CloudPrivateIPConfig
 		wf                                  *WatchFactory
 		egressFirewalls                     []*egressfirewall.EgressFirewall
+		dnsNameResolvers                    []*ocpnetworkapiv1alpha1.DNSNameResolver
 		egressQoSes                         []*egressqos.EgressQoS
 		egressServices                      []*egressservice.EgressService
 		adminNetworkPolicies                []*anpapi.AdminNetworkPolicy
@@ -333,15 +355,18 @@ var _ = Describe("Watch Factory Operations", func() {
 		config.PrepareTestConfig()
 		config.OVNKubernetesFeature.EnableEgressIP = true
 		config.OVNKubernetesFeature.EnableEgressFirewall = true
+		config.OVNKubernetesFeature.EnableDNSNameResolver = true
 		config.OVNKubernetesFeature.EnableEgressQoS = true
 		config.OVNKubernetesFeature.EnableEgressService = true
 		config.OVNKubernetesFeature.EnableAdminNetworkPolicy = true
 		config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
+		config.Kubernetes.OVNConfigNamespace = "ovn-kubernetes"
 
 		fakeClient = &fake.Clientset{}
 		egressFirewallFakeClient = &egressfirewallfake.Clientset{}
 		egressIPFakeClient = &egressipfake.Clientset{}
 		cloudNetworkFakeClient = &ocpcloudnetworkclientsetfake.Clientset{}
+		networkFakeClient = &ocpnetworkclientsetfake.Clientset{}
 		egressQoSFakeClient = &egressqosfake.Clientset{}
 		egressServiceFakeClient = &egressservicefake.Clientset{}
 		adminNetworkPolicyFakeClient = &anpapifake.Clientset{}
@@ -352,6 +377,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			EgressIPClient:       egressIPFakeClient,
 			CloudNetworkClient:   cloudNetworkFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
+			NetworkClient:        networkFakeClient,
 			EgressQoSClient:      egressQoSFakeClient,
 			EgressServiceClient:  egressServiceFakeClient,
 		}
@@ -361,6 +387,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			CloudNetworkClient:   cloudNetworkFakeClient,
 			EgressServiceClient:  egressServiceFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
+			NetworkClient:        networkFakeClient,
 		}
 
 		pods = make([]*v1.Pod, 0)
@@ -421,6 +448,15 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressFirewallWatch = egressFirewallObjSetup(egressFirewallFakeClient, "egressfirewalls", func(core.Action) (bool, runtime.Object, error) {
 			obj := &egressfirewall.EgressFirewallList{}
 			for _, p := range egressFirewalls {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
+
+		dnsNameResolvers = make([]*ocpnetworkapiv1alpha1.DNSNameResolver, 0)
+		dnsNameResolverWatch = dnsNameResolverObjSetup(networkFakeClient, "dnsnameresolvers", func(core.Action) (bool, runtime.Object, error) {
+			obj := &ocpnetworkapiv1alpha1.DNSNameResolverList{}
+			for _, p := range dnsNameResolvers {
 				obj.Items = append(obj.Items, *p)
 			}
 			return true, obj, nil
@@ -597,6 +633,11 @@ var _ = Describe("Watch Factory Operations", func() {
 			testExisting(EgressFirewallType, "", nil, defaultHandlerPriority)
 		})
 
+		It("is called for each existing dnsNameResolver", func() {
+			dnsNameResolvers = append(dnsNameResolvers, newDNSNameResolver("myDNSNameResolver", "default", "www.example.com."))
+			testExisting(DNSNameResolverType, "", nil, defaultHandlerPriority)
+		})
+
 		It("is called for each existing egressIP", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
 			pods = append(pods, newPod("pod1", "default"))
@@ -649,6 +690,11 @@ var _ = Describe("Watch Factory Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			testExisting(PodType, "default", sel, defaultHandlerPriority)
+		})
+
+		It("is called for each existing dnsNameResolver that matches a given namespace", func() {
+			dnsNameResolvers = append(dnsNameResolvers, newDNSNameResolver("myDNSNameResolver", "ovn-kubernetes", "www.example.com."))
+			testExisting(DNSNameResolverType, config.Kubernetes.OVNConfigNamespace, nil, defaultHandlerPriority)
 		})
 	})
 
@@ -718,6 +764,12 @@ var _ = Describe("Watch Factory Operations", func() {
 			egressFirewalls = append(egressFirewalls, newEgressFirewall("myFirewall", "default"))
 			egressFirewalls = append(egressFirewalls, newEgressFirewall("myFirewall1", "default"))
 			testExisting(EgressFirewallType)
+		})
+
+		It("calls ADD for each existing dnsNameResolver", func() {
+			dnsNameResolvers = append(dnsNameResolvers, newDNSNameResolver("myDNSNameResolver1", "ovn-kubernetes", "www.example.com."))
+			dnsNameResolvers = append(dnsNameResolvers, newDNSNameResolver("myDNSNameResolver2", "ovn-kubernetes", "sub.example.com."))
+			testExisting(DNSNameResolverType)
 		})
 		It("calls ADD for each existing egressIP", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
@@ -796,6 +848,19 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("does not contain EgressFirewall informer", func() {
 			config.OVNKubernetesFeature.EnableEgressFirewall = false
 			testExisting(EgressFirewallType)
+		})
+	})
+	Context("when DNSNameResolver is disabled", func() {
+		testExisting := func(objType reflect.Type) {
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wf.informers).NotTo(HaveKey(objType))
+		}
+		It("does not contain DNSNameResolver informer", func() {
+			config.OVNKubernetesFeature.EnableDNSNameResolver = false
+			testExisting(DNSNameResolverType)
 		})
 	})
 	Context("when EgressQoS is disabled", func() {
@@ -1746,6 +1811,51 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		wf.RemoveEgressFirewallHandler(h)
 	})
+
+	It("responds to dnsNameRsolver add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newDNSNameResolver("myDNSNameResolver", "ovn-kubernetes", "www.example.com.")
+		resolvedName := ocpnetworkapiv1alpha1.DNSNameResolverResolvedName{
+			DNSName: "www.example.com.",
+			ResolvedAddresses: []ocpnetworkapiv1alpha1.DNSNameResolverResolvedAddress{
+				{
+					IP: "1.1.1.1",
+				},
+			},
+		}
+		h, c := addHandler(wf, DNSNameResolverType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				dnsNameResolver := obj.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+				Expect(reflect.DeepEqual(dnsNameResolver, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newDNSNameResolver := new.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+				Expect(reflect.DeepEqual(newDNSNameResolver, added)).To(BeTrue())
+				Expect(reflect.DeepEqual(newDNSNameResolver.Status.ResolvedNames[0], resolvedName))
+			},
+			DeleteFunc: func(obj interface{}) {
+				dnsNameResolver := obj.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+				Expect(reflect.DeepEqual(dnsNameResolver, added)).To(BeTrue())
+			},
+		})
+
+		dnsNameResolvers = append(dnsNameResolvers, added)
+		dnsNameResolverWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Status.ResolvedNames = append(added.Status.ResolvedNames, resolvedName)
+		dnsNameResolverWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		dnsNameResolvers = dnsNameResolvers[:0]
+		dnsNameResolverWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveDNSNameResolverHandler(h)
+	})
+
 	It("responds to egressIP add/update/delete events", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
@@ -2136,4 +2246,63 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		wf.RemovePodHandler(h)
 	})
+
+	It("filters dnsNameResolvers correctly by namespace", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		passesFilter := newDNSNameResolver("dnsnameresolver1", "ovn-kubernetes", "www.example.com.")
+		failsFilter := newDNSNameResolver("dnsnameresolver12", "default", "www.example.com.")
+
+		Expect(err).NotTo(HaveOccurred())
+
+		_, c := addFilteredHandler(wf,
+			DNSNameResolverType,
+			DNSNameResolverType,
+			config.Kubernetes.OVNConfigNamespace,
+			nil,
+			cache.ResourceEventHandlerFuncs{
+				AddFunc: func(obj interface{}) {
+					dnsNameResolver := obj.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+					Expect(reflect.DeepEqual(dnsNameResolver, passesFilter)).To(BeTrue())
+				},
+				UpdateFunc: func(old, new interface{}) {
+					newDnsNameResolver := new.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+					Expect(reflect.DeepEqual(newDnsNameResolver, passesFilter)).To(BeTrue())
+				},
+				DeleteFunc: func(obj interface{}) {
+					dnsNameResolver := obj.(*ocpnetworkapiv1alpha1.DNSNameResolver)
+					Expect(reflect.DeepEqual(dnsNameResolver, passesFilter)).To(BeTrue())
+				},
+			})
+
+		dnsNameResolvers = append(dnsNameResolvers, passesFilter)
+		dnsNameResolverWatch.Add(passesFilter)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+
+		// numAdded should remain 1
+		dnsNameResolvers = append(dnsNameResolvers, failsFilter)
+		dnsNameResolverWatch.Add(failsFilter)
+		Consistently(c.getAdded, 2).Should(Equal(1))
+
+		passesFilter.Status.ResolvedNames = append(passesFilter.Status.ResolvedNames, ocpnetworkapiv1alpha1.DNSNameResolverResolvedName{
+			DNSName: "www.example.com.",
+		})
+		dnsNameResolverWatch.Modify(passesFilter)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+
+		// numAdded should remain 1
+		failsFilter.Status.ResolvedNames = append(failsFilter.Status.ResolvedNames, ocpnetworkapiv1alpha1.DNSNameResolverResolvedName{
+			DNSName: "www.example.com.",
+		})
+		dnsNameResolverWatch.Modify(failsFilter)
+		Consistently(c.getUpdated, 2).Should(Equal(1))
+
+		dnsNameResolvers = []*ocpnetworkapiv1alpha1.DNSNameResolver{failsFilter}
+		dnsNameResolverWatch.Delete(passesFilter)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+	})
+
 })
