@@ -353,6 +353,12 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 						defer ticker.Stop()
 						maxTicks := 15
 						ticks := 0
+						stdout, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", pod, "--", "ovs-appctl",
+							"dpctl/flush-conntrack")
+						if err != nil {
+							return err
+						}
+						framework.Logf("Conntrack flushed on pod: %s, node: %s \n: %s", pod, node, stdout)
 						for range ticker.C {
 							if ticks > maxTicks {
 								return nil
@@ -406,7 +412,10 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 						framework.Poll,
 						30*time.Second)
 					_ = tcpDumpSync.Wait()
-					_ = datapathDumpSync.Wait()
+					err = datapathDumpSync.Wait()
+					if err != nil {
+						framework.Logf("Failure during datapath dump: %s")
+					}
 					for _, nodeName := range []string{serverPodNodeName, clientPodNodeName} {
 						nodeName := nodeName
 						framework.Logf("Node name is: %s", nodeName)
