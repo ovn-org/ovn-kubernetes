@@ -354,7 +354,7 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 						maxTicks := 15
 						ticks := 0
 						stdout, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", pod, "--", "ovs-appctl",
-							"dpctl/flush-conntrack")
+							"dpctl/dump-conntrack")
 						if err != nil {
 							return err
 						}
@@ -428,6 +428,10 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 							framework.ExpectNoError(err, "Could not dump OF flows")
 						}
 						framework.Logf("OFDUMP on pod: %s, node: %s \n: %s", ovnkPod.Name, nodeName, stdout)
+						stdout, err = e2ekubectl.RunKubectl(ovnNamespace, "exec", ovnkPod.Name, "--", "ovs-appctl",
+							"dpctl/dump-conntrack")
+						framework.ExpectNoError(err, "Could not dump conntrack")
+						framework.Logf("Conntrack on pod: %s, node: %s \n: %s", ovnkPod.Name, nodeName, stdout)
 					}
 					framework.ExpectNoError(err, "Sending large TCP payload from client failed")
 					gomega.Expect(stdout).To(gomega.Equal(payload),
