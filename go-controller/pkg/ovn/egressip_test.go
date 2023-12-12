@@ -4934,7 +4934,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in local zones", true, "remote", "local"),
 		)
 
-		ginkgo.It("should delete and re-create", func() {
+		ginkgo.It("should delete and re-create and delete", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
@@ -5090,12 +5090,25 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				eIPUpdate, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				// For pod selector, let's test a use case where the selector only looks for keys that are not
+				// present in the pod. That should be properly handled in deletion cases, where the match is
+				// true, but the "new" pod object is nil.
 				eIPUpdate.Spec = egressipv1.EgressIPSpec{
 					EgressIPs: []string{
 						updatedEgressIP.String(),
 					},
 					PodSelector: metav1.LabelSelector{
-						MatchLabels: egressPodLabel,
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      "someNonExistingKey",
+								Operator: metav1.LabelSelectorOpDoesNotExist,
+							},
+							{
+								Key:      "egress",
+								Operator: metav1.LabelSelectorOpNotIn,
+								Values:   []string{"not_needed", "needle", "haystack"},
+							},
+						},
 					},
 					NamespaceSelector: metav1.LabelSelector{
 						MatchLabels: egressPodLabel,
@@ -5115,6 +5128,45 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				}).Should(gomega.ContainElement(updatedEgressIP.String()))
 
 				gomega.Expect(nodes[0]).To(gomega.Equal(node2Name))
+
+				// Remove pod and ensure LRP and SNAT are removed as well
+				ginkgo.By("Deleting the completed pod should update EIPs SNATs")
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespace).Delete(context.TODO(), podName, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				expectedDatabaseState2 := []libovsdbtest.TestData{
+					&nbdb.LogicalRouter{
+						Name:     ovntypes.OVNClusterRouter,
+						UUID:     ovntypes.OVNClusterRouter + "-UUID",
+						Policies: []string{},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name + "-UUID",
+						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
+						Networks: []string{node2LogicalRouterIfAddrV6},
+					},
+					&nbdb.LogicalRouter{
+						Name: ovntypes.GWRouterPrefix + node1Name,
+						UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
+					},
+					&nbdb.LogicalRouter{
+						Name: ovntypes.GWRouterPrefix + node2Name,
+						UUID: ovntypes.GWRouterPrefix + node2Name + "-UUID",
+						Nat:  []string{},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID:      "k8s-" + node1Name + "-UUID",
+						Name:      "k8s-" + node1Name,
+						Addresses: []string{"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(node1Subnet).IP.String()},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID:      "k8s-" + node2Name + "-UUID",
+						Name:      "k8s-" + node2Name,
+						Addresses: []string{"fe:1a:c2:3f:0e:fb " + util.GetNodeManagementIfAddr(node2Subnet).IP.String()},
+					},
+				}
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState2))
+
 				return nil
 			}
 
