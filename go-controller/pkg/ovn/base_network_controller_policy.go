@@ -208,52 +208,34 @@ func (bnc *BaseNetworkController) syncNetworkPoliciesCommon(expectedPolicies map
 	// Delete port groups with acls first, since address sets may be referenced in these acls, and
 	// cause SyntaxError in ovn-controller, if address sets deleted first, but acls still reference them.
 
-	// cleanup port groups based on acl search
+	// cleanup port groups
 	// netpol-owned port groups first
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, bnc.controllerName, nil)
-	p := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
-	netpolACLs, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, p)
-	if err != nil {
-		return fmt.Errorf("cannot find NetworkPolicy ACLs: %v", err)
-	}
-	stalePGs := sets.Set[string]{}
-	for _, netpolACL := range netpolACLs {
-		// policy-owned acl
-		namespace, policyName, err := parseACLPolicyKey(netpolACL.ExternalIDs[libovsdbops.ObjectNameKey.String()])
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetworkPolicy, bnc.controllerName, nil)
+	p := libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
+		namespace, policyName, err := libovsdbops.ParseNamespaceNameKey(item.ExternalIDs[libovsdbops.ObjectNameKey.String()])
 		if err != nil {
-			return fmt.Errorf("failed to sync stale network policies: acl IDs parsing failed: %w", err)
+			klog.Errorf("Failed to sync stale network policy %v: port group IDs parsing failed: %v",
+				item.ExternalIDs[libovsdbops.ObjectNameKey.String()], err)
+			return false
 		}
-		if !expectedPolicies[namespace][policyName] {
-			// policy doesn't exist on k8s, cleanup
-			portGroupName := bnc.getNetworkPolicyPGName(namespace, policyName)
-			stalePGs.Insert(portGroupName)
-		}
-	}
-	// default deny port groups
-	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNamespace, bnc.controllerName, nil)
-	p = libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
-	netpolACLs, err = libovsdbops.FindACLsWithPredicate(bnc.nbClient, p)
-	if err != nil {
-		return fmt.Errorf("cannot find default deny NetworkPolicy ACLs: %v", err)
-	}
-	for _, netpolACL := range netpolACLs {
-		// default deny acl
-		namespace := netpolACL.ExternalIDs[libovsdbops.ObjectNameKey.String()]
-		if _, ok := expectedPolicies[namespace]; !ok {
-			// no policies in that namespace are found, delete default deny port group
-			stalePGs.Insert(bnc.defaultDenyPortGroupName(namespace, libovsdbutil.ACLIngress))
-			stalePGs.Insert(bnc.defaultDenyPortGroupName(namespace, libovsdbutil.ACLEgress))
-		}
-	}
-	if len(stalePGs) > 0 {
-		sets.List[string](stalePGs)
-		err = libovsdbops.DeletePortGroups(bnc.nbClient, sets.List[string](stalePGs)...)
-		if err != nil {
-			return fmt.Errorf("error removing stale port groups %v: %v", stalePGs, err)
-		}
-		klog.Infof("Network policy sync cleaned up %d stale port groups", len(stalePGs))
+		// delete if policy is not present in expectedPolicies
+		return !expectedPolicies[namespace][policyName]
+	})
+	if err := libovsdbops.DeletePortGroupsWithPredicate(bnc.nbClient, p); err != nil {
+		return fmt.Errorf("cannot delete namespace NetworkPolicy port groups: %v", err)
 	}
 
+	// netpol-namespace-owned default deny port groups
+	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetpolNamespace, bnc.controllerName, nil)
+	p = libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
+		namespace := item.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+		_, ok := expectedPolicies[namespace]
+		// delete default deny port group if no policies in that namespace are found
+		return !ok
+	})
+	if err := libovsdbops.DeletePortGroupsWithPredicate(bnc.nbClient, p); err != nil {
+		return fmt.Errorf("cannot find default deny NetworkPolicy port groups: %v", err)
+	}
 	return nil
 }
 
