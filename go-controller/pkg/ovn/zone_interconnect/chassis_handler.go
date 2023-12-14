@@ -149,7 +149,7 @@ func (zch *ZoneChassisHandler) createOrUpdateNodeChassis(node *corev1.Node, isRe
 	encap := sbdb.Encap{
 		ChassisName: chassisID,
 		IP:          nodePrimaryIp,
-		Type:        "geneve",
+		Type:        "vxlan",
 		Options:     map[string]string{"csum": "true"},
 	}
 

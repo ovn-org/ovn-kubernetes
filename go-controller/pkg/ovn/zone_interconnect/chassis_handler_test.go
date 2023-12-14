@@ -156,7 +156,7 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			encap := &sbdb.Encap{
-				Type: "geneve",
+				Type: "vxlan",
 				IP:   testNode3.Status.Addresses[0].Address,
 			}
 			err = libovsdbOvnSBClient.Get(context.Background(), encap)

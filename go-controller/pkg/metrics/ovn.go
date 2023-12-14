@@ -467,7 +467,7 @@ func RegisterOvnControllerMetrics(stopChan <-chan struct{}) {
 			Help:      "Captures the number of geneve ports that are on br-int OVS bridge.",
 		},
 		func() float64 {
-			return getPortCount("geneve")
+			return getPortCount("vxlan")
 		}))
 
 	// register ovn-controller configuration metrics

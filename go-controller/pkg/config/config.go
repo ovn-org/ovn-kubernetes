@@ -60,7 +60,7 @@ var (
 	Default = DefaultConfig{
 		MTU:                   1400,
 		ConntrackZone:         64000,
-		EncapType:             "geneve",
+		EncapType:             "vxlan",
 		EncapIP:               "",
 		EncapPort:             DefaultEncapPort,
 		InactivityProbe:       100000, // in Milliseconds
