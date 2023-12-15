@@ -268,6 +268,20 @@ var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
 		"-- none(0), skip_sw(1), and skip_hw(2).",
 })
 
+var metricOvsUpcallFlowLimitKill = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "upcall_flow_limit_kill",
+	Help:      "Counter is increased when a number of datapath flows twice as high as current dynamic flow limit.",
+})
+
+var metricOvsUpcallFlowLimitHit = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "upcall_flow_limit_hit",
+	Help:      "Counter is increased when datapath reaches the dynamic limit of flows.",
+})
+
 type ovsClient func(args ...string) (string, string, error)
 
 func getOvsVersionInfo() {
@@ -688,6 +702,49 @@ func ovsHwOffloadMetricsUpdater(ovsVsctl ovsClient, tickPeriod time.Duration, st
 	}
 }
 
+func setOvsUpcallMetrics(ovsAppctl ovsClient) (err error) {
+	var stdout, stderr string
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("recovering from a panic while parsing the ovs-appctl coverage/"+
+				"read-counter output : %v", r)
+		}
+	}()
+
+	for counterName, metric := range ovsUpcallMetricsMap {
+		stdout, stderr, err = ovsAppctl("coverage/read-counter", counterName)
+		if err != nil {
+			return fmt.Errorf("failed to get counter for %s "+
+				"stderr(%s) :(%v)", counterName, stderr, err)
+		}
+		counterValue, err := strconv.Atoi(stdout)
+		if err != nil {
+			return fmt.Errorf("failed to convert counter for %s "+
+				"to int :(%v)", counterName, err)
+		}
+
+		metric.Set(float64(counterValue))
+	}
+	return nil
+}
+
+// ovsDatapathMetricsUpdater updates the ovs datapath metrics
+func ovsUpcallMetricsUpdater(ovsAppctl ovsClient, tickPeriod time.Duration, stopChan <-chan struct{}) {
+	ticker := time.NewTicker(tickPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := setOvsUpcallMetrics(ovsAppctl); err != nil {
+				klog.Errorf("Setting ovs upcall metrics failed: %s", err.Error())
+			}
+		case <-stopChan:
+			return
+		}
+	}
+}
+
 var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 	"netlink_sent": {
 		help: "Number of netlink message sent to the kernel.",
@@ -846,6 +903,10 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 	},
 }
 var registerOvsMetricsOnce sync.Once
+var ovsUpcallMetricsMap = map[string]prometheus.Gauge{
+	"upcall_flow_limit_kill": metricOvsUpcallFlowLimitKill,
+	"upcall_flow_limit_hit":  metricOvsUpcallFlowLimitHit,
+}
 
 func RegisterStandaloneOvsMetrics(stopChan <-chan struct{}) {
 	registerOvsMetrics(prometheus.DefaultRegisterer, stopChan)
@@ -914,6 +975,11 @@ func registerOvsMetrics(registry prometheus.Registerer, stopChan <-chan struct{}
 			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovsdb-server.pid"),
 			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemDB),
 		}))
+
+		for _, counterMetric := range ovsUpcallMetricsMap {
+			registry.MustRegister(counterMetric)
+		}
+
 		// OVS datapath metrics updater
 		go ovsDatapathMetricsUpdater(util.RunOVSAppctl, 30*time.Second, stopChan)
 		// OVS bridge metrics updater
@@ -926,5 +992,7 @@ func registerOvsMetrics(registry prometheus.Registerer, stopChan <-chan struct{}
 		go ovsHwOffloadMetricsUpdater(util.RunOVSVsctl, 30*time.Second, stopChan)
 		// OVS coverage/show metrics updater.
 		go coverageShowMetricsUpdater(ovsVswitchd, stopChan)
+		// OVS upcall metrics updater.
+		go ovsUpcallMetricsUpdater(util.RunOVSAppctl, 30*time.Second, stopChan)
 	})
 }
