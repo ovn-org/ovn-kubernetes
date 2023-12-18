@@ -1173,7 +1173,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to run egress IP controller: %v", err)
 		}
 	} else {
-		klog.Infof("Egress IP for non-OVN managed networks is disabled")
+		klog.Infof("Egress IP for secondary host network is disabled")
 	}
 
 	linkManager.Run(nc.stopChan, nc.wg)

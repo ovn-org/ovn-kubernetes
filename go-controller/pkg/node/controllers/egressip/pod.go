@@ -19,7 +19,7 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-// podIPConfig holds pod specific info to implement egress IP for non-OVN managed networks for a single pod IP. A pod may
+// podIPConfig holds pod specific info to implement egress IP for secondary host networks for a single pod IP. A pod may
 // contain multiple IPs (one for single stack, 2 for dual stack).
 type podIPConfig struct {
 	failed      bool // used for retry

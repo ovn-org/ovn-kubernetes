@@ -144,7 +144,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 	}
 
 	getIPv4Nodes := func(nodeInfos []nodeInfo) []v1.Node {
-		// first address in each nodeAddress address is assumed to be OVN managed network
+		// first address in each nodeAddress address is assumed to be OVN network
 		nodeSuffix := 1
 		nodeSubnets := []string{v4Node1Subnet, v4Node2Subnet, v4Node3Subnet}
 		if len(nodeInfos) > len(nodeSubnets) {
@@ -176,7 +176,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 	}
 
 	getIPv6Nodes := func(nodeInfos []nodeInfo) []v1.Node {
-		// first address in each nodeAddress address is assumed to be OVN managed network
+		// first address in each nodeAddress address is assumed to be OVN network
 		nodeSuffix := 1
 		nodeSubnets := []string{v6Node1Subnet, v6Node2Subnet}
 		if len(nodeInfos) > len(nodeSubnets) {
@@ -242,15 +242,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 	}
 
 	ginkgo.Context("On node UPDATE", func() {
-		ginkgo.It("OVN managed network does not depend on EgressIP status for assignment", func() {
+		ginkgo.It("OVN network does not depend on EgressIP status for assignment", func() {
 			config.OVNKubernetesFeature.EnableInterconnect = true
 			egressIP := "192.168.126.101"
 			zone := "global"
-			node1IPv4OVNManaged := "192.168.126.202/24"
+			node1IPv4OVN := "192.168.126.202/24"
 			node1IPv4TranSwitchIP := "100.88.0.2/16"
-			node1IPv4NonOVNManaged1 := "10.10.10.4/24"
-			node1IPv4NonOVNManaged2 := "5.5.5.10/24"
-			node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
+			node1IPv4SecondaryHost1 := "10.10.10.4/24"
+			node1IPv4SecondaryHost2 := "5.5.5.10/24"
+			node1IPv4Addresses := []string{node1IPv4OVN, node1IPv4SecondaryHost1, node1IPv4SecondaryHost2}
 
 			egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
 			egressNamespace := newNamespace(namespace)
@@ -407,16 +407,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
-		ginkgo.It("non-OVN managed network does not depend on EgressIP status for assignment", func() {
+		ginkgo.It("Secondary host network does not depend on EgressIP status for assignment", func() {
 			config.OVNKubernetesFeature.EnableInterconnect = true
 			egressIP := "10.10.10.10"
 			zone := "global"
-			node1IPv4OVNManaged := "192.168.126.202/24"
+			node1IPv4OVN := "192.168.126.202/24"
 			node1IPv4TranSwitchIP := "100.88.0.2/16"
-			node1IPv4NonOVNManaged1 := "10.10.10.4/24"
-			node1IPv4NonOVNManaged2 := "5.5.5.10/24"
+			node1IPv4SecondaryHost1 := "10.10.10.4/24"
+			node1IPv4SecondaryHost2 := "5.5.5.10/24"
 			_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
-			node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
+			node1IPv4Addresses := []string{node1IPv4OVN, node1IPv4SecondaryHost1, node1IPv4SecondaryHost2}
 
 			egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
 			egressNamespace := newNamespace(namespace)
@@ -569,25 +569,25 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
-		ginkgotable.DescribeTable("[OVN managed network] should perform proper OVN transactions when pod is created after node egress label switch",
+		ginkgotable.DescribeTable("[OVN network] should perform proper OVN transactions when pod is created after node egress label switch",
 			func(interconnect bool) {
 				app.Action = func(ctx *cli.Context) error {
 					config.OVNKubernetesFeature.EnableInterconnect = interconnect
 					egressIP := "192.168.126.101"
 
 					zone := "global"
-					node1IPv4OVNManagedNet := "192.168.126.0/24"
-					node1IPv4OVNManaged := "192.168.126.202/24"
+					node1IPv4OVNNet := "192.168.126.0/24"
+					node1IPv4OVN := "192.168.126.202/24"
 					node1IPv4TranSwitchIP := "100.88.0.2/16"
-					node2IPv4OVNManagedNet := "192.168.126.0/24"
-					node2IPv4OVNManaged := "192.168.126.51/24"
+					node2IPv4OVNNet := "192.168.126.0/24"
+					node2IPv4OVN := "192.168.126.51/24"
 					node2IPv4TranSwitchIP := "100.88.0.3/16"
-					node1IPv4NonOVNManaged1 := "10.10.10.4/24"
-					node1IPv4NonOVNManaged2 := "5.5.5.10/24"
-					node2IPv4NonOVNManaged1 := "10.10.10.5/24"
-					node2IPv4NonOVNManaged2 := "7.7.7.9/16"
-					node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
-					node2IPv4Addresses := []string{node2IPv4OVNManaged, node2IPv4NonOVNManaged1, node2IPv4NonOVNManaged2}
+					node1IPv4SecondaryHost1 := "10.10.10.4/24"
+					node1IPv4SecondaryHost2 := "5.5.5.10/24"
+					node2IPv4SecondaryHost1 := "10.10.10.5/24"
+					node2IPv4SecondaryHost2 := "7.7.7.9/16"
+					node1IPv4Addresses := []string{node1IPv4OVN, node1IPv4SecondaryHost1, node1IPv4SecondaryHost2}
+					node2IPv4Addresses := []string{node2IPv4OVN, node2IPv4SecondaryHost1, node2IPv4SecondaryHost2}
 
 					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
 					egressNamespace := newNamespace(namespace)
@@ -689,7 +689,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Eventually(lsp.Options["nat-addresses"]).Should(gomega.Equal("router"))
 					gomega.Eventually(lsp.Options["exclude-lb-vips-from-garp"]).Should(gomega.Equal("true"))
 
-					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4OVNManagedNet)
+					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4OVNNet)
 					gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 					egressIPs, eipNodes := getEgressIPStatus(egressIPName)
 					gomega.Expect(eipNodes[0]).To(gomega.Equal(node1.Name))
@@ -705,7 +705,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4OVNManagedNet)
+					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4OVNNet)
 					gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 					gomega.Eventually(nodeSwitch).Should(gomega.Equal(node2.Name))
 					egressIPs, _ = getEgressIPStatus(egressIPName)
@@ -818,28 +818,28 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			ginkgotable.Entry("interconnect enabled", true),
 		)
 
-		ginkgotable.DescribeTable("[OVN managed network] using EgressNode retry should perform proper OVN transactions when pod is created after node egress label switch",
+		ginkgotable.DescribeTable("[OVN network] using EgressNode retry should perform proper OVN transactions when pod is created after node egress label switch",
 			func(interconnect bool) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
 					egressIP := "192.168.126.101"
 					zone := "global"
-					node1IPv4OVNManagedNet := "192.168.126.0/24"
-					node1IPv4OVNManaged := "192.168.126.202/24"
-					node1IPv4NonOVNManaged1 := "10.10.10.4/24"
-					node1IPv4NonOVNManaged2 := "5.5.5.10/24"
+					node1IPv4OVNNet := "192.168.126.0/24"
+					node1IPv4OVN := "192.168.126.202/24"
+					node1IPv4SecondaryHost1 := "10.10.10.4/24"
+					node1IPv4SecondaryHost2 := "5.5.5.10/24"
 					node1IPv4TranSwitchIP := "100.88.0.2/16"
-					node2IPv4OVNManagedNet := "192.168.126.0/24"
-					node2IPv4OVNManaged := "192.168.126.51/24"
-					node2IPv4NonOVNManaged1 := "10.10.10.5/24"
-					node2IPv4NonOVNManaged2 := "7.7.7.9/16"
+					node2IPv4OVNNet := "192.168.126.0/24"
+					node2IPv4OVN := "192.168.126.51/24"
+					node2IPv4SecondaryHost1 := "10.10.10.5/24"
+					node2IPv4SecondaryHost2 := "7.7.7.9/16"
 					node2IPv4TranSwitchIP := "100.88.0.3/16"
-					node3IPv4OVNManaged := "192.168.126.5/24"
-					node3IPv4NonOVNManaged1 := "10.10.10.6/24"
+					node3IPv4OVN := "192.168.126.5/24"
+					node3IPv4SecondaryHost1 := "10.10.10.6/24"
 					node3IPv4TranSwitchIP := "100.88.0.4/16"
-					node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
-					node2IPv4Addresses := []string{node2IPv4OVNManaged, node2IPv4NonOVNManaged1, node2IPv4NonOVNManaged2}
-					node3IPv4Addresses := []string{node3IPv4OVNManaged, node3IPv4NonOVNManaged1}
+					node1IPv4Addresses := []string{node1IPv4OVN, node1IPv4SecondaryHost1, node1IPv4SecondaryHost2}
+					node2IPv4Addresses := []string{node2IPv4OVN, node2IPv4SecondaryHost1, node2IPv4SecondaryHost2}
+					node3IPv4Addresses := []string{node3IPv4OVN, node3IPv4SecondaryHost1}
 					nodes := getIPv4Nodes([]nodeInfo{{node1IPv4Addresses, zone, node1IPv4TranSwitchIP},
 						{node2IPv4Addresses, zone, node2IPv4TranSwitchIP}, {node3IPv4Addresses, zone, node3IPv4TranSwitchIP}})
 					node1 := nodes[0]
@@ -961,7 +961,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Eventually(lsp.Options["nat-addresses"]).Should(gomega.Equal("router"))
 					gomega.Eventually(lsp.Options["exclude-lb-vips-from-garp"]).Should(gomega.Equal("true"))
 
-					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4OVNManagedNet)
+					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4OVNNet)
 
 					gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 					egressIPs, eIPNodes := getEgressIPStatus(egressIPName)
@@ -982,7 +982,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4OVNManagedNet)
+					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4OVNNet)
 
 					// sleep long enough for TransactWithRetry to fail, causing egressnode operations to fail
 					// there is a chance that both egressnode events(node1 removal and node2 update) will end up in the same event queue
@@ -1143,31 +1143,31 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			ginkgotable.Entry("interconnect enabled", true), // all 3 nodes in same zone, so behaves like non-ic
 		)
 
-		ginkgotable.DescribeTable("[non-OVN managed network] using EgressNode retry should perform proper OVN transactions when pod is created after node egress label switch",
+		ginkgotable.DescribeTable("[secondary host network] using EgressNode retry should perform proper OVN transactions when pod is created after node egress label switch",
 			func(interconnect bool) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
 					egressIP := "10.10.10.7"
 					zone := "global"
-					node1IPv4OVNManaged := "192.168.126.202/24"
-					node1IPv4NonOVNManaged1Net := "10.10.10.0/24"
-					node1IPv4NonOVNManaged1 := "10.10.10.4/24"
-					node1IPv4NonOVNManaged2 := "5.5.5.10/24"
+					node1IPv4OVN := "192.168.126.202/24"
+					node1IPv4SecondaryHost1Net := "10.10.10.0/24"
+					node1IPv4SecondaryHost1 := "10.10.10.4/24"
+					node1IPv4SecondaryHost2 := "5.5.5.10/24"
 					node1IPv4TranSwitchIP := "100.88.0.2/16"
-					node2IPv4OVNManaged := "192.168.126.51/24"
-					node2IPv4NonOVNManaged1Net := "10.10.10.0/24"
-					node2IPv4NonOVNManaged1 := "10.10.10.5/24"
-					node2IPv4NonOVNManaged2 := "7.7.7.9/16"
+					node2IPv4OVN := "192.168.126.51/24"
+					node2IPv4SecondaryHost1Net := "10.10.10.0/24"
+					node2IPv4SecondaryHost1 := "10.10.10.5/24"
+					node2IPv4SecondaryHost2 := "7.7.7.9/16"
 					node2IPv4TranSwitchIP := "100.88.0.3/16"
-					node3IPv4OVNManaged := "192.168.126.5/24"
-					node3IPv4NonOVNManaged1 := "12.10.10.6/24"
+					node3IPv4OVN := "192.168.126.5/24"
+					node3IPv4SecondaryHost1 := "12.10.10.6/24"
 					node3IPv4TranSwitchIP := "100.88.0.4/16"
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
 					_, node3Subnet, _ := net.ParseCIDR(v4Node3Subnet)
-					node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
-					node2IPv4Addresses := []string{node2IPv4OVNManaged, node2IPv4NonOVNManaged1, node2IPv4NonOVNManaged2}
-					node3IPv4Addresses := []string{node3IPv4OVNManaged, node3IPv4NonOVNManaged1}
+					node1IPv4Addresses := []string{node1IPv4OVN, node1IPv4SecondaryHost1, node1IPv4SecondaryHost2}
+					node2IPv4Addresses := []string{node2IPv4OVN, node2IPv4SecondaryHost1, node2IPv4SecondaryHost2}
+					node3IPv4Addresses := []string{node3IPv4OVN, node3IPv4SecondaryHost1}
 					nodes := getIPv4Nodes([]nodeInfo{{node1IPv4Addresses, zone, node1IPv4TranSwitchIP},
 						{node2IPv4Addresses, zone, node2IPv4TranSwitchIP}, {node3IPv4Addresses, zone, node3IPv4TranSwitchIP}})
 					node1 := nodes[0]
@@ -1292,7 +1292,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4NonOVNManaged1Net)
+					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4SecondaryHost1Net)
 
 					gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 					egressIPs, eIPNodes := getEgressIPStatus(egressIPName)
@@ -1313,7 +1313,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4NonOVNManaged1Net)
+					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4SecondaryHost1Net)
 
 					// sleep long enough for TransactWithRetry to fail, causing egressnode operations to fail
 					// there is a chance that both egressnode events(node1 removal and node2 update) will end up in the same event queue
@@ -1476,26 +1476,26 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			ginkgotable.Entry("interconnect enabled", true), // all 3 nodes in same zone, so behaves like non-ic
 		)
 
-		ginkgotable.DescribeTable("[Non OVN managed network] should perform proper OVN transactions when namespace and pod is created after node egress label switch",
+		ginkgotable.DescribeTable("[secondary host network] should perform proper OVN transactions when namespace and pod is created after node egress label switch",
 			func(interconnect bool, node1Zone, node2Zone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
 					egressIP := "10.10.10.20"
 
-					node1IPv4OVNManaged := "192.168.126.202/24"
-					node1IPv4NonOVNManaged1Net := "10.10.10.0/24"
-					node1IPv4NonOVNManaged1 := "10.10.10.4/24"
-					node1IPv4NonOVNManaged2 := "5.5.5.10/24"
+					node1IPv4OVN := "192.168.126.202/24"
+					node1IPv4SecondaryHost1Net := "10.10.10.0/24"
+					node1IPv4SecondaryHost1 := "10.10.10.4/24"
+					node1IPv4SecondaryHost2 := "5.5.5.10/24"
 					node1IPv4TranSwitchIP := "100.88.0.2/16"
-					node2IPv4OVNManaged := "192.168.126.51/24"
-					node2IPv4NonOVNManaged1Net := "10.10.10.0/24"
-					node2IPv4NonOVNManaged1 := "10.10.10.5/24"
-					node2IPv4NonOVNManaged2 := "7.7.7.9/16"
+					node2IPv4OVN := "192.168.126.51/24"
+					node2IPv4SecondaryHost1Net := "10.10.10.0/24"
+					node2IPv4SecondaryHost1 := "10.10.10.5/24"
+					node2IPv4SecondaryHost2 := "7.7.7.9/16"
 					node2IPv4TranSwitchIP := "100.88.0.3/16"
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
-					node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
-					node2IPv4Addresses := []string{node2IPv4OVNManaged, node2IPv4NonOVNManaged1, node2IPv4NonOVNManaged2}
+					node1IPv4Addresses := []string{node1IPv4OVN, node1IPv4SecondaryHost1, node1IPv4SecondaryHost2}
+					node2IPv4Addresses := []string{node2IPv4OVN, node2IPv4SecondaryHost1, node2IPv4SecondaryHost2}
 
 					nodes := getIPv4Nodes([]nodeInfo{{node1IPv4Addresses, node1Zone, node1IPv4TranSwitchIP},
 						{node2IPv4Addresses, node2Zone, node2IPv4TranSwitchIP}})
@@ -1604,7 +1604,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4NonOVNManaged1Net)
+					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4SecondaryHost1Net)
 
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1624,7 +1624,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4NonOVNManaged1Net)
+					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4SecondaryHost1Net)
 					gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 					gomega.Eventually(nodeSwitch).Should(gomega.Equal(node2.Name))
 					egressIPs, _ = getEgressIPStatus(egressIPName)
@@ -1753,24 +1753,24 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			func(interconnect bool, node1Zone, node2Zone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
-					egressIPOVNManaged := "192.168.126.190"
-					egressIPNonOVNManaged := "10.10.10.20"
+					egressIPOVN := "192.168.126.190"
+					egressIPSecondaryHost := "10.10.10.20"
 					node1IPv4 := "192.168.126.202"
-					node1IPv4OVNManagedNet := "192.168.126.0/24"
-					node1IPv4OVNManaged := node1IPv4 + "/24"
-					node1IPv4NonOVNManaged1 := "10.10.10.4/24"
-					node1IPv4NonOVNManaged2 := "5.5.5.10/24"
+					node1IPv4SecondaryHostNet := "192.168.126.0/24"
+					node1IPv4OVN := node1IPv4 + "/24"
+					node1IPv4SecondaryHost1 := "10.10.10.4/24"
+					node1IPv4SecondaryHost2 := "5.5.5.10/24"
 					node1IPv4TranSwitchIP := "100.88.0.2/16"
-					node2IPv4OVNManaged := "192.168.126.51/24"
-					node2IPv4NonOVNManaged1Net := "10.10.10.0/24"
-					node2IPv4NonOVNManaged1 := "10.10.10.5/24"
-					node2IPv4NonOVNManaged2 := "7.7.7.9/16"
+					node2IPv4OVN := "192.168.126.51/24"
+					node2IPv4SecondaryHost1Net := "10.10.10.0/24"
+					node2IPv4SecondaryHost1 := "10.10.10.5/24"
+					node2IPv4SecondaryHost2 := "7.7.7.9/16"
 					node2IPv4TranSwitchIP := "100.88.0.3/16"
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
 
-					node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
-					node2IPv4Addresses := []string{node2IPv4OVNManaged, node2IPv4NonOVNManaged1, node2IPv4NonOVNManaged2}
+					node1IPv4Addresses := []string{node1IPv4OVN, node1IPv4SecondaryHost1, node1IPv4SecondaryHost2}
+					node2IPv4Addresses := []string{node2IPv4OVN, node2IPv4SecondaryHost1, node2IPv4SecondaryHost2}
 
 					nodes := getIPv4Nodes([]nodeInfo{{node1IPv4Addresses, node1Zone, node1IPv4TranSwitchIP},
 						{node2IPv4Addresses, node2Zone, node2IPv4TranSwitchIP}})
@@ -1787,10 +1787,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					egressPod3Node2 := *newPodWithLabels(namespace, podName2, node2Name, podV4IP3, egressPodLabel)
 					egressPod4Node2 := *newPodWithLabels(namespace2, podName2, node2Name, podV4IP4, egressPodLabel)
 
-					eIPOVNManaged := egressipv1.EgressIP{
+					eIPOVN := egressipv1.EgressIP{
 						ObjectMeta: newEgressIPMeta(egressIPName),
 						Spec: egressipv1.EgressIPSpec{
-							EgressIPs: []string{egressIPOVNManaged},
+							EgressIPs: []string{egressIPOVN},
 							PodSelector: metav1.LabelSelector{
 								MatchLabels: egressPodLabel,
 							},
@@ -1805,10 +1805,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					}
 
-					eIPNonOVNManaged := egressipv1.EgressIP{
+					eIPSecondaryHost := egressipv1.EgressIP{
 						ObjectMeta: newEgressIPMeta(egressIP2Name),
 						Spec: egressipv1.EgressIPSpec{
-							EgressIPs: []string{egressIPNonOVNManaged},
+							EgressIPs: []string{egressIPSecondaryHost},
 							PodSelector: metav1.LabelSelector{
 								MatchLabels: egressPodLabel,
 							},
@@ -1878,7 +1878,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							},
 						},
 						&egressipv1.EgressIPList{
-							Items: []egressipv1.EgressIP{eIPOVNManaged, eIPNonOVNManaged},
+							Items: []egressipv1.EgressIP{eIPOVN, eIPSecondaryHost},
 						},
 						&v1.NodeList{
 							Items: []v1.Node{node1, node2},
@@ -1923,7 +1923,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIPOVNManaged, node1IPv4OVNManagedNet)
+					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIPOVN, node1IPv4SecondaryHostNet)
 
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1931,13 +1931,13 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 					egressIPs, eIPNodes := getEgressIPStatus(egressIPName)
 					gomega.Expect(eIPNodes[0]).To(gomega.Equal(node1.Name))
-					gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIPOVNManaged))
+					gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIPOVN))
 					time.Sleep(20 * time.Millisecond)
-					fakeOvn.patchEgressIPObj(node1Name, egressIP2Name, egressIPNonOVNManaged, node2IPv4NonOVNManaged1Net)
+					fakeOvn.patchEgressIPObj(node1Name, egressIP2Name, egressIPSecondaryHost, node2IPv4SecondaryHost1Net)
 					gomega.Eventually(getEgressIPStatusLen(egressIP2Name)).Should(gomega.Equal(1))
 					gomega.Eventually(nodeSwitch).Should(gomega.Equal(node1.Name))
 					egressIPs, _ = getEgressIPStatus(egressIP2Name)
-					gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIPNonOVNManaged))
+					gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIPSecondaryHost))
 					time.Sleep(20 * time.Millisecond)
 					nodeMgntIP, err := getSwitchManagementPortIP(&node1)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2065,7 +2065,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState = append(expectedDatabaseState, &nbdb.NAT{
 							UUID:       "egressip-nat-UUID",
 							LogicalIP:  podV4IP,
-							ExternalIP: egressIPOVNManaged,
+							ExternalIP: egressIPOVN,
 							ExternalIDs: map[string]string{
 								"name": egressIPName,
 							},
@@ -2077,7 +2077,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						}, &nbdb.NAT{
 							UUID:       "egressip2-nat-UUID",
 							LogicalIP:  podV4IP3,
-							ExternalIP: egressIPOVNManaged,
+							ExternalIP: egressIPOVN,
 							ExternalIDs: map[string]string{
 								"name": egressIPName,
 							},
@@ -2532,17 +2532,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
 
-		ginkgotable.DescribeTable("[non OVN managed network] should perform proper OVN transactions when namespace and pod is created after node egress label switch",
+		ginkgotable.DescribeTable("[secondary host network] should perform proper OVN transactions when namespace and pod is created after node egress label switch",
 			func(interconnect bool, node1Zone, node2Zone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
 					egressIP := "10.10.10.10"
-					node1IPv4OVNManaged := "192.168.126.202/24"
-					node1IPv4NonOVNManagedNet := "10.10.0.0/16"
-					node1IPv4NonOVNManaged := "10.10.10.5/16"
+					node1IPv4OVN := "192.168.126.202/24"
+					node1IPv4SecondaryHostNet := "10.10.0.0/16"
+					node1IPv4SecondaryHost := "10.10.10.5/16"
 					node1IPv4TranSwitchIP := "100.88.0.2/16"
-					node2IPv4OVNManagedNet := "192.168.126.0/24"
-					node2IPv4OVNManaged := "192.168.126.51/24"
+					node2IPv4OVNNet := "192.168.126.0/24"
+					node2IPv4OVN := "192.168.126.51/24"
 					node2IPv4TranSwitchIP := "100.88.0.3/16"
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
@@ -2550,8 +2550,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
 					egressNamespace := newNamespace(namespace)
 
-					node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged}
-					node2IPv4Addresses := []string{node2IPv4OVNManaged}
+					node1IPv4Addresses := []string{node1IPv4OVN, node1IPv4SecondaryHost}
+					node2IPv4Addresses := []string{node2IPv4OVN}
 
 					nodes := getIPv4Nodes([]nodeInfo{{node1IPv4Addresses, node1Zone, node1IPv4TranSwitchIP},
 						{node2IPv4Addresses, node2Zone, node2IPv4TranSwitchIP}})
@@ -2651,7 +2651,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4NonOVNManagedNet)
+					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4SecondaryHostNet)
 
 					lsp := &nbdb.LogicalSwitchPort{Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name}
 					fakeOvn.controller.nbClient.Get(context.Background(), lsp)
@@ -2679,7 +2679,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4OVNManagedNet)
+					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4OVNNet)
 					gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 					gomega.Eventually(nodeSwitch).Should(gomega.Equal(node2.Name))
 					egressIPs, _ = getEgressIPStatus(egressIPName)

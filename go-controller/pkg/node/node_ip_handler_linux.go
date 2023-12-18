@@ -384,9 +384,9 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
 		// IPs assigned to host interfaces to support the egress IP multi NIC feature must be excluded.
-		eipAddresses, err := c.getNonOVNEgressIPs()
+		eipAddresses, err := c.getSecondaryHostEgressIPs()
 		if err != nil {
-			klog.Errorf("Failed to get non-OVN assigned Egress IPs and ensure they are excluded: %v %v", err)
+			klog.Errorf("Failed to get secondary host assigned Egress IPs and ensure they are excluded: %v %v", err)
 		}
 		if eipAddresses.Has(addr.String()) {
 			return false
@@ -437,15 +437,15 @@ func (c *addressManager) sync() {
 	}
 }
 
-// getNonOVNEgressIPs returns the set of egress IPs that are assigned to non-OVN managed interfaces. The
+// getSecondaryHostEgressIPs returns the set of egress IPs that are assigned to standard linux interfaces (non ovs type). The
 // addresses are used to support Egress IP multi NIC feature. The addresses must not be included in address manager
 // because the addresses are only to support Egress IP multi NIC feature and must not be exposed via host-cidrs annot.
-func (c *addressManager) getNonOVNEgressIPs() (sets.Set[string], error) {
+func (c *addressManager) getSecondaryHostEgressIPs() (sets.Set[string], error) {
 	node, err := c.watchFactory.GetNode(c.nodeName)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get Node from informer: %v", err)
 	}
-	eipAddrs, err := util.ParseNodeNonOVNEgressIPsAnnotation(node)
+	eipAddrs, err := util.ParseNodeSecondaryHostEgressIPsAnnotation(node)
 	if err != nil {
 		if util.IsAnnotationNotSetError(err) {
 			return sets.New[string](), nil

@@ -571,7 +571,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	   17. Check that the status is of length one
 	   18. Check connectivity from the remaining pod to an external "node" and verify that the IP is the remaining egress IP
 	*/
-	ginkgo.Describe("[OVN managed network] Using different methods to disable a node's availability for egress", func() {
+	ginkgo.Describe("[OVN network] Using different methods to disable a node's availability for egress", func() {
 		ginkgo.AfterEach(func() {
 			usedEgressNodeAvailabilityHandler.Restore(egress1Node.name)
 			usedEgressNodeAvailabilityHandler.Restore(egress2Node.name)
@@ -747,7 +747,7 @@ spec:
 	   19. Check connectivity from second pod to another node (egress2Node) primary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted for pods unless pod is on its own egressNode)
 	   20. Check connectivity from second pod to another node (egress2Node) secondary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted for pods unless pod is on its own egressNode)
 	*/
-	ginkgo.It("[OVN managed network] Should validate the egress IP SNAT functionality against host-networked pods", func() {
+	ginkgo.It("[OVN network] Should validate the egress IP SNAT functionality against host-networked pods", func() {
 
 		command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
 
@@ -1837,17 +1837,17 @@ spec:
 	})
 
 	/* This test does the following:
-	   Note: 'OVN managed network' here means that OVN directly controls an interface that is attached to a network. This is
-	   accomplished with OVN and therefore ovs rules. 'Non-OVN managed network' means that we partly use OVN/ovs rules to route the packet
+	   Note: 'OVN network' here means that OVN directly controls an interface that is attached to a network. This is
+	   accomplished with OVN and therefore ovs rules. 'secondary host network' means that we partly use OVN/ovs rules to route the packet
 	   and also use the linux networking stack to perform the local host routing when the packet is expected to egress that
 	   particular node.
 
 	   0. Set two nodes as available for egress
-	   1. Create an EgressIP object with two egress IPs - both hosted by a non-OVN managed networks
+	   1. Create an EgressIP object with two egress IPs - both hosted by a secondary host networks
 	   2. Check that the status is of length two, not blank and both are assigned to different nodes
 	   3. Check that correct Egress IPs are assigned
 	   4. Create two pods matching the EgressIP: one running on each of the egress nodes
-	   5. Check connectivity from both to an external "node" hosted on the non-OVN managed network and verify expected src IPs
+	   5. Check connectivity from both to an external "node" hosted on the secondary host network and verify expected src IPs
 	   6. Check connectivity from one pod to the other and verify that the connection is achieved
 	   7. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved
 	   8. Update one of the pods, unmatching the EgressIP
@@ -1870,7 +1870,7 @@ spec:
 	   25. Check that correct Egress IP is assigned
 	   26. Check connectivity from the other pod to an external "node" on the secondary host network and verify the expected src IPs
 	*/
-	table.DescribeTable("[non-ovn-eip] Using different methods to disable a node or pod availability for egress", func(egressIPIP1, egressIPIP2 string) {
+	table.DescribeTable("[secondary-host-eip] Using different methods to disable a node or pod availability for egress", func(egressIPIP1, egressIPIP2 string) {
 		// get v4, v6 from eips
 		// check that node has both of them
 		v4, v6 := getIPVersions(egressIPIP1, egressIPIP2)
@@ -1892,7 +1892,7 @@ spec:
 		}
 		updateNamespace(f, podNamespace)
 
-		ginkgo.By("1. Create an EgressIP object with two egress IPs - both hosted by the same non-OVN managed network")
+		ginkgo.By("1. Create an EgressIP object with two egress IPs - both hosted by the same secondary host network")
 		egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressIP
 metadata:
@@ -1952,17 +1952,17 @@ spec:
 		framework.Logf("Created two pods - pod %s on node %s and pod %s on node %s", pod1Name, pod1Node.name, pod2Name,
 			pod2Node.name)
 
-		ginkgo.By("5. Check connectivity from both pods to an external \"node\" hosted on the non-OVN managed network " +
+		ginkgo.By("5. Check connectivity from both pods to an external \"node\" hosted on the secondary host network " +
 			"and verify the expected IPs")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod1Name,
 			podNamespace.Name, true, []string{egressIPIP1, egressIPIP2}))
 		framework.ExpectNoError(err, "Step 5. Check connectivity from pod (%s/%s) to an external container attached to "+
-			"a network that isn't OVN managed and verify that the src IP is the expected egressIP, failed: %v",
+			"a network that is a secondary host network and verify that the src IP is the expected egressIP, failed: %v",
 			podNamespace.Name, pod1Name, err)
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod2Name,
 			podNamespace.Name, true, []string{egressIPIP1, egressIPIP2}))
 		framework.ExpectNoError(err, "Step 5. Check connectivity from pod (%s/%s) to an external container attached to "+
-			"a network that isn't OVN managed and verify that the src IP is the expected egressIP, failed: %v", podNamespace.Name, pod2Name, err)
+			"a network that is a secondary host network and verify that the src IP is the expected egressIP, failed: %v", podNamespace.Name, pod2Name, err)
 
 		ginkgo.By("6. Check connectivity from one pod to the other and verify that the connection is achieved")
 		pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
@@ -1983,11 +1983,11 @@ spec:
 		updatePod(f, pod2)
 
 		ginkgo.By("9. Check connectivity from pod that isn't selected by EgressIP anymore to an external \"node\" on " +
-			"the OVN managed network and verify that the IP is the node IP.")
+			"the OVN network and verify that the IP is the node IP.")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name,
 			podNamespace.Name, true, []string{pod2Node.nodeIP}))
 		framework.ExpectNoError(err, "Step 9. Check connectivity from that one to an external \"node\" on the OVN "+
-			"managed network and verify that the IP is the node IP failed: %v", err)
+			"network and verify that the IP is the node IP failed: %v", err)
 
 		ginkgo.By("10. Update the unselected pod to be selected by the EgressIP")
 		pod2 = getPod(f, pod2Name)
@@ -2075,18 +2075,18 @@ spec:
 		table.Entry("IPv6 compressed", "2001:db8:abcd:1234:c001::", "2001:db8:abcd:1234:c002::"))
 
 	/* This test does the following:
-	   Note: 'OVN managed network' here means that OVN directly controls an interface that is attached to a network. This is
-	   accomplished with OVN and therefore ovs rules. 'Non-OVN managed network' means that we partly use OVN/ovs rules to route the packet
+	   Note: 'OVN network' here means that OVN directly controls an interface that is attached to a network. This is
+	   accomplished with OVN and therefore ovs rules. 'secondary host network' means that we partly use OVN/ovs rules to route the packet
 	   and also use the linux networking stack to perform the local host routing when the packet is expected to egress that
 	   particular node.
 
 	   0. Set two nodes as available for egress
-	   1. Create an EgressIP object with two egress IPs - one hosted by an OVN managed network and one by a non-OVN managed network
+	   1. Create an EgressIP object with two egress IPs - one hosted by an OVN network and one by a secondary host network
 	   2. Check that the status is of length two, not blank and both are assigned to different nodes
 	   3. Check that correct Egress IPs are assigned
 	   4. Create two pods matching the EgressIP: one running on each of the egress nodes
-	   5. Check connectivity from a pod to an external "node" hosted on the OVN managed network and verify the expected src IP
-	   6. Check connectivity from a pod to an external "node" hosted on the non-OVN managed network and verify the expected src IP
+	   5. Check connectivity from a pod to an external "node" hosted on the OVN network and verify the expected src IP
+	   6. Check connectivity from a pod to an external "node" hosted on the secondary host network and verify the expected src IP
 	   7. Check connectivity from one pod to the other and verify that the connection is achieved
 	   8. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved
 	   9. Update one of the pods, unmatching the EgressIP
@@ -2110,7 +2110,7 @@ spec:
 	   27. Check connectivity both pods to an external "node" on the OVN network and verify the src IP is the expected egressIP
 	   28. Check connectivity both pods to an external "node" on the secondary host network and verify the src IP is the expected egressIP
 	*/
-	ginkgo.It("[non-ovn-eip] Using different methods to disable a node or pod availability for egress", func() {
+	ginkgo.It("[secondary-host-eip] Using different methods to disable a node or pod availability for egress", func() {
 		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
 			ginkgo.Skip("Node does not have IPv4 address")
 		}
@@ -2126,22 +2126,22 @@ spec:
 		}
 		updateNamespace(f, podNamespace)
 
-		ginkgo.By("1. Create an EgressIP object with two egress IPs - one hosted by an OVN managed network and one by a non-OVN managed network")
+		ginkgo.By("1. Create an EgressIP object with two egress IPs - one hosted by an OVN network and one by a secondary host network")
 		// Assign the egress IP without conflicting with any node IP,
 		// the kind subnet is /16 or /64 so the following should be fine.
 		egressNodeIP := net.ParseIP(egress1Node.nodeIP)
 		egressIP := dupIP(egressNodeIP)
 		egressIP[len(egressIP)-2]++
-		egressIPOVNManaged := egressIP.String()
-		egressIPNonOVNManaged := "10.10.10.200"
+		egressIPOVN := egressIP.String()
+		egressIPSecondaryHost := "10.10.10.200"
 		egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressIP
 metadata:
     name: ` + egressIPName + `
 spec:
     egressIPs:
-    - ` + egressIPOVNManaged + `
-    - ` + egressIPNonOVNManaged + `
+    - ` + egressIPOVN + `
+    - ` + egressIPSecondaryHost + `
     podSelector:
         matchLabels:
             wants: egress
@@ -2169,7 +2169,7 @@ spec:
 		}
 
 		ginkgo.By("3. Check that correct Egress IPs are assigned")
-		gomega.Expect(verifyEgressIPStatusContainsIPs(statuses, []string{egressIPOVNManaged, egressIPNonOVNManaged})).Should(gomega.BeTrue())
+		gomega.Expect(verifyEgressIPStatusContainsIPs(statuses, []string{egressIPOVN, egressIPSecondaryHost})).Should(gomega.BeTrue())
 
 		ginkgo.By("4. Create two pods matching the EgressIP: one running on each of the egress nodes")
 		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
@@ -2189,29 +2189,29 @@ spec:
 		framework.Logf("Created two pods - pod %s on node %s and pod %s on node %s", pod1Name, pod1Node.name, pod2Name,
 			pod2Node.name)
 
-		ginkgo.By("5. Check connectivity a pod to an external \"node\" hosted on the OVN managed network " +
+		ginkgo.By("5. Check connectivity a pod to an external \"node\" hosted on the OVN network " +
 			"and verify the expected IP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name,
-			podNamespace.Name, true, []string{egressIPOVNManaged}))
+			podNamespace.Name, true, []string{egressIPOVN}))
 		framework.ExpectNoError(err, "Step 5. Check connectivity from pod (%s/%s) to an external container attached to "+
-			"a network that is OVN managed and verify that the src IP is the expected egressIP, failed: %v",
+			"a network that is OVN network and verify that the src IP is the expected egressIP, failed: %v",
 			podNamespace.Name, pod1Name, err)
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name,
-			podNamespace.Name, true, []string{egressIPOVNManaged}))
+			podNamespace.Name, true, []string{egressIPOVN}))
 		framework.ExpectNoError(err, "Step 5. Check connectivity from pod (%s/%s) to an external container attached to "+
-			"a network that is OVN managed and verify that the src IP is the expected egressIP, failed: %v", podNamespace.Name, pod2Name, err)
+			"a network that is OVN network and verify that the src IP is the expected egressIP, failed: %v", podNamespace.Name, pod2Name, err)
 
-		ginkgo.By("6. Check connectivity a pod to an external \"node\" hosted on a non-OVN managed network " +
+		ginkgo.By("6. Check connectivity a pod to an external \"node\" hosted on a secondary host network " +
 			"and verify the expected IP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod1Name,
-			podNamespace.Name, true, []string{egressIPNonOVNManaged}))
+			podNamespace.Name, true, []string{egressIPSecondaryHost}))
 		framework.ExpectNoError(err, "Step 6. Check connectivity from pod (%s/%s) to an external container attached to "+
-			"a network that is non-OVN managed and verify that the src IP is the expected egressIP, failed: %v",
+			"a network that is secondary host network and verify that the src IP is the expected egressIP, failed: %v",
 			podNamespace.Name, pod1Name, err)
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod2Name,
-			podNamespace.Name, true, []string{egressIPNonOVNManaged}))
+			podNamespace.Name, true, []string{egressIPSecondaryHost}))
 		framework.ExpectNoError(err, "Step 6. Check connectivity from pod (%s/%s) to an external container attached to "+
-			"a network that is non-OVN managed and verify that the src IP is the expected egressIP, failed: %v",
+			"a network that is secondary host network and verify that the src IP is the expected egressIP, failed: %v",
 			podNamespace.Name, pod2Name, err)
 
 		ginkgo.By("7. Check connectivity from one pod to the other and verify that the connection is achieved")
@@ -2233,11 +2233,11 @@ spec:
 		updatePod(f, pod2)
 
 		ginkgo.By("10. Check connectivity from pod that isn't selected by EgressIP anymore to an external \"node\" on " +
-			"the OVN managed network and verify that the IP is the node IP.")
+			"the OVN network and verify that the IP is the node IP.")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name,
 			podNamespace.Name, true, []string{pod2Node.nodeIP}))
 		framework.ExpectNoError(err, "Step 10. Check connectivity from that one to an external \"node\" on the OVN "+
-			"managed network and verify that the IP is the node IP failed: %v", err)
+			"network and verify that the IP is the node IP failed: %v", err)
 
 		ginkgo.By("11. Update the unselected pod to be selected by the Egress IP")
 		pod2 = getPod(f, pod2Name)
@@ -2269,15 +2269,15 @@ spec:
 		ginkgo.By("14. Set the node hosting the OVN egress IP as unavailable")
 		var nodeNameHostingOVNEIP, nodeNameHostingSecondaryHostEIP string
 		for _, status := range statuses {
-			if status.EgressIP == egressIPOVNManaged {
-				nodeNameHostingOVNManagedEIP = status.Node
-			} else if status.EgressIP == egressIPNonOVNManaged {
-				nodeNameHostingNonOVNManagedEIP = status.Node
+			if status.EgressIP == egressIPOVN {
+				nodeNameHostingOVNEIP = status.Node
+			} else if status.EgressIP == egressIPSecondaryHost {
+				nodeNameHostingSecondaryHostEIP = status.Node
 			}
 		}
-		gomega.Expect(nodeNameHostingOVNManagedEIP).ShouldNot(gomega.BeEmpty())
-		gomega.Expect(nodeNameHostingNonOVNManagedEIP).ShouldNot(gomega.BeEmpty())
-		egressNodeAvailabilityHandler.Disable(nodeNameHostingOVNManagedEIP)
+		gomega.Expect(nodeNameHostingOVNEIP).ShouldNot(gomega.BeEmpty())
+		gomega.Expect(nodeNameHostingSecondaryHostEIP).ShouldNot(gomega.BeEmpty())
+		egressNodeAvailabilityHandler.Disable(nodeNameHostingOVNEIP)
 
 		ginkgo.By("15. Check that the status is of length one")
 		statuses = verifyEgressIPStatusLengthEquals(1, nil)
@@ -2352,16 +2352,16 @@ spec:
 			podNamespace.Name, pod2Name, err)
 	})
 
-	// Multiple EgressIP objects where the Egress IPs of both objects are hosted on the same interface on a non-OVN managed network
+	// Multiple EgressIP objects where the Egress IPs of both objects are hosted on the same interface on a secondary host network
 	// 0. Set one nodes as available for egress
-	// 1. Create two EgressIP objects with one egress IP each - hosted by a non-OVN managed network
+	// 1. Create two EgressIP objects with one egress IP each - hosted by a secondary host network
 	// 2. Check that status of both EgressIP objects is of length one
 	// 3. Create two pods - one matching each EgressIP
-	// 4. Check connectivity from both pods to an external "node" hosted on a non-OVN managed network and verify the expected IPs
+	// 4. Check connectivity from both pods to an external "node" hosted on a secondary host network and verify the expected IPs
 	// 5. Delete one EgressIP object
-	// 6. Check connectivity to the host on the non-OVN managed network from the pod selected by the other EgressIP
-	// 7. Check connectivity to the host on the OVN managed network from the pod not selected by EgressIP
-	ginkgo.It("[non-ovn-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface", func() {
+	// 6. Check connectivity to the host on the secondary host network from the pod selected by the other EgressIP
+	// 7. Check connectivity to the host on the OVN network from the pod not selected by EgressIP
+	ginkgo.It("[secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface", func() {
 		var egressIP1, egressIP2 string
 		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
 			egressIP1 = "2001:db8:abcd:1234:c001::"
@@ -2381,7 +2381,7 @@ spec:
 		}
 		updateNamespace(f, podNamespace)
 
-		ginkgo.By("1. Create two EgressIP objects with one egress IP each - hosted by a non-OVN managed network")
+		ginkgo.By("1. Create two EgressIP objects with one egress IP each - hosted by a secondary host network")
 		egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressIP
 metadata:
@@ -2448,29 +2448,29 @@ spec:
 		})
 		framework.ExpectNoError(err, "Step 3. Create two pods - one matching each EgressIP, failed, err: %v", err)
 
-		ginkgo.By("4. Check connectivity from both pods to an external \"node\" hosted on a non-OVN managed network " +
+		ginkgo.By("4. Check connectivity from both pods to an external \"node\" hosted on a secondary host network " +
 			"and verify the expected IPs")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod1Name,
 			podNamespace.Name, true, []string{egressIP1}))
-		framework.ExpectNoError(err, "4. Check connectivity from both pods to an external \"node\" hosted on a non-OVN managed network "+
+		framework.ExpectNoError(err, "4. Check connectivity from both pods to an external \"node\" hosted on a secondary host network "+
 			"and verify the expected IPs, failed for EgressIP %s: %v", egressIPName, err)
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod2Name,
 			podNamespace.Name, true, []string{egressIP2}))
-		framework.ExpectNoError(err, "4. Check connectivity from both pods to an external \"node\" hosted on a non-OVN managed network "+
+		framework.ExpectNoError(err, "4. Check connectivity from both pods to an external \"node\" hosted on a secondary host network "+
 			"and verify the expected IPs, failed for EgressIP %s: %v", egressIPName2, err)
 
 		ginkgo.By("5. Delete one EgressIP object")
 		e2ekubectl.RunKubectlOrDie("default", "delete", "eip", egressIPName, "--ignore-not-found=true")
 
-		ginkgo.By("6. Check connectivity to the host on the non-OVN managed network from the pod selected by the other EgressIP")
+		ginkgo.By("6. Check connectivity to the host on the secondary host network from the pod selected by the other EgressIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod2Name,
 			podNamespace.Name, true, []string{egressIP2}))
-		framework.ExpectNoError(err, "6. Check connectivity to the host on the non-OVN managed network from the pod "+
+		framework.ExpectNoError(err, "6. Check connectivity to the host on the secondary host network from the pod "+
 			"selected by the other EgressIP, failed: %v", err)
 
-		ginkgo.By("7. Check connectivity to the host on the OVN managed network from the pod not selected by EgressIP")
+		ginkgo.By("7. Check connectivity to the host on the OVN network from the pod not selected by EgressIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name,
 			podNamespace.Name, true, []string{pod1Node.nodeIP}))
-		framework.ExpectNoError(err, "7. Check connectivity to the host on the OVN managed network from the pod not selected by EgressIP, failed: %v", err)
+		framework.ExpectNoError(err, "7. Check connectivity to the host on the OVN network from the pod not selected by EgressIP, failed: %v", err)
 	})
 })

@@ -141,7 +141,7 @@ const (
 	pod4IPv4CIDR                    = "192.168.100.67/32"
 	pod4IPv6Compressed              = "fd46::4"
 	pod4IPv6CIDRCompressed          = pod4IPv6Compressed + "/128"
-	node1OVNManagedNetworkV4        = "11.11.0.0/16"
+	node1OVNNetworkV4               = "11.11.0.0/16"
 )
 
 var (
@@ -470,7 +470,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 						if status.EgressIP == "" {
 							continue
 						}
-						// FIXME: we assume all EIPs are hosted by non-OVN managed network. Skip OVN managed EIPs.
+						// FIXME: we assume all EIPs are hosted by secondary host network. Skip OVN network EIPs.
 						link, err := netlink.LinkByName(expectedEIPConfig.inf)
 						if err != nil {
 							return err
@@ -1315,7 +1315,7 @@ func newNamespaceMeta(namespace string, additionalLabels map[string]string) meta
 func getNodeObj(testNode nodeConfig, createEIPAnnot bool) corev1.Node {
 	hostCIDRs := make([]string, 0)
 	assignedEIPs := sets.New[string]()
-	hostCIDRs = append(hostCIDRs, fmt.Sprintf("\"%s\"", node1OVNManagedNetworkV4))
+	hostCIDRs = append(hostCIDRs, fmt.Sprintf("\"%s\"", node1OVNNetworkV4))
 	// we assume all extra interfaces and their addresses are valid for host addr
 	for _, linkAddrs := range testNode.linkConfigs {
 		for _, addrs := range linkAddrs.address {
@@ -1331,7 +1331,7 @@ func getNodeObj(testNode nodeConfig, createEIPAnnot bool) corev1.Node {
 	}
 	annots := map[string]string{
 		"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}",
-			node1OVNManagedNetworkV4, ""),
+			node1OVNNetworkV4, ""),
 		util.OVNNodeHostCIDRs: fmt.Sprintf("[%s]", strings.Join(hostCIDRs, ",")),
 	}
 	if createEIPAnnot && assignedEIPs.Len() > 0 {
@@ -1339,7 +1339,7 @@ func getNodeObj(testNode nodeConfig, createEIPAnnot bool) corev1.Node {
 		if err != nil {
 			panic(err.Error())
 		}
-		annots[util.OVNNodeNonOVNEgressIPs] = string(bytes)
+		annots[util.OVNNodeSecondaryHostEgressIPs] = string(bytes)
 	}
 	return corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{

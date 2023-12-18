@@ -281,22 +281,22 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 	ginkgo.Context("On node ADD/UPDATE/DELETE", func() {
 		table.DescribeTable("should re-assign EgressIPs and perform proper egressIP allocation changes", func(egressIP, expectedNetwork string) {
 			app.Action = func(ctx *cli.Context) error {
-				node1IPv4OVNManaged := "192.168.126.202/24"
-				node1IPv4NonOVNManaged := "10.10.10.3/24"
-				node1Ipv4NonOVNManaged2 := "7.7.7.7/16"
-				node2IPv4OVNManaged := "192.168.126.51/24"
-				node2IPv4NonOVNManaged := "10.10.10.4/24"
-				node2Ipv4NonOVNManaged2 := "7.7.7.8/16"
-				node2Ipv4NonOVNManaged3 := "5.5.5.5/16"
+				node1IPv4OVN := "192.168.126.202/24"
+				node1IPv4SecondaryHost := "10.10.10.3/24"
+				node1Ipv4SecondaryHost2 := "7.7.7.7/16"
+				node2IPv4OVN := "192.168.126.51/24"
+				node2IPv4SecondaryHost := "10.10.10.4/24"
+				node2Ipv4SecondaryHost2 := "7.7.7.8/16"
+				node2Ipv4SecondaryHost3 := "5.5.5.5/16"
 
 				egressNamespace := newNamespace(namespace)
 				node1 := v1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node1Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, ""),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVN, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node1IPv4OVNManaged, node1IPv4NonOVNManaged, node1Ipv4NonOVNManaged2),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node1IPv4OVN, node1IPv4SecondaryHost, node1Ipv4SecondaryHost2),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -315,9 +315,9 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node2Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, ""),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVN, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node2IPv4OVNManaged, node2IPv4NonOVNManaged, node2Ipv4NonOVNManaged2, node2Ipv4NonOVNManaged3),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node2IPv4OVN, node2IPv4SecondaryHost, node2Ipv4SecondaryHost2, node2Ipv4SecondaryHost3),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -393,30 +393,30 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				app.Name,
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("OVN managed network", "192.168.126.101", "192.168.126.0/24"),
-			table.Entry("Non-OVN managed network", "10.10.10.100", "10.10.10.0/24"),
-			table.Entry("Non-OVN managed network", "7.7.7.100", "7.7.0.0/16"),
-			table.Entry("Non-OVN managed network", "7.7.8.100", "7.7.0.0/16"),
+		}, table.Entry("OVN network", "192.168.126.101", "192.168.126.0/24"),
+			table.Entry("Secondary host network", "10.10.10.100", "10.10.10.0/24"),
+			table.Entry("Secondary host network", "7.7.7.100", "7.7.0.0/16"),
+			table.Entry("Secondary host network", "7.7.8.100", "7.7.0.0/16"),
 		)
 
 		table.DescribeTable("should re-assign EgressIPs and perform proper egressIP allocation changes during node deletion", func(egressIP, expectedNetwork string) {
 			app.Action = func(ctx *cli.Context) error {
-				node1IPv4OVNManaged := "192.168.126.202/24"
-				node1IPv4NonOVNManaged := "10.10.10.3/24"
-				node1Ipv4NonOVNManaged2 := "7.7.7.7/16"
-				node2IPv4OVNManaged := "192.168.126.51/24"
-				node2IPv4NonOVNManaged := "10.10.10.4/24"
-				node2Ipv4NonOVNManaged2 := "7.7.7.8/16"
-				node2Ipv4NonOVNManaged3 := "5.5.5.5/16"
+				node1IPv4OVN := "192.168.126.202/24"
+				node1IPv4SecondaryHost := "10.10.10.3/24"
+				node1Ipv4SecondaryHost2 := "7.7.7.7/16"
+				node2IPv4OVN := "192.168.126.51/24"
+				node2IPv4SecondaryHost := "10.10.10.4/24"
+				node2Ipv4SecondaryHost2 := "7.7.7.8/16"
+				node2Ipv4SecondaryHost3 := "5.5.5.5/16"
 				egressNamespace := newNamespace(namespace)
 
 				node1 := v1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node1Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, ""),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVN, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node1IPv4OVNManaged, node1IPv4NonOVNManaged, node1Ipv4NonOVNManaged2),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node1IPv4OVN, node1IPv4SecondaryHost, node1Ipv4SecondaryHost2),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -435,9 +435,9 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node2Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, ""),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVN, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node2IPv4OVNManaged, node2IPv4NonOVNManaged, node2Ipv4NonOVNManaged2, node2Ipv4NonOVNManaged3),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node2IPv4OVN, node2IPv4SecondaryHost, node2Ipv4SecondaryHost2, node2Ipv4SecondaryHost3),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -511,10 +511,10 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("OVN managed network", "192.168.126.101", "192.168.126.0/24"),
-			table.Entry("Non-OVN managed network", "10.10.10.100", "10.10.10.0/24"),
-			table.Entry("Non-OVN managed network", "7.7.7.100", "7.7.0.0/16"),
-			table.Entry("Non-OVN managed network", "7.7.8.100", "7.7.0.0/16"),
+		}, table.Entry("OVN network", "192.168.126.101", "192.168.126.0/24"),
+			table.Entry("Secondary host network", "10.10.10.100", "10.10.10.0/24"),
+			table.Entry("Secondary host network", "7.7.7.100", "7.7.0.0/16"),
+			table.Entry("Secondary host network", "7.7.8.100", "7.7.0.0/16"),
 		)
 		ginkgo.It("should assign EgressIPs to a linux node when there are windows nodes in the cluster", func() {
 			app.Action = func(ctx *cli.Context) error {
@@ -624,22 +624,22 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 		ginkgo.It("should populated egress node data as they are tagged `egress assignable` with variants of IPv4/IPv6", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				node1IPv4OVNManaged := "192.168.128.202/24"
-				node1IPv6OVNManaged := "1521:b9cc:59b3:b9ee:95e9:f04c:4fec:33c4/64"
-				node1IPv4NonOVNManaged := "10.10.10.3/24"
-				node1IPv4NonOVNManaged2 := "7.7.7.7/16"
-				node2IPv4OVNManaged := "192.168.126.51/24"
-				node2IPv4NonOVNManaged := "10.10.10.20/24"
-				node2IPv4NonOVNManaged2 := "7.7.7.40/16"
+				node1IPv4OVN := "192.168.128.202/24"
+				node1IPv6OVN := "1521:b9cc:59b3:b9ee:95e9:f04c:4fec:33c4/64"
+				node1IPv4SecondaryHost := "10.10.10.3/24"
+				node1IPv4SecondaryHost2 := "7.7.7.7/16"
+				node2IPv4OVN := "192.168.126.51/24"
+				node2IPv4SecondaryHost := "10.10.10.20/24"
+				node2IPv4SecondaryHost2 := "7.7.7.40/16"
 
 				node1 := v1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "node1",
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, node1IPv6OVNManaged),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVN, node1IPv6OVN),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node1IPv4OVNManaged,
-								node1IPv6OVNManaged, node1IPv4NonOVNManaged, node1IPv4NonOVNManaged2),
+							util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\",\"%s\",\"%s\",\"%s\"]", node1IPv4OVN,
+								node1IPv6OVN, node1IPv4SecondaryHost, node1IPv4SecondaryHost2),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -655,10 +655,10 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "node2",
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, ""),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVN, ""),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
-							util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node2IPv4OVNManaged,
-								node2IPv4NonOVNManaged, node2IPv4NonOVNManaged2),
+							util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node2IPv4OVN,
+								node2IPv4SecondaryHost, node2IPv4SecondaryHost2),
 						},
 					},
 					Status: v1.NodeStatus{
@@ -685,20 +685,20 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					"k8s.ovn.org/egress-assignable": "",
 				}
 
-				_, node1ipV4OVNManagedNet, err := net.ParseCIDR(node1IPv4OVNManaged)
+				_, node1ipV4OVNNet, err := net.ParseCIDR(node1IPv4OVN)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node1, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(1))
-				gomega.Expect(getEgressIPAllocatorSafely(node1.Name, false).Net).To(gomega.Equal(node1ipV4OVNManagedNet))
+				gomega.Expect(getEgressIPAllocatorSafely(node1.Name, false).Net).To(gomega.Equal(node1ipV4OVNNet))
 				node2.Labels = map[string]string{
 					"k8s.ovn.org/egress-assignable": "",
 				}
 				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
-				gomega.Expect(getEgressIPAllocatorSafely(node1.Name, false).Net).To(gomega.Equal(node1ipV4OVNManagedNet))
+				gomega.Expect(getEgressIPAllocatorSafely(node1.Name, false).Net).To(gomega.Equal(node1ipV4OVNNet))
 				return nil
 			}
 
@@ -1750,20 +1750,20 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 		table.DescribeTable("should be able to allocate several EgressIPs and avoid the same node", func(egressIP1, egressIP2 string) {
 			app.Action = func(ctx *cli.Context) error {
-				node1IPv4OVNManaged := ""
-				node1IPv6OVNManaged := "0:0:0:0:0:feff:c0a8:8e0c/64"
-				node1IPv6NonOVNManaged := "0:0:1:0:0:feff:c0a8:8e0c/64"
-				node2IPv4OVNManaged := ""
-				node2IPv6OVNManaged := "0:0:0:0:0:fedf:c0a8:8e0c/64"
-				node2IPv6NonOVNManaged := "0:0:1:0:0:fedf:c0a8:8e0c/64"
+				node1IPv4OVN := ""
+				node1IPv6OVN := "0:0:0:0:0:feff:c0a8:8e0c/64"
+				node1IPv6SecondaryHost := "0:0:1:0:0:feff:c0a8:8e0c/64"
+				node2IPv4OVN := ""
+				node2IPv6OVN := "0:0:0:0:0:fedf:c0a8:8e0c/64"
+				node2IPv6SecondaryHost := "0:0:1:0:0:fedf:c0a8:8e0c/64"
 
 				node1 := v1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node1Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, node1IPv6OVNManaged),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVN, node1IPv6OVN),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVN, node1IPv6SecondaryHost),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1782,9 +1782,9 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node2Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, node2IPv6OVNManaged),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVN, node2IPv6OVN),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVN, node2IPv6SecondaryHost),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1812,8 +1812,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
 				)
 
-				egressNode1 := setupNode(node1Name, []string{node1IPv6OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
-				egressNode2 := setupNode(node2Name, []string{node2IPv6OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
+				egressNode1 := setupNode(node1Name, []string{node1IPv6OVN}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
+				egressNode2 := setupNode(node2Name, []string{node2IPv6OVN}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
 
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode1.name] = &egressNode1
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode2.name] = &egressNode2
@@ -1829,26 +1829,26 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("OVN managed egress IPs", "0:0:0:0:0:feff:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0f"),
-			table.Entry("Non-OVN managed egress IPs", "0:0:1:0:0:fecf:c0a8:8e0d", "0:0:1:0:0:febf:c0a8:8e0f"),
-			table.Entry("OVN and non-OVN managed egress IPs", "0:0:1:0:0:fecf:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0f"))
+		}, table.Entry("OVN egress IPs", "0:0:0:0:0:feff:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0f"),
+			table.Entry("Secondary host egress IPs", "0:0:1:0:0:fecf:c0a8:8e0d", "0:0:1:0:0:febf:c0a8:8e0f"),
+			table.Entry("OVN and secondary host egress IPs", "0:0:1:0:0:fecf:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0f"))
 
 		table.DescribeTable("should be able to allocate several EgressIPs and avoid the same node and leave one un-assigned without error", func(egressIP1, egressIP2, egressIP3 string) {
 			app.Action = func(ctx *cli.Context) error {
-				node1IPv4OVNManaged := ""
-				node1IPv6OVNManaged := "0:0:0:0:0:feff:c0a8:8e0c/64"
-				node1IPv6NonOVNManaged := "0:0:1:0:0:feff:c0a8:8e0c/64"
-				node2IPv4OVNManaged := ""
-				node2IPv6OVNManaged := "0:0:0:0:0:fedf:c0a8:8e0c/64"
-				node2IPv6NonOVNManaged := "0:0:1:0:0:fedf:c0a8:8e0c/64"
+				node1IPv4OVN := ""
+				node1IPv6OVN := "0:0:0:0:0:feff:c0a8:8e0c/64"
+				node1IPv6SecondaryHost := "0:0:1:0:0:feff:c0a8:8e0c/64"
+				node2IPv4OVN := ""
+				node2IPv6OVN := "0:0:0:0:0:fedf:c0a8:8e0c/64"
+				node2IPv6SecondaryHost := "0:0:1:0:0:fedf:c0a8:8e0c/64"
 
 				node1 := v1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node1Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, node1IPv6OVNManaged),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVN, node1IPv6OVN),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVN, node1IPv6SecondaryHost),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1867,9 +1867,9 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node2Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, node2IPv6OVNManaged),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVN, node2IPv6OVN),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVN, node2IPv6SecondaryHost),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1897,8 +1897,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
 				)
 
-				egressNode1 := setupNode(node1Name, []string{node1IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
-				egressNode2 := setupNode(node2Name, []string{node2IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
+				egressNode1 := setupNode(node1Name, []string{node1IPv4OVN}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
+				egressNode2 := setupNode(node2Name, []string{node2IPv4OVN}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
 
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode1.name] = &egressNode1
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode2.name] = &egressNode2
@@ -1917,32 +1917,32 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("OVN managed network", "0:0:0:0:0:feff:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0e", "0:0:0:0:0:feff:c0a8:8e0f"),
-			table.Entry("Non-OVN managed network", "0:0:1:0:0:feff:c0a8:8e0d", "0:0:1:0:0:feff:c0a8:8e0e", "0:0:1:0:0:feff:c0a8:8e0f"),
+		}, table.Entry("OVN network", "0:0:0:0:0:feff:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0e", "0:0:0:0:0:feff:c0a8:8e0f"),
+			table.Entry("Secondary host network", "0:0:1:0:0:feff:c0a8:8e0d", "0:0:1:0:0:feff:c0a8:8e0e", "0:0:1:0:0:feff:c0a8:8e0f"),
 		)
 
-		ginkgo.It("should be able to allocate several EgressIPs for OVN and non-OVN managed networks and avoid the same node and leave multiple EgressIPs un-assigned without error", func() {
+		ginkgo.It("should be able to allocate several EgressIPs for OVN and Secondary host networks and avoid the same node and leave multiple EgressIPs un-assigned without error", func() {
 			app.Action = func(ctx *cli.Context) error {
-				egressIP1NonOVNManaged := "0:0:1:0:0:feff:c0a8:8e0d"
-				egressIP2NonOVNManaged := "0:0:1:0:0:feff:c0a8:8e0e"
-				egressIP3NonOVNManaged := "0:0:1:0:0:feff:c0a8:8e0f"
-				egressIP4OVNManaged := "0:0:0:0:0:feff:c0a8:8e1a"
-				egressIP5OVNManaged := "0:0:0:0:0:feff:c0a8:8e1b"
+				egressIP1SecondaryHost := "0:0:1:0:0:feff:c0a8:8e0d"
+				egressIP2SecondaryHost := "0:0:1:0:0:feff:c0a8:8e0e"
+				egressIP3SecondaryHost := "0:0:1:0:0:feff:c0a8:8e0f"
+				egressIP4OVN := "0:0:0:0:0:feff:c0a8:8e1a"
+				egressIP5OVN := "0:0:0:0:0:feff:c0a8:8e1b"
 
-				node1IPv4OVNManaged := ""
-				node1IPv6OVNManaged := "0:0:0:0:0:feff:c0a8:8e0c/64"
-				node1IPv6NonOVNManaged := "0:0:1:0:0:feff:c0a8:8e0c/64"
-				node2IPv4OVNManaged := ""
-				node2IPv6OVNManaged := "0:0:0:0:0:feff:c0a8:8e0b/64"
-				node2IPv6NonOVNManaged := "0:0:1:0:0:feff:c0a8:8e0b/64"
+				node1IPv4OVN := ""
+				node1IPv6OVN := "0:0:0:0:0:feff:c0a8:8e0c/64"
+				node1IPv6SecondaryHost := "0:0:1:0:0:feff:c0a8:8e0c/64"
+				node2IPv4OVN := ""
+				node2IPv6OVN := "0:0:0:0:0:feff:c0a8:8e0b/64"
+				node2IPv6SecondaryHost := "0:0:1:0:0:feff:c0a8:8e0b/64"
 
 				node1 := v1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node1Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, node1IPv6OVNManaged),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVN, node1IPv6OVN),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVN, node1IPv6SecondaryHost),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1961,9 +1961,9 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node2Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, node2IPv6OVNManaged),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVN, node2IPv6OVN),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVN, node2IPv6SecondaryHost),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -1982,7 +1982,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1NonOVNManaged, egressIP2NonOVNManaged, egressIP3NonOVNManaged, egressIP4OVNManaged, egressIP5OVNManaged},
+						EgressIPs: []string{egressIP1SecondaryHost, egressIP2SecondaryHost, egressIP3SecondaryHost, egressIP4OVN, egressIP5OVN},
 					},
 				}
 
@@ -1991,8 +1991,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
 				)
 
-				egressNode1 := setupNode(node1Name, []string{node1IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
-				egressNode2 := setupNode(node2Name, []string{node2IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
+				egressNode1 := setupNode(node1Name, []string{node1IPv4OVN}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
+				egressNode2 := setupNode(node2Name, []string{node2IPv4OVN}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
 
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode1.name] = &egressNode1
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode2.name] = &egressNode2
@@ -2002,9 +2002,9 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				assignedStatuses := fakeClusterManagerOVN.eIPC.assignEgressIPs(eIP.Name, eIP.Spec.EgressIPs)
 				gomega.Expect(assignedStatuses).To(gomega.HaveLen(2))
 				gomega.Expect(assignedStatuses[0].Node).To(gomega.Equal(egressNode2.name))
-				gomega.Expect(assignedStatuses[0].EgressIP).To(gomega.Equal(net.ParseIP(egressIP1NonOVNManaged).String()))
+				gomega.Expect(assignedStatuses[0].EgressIP).To(gomega.Equal(net.ParseIP(egressIP1SecondaryHost).String()))
 				gomega.Expect(assignedStatuses[1].Node).To(gomega.Equal(egressNode1.name))
-				gomega.Expect(assignedStatuses[1].EgressIP).To(gomega.Equal(net.ParseIP(egressIP2NonOVNManaged).String()))
+				gomega.Expect(assignedStatuses[1].EgressIP).To(gomega.Equal(net.ParseIP(egressIP2SecondaryHost).String()))
 
 				return nil
 			}
@@ -2015,20 +2015,20 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 		table.DescribeTable("should return the already allocated IP with the same node if it is allocated again", func(egressIP string) {
 			app.Action = func(ctx *cli.Context) error {
-				node1IPv4OVNManaged := ""
-				node1IPv6OVNManaged := "0:0:0:0:0:feff:c0a8:8e0c/64"
-				node1IPv6NonOVNManaged := "0:0:1:0:0:feff:c0a8:8e0c/64"
-				node2IPv4OVNManaged := ""
-				node2IPv6OVNManaged := "0:0:0:0:0:feff:c0a8:8e0b/64"
-				node2IPv6NonOVNManaged := "0:0:1:0:0:feff:c0a8:8e0b/64"
+				node1IPv4OVN := ""
+				node1IPv6OVN := "0:0:0:0:0:feff:c0a8:8e0c/64"
+				node1IPv6SecondaryHost := "0:0:1:0:0:feff:c0a8:8e0c/64"
+				node2IPv4OVN := ""
+				node2IPv6OVN := "0:0:0:0:0:feff:c0a8:8e0b/64"
+				node2IPv6SecondaryHost := "0:0:1:0:0:feff:c0a8:8e0b/64"
 
 				node1 := v1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node1Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, node1IPv6OVNManaged),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVN, node1IPv6OVN),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVNManaged, node1IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node1IPv6OVN, node1IPv6SecondaryHost),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2047,9 +2047,9 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node2Name,
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVNManaged, node2IPv6OVNManaged),
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4OVN, node2IPv6OVN),
 							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
-							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVNManaged, node2IPv6NonOVNManaged),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv6OVN, node2IPv6SecondaryHost),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -2077,8 +2077,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
 				)
 
-				egressNode1 := setupNode(node1Name, []string{node1IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
-				egressNode2 := setupNode(node2Name, []string{node2IPv4OVNManaged}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
+				egressNode1 := setupNode(node1Name, []string{node1IPv4OVN}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
+				egressNode2 := setupNode(node2Name, []string{node2IPv4OVN}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
 
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode1.name] = &egressNode1
 				fakeClusterManagerOVN.eIPC.allocator.cache[egressNode2.name] = &egressNode2
@@ -2096,8 +2096,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("OVN managed network", "0:0:0:0:0:feff:c0a8:8e1a"),
-			table.Entry("Non-OVN managed network", "0:0:1:0:0:feff:c0a8:8e0d"),
+		}, table.Entry("OVN network", "0:0:0:0:0:feff:c0a8:8e1a"),
+			table.Entry("Secondary host network", "0:0:1:0:0:feff:c0a8:8e0d"),
 		)
 
 		ginkgo.It("should not be able to allocate node IP", func() {

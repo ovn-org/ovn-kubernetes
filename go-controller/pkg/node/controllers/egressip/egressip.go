@@ -101,7 +101,7 @@ type referencedObjects struct {
 	eIPPods       sets.Set[ktypes.NamespacedName]
 }
 
-// Controller implement Egress IP for non-OVN managed networks
+// Controller implement Egress IP for secondary host networks
 type Controller struct {
 	eIPLister         egressiplisters.EgressIPLister
 	eIPInformer       cache.SharedIndexInformer
@@ -173,7 +173,7 @@ func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInform
 	return c, nil
 }
 
-// Run starts the Egress IP that is hosted in non-OVN managed networks. Changes to this function
+// Run starts the Egress IP that is hosted in secondary host networks. Changes to this function
 // need to be mirrored in test function setupFakeTestNode
 func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int) error {
 	klog.Info("Starting Egress IP Controller")
@@ -496,7 +496,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
 				fmt.Errorf("failed to generate mask for EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
-		if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
+		if util.IsOVNNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 			continue
 		}
 		found, link, err := findLinkOnSameNetworkAsIP(eIPNet.IP, c.v4, c.v6)
@@ -905,7 +905,7 @@ func (c *Controller) repairNode() error {
 			if err != nil {
 				return err
 			}
-			if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
+			if util.IsOVNNetwork(parsedNodeEIPConfig, eIPNet.IP) {
 				continue
 			}
 			isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
@@ -1013,7 +1013,7 @@ func (c *Controller) migrateFromAddrLabelToAnnotation() error {
 	if err != nil {
 		return err
 	}
-	if util.IsNodeNonOVNEgressIPsAnnotationSet(node) {
+	if util.IsNodeSecondaryHostEgressIPsAnnotationSet(node) {
 		// if annotation is set, exit early as migration from labels must have has been completed previously
 		return nil
 	}
@@ -1046,7 +1046,7 @@ func (c *Controller) migrateFromAddrLabelToAnnotation() error {
 		if err != nil {
 			return err
 		}
-		node.Annotations[util.OVNNodeNonOVNEgressIPs] = string(patch)
+		node.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
 		return c.kube.UpdateNodeStatus(node)
 	})
 }
@@ -1062,12 +1062,12 @@ func (c *Controller) addIPToAnnotation(ip string) error {
 		if err != nil {
 			return err
 		}
-		existingIPs, err := util.ParseNodeNonOVNEgressIPsAnnotation(node)
+		existingIPs, err := util.ParseNodeSecondaryHostEgressIPsAnnotation(node)
 		if err != nil {
 			if util.IsAnnotationNotSetError(err) {
 				existingIPs = sets.New[string]()
 			} else {
-				return fmt.Errorf("failed to parse annotation key %q from node object: %v", util.OVNNodeNonOVNEgressIPs, err)
+				return fmt.Errorf("failed to parse annotation key %q from node object: %v", util.OVNNodeSecondaryHostEgressIPs, err)
 			}
 		}
 		if existingIPs.Has(ip) {
@@ -1078,7 +1078,7 @@ func (c *Controller) addIPToAnnotation(ip string) error {
 		if err != nil {
 			return err
 		}
-		node.Annotations[util.OVNNodeNonOVNEgressIPs] = string(patch)
+		node.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
 		return c.kube.UpdateNodeStatus(node)
 	})
 }
@@ -1094,12 +1094,12 @@ func (c *Controller) deleteIPFromAnnotation(ip string) error {
 		if err != nil {
 			return err
 		}
-		existingIPs, err := util.ParseNodeNonOVNEgressIPsAnnotation(node)
+		existingIPs, err := util.ParseNodeSecondaryHostEgressIPsAnnotation(node)
 		if err != nil {
 			if util.IsAnnotationNotSetError(err) {
 				existingIPs = sets.New[string]()
 			} else {
-				return fmt.Errorf("failed to parse annotation key %q from node object: %v", util.OVNNodeNonOVNEgressIPs, err)
+				return fmt.Errorf("failed to parse annotation key %q from node object: %v", util.OVNNodeSecondaryHostEgressIPs, err)
 			}
 		}
 		if !existingIPs.Has(ip) {
@@ -1110,7 +1110,7 @@ func (c *Controller) deleteIPFromAnnotation(ip string) error {
 		if err != nil {
 			return err
 		}
-		node.Annotations[util.OVNNodeNonOVNEgressIPs] = string(patch)
+		node.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
 		return c.kube.UpdateNodeStatus(node)
 	})
 }
@@ -1122,12 +1122,12 @@ func (c *Controller) getAnnotation() (sets.Set[string], error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s from lister: %v", c.nodeName, err)
 	}
-	ips, err := util.ParseNodeNonOVNEgressIPsAnnotation(node)
+	ips, err := util.ParseNodeSecondaryHostEgressIPsAnnotation(node)
 	if err != nil {
 		if util.IsAnnotationNotSetError(err) {
 			ips = sets.New[string]()
 		} else {
-			return nil, fmt.Errorf("failed to parse annotation key %q from node object: %v", util.OVNNodeNonOVNEgressIPs, err)
+			return nil, fmt.Errorf("failed to parse annotation key %q from node object: %v", util.OVNNodeSecondaryHostEgressIPs, err)
 		}
 	}
 	return ips, nil
