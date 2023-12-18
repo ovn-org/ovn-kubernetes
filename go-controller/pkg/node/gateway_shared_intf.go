@@ -214,7 +214,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 						// table=0, matches on return traffic from service nodePort and sends it out to primary node interface (br-ex)
 						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, dl_src=%s, %s, tp_src=%d, "+
 							"actions=output:%s",
-							cookie, npw.ofportPatch, npw.ofm.defaultBridge.macAddress, flowProtocol, svcPort.NodePort, npw.ofportPhys)})
+							cookie, npw.ofportPatch, npw.ofm.getDefaultBridgeMAC(), flowProtocol, svcPort.NodePort, npw.ofportPhys)})
 				}
 			}
 		}
@@ -336,7 +336,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 			// table=0, matches on return traffic from service externalIP or LB ingress and sends it out to primary node interface (br-ex)
 			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, dl_src=%s, %s, %s=%s, tp_src=%d, "+
 				"actions=output:%s",
-				cookie, npw.ofportPatch, npw.ofm.defaultBridge.macAddress, flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort.Port, npw.ofportPhys))
+				cookie, npw.ofportPatch, npw.ofm.getDefaultBridgeMAC(), flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort.Port, npw.ofportPhys))
 	}
 	npw.ofm.updateFlowCacheEntry(key, externalIPFlows)
 
@@ -1054,69 +1054,6 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		}
 	}
 	return apierrors.NewAggregate(errors)
-}
-
-// since we share the host's k8s node IP, add OpenFlow flows
-// -- to steer the NodePort traffic arriving on the host to the OVN logical topology and
-// -- to also connection track the outbound north-south traffic through l3 gateway so that
-//
-//	the return traffic can be steered back to OVN logical topology
-//
-// -- to handle host -> service access, via masquerading from the host to OVN GR
-// -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnets []*net.IPNet, extraIPs []net.IP) (*openflowManager, error) {
-	// add health check function to check default OpenFlow flows are on the shared gateway bridge
-	ofm := &openflowManager{
-		defaultBridge:         gwBridge,
-		externalGatewayBridge: exGWBridge,
-		flowCache:             make(map[string][]string),
-		flowMutex:             sync.Mutex{},
-		exGWFlowCache:         make(map[string][]string),
-		exGWFlowMutex:         sync.Mutex{},
-		flowChan:              make(chan struct{}, 1),
-	}
-
-	if err := ofm.updateBridgeFlowCache(subnets, extraIPs); err != nil {
-		return nil, err
-	}
-
-	// defer flowSync until syncService() to prevent the existing service OpenFlows being deleted
-	return ofm, nil
-}
-
-// updateBridgeFlowCache generates the "static" per-bridge flows
-// note: this is shared between shared and local gateway modes
-func (ofm *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs []net.IP) error {
-	// protect defaultBridge config from being updated by gw.nodeIPManager
-	ofm.defaultBridge.Lock()
-	defer ofm.defaultBridge.Unlock()
-
-	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
-	// that dl_src is included in match criteria!
-
-	dftFlows, err := flowsForDefaultBridge(ofm.defaultBridge, extraIPs)
-	if err != nil {
-		return err
-	}
-	dftCommonFlows, err := commonFlows(subnets, ofm.defaultBridge)
-	if err != nil {
-		return err
-	}
-	dftFlows = append(dftFlows, dftCommonFlows...)
-
-	ofm.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-	ofm.updateFlowCacheEntry("DEFAULT", dftFlows)
-
-	// we consume ex gw bridge flows only if that is enabled
-	if ofm.externalGatewayBridge != nil {
-		ofm.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-		exGWBridgeDftFlows, err := commonFlows(subnets, ofm.externalGatewayBridge)
-		if err != nil {
-			return err
-		}
-		ofm.updateExBridgeFlowCacheEntry("DEFAULT", exGWBridgeDftFlows)
-	}
-	return nil
 }
 
 func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]string, error) {

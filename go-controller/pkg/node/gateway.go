@@ -358,7 +358,7 @@ func gatewayReady(patchPort string) (bool, error) {
 }
 
 func (g *gateway) GetGatewayBridgeIface() string {
-	return g.openflowManager.defaultBridge.bridgeName
+	return g.openflowManager.getDefaultBridgeName()
 }
 
 // getMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
@@ -368,9 +368,7 @@ func getMaxFrameLength() int {
 
 // SetDefaultGatewayBridgeMAC updates the mac address for the OFM used to render flows with
 func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
-	g.openflowManager.defaultBridge.Lock()
-	defer g.openflowManager.defaultBridge.Unlock()
-	g.openflowManager.defaultBridge.macAddress = macAddr
+	g.openflowManager.setDefaultBridgeMAC(macAddr)
 	klog.Infof("Default gateway bridge MAC address updated to %s", macAddr)
 }
 
