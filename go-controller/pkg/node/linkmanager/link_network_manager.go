@@ -25,40 +25,97 @@ type LinkAddress struct {
 }
 
 type Controller struct {
-	mu          *sync.Mutex
-	name        string
-	ipv4Enabled bool
-	ipv6Enabled bool
-	store       map[string][]netlink.Addr
+	mu              *sync.Mutex
+	name            string
+	ipv4Enabled     bool
+	ipv6Enabled     bool
+	store           map[string][]netlink.Addr
+	linkHandlerFunc func(link netlink.Link) error
 }
 
 // NewController creates a controller to manage linux network interfaces
-func NewController(name string, v4, v6 bool) *Controller {
+func NewController(name string, v4, v6 bool, linkHandlerFunc func(link netlink.Link) error) *Controller {
 	return &Controller{
-		mu:          &sync.Mutex{},
-		name:        name,
-		ipv4Enabled: v4,
-		ipv6Enabled: v6,
-		store:       make(map[string][]netlink.Addr, 0),
+		mu:              &sync.Mutex{},
+		name:            name,
+		ipv4Enabled:     v4,
+		ipv6Enabled:     v6,
+		store:           make(map[string][]netlink.Addr),
+		linkHandlerFunc: linkHandlerFunc,
 	}
 }
 
 // Run starts the controller and syncs at least every syncPeriod
-// linkHandlerFunc fires as an additional handler when reconcile runs
-func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration, linkHandlerFunc func(link netlink.Link) error) {
-	ticker := time.NewTicker(syncPeriod)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-stopCh:
-			return
-		case <-ticker.C:
-			c.mu.Lock()
-			c.reconcile(linkHandlerFunc)
-			c.mu.Unlock()
-		}
+// linkHandlerFunc fires as an additional handler when sync runs
+func (c *Controller) Run(stopCh <-chan struct{}, doneWg *sync.WaitGroup) {
+	linkSubscribeOptions := netlink.LinkSubscribeOptions{
+		ErrorCallback: func(err error) {
+			klog.Errorf("Failed during LinkSubscribe callback: %v", err)
+			// Note: Not calling sync() from here: it is redundant and unsafe when stopChan is closed.
+		},
 	}
 
+	subscribe := func() (bool, chan netlink.LinkUpdate, error) {
+		linkChan := make(chan netlink.LinkUpdate)
+		if err := netlink.LinkSubscribeWithOptions(linkChan, stopCh, linkSubscribeOptions); err != nil {
+			return false, nil, err
+		}
+		// sync the manager with current addresses on the node
+		c.sync()
+		return true, linkChan, nil
+	}
+
+	c.runInternal(stopCh, doneWg, subscribe)
+}
+
+type subscribeFn func() (bool, chan netlink.LinkUpdate, error)
+
+// runInternal can be used by testcases to provide a fake subscription function
+// rather than using netlink
+func (c *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGroup, subscribe subscribeFn) {
+
+	doneWg.Add(1)
+	go func() {
+		defer doneWg.Done()
+
+		linkSyncTimer := time.NewTicker(2 * time.Minute)
+		defer linkSyncTimer.Stop()
+
+		subscribed, addrChan, err := subscribe()
+		if err != nil {
+			klog.Errorf("Error during netlink subscribe for Link Manager: %v", err)
+		}
+
+		for {
+			select {
+			case a, ok := <-addrChan:
+				linkSyncTimer.Reset(2 * time.Minute)
+				if !ok {
+					if subscribed, addrChan, err = subscribe(); err != nil {
+						klog.Errorf("Error during netlink re-subscribe due to channel closing for Link Manager: %v", err)
+					}
+					continue
+				}
+				if err := c.syncLinkLocked(a.Link); err != nil {
+					klog.Errorf("Error while syncing link %q: %v", a.Link.Attrs().Name, err)
+				}
+
+			case <-linkSyncTimer.C:
+				if subscribed {
+					klog.V(5).Info("Link manager calling sync() explicitly")
+					c.sync()
+				} else {
+					if subscribed, addrChan, err = subscribe(); err != nil {
+						klog.Errorf("Error during netlink re-subscribe for Link Manager: %v", err)
+					}
+				}
+			case <-stopChan:
+				return
+			}
+		}
+	}()
+
+	klog.Info("Link manager is running")
 }
 
 // AddAddress stores the address in a store and ensures its applied
@@ -75,8 +132,7 @@ func (c *Controller) AddAddress(address netlink.Addr) error {
 	// overwrite label to the name of this component in-order to aid address ownership. Label must start with link name.
 	address.Label = GetAssignedAddressLabel(link.Attrs().Name)
 	c.addAddressToStore(link.Attrs().Name, address)
-	c.reconcile(nil)
-	return nil
+	return c.syncLink(link)
 }
 
 // DelAddress removes the address from the store and ensure its removed from a link
@@ -91,11 +147,71 @@ func (c *Controller) DelAddress(address netlink.Addr) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.delAddressFromStore(link.Attrs().Name, address)
-	c.reconcile(nil)
+	return c.syncLink(link)
+}
+
+// syncLinkLocked is just a wrapper around syncLink that ensures the mutex is locked in advance
+func (c *Controller) syncLinkLocked(link netlink.Link) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.syncLink(link)
+}
+
+// syncLink handles link updates
+// It MUST be called with the controller locked
+func (c *Controller) syncLink(link netlink.Link) error {
+	if c.linkHandlerFunc != nil {
+		if err := c.linkHandlerFunc(link); err != nil {
+			klog.Errorf("Failed to execute link handler function on link: %s, error: %v", link.Attrs().Name, err)
+		}
+	}
+	linkName := link.Attrs().Name
+	// get all addresses associated with the link depending on which IP families we support
+	foundAddresses, err := getAllLinkAddressesByIPFamily(link, c.ipv4Enabled, c.ipv6Enabled)
+	if err != nil {
+		return fmt.Errorf("failed to get address from link %q: %w", linkName, err)
+	}
+	wantedAddresses, found := c.store[linkName]
+	// cleanup any stale addresses on the link
+	for _, foundAddress := range foundAddresses {
+		// we label any address we create, so if we aren't managing a link, we must remove any stale addresses
+		if foundAddress.Label == GetAssignedAddressLabel(linkName) && !containsAddress(wantedAddresses, foundAddress) {
+			if err := util.GetNetLinkOps().AddrDel(link, &foundAddress); err != nil && !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+				klog.Errorf("Link Network Manager: failed to delete address %q from link %q",
+					foundAddress.String(), linkName)
+			} else {
+				klog.Infof("Link Network Manager: successfully removed stale address %q from link %q",
+					foundAddress.String(), linkName)
+			}
+		}
+	}
+	// we don't manage this link therefore we don't need to add any addresses
+	if !found {
+		return nil
+	}
+	// add addresses we want that are not found on the link
+	for _, addressWanted := range wantedAddresses {
+		if containsAddress(foundAddresses, addressWanted) {
+			continue
+		}
+		if err = util.GetNetLinkOps().AddrAdd(link, &addressWanted); err != nil {
+			klog.Errorf("Link manager: failed to add address %q to link %q: %v", addressWanted.String(), linkName, err)
+		}
+		// For IPv4, use arping to try to update other hosts ARP caches, in case this IP was
+		// previously active on another node
+		if addressWanted.IP.To4() != nil {
+			if err = arping.GratuitousArpOverIfaceByName(addressWanted.IP, linkName); err != nil {
+				klog.Errorf("Failed to send a GARP for IP %s over interface %s: %v", addressWanted.IP.String(),
+					linkName, err)
+			}
+		}
+		klog.Infof("Link manager completed adding address %s to link %s", addressWanted, linkName)
+	}
+
 	return nil
 }
 
-func (c *Controller) reconcile(linkHandlerFunc func(link netlink.Link) error) {
+func (c *Controller) sync() {
 	// 1. get all the links on the node
 	// 2. iterate over the links and get the addresses associated with it
 	// 3. cleanup any stale addresses from link that we no longer managed
@@ -106,54 +222,11 @@ func (c *Controller) reconcile(linkHandlerFunc func(link netlink.Link) error) {
 		klog.Errorf("Link Network Manager: failed to list links: %v", err)
 		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, link := range links {
-		if linkHandlerFunc != nil {
-			if err := linkHandlerFunc(link); err != nil {
-				klog.Errorf("Failed to execute link handler function on link: %s, error: %v", link.Attrs().Name, err)
-			}
-		}
-		linkName := link.Attrs().Name
-		// get all addresses associated with the link depending on which IP families we support
-		foundAddresses, err := getAllLinkAddressesByIPFamily(link, c.ipv4Enabled, c.ipv6Enabled)
-		if err != nil {
-			klog.Errorf("Link Network Manager: failed to get address from link %q", linkName)
-			continue
-		}
-		wantedAddresses, found := c.store[linkName]
-		// cleanup any stale addresses on the link
-		for _, foundAddress := range foundAddresses {
-			// we label any address we create, so if we aren't managing a link, we must remove any stale addresses
-			if foundAddress.Label == GetAssignedAddressLabel(linkName) && !containsAddress(wantedAddresses, foundAddress) {
-				if err := util.GetNetLinkOps().AddrDel(link, &foundAddress); err != nil && !util.GetNetLinkOps().IsLinkNotFoundError(err) {
-					klog.Errorf("Link Network Manager: failed to delete address %q from link %q",
-						foundAddress.String(), linkName)
-				} else {
-					klog.Infof("Link Network Manager: successfully removed stale address %q from link %q",
-						foundAddress.String(), linkName)
-				}
-			}
-		}
-		// we don't manage this link therefore we don't need to add any addresses
-		if !found {
-			continue
-		}
-		// add addresses we want that are not found on the link
-		for _, addressWanted := range wantedAddresses {
-			if containsAddress(foundAddresses, addressWanted) {
-				continue
-			}
-			if err = util.GetNetLinkOps().AddrAdd(link, &addressWanted); err != nil {
-				klog.Errorf("Link manager: failed to add address %q to link %q: %v", addressWanted.String(), linkName, err)
-			}
-			// For IPv4, use arping to try to update other hosts ARP caches, in case this IP was
-			// previously active on another node
-			if addressWanted.IP.To4() != nil {
-				if err = arping.GratuitousArpOverIfaceByName(addressWanted.IP, linkName); err != nil {
-					klog.Errorf("Failed to send a GARP for IP %s over interface %s: %v", addressWanted.IP.String(),
-						linkName, err)
-				}
-			}
-			klog.Infof("Link manager completed adding address %s to link %s", addressWanted, linkName)
+		if err := c.syncLink(link); err != nil {
+			klog.Errorf("Sync Link failed for link %q: %v", link.Attrs().Name, err)
 		}
 	}
 }

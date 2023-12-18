@@ -1161,7 +1161,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// create link manager, will work for egress IP as well as monitoring MAC changes to default gw bridge
-	linkManager := linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode)
+	linkManager := linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode, nc.updateGatewayMAC)
 
 	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
 		c, err := egressip.NewController(nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
@@ -1178,11 +1178,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Infof("Egress IP for non-OVN managed networks is disabled")
 	}
 
-	nc.wg.Add(1)
-	go func() {
-		linkManager.Run(nc.stopChan, 30*time.Second, nc.updateGatewayMAC)
-		nc.wg.Done()
-	}()
+	linkManager.Run(nc.stopChan, nc.wg)
 
 	nc.wg.Add(1)
 	go func() {
