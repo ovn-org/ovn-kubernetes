@@ -403,7 +403,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	}
 
 	initGwFunc := func() error {
-		return gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
+		return gw.Init(nc.stopChan, nc.wg)
 	}
 
 	readyGwFunc := func() (bool, error) {
@@ -502,7 +502,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		return fmt.Errorf("failed to add MAC bindings for service routing")
 	}
 
-	err = gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
+	err = gw.Init(nc.stopChan, nc.wg)
 	nc.gateway = gw
 	return err
 }

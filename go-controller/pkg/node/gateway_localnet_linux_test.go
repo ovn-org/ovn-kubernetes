@@ -276,9 +276,11 @@ var _ = Describe("Node Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
 				externalIPPort := int32(8032)
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-ofctl show ",
-				})
+				for i := 0; i < 2; i++ {
+					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd: "ovs-ofctl show ",
+					})
+				}
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -631,12 +633,11 @@ var _ = Describe("Node Operations", func() {
 		It("inits iptables rules with LoadBalancer", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-ofctl show ",
-				})
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-ofctl show ",
-				})
+				for i := 0; i < 6; i++ {
+					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd: "ovs-ofctl show ",
+					})
+				}
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1312,12 +1313,11 @@ var _ = Describe("Node Operations", func() {
 				clusterIPv4 := "10.129.0.2"
 				clusterIPv6 := "fd00:10:96::10"
 				fNPW.gatewayIPv6 = v6localnetGatewayIP
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-ofctl show ",
-				})
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-ofctl show ",
-				})
+				for i := 0; i < 6; i++ {
+					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd: "ovs-ofctl show ",
+					})
+				}
 
 				service := *newService("service1", "namespace1", clusterIPv4,
 					[]v1.ServicePort{
@@ -1407,10 +1407,11 @@ var _ = Describe("Node Operations", func() {
 		It("deletes iptables rules with ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-ofctl show ",
-				})
-
+				for i := 0; i < 2; i++ {
+					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd: "ovs-ofctl show ",
+					})
+				}
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1576,9 +1577,11 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules with ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "10.10.10.1"
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-ofctl show ",
-				})
+				for i := 0; i < 3; i++ {
+					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd: "ovs-ofctl show ",
+					})
+				}
 				externalIPPort := int32(8034)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{

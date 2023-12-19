@@ -24,6 +24,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
+	kerrors2 "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -605,7 +606,12 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 			return fmt.Errorf("AddService failed for nodePortWatcher: %v", err)
 		}
 	} else {
-		klog.V(5).Infof("Rules already programmed for %s in namespace %s", service.Name, service.Namespace)
+		// Need to update flows here in case an attribute of the gateway has changed, such as MAC address
+		klog.V(5).Infof("Updating already programmed rules for %s in namespace %s", service.Name, service.Namespace)
+		if err = npw.updateServiceFlowCache(service, true, hasLocalHostNetworkEp); err != nil {
+			return fmt.Errorf("failed to update flows for service %s/%s: %w", service.Namespace, service.Name, err)
+		}
+		npw.ofm.requestFlowSync()
 	}
 	return nil
 }
@@ -1753,6 +1759,13 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			}
 			npw, _ := gw.nodePortWatcher.(*nodePortWatcher)
 			npw.updateGatewayIPs(gw.nodeIPManager)
+			// Services create OpenFlow flows as well, need to update them all
+			if gw.servicesRetryFramework != nil {
+				if errs := gw.addAllServices(); errs != nil {
+					err := kerrors2.NewAggregate(errs)
+					klog.Errorf("Failed to sync all services after node IP change: %v", err)
+				}
+			}
 			gw.openflowManager.requestFlowSync()
 		}
 
