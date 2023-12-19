@@ -185,7 +185,7 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 		// disappearing
 		warnings = append(warnings, fmt.Sprintf("missing IP address %s on the interface %s, adding it...",
 			cfg.ifAddr, mpcfg.ifName))
-		err = util.LinkAddrAdd(mpcfg.link, cfg.ifAddr, 0)
+		err = util.LinkAddrAdd(mpcfg.link, cfg.ifAddr, 0, 0, 0)
 	}
 	if err != nil {
 		return warnings, err

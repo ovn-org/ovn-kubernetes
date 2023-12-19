@@ -1432,7 +1432,11 @@ func upgradeServiceRoute(routeManager *routemanager.Controller, bridgeName strin
 	}
 	for _, serviceCIDR := range config.Kubernetes.ServiceCIDRs {
 		serviceCIDR := *serviceCIDR
-		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Dst: &serviceCIDR})
+		srcIP := config.Gateway.MasqueradeIPs.V4HostMasqueradeIP
+		if utilnet.IsIPv6CIDR(&serviceCIDR) {
+			srcIP = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP
+		}
+		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Dst: &serviceCIDR, Src: srcIP})
 	}
 
 	// add route via OVS bridge
