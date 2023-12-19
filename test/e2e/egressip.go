@@ -182,6 +182,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		egressFirewallYaml   string = "egressfirewall.yaml"
 		waitInterval                = 3 * time.Second
 		ciNetworkName               = "kind"
+		retryTimeout                = 3 * retryTimeout // Boost the retryTimeout for EgressIP tests.
 	)
 
 	type node struct {
