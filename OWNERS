@@ -1,17 +1,21 @@
 reviewers:
-  - JacobTanenbaum
-  - pecameron
-  - squeed
-  - dcbw
-  - rajatchopra
-  - shettyg
   - aserdean
-  - alinbalutoiu
+  - dcbw
   - girishmg
+  - trozet
+  - cathy-zhou
+  - npinaeva
+  - jcaamano
+  - tssurya
+  - flavio-fernandes
+  - martinkennelly
+  - kyrtapz
+  - pperiyasamy
+  - bpickard22
+
 approvers:
-  - rajatchopra
-  - shettyg
   - dcbw
   - girishmg
-  - aserdean
-  - russellb
+  - jcaamano
+  - trozet
+  - tssurya
