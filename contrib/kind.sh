@@ -1081,7 +1081,7 @@ install_metallb() {
 install_plugins() {
   git clone https://github.com/containernetworking/plugins.git
   pushd plugins
-  ./build_linux.sh
+  CGO_ENABLED=0 ./build_linux.sh
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   # Opted for not overwritting the existing plugins
   for node in $KIND_NODES; do

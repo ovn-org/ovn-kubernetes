@@ -1270,6 +1270,7 @@ ovn-master() {
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
+    --metrics-enable-pprof \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid &
 
@@ -1530,6 +1531,7 @@ ovnkube-controller() {
     --logfile /var/log/ovn-kubernetes/ovnkube-controller.log \
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
+    --metrics-enable-pprof \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
     --zone ${ovn_zone} &
 
@@ -1917,6 +1919,7 @@ ovnkube-controller-with-node() {
     ${sflow_targets} \
     ${ssl_opts} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
+    --export-ovs-metrics \
     --gateway-mode=${ovn_gateway_mode} \
     --gateway-router-subnet=${ovn_gateway_router_subnet} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -1927,6 +1930,7 @@ ovnkube-controller-with-node() {
     --logfile /var/log/ovn-kubernetes/ovnkube-controller-with-node.log \
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${metrics_bind_address} \
+    --metrics-enable-pprof \
     --mtu=${mtu} \
     --nodeport \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
@@ -2079,6 +2083,7 @@ ovn-cluster-manager() {
     --logfile /var/log/ovn-kubernetes/ovnkube-cluster-manager.log \
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
+    --metrics-enable-pprof \
     --pidfile ${OVN_RUNDIR}/ovnkube-cluster-manager.pid &
 
   echo "=============== ovn-cluster-manager ========== running"
@@ -2408,6 +2413,7 @@ ovn-node() {
         ${routable_mtu_flag} \
         ${sflow_targets} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
+        --export-ovs-metrics \
         --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
         --gateway-router-subnet=${ovn_gateway_router_subnet} \
         --host-network-namespace ${ovn_host_network_namespace} \
@@ -2418,6 +2424,7 @@ ovn-node() {
         --logfile /var/log/ovn-kubernetes/ovnkube.log \
         --loglevel=${ovnkube_loglevel} \
         --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
+        --metrics-enable-pprof \
         --mtu=${mtu} \
         --nodeport \
         --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
