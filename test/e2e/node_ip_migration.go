@@ -5,7 +5,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
+	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
+	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	"math/big"
+	"math/rand"
 	"net"
 	"os"
 	"path"
@@ -52,6 +57,8 @@ spec:
         matchLabels:
             kubernetes.io/metadata.name: %s
 `
+		serviceName = "testservice"
+		podName     = "backend"
 	)
 
 	var (
@@ -66,6 +73,8 @@ spec:
 		migrationWorkerNodeIP  string
 		rollbackNeeded         bool
 		egressIP               string
+		assignedNodePort       int32
+		ovnkPod                v1.Pod
 
 		podLabels = map[string]string{
 			"app": "ip-migration-test",
@@ -79,6 +88,9 @@ spec:
 		}
 
 		f = wrappedTestFramework(namespacePrefix)
+
+		udpPort  = int32(rand.Intn(1000) + 10000)
+		udpPortS = fmt.Sprintf("%d", udpPort)
 	)
 
 	BeforeEach(func() {
@@ -391,6 +403,126 @@ spec:
 							}, pollingTimeout, pollingInterval).Should(BeTrue())
 						})
 				}
+			})
+
+			Context("when ETP=Local service with host network backend is configured", func() {
+				BeforeEach(func() {
+					By("creating a host-network backend pod")
+					jig := e2eservice.NewTestJig(f.ClientSet, f.Namespace.Name, serviceName)
+					serverPod := e2epod.NewAgnhostPod(f.Namespace.Name, podName, nil, nil, []v1.ContainerPort{{ContainerPort: udpPort}, {ContainerPort: udpPort, Protocol: "UDP"}},
+						"netexec", "--udp-port="+udpPortS)
+					serverPod.Labels = jig.Labels
+					serverPod.Spec.HostNetwork = true
+					serverPod.Spec.NodeName = workerNode.Name
+					serverPod = e2epod.NewPodClient(f).CreateSync(context.TODO(), serverPod)
+
+					By("Creating ETP local service")
+					svc, err := jig.CreateUDPService(context.TODO(), func(s *v1.Service) {
+						s.Spec.Ports = []v1.ServicePort{
+							{
+								Name:       serviceName,
+								Protocol:   v1.ProtocolUDP,
+								Port:       80,
+								TargetPort: intstr.FromInt(int(udpPort)),
+							},
+						}
+						s.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyLocal
+						s.Spec.Type = v1.ServiceTypeNodePort
+					})
+					framework.ExpectNoError(err)
+
+					By("Checking flows have correct IP address")
+					assignedNodePort = svc.Spec.Ports[0].NodePort
+
+					// find the ovn-kube node pod on this node
+					pods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+						LabelSelector: "app=ovnkube-node",
+						FieldSelector: "spec.nodeName=" + workerNode.Name,
+					})
+					framework.ExpectNoError(err)
+					Expect(pods.Items).To(HaveLen(1))
+					ovnkPod = pods.Items[0]
+
+					cmd := "ovs-ofctl dump-flows breth0 table=0"
+					err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
+						stdout, err := e2epodoutput.RunHostCmdWithRetries(ovnkPod.Namespace, ovnkPod.Name, cmd, framework.Poll, 30*time.Second)
+						if err != nil {
+							return false, err
+						}
+						lines := strings.Split(stdout, "\n")
+						for _, line := range lines {
+							if strings.Contains(line, "priority=110,udp") &&
+								strings.Contains(line, fmt.Sprintf("tp_dst=%d", assignedNodePort)) &&
+								strings.Contains(line, workerNodeIPs[ipAddrFamily]) {
+								framework.Logf("Matching OpenFlow found: %s", line)
+								return true, nil
+							}
+						}
+						return false, nil
+					})
+					framework.ExpectNoError(err)
+				})
+
+				JustAfterEach(func() {
+					By("Deleting the service")
+					e2ekubectl.RunKubectl(f.Namespace.Name, "delete", "service", serviceName)
+
+					By("Deleting host network backend pod")
+					e2ekubectl.RunKubectl(f.Namespace.Name, "delete", "pod", podName)
+				})
+
+				for _, updateKubeletFirst := range []bool{true, false} {
+					updateKubeletFirst := updateKubeletFirst // Required to avoid race conditions due to pointer assignment.
+					It(fmt.Sprintf("makes sure that the flows are updated with new IP address (%s)",
+						updateKubeletIPAddressMsg[updateKubeletFirst]),
+						func() {
+							By(fmt.Sprintf("Migrating worker node %s from IP address %s to IP address %s",
+								workerNode.Name, workerNodeIPs[ipAddrFamily], migrationWorkerNodeIP))
+							err := migrateWorkerNodeIP(workerNode.Name, workerNodeIPs[ipAddrFamily], migrationWorkerNodeIP,
+								updateKubeletFirst)
+							Expect(err).NotTo(HaveOccurred())
+
+							By("Setting rollbackNeeded to true")
+							rollbackNeeded = true
+
+							ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+								LabelSelector: "app=ovnkube-node",
+								FieldSelector: "spec.nodeName=" + workerNode.Name,
+							})
+							Expect(err).NotTo(HaveOccurred())
+							Expect(ovnkubeNodePods.Items).To(HaveLen(1))
+							ovnkubePodWorkerNode := ovnkubeNodePods.Items[0]
+
+							Eventually(func() bool {
+								By("waiting for the ovn-encap-ip to be reconfigured")
+								return isOVNEncapIPReady(workerNode.Name, migrationWorkerNodeIP, ovnkubePodWorkerNode.Name)
+							}, pollingTimeout, pollingInterval).Should(BeTrue())
+
+							By(fmt.Sprintf("Sleeping for %d seconds to give things time to settle", settleTimeout))
+							time.Sleep(time.Duration(settleTimeout) * time.Second)
+
+							By(fmt.Sprintf("Checking nodeport flows have been updated to use new IP: %s", migrationWorkerNodeIP))
+							cmd := "ovs-ofctl dump-flows breth0 table=0"
+							err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
+								stdout, err := e2epodoutput.RunHostCmdWithRetries(ovnkPod.Namespace, ovnkPod.Name, cmd, framework.Poll, 30*time.Second)
+								if err != nil {
+									return false, err
+								}
+								lines := strings.Split(stdout, "\n")
+								for _, line := range lines {
+									if strings.Contains(line, "priority=110,udp") &&
+										strings.Contains(line, fmt.Sprintf("tp_dst=%d", assignedNodePort)) &&
+										strings.Contains(line, migrationWorkerNodeIP) {
+										framework.Logf("Matching OpenFlow found: %s", line)
+										return true, nil
+									}
+								}
+								return false, nil
+							})
+							framework.ExpectNoError(err)
+						})
+				}
+
 			})
 		})
 	}
