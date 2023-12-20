@@ -29,7 +29,7 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-var _ = Describe("Node IP address migration", func() {
+var _ = Describe("Node IP and MAC address migration", func() {
 	const (
 		namespacePrefix            = "node-ip-migration"
 		podWorkerNodeName          = "primary"
@@ -59,12 +59,14 @@ spec:
 `
 		serviceName = "testservice"
 		podName     = "backend"
+		migratedMAC = "02:42:ac:12:d1:d1"
 	)
 
 	var (
 		tmpDirIPMigration      string
 		workerNodeIPs          map[int]string
 		workerNode             v1.Node
+		workerNodeMAC          net.HardwareAddr
 		secondaryWorkerNodeIPs map[int]string
 		secondaryWorkerNode    v1.Node
 		externalContainerIPs   map[int]string
@@ -526,7 +528,126 @@ spec:
 			})
 		})
 	}
+
+	When("when MAC address changes", func() {
+		BeforeEach(func() {
+			By("Storing original MAC")
+			ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+				LabelSelector: "app=ovnkube-node",
+				FieldSelector: "spec.nodeName=" + workerNode.Name,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovnkubeNodePods.Items).To(HaveLen(1))
+			ovnkPod = ovnkubeNodePods.Items[0]
+			workerNodeMAC, err = getMACAddress(ovnkPod)
+			framework.Logf("Original MAC found to be: %s", workerNodeMAC)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Checking flows have current original MAC address")
+			Expect(checkFlowsForMAC(ovnkPod, workerNodeMAC)).NotTo(HaveOccurred())
+		})
+
+		JustAfterEach(func() {
+			if len(workerNodeMAC) > 0 {
+				By("Reverting to original MAC address")
+				setMACAddress(ovnkPod, workerNodeMAC.String())
+			}
+		})
+
+		Context("when a nodeport service is configured", func() {
+			BeforeEach(func() {
+				By("Creating service")
+				jig := e2eservice.NewTestJig(f.ClientSet, f.Namespace.Name, serviceName)
+				_, err := jig.CreateUDPService(context.TODO(), func(s *v1.Service) {
+					s.Spec.Ports = []v1.ServicePort{
+						{
+							Name:       serviceName,
+							Protocol:   v1.ProtocolUDP,
+							Port:       80,
+							TargetPort: intstr.FromInt(int(udpPort)),
+						},
+					}
+					s.Spec.Type = v1.ServiceTypeNodePort
+				})
+				framework.ExpectNoError(err)
+
+			})
+
+			JustAfterEach(func() {
+				By("Deleting the service")
+				e2ekubectl.RunKubectl(f.Namespace.Name, "delete", "service", serviceName)
+			})
+
+			It(fmt.Sprintf("Ensures flows are updated when MAC address changes"), func() {
+				By(fmt.Sprintf("Updating the mac address to a new value: %s", migratedMAC))
+				framework.ExpectNoError(setMACAddress(ovnkPod, migratedMAC))
+				By("Checking flows are updated with the correct MAC address")
+				mac, err := net.ParseMAC(migratedMAC)
+				framework.ExpectNoError(err)
+				Expect(checkFlowsForMACPeriodically(ovnkPod, mac, 30*time.Second)).NotTo(HaveOccurred())
+				By("Checking the L3 gateway annotation has been updated with the new MAC address")
+				Eventually(func() string {
+					node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), workerNode.Name, metav1.GetOptions{})
+					if err != nil {
+						return ""
+					}
+					return node.Annotations["k8s.ovn.org/l3-gateway-config"]
+				}, 30*time.Second, 2*time.Second).Should(ContainSubstring(migratedMAC))
+			})
+		})
+	})
 })
+
+func checkFlowsForMACPeriodically(ovnkPod v1.Pod, addr net.HardwareAddr, duration time.Duration) error {
+	var endErr error
+	if err := wait.PollImmediate(framework.Poll, duration, func() (bool, error) {
+		if err := checkFlowsForMAC(ovnkPod, addr); err != nil {
+			endErr = err
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		return fmt.Errorf("failed checking for MAC periodically: %w, final error: %v", err, endErr)
+	}
+	return nil
+}
+
+func checkFlowsForMAC(ovnkPod v1.Pod, mac net.HardwareAddr) error {
+	cmd := "ovs-ofctl dump-flows breth0"
+	flowOutput := e2epodoutput.RunHostCmdOrDie(ovnkPod.Namespace, ovnkPod.Name, cmd)
+	lines := strings.Split(flowOutput, "\n")
+	for _, line := range lines {
+		if !strings.Contains(line, "dl_dst") && !strings.Contains(line, "dl_src") {
+			// flows we don't care about without MACs
+			continue
+		}
+
+		// must be a flow with a MAC, if it isn't the right MAC address, fail
+		if !strings.Contains(line, mac.String()) {
+			return fmt.Errorf("flow found with incorrect MAC: %s, expected MAC: %s", line, mac)
+		}
+	}
+	return nil
+}
+
+func setMACAddress(ovnkubePod v1.Pod, mac string) error {
+	cmd := []string{"kubectl", "-n", ovnkubePod.Namespace, "exec", ovnkubePod.Name, "-c", "ovn-controller",
+		"--", "ovs-vsctl", "set", "bridge", "breth0", fmt.Sprintf("other-config:hwaddr=%s", mac)}
+	_, err := runCommand(cmd...)
+	return err
+}
+
+func getMACAddress(ovnkubePod v1.Pod) (net.HardwareAddr, error) {
+	cmd := []string{"kubectl", "-n", ovnkubePod.Namespace, "exec", ovnkubePod.Name, "-c", "ovn-controller",
+		"--", "ip", "link", "show", "breth0"}
+	output, err := runCommand(cmd...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ip link output: %w", err)
+	}
+
+	re := regexp.MustCompile("([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})|([0-9a-fA-F]{4}\\.[0-9a-fA-F]{4}\\.[0-9a-fA-F]{4})")
+	return net.ParseMAC(re.FindString(output))
+}
 
 // getNodeInternalAddresses returns the first IPv4 and/or IPv6 InternalIP defined for the node. Node IPs are ordered,
 // meaning that the returned IPs should be kubelet's node IPs.
