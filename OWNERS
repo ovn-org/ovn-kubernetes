@@ -3,9 +3,8 @@ reviewers:
   - dcbw
   - JacobTanenbaum
   - jcaamano
-  - squeed
-  - tssurya
   - trozet
+  - tssurya
 approvers:
   - abhat
   - danwinship
@@ -13,8 +12,8 @@ approvers:
   - JacobTanenbaum
   - jcaamano
   - knobunc
-  - squeed
   - trozet
+  - tssurya
 
 # Bugzilla info
 component: Networking
