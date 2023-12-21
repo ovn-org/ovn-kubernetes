@@ -118,7 +118,7 @@ var _ = ginkgo.Describe("Link network manager", func() {
 		nlMock.On("AddrList", nlLink1Mock, getIPFamilyInt(v4Enabled, v6Enabled)).Return(getLinkAddrs(existingLinkAddr, linkName1), nil)
 		nlMock.On("AddrList", nlLink2Mock, getIPFamilyInt(v4Enabled, v6Enabled)).Return(getLinkAddrs(existingLinkAddr, linkName2), nil)
 		nlMock.On("AddrAdd", nlLink1Mock, &expectedAddr).Return(nil)
-		c = NewController("test", v4Enabled, v6Enabled)
+		c = NewController("test", v4Enabled, v6Enabled, nil)
 		c.store = existingStore
 		err := c.AddAddress(addrToAdd)
 		expectedResMatcher := gomega.Succeed()
@@ -169,7 +169,7 @@ var _ = ginkgo.Describe("Link network manager", func() {
 		nlMock.On("AddrList", nlLink1Mock, getIPFamilyInt(v4Enabled, v6Enabled)).Return(getLinkAddrs(existingLinkAddr, linkName1), nil)
 		nlMock.On("AddrList", nlLink2Mock, getIPFamilyInt(v4Enabled, v6Enabled)).Return(getLinkAddrs(existingLinkAddr, linkName2), nil)
 		nlMock.On("AddrDel", nlLink1Mock, &expectedAddr).Return(nil)
-		c = NewController("test", v4Enabled, v6Enabled)
+		c = NewController("test", v4Enabled, v6Enabled, nil)
 		c.store = existingStore
 		err := c.DelAddress(addrToDel)
 		expectedResMatcher := gomega.Succeed()

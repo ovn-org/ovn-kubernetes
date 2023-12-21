@@ -133,8 +133,9 @@ type Controller struct {
 	v6       bool
 }
 
-func NewController(eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer, namespaceInformer coreinformers.NamespaceInformer,
-	podInformer coreinformers.PodInformer, routeManager *routemanager.Controller, v4, v6 bool, nodeName string) (*Controller, error) {
+func NewController(eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer,
+	namespaceInformer coreinformers.NamespaceInformer, podInformer coreinformers.PodInformer,
+	routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
 
 	c := &Controller{
 		eIPLister:   eIPInformer.Lister(),
@@ -160,7 +161,7 @@ func NewController(eIPInformer egressipinformer.EgressIPInformer, nodeInformer c
 		referencedObjectsLock: sync.RWMutex{},
 		referencedObjects:     map[string]*referencedObjects{},
 		routeManager:          routeManager,
-		linkManager:           linkmanager.NewController(nodeName, v4, v6),
+		linkManager:           linkManager,
 		ruleManager:           iprulemanager.NewController(v4, v6),
 		iptablesManager:       iptables.NewController(),
 		nodeName:              nodeName,
@@ -283,11 +284,6 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		c.eIPQueue.ShutDown()
 		c.podQueue.ShutDown()
 		c.namespaceQueue.ShutDown()
-	}()
-	wg.Add(1)
-	go func() {
-		c.linkManager.Run(stopCh, 2*time.Minute)
-		wg.Done()
 	}()
 	wg.Add(1)
 	go func() {
