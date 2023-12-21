@@ -29,6 +29,7 @@ const (
 	MulticastClusterOwnerType   ownerType = "MulticastCluster"
 	NetpolNodeOwnerType         ownerType = "NetpolNode"
 	NetpolNamespaceOwnerType    ownerType = "NetpolNamespace"
+	DefaultNodeOwnerType        ownerType = "DefaultNode"
 	VirtualMachineOwnerType     ownerType = "VirtualMachine"
 	// NetworkPolicyPortIndexOwnerType is the old version of NetworkPolicyOwnerType, kept for sync only
 	NetworkPolicyPortIndexOwnerType ownerType = "NetworkPolicyPortIndexOwnerType"
@@ -118,6 +119,12 @@ var AddressSetEgressIP = newObjectIDsType(addressSet, EgressIPOwnerType, []Exter
 })
 
 var AddressSetEgressService = newObjectIDsType(addressSet, EgressServiceOwnerType, []ExternalIDKey{
+	// cluster-wide address set name
+	ObjectNameKey,
+	AddressSetIPFamilyKey,
+})
+
+var AddressSetNode = newObjectIDsType(addressSet, DefaultNodeOwnerType, []ExternalIDKey{
 	// cluster-wide address set name
 	ObjectNameKey,
 	AddressSetIPFamilyKey,

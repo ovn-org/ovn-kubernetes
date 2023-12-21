@@ -309,7 +309,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			expectedDatabaseState := []libovsdb.TestData{}
 			expectedDatabaseState = addNodeLogicalFlowsWithServiceController(expectedDatabaseState, expectedOVNClusterRouter,
-				expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, fakeOvn.controller.svcTemplateSupport)
+				expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, fakeOvn.controller.svcTemplateSupport, true)
 
 			// Addressset of the host-network namespace was initialized but the node logical switch management port address may or may not
 			// be in the addressset yet, depending on if the host subnets annotation of the node exists in the informer cache. The addressset

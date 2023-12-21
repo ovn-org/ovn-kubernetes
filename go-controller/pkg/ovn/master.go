@@ -7,6 +7,7 @@ import (
 	"time"
 
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -18,6 +19,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/pkg/errors"
 
@@ -241,8 +243,9 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		}
 	}
 
-	var v4Subnet *net.IPNet
+	var v4Subnet, v4Mgmt, v6Mgmt *net.IPNet
 	addresses := macAddress.String()
+
 	for _, hostSubnet := range hostSubnets {
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
@@ -253,7 +256,11 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 
 		if !utilnet.IsIPv6CIDR(hostSubnet) {
 			v4Subnet = hostSubnet
+			v4Mgmt = mgmtIfAddr
+		} else {
+			v6Mgmt = mgmtIfAddr
 		}
+
 		if config.Gateway.Mode == config.GatewayModeLocal {
 			lrsr := nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
@@ -294,7 +301,87 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		}
 	}
 
+	var v4MgmtIP, v6MgmtIP net.IP
+	if v4Mgmt != nil {
+		v4MgmtIP = v4Mgmt.IP
+	}
+
+	if v6Mgmt != nil {
+		v6MgmtIP = v6Mgmt.IP
+	}
+
+	// Add routes for node IPs to this node
+	if err := oc.createHostAccessReroute(node, v4MgmtIP, v6MgmtIP); err != nil {
+		return fmt.Errorf("failed to create host access reroute policy for node %q: %w", node.Name, err)
+	}
+
 	return nil
+}
+
+func (oc *DefaultNetworkController) createHostAccessReroute(node *kapi.Node, v4nexthop, v6nexthop net.IP) error {
+	// Add routes for node IPs to this node
+	v4NodeAddrs, v6NodeAddrs, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, node)
+	if err != nil {
+		return err
+	}
+	allAddresses := make([]net.IP, 0, len(v4NodeAddrs)+len(v6NodeAddrs))
+	allAddresses = append(allAddresses, v4NodeAddrs...)
+	allAddresses = append(allAddresses, v6NodeAddrs...)
+
+	var as addressset.AddressSet
+
+	addrSetName := fmt.Sprintf("%s-node-ips", node.Name)
+	dbIDs := getNodeIPAddrSetDbIDs(addrSetName, oc.controllerName)
+	if as, err = oc.addressSetFactory.EnsureAddressSet(dbIDs); err != nil {
+		return fmt.Errorf("cannot ensure that addressSet %s exists %v", addrSetName, err)
+	}
+
+	if err = as.SetIPs(allAddresses); err != nil {
+		return fmt.Errorf("unable to set IPs to no re-route address set %s: %w", addrSetName, err)
+	}
+
+	ipv4NodeIPAS, ipv6NodeIPAS := as.GetASHashNames()
+
+	// construct the policy
+	if v4nexthop != nil {
+		matchV4 := fmt.Sprintf(`ip4.dst == $%s`, ipv4NodeIPAS)
+		if err := oc.createReroutePolicy(types.HostAccessPolicyPriority, v4nexthop.String(), matchV4, ipv4NodeIPAS); err != nil {
+			return err
+		}
+	}
+	if v6nexthop != nil {
+		matchV6 := fmt.Sprintf(`ip6.dst == $%s`, ipv6NodeIPAS)
+		if err := oc.createReroutePolicy(types.HostAccessPolicyPriority, v6nexthop.String(), matchV6, ipv6NodeIPAS); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (oc *DefaultNetworkController) createReroutePolicy(priority int, nexthop, match, existingMatch string) error {
+	logicalRouterPolicy := nbdb.LogicalRouterPolicy{
+		Priority: priority,
+		Action:   nbdb.LogicalRouterPolicyActionReroute,
+		Nexthops: []string{nexthop},
+		Match:    match,
+	}
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == logicalRouterPolicy.Priority && strings.Contains(item.Match, existingMatch)
+	}
+	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter,
+		&logicalRouterPolicy, p, &logicalRouterPolicy.Nexthops, &logicalRouterPolicy.Match, &logicalRouterPolicy.Action)
+	if err != nil {
+		return fmt.Errorf("failed to add policy route %+v to %s: %v", logicalRouterPolicy, types.OVNClusterRouter, err)
+	}
+	return nil
+}
+
+func getNodeIPAddrSetDbIDs(name string, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetNode, controller, map[libovsdbops.ExternalIDKey]string{
+		// creates per node address set holding all node IPs
+		libovsdbops.ObjectNameKey: string(name),
+	})
 }
 
 func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
@@ -471,28 +558,53 @@ func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *kapi.Node) erro
 }
 
 // cleanupNodeResources deletes the node resources from the OVN Northbound database
-func (oc *DefaultNetworkController) cleanupNodeResources(nodeName string) error {
-	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
-		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
+func (oc *DefaultNetworkController) cleanupNodeResources(node *kapi.Node) error {
+	v4Mgmt, v6Mgmt, err := oc.getManagementPortIPs(node)
+	if err != nil {
+		return fmt.Errorf("failed to clean up host access route policies via mp0 for node %q, error: %w", node.Name, err)
+	}
+	var mgmtIPs []net.IP
+
+	if v4Mgmt != nil {
+		mgmtIPs = append(mgmtIPs, v4Mgmt)
+	}
+	if v6Mgmt != nil {
+		mgmtIPs = append(mgmtIPs, v6Mgmt)
 	}
 
-	if err := oc.gatewayCleanup(nodeName); err != nil {
-		return fmt.Errorf("failed to clean up node %s gateway: (%w)", nodeName, err)
+	// cleanup route policy towards mp0
+	if len(mgmtIPs) > 0 {
+		oc.policyRouteCleanup(mgmtIPs)
+	}
+
+	if err := oc.deleteNodeLogicalNetwork(node.Name); err != nil {
+		return fmt.Errorf("error deleting node %s logical network: %v", node.Name, err)
+	}
+
+	if err := oc.gatewayCleanup(node.Name); err != nil {
+		return fmt.Errorf("failed to clean up node %s gateway: (%w)", node.Name, err)
+	}
+
+	// cleanup node Address set
+	addrSetName := fmt.Sprintf("%s-node-ips", node.Name)
+	dbIDs := getNodeIPAddrSetDbIDs(addrSetName, oc.controllerName)
+	if err := oc.addressSetFactory.DestroyAddressSet(dbIDs); err != nil {
+		return err
 	}
 
 	chassisTemplateVars := make([]*nbdb.ChassisTemplateVar, 0)
 	p := func(item *sbdb.Chassis) bool {
-		if item.Hostname == nodeName {
+		if item.Hostname == node.Name {
 			chassisTemplateVars = append(chassisTemplateVars, &nbdb.ChassisTemplateVar{Chassis: item.Name})
 			return true
 		}
 		return false
 	}
 	if err := libovsdbops.DeleteChassisWithPredicate(oc.sbClient, p); err != nil {
-		return fmt.Errorf("failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
+		return fmt.Errorf("failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", node.Name, err)
 	}
 	if err := libovsdbops.DeleteChassisTemplateVar(oc.nbClient, chassisTemplateVars...); err != nil {
-		return fmt.Errorf("failed deleting chassis template variables for %s: %v", nodeName, err)
+		return fmt.Errorf("failed deleting chassis template variables for %s: %v", node.Name, err)
 	}
 	return nil
 }
@@ -596,8 +708,19 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 
 	// Cleanup stale nodes (including gateway routers and external logical switches)
 	for _, staleNode := range staleNodes.UnsortedList() {
-		if err := oc.cleanupNodeResources(staleNode); err != nil {
+		n := &kapi.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: staleNode,
+			},
+		}
+		if err := oc.cleanupNodeResources(n); err != nil {
 			return fmt.Errorf("failed to cleanup node resources:%s, err:%w", staleNode, err)
+		}
+		if config.OVNKubernetesFeature.EnableInterconnect {
+			if err := oc.cleanupTransitHostAccessPolicies(n); err != nil {
+				return fmt.Errorf("failed to cleanup host access route policies for rmote node: %s, err: %w",
+					staleNode, err)
+			}
 		}
 	}
 
@@ -859,7 +982,7 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 
 	if present {
 		klog.Infof("Node %q moved from the local zone %s to a remote zone %s. Cleaning the node resources", node.Name, oc.zone, util.GetNodeZone(node))
-		if err := oc.cleanupNodeResources(node.Name); err != nil {
+		if err := oc.cleanupNodeResources(node); err != nil {
 			return fmt.Errorf("error cleaning up the local resources for the remote node %s, err : %w", node.Name, err)
 		}
 		oc.localZoneNodes.Delete(node.Name)
@@ -884,6 +1007,26 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 			oc.syncZoneICFailed.Store(node.Name, true)
 		} else {
 			oc.syncZoneICFailed.Delete(node.Name)
+		}
+
+		// Add reroute policies to access host IPs via mp0
+		nodeTransitSwitchPortIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
+		if err != nil || len(nodeTransitSwitchPortIPs) == 0 {
+			return fmt.Errorf("failed to get the node transit switch port IPs : %w", err)
+		}
+		var transitV4, transitV6 net.IP
+		for _, ipNet := range nodeTransitSwitchPortIPs {
+			if ipNet == nil {
+				continue
+			}
+			if utilnet.IsIPv4(ipNet.IP) {
+				transitV4 = ipNet.IP
+			} else {
+				transitV6 = ipNet.IP
+			}
+		}
+		if err := oc.createHostAccessReroute(node, transitV4, transitV6); err != nil {
+			return err
 		}
 	}
 	klog.V(5).Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
@@ -911,11 +1054,15 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
 		}
 	}
 
-	if err := oc.cleanupNodeResources(node.Name); err != nil {
+	if err := oc.cleanupNodeResources(node); err != nil {
 		return err
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.cleanupTransitHostAccessPolicies(node); err != nil {
+			return err
+		}
+
 		if err := oc.zoneICHandler.DeleteNode(node); err != nil {
 			return err
 		}
@@ -1018,6 +1165,134 @@ func (oc *DefaultNetworkController) deleteHoNodeEvent(node *kapi.Node) error {
 		if err != nil {
 			return fmt.Errorf("failed to remove hybrid overlay static routes and route policy: %w", err)
 		}
+	}
+	return nil
+}
+
+// getManagementPortIPs returns the v4 and v6 addresses for mgmt ports
+// This is a best effort attempt by using node annotations first, and OVN NBDB second
+func (oc *DefaultNetworkController) getManagementPortIPs(node *kapi.Node) (net.IP, net.IP, error) {
+	if node == nil {
+		return nil, nil, nil
+	}
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	if err != nil || len(hostSubnets) == 0 {
+		v4, v6, newErr := oc.getManagementPortIPsFromOVN(node.Name)
+		if newErr != nil {
+			if errors.Is(newErr, libovsdbclient.ErrNotFound) {
+				return nil, nil, nil
+			} else {
+				return nil, nil, fmt.Errorf("failed to find managment port IPs for node %q in either "+
+					"annotations: %v, or OVN NBDB: %w", node.Name, err, newErr)
+			}
+		} else {
+			return v4, v6, nil
+		}
+	}
+	var v4Addr, v6Addr net.IP
+	for _, hostSubnet := range hostSubnets {
+		n := util.GetNodeManagementIfAddr(hostSubnet)
+		if n != nil {
+			if !utilnet.IsIPv6CIDR(hostSubnet) {
+				v4Addr = n.IP
+			} else {
+				v6Addr = n.IP
+			}
+		}
+	}
+
+	return v4Addr, v6Addr, nil
+}
+
+func (oc *DefaultNetworkController) getManagementPortIPsFromOVN(node string) (net.IP, net.IP, error) {
+	return oc.findIPsFromLSP(types.K8sPrefix + node)
+}
+
+func (oc *DefaultNetworkController) findIPsFromLSP(portName string) (net.IP, net.IP, error) {
+	lsp := &nbdb.LogicalSwitchPort{Name: types.K8sPrefix + portName}
+	lsp, err := libovsdbops.GetLogicalSwitchPort(oc.nbClient, lsp)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get logical switch port %q: %w", portName, err)
+	}
+	v4, v6 := getIPsFromOVNPort(lsp)
+	return v4, v6, nil
+}
+
+// getIPsFromOVNPort parses the addresses field, which normally includes mac address and ip addresses, and returns
+// ipv4 and ip6 addresses found
+func getIPsFromOVNPort(port *nbdb.LogicalSwitchPort) (net.IP, net.IP) {
+	if port == nil {
+		return nil, nil
+	}
+	var v4Addr, v6Addr net.IP
+	for _, addr := range port.Addresses {
+		ip := net.ParseIP(addr)
+		if utilnet.IsIPv4(ip) {
+			v4Addr = ip
+		} else if utilnet.IsIPv6(ip) {
+			v6Addr = ip
+		}
+	}
+
+	return v4Addr, v6Addr
+}
+
+func (oc *DefaultNetworkController) getTransitPortIPs(node *kapi.Node) (net.IP, net.IP, error) {
+	nodeTransitSwitchPortIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
+	if err != nil || len(nodeTransitSwitchPortIPs) == 0 {
+		// try getting from nbdb
+		v4, v6, newErr := oc.getTransitPortIPsFromOVN(node.Name)
+		if newErr != nil {
+			// if we cant get the IPs from the node annotation, and the port doesn't exist, we treat it as no error
+			// and the port does not exist. We have little chance of finding this information on a retry, so no point in failing
+			// sync functions or retrying.
+			if errors.Is(newErr, libovsdbclient.ErrNotFound) {
+				return nil, nil, nil
+			} else {
+				return nil, nil, fmt.Errorf("failed to find transit port IPs for node %q in either "+
+					"annotations: %v, or OVN NBDB: %w", node.Name, err, newErr)
+			}
+		} else {
+			return v4, v6, nil
+		}
+
+	}
+
+	var v4Addr, v6Addr net.IP
+	for _, transitIPNet := range nodeTransitSwitchPortIPs {
+		if utilnet.IsIPv6CIDR(transitIPNet) {
+			v6Addr = transitIPNet.IP
+		} else if utilnet.IsIPv4CIDR(transitIPNet) {
+			v4Addr = transitIPNet.IP
+		}
+	}
+
+	return v4Addr, v6Addr, nil
+}
+
+func (oc *DefaultNetworkController) getTransitPortIPsFromOVN(node string) (net.IP, net.IP, error) {
+	return oc.findIPsFromLSP(types.TransitSwitchToRouterPrefix + node)
+}
+
+func (oc *DefaultNetworkController) cleanupTransitHostAccessPolicies(node *kapi.Node) error {
+	// cleanup reroute policies towards transit ips for host access
+	v4Transit, v6Transit, err := oc.getTransitPortIPs(node)
+	if err != nil {
+		return err
+	}
+
+	var transitIPs []net.IP
+
+	if v4Transit != nil {
+		transitIPs = append(transitIPs, v4Transit)
+	}
+	if v6Transit != nil {
+		transitIPs = append(transitIPs, v6Transit)
+	}
+
+	// cleanup route policy towards mp0
+	if len(transitIPs) > 0 {
+		oc.policyRouteCleanup(transitIPs)
 	}
 	return nil
 }
