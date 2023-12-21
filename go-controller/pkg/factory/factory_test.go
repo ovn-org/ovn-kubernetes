@@ -572,12 +572,6 @@ var _ = Describe("Watch Factory Operations", func() {
 			testExistingFilteredHandler(NamespaceType, AddressSetNamespaceAndPodSelectorType, "default", nil, 3)
 		})
 
-		It("is called for each existing policy: PeerNamespaceSelectorType", func() {
-			policies = append(policies, newPolicy("denyall", "default"))
-			pods = append(pods, newPod("pod1", "default"))
-			testExistingFilteredHandler(NamespaceType, PeerNamespaceSelectorType, "default", nil, 2)
-		})
-
 		It("is called for each existing endpointSlice", func() {
 			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice", "default", "myService"))
 			testExisting(EndpointSliceType, "", nil, defaultHandlerPriority)
@@ -1433,46 +1427,7 @@ var _ = Describe("Watch Factory Operations", func() {
 				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
 			},
 		})
-		peernsh, c3 := addPriorityHandler(wf, NamespaceType, PeerNamespaceSelectorType, cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				defer GinkgoRecover()
-				namespace := obj.(*v1.Namespace)
-				ot, ok := testNamespaces[namespace.Name]
-				Expect(ok).To(BeTrue())
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(10), "add for peer namespace %s processed before EIP namespace add!", namespace.Name)
-				ot.added = ot.added - 2
-				Expect(namespace.Status.Phase).To(BeEmpty())
-			},
-			UpdateFunc: func(old, new interface{}) {
-				defer GinkgoRecover()
-				newNamespace := new.(*v1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
-				Expect(ok).To(BeTrue())
-				// Expect updates to be processed after Add
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(10), "update for peer namespace %s processed before EIP namespace update!", newNamespace.Name)
-				ot.updated = ot.updated - 2
-				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceActive))
-			},
-			DeleteFunc: func(obj interface{}) {
-				defer GinkgoRecover()
-				newNamespace := obj.(*v1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
-				Expect(ok).To(BeTrue())
-				// Verify that deletes were processed after the updates and adds
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(4), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(4), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
-				Expect(ot.deleted).To(Equal(1))
-				ot.deleted = ot.deleted * 10
-				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
-			},
-		})
+
 		peerpodnsh, c4 := addPriorityHandler(wf, NamespaceType, AddressSetNamespaceAndPodSelectorType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
@@ -1532,13 +1487,11 @@ var _ = Describe("Watch Factory Operations", func() {
 		}
 		Expect(c1.getAdded()).To(Equal(len(testNamespaces)))
 		Expect(c2.getAdded()).To(Equal(len(testNamespaces)))
-		Expect(c3.getAdded()).To(Equal(len(testNamespaces)))
 		Expect(c4.getAdded()).To(Equal(len(testNamespaces)))
 		<-done
 		// Updates are async and may take a bit longer to finish
 		Eventually(c1.getUpdated, 10).Should(Equal(len(testNamespaces)))
 		Eventually(c2.getUpdated, 10).Should(Equal(len(testNamespaces)))
-		Eventually(c3.getUpdated, 10).Should(Equal(len(testNamespaces)))
 		Eventually(c4.getUpdated, 10).Should(Equal(len(testNamespaces)))
 
 		for _, ot := range testNamespaces {
@@ -1560,7 +1513,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		// Deletes are async and may take a bit longer to finish
 		Eventually(c1.getDeleted, 10).Should(Equal(len(testNamespaces)))
 		Eventually(c2.getDeleted, 10).Should(Equal(len(testNamespaces)))
-		Eventually(c3.getDeleted, 10).Should(Equal(len(testNamespaces)))
 		Eventually(c4.getDeleted, 10).Should(Equal(len(testNamespaces)))
 
 		for _, ot := range testNamespaces {
@@ -1572,7 +1524,6 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		wf.RemoveNamespaceHandler(nsh)
 		wf.RemoveNamespaceHandler(eipnsh)
-		wf.RemoveNamespaceHandler(peernsh)
 		wf.RemoveNamespaceHandler(peerpodnsh)
 	})
 

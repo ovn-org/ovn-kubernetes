@@ -159,7 +159,6 @@ var (
 	AdminNetworkPolicyType                reflect.Type = reflect.TypeOf(&anpapi.AdminNetworkPolicy{})
 	BaselineAdminNetworkPolicyType        reflect.Type = reflect.TypeOf(&anpapi.BaselineAdminNetworkPolicy{})
 	AddressSetNamespaceAndPodSelectorType reflect.Type = reflect.TypeOf(&addressSetNamespaceAndPodSelector{})
-	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
 	AddressSetPodSelectorType             reflect.Type = reflect.TypeOf(&addressSetPodSelector{})
 	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
 	NetworkAttachmentDefinitionType       reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
@@ -747,8 +746,6 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 		return 3
 	case EgressIPNamespaceType:
 		return 1
-	case PeerNamespaceSelectorType:
-		return 2
 	case AddressSetNamespaceAndPodSelectorType:
 		return 3
 	case EgressNodeType:
@@ -799,7 +796,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
-	case AddressSetNamespaceAndPodSelectorType, PeerNamespaceSelectorType, EgressIPNamespaceType:
+	case AddressSetNamespaceAndPodSelectorType, EgressIPNamespaceType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredNamespaceHandler(namespace, sel, funcs, processExisting, priority)

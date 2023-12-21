@@ -72,8 +72,7 @@ func (h *networkControllerPolicyEventHandler) AreResourcesEqual(obj1, obj2 inter
 		// so pretend they're always different so that the update code gets executed
 		return false, nil
 
-	case factory.PeerNamespaceSelectorType, //
-		factory.AddressSetNamespaceAndPodSelectorType: //
+	case factory.AddressSetNamespaceAndPodSelectorType: //
 		// For these types there is no update code, so pretend old and new
 		// objs are always equivalent and stop processing the update event.
 		return true, nil
@@ -105,8 +104,7 @@ func (h *networkControllerPolicyEventHandler) GetResourceFromInformerCache(key s
 		factory.LocalPodSelectorType:
 		obj, err = h.watchFactory.GetPod(namespace, name)
 
-	case factory.AddressSetNamespaceAndPodSelectorType,
-		factory.PeerNamespaceSelectorType:
+	case factory.AddressSetNamespaceAndPodSelectorType:
 		obj, err = h.watchFactory.GetNamespace(name)
 
 	default:
@@ -128,10 +126,6 @@ func (h *networkControllerPolicyEventHandler) AddResource(obj interface{}, fromR
 	case factory.AddressSetNamespaceAndPodSelectorType:
 		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
 		return h.bnc.handleNamespaceAddUpdate(peerAS, obj)
-
-	case factory.PeerNamespaceSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.bnc.handlePeerNamespaceSelectorAdd(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -185,10 +179,6 @@ func (h *networkControllerPolicyEventHandler) DeleteResource(obj, cachedObj inte
 		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
 		return h.bnc.handleNamespaceDel(peerAS, obj)
 
-	case factory.PeerNamespaceSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.bnc.handlePeerNamespaceSelectorDel(extraParameters.np, extraParameters.gp, obj)
-
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
 		return h.bnc.handleLocalPodSelectorDelFunc(
@@ -210,8 +200,7 @@ func (h *networkControllerPolicyEventHandler) SyncFunc(objs []interface{}) error
 		switch h.objType {
 		case factory.LocalPodSelectorType,
 			factory.AddressSetNamespaceAndPodSelectorType,
-			factory.AddressSetPodSelectorType,
-			factory.PeerNamespaceSelectorType:
+			factory.AddressSetPodSelectorType:
 			syncFunc = nil
 
 		default:
