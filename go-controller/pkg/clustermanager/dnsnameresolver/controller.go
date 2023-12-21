@@ -50,6 +50,10 @@ type Controller struct {
 	// DNSNameResolver objects.
 	dnsNameObj map[string]resolverDetails
 	objDNSName sets.Set[string]
+
+	// map to hold the current DNS names used in a namespace corresponding
+	// to an EgressFirewall.
+	efNamespaceDNSNames map[string]sets.Set[string]
 }
 
 // resolverDetails holds the information regarding the DNSNameResolver
@@ -74,11 +78,12 @@ func NewController(ovnClient *util.OVNClusterManagerClientset, wf *factory.Watch
 		kube: &kube.KubeOVN{
 			NetworkClient: ovnClient.NetworkClient,
 		},
-		stopChan:     make(chan struct{}),
-		wg:           wg,
-		watchFactory: wf,
-		dnsNameObj:   make(map[string]resolverDetails),
-		objDNSName:   sets.New[string](),
+		stopChan:            make(chan struct{}),
+		wg:                  wg,
+		watchFactory:        wf,
+		dnsNameObj:          make(map[string]resolverDetails),
+		objDNSName:          sets.New[string](),
+		efNamespaceDNSNames: make(map[string]sets.Set[string]),
 	}
 	c.initRetryFramework()
 	return c
@@ -188,16 +193,23 @@ func (c *Controller) syncDNSNames(dnsNameResolvers []interface{}) error {
 	// Iterate through the existing EgressFirewall objects. For each
 	// EgressFirewall object iterate through the DNS names in it and
 	// add the namespace of the EgressFirewall to the list of
-	// namespaces of each DNS name.
+	// namespaces of each DNS name. Also add the DNS names to the set
+	// of DNS names mapped to each namespace.
 	for _, egressFirewall := range egressFirewalls {
 		existingDNSNames := sets.New[string]()
 		getDNSNames(egressFirewall, existingDNSNames, c.watchFactory)
+		dnsNames, exists := c.efNamespaceDNSNames[egressFirewall.Namespace]
+		if !exists {
+			dnsNames = sets.New[string]()
+		}
 		for dnsName := range existingDNSNames {
 			if objDetails, exists := c.dnsNameObj[dnsName]; exists {
 				objDetails.namespaces.Insert(egressFirewall.Namespace)
 				c.dnsNameObj[dnsName] = objDetails
+				dnsNames.Insert(dnsName)
 			}
 		}
+		c.efNamespaceDNSNames[egressFirewall.Namespace] = dnsNames
 	}
 
 	// Delete the details of the DNS names from the dnsNameObj and
@@ -232,6 +244,13 @@ func (c *Controller) egressFirewallChanged(oldEf, newEf *egressfirewall.EgressFi
 	// For the update or create event, get the DNS names which are used in
 	// new EgressFirewall object.
 	if newEf != nil {
+		// If it is an add event, add all the existing DNS names corresponding
+		// to the EgressFirewall object's namespace, if any, to oldDNSNames.
+		if oldEf == nil {
+			if dnsNames, exists := c.efNamespaceDNSNames[newEf.Namespace]; exists {
+				oldDNSNames.Insert(dnsNames.UnsortedList()...)
+			}
+		}
 		getDNSNames(newEf, newDNSNames, c.watchFactory)
 	}
 
@@ -332,6 +351,15 @@ func (c *Controller) addDNSName(dnsName, namespace string) error {
 		}
 	}
 
+	// Add the DNS name to the set of DNS names belonging
+	// to the namespace.
+	dnsNames, exists := c.efNamespaceDNSNames[namespace]
+	if !exists {
+		dnsNames = sets.New[string]()
+	}
+	dnsNames.Insert(dnsName)
+	c.efNamespaceDNSNames[namespace] = dnsNames
+
 	objDetails.namespaces.Insert(namespace)
 
 	c.dnsNameObj[dnsName] = objDetails
@@ -358,6 +386,19 @@ func (c *Controller) deleteDNSName(dnsName, namespace string) error {
 			}
 			delete(c.dnsNameObj, dnsName)
 			c.objDNSName.Delete(objDetails.objName)
+		}
+	}
+
+	// Remove the DNS name from the set of DNS names belonging
+	// to the namespace. If the set is empty, then delete the
+	// mapping to the namespace.
+	dnsNames, exists := c.efNamespaceDNSNames[namespace]
+	if exists {
+		dnsNames.Delete(dnsName)
+		if dnsNames.Len() == 0 {
+			delete(c.efNamespaceDNSNames, namespace)
+		} else {
+			c.efNamespaceDNSNames[namespace] = dnsNames
 		}
 	}
 
