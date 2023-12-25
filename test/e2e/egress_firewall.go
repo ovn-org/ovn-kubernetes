@@ -15,7 +15,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
@@ -444,7 +443,7 @@ spec:
 
 		efPodName := "e2e-egress-fw-pod"
 		efPodPort := 1234
-		serviceName := "nodeportsvc"
+		serviceName := "service-for-pods"
 		servicePort := 31234
 		externalContainerName := "e2e-egress-fw-external-container"
 		externalContainerPort := 1234
@@ -491,26 +490,8 @@ spec:
 		}
 
 		ginkgo.By("Creating the nodePort service")
-		npSpec := &v1.Service{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: serviceName,
-			},
-			Spec: v1.ServiceSpec{
-				Type: v1.ServiceTypeNodePort,
-				Ports: []v1.ServicePort{
-					{
-						Port:       int32(servicePort),
-						NodePort:   int32(servicePort),
-						Name:       "http",
-						Protocol:   v1.ProtocolTCP,
-						TargetPort: intstr.FromInt(efPodPort),
-					},
-				},
-				Selector: endpointsSelector,
-			},
-		}
-		_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
-		framework.ExpectNoError(err)
+		_, err = createServiceForPodsWithLabel(f, f.Namespace.Name, int32(servicePort), strconv.Itoa(efPodPort), "NodePort", endpointsSelector)
+		framework.ExpectNoError(err, fmt.Sprintf("unable to create nodePort service, err: %v", err))
 
 		ginkgo.By("Waiting for the endpoints to pop up")
 		err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, 1, time.Second, wait.ForeverTestTimeout)
@@ -532,9 +513,12 @@ spec:
 			framework.Failf("Failed to connect from pod to external container, before egress firewall is applied")
 		}
 		// external container -> nodePort svc should work
+		svc, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
+		framework.ExpectNoError(err, "failed to fetch service: %s in namespace %s", serviceName, f.Namespace.Name)
+
 		ginkgo.By(fmt.Sprintf("Verifying connectivity from external container %s to nodePort svc [%s]:%d",
-			externalContainerIP, nodeIP, servicePort))
-		cmd := []string{"docker", "exec", externalContainerName, "nc", "-vz", "-w", testTimeout, nodeIP, strconv.Itoa(servicePort)}
+			externalContainerIP, nodeIP, svc.Spec.Ports[0].NodePort))
+		cmd := []string{"docker", "exec", externalContainerName, "nc", "-vz", "-w", testTimeout, nodeIP, strconv.Itoa(int(svc.Spec.Ports[0].NodePort))}
 		framework.Logf("Running command %v", cmd)
 		_, err = runCommand(cmd...)
 		if err != nil {
@@ -565,8 +549,8 @@ spec:
 		}
 		// external container -> nodePort svc should work
 		ginkgo.By(fmt.Sprintf("Verifying connectivity from external container %s to nodePort svc [%s]:%d",
-			externalContainerIP, nodeIP, servicePort))
-		cmd = []string{"docker", "exec", externalContainerName, "nc", "-vz", "-w", testTimeout, nodeIP, strconv.Itoa(servicePort)}
+			externalContainerIP, nodeIP, svc.Spec.Ports[0].NodePort))
+		cmd = []string{"docker", "exec", externalContainerName, "nc", "-vz", "-w", testTimeout, nodeIP, strconv.Itoa(int(svc.Spec.Ports[0].NodePort))}
 		framework.Logf("Running command %v", cmd)
 		_, err = runCommand(cmd...)
 		if err != nil {
