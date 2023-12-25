@@ -271,7 +271,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator, k,
 				&fakeMgmtPortConfig, wf, rm)
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf, stop, wg)
+			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -644,7 +644,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
 				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf, rm)
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf, stop, wg)
+			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
@@ -847,7 +847,28 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			nodeSubnet string = "10.1.1.0/24"
 		)
 
+		ovsOFOutput := `
+OFPT_FEATURES_REPLY (xid=0x2): dpid:00000242ac120002
+n_tables:254, n_buffers:0
+capabilities: FLOW_STATS TABLE_STATS PORT_STATS QUEUE_STATS ARP_MATCH_IP
+actions: output enqueue set_vlan_vid set_vlan_pcp strip_vlan mod_dl_src mod_dl_dst mod_nw_src mod_nw_dst mod_nw_tos mod_tp_src mod_tp_dst
+ 1(eth0): addr:02:42:ac:12:00:02
+     config:     0
+     state:      0
+     current:    10GB-FD COPPER
+     speed: 10000 Mbps now, 0 Mbps max
+ 2(patch-breth0_ov): addr:8e:8d:f4:cd:4f:76
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+ LOCAL(breth0): addr:02:42:ac:12:00:02
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
+
 		fexec := ovntest.NewLooseCompareFakeExec()
+
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
 			Err: fmt.Errorf(""),
@@ -946,31 +967,9 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd: "ovs-ofctl show breth0",
-			Output: `
-OFPT_FEATURES_REPLY (xid=0x2): dpid:00000242ac120002
-n_tables:254, n_buffers:0
-capabilities: FLOW_STATS TABLE_STATS PORT_STATS QUEUE_STATS ARP_MATCH_IP
-actions: output enqueue set_vlan_vid set_vlan_pcp strip_vlan mod_dl_src mod_dl_dst mod_nw_src mod_nw_dst mod_nw_tos mod_tp_src mod_tp_dst
- 1(eth0): addr:02:42:ac:12:00:02
-     config:     0
-     state:      0
-     current:    10GB-FD COPPER
-     speed: 10000 Mbps now, 0 Mbps max
- 2(patch-breth0_ov): addr:8e:8d:f4:cd:4f:76
-     config:     0
-     state:      0
-     speed: 0 Mbps now, 0 Mbps max
- LOCAL(breth0): addr:02:42:ac:12:00:02
-     config:     0
-     state:      0
-     speed: 0 Mbps now, 0 Mbps max
-OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
+			Cmd:    "ovs-ofctl show breth0",
+			Output: ovsOFOutput,
 		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -",
-		})
-		// nodePortWatcher()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface patch-breth0_" + nodeName + "-to-br-int ofport",
 			Output: "5",
@@ -978,6 +977,17 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface eth0 ofport",
 			Output: "7",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-ofctl show breth0",
+			Output: ovsOFOutput,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-ofctl show breth0",
+			Output: ovsOFOutput,
 		})
 		// syncServices()
 
@@ -1078,7 +1088,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
 				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm)
 			Expect(err).NotTo(HaveOccurred())
-			err = localGw.Init(wf, stop, wg)
+			err = localGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
@@ -1133,7 +1143,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
-
 		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
 
 		expectedTables := map[string]util.FakeTable{

@@ -202,8 +202,8 @@ func (bnc *BaseNetworkController) syncNamespaces(namespaces []interface{}) error
 			return false
 		}
 		// here we can be sure it is namespace-owned port group
-		// delete if it is not in the expectedNs
-		return !expectedNs[pg.ExternalIDs["name"]]
+		// delete if it is not in the expectedNs or if port group features are disabled
+		return !bnc.needNamespacedPortGroup() || !expectedNs[pg.ExternalIDs["name"]]
 	}
 
 	err = libovsdbops.DeletePortGroupsWithPredicate(bnc.nbClient, p)
@@ -286,7 +286,7 @@ func (bnc *BaseNetworkController) ensureNamespaceLockedCommon(ns string, readOnl
 		}
 
 		// namespace port groups are only used by egress firewall and multicast for now
-		if bnc.multicastSupport || config.OVNKubernetesFeature.EnableEgressFirewall {
+		if bnc.needNamespacedPortGroup() {
 			portGroupName, err := bnc.createNamespacePortGroup(ns)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to create port group for namespace: %s, error: %v", ns, err)
@@ -342,6 +342,11 @@ func (bnc *BaseNetworkController) ensureNamespaceLockedCommon(ns string, readOnl
 	}
 
 	return nsInfo, unlockFunc, nil
+}
+
+func (bnc *BaseNetworkController) needNamespacedPortGroup() bool {
+	// namespace port groups are only used by egress firewall and multicast for now
+	return bnc.multicastSupport || config.OVNKubernetesFeature.EnableEgressFirewall
 }
 
 func (bnc *BaseNetworkController) configureNamespaceCommon(nsInfo *namespaceInfo, ns *kapi.Namespace) error {
@@ -429,17 +434,13 @@ func (bnc *BaseNetworkController) createNamespaceAddrSetAllPods(ns string, ips [
 	return bnc.addressSetFactory.NewAddressSet(dbIDs, ips)
 }
 
+// createNamespacePortGroup should only create a port group if doesn't exist already,
+// all ports and acls will be added by pod/multicast/egressfirewall/etc handlers.
 func (bnc *BaseNetworkController) createNamespacePortGroup(ns string) (string, error) {
-	// Add all ports from this namespace to the multicast allow group.
-	ports, err := bnc.getNamespaceLSPs(ns)
-	if err != nil {
-		return "", fmt.Errorf("failed to create namespace port group")
-	}
-
 	portGroupName := bnc.getNamespacePortGroupName(ns)
-
-	pg := bnc.buildPortGroup(portGroupName, ns, ports, nil)
-	err = libovsdbops.CreateOrUpdatePortGroups(bnc.nbClient, pg)
+	// create empty port group if it doesn't exist
+	pg := bnc.buildPortGroup(portGroupName, ns, nil, nil)
+	err := libovsdbops.CreatePortGroup(bnc.nbClient, pg)
 
 	return portGroupName, err
 }

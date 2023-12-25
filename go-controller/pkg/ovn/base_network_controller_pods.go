@@ -1148,25 +1148,3 @@ func (bnc *BaseNetworkController) wasPodReleasedBeforeStartup(uid, nad string) b
 	}
 	return bnc.releasedPodsBeforeStartup[nad].Has(uid)
 }
-
-func (bnc *BaseNetworkController) getNamespaceLSPs(ns string) ([]*nbdb.LogicalSwitchPort, error) {
-	ports := []*nbdb.LogicalSwitchPort{}
-	pods, err := bnc.watchFactory.GetPods(ns)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pods for namespace %q: %v", ns, err)
-	}
-	for _, pod := range pods {
-		if util.PodCompleted(pod) {
-			continue
-		}
-		portInfoMap, err := bnc.logicalPortCache.getAll(pod)
-		if err != nil {
-			klog.Errorf(err.Error())
-		} else {
-			for _, portInfo := range portInfoMap {
-				ports = append(ports, &nbdb.LogicalSwitchPort{UUID: portInfo.uuid})
-			}
-		}
-	}
-	return ports, nil
-}

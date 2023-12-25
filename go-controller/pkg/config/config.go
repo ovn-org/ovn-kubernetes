@@ -617,6 +617,7 @@ func PrepareTestConfig() error {
 	HybridOverlay = savedHybridOverlay
 	OvnKubeNode = savedOvnKubeNode
 	ClusterManager = savedClusterManager
+	EnableMulticast = false
 
 	if err := completeConfig(); err != nil {
 		return err
