@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -359,6 +360,18 @@ func (snr *subnetAllocatorRange) markAllocatedNetwork(owner string, network *net
 
 // allocateNetwork returns a new subnet, or nil if the range is full
 func (snr *subnetAllocatorRange) allocateNetwork(owner string) *net.IPNet {
+	// Return an already allocated subnet instead of creating a new one if a
+	// combination of subnet and node name already exists in the cache
+	for nodeSubnet, nodeName := range snr.allocMap {
+		if nodeName == owner {
+			_, subnet, err := net.ParseCIDR(nodeSubnet)
+			if err != nil {
+				klog.Errorf("Failed to parse subnet %s for node %s: %v", nodeSubnet, nodeName, err)
+				continue
+			}
+			return subnet
+		}
+	}
 	netMaskSize, addrLen := snr.network.Mask.Size()
 	numSubnets := uint32(1) << snr.subnetBits
 	if snr.subnetBits > 24 {
