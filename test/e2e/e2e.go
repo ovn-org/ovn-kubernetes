@@ -1384,6 +1384,7 @@ spec:
 		efPodPort := 1234
 		serviceName := "nodeportsvc"
 		servicePort := 31234
+		maxServicePort := 32767
 		externalContainerName := "e2e-egress-fw-external-container"
 		externalContainerPort := 1234
 
@@ -1448,6 +1449,13 @@ spec:
 			},
 		}
 		_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
+		// increment port if already used
+		for err != nil && strings.Contains(err.Error(), "provided port is already allocated") && servicePort <= maxServicePort {
+			servicePort += 1
+			npSpec.Spec.Ports[0].Port = int32(servicePort)
+			npSpec.Spec.Ports[0].NodePort = int32(servicePort)
+			_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
+		}
 		framework.ExpectNoError(err)
 
 		ginkgo.By("Waiting for the endpoints to pop up")
