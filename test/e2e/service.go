@@ -830,6 +830,8 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 		backendName      = "lb-backend-pod"
 		endpointHTTPPort = 80
 		loadBalancerYaml = "loadbalancer.yaml"
+		bgpAddYaml       = "bgpAdd.yaml"
+		bgpEmptyYaml     = "bgpEmptyAdd.yaml"
 		svcIP            = "192.168.10.0"
 		clientContainer  = "lbclient"
 		routerContainer  = "frr"
@@ -837,6 +839,7 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 
 	var (
 		backendNodeName string
+		nonBackendNodeName string
 		namespaceName   = "default"
 	)
 	f := wrappedTestFramework(svcName)
@@ -847,6 +850,7 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 			framework.Failf("Test requires >= 2 Ready nodes, but there are only %v nodes", len(nodes.Items))
 		}
 		backendNodeName = nodes.Items[0].Name
+		nonBackendNodeName = nodes.Items[1].Name
 		var loadBalancerServiceConfig = fmt.Sprintf(`
 ---
 apiVersion: v1
@@ -938,6 +942,27 @@ spec:
 			if err := os.Remove(loadBalancerYaml); err != nil {
 				framework.Logf("Unable to remove the CRD config from disk: %v", err)
 			}
+			framework.Logf("Reset MTU on intermediary router to allow large packets")
+			cmd := []string{containerRuntime, "exec", routerContainer}
+			mtuCommand := strings.Split("ip link set mtu 1500 dev eth1", " ")
+			cmd = append(cmd, mtuCommand...)
+			_, err := runCommand(cmd...)
+			framework.ExpectNoError(err, "failed to reset MTU on intermediary router")
+			framework.Logf("Delete the custom BGP Advertisement configuration")
+			e2ekubectl.RunKubectlOrDie("metallb-system", "delete", "bgpadvertisement", "example", "--ignore-not-found=true")
+			var bgpEmptyConfig = fmt.Sprintf(`
+---
+apiVersion: metallb.io/v1beta1
+kind: BGPAdvertisement
+metadata:
+  name: empty
+  namespace: metallb-system
+`)
+			if err := os.WriteFile(bgpEmptyYaml, []byte(bgpEmptyConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			framework.Logf("Re-create the default BGP Advertisement configuration for other tests")
+			e2ekubectl.RunKubectlOrDie("metallb-system", "apply", "-f", bgpEmptyYaml)
 		}()
 	})
 
@@ -1063,8 +1088,29 @@ spec:
 		framework.ExpectNoError(err, "failed to connect with external load balancer service after changing mtu size")
 	})
 
-	ginkgo.It("Should ensure load balancer service works with pmtu", func() {
+	ginkgo.It("Should ensure load balancer service works with pmtud", func() {
 
+		// TEST LOGIC: This test uses metaLB BGP for advertising routes towards the 3 KIND ovnk cluster nodes
+		// (control-plane, 2 workers) as potential candidates to reach the load balancer service (192.168.10.0 service VIP).
+		// There is also a FRR router that sits in front of the KIND cluster through which traffic flows to the service VIP.
+		// External client (name: lbclient container {installation details in kind.sh script}) tries to reach a
+		// load balancer service with VIP: 192.168.10.0 that has 4 backends running on one of the nodes in the cluster through
+		// the FRR router.
+		// -----------------       ------------------      VIP: 192.168.10.0  ---------------------
+		// |               | 1500  |                | 1500                    | ovn-control-plane |
+		// |   lbclient    |------>|   FRR router   |------> KIND cluster --> ---------------------
+		// |               | change|                |                         |    ovn-worker     |   (4 backend CNI pods running
+		// -----------------  to   ------------------                         ---------------------    on one of the nodes serving
+		//                   1200                                             |    ovn-worker2    |    lb service)
+		//              generates ICMP                                        ---------------------
+		//                 needs FRAG
+		//
+		// NOTE: There is no guarantee which node gets picked for serving the request since metalLB uses ECMP.
+		// Hence we could either have:
+		// A) lbclient->FRR router->ovn-worker->br-ex->GR_ovn-worker->join->cluster-router->ovn-worker-switch->pod OR
+		// B) lbclient->FRR router->ovn-worker2->br-ex->GR_ovn-worker2->join->cluster-router-ovn-worker->transit-switch->GENEVE->
+		//    transit-switch->cluster-router-ovn-worker->ovn-worker-switch->pod
+		// depending on which node is hit for the service traffic and which node the backendpod lives on.
 		err := framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*120)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 
@@ -1073,25 +1119,121 @@ spec:
 		numberOfETPRules := pokeIPTableRules(backendNodeName, "OVN-KUBE-EXTERNALIP")
 		framework.ExpectEqual(numberOfETPRules, 4)
 
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " from backend pod " + backendName)
+		// curl the LB service from the client container to trigger BGP route advertisement
+		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
 		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
-		ginkgo.By("change MTU on intermediary router to force icmp related packets")
+		ginkgo.By("all 3 nodeIP routes are advertised correctly by metalb BGP routes")
+		// sample
+		// 192.168.10.0 nhid 84 proto bgp metric 20
+		//	nexthop via 172.19.0.3 dev eth0 weight 1
+		//	nexthop via 172.19.0.4 dev eth0 weight 1
+		//	nexthop via 172.19.0.2 dev eth0 weight 1
 		cmd := []string{containerRuntime, "exec", routerContainer}
-		mtuCommand := strings.Split("ip link set mtu 1200 dev eth1", " ")
+		bgpRouteCommand := strings.Split("ip route show 192.168.10.0", " ")
+		cmd = append(cmd, bgpRouteCommand...)
 
-		cmd = append(cmd, mtuCommand...)
-		_, err = runCommand(cmd...)
-		framework.ExpectNoError(err, "failed to change MTU on intermediary router")
+		backendNodeIP, err := getNodeIP(f.ClientSet, backendNodeName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get node's %s node ip address", backendNodeName))
+		nonBackendNodeIP, err := getNodeIP(f.ClientSet, backendNodeName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get node's %s node ip address", backendNodeName))
+		gomega.Eventually(func() bool {
+			routes, err := runCommand(cmd...)
+			framework.ExpectNoError(err, "failed to get BGP routes from intermediary router")
+			framework.Logf("Routes in FRR %s", routes)
+			return strings.Contains(routes, backendNodeIP)
+		}, 30*time.Second).Should(gomega.BeTrue())
+		gomega.Eventually(func() bool {
+			routes, err := runCommand(cmd...)
+			framework.ExpectNoError(err, "failed to get BGP routes from intermediary router")
+			framework.Logf("Routes in FRR %s", routes)
+			return strings.Contains(routes, nonBackendNodeIP)
+		}, 30*time.Second).Should(gomega.BeTrue())
 
-		time.Sleep(time.Second * 5) // buffer to ensure MTU change took effect
+		framework.Logf("Delete the default BGP Advertisement configuration")
+		e2ekubectl.RunKubectlOrDie("metallb-system", "delete", "bgpadvertisement", "empty", "--ignore-not-found=true")
 
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " from backend pod " + backendName)
+		// test CASE A: traffic lands on the same node where backend lives
+		// test CASE B: traffic lands on different node than where the backend lives
+		for _, node := range []string{backendNodeName, nonBackendNodeName} {
+			var bgpConfig = fmt.Sprintf(`
+---
+apiVersion: metallb.io/v1beta1
+kind: BGPAdvertisement
+metadata:
+  name: example
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - dev-env-bgp
+  nodeSelectors:
+  - matchLabels:
+      kubernetes.io/hostname: ` + node + `
+`)
+			if err := os.WriteFile(bgpAddYaml, []byte(bgpConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			framework.Logf("Create the BGP Advertisement configuration")
+			e2ekubectl.RunKubectlOrDie("metallb-system", "apply", "-f", bgpAddYaml)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
-		framework.ExpectNoError(err, "failed to curl load balancer service")
+			ginkgo.By("only 1 nodeIP route is advertised correctly by metalb BGP routes")
+			// ensure only this node's IP route is advertised correctly by metalb BGP routes
+			// sample:
+			// 192.168.10.0 nhid 31 via 172.19.0.4 dev eth0 proto bgp metric 20
+			nodeIP, err := getNodeIP(f.ClientSet, node)
+			framework.ExpectNoError(err, fmt.Sprintf("failed to get nodes's %s node ip address", node))
+			framework.Logf("NodeIP of node %s is %s", node, nodeIP)
+			cmd := []string{containerRuntime, "exec", routerContainer}
+			bgpRouteCommand := strings.Split("ip route show 192.168.10.0", " ")
+			cmd = append(cmd, bgpRouteCommand...)
+			gomega.Eventually(func() bool {
+				routes, err := runCommand(cmd...)
+				framework.ExpectNoError(err, "failed to get BGP routes from intermediary router")
+				framework.Logf("Routes in FRR %s", routes)
+				routeCount := 0
+				matchedRoute := ""
+				for _, route := range strings.Split(routes, "\n") {
+					match := strings.Contains(route, nodeIP)
+					if match {
+						framework.Logf("DEBUG: Matched route %s for pattern %s", route, nodeIP)
+						matchedRoute = route
+					}
+					if strings.Contains(route, "via") {
+						routeCount++
+					}
+				}
+				return routeCount == 1 && strings.Contains(matchedRoute, nodeIP)
+			}, 60*time.Second).Should(gomega.BeTrue())
+
+			ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName + " via node " + node)
+
+			_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+			framework.ExpectNoError(err, "failed to curl load balancer service")
+
+			ginkgo.By("change MTU on intermediary router to force icmp related packets")
+			cmd = []string{containerRuntime, "exec", routerContainer}
+			mtuCommand := strings.Split("ip link set mtu 1200 dev eth1", " ")
+
+			cmd = append(cmd, mtuCommand...)
+			_, err = runCommand(cmd...)
+			framework.ExpectNoError(err, "failed to change MTU on intermediary router")
+
+			time.Sleep(time.Second * 5) // buffer to ensure MTU change took effect
+
+			ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName + " via node " + node)
+
+			_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+			framework.ExpectNoError(err, "failed to curl load balancer service")
+
+			ginkgo.By("reset MTU on intermediary router to allow large packets")
+			cmd = []string{containerRuntime, "exec", routerContainer}
+			mtuCommand = strings.Split("ip link set mtu 1500 dev eth1", " ")
+			cmd = append(cmd, mtuCommand...)
+			_, err = runCommand(cmd...)
+			framework.ExpectNoError(err, "failed to reset MTU on intermediary router")
+		}
 	})
 
 	ginkgo.It("Should ensure load balancer service works with 0 node ports when ETP=local", func() {
