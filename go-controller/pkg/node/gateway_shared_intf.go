@@ -595,7 +595,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 		hasLocalHostNetworkEp = false
 	} else {
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		localEndpoints = npw.GetLocalEndpointAddresses(epSlices, service)
+		localEndpoints = npw.GetLocalEligibleEndpointAddresses(epSlices, service)
 		hasLocalHostNetworkEp = util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 	}
 	// If something didn't already do it add correct Service rules
@@ -757,7 +757,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			continue
 		}
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		localEndpoints := npw.GetLocalEndpointAddresses(epSlices, service)
+		localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, service)
 		hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints)
 
@@ -821,7 +821,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 		// No need to continue adding the new endpoint slice, if we can't retrieve all slices for this service
 		return fmt.Errorf("error retrieving endpointslices for service %s/%s during endpointslice add: %w", svc.Namespace, svc.Name, err)
 	}
-	localEndpoints := npw.GetLocalEndpointAddresses(epSlices, svc)
+	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
 	hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 
 	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice event is
@@ -880,7 +880,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 		return fmt.Errorf("error retrieving service %s/%s for endpointslice %s during endpointslice delete: %v",
 			namespacedName.Namespace, namespacedName.Name, epSlice.Name, err)
 	}
-	localEndpoints := npw.GetLocalEndpointAddresses(epSlices, svc)
+	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
 	if svcConfig, exists := npw.updateServiceInfo(namespacedName, nil, &hasLocalHostNetworkEp, localEndpoints); exists {
 		// Lock the cache mutex here so we don't miss a service delete during an endpoint delete
 		// we have to do this because deleting and adding iptables rules is slow.
@@ -899,8 +899,8 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 }
 
 // GetLocalEndpointAddresses returns a list of eligible endpoints that are local to the node
-func (npw *nodePortWatcher) GetLocalEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.Set[string] {
-	return util.GetLocalEndpointAddresses(endpointSlices, service, npw.nodeIPManager.nodeName)
+func (npw *nodePortWatcher) GetLocalEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.Set[string] {
+	return util.GetLocalEligibleEndpointAddresses(endpointSlices, service, npw.nodeIPManager.nodeName)
 }
 
 func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) error {
@@ -920,8 +920,8 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 			namespacedName.Namespace, namespacedName.Name, newEpSlice.Name, err)
 	}
 
-	oldEndpointAddresses := util.GetEndpointAddresses([]*discovery.EndpointSlice{oldEpSlice}, svc)
-	newEndpointAddresses := util.GetEndpointAddresses([]*discovery.EndpointSlice{newEpSlice}, svc)
+	oldEndpointAddresses := util.GetEligibleEndpointAddresses([]*discovery.EndpointSlice{oldEpSlice}, svc)
+	newEndpointAddresses := util.GetEligibleEndpointAddresses([]*discovery.EndpointSlice{newEpSlice}, svc)
 	if reflect.DeepEqual(oldEndpointAddresses, newEndpointAddresses) {
 		return nil
 	}
@@ -961,8 +961,8 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	// endpoints has changed. For this second comparison, check first between the old endpoint slice and all current
 	// endpointslices for this service. This is a partial comparison, in case serviceInfo is not set. When it is set, compare
 	// between /all/ old endpoint slices and all new ones.
-	oldLocalEndpoints := npw.GetLocalEndpointAddresses([]*discovery.EndpointSlice{oldEpSlice}, svc)
-	newLocalEndpoints := npw.GetLocalEndpointAddresses(epSlices, svc)
+	oldLocalEndpoints := npw.GetLocalEligibleEndpointAddresses([]*discovery.EndpointSlice{oldEpSlice}, svc)
+	newLocalEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
 	hasLocalHostNetworkEpOld := util.HasLocalHostNetworkEndpoints(oldLocalEndpoints, nodeIPs)
 	hasLocalHostNetworkEpNew := util.HasLocalHostNetworkEndpoints(newLocalEndpoints, nodeIPs)
 

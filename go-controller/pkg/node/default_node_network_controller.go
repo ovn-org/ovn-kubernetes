@@ -1261,7 +1261,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 				oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
 				// upon an update event, remove conntrack entries for IP addresses that are no longer
 				// in the endpointslice, skip otherwise
-				if newEndpointSlice != nil && util.DoesEndpointSliceContainEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
+				if newEndpointSlice != nil && util.DoesEndpointSliceContainEligibleEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
 					continue
 				}
 				// upon update and delete events, flush conntrack only for UDP
