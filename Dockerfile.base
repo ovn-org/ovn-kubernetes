@@ -5,7 +5,7 @@
 # The standard name for this image is ovn-kubernetes-base
 
 # build base image shared by both OpenShift and MicroShift
-FROM registry.ci.openshift.org/ocp/4.15:base-rhel9
+FROM registry.ci.openshift.org/ocp/4.16:base-rhel9
 
 # install selinux-policy first to avoid a race
 RUN dnf install -y --nodocs \
