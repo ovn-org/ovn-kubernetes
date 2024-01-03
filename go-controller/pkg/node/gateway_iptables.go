@@ -608,7 +608,15 @@ func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 			errors = append(errors, fmt.Errorf("error clearing Chain: %s in Table: %s, err: %v", chain, table, err))
 		}
 	}
-	if err = insertIptRules(keepIPTRules); err != nil {
+	// only insert rules for the chain we are interested in
+	var iptRules []nodeipt.Rule
+	for _, rule := range keepIPTRules {
+		if rule.Table == table && rule.Chain == chain {
+			iptRules = append(iptRules, rule)
+		}
+	}
+
+	if err = insertIptRules(iptRules); err != nil {
 		errors = append(errors, err)
 	}
 	return apierrors.NewAggregate(errors)
