@@ -188,14 +188,6 @@ func getITPLocalIPTRules(svcPort kapi.ServicePort, clusterIP string, svcHasLocal
 	}
 }
 
-// getNodePortETPLocalIPTRule returns the IPTable REDIRECT or RETURN rules for a service of type nodePort if ETP=local
-// `svcPort` corresponds to port details for this service as specified in the service object
-// `targetIP` corresponds to svc.spec.ClusterIP
-// This function returns a RETURN rule in iptableMgmPortChain to prevent SNAT of sourceIP
-func getNodePortETPLocalIPTRule(svcPort kapi.ServicePort, targetIP string) nodeipt.Rule {
-	return getSkipMgmtSNATRule(string(svcPort.Protocol), fmt.Sprintf("%d", svcPort.NodePort), "", getIPTablesProtocol(targetIP))
-}
-
 // getSkipMgmtSNATRule generates the return iptables rule for avoiding SNAT to mgmt port
 func getSkipMgmtSNATRule(protocol, port, destIP string, ipFamily iptables.Protocol) nodeipt.Rule {
 	args := make([]string, 0, 8)
@@ -213,16 +205,116 @@ func getSkipMgmtSNATRule(protocol, port, destIP string, ipFamily iptables.Protoc
 	return n
 }
 
+// getNodePortETPLocalIPTRules returns the IPTable REDIRECT or RETURN rules for a service of type nodePort if ETP=local
+// `svcPort` corresponds to port details for this service as specified in the service object
+// `targetIP` corresponds to svc.spec.ClusterIP
+// This function returns a RETURN rule in iptableMgmPortChain to prevent SNAT of sourceIP
+// If the traffic is from the pod network to our nodeport, we need to SNAT in order to preserve symmetrical reply
+func getNodePortETPLocalIPTRules(svcPort kapi.ServicePort, targetIP string, mgmtPortConfig *managementPortConfig) []nodeipt.Rule {
+	var rules []nodeipt.Rule
+
+	rules = append(rules, getSkipMgmtSNATRule(string(svcPort.Protocol), fmt.Sprintf("%d", svcPort.NodePort), "", getIPTablesProtocol(targetIP)))
+
+	// note rules will be inserted in order (not appended), so need to place these after the return above
+	var mgmtIP net.IP
+	protocol := getIPTablesProtocol(targetIP)
+	if mgmtPortConfig != nil {
+		if protocol == iptables.ProtocolIPv4 {
+			if mgmtPortConfig.ipv4 != nil {
+				mgmtIP = mgmtPortConfig.ipv4.ifAddr.IP
+			} else {
+				klog.Errorf("IPv4 iptables rule insertion, but no IPv4 managment IP address found!")
+			}
+		} else {
+			if mgmtPortConfig.ipv6 != nil {
+				mgmtIP = mgmtPortConfig.ipv6.ifAddr.IP
+			} else {
+				klog.Errorf("IPv6 iptables rule insertion, but no IPv6 managment IP address found!")
+			}
+
+		}
+	}
+
+	for _, clusterEntry := range config.Default.ClusterSubnets {
+		if mgmtIP == nil {
+			klog.Errorf("Cannot program node port ETP Local IPT rules, management IP not found")
+			break
+		}
+
+		if utilnet.IsIPv4CIDR(clusterEntry.CIDR) != utilnet.IsIPv4String(targetIP) {
+			continue
+		}
+		rules = append(rules, nodeipt.Rule{
+			Table: "nat",
+			Chain: iptableMgmPortChain,
+			Args: []string{
+				"-p", string(svcPort.Protocol),
+				"-s", clusterEntry.CIDR.String(),
+				"--dport", fmt.Sprintf("%d", svcPort.NodePort),
+				"-j", "SNAT",
+				"--to-source", mgmtIP.String(),
+			},
+			Protocol: protocol,
+		})
+	}
+
+	return rules
+}
+
 func computeProbability(n, i int) string {
 	return fmt.Sprintf("%0.10f", 1.0/float64(n-i+1))
 }
 
-func generateSkipMgmtForLocalEndpoints(svcPort kapi.ServicePort, externalIP string, localEndpoints []string) []nodeipt.Rule {
+func generateMgmtChainRulesForLocalEndpoints(svcPort kapi.ServicePort, externalIP string, localEndpoints []string, mgmtPortConfig *managementPortConfig) []nodeipt.Rule {
 	iptRules := make([]nodeipt.Rule, 0, len(localEndpoints))
+	protocol := getIPTablesProtocol(externalIP)
 	for _, localEndpoint := range localEndpoints {
 		if len(localEndpoint) == 0 {
 			continue
 		}
+
+		// note rules will be inserted in order (not appended), so need to place these after the return above
+		var mgmtIP net.IP
+		if mgmtPortConfig != nil {
+			if protocol == iptables.ProtocolIPv4 {
+				if mgmtPortConfig.ipv4 != nil {
+					mgmtIP = mgmtPortConfig.ipv4.ifAddr.IP
+				} else {
+					klog.Errorf("IPv4 iptables rule insertion, but no IPv4 management IP address found!")
+				}
+			} else {
+				if mgmtPortConfig.ipv6 != nil {
+					mgmtIP = mgmtPortConfig.ipv6.ifAddr.IP
+				} else {
+					klog.Errorf("IPv6 iptables rule insertion, but no IPv6 management IP address found!")
+				}
+
+			}
+		}
+
+		for _, clusterEntry := range config.Default.ClusterSubnets {
+			if mgmtIP == nil {
+				klog.Errorf("Cannot program IPT rules (without nodeports) due to no management IP found!")
+			}
+
+			if utilnet.IsIPv4CIDR(clusterEntry.CIDR) != utilnet.IsIPv4String(externalIP) {
+				continue
+			}
+			iptRules = append([]nodeipt.Rule{{
+				Table: "nat",
+				Chain: iptableMgmPortChain,
+				Args: []string{
+					"-p", string(svcPort.Protocol),
+					"-s", clusterEntry.CIDR.String(),
+					"-d", localEndpoint,
+					"--dport", fmt.Sprintf("%v", int32(svcPort.TargetPort.IntValue())),
+					"-j", "SNAT",
+					"--to-source", mgmtIP.String(),
+				},
+				Protocol: protocol,
+			}}, iptRules...)
+		}
+
 		iptRules = append([]nodeipt.Rule{getSkipMgmtSNATRule(
 			string(svcPort.Protocol),
 			fmt.Sprintf("%v", int32(svcPort.TargetPort.IntValue())),
@@ -559,7 +651,7 @@ func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 // case3: if svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that redirects clusterIP traffic to host targetPort is added.
 //
 //	if !svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that marks clusterIP traffic to steer it to ovn-k8s-mp0 is added.
-func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) []nodeipt.Rule {
+func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool, mgmtPortCfg *managementPortConfig) []nodeipt.Rule {
 	rules := make([]nodeipt.Rule, 0)
 	clusterIPs := util.GetClusterIPs(service)
 	svcTypeIsETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
@@ -580,11 +672,9 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 				if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt {
 					// case1 (see function description for details)
 					// A DNAT rule to masqueradeIP is added that takes priority over DNAT to clusterIP.
-					if config.Gateway.Mode == config.GatewayModeLocal {
-						rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.NodePort, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
-					}
+					rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.NodePort, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
 					// add a skip SNAT rule to OVN-KUBE-SNAT-MGMTPORT to preserve sourceIP for etp=local traffic.
-					rules = append(rules, getNodePortETPLocalIPTRule(svcPort, clusterIP))
+					rules = append(rules, getNodePortETPLocalIPTRules(svcPort, clusterIP, mgmtPortCfg)...)
 				}
 				// case2 (see function description for details)
 				rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port, svcHasLocalHostNetEndPnt, false)...)
@@ -609,7 +699,7 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 						rules = append(rules, generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort, externalIP, localEndpoints)...)
 						// These rules are per endpoint and should only be created one time per endpoint and port combination
 						if !snatRulesCreated {
-							rules = append(rules, generateSkipMgmtForLocalEndpoints(svcPort, externalIP, localEndpoints)...)
+							rules = append(rules, generateMgmtChainRulesForLocalEndpoints(svcPort, externalIP, localEndpoints, mgmtPortCfg)...)
 							snatRulesCreated = true
 						}
 					} else {
