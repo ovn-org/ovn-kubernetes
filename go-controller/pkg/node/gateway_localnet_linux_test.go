@@ -602,6 +602,7 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
+							fmt.Sprintf("-p TCP -s %s --dport %v -j SNAT --to-source %s", config.Default.ClusterSubnets[0].CIDR, service.Spec.Ports[0].NodePort, fakeMgmtPortConfig.ipv4.ifAddr.IP),
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ETP": []string{
@@ -795,6 +796,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
+							fmt.Sprintf("-p TCP -s %s --dport %v -j SNAT --to-source %s", config.Default.ClusterSubnets[0].CIDR, service.Spec.Ports[0].NodePort, fakeMgmtPortConfig.ipv4.ifAddr.IP),
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{
@@ -928,7 +930,9 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-NODEPORT": []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
+							fmt.Sprintf("-p TCP -s %s -d %s --dport %d -j SNAT --to-source %s", config.Default.ClusterSubnets[0].CIDR, ep1.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue()), fakeMgmtPortConfig.ipv4.ifAddr.IP),
 							fmt.Sprintf("-p TCP -d %s --dport %d -j RETURN", ep1.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
+							fmt.Sprintf("-p TCP -s %s -d %s --dport %d -j SNAT --to-source %s", config.Default.ClusterSubnets[0].CIDR, ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue()), fakeMgmtPortConfig.ipv4.ifAddr.IP),
 							fmt.Sprintf("-p TCP -d %s --dport %d -j RETURN", ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{
@@ -1152,6 +1156,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
+							fmt.Sprintf("-p TCP -s %s --dport %v -j SNAT --to-source %s", config.Default.ClusterSubnets[0].CIDR, service.Spec.Ports[0].NodePort, fakeMgmtPortConfig.ipv4.ifAddr.IP),
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{
@@ -1161,6 +1166,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-ETP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ITP":        []string{},
 						"OVN-KUBE-EGRESS-SVC": []string{},
@@ -1987,6 +1993,7 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
+							fmt.Sprintf("-p TCP -s %s --dport %v -j SNAT --to-source %s", config.Default.ClusterSubnets[0].CIDR, service.Spec.Ports[0].NodePort, fakeMgmtPortConfig.ipv4.ifAddr.IP),
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ETP": []string{
@@ -2126,9 +2133,12 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
+							fmt.Sprintf("-p TCP -s %s --dport %v -j SNAT --to-source %s", config.Default.ClusterSubnets[0].CIDR, service.Spec.Ports[0].NodePort, fakeMgmtPortConfig.ipv4.ifAddr.IP),
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ETP": []string{
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
+						},
 						"OVN-KUBE-ITP":        []string{},
 						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
@@ -2415,10 +2425,13 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
+							fmt.Sprintf("-p TCP -s %s --dport %v -j SNAT --to-source %s", config.Default.ClusterSubnets[0].CIDR, service.Spec.Ports[0].NodePort, fakeMgmtPortConfig.ipv4.ifAddr.IP),
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP": []string{},
+						"OVN-KUBE-ETP": []string{
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
+						},
 						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
