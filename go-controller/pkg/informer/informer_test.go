@@ -267,6 +267,11 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			return pod != nil, nil
 		}, 2).Should(BeTrue())
 
+		// Make sure the initial 'add' took place. This is important because the worker may take a
+		// while to get started and synced from the informer. If that happened, the add and the update
+		// performed below would be combined into a single 'add' event.
+		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
+
 		pod.Annotations = map[string]string{"bar": "baz"}
 		pod.ResourceVersion = "11"
 
