@@ -354,6 +354,47 @@ func multiNetEgressLimitingIPBlockPolicy(
 	}
 }
 
+func multiNetIngressDenyAllPolicy(
+	policyName string,
+	policyFor string,
+	appliesFor metav1.LabelSelector,
+) *mnpapi.MultiNetworkPolicy {
+	return &mnpapi.MultiNetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: policyName,
+			Annotations: map[string]string{
+				PolicyForAnnotation: policyFor,
+			},
+		},
+		Spec: mnpapi.MultiNetworkPolicySpec{
+			PodSelector: appliesFor,
+			PolicyTypes: []mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
+		},
+	}
+}
+
+func multiNetIngressDenyAllEgressAllowAllPolicy(
+	policyName string,
+	policyFor string,
+	appliesFor metav1.LabelSelector,
+) *mnpapi.MultiNetworkPolicy {
+	return &mnpapi.MultiNetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: policyName,
+			Annotations: map[string]string{
+				PolicyForAnnotation: policyFor,
+			},
+		},
+		Spec: mnpapi.MultiNetworkPolicySpec{
+			PodSelector: appliesFor,
+			PolicyTypes: []mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
+			Egress: []mnpapi.MultiNetworkPolicyEgressRule{
+				mnpapi.MultiNetworkPolicyEgressRule{},
+			},
+		},
+	}
+}
+
 func doesPolicyFeatAnIPBlock(policy *mnpapi.MultiNetworkPolicy) bool {
 	for _, rule := range policy.Spec.Ingress {
 		for _, peer := range rule.From {
