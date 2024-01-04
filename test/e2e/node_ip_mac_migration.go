@@ -519,6 +519,11 @@ spec:
 										return true, nil
 									}
 								}
+								// Due to potential k8s bug described here: https://github.com/ovn-org/ovn-kubernetes/issues/4073
+								// We may need to restart kubelet for the backend pod to update its host networked IP address
+								restartCmd := []string{"docker", "exec", workerNode.Name, "systemctl", "restart", "kubelet"}
+								_, restartErr := runCommand(restartCmd...)
+								framework.ExpectNoError(restartErr)
 								return false, nil
 							})
 							framework.ExpectNoError(err)
