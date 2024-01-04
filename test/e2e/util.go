@@ -1084,6 +1084,16 @@ func randStr(n int) string {
 	return string(b)
 }
 
+func isIPv4Supported() bool {
+	val, present := os.LookupEnv("KIND_IPV4_SUPPORT")
+	return present && val == "true"
+}
+
+func isIPv6Supported() bool {
+	val, present := os.LookupEnv("KIND_IPV6_SUPPORT")
+	return present && val == "true"
+}
+
 func isInterconnectEnabled() bool {
 	val, present := os.LookupEnv("OVN_ENABLE_INTERCONNECT")
 	return present && val == "true"
