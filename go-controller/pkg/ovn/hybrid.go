@@ -314,15 +314,18 @@ func (oc *DefaultNetworkController) removeHybridLRPolicySharedGW(node *kapi.Node
 		return fmt.Errorf("failed to delete policy %s from %s, error: %w", name, ovntypes.OVNClusterRouter, err)
 	}
 
-	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
-		return strings.Contains(item.ExternalIDs["name"], name)
-	}); err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return fmt.Errorf("failed to delete static route %s from %s, error: %w", name, ovntypes.OVNClusterRouter, err)
-	}
+	// order is important here to not incur referential integrity violation
+	// first remove GR routes with a specific predicate, then remove the
+	// remaining ones from cluster router with a generic predicate
 	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, ovntypes.GWRouterPrefix+nodeName, func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return item.ExternalIDs["name"] == name+ovntypes.HybridOverlayGRSubfix
 	}); err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to delete static route %s from %s, error: %w", name+"gr", ovntypes.GWRouterPrefix+nodeName, err)
+	}
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return strings.Contains(item.ExternalIDs["name"], name)
+	}); err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to delete static route %s from %s, error: %w", name, ovntypes.OVNClusterRouter, err)
 	}
 
 	if node.Annotations[hotypes.HybridOverlayDRIP] != "" {
