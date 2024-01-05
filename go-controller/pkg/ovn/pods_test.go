@@ -405,7 +405,6 @@ func getExpectedDataPodsSwitchesPortGroup(pods []testPod, nodes []string, namesp
 		}
 		logicalSwitchPorts = append(logicalSwitchPorts, lsp)
 		nodeslsps[pod.nodeName] = append(nodeslsps[pod.nodeName], lspUUID)
-
 	}
 	var logicalSwitches []*nbdb.LogicalSwitch
 	for _, node := range nodes {

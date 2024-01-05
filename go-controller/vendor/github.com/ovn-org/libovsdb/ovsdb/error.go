@@ -128,6 +128,10 @@ type ReferentialIntegrityViolation struct {
 	operation *Operation
 }
 
+func NewReferentialIntegrityViolation(details string) *ReferentialIntegrityViolation {
+	return &ReferentialIntegrityViolation{details: details}
+}
+
 // Error implements the error interface
 func (e *ReferentialIntegrityViolation) Error() string {
 	msg := referentialIntegrityViolation

@@ -472,14 +472,17 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			name: "Test create non-existing no-root by model predicate specification and parent model update",
 			op:   "CreateOrUpdate",
 			generateOp: func() []operationModel {
+				m := nbdb.LogicalSwitchPort{}
 				parentModel := nbdb.LogicalSwitch{
-					Name:  logicalSwitchTestName,
-					Ports: []string{logicalSwitchPortTestUUID},
+					Name: logicalSwitchTestName,
 				}
 				return []operationModel{
 					{
-						Model:          &nbdb.LogicalSwitchPort{},
+						Model:          &m,
 						ModelPredicate: func(lsp *nbdb.LogicalSwitchPort) bool { return lsp.Name == logicalSwitchPortTestName },
+						DoAfter: func() {
+							parentModel.Ports = []string{m.UUID}
+						},
 					},
 					{
 						Model: &parentModel,
@@ -553,14 +556,17 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			name: "Test create non-existing no-root by model and parent model update",
 			op:   "CreateOrUpdate",
 			generateOp: func() []operationModel {
+				m := nbdb.LogicalSwitchPort{
+					Name: logicalSwitchPortTestName,
+				}
 				parentModel := nbdb.LogicalSwitch{
-					Name:  logicalSwitchTestName,
-					Ports: []string{logicalSwitchPortTestUUID},
+					Name: logicalSwitchTestName,
 				}
 				return []operationModel{
 					{
-						Model: &nbdb.LogicalSwitchPort{
-							Name: logicalSwitchPortTestName,
+						Model: &m,
+						DoAfter: func() {
+							parentModel.Ports = []string{m.UUID}
 						},
 					},
 					{
@@ -598,14 +604,16 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Addresses: []string{logicalSwitchPortAddress},
 				}
 				parentModel := nbdb.LogicalSwitch{
-					Name:  logicalSwitchTestName,
-					Ports: []string{logicalSwitchPortTestUUID},
+					Name: logicalSwitchTestName,
 				}
 				return []operationModel{
 					{
 						Model: &model,
 						OnModelUpdates: []interface{}{
 							&model.Addresses,
+						},
+						DoAfter: func() {
+							parentModel.Ports = []string{model.UUID}
 						},
 					},
 					{
@@ -649,14 +657,16 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Addresses: []string{logicalSwitchPortAddress},
 				}
 				pm := nbdb.LogicalSwitch{
-					Name:  logicalSwitchTestName,
-					Ports: []string{logicalSwitchPortTestUUID},
+					Name: logicalSwitchTestName,
 				}
 				return []operationModel{
 					{
 						Model: &m,
 						OnModelMutations: []interface{}{
 							&m.Addresses,
+						},
+						DoAfter: func() {
+							pm.Ports = []string{m.UUID}
 						},
 					},
 					{

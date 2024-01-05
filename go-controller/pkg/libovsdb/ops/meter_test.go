@@ -26,6 +26,10 @@ func TestCreateMeterBandOps(t *testing.T) {
 			},
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
+					&nbdb.Meter{
+						UUID:  buildNamedUUID(),
+						Bands: []string{secondUUID, firstUUID, thirdUUID},
+					},
 					&nbdb.MeterBand{
 						UUID: secondUUID,
 					},

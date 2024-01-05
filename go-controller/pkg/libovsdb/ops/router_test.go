@@ -21,6 +21,9 @@ func TestFindNATsUsingPredicate(t *testing.T) {
 
 	initialNbdb := libovsdbtest.TestSetup{
 		NBData: []libovsdbtest.TestData{
+			&nbdb.LogicalRouter{
+				Nat: []string{fakeNAT1.UUID, fakeNAT2.UUID},
+			},
 			fakeNAT1,
 			fakeNAT2,
 		},
@@ -48,7 +51,7 @@ func TestFindNATsUsingPredicate(t *testing.T) {
 		{
 			desc: "find nat2",
 			predFunc: func(item *nbdb.NAT) bool {
-				name, _ := item.ExternalIDs["name"]
+				name := item.ExternalIDs["name"]
 				return name == "fakeNAT2"
 			},
 			expectedRc: []*nbdb.NAT{fakeNAT2},

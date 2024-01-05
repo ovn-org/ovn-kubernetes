@@ -147,8 +147,11 @@ func TestDeleteChassis(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
+			fakeDatapath := &sbdb.DatapathBinding{
+				UUID: fakeDatapathUUID,
+			}
 			dbSetup := libovsdbtest.TestSetup{
-				SBData: tt.initialDB,
+				SBData: append(tt.initialDB, fakeDatapath),
 			}
 			sbClient, cleanup, err := libovsdbtest.NewSBTestHarness(dbSetup, nil)
 			if err != nil {
@@ -166,7 +169,8 @@ func TestDeleteChassis(t *testing.T) {
 				t.Fatal(fmt.Errorf("%s: got unexpected error: %v", tt.desc, err))
 			}
 
-			matcher := libovsdbtest.HaveDataIgnoringUUIDs(tt.expectedDB)
+			expectedDB := append(tt.expectedDB, fakeDatapath)
+			matcher := libovsdbtest.HaveDataIgnoringUUIDs(expectedDB)
 			match, err := matcher.Match(sbClient)
 			if err != nil {
 				t.Fatalf("%s: matcher error: %v", tt.desc, err)

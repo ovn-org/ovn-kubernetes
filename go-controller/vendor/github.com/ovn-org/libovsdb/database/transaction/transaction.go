@@ -1,4 +1,4 @@
-package database
+package transaction
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/ovn-org/libovsdb/cache"
+	"github.com/ovn-org/libovsdb/database"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/libovsdb/updates"
@@ -19,31 +20,42 @@ type Transaction struct {
 	DeletedRows map[string]struct{}
 	Model       model.DatabaseModel
 	DbName      string
-	Database    Database
+	Database    database.Database
+	logger      *logr.Logger
 }
 
-func NewTransaction(model model.DatabaseModel, dbName string, database Database, logger *logr.Logger) Transaction {
+func NewTransaction(model model.DatabaseModel, dbName string, database database.Database, logger *logr.Logger) Transaction {
 	if logger != nil {
 		l := logger.WithName("transaction")
 		logger = &l
 	}
-	cache, err := cache.NewTableCache(model, nil, logger)
-	if err != nil {
-		panic(err)
-	}
+
 	return Transaction{
 		ID:          uuid.New(),
-		Cache:       cache,
 		DeletedRows: make(map[string]struct{}),
 		Model:       model,
 		DbName:      dbName,
 		Database:    database,
+		logger:      logger,
 	}
 }
 
-func (t *Transaction) Transact(operations []ovsdb.Operation) ([]*ovsdb.OperationResult, Update) {
-	results := []*ovsdb.OperationResult{}
+func (t *Transaction) Transact(operations ...ovsdb.Operation) ([]*ovsdb.OperationResult, database.Update) {
+	results := make([]*ovsdb.OperationResult, len(operations), len(operations)+1)
 	update := updates.ModelUpdates{}
+
+	if !t.Database.Exists(t.DbName) {
+		r := ovsdb.ResultFromError(fmt.Errorf("database does not exist"))
+		results[0] = &r
+		return results, updates.NewDatabaseUpdate(update, nil)
+	}
+
+	err := t.initializeCache()
+	if err != nil {
+		r := ovsdb.ResultFromError(err)
+		results[0] = &r
+		return results, updates.NewDatabaseUpdate(update, nil)
+	}
 
 	// Every Insert operation must have a UUID
 	for i := range operations {
@@ -54,31 +66,15 @@ func (t *Transaction) Transact(operations []ovsdb.Operation) ([]*ovsdb.Operation
 	}
 
 	// Ensure Named UUIDs are expanded in all operations
-	var err error
 	operations, err = ovsdb.ExpandNamedUUIDs(operations, &t.Model.Schema)
 	if err != nil {
 		r := ovsdb.ResultFromError(err)
-		return []*ovsdb.OperationResult{&r}, nil
+		results[0] = &r
+		return results, updates.NewDatabaseUpdate(update, nil)
 	}
 
 	var r ovsdb.OperationResult
-	for _, op := range operations {
-		// if we had a previous error, just append a nil result for every op
-		// after that
-		if r.Error != "" {
-			results = append(results, nil)
-			continue
-		}
-
-		// simple case: database name does not exist
-		if !t.Database.Exists(t.DbName) {
-			r = ovsdb.OperationResult{
-				Error: "database does not exist",
-			}
-			results = append(results, &r)
-			continue
-		}
-
+	for i, op := range operations {
 		var u *updates.ModelUpdates
 		switch op.Op {
 		case ovsdb.OperationInsert:
@@ -118,12 +114,39 @@ func (t *Transaction) Transact(operations []ovsdb.Operation) ([]*ovsdb.Operation
 		}
 
 		result := r
-		results = append(results, &result)
+		results[i] = &result
+
+		// if an operation failed, no need to process any further operation
+		if r.Error != "" {
+			break
+		}
 	}
 
 	// if an operation failed, no need to do any further validation
 	if r.Error != "" {
-		return results, update
+		return results, updates.NewDatabaseUpdate(update, nil)
+	}
+
+	// if there is no updates, no need to do any further validation
+	if len(update.GetUpdatedTables()) == 0 {
+		return results, updates.NewDatabaseUpdate(update, nil)
+	}
+
+	// check & update references
+	update, refUpdates, refs, err := updates.ProcessReferences(t.Model, t.Database, update)
+	if err != nil {
+		r = ovsdb.ResultFromError(err)
+		results = append(results, &r)
+		return results, updates.NewDatabaseUpdate(update, refs)
+	}
+
+	// apply updates resulting from referential integrity to the transaction
+	// caches so they are accounted for when checking index constraints
+	err = t.applyReferenceUpdates(refUpdates)
+	if err != nil {
+		r = ovsdb.ResultFromError(err)
+		results = append(results, &r)
+		return results, updates.NewDatabaseUpdate(update, refs)
 	}
 
 	// check index constraints
@@ -136,12 +159,58 @@ func (t *Transaction) Transact(operations []ovsdb.Operation) ([]*ovsdb.Operation
 			r := ovsdb.ResultFromError(err)
 			results = append(results, &r)
 		}
+
+		return results, updates.NewDatabaseUpdate(update, refs)
 	}
 
-	return results, update
+	return results, updates.NewDatabaseUpdate(update, refs)
+}
+
+func (t *Transaction) applyReferenceUpdates(update updates.ModelUpdates) error {
+	tables := update.GetUpdatedTables()
+	for _, table := range tables {
+		err := update.ForEachModelUpdate(table, func(uuid string, old, new model.Model) error {
+			// track deleted rows due to reference updates
+			if old != nil && new == nil {
+				t.DeletedRows[uuid] = struct{}{}
+			}
+			// warm the cache with updated and deleted rows due to reference
+			// updates
+			if old != nil && !t.Cache.Table(table).HasRow(uuid) {
+				row, err := t.Database.Get(t.DbName, table, uuid)
+				if err != nil {
+					return err
+				}
+				err = t.Cache.Table(table).Create(uuid, row, false)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	// apply reference updates to the cache
+	return t.Cache.ApplyCacheUpdate(update)
+}
+
+func (t *Transaction) initializeCache() error {
+	if t.Cache != nil {
+		return nil
+	}
+	var err error
+	t.Cache, err = cache.NewTableCache(t.Model, nil, t.logger)
+	return err
 }
 
 func (t *Transaction) rowsFromTransactionCacheAndDatabase(table string, where []ovsdb.Condition) (map[string]model.Model, error) {
+	err := t.initializeCache()
+	if err != nil {
+		return nil, err
+	}
+
 	txnRows, err := t.Cache.Table(table).RowsByCondition(where)
 	if err != nil {
 		return nil, fmt.Errorf("failed getting rows for table %s from transaction cache: %v", table, err)

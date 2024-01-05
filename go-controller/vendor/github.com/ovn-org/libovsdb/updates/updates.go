@@ -71,8 +71,10 @@ func (u ModelUpdates) GetModel(table, uuid string) model.Model {
 	if u.updates == nil {
 		return nil
 	}
-	if table, found := u.updates[table]; found {
-		return table[uuid].new
+	if t, found := u.updates[table]; found {
+		if update, found := t[uuid]; found {
+			return update.new
+		}
 	}
 	return nil
 }
@@ -83,8 +85,10 @@ func (u ModelUpdates) GetRow(table, uuid string) *ovsdb.Row {
 	if u.updates == nil {
 		return nil
 	}
-	if table, found := u.updates[table]; found {
-		return table[uuid].rowUpdate2.New
+	if t, found := u.updates[table]; found {
+		if update, found := t[uuid]; found {
+			return update.rowUpdate2.New
+		}
 	}
 	return nil
 }
@@ -218,13 +222,21 @@ func (u *ModelUpdates) addUpdate(dbModel model.DatabaseModel, table, uuid string
 		return err
 	}
 
-	// If after the merge this amounts to no update, remove it from the list
-	if update.isEmpty() {
-		delete(u.updates[table], uuid)
+	if !update.isEmpty() {
+		u.updates[table][uuid] = update
 		return nil
 	}
 
-	u.updates[table][uuid] = update
+	// If after the merge this amounts to no update, remove it from the list and
+	// clean up
+	delete(u.updates[table], uuid)
+	if len(u.updates[table]) == 0 {
+		delete(u.updates, table)
+	}
+	if len(u.updates) == 0 {
+		u.updates = nil
+	}
+
 	return nil
 }
 

@@ -963,6 +963,11 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					Name: ovntypes.OVNClusterRouter,
 					UUID: ovntypes.OVNClusterRouter + "-UUID",
 				}
+				gwRouter := &nbdb.LogicalRouter{
+					Name:  ovntypes.GWRouterPrefix + node1.Name,
+					UUID:  ovntypes.GWRouterPrefix + node1.Name + "-UUID",
+					Ports: []string{ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID"},
+				}
 				node1LRP := &nbdb.LogicalRouterPort{
 					UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
 					Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
@@ -972,6 +977,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 					},
 				}
@@ -1071,8 +1077,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				v4lrp1 := egressServiceRouterPolicy("v4lrp1-UUID", "testns/svc1", "10.128.1.5", "10.128.1.2")
 				v4lrp2 := egressServiceRouterPolicy("v4lrp2-UUID", "testns/svc1", "10.128.2.5", "10.128.1.2")
 				v4lrpic := egressServiceRouterPolicy("v4lrsr-UUID", "testns/svc1:ic", "10.128.2.5", "10.128.1.2")
-				expectedDatabaseState := []libovsdbtest.TestData{}
-				expectedEgressSvcAddrSet := []string{}
+				var expectedDatabaseState []libovsdbtest.TestData
+				var expectedEgressSvcAddrSet []string
 				v4DefaultReRoute := getReRouteStaticRoute("10.128.0.0/16", nodeLogicalRouterIPv4[0])
 				v6DefaultReRoute := getReRouteStaticRoute("fe00::/16", nodeLogicalRouterIPv6[0])
 				v6DefaultReRoute.UUID = "reroute-static-route-UUID-v6"
@@ -1080,6 +1086,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v4lrp2-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrp2,
@@ -1089,6 +1096,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v4lrsr-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrpic,
@@ -1118,6 +1126,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v4lrp2-UUID", "v6lrp1-UUID", "v6lrp2-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrp2,
@@ -1129,6 +1138,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v6lrp1-UUID", "v4lrsr-UUID", "v6lrsr-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrpic,
@@ -1163,6 +1173,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v4lrp2-UUID", "v4lrp3-UUID", "v6lrp2-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrp2,
@@ -1174,6 +1185,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v4lrp3-UUID", "v4lrsr-UUID", "v6lrsr-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrpic,
@@ -1200,6 +1212,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v6lrp2-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v6lrp2,
 					}
@@ -1208,6 +1221,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v6lrsr-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v6lrpic,
 						v4DefaultReRoute,
@@ -1230,6 +1244,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				clusterRouter.Policies = []string{}
 				expectedDatabaseState = []libovsdbtest.TestData{
 					clusterRouter,
+					gwRouter,
 					node1LRP,
 				}
 				if interconnectEnabled {

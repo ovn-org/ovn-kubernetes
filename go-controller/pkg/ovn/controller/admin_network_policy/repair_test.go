@@ -80,37 +80,70 @@ func TestAdminNetworkPolicyRepair(t *testing.T) {
 				},
 			},
 			initialDb: []libovsdbtest.TestData{
+				&nbdb.LogicalSwitch{
+					Ports: []string{"sansa", "stark", "silvester", "tweety"},
+				},
+				&nbdb.LogicalSwitchPort{UUID: "sansa", Name: "sansa"},
+				&nbdb.LogicalSwitchPort{UUID: "stark", Name: "stark"},
+				&nbdb.LogicalSwitchPort{UUID: "silvester", Name: "silvester"},
+				&nbdb.LogicalSwitchPort{UUID: "tweety", Name: "tweety"},
 				portGroup("AegonTargaryen", []*nbdb.LogicalSwitchPort{{UUID: "sansa"}, {UUID: "stark"}}, nil, false),
+				accessControlList("arya", libovsdbutil.ACLEgress, 3, false),
+				accessControlList("stark", libovsdbutil.ACLEgress, 29200, false),
 				portGroup("DaenerysTargaryen",
 					nil,
-					[]*nbdb.ACL{accessControlList("arya", libovsdbutil.ACLEgress, 3, false),
-						accessControlList("stark", libovsdbutil.ACLEgress, 29200, false)},
+					[]*nbdb.ACL{
+						accessControlList("arya", libovsdbutil.ACLEgress, 3, false),
+						accessControlList("stark", libovsdbutil.ACLEgress, 29200, false),
+					},
 					false),
-				// NOTE: test framework doesn't removed referenced ACLs; so they are usually left hanging if any)
+				accessControlList("tom", libovsdbutil.ACLEgress, 3, false),
+				accessControlList("jerry", libovsdbutil.ACLEgress, 3, false),
 				portGroup("RoadRunner",
 					[]*nbdb.LogicalSwitchPort{{UUID: "silvester"}, {UUID: "tweety"}},
-					[]*nbdb.ACL{accessControlList("tom", libovsdbutil.ACLEgress, 3, false),
-						accessControlList("jerry", libovsdbutil.ACLEgress, 3, false)},
+					[]*nbdb.ACL{
+						accessControlList("tom", libovsdbutil.ACLEgress, 3, false),
+						accessControlList("jerry", libovsdbutil.ACLEgress, 3, false),
+					},
 					false), // stalePG
 				// "RoadRunner1" PG doesn't have any externalIDs that match ANP controller's, so ignored
+				accessControlList("tom1", libovsdbutil.ACLEgress, 3, false),
+				accessControlList("jerry1", libovsdbutil.ACLEgress, 3, false),
 				stalePGWithoutExtIDs("RoadRunner1",
 					[]*nbdb.LogicalSwitchPort{{UUID: "silvester"}, {UUID: "tweety"}},
-					[]*nbdb.ACL{accessControlList("tom1", libovsdbutil.ACLEgress, 3, false),
-						accessControlList("jerry1", libovsdbutil.ACLEgress, 3, false)},
+					[]*nbdb.ACL{
+						accessControlList("tom1", libovsdbutil.ACLEgress, 3, false),
+						accessControlList("jerry1", libovsdbutil.ACLEgress, 3, false),
+					},
 					false), // stalePG
 			},
 			expectedDb: []libovsdbtest.TestData{
+				&nbdb.LogicalSwitch{
+					Ports: []string{"sansa", "stark", "silvester", "tweety"},
+				},
+				&nbdb.LogicalSwitchPort{UUID: "sansa", Name: "sansa"},
+				&nbdb.LogicalSwitchPort{UUID: "stark", Name: "stark"},
+				&nbdb.LogicalSwitchPort{UUID: "silvester", Name: "silvester"},
+				&nbdb.LogicalSwitchPort{UUID: "tweety", Name: "tweety"},
 				portGroup("AegonTargaryen", []*nbdb.LogicalSwitchPort{{UUID: "sansa"}, {UUID: "stark"}}, nil, false),
+				accessControlList("arya", libovsdbutil.ACLEgress, 3, false),
+				accessControlList("stark", libovsdbutil.ACLEgress, 29200, false),
 				portGroup("DaenerysTargaryen",
 					nil,
-					[]*nbdb.ACL{accessControlList("arya", libovsdbutil.ACLEgress, 3, false),
-						accessControlList("stark", libovsdbutil.ACLEgress, 29200, false)},
+					[]*nbdb.ACL{
+						accessControlList("arya", libovsdbutil.ACLEgress, 3, false),
+						accessControlList("stark", libovsdbutil.ACLEgress, 29200, false),
+					},
 					false),
 				// "RoadRunner1" PG doesn't have any externalIDs that match ANP controller's, so ignored
+				accessControlList("tom1", libovsdbutil.ACLEgress, 3, false),
+				accessControlList("jerry1", libovsdbutil.ACLEgress, 3, false),
 				stalePGWithoutExtIDs("RoadRunner1",
 					[]*nbdb.LogicalSwitchPort{{UUID: "silvester"}, {UUID: "tweety"}},
-					[]*nbdb.ACL{accessControlList("tom1", libovsdbutil.ACLEgress, 3, false),
-						accessControlList("jerry1", libovsdbutil.ACLEgress, 3, false)},
+					[]*nbdb.ACL{
+						accessControlList("tom1", libovsdbutil.ACLEgress, 3, false),
+						accessControlList("jerry1", libovsdbutil.ACLEgress, 3, false),
+					},
 					false), // stalePG
 			},
 		},
@@ -211,28 +244,71 @@ func TestBaselineAdminNetworkPolicyRepair(t *testing.T) {
 				},
 			},
 			initialDb: []libovsdbtest.TestData{
+				&nbdb.LogicalSwitch{
+					Ports: []string{"sansa", "stark", "silvester", "tweety"},
+				},
+				&nbdb.LogicalSwitchPort{UUID: "sansa", Name: "sansa"},
+				&nbdb.LogicalSwitchPort{UUID: "stark", Name: "stark"},
+				&nbdb.LogicalSwitchPort{UUID: "silvester", Name: "silvester"},
+				&nbdb.LogicalSwitchPort{UUID: "tweety", Name: "tweety"},
 				portGroup("AegonTargaryen", []*nbdb.LogicalSwitchPort{{UUID: "sansa"}, {UUID: "stark"}}, nil, true),
-				portGroup("DaenerysTargaryen", nil,
-					[]*nbdb.ACL{accessControlList("arya", libovsdbutil.ACLEgress, 3, true),
-						accessControlList("stark", libovsdbutil.ACLEgress, 29200, true)}, true),
-				// NOTE: test framework doesn't removed referenced ACLs; so they are usually left hanging if any)
-				portGroup("RoadRunner", []*nbdb.LogicalSwitchPort{{UUID: "silvester"}, {UUID: "tweety"}},
-					[]*nbdb.ACL{accessControlList("tom", libovsdbutil.ACLEgress, 3, true),
-						accessControlList("jerry", libovsdbutil.ACLEgress, 3, true)}, true), // stalePG
+				accessControlList("arya", libovsdbutil.ACLEgress, 3, true),
+				accessControlList("stark", libovsdbutil.ACLEgress, 29200, true),
+				portGroup("DaenerysTargaryen",
+					nil,
+					[]*nbdb.ACL{
+						accessControlList("arya", libovsdbutil.ACLEgress, 3, true),
+						accessControlList("stark", libovsdbutil.ACLEgress, 29200, true),
+					},
+					true),
+				accessControlList("tom", libovsdbutil.ACLEgress, 3, true),
+				accessControlList("jerry", libovsdbutil.ACLEgress, 3, true),
+				portGroup("RoadRunner",
+					[]*nbdb.LogicalSwitchPort{{UUID: "silvester"}, {UUID: "tweety"}},
+					[]*nbdb.ACL{
+						accessControlList("tom", libovsdbutil.ACLEgress, 3, true),
+						accessControlList("jerry", libovsdbutil.ACLEgress, 3, true),
+					},
+					true), // stalePG
 				// "RoadRunner1" PG doesn't have any externalIDs that match ANP controller's, so ignored
-				stalePGWithoutExtIDs("RoadRunner1", []*nbdb.LogicalSwitchPort{{UUID: "silvester"}, {UUID: "tweety"}},
-					[]*nbdb.ACL{accessControlList("tom1", libovsdbutil.ACLEgress, 3, true),
-						accessControlList("jerry1", libovsdbutil.ACLEgress, 3, true)}, true), // stalePG
+				accessControlList("tom1", libovsdbutil.ACLEgress, 3, true),
+				accessControlList("jerry1", libovsdbutil.ACLEgress, 3, true),
+				stalePGWithoutExtIDs("RoadRunner1",
+					[]*nbdb.LogicalSwitchPort{{UUID: "silvester"}, {UUID: "tweety"}},
+					[]*nbdb.ACL{
+						accessControlList("tom1", libovsdbutil.ACLEgress, 3, true),
+						accessControlList("jerry1", libovsdbutil.ACLEgress, 3, true),
+					},
+					true), // stalePG
 			},
 			expectedDb: []libovsdbtest.TestData{
+				&nbdb.LogicalSwitch{
+					Ports: []string{"sansa", "stark", "silvester", "tweety"},
+				},
+				&nbdb.LogicalSwitchPort{UUID: "sansa", Name: "sansa"},
+				&nbdb.LogicalSwitchPort{UUID: "stark", Name: "stark"},
+				&nbdb.LogicalSwitchPort{UUID: "silvester", Name: "silvester"},
+				&nbdb.LogicalSwitchPort{UUID: "tweety", Name: "tweety"},
 				portGroup("AegonTargaryen", []*nbdb.LogicalSwitchPort{{UUID: "sansa"}, {UUID: "stark"}}, nil, true),
-				portGroup("DaenerysTargaryen", nil,
-					[]*nbdb.ACL{accessControlList("arya", libovsdbutil.ACLEgress, 3, true),
-						accessControlList("stark", libovsdbutil.ACLEgress, 29200, true)}, true),
+				accessControlList("arya", libovsdbutil.ACLEgress, 3, true),
+				accessControlList("stark", libovsdbutil.ACLEgress, 29200, true),
+				portGroup("DaenerysTargaryen",
+					nil,
+					[]*nbdb.ACL{
+						accessControlList("arya", libovsdbutil.ACLEgress, 3, true),
+						accessControlList("stark", libovsdbutil.ACLEgress, 29200, true),
+					},
+					true),
 				// "RoadRunner1" PG doesn't have any externalIDs that match ANP controller's, so ignored
-				stalePGWithoutExtIDs("RoadRunner1", []*nbdb.LogicalSwitchPort{{UUID: "silvester"}, {UUID: "tweety"}},
-					[]*nbdb.ACL{accessControlList("tom1", libovsdbutil.ACLEgress, 3, true),
-						accessControlList("jerry1", libovsdbutil.ACLEgress, 3, true)}, true), // stalePG
+				accessControlList("tom1", libovsdbutil.ACLEgress, 3, true),
+				accessControlList("jerry1", libovsdbutil.ACLEgress, 3, true),
+				stalePGWithoutExtIDs("RoadRunner1",
+					[]*nbdb.LogicalSwitchPort{{UUID: "silvester"}, {UUID: "tweety"}},
+					[]*nbdb.ACL{
+						accessControlList("tom1", libovsdbutil.ACLEgress, 3, true),
+						accessControlList("jerry1", libovsdbutil.ACLEgress, 3, true),
+					},
+					true), // stalePG
 			},
 		},
 		{

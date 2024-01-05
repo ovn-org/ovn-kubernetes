@@ -618,8 +618,8 @@ github.com/openshift/client-go v0.0.0-20230503144108-75015d2347cb h1:Nij5OnaECrk
 github.com/openshift/client-go v0.0.0-20230503144108-75015d2347cb/go.mod h1:Rhb3moCqeiTuGHAbXBOlwPubUMlOZEkrEWTRjIF3jzs=
 github.com/openshift/custom-resource-status v1.1.2 h1:C3DL44LEbvlbItfd8mT5jWrqPfHnSOQoQf/sypqA6A4=
 github.com/openshift/custom-resource-status v1.1.2/go.mod h1:DB/Mf2oTeiAmVVX1gN+NEqweonAPY0TKUwADizj8+ZA=
-github.com/ovn-org/libovsdb v0.6.1-0.20230711201130-6785b52d4020 h1:yXJ7ZLNWEwaLWD0rCJKCMwG2xAD2bDJTbzskTq9HJNE=
-github.com/ovn-org/libovsdb v0.6.1-0.20230711201130-6785b52d4020/go.mod h1:6dt3gtS8wj89D+MotriocA/t5Vd8LfpzR5/ruKW2ses=
+github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892 h1:/yg3/z+RH+iDLMxp6FTnmlk5bStK542/Rge5EBjnA9A=
+github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892/go.mod h1:LC5DOvcY58jOG3HTvDyCVidoMJDurPeu+xlxv5Krd9Q=
 github.com/pborman/uuid v1.2.0 h1:J7Q5mO4ysT1dv8hyrUGHb9+ooztCXu1D8MY8DZYsu3g=
 github.com/pborman/uuid v1.2.0/go.mod h1:X/NO0urCmaxf9VXbdlT7C2Yzkj2IKimNn4k+gtPdI/k=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=

@@ -284,6 +284,11 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 			},
 		}
 		initialDb := []libovsdbtest.TestData{
+			&nbdb.LogicalSwitch{
+				UUID:     "node1-UUID",
+				Name:     "node1",
+				QOSRules: []string{"qos1-UUID"},
+			},
 			&nbdb.QoS{
 				Direction:   nbdb.QoSDirectionToLport,
 				Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName,
@@ -378,6 +383,11 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 					ExternalIDs: map[string]string{"EgressQoS": "namespace"},
 					UUID:        "qos5-UUID",
 				},
+				&nbdb.LogicalSwitch{
+					UUID:     "node1-UUID",
+					Name:     "node1",
+					QOSRules: []string{"qos1-UUID", "qos2-UUID", "qos3-UUID", "qos4-UUID", "qos5-UUID"},
+				},
 			}
 			testSyncerWithData(testData, initialDb, nil, controllerName, disableBatching)
 		})
@@ -406,7 +416,14 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 			types.PlaceHolderACLTier,
 		)
 		acl.UUID = "acl-UUID"
-		initialDb := []libovsdbtest.TestData{acl}
+		initialDb := []libovsdbtest.TestData{
+			acl,
+			&nbdb.LogicalSwitch{
+				UUID: "node1-UUID",
+				Name: "node1",
+				ACLs: []string{acl.UUID},
+			},
+		}
 		testSyncerWithData(testData, initialDb, nil, controllerName, false)
 	})
 	ginkgo.It("updates address set owned by NetworkPolicyOwnerType and its references", func() {
@@ -456,7 +473,15 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 			types.PlaceHolderACLTier,
 		)
 		acl2.UUID = "acl2-UUID"
-		initialDb := []libovsdbtest.TestData{acl1, acl2}
+		initialDb := []libovsdbtest.TestData{
+			acl1,
+			acl2,
+			&nbdb.LogicalSwitch{
+				UUID: "node1-UUID",
+				Name: "node1",
+				ACLs: []string{acl1.UUID, acl2.UUID},
+			},
+		}
 		testSyncerWithData(testData, initialDb, nil, controllerName, false)
 	})
 	ginkgo.It("updates address set owned by NamespaceOwnerType and its references", func() {
@@ -506,6 +531,12 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				UUID:     types.OVNClusterRouter + "-UUID",
 				Name:     types.OVNClusterRouter,
 				Policies: []string{"lrp1"},
+			},
+			&nbdb.LogicalSwitch{
+				UUID:     "node1-UUID",
+				Name:     "node1",
+				ACLs:     []string{acl.UUID},
+				QOSRules: []string{"qos1-UUID"},
 			},
 		}
 		testSyncerWithData(testData, initialDb, nil, controllerName, false)

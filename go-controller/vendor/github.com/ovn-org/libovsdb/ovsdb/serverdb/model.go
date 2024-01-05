@@ -83,7 +83,8 @@ var schema = `{
             "max": 1
           }
         }
-      }
+      },
+      "isRoot": true
     }
   }
 }`
