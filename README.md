@@ -2,7 +2,7 @@
 
 On Linux, the easiest way to get started is to use OVN DaemonSet and Deployments.
 
-# Master Based Ovn-Kubernetes Images 
+# Master Based OVN-Kubernetes Images 
 
 With every PR that is merged into master, ovn-kubernetes images are automatically
 rebuilt and pushed to ghcr.io (i.e [ovn-org's packages](https://github.com/orgs/ovn-org/packages))
