@@ -109,13 +109,16 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			e.Run(1, stopChan)
 		}()
 
-		wait.PollImmediate(
+		err = wait.PollUntilContextTimeout(
+			context.Background(),
 			500*time.Millisecond,
 			5*time.Second,
-			func() (bool, error) {
+			true,
+			func(context.Context) (done bool, err error) {
 				return e.Synced(), nil
 			},
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() (bool, error) {
 			ns, err := k.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
@@ -172,13 +175,16 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			e.Run(1, stopChan)
 		}()
 
-		wait.PollImmediate(
+		err = wait.PollUntilContextTimeout(
+			context.Background(),
 			500*time.Millisecond,
 			5*time.Second,
-			func() (bool, error) {
+			true,
+			func(context.Context) (done bool, err error) {
 				return e.Synced(), nil
 			},
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() (bool, error) {
 			ns, err := k.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
@@ -261,6 +267,11 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			return pod != nil, nil
 		}, 2).Should(BeTrue())
 
+		// Make sure the initial 'add' took place. This is important because the worker may take a
+		// while to get started and synced from the informer. If that happened, the add and the update
+		// performed below would be combined into a single 'add' event.
+		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
+
 		pod.Annotations = map[string]string{"bar": "baz"}
 		pod.ResourceVersion = "11"
 
@@ -324,13 +335,16 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			e.Run(1, stopChan)
 		}()
 
-		wait.PollImmediate(
+		err = wait.PollUntilContextTimeout(
+			context.Background(),
 			500*time.Millisecond,
 			5*time.Second,
-			func() (bool, error) {
+			true,
+			func(context.Context) (done bool, err error) {
 				return e.Synced(), nil
 			},
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() (bool, error) {
 			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
@@ -395,13 +409,16 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			e.Run(1, stopChan)
 		}()
 
-		wait.PollImmediate(
+		err = wait.PollUntilContextTimeout(
+			context.Background(),
 			500*time.Millisecond,
 			5*time.Second,
-			func() (bool, error) {
+			true,
+			func(context.Context) (done bool, err error) {
 				return e.Synced(), nil
 			},
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() (bool, error) {
 			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
@@ -466,13 +483,16 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			e.Run(1, stopChan)
 		}()
 
-		wait.PollImmediate(
+		err = wait.PollUntilContextTimeout(
+			context.Background(),
 			500*time.Millisecond,
 			5*time.Second,
-			func() (bool, error) {
+			true,
+			func(context.Context) (done bool, err error) {
 				return e.Synced(), nil
 			},
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() (bool, error) {
 			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
