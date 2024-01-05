@@ -42,6 +42,9 @@ var _ = Describe("Egress Service Operations", func() {
 		app.Flags = config.Flags
 		fExec = ovntest.NewLooseCompareFakeExec()
 		fakeOvnNode = NewFakeOVNNode(fExec)
+		fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=15 --no-heading --data=bare --format=csv --columns name list interface",
+		})
 
 		config.OVNKubernetesFeature.EnableEgressService = true
 		_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
