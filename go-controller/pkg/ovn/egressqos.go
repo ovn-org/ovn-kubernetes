@@ -397,12 +397,6 @@ func (oc *DefaultNetworkController) repairEgressQoSes() error {
 	if len(existingQoSes) > 0 {
 		allOps := []ovsdb.Operation{}
 
-		ops, err := libovsdbops.DeleteQoSesOps(oc.nbClient, nil, existingQoSes...)
-		if err != nil {
-			return err
-		}
-		allOps = append(allOps, ops...)
-
 		logicalSwitches, err := oc.egressQoSSwitches()
 		if err != nil {
 			return err
