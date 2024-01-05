@@ -234,6 +234,10 @@ ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
 ovn_v4_masquerade_subnet=${OVN_V4_MASQUERADE_SUBNET:-}
 # OVN_V6_MASQUERADE_SUBNET - v6 masquerade subnet
 ovn_v6_masquerade_subnet=${OVN_V6_MASQUERADE_SUBNET:-}
+# OVN_V4_TRANSIT_SWITCH_SUBNET - v4 Transit switch subnet
+ovn_v4_transit_switch_subnet=${OVN_V4_TRANSIT_SWITCH_SUBNET:-}
+# OVN_V6_TRANSIT_SWITCH_SUBNET - v6 Transit switch subnet
+ovn_v6_transit_switch_subnet=${OVN_V6_TRANSIT_SWITCH_SUBNET:-}
 #OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 #OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
@@ -2015,6 +2019,18 @@ ovn-cluster-manager() {
   fi
   echo "ovn_v6_masquerade_subnet_opt=${ovn_v6_masquerade_subnet_opt}"
 
+  ovn_v4_transit_switch_subnet_opt=
+  if [[ -n ${ovn_v4_transit_switch_subnet} ]]; then
+      ovn_v4_transit_switch_subnet_opt="--cluster-manager-v4-transit-switch-subnet=${ovn_v4_transit_switch_subnet}"
+  fi
+  echo "ovn_v4_transit_switch_subnet_opt=${ovn_v4_transit_switch_subnet}"
+
+  ovn_v6_transit_switch_subnet_opt=
+  if [[ -n ${ovn_v6_transit_switch_subnet} ]]; then
+      ovn_v6_transit_switch_subnet_opt="--cluster-manager-v6-transit-switch-subnet=${ovn_v6_transit_switch_subnet}"
+  fi
+  echo "ovn_v6_transit_switch_subnet_opt=${ovn_v6_transit_switch_subnet}"
+
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
@@ -2075,6 +2091,8 @@ ovn-cluster-manager() {
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
+    ${ovn_v4_transit_switch_subnet_opt} \
+    ${ovn_v6_transit_switch_subnet_opt} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --host-network-namespace ${ovn_host_network_namespace} \
     --logfile-maxage=${ovnkube_logfile_maxage} \

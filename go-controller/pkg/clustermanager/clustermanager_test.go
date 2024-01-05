@@ -21,6 +21,7 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -1173,6 +1174,8 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 	ginkgo.Context("Transit switch port IP allocations", func() {
 		ginkgo.It("Interconnect enabled", func() {
+			config.ClusterManager.V4TransitSwitchSubnet = "100.89.0.0/16"
+			config.ClusterManager.V6TransitSwitchSubnet = "fd98::/64"
 			app.Action = func(ctx *cli.Context) error {
 				nodes := []v1.Node{
 					{
@@ -1236,6 +1239,23 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 							return fmt.Errorf("transit switch ips for node %s not allocated", n.Name)
 						}
 
+						_, transitSwitchV4Subnet, err := net.ParseCIDR(config.ClusterManager.V4TransitSwitchSubnet)
+						if err != nil {
+							return fmt.Errorf("could not parse IPv4 transit switch subnet %v", err)
+						}
+
+						_, transitSwitchV6Subnet, err := net.ParseCIDR(config.ClusterManager.V6TransitSwitchSubnet)
+						if err != nil {
+							return fmt.Errorf("could not parse IPv6 transit switch subnet %v", err)
+						}
+
+						for _, ipNet := range transitSwitchIps {
+							if !transitSwitchV4Subnet.Contains(ipNet.IP) && utilnet.IsIPv4CIDR(ipNet) {
+								return fmt.Errorf("IPv4 transit switch ips for node %s does not belong to expected subnet", n.Name)
+							} else if !transitSwitchV6Subnet.Contains(ipNet.IP) && utilnet.IsIPv6CIDR(ipNet) {
+								return fmt.Errorf("IPv6 transit switch ips for node %s does not belong to expected subnet", n.Name)
+							}
+						}
 						return nil
 					}).ShouldNot(gomega.HaveOccurred())
 				}
@@ -1245,7 +1265,8 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 			err := app.Run([]string{
 				app.Name,
-				"-cluster-subnets=" + clusterCIDR,
+				"-cluster-subnets=" + clusterCIDR + "," + clusterv6CIDR,
+				"-k8s-service-cidr=10.96.0.0/16,fd00:10:96::/112",
 				"--enable-interconnect",
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
