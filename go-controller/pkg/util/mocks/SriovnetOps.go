@@ -67,6 +67,30 @@ func (_m *SriovnetOps) GetNetDevicesFromPci(pciAddress string) ([]string, error)
 	return r0, r1
 }
 
+// GetPCIFromDeviceName provides a mock function with given fields: netdevName
+func (_m *SriovnetOps) GetPCIFromDeviceName(netdevName string) (string, error) {
+	ret := _m.Called(netdevName)
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(netdevName)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(netdevName)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(netdevName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetPfIndexByVfPciAddress provides a mock function with given fields: vfPciAddress
 func (_m *SriovnetOps) GetPfIndexByVfPciAddress(vfPciAddress string) (int, error) {
 	ret := _m.Called(vfPciAddress)
