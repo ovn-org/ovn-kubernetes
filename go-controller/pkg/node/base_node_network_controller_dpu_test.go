@@ -136,12 +136,14 @@ var _ = Describe("Node DPU tests", func() {
 
 	Context("addRepPort", func() {
 		var vfRep string
+		var vfPciAddress string
 		var vfLink *linkMock.Link
 		var ifInfo *cni.PodInterfaceInfo
 		var scd util.DPUConnectionDetails
 
 		BeforeEach(func() {
 			vfRep = "pf0vf9"
+			vfPciAddress = "0000:03:00.0"
 			vfLink = &linkMock.Link{}
 			ifInfo = &cni.PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
@@ -178,14 +180,32 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
 
+		It("Fails if GetPCIFromDeviceName fails", func() {
+			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
+			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return("", fmt.Errorf("could not find PCI Address"))
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+
+			// call addRepPort()
+			err := dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("could not find PCI Address"))
+			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+		})
+
 		It("Fails if configure OVS fails", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
+			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return(vfPciAddress, nil)
+
 			// set ovs CMD output
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSFindCmd("30", "Interface", "name",
 					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 			})
 			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSGetCmd("Open_vSwitch", ".", "external_ids", "ovn-pf-encap-ip-mapping"),
+				Output: "",
+			})
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
@@ -204,12 +224,17 @@ var _ = Describe("Node DPU tests", func() {
 
 		It("Fails if configure OVS fails but OVS interface is added", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
+			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return(vfPciAddress, nil)
 			// set ovs CMD output
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSFindCmd("30", "Interface", "name",
 					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 			})
 			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSGetCmd("Open_vSwitch", ".", "external_ids", "ovn-pf-encap-ip-mapping"),
+				Output: "",
+			})
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
@@ -233,12 +258,17 @@ var _ = Describe("Node DPU tests", func() {
 		Context("After successfully calling ConfigureOVS", func() {
 			BeforeEach(func() {
 				sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
+				sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return(vfPciAddress, nil)
 				// set ovs CMD output so cni.ConfigureOVS passes without error
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genOVSFindCmd("30", "Interface", "name",
 						"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 				})
 				checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    genOVSGetCmd("Open_vSwitch", ".", "external_ids", "ovn-pf-encap-ip-mapping"),
+					Output: "",
+				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				})

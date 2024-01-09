@@ -305,3 +305,13 @@ func (f *FakeExec) AddFakeCmdsNoOutputNoError(commands []string) {
 		f.AddFakeCmd(&ExpectedCmd{Cmd: cmd})
 	}
 }
+
+func (f *FakeExec) AddFakeCmds(commands []*ExpectedCmd) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for _, cmd := range commands {
+		cmd.Cmd = fakeBinPrefix + cmd.Cmd
+		f.expectedCommands = append(f.expectedCommands, cmd)
+	}
+}

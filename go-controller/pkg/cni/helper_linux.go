@@ -386,9 +386,42 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	return hostIface, contIface, nil
 }
 
+func getPfEncapIP(deviceID string) (string, error) {
+	stdout, err := ovsGet("Open_vSwitch", ".", "external_ids", "ovn-pf-encap-ip-mapping")
+	if err != nil {
+		return "", fmt.Errorf("failed to get ovn-pf-encap-ip-mapping, error: %v", err)
+	}
+
+	if len(stdout) == 0 {
+		return "", nil
+	}
+
+	encapIpMapping := map[string]string{}
+	mappings := strings.Split(stdout, ",")
+	for _, mapping := range mappings {
+		tokens := strings.Split(mapping, ":")
+		if len(tokens) != 2 {
+			return "", fmt.Errorf("bad ovn-pf-encap-ip-mapping config: %s", stdout)
+		}
+
+		encapIpMapping[tokens[0]] = tokens[1]
+	}
+
+	uplinkRepName, err := util.GetUplinkRepresentorName(deviceID)
+	if err != nil {
+		// FIXME(leih): unlikely to happen, treat this as a valid case and ignore for now.
+		klog.Errorf("Failed to get uplink representor for VF PCI address %s: %v",
+			deviceID, err)
+		return "", nil
+	}
+
+	encapIP := encapIpMapping[uplinkRepName]
+	return encapIP, nil
+}
+
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
-	ifInfo *PodInterfaceInfo, sandboxID string, getter PodInfoGetter) error {
+	ifInfo *PodInterfaceInfo, sandboxID, deviceID string, getter PodInfoGetter) error {
 
 	ifaceID := util.GetIfaceId(namespace, podName)
 	if ifInfo.NetName != types.DefaultNetworkName {
@@ -400,8 +433,8 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ipStrs[i] = ip.String()
 	}
 
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, NAD %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v",
-		namespace, podName, ifInfo.NetName, ifInfo.NADName, sandboxID, initialPodUID, ifInfo.MAC, ipStrs)
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, NAD %s, SandboxID: %q, PCI device ID: %s, UID: %q, MAC: %s, IPs: %v",
+		namespace, podName, ifInfo.NetName, ifInfo.NADName, sandboxID, deviceID, initialPodUID, ifInfo.MAC, ipStrs)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -440,12 +473,27 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	// Add the new sandbox's OVS port, tag the port as transient so stale
 	// pod ports are scrubbed on hard reboot
 	ovsArgs := []string{
-		"--may-exist", "add-port", "br-int", hostIfaceName, "other_config:transient=true", "--", "set",
-		"interface", hostIfaceName,
+		"--may-exist", "add-port", "br-int", hostIfaceName, "other_config:transient=true",
+		"--", "set", "interface", hostIfaceName,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
 		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
+	}
+
+	// In case of multi-vtep, host has multipe NICs and each NIC has a VTEP interface, the mapping
+	// of VTEP IP to NIC is stored in Open_vSwitch table's `external_ids:ovn-pf-encap-ip-mapping`,
+	// the value's format is:
+	//   enp1s0f0:<vtep-ip1>,enp193s0f0:<vtep-ip2>,enp197s0f0:<vtep-ip3>
+	// Here configure the OVS Interface's encap-ip according to the mapping.
+	if deviceID != "" {
+		encapIP, err := getPfEncapIP(deviceID)
+		if err != nil {
+			return err
+		}
+		if len(encapIP) > 0 {
+			ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:encap-ip=%s", encapIP))
+		}
 	}
 
 	// IPAM is optional for secondary flatL2 networks; thus, the ifaces may not
@@ -528,7 +576,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	}
 
 	if !ifInfo.IsDPUHostMode {
-		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID, getter)
+		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID, pr.CNIConf.DeviceID, getter)
 		if err != nil {
 			pr.deletePorts(hostIface.Name, pr.PodNamespace, pr.PodName)
 			return nil, err

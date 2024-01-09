@@ -6,11 +6,18 @@ package util
 import (
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 
 	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	"k8s.io/klog/v2"
+)
+
+const (
+	PcidevPrefix = "device"
+	NetSysDir    = "/sys/class/net"
 )
 
 type SriovnetOps interface {
@@ -29,6 +36,7 @@ type SriovnetOps interface {
 	IsVfPciVfioBound(pciAddr string) bool
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
 	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
+	GetPCIFromDeviceName(netdevName string) (string, error)
 }
 
 type defaultSriovnetOps struct {
@@ -203,4 +211,39 @@ func SetVFHardwreAddress(deviceID string, mac net.HardwareAddr) error {
 		return err
 	}
 	return nil
+}
+
+// From sriovnet, ideally should export from the lib and use it here.
+func readPCIsymbolicLink(symbolicLink string) (string, error) {
+	pciDevDir, err := os.Readlink(symbolicLink)
+	//nolint:gomnd
+	if len(pciDevDir) <= 3 {
+		return "", fmt.Errorf("could not find PCI Address")
+	}
+
+	return pciDevDir[9:], err
+}
+
+func (defaultSriovnetOps) GetPCIFromDeviceName(netdevName string) (string, error) {
+	symbolicLink := filepath.Join(NetSysDir, netdevName, PcidevPrefix)
+	pciAddress, err := readPCIsymbolicLink(symbolicLink)
+	if err != nil {
+		err = fmt.Errorf("%v for netdevice %s", err, netdevName)
+	}
+	return pciAddress, err
+}
+
+// GetUplinkRepresentorName returns uplink representor name for passed device ID.
+// Supported devices are Virtual Function or Scalable Function
+func GetUplinkRepresentorName(deviceID string) (string, error) {
+	var uplink string
+	var err error
+
+	if IsPCIDeviceName(deviceID) { // PCI device
+		uplink, err = GetSriovnetOps().GetUplinkRepresentor(deviceID)
+	} else if IsAuxDeviceName(deviceID) { // Auxiliary device
+		uplink, err = GetSriovnetOps().GetUplinkRepresentorFromAux(deviceID)
+	}
+
+	return uplink, err
 }
