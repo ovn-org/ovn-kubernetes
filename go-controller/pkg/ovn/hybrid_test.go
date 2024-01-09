@@ -153,12 +153,16 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 	const (
 		clusterIPNet string = "10.1.0.0"
 		clusterCIDR  string = clusterIPNet + "/16"
+		portStart           = 35000
+		portEnd             = 65535
 	)
+
+	var portRange = fmt.Sprintf("%d-%d", portStart, portEnd)
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
-
+		util.MockPortRangeFileSystemOps(ginkgo.GinkgoT(), portStart, portEnd)
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
@@ -172,7 +176,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 	})
 
 	ginkgo.AfterEach(func() {
-
 		close(stopChan)
 		wg.Wait()
 		if libovsdbCleanup != nil {
@@ -180,6 +183,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 		}
 		f.Shutdown()
 		wg.Wait()
+		util.SetFileSystemOps(util.GetDefaultFileSystemOps())
 	})
 
 	const hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
@@ -423,7 +427,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
-				node1.NodeMgmtPortIP, "1400")
+				node1.NodeMgmtPortIP, "1400", portRange)
 
 			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, "", hoSubnet, nodeHOIP, nodeHOMAC)
 
@@ -635,7 +639,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
-				node1.NodeMgmtPortIP, "1400")
+				node1.NodeMgmtPortIP, "1400", portRange)
 
 			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, "", hoSubnet, nodeHOIP, nodeHOMAC)
 
@@ -875,7 +879,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
-				node1.NodeMgmtPortIP, "1400")
+				node1.NodeMgmtPortIP, "1400", portRange)
 
 			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, winNodeName, winNodeSubnet, nodeHOIP, nodeHOMAC)
 
@@ -1530,7 +1534,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
-				node1.NodeMgmtPortIP, "1400")
+				node1.NodeMgmtPortIP, "1400", portRange)
 
 			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, "", hoSubnet, nodeHOIP, nodeHOMAC)
 

@@ -80,17 +80,20 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		clusterIPNet   string = "10.1.0.0"
 		clusterCIDR    string = clusterIPNet + "/16"
 		controllerName        = DefaultNetworkControllerName
+		portStart             = 35000
+		portEnd               = 65535
 	)
 	var (
-		fakeOvn *FakeOVN
-		wg      *sync.WaitGroup
+		fakeOvn   *FakeOVN
+		wg        *sync.WaitGroup
+		portRange = fmt.Sprintf("%d-%d", portStart, portEnd)
 	)
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		err := config.PrepareTestConfig()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
+		util.MockPortRangeFileSystemOps(ginkgo.GinkgoT(), portStart, portEnd)
 		fakeOvn = NewFakeOVN(true)
 		wg = &sync.WaitGroup{}
 	})
@@ -98,6 +101,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
 		wg.Wait()
+		util.SetFileSystemOps(util.GetDefaultFileSystemOps())
 	})
 
 	ginkgo.Context("on startup", func() {
@@ -336,7 +340,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
-				node1.NodeMgmtPortIP, "1400")
+				node1.NodeMgmtPortIP, "1400", portRange)
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			// check the namespace again and ensure the address set

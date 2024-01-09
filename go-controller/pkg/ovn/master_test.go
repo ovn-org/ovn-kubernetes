@@ -946,12 +946,16 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		clusterCIDR   string = clusterIPNet + "/16"
 		clusterv6CIDR string = "aef0::/48"
 		vlanID               = 1024
+		portStart            = 35000
+		portEnd              = 65535
 	)
+
+	var portRange = fmt.Sprintf("%d-%d", portStart, portEnd)
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
-
+		util.MockPortRangeFileSystemOps(ginkgo.GinkgoT(), portStart, portEnd)
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
@@ -1086,6 +1090,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		f.Shutdown()
 		close(recorder.Events)
 		wg.Wait()
+		util.SetFileSystemOps(util.GetDefaultFileSystemOps())
 	})
 
 	ginkgo.It("sets up a local gateway", func() {
@@ -1114,7 +1119,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
-				skipSnat, node1.NodeMgmtPortIP, "1400")
+				skipSnat, node1.NodeMgmtPortIP, "1400", portRange)
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
 
 			return nil
@@ -1161,7 +1166,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
-				skipSnat, node1.NodeMgmtPortIP, "1400")
+				skipSnat, node1.NodeMgmtPortIP, "1400", portRange)
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
 
 			return nil
@@ -1191,7 +1196,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
-				skipSnat, node1.NodeMgmtPortIP, "1400")
+				skipSnat, node1.NodeMgmtPortIP, "1400", portRange)
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
 
 			return nil
@@ -1235,7 +1240,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
-				skipSnat, node1.NodeMgmtPortIP, "1400")
+				skipSnat, node1.NodeMgmtPortIP, "1400", portRange)
 
 			// add stale SNATs from pods to nodes on wrong node
 			staleNats := []*nbdb.NAT{
@@ -1293,7 +1298,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
-				skipSnat, node1.NodeMgmtPortIP, "1400")
+				skipSnat, node1.NodeMgmtPortIP, "1400", portRange)
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
 
 			ginkgo.By("modifying the node and triggering an update")
@@ -1338,7 +1343,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
-				skipSnat, node1.NodeMgmtPortIP, "1400")
+				skipSnat, node1.NodeMgmtPortIP, "1400", portRange)
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
 
 			ginkgo.By("Bringing down NBDB")

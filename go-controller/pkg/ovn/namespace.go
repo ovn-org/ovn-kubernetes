@@ -251,7 +251,7 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 				} else {
 					if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
 						errors = append(errors, err)
-					} else if err = addOrUpdatePodSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podAnnotation.IPs); err != nil {
+					} else if err = addOrUpdatePodSNAT(oc.nbClient, pod.Spec.NodeName, oc.externalPortRange, extIPs, podAnnotation.IPs); err != nil {
 						errors = append(errors, err)
 					}
 				}

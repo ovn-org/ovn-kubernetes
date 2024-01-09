@@ -592,7 +592,7 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 		err = oc.eIPC.nodeZoneState.DoWithLock(status.Node, func(key string) error {
 			if status.Node == pod.Spec.NodeName {
 				// we are safe, no need to grab lock again
-				if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod, podIPs); err != nil {
+				if err := oc.eIPC.addPodEgressIPAssignment(name, oc.externalPortRange, status, pod, podIPs); err != nil {
 					return fmt.Errorf("unable to create egressip configuration for pod %s/%s/%v, err: %w", pod.Namespace, pod.Name, podIPs, err)
 				}
 				podState.egressStatuses.statusMap[status] = ""
@@ -600,7 +600,7 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 			}
 			return oc.eIPC.nodeZoneState.DoWithLock(pod.Spec.NodeName, func(key string) error {
 				// we need to grab lock again for pod's node
-				if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod, podIPs); err != nil {
+				if err := oc.eIPC.addPodEgressIPAssignment(name, oc.externalPortRange, status, pod, podIPs); err != nil {
 					return fmt.Errorf("unable to create egressip configuration for pod %s/%s/%v, err: %w", pod.Namespace, pod.Name, podIPs, err)
 				}
 				podState.egressStatuses.statusMap[status] = ""
@@ -658,7 +658,7 @@ func (oc *DefaultNetworkController) deleteEgressIPAssignments(name string, statu
 				}
 				// this pod was managed by statusToRemove.EgressIP; we need to try and add its SNAT back towards nodeIP
 				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-				if err = oc.eIPC.addExternalGWPodSNAT(podNamespace, podName, statusToRemove); err != nil {
+				if err = oc.eIPC.addExternalGWPodSNAT(podNamespace, podName, oc.externalPortRange, statusToRemove); err != nil {
 					return err
 				}
 				podStatus.egressStatuses.delete(statusToRemove)
@@ -751,14 +751,14 @@ func (oc *DefaultNetworkController) deletePodEgressIPAssignments(name string, st
 		err = oc.eIPC.nodeZoneState.DoWithLock(statusToRemove.Node, func(key string) error {
 			if statusToRemove.Node == pod.Spec.NodeName {
 				// we are safe, no need to grab lock again
-				if err := oc.eIPC.deletePodEgressIPAssignment(name, statusToRemove, pod, podIPs); err != nil {
+				if err := oc.eIPC.deletePodEgressIPAssignment(name, oc.externalPortRange, statusToRemove, pod, podIPs); err != nil {
 					return err
 				}
 				podStatus.egressStatuses.delete(statusToRemove)
 				return nil
 			}
 			return oc.eIPC.nodeZoneState.DoWithLock(pod.Spec.NodeName, func(key string) error {
-				if err := oc.eIPC.deletePodEgressIPAssignment(name, statusToRemove, pod, podIPs); err != nil {
+				if err := oc.eIPC.deletePodEgressIPAssignment(name, oc.externalPortRange, statusToRemove, pod, podIPs); err != nil {
 					return err
 				}
 				podStatus.egressStatuses.delete(statusToRemove)
@@ -1478,7 +1478,7 @@ func (oc *DefaultNetworkController) addStandByEgressIPAssignment(podKey string, 
 // (routing pod traffic to the egress node) and NAT objects on the egress node
 // (SNAT-ing to the egress IP).
 // This function should be called with lock on nodeZoneState cache key status.Node and pod.Spec.NodeName
-func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod, podIPs []*net.IPNet) (err error) {
+func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName, portRange string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod, podIPs []*net.IPNet) (err error) {
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -1510,7 +1510,7 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 	var ops []ovsdb.Operation
 	if loadedEgressNode && isLocalZoneEgressNode {
 		if isOVNManagedNetwork {
-			ops, err = createNATRuleOps(e.nbClient, nil, podIPs, status, egressIPName)
+			ops, err = createNATRuleOps(e.nbClient, nil, podIPs, status, egressIPName, portRange)
 			if err != nil {
 				return fmt.Errorf("unable to create NAT rule ops for status: %v, err: %v", status, err)
 			}
@@ -1531,7 +1531,7 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 		if err != nil {
 			return fmt.Errorf("unable to create logical router policy ops, err: %v", err)
 		}
-		ops, err = e.deleteExternalGWPodSNATOps(ops, pod, podIPs, status)
+		ops, err = e.deleteExternalGWPodSNATOps(ops, pod, podIPs, status, portRange)
 		if err != nil {
 			return err
 		}
@@ -1543,7 +1543,7 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 // deletePodEgressIPAssignment deletes the OVN programmed egress IP
 // configuration mentioned for addPodEgressIPAssignment.
 // This function should be called with lock on nodeZoneState cache key status.Node and pod.Spec.NodeName
-func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod, podIPs []*net.IPNet) (err error) {
+func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName, portRange string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod, podIPs []*net.IPNet) (err error) {
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -1581,7 +1581,7 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 
 	var ops []ovsdb.Operation
 	if !loadedPodNode || isLocalZonePod { // node is deleted (we can't determine zone so we always try and nuke OR pod is local to zone)
-		ops, err = e.addExternalGWPodSNATOps(nil, pod.Namespace, pod.Name, status)
+		ops, err = e.addExternalGWPodSNATOps(nil, pod.Namespace, pod.Name, portRange, status)
 		if err != nil {
 			return err
 		}
@@ -1622,8 +1622,8 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 // check the informer cache since on pod deletion the event handlers are
 // triggered after the update to the informer cache. We should not re-add the
 // external GW setup in those cases.
-func (e *egressIPZoneController) addExternalGWPodSNAT(podNamespace, podName string, status egressipv1.EgressIPStatusItem) error {
-	ops, err := e.addExternalGWPodSNATOps(nil, podNamespace, podName, status)
+func (e *egressIPZoneController) addExternalGWPodSNAT(podNamespace, podName, portRange string, status egressipv1.EgressIPStatusItem) error {
+	ops, err := e.addExternalGWPodSNATOps(nil, podNamespace, podName, portRange, status)
 	if err != nil {
 		return fmt.Errorf("error creating ops for adding external gw pod snat: %+v", err)
 	}
@@ -1646,7 +1646,9 @@ func (e *egressIPZoneController) addExternalGWPodSNAT(podNamespace, podName stri
 // triggered after the update to the informer cache. We should not re-add the
 // external GW setup in those cases.
 // This function should be called with lock on nodeZoneState cache key pod.Spec.Name
-func (e *egressIPZoneController) addExternalGWPodSNATOps(ops []ovsdb.Operation, podNamespace, podName string, status egressipv1.EgressIPStatusItem) ([]ovsdb.Operation, error) {
+func (e *egressIPZoneController) addExternalGWPodSNATOps(ops []ovsdb.Operation, podNamespace, podName, portRange string,
+	status egressipv1.EgressIPStatusItem) ([]ovsdb.Operation, error) {
+
 	if config.Gateway.DisableSNATMultipleGWs {
 		pod, err := e.watchFactory.GetPod(podNamespace, podName)
 		if err != nil {
@@ -1664,7 +1666,7 @@ func (e *egressIPZoneController) addExternalGWPodSNATOps(ops []ovsdb.Operation, 
 			if err != nil {
 				return nil, err
 			}
-			ops, err = addOrUpdatePodSNATOps(e.nbClient, pod.Spec.NodeName, extIPs, podIPs, ops)
+			ops, err = addOrUpdatePodSNATOps(e.nbClient, pod.Spec.NodeName, portRange, extIPs, podIPs, ops)
 			if err != nil {
 				return nil, err
 			}
@@ -1675,7 +1677,9 @@ func (e *egressIPZoneController) addExternalGWPodSNATOps(ops []ovsdb.Operation, 
 }
 
 // deleteExternalGWPodSNATOps creates ops for the required external GW teardown for the given pod
-func (e *egressIPZoneController) deleteExternalGWPodSNATOps(ops []ovsdb.Operation, pod *kapi.Pod, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem) ([]ovsdb.Operation, error) {
+func (e *egressIPZoneController) deleteExternalGWPodSNATOps(ops []ovsdb.Operation, pod *kapi.Pod, podIPs []*net.IPNet,
+	status egressipv1.EgressIPStatusItem, portRange string) ([]ovsdb.Operation, error) {
+
 	if config.Gateway.DisableSNATMultipleGWs && status.Node == pod.Spec.NodeName {
 		// remove snats to->nodeIP (from the node where pod exists if that node is also serving
 		// as an egress node for this pod) for these podIPs before adding the snat to->egressIP
@@ -2124,7 +2128,8 @@ func DeleteLegacyDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, no
 	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, types.OVNClusterRouter, p)
 }
 
-func buildSNATFromEgressIPStatus(podIP net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) (*nbdb.NAT, error) {
+// buildSNATFromEgressIPStatus builds a logical router SNAT from a given egress IP status. If parameter portRange is empty, port range will not be set.
+func buildSNATFromEgressIPStatus(podIP net.IP, status egressipv1.EgressIPStatusItem, egressIPName, portRange string) (*nbdb.NAT, error) {
 	logicalIP := &net.IPNet{
 		IP:   podIP,
 		Mask: util.GetIPFullMask(podIP),
@@ -2132,17 +2137,20 @@ func buildSNATFromEgressIPStatus(podIP net.IP, status egressipv1.EgressIPStatusI
 	externalIP := net.ParseIP(status.EgressIP)
 	logicalPort := types.K8sPrefix + status.Node
 	externalIds := map[string]string{"name": egressIPName}
-	nat := libovsdbops.BuildSNAT(&externalIP, logicalIP, logicalPort, externalIds)
+	nat := libovsdbops.BuildSNAT(&externalIP, logicalIP, logicalPort, portRange, externalIds)
 	return nat, nil
 }
 
-func createNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem, egressIPName string) ([]ovsdb.Operation, error) {
+// createNATRuleOps creates SNATs for each pod. SNAT IP is retrieved from egress IP status. If parameter portRange is empty, port range will not be set.
+func createNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem,
+	egressIPName, portRange string) ([]ovsdb.Operation, error) {
+
 	nats := make([]*nbdb.NAT, 0, len(podIPs))
 	var nat *nbdb.NAT
 	var err error
 	for _, podIP := range podIPs {
 		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP.IP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP.IP)) {
-			nat, err = buildSNATFromEgressIPStatus(podIP.IP, status, egressIPName)
+			nat, err = buildSNATFromEgressIPStatus(podIP.IP, status, egressIPName, portRange)
 			if err != nil {
 				return nil, err
 			}
@@ -2165,7 +2173,8 @@ func deleteNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, pod
 	var err error
 	for _, podIP := range podIPs {
 		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP.IP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP.IP)) {
-			nat, err = buildSNATFromEgressIPStatus(podIP.IP, status, egressIPName)
+			// no need to specify port range because we do not compare port range when deleting SNATs
+			nat, err = buildSNATFromEgressIPStatus(podIP.IP, status, egressIPName, "")
 			if err != nil {
 				return nil, err
 			}

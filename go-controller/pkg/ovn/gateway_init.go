@@ -488,7 +488,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		if err != nil {
 			return fmt.Errorf("failed to parse full CIDR mask for join subnet IP: %s", gwLRPIP)
 		}
-		nat := libovsdbops.BuildSNAT(&externalIP[0], joinIPNet, "", nil)
+		nat := libovsdbops.BuildSNAT(&externalIP[0], joinIPNet, "", oc.externalPortRange, nil)
 		joinNATs = append(joinNATs, nat)
 	}
 	err = libovsdbops.CreateOrUpdateNATs(oc.nbClient, &logicalRouter, joinNATs...)
@@ -507,7 +507,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
 			}
-			nat = libovsdbops.BuildSNAT(&externalIP[0], entry, "", nil)
+			nat = libovsdbops.BuildSNAT(&externalIP[0], entry, "", oc.externalPortRange, nil)
 			nats = append(nats, nat)
 		}
 		err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, &logicalRouter, nats...)
@@ -517,7 +517,8 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 	} else {
 		// ensure we do not have any leftover SNAT entries after an upgrade
 		for _, logicalSubnet := range clusterIPSubnet {
-			nat = libovsdbops.BuildSNAT(nil, logicalSubnet, "", nil)
+			// no need to populate port range because we do not inspect this field when deleting NATs
+			nat = libovsdbops.BuildSNAT(nil, logicalSubnet, "", "", nil)
 			nats = append(nats, nat)
 		}
 		err := libovsdbops.DeleteNATs(oc.nbClient, &logicalRouter, nats...)

@@ -3030,11 +3030,12 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.NAT{
-						UUID:       "nat-UUID",
-						ExternalIP: "169.254.33.2",
-						LogicalIP:  "10.128.1.3",
-						Options:    map[string]string{"stateless": "false"},
-						Type:       nbdb.NATTypeSNAT,
+						UUID:              "nat-UUID",
+						ExternalIP:        "169.254.33.2",
+						LogicalIP:         "10.128.1.3",
+						ExternalPortRange: "32000-65535",
+						Options:           map[string]string{"stateless": "false"},
+						Type:              nbdb.NATTypeSNAT,
 					},
 					&nbdb.LogicalRouter{
 						Name: types.GWRouterPrefix + nodeName,
@@ -3064,7 +3065,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 
 				_, fullMaskPodNet, _ := net.ParseCIDR("10.128.1.3/32")
 				gomega.Expect(
-					addOrUpdatePodSNAT(fakeOvn.controller.nbClient, pod[0].Spec.NodeName, extIPs, []*net.IPNet{fullMaskPodNet}),
+					addOrUpdatePodSNAT(fakeOvn.controller.nbClient, pod[0].Spec.NodeName, "32000-65535", extIPs, []*net.IPNet{fullMaskPodNet}),
 				).To(gomega.Succeed())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				finalNB = []libovsdbtest.TestData{

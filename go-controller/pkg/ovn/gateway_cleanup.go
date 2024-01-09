@@ -92,7 +92,8 @@ func (oc *DefaultNetworkController) delPbrAndNatRules(nodeName string, lrpTypes 
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
 	mgmtPortName := types.K8sPrefix + nodeName
-	nat := libovsdbops.BuildDNATAndSNAT(nil, nil, mgmtPortName, "", nil)
+	// empty port range is ok because we do not inspect this field when selecting a NAT to delete
+	nat := libovsdbops.BuildDNATAndSNAT(nil, nil, mgmtPortName, "", "", nil)
 	logicalRouter := nbdb.LogicalRouter{
 		Name: types.OVNClusterRouter,
 	}

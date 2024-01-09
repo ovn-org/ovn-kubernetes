@@ -82,6 +82,10 @@ type DefaultNetworkController struct {
 	// Includes all node gateway routers.
 	routerLoadBalancerGroupUUID string
 
+	// Cluster wide external source port range. See external_port_range field within
+	// NB DB NAT table.
+	externalPortRange string
+
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
@@ -184,6 +188,11 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		return nil, fmt.Errorf("unable to create new admin policy based external route controller while creating new default network controller :%w", err)
 	}
 
+	portRange, err := util.GetExternalPortRange()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get TCP/UDP local port range: %v", err)
+	}
+
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
@@ -216,6 +225,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		clusterLoadBalancerGroupUUID: "",
 		switchLoadBalancerGroupUUID:  "",
 		routerLoadBalancerGroupUUID:  "",
+		externalPortRange:            portRange,
 		svcController:                svcController,
 		zoneChassisHandler:           zoneChassisHandler,
 		apbExternalRouteController:   apbExternalRouteController,

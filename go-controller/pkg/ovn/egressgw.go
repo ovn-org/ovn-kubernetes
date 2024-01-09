@@ -658,7 +658,7 @@ func (oc *DefaultNetworkController) deletePodSNAT(nodeName string, extIPs, podIP
 }
 
 // buildPodSNAT builds per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
-func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
+func buildPodSNAT(extIPs, podIPNets []*net.IPNet, portRange string) ([]*nbdb.NAT, error) {
 	nats := make([]*nbdb.NAT, 0, len(extIPs)*len(podIPNets))
 	var nat *nbdb.NAT
 
@@ -668,13 +668,13 @@ func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
 			Mask: util.GetIPFullMask(podIPNet.IP),
 		}
 		if len(extIPs) == 0 {
-			nat = libovsdbops.BuildSNAT(nil, fullMaskPodNet, "", nil)
+			nat = libovsdbops.BuildSNAT(nil, fullMaskPodNet, "", portRange, nil)
 		} else {
 			for _, gwIPNet := range extIPs {
 				if utilnet.IsIPv6CIDR(gwIPNet) != utilnet.IsIPv6CIDR(podIPNet) {
 					continue
 				}
-				nat = libovsdbops.BuildSNAT(&gwIPNet.IP, fullMaskPodNet, "", nil)
+				nat = libovsdbops.BuildSNAT(&gwIPNet.IP, fullMaskPodNet, "", portRange, nil)
 			}
 		}
 		nats = append(nats, nat)
@@ -699,7 +699,7 @@ func getExternalIPsGR(watchFactory *factory.WatchFactory, nodeName string) ([]*n
 // deletePodSNATOps creates ovsdb operation that removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
 func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, nodeName string, extIPs, podIPNets []*net.IPNet) ([]ovsdb.Operation, error) {
-	nats, err := buildPodSNAT(extIPs, podIPNets)
+	nats, err := buildPodSNAT(extIPs, podIPNets, "")
 	if err != nil {
 		return nil, err
 	}
@@ -715,8 +715,8 @@ func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, nod
 
 // addOrUpdatePodSNAT adds or updates per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs, podIfAddrs []*net.IPNet) error {
-	nats, err := buildPodSNAT(extIPs, podIfAddrs)
+func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, nodeName, portRange string, extIPs, podIfAddrs []*net.IPNet) error {
+	nats, err := buildPodSNAT(extIPs, podIfAddrs, portRange)
 	if err != nil {
 		return err
 	}
@@ -732,10 +732,12 @@ func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs,
 // addOrUpdatePodSNATOps returns the operation that adds or updates per pod SNAT rules towards the nodeIP that are
 // applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, nodeName, portRange string, extIPs, podIfAddrs []*net.IPNet,
+	ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+
 	gr := types.GWRouterPrefix + nodeName
 	router := &nbdb.LogicalRouter{Name: gr}
-	nats, err := buildPodSNAT(extIPs, podIfAddrs)
+	nats, err := buildPodSNAT(extIPs, podIfAddrs, portRange)
 	if err != nil {
 		return nil, err
 	}

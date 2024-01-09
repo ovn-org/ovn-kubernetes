@@ -869,6 +869,7 @@ func buildNAT(
 	logicalIP string,
 	logicalPort string,
 	externalMac string,
+	externalPortRange string,
 	externalIDs map[string]string,
 ) *nbdb.NAT {
 	nat := &nbdb.NAT{
@@ -887,6 +888,9 @@ func buildNAT(
 		nat.ExternalMAC = &externalMac
 	}
 
+	if externalPortRange != "" {
+		nat.ExternalPortRange = externalPortRange
+	}
 	return nat
 }
 
@@ -895,6 +899,7 @@ func BuildSNAT(
 	externalIP *net.IP,
 	logicalIP *net.IPNet,
 	logicalPort string,
+	externalPortRange string,
 	externalIDs map[string]string,
 ) *nbdb.NAT {
 	externalIPStr := ""
@@ -907,7 +912,7 @@ func BuildSNAT(
 	if logicalIPMask != 32 && logicalIPMask != 128 {
 		logicalIPStr = logicalIP.String()
 	}
-	return buildNAT(nbdb.NATTypeSNAT, externalIPStr, logicalIPStr, logicalPort, "", externalIDs)
+	return buildNAT(nbdb.NATTypeSNAT, externalIPStr, logicalIPStr, logicalPort, "", externalPortRange, externalIDs)
 }
 
 // BuildDNATAndSNAT builds a logical router DNAT/SNAT
@@ -916,6 +921,7 @@ func BuildDNATAndSNAT(
 	logicalIP *net.IPNet,
 	logicalPort string,
 	externalMac string,
+	externalPortRange string,
 	externalIDs map[string]string,
 ) *nbdb.NAT {
 	externalIPStr := ""
@@ -932,7 +938,9 @@ func BuildDNATAndSNAT(
 		logicalIPStr,
 		logicalPort,
 		externalMac,
-		externalIDs)
+		externalPortRange,
+		externalIDs,
+	)
 }
 
 // isEquivalentNAT if it has same uuid. Otherwise, check if types match.

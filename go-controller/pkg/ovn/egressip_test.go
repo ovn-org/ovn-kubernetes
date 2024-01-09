@@ -93,14 +93,17 @@ type nodeInfo struct {
 var egressPodLabel = map[string]string{"egress": "needed"}
 
 var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
-	var (
-		app     *cli.App
-		fakeOvn *FakeOVN
-	)
 	const (
 		node1Name = "node1"
 		node2Name = "node2"
 		node3Name = "node3"
+		portStart = 35000
+		portEnd   = 65535
+	)
+	var (
+		app       *cli.App
+		fakeOvn   *FakeOVN
+		portRange = fmt.Sprintf("%d-%d", portStart, portEnd)
 	)
 
 	clusterRouterDbSetup := libovsdbtest.TestSetup{
@@ -218,6 +221,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
+		util.MockPortRangeFileSystemOps(ginkgo.GinkgoT(), portStart, portEnd)
 		config.OVNKubernetesFeature.EnableEgressIP = true
 		config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort = 1234
 
@@ -230,6 +234,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
+		util.SetFileSystemOps(util.GetDefaultFileSystemOps())
 	})
 
 	getPodAssignmentState := func(pod *v1.Pod) *podAssignmentState {
@@ -366,9 +371,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					UUID:     "no-reroute-node-UUID",
 				},
 				&nbdb.NAT{
-					UUID:       "egressip-nat-UUID",
-					LogicalIP:  podV4IP,
-					ExternalIP: egressIP,
+					UUID:              "egressip-nat-UUID",
+					LogicalIP:         podV4IP,
+					ExternalIP:        egressIP,
+					ExternalPortRange: portRange,
 					ExternalIDs: map[string]string{
 						"name": egressIPName,
 					},
@@ -749,9 +755,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.NAT{
-							UUID:       "egressip-nat-UUID",
-							LogicalIP:  podV4IP,
-							ExternalIP: egressIP,
+							UUID:              "egressip-nat-UUID",
+							LogicalIP:         podV4IP,
+							ExternalIP:        egressIP,
+							ExternalPortRange: portRange,
 							ExternalIDs: map[string]string{
 								"name": egressIPName,
 							},
@@ -1054,9 +1061,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.NAT{
-							UUID:       "egressip-nat-UUID",
-							LogicalIP:  podV4IP,
-							ExternalIP: egressIP,
+							UUID:              "egressip-nat-UUID",
+							LogicalIP:         podV4IP,
+							ExternalIP:        egressIP,
+							ExternalPortRange: portRange,
 							ExternalIDs: map[string]string{
 								"name": egressIPName,
 							},
@@ -2063,9 +2071,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState[3].(*nbdb.LogicalRouter).Nat = append(expectedDatabaseState[3].(*nbdb.LogicalRouter).Nat, "egressip-nat-UUID", "egressip2-nat-UUID")
 						expectedDatabaseState = append(expectedDatabaseState, &nbdb.NAT{
-							UUID:       "egressip-nat-UUID",
-							LogicalIP:  podV4IP,
-							ExternalIP: egressIPOVNManaged,
+							UUID:              "egressip-nat-UUID",
+							LogicalIP:         podV4IP,
+							ExternalIP:        egressIPOVNManaged,
+							ExternalPortRange: portRange,
 							ExternalIDs: map[string]string{
 								"name": egressIPName,
 							},
@@ -2075,9 +2084,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								"stateless": "false",
 							},
 						}, &nbdb.NAT{
-							UUID:       "egressip2-nat-UUID",
-							LogicalIP:  podV4IP3,
-							ExternalIP: egressIPOVNManaged,
+							UUID:              "egressip2-nat-UUID",
+							LogicalIP:         podV4IP3,
+							ExternalIP:        egressIPOVNManaged,
+							ExternalPortRange: portRange,
 							ExternalIDs: map[string]string{
 								"name": egressIPName,
 							},
@@ -2292,7 +2302,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					expectedNatLogicalPort := "k8s-node1"
-					primarySNAT := getEIPSNAT(podV4IP, egressIP, expectedNatLogicalPort)
+					primarySNAT := getEIPSNAT(podV4IP, egressIP, expectedNatLogicalPort, portRange)
 					primarySNAT.UUID = "egressip-nat1-UUID"
 					expectedDatabaseState := []libovsdbtest.TestData{
 						primarySNAT,
@@ -2423,7 +2433,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
 
 					expectedNatLogicalPort = "k8s-node2"
-					eipSNAT := getEIPSNAT(podV4IP, egressIP, expectedNatLogicalPort)
+					eipSNAT := getEIPSNAT(podV4IP, egressIP, expectedNatLogicalPort, portRange)
 					expectedDatabaseState = []libovsdbtest.TestData{
 						getReRoutePolicy(egressPod.Status.PodIP, "4", "reroute-UUID", node2LogicalRouterIPv4, eipExternalID),
 						&nbdb.LogicalRouterPolicy{
@@ -2951,7 +2961,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					expectedNatLogicalPort := "k8s-node2"
 					expectedDatabaseState := []libovsdbtest.TestData{
 						getReRoutePolicy(egressPod.Status.PodIP, "6", "reroute-UUID", node2LogicalRouterIPv6, eipExternalID),
-						getEIPSNAT(podV6IP, egressIP.String(), expectedNatLogicalPort),
+						getEIPSNAT(podV6IP, egressIP.String(), expectedNatLogicalPort, portRange),
 						&nbdb.LogicalRouter{
 							Name:     ovntypes.OVNClusterRouter,
 							UUID:     ovntypes.OVNClusterRouter + "-UUID",
@@ -3173,7 +3183,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					expectedNatLogicalPort := "k8s-node2"
 					expectedDatabaseState := []libovsdbtest.TestData{
 						getReRoutePolicy(egressPod.Status.PodIP, "6", "reroute-UUID", node2LogicalRouterIPv6, eipExternalID),
-						getEIPSNAT(podV6IP, egressIP.String(), expectedNatLogicalPort),
+						getEIPSNAT(podV6IP, egressIP.String(), expectedNatLogicalPort, portRange),
 						&nbdb.LogicalRouter{
 							Name:     ovntypes.OVNClusterRouter,
 							UUID:     ovntypes.OVNClusterRouter + "-UUID",
@@ -3376,9 +3386,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Networks: []string{nodeLogicalRouterIfAddrV6},
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID",
-						LogicalIP:  podV6IP,
-						ExternalIP: egressIP.String(),
+						UUID:              "egressip-nat-UUID",
+						LogicalIP:         podV6IP,
+						ExternalIP:        egressIP.String(),
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -3699,7 +3710,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					expectedNatLogicalPort := "k8s-node2"
 					expectedDatabaseState := []libovsdbtest.TestData{
 						getReRoutePolicy(podV6IP, "6", "reroute-UUID", node2LogicalRouterIPv6, eipExternalID),
-						getEIPSNAT(podV6IP, egressIP.String(), expectedNatLogicalPort),
+						getEIPSNAT(podV6IP, egressIP.String(), expectedNatLogicalPort, portRange),
 						&nbdb.LogicalRouter{
 							Name:     ovntypes.OVNClusterRouter,
 							UUID:     ovntypes.OVNClusterRouter + "-UUID",
@@ -3913,7 +3924,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					expectedNatLogicalPort := "k8s-node2"
 					expectedDatabaseState := []libovsdbtest.TestData{
 						getReRoutePolicy(egressPod.Status.PodIP, "6", "reroute-UUID", node2LogicalRouterIPv6, eipExternalID),
-						getEIPSNAT(podV6IP, egressIP.String(), expectedNatLogicalPort),
+						getEIPSNAT(podV6IP, egressIP.String(), expectedNatLogicalPort, portRange),
 						&nbdb.LogicalRouter{
 							Name:     ovntypes.OVNClusterRouter,
 							UUID:     ovntypes.OVNClusterRouter + "-UUID",
@@ -4124,7 +4135,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					expectedNatLogicalPort := "k8s-node2"
 					expectedDatabaseState := []libovsdbtest.TestData{
 						getReRoutePolicy(egressPod.Status.PodIP, "6", "reroute-UUID", nodeLogicalRouterIPv6, eipExternalID),
-						getEIPSNAT(podV6IP, egressIP.String(), expectedNatLogicalPort),
+						getEIPSNAT(podV6IP, egressIP.String(), expectedNatLogicalPort, portRange),
 						&nbdb.LogicalRouter{
 							Name:     ovntypes.OVNClusterRouter,
 							UUID:     ovntypes.OVNClusterRouter + "-UUID",
@@ -4323,9 +4334,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Networks: []string{node2LogicalRouterIfAddrV6},
 						},
 						&nbdb.NAT{
-							UUID:       "egressip-nat-UUID",
-							LogicalIP:  podV6IP,
-							ExternalIP: egressIP.String(),
+							UUID:              "egressip-nat-UUID",
+							LogicalIP:         podV6IP,
+							ExternalIP:        egressIP.String(),
+							ExternalPortRange: portRange,
 							ExternalIDs: map[string]string{
 								"name": egressIPName,
 							},
@@ -4645,9 +4657,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					expectedNatLogicalPort1 := fmt.Sprintf("k8s-%s", assignmentNode1)
 					expectedNatLogicalPort2 := fmt.Sprintf("k8s-%s", assignmentNode2)
 					natEIP1 := &nbdb.NAT{
-						UUID:       "egressip-nat-1-UUID",
-						LogicalIP:  podV4IP,
-						ExternalIP: assignedEgressIP1,
+						UUID:              "egressip-nat-1-UUID",
+						LogicalIP:         podV4IP,
+						ExternalIP:        assignedEgressIP1,
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -4658,9 +4671,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					}
 					natEIP2 := &nbdb.NAT{
-						UUID:       "egressip-nat-2-UUID",
-						LogicalIP:  podV4IP,
-						ExternalIP: assignedEgressIP2,
+						UUID:              "egressip-nat-2-UUID",
+						LogicalIP:         podV4IP,
+						ExternalIP:        assignedEgressIP2,
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -4934,6 +4948,166 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in local zones", true, "remote", "local"),
 		)
 
+		ginkgo.It("should update NAT port range", func() {
+			app.Action = func(ctx *cli.Context) error {
+				egressIP1 := "192.168.126.101"
+				node1IPv4 := "192.168.126.12"
+				node1IPv4CIDR := node1IPv4 + "/24"
+				_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
+				egressPod1 := *newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
+				podIP := "10.128.0.50"
+				podOVNAddr := "02:42:1e:dc:b5:c5 10.128.0.50"
+				egressPod1.Annotations = map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["10.128.0.50/24"],"mac_address":"02:42:1e:dc:b5:c5","gateway_ips":["10.128.0.1"],"routes":[{"dest":"10.128.0.0/24","nextHop":"10.128.0.1"}],"ip_address":"10.128.0.50/24","gateway_ip":"10.128.0.1"}}`}
+				egressNamespace := newNamespace(namespace)
+				annotations := map[string]string{
+					"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4CIDR),
+					"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
+					"k8s.ovn.org/l3-gateway-config":   `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop":"192.168.126.1"}}`,
+					"k8s.ovn.org/node-chassis-id":     "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
+					util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
+				}
+				labels := map[string]string{
+					"k8s.ovn.org/egress-assignable": "",
+				}
+				node1 := getNodeObj(node1Name, annotations, labels)
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP1},
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: egressPodLabel,
+						},
+						NamespaceSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"name": egressNamespace.Name,
+							},
+						},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{
+							{
+								Node:     node1.Name,
+								EgressIP: egressIP1,
+							},
+						},
+					},
+				}
+				natLogicalPort1 := fmt.Sprintf("k8s-%s", node1.Name)
+				gwLR := &nbdb.LogicalRouter{
+					Name: ovntypes.GWRouterPrefix + node1.Name,
+					UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
+					Nat:  []string{"egressip-nat-UUID1"},
+				}
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalSwitchPort{
+								UUID:      util.GetLogicalPortName(egressPod1.Namespace, egressPod1.Name) + "-UUID",
+								Name:      util.GetLogicalPortName(egressPod1.Namespace, egressPod1.Name),
+								Addresses: []string{podOVNAddr},
+								// ExternalPortRange not defined
+								ExternalIDs: map[string]string{
+									"pod":       "true",
+									"namespace": egressPod1.Namespace,
+								},
+								Options: map[string]string{
+									"requested-chassis": egressPod1.Spec.NodeName,
+									"iface-id-ver":      egressPod1.Name,
+								},
+								PortSecurity: []string{podOVNAddr},
+							},
+							&nbdb.NAT{
+								UUID:       "egressip-nat-UUID1",
+								LogicalIP:  podIP,
+								ExternalIP: egressIP1,
+								ExternalIDs: map[string]string{
+									"name": egressIPName,
+								},
+								Type:        nbdb.NATTypeSNAT,
+								LogicalPort: &natLogicalPort1,
+								Options: map[string]string{
+									"stateless": "false",
+								},
+							},
+							&nbdb.LogicalRouter{
+								Name: ovntypes.OVNClusterRouter,
+								UUID: ovntypes.OVNClusterRouter + "-UUID",
+							},
+							gwLR,
+							&nbdb.LogicalRouterPort{
+								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
+								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
+								Networks: []string{nodeLogicalRouterIfAddrV4},
+							},
+							&nbdb.LogicalSwitchPort{
+								UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "UUID",
+								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
+								Type: "router",
+								Options: map[string]string{
+									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								},
+							},
+							&nbdb.LogicalSwitch{
+								UUID:  node1.Name + "-UUID",
+								Name:  node1.Name,
+								Ports: []string{util.GetLogicalPortName(egressPod1.Namespace, egressPod1.Name) + "-UUID"},
+							},
+							&nbdb.LogicalSwitchPort{
+								UUID:      "k8s-" + node1.Name + "-UUID",
+								Name:      "k8s-" + node1.Name,
+								Addresses: []string{"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(node1Subnet).IP.String()},
+							},
+						},
+					},
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{node1},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{*egressNamespace},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{egressPod1},
+					},
+				)
+				// set the port range
+				fakeOvn.controller.externalPortRange = portRange
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)})
+				err := fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressNodes()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// ensure Pod didnt get a new IP
+				egressPodPortInfo, err := fakeOvn.controller.logicalPortCache.get(&egressPod1, types.DefaultNetworkName)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				egressPodIP, _, err := net.ParseCIDR(egressPodPortInfo.ips[0].String())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(egressPodIP.String()).Should(gomega.Equal(podIP))
+				// ensure port range is updated
+				gomega.Eventually(func() bool {
+					nats, err := libovsdbops.GetRouterNATs(fakeOvn.nbClient, gwLR)
+					gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+					for _, nat := range nats {
+						if nat.LogicalIP == podIP && nat.ExternalPortRange == portRange {
+							return true
+						}
+					}
+					return false
+				}).Should(gomega.BeTrue())
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("should delete and re-create and delete", func() {
 			app.Action = func(ctx *cli.Context) error {
 
@@ -5027,9 +5201,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				expectedNatLogicalPort := "k8s-node2"
 				expectedNAT := &nbdb.NAT{
-					UUID:       "egressip-nat-UUID",
-					LogicalIP:  podV6IP,
-					ExternalIP: egressIP.String(),
+					UUID:              "egressip-nat-UUID",
+					LogicalIP:         podV6IP,
+					ExternalIP:        egressIP.String(),
+					ExternalPortRange: portRange,
 					ExternalIDs: map[string]string{
 						"name": egressIPName,
 					},
@@ -5660,9 +5835,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Nat:  []string{"egressip-nat-UUID1"},
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID1",
-						LogicalIP:  egressPodIP.String(),
-						ExternalIP: egressIP1,
+						UUID:              "egressip-nat-UUID1",
+						LogicalIP:         egressPodIP.String(),
+						ExternalIP:        egressIP1,
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -5916,9 +6092,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				expectedNatLogicalPort1 := "k8s-node1"
 				podEIPSNAT := &nbdb.NAT{
-					UUID:       "egressip-nat-UUID1",
-					LogicalIP:  egressPodIP.String(),
-					ExternalIP: egressIP1,
+					UUID:              "egressip-nat-UUID1",
+					LogicalIP:         egressPodIP.String(),
+					ExternalIP:        egressIP1,
+					ExternalPortRange: portRange,
 					ExternalIDs: map[string]string{
 						"name": egressIPName,
 					},
@@ -6095,10 +6272,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// because deleteLogicalPort removes ALL snats for a given pod but doesn't remove the policies.
 				ipv4Addr, _, _ := net.ParseCIDR(node1IPv4CIDR)
 				podNodeSNAT := &nbdb.NAT{
-					UUID:       "node-nat-UUID1",
-					LogicalIP:  newEgressPodIP,
-					ExternalIP: ipv4Addr.String(),
-					Type:       nbdb.NATTypeSNAT,
+					UUID:              "node-nat-UUID1",
+					LogicalIP:         newEgressPodIP,
+					ExternalIP:        ipv4Addr.String(),
+					ExternalPortRange: portRange,
+					Type:              nbdb.NATTypeSNAT,
 					Options: map[string]string{
 						"stateless": "false",
 					},
@@ -6355,9 +6533,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						g.Expect(pas.standbyEgressIPNames.Has(egressIP2Name)).To(gomega.BeTrue())
 					}).Should(gomega.Succeed())
 					podEIPSNAT := &nbdb.NAT{
-						UUID:       "egressip-nat-UUID1",
-						LogicalIP:  egressPodIP[0].String(),
-						ExternalIP: assignedEIP,
+						UUID:              "egressip-nat-UUID1",
+						LogicalIP:         egressPodIP[0].String(),
+						ExternalIP:        assignedEIP,
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": pas.egressIPName,
 						},
@@ -6472,10 +6651,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						podEIPSNAT.ExternalIP = "192.168.126.12" // EIP SNAT is not visible since podNode is remote, SNAT towards nodeIP is visible.
 						podEIPSNAT.LogicalPort = nil
 						podNodeSNAT := &nbdb.NAT{
-							UUID:       "node-nat-UUID1",
-							LogicalIP:  egressPodIP[0].String(),
-							ExternalIP: "192.168.126.12",
-							Type:       nbdb.NATTypeSNAT,
+							UUID:              "node-nat-UUID1",
+							LogicalIP:         egressPodIP[0].String(),
+							ExternalIP:        "192.168.126.12",
+							ExternalPortRange: portRange,
+							Type:              nbdb.NATTypeSNAT,
 							Options: map[string]string{
 								"stateless": "false",
 							},
@@ -6516,9 +6696,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(egressIPs1[1]).To(gomega.Equal(egressIP2))
 
 					podEIPSNAT2 := &nbdb.NAT{
-						UUID:       "egressip-nat-UUID2",
-						LogicalIP:  egressPodIP[0].String(),
-						ExternalIP: egressIPs1[1],
+						UUID:              "egressip-nat-UUID2",
+						LogicalIP:         egressPodIP[0].String(),
+						ExternalIP:        egressIPs1[1],
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": pas.egressIPName,
 						},
@@ -6657,10 +6838,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						podReRoutePolicy.Nexthops = []string{"100.88.0.3"}
 					}
 					podNodeSNAT := &nbdb.NAT{
-						UUID:       "node-nat-UUID1",
-						LogicalIP:  egressPodIP[0].String(),
-						ExternalIP: "192.168.126.12", // adds back SNAT to nodeIP
-						Type:       nbdb.NATTypeSNAT,
+						UUID:              "node-nat-UUID1",
+						LogicalIP:         egressPodIP[0].String(),
+						ExternalIP:        "192.168.126.12", // adds back SNAT to nodeIP
+						ExternalPortRange: portRange,
+						Type:              nbdb.NATTypeSNAT,
 						Options: map[string]string{
 							"stateless": "false",
 						},
@@ -7518,9 +7700,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID: "reroute-UUID",
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID",
-						LogicalIP:  podV4IP,
-						ExternalIP: egressIP1,
+						UUID:              "egressip-nat-UUID",
+						LogicalIP:         podV4IP,
+						ExternalIP:        egressIP1,
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -7656,9 +7839,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Nat:  []string{"egressip-nat-UUID"},
 							},
 							&nbdb.NAT{
-								UUID:       "egressip-nat-UUID",
-								LogicalIP:  podV4IP,
-								ExternalIP: egressIP1,
+								UUID:              "egressip-nat-UUID",
+								LogicalIP:         podV4IP,
+								ExternalIP:        egressIP1,
+								ExternalPortRange: portRange,
 								ExternalIDs: map[string]string{
 									"name": egressIPName,
 								},
@@ -7829,9 +8013,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							// This is unexpected snat entry where its logical port refers to an unavailable node
 							// and ensure this entry is removed as soon as ovnk master is up and running.
 							&nbdb.NAT{
-								UUID:       "egressip-nat-UUID2",
-								LogicalIP:  podV4IP,
-								ExternalIP: egressIP,
+								UUID:              "egressip-nat-UUID2",
+								LogicalIP:         podV4IP,
+								ExternalIP:        egressIP,
+								ExternalPortRange: portRange,
 								ExternalIDs: map[string]string{
 									"name": egressIPName,
 								},
@@ -7890,7 +8075,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(nodes[0]).To(gomega.Equal(node1.Name))
 				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
 
-				podEIPSNAT := getEIPSNAT(podV4IP, egressIP, "k8s-node1")
+				podEIPSNAT := getEIPSNAT(podV4IP, egressIP, "k8s-node1", portRange)
 				podReRoutePolicy := getReRoutePolicy(egressPodIP[0].String(), "4", "reroute-UUID", nodeLogicalRouterIPv4, eipExternalID)
 				node1GR.Nat = []string{"egressip-nat-UUID"}
 				node1LSP.Options = map[string]string{
@@ -8862,9 +9047,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
 
 				podEIPSNAT := &nbdb.NAT{
-					UUID:       "egressip-nat-UUID1",
-					LogicalIP:  podV4IP,
-					ExternalIP: egressIP,
+					UUID:              "egressip-nat-UUID1",
+					LogicalIP:         podV4IP,
+					ExternalIP:        egressIP,
+					ExternalPortRange: portRange,
 					ExternalIDs: map[string]string{
 						"name": egressIPName,
 					},
@@ -9243,9 +9429,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID: ovntypes.GWRouterPrefix + node2.Name + "-UUID",
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID1",
-						LogicalIP:  podV4IP,
-						ExternalIP: eips[0],
+						UUID:              "egressip-nat-UUID1",
+						LogicalIP:         podV4IP,
+						ExternalIP:        eips[0],
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -9256,9 +9443,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID2",
-						LogicalIP:  "10.128.0.16",
-						ExternalIP: eips[0],
+						UUID:              "egressip-nat-UUID2",
+						LogicalIP:         "10.128.0.16",
+						ExternalIP:        eips[0],
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -9373,9 +9561,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID: "reroute-UUID2",
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID1",
-						LogicalIP:  podV4IP,
-						ExternalIP: eips[0],
+						UUID:              "egressip-nat-UUID1",
+						LogicalIP:         podV4IP,
+						ExternalIP:        eips[0],
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -9386,9 +9575,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID2",
-						LogicalIP:  "10.128.0.16",
-						ExternalIP: eips[0],
+						UUID:              "egressip-nat-UUID2",
+						LogicalIP:         "10.128.0.16",
+						ExternalIP:        eips[0],
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -9399,9 +9589,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID3",
-						LogicalIP:  podV4IP,
-						ExternalIP: eips[1],
+						UUID:              "egressip-nat-UUID3",
+						LogicalIP:         podV4IP,
+						ExternalIP:        eips[1],
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -9412,9 +9603,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID4",
-						LogicalIP:  "10.128.0.16",
-						ExternalIP: eips[1],
+						UUID:              "egressip-nat-UUID4",
+						LogicalIP:         "10.128.0.16",
+						ExternalIP:        eips[1],
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -9525,9 +9717,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID: "reroute-UUID2",
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID1",
-						LogicalIP:  podV4IP,
-						ExternalIP: eips[0],
+						UUID:              "egressip-nat-UUID1",
+						LogicalIP:         podV4IP,
+						ExternalIP:        eips[0],
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -9538,9 +9731,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID2",
-						LogicalIP:  "10.128.0.16",
-						ExternalIP: eips[0],
+						UUID:              "egressip-nat-UUID2",
+						LogicalIP:         "10.128.0.16",
+						ExternalIP:        eips[0],
+						ExternalPortRange: portRange,
 						ExternalIDs: map[string]string{
 							"name": egressIPName,
 						},
@@ -9551,10 +9745,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID3",
-						LogicalIP:  "10.128.0.16",
-						ExternalIP: "192.168.126.51", // adds back SNAT towards nodeIP
-						Type:       nbdb.NATTypeSNAT,
+						UUID:              "egressip-nat-UUID3",
+						LogicalIP:         "10.128.0.16",
+						ExternalIP:        "192.168.126.51", // adds back SNAT towards nodeIP
+						ExternalPortRange: portRange,
+						Type:              nbdb.NATTypeSNAT,
 						Options: map[string]string{
 							"stateless": "false",
 						},
@@ -9645,19 +9840,21 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID:     "no-reroute-service-UUID",
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID1",
-						LogicalIP:  podV4IP,
-						ExternalIP: "192.168.126.12", // adds back SNAT towards nodeIP
-						Type:       nbdb.NATTypeSNAT,
+						UUID:              "egressip-nat-UUID1",
+						LogicalIP:         podV4IP,
+						ExternalIP:        "192.168.126.12", // adds back SNAT towards nodeIP
+						ExternalPortRange: portRange,
+						Type:              nbdb.NATTypeSNAT,
 						Options: map[string]string{
 							"stateless": "false",
 						},
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID3",
-						LogicalIP:  "10.128.0.16",
-						ExternalIP: "192.168.126.51",
-						Type:       nbdb.NATTypeSNAT,
+						UUID:              "egressip-nat-UUID3",
+						LogicalIP:         "10.128.0.16",
+						ExternalIP:        "192.168.126.51",
+						ExternalPortRange: portRange,
+						Type:              nbdb.NATTypeSNAT,
 						Options: map[string]string{
 							"stateless": "false",
 						},
@@ -10089,11 +10286,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 // TEST UTILITY FUNCTIONS;
 // reduces redundant code
 
-func getEIPSNAT(podIP, egressIP, expectedNatLogicalPort string) *nbdb.NAT {
+func getEIPSNAT(podIP, egressIP, expectedNatLogicalPort, portRange string) *nbdb.NAT {
 	return &nbdb.NAT{
-		UUID:       "egressip-nat-UUID",
-		LogicalIP:  podIP,
-		ExternalIP: egressIP,
+		UUID:              "egressip-nat-UUID",
+		LogicalIP:         podIP,
+		ExternalIP:        egressIP,
+		ExternalPortRange: portRange,
 		ExternalIDs: map[string]string{
 			"name": egressIPName,
 		},

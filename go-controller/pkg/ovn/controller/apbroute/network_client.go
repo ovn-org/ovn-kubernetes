@@ -218,7 +218,8 @@ func (nb *northBoundClient) deletePodSNAT(nodeName string, extIPs, podIPNets []*
 		klog.V(4).Infof("Node %s is not in the local zone %s", nodeName, nb.zone)
 		return nil
 	}
-	nats, err := buildPodSNAT(extIPs, podIPNets)
+	// setting portRange to an empty string is ok because when comparing NAT entries, we do not compare portRange
+	nats, err := buildPodSNAT(extIPs, podIPNets, "")
 	if err != nil {
 		return err
 	}
@@ -644,20 +645,20 @@ func (nb *northBoundClient) lookupBFDEntry(gatewayIP, gatewayRouter, prefix stri
 
 // buildPodSNAT builds per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // if allSNATs flag is set, then all the SNATs (including against egressIPs if any) for that pod will be returned
-func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
+func buildPodSNAT(extIPs, podIPNets []*net.IPNet, portRange string) ([]*nbdb.NAT, error) {
 	nats := make([]*nbdb.NAT, 0, len(extIPs)*len(podIPNets))
 	var nat *nbdb.NAT
 
 	for _, podIPNet := range podIPNets {
 		fullMaskPodNet := util.IPsToNetworkIPs(podIPNet)[0]
 		if len(extIPs) == 0 {
-			nat = libovsdbops.BuildSNAT(nil, fullMaskPodNet, "", nil)
+			nat = libovsdbops.BuildSNAT(nil, fullMaskPodNet, "", portRange, nil)
 		} else {
 			for _, gwIPNet := range extIPs {
 				if utilnet.IsIPv6CIDR(gwIPNet) != utilnet.IsIPv6CIDR(podIPNet) {
 					continue
 				}
-				nat = libovsdbops.BuildSNAT(&gwIPNet.IP, fullMaskPodNet, "", nil)
+				nat = libovsdbops.BuildSNAT(&gwIPNet.IP, fullMaskPodNet, "", portRange, nil)
 			}
 		}
 		nats = append(nats, nat)
