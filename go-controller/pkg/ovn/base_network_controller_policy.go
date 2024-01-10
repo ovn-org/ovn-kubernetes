@@ -875,7 +875,7 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 	// then corresponding egress/ingress policies will be added as stateful OVN ACL's.
 	var statelessNetPol bool
 	if config.OVNKubernetesFeature.EnableStatelessNetPol {
-		// look for stateless annotation if the statlessNetPol feature flag is enabled
+		// look for stateless annotation if the statelessNetPol feature flag is enabled
 		val, ok := policy.Annotations[ovnStatelessNetPolAnnotationName]
 		if ok && val == "true" {
 			statelessNetPol = true

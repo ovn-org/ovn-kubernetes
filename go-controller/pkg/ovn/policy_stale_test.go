@@ -275,7 +275,7 @@ var _ = ginkgo.Describe("OVN Stale NetworkPolicy Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// make sure stale ACLs were updated
 			expectedData := getNamespaceWithSinglePolicyExpectedData(
-				networkPolicy, nil, []string{namespace2.Name}, nil,
+				newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name),
 				initialDB.NBData)
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData...))
 		})
@@ -303,7 +303,7 @@ var _ = ginkgo.Describe("OVN Stale NetworkPolicy Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// make sure stale ACLs were updated
 			expectedData := getNamespaceWithSinglePolicyExpectedData(
-				networkPolicy, nil, []string{namespace2.Name}, nil,
+				newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name),
 				initialDB.NBData)
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData...))
 		})
@@ -320,7 +320,7 @@ var _ = ginkgo.Describe("OVN Stale NetworkPolicy Operations", func() {
 			peerASName, _ := getNsAddrSetHashNames(namespace2.Name)
 			fakeController := getFakeController(DefaultNetworkControllerName)
 			pgName, _ := fakeController.getNetworkPolicyPGName(networkPolicy.Namespace, networkPolicy.Name)
-			initialData := getPolicyData(networkPolicy, nil, []string{namespace2.Name}, nil)
+			initialData := getPolicyData(newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name))
 			staleACL := initialData[0].(*nbdb.ACL)
 			staleACL.Match = fmt.Sprintf("ip4.dst == {$%s, $%s} && inport == @%s", localASName, peerASName, pgName)
 
@@ -338,7 +338,7 @@ var _ = ginkgo.Describe("OVN Stale NetworkPolicy Operations", func() {
 
 			// make sure stale ACLs were updated
 			expectedData := getNamespaceWithSinglePolicyExpectedData(
-				networkPolicy, nil, []string{namespace2.Name}, nil,
+				newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name),
 				initialDB.NBData)
 			fakeOvn.asf.ExpectEmptyAddressSet(staleAddrSetIDs)
 

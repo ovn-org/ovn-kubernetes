@@ -216,12 +216,6 @@ func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []
 	return data
 }
 
-func getMultiPolicyData(networkPolicy *knet.NetworkPolicy, localPortUUIDs []string, peerNamespaces []string,
-	tcpPeerPorts []int32, netInfo util.NetInfo) []libovsdb.TestData {
-	return getPolicyDataHelper(networkPolicy, localPortUUIDs, peerNamespaces, tcpPeerPorts, "",
-		false, netInfo)
-}
-
 func getMultiDefaultDenyData(networkPolicy *knet.NetworkPolicy, ports []string, netInfo util.NetInfo) []libovsdb.TestData {
 	policyTypeIngress, policyTypeEgress := getPolicyType(networkPolicy)
 	return getDefaultDenyDataHelper(networkPolicy.Namespace, policyTypeIngress, policyTypeEgress,
@@ -470,8 +464,8 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				ocInfo.asf.EventuallyExpectEmptyAddressSetExist(namespaceName1)
 				ocInfo.asf.EventuallyExpectEmptyAddressSetExist(namespaceName2)
 
-				gressPolicyExpectedData := getMultiPolicyData(policy, nil, []string{namespace2.Name},
-					nil, netInfo)
+				gressPolicyExpectedData := getPolicyData(newNetpolDataParams(policy).
+					withPeerNamespaces(namespace2.Name).withNetInfo(netInfo))
 				defaultDenyExpectedData := getMultiDefaultDenyData(policy, nil, netInfo)
 				expectedData := initialDB.NBData
 				expectedData = append(expectedData, gressPolicyExpectedData...)
@@ -514,8 +508,8 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
-				gressPolicyExpectedData1 := getPolicyData(networkPolicy, []string{nPodTest.portUUID},
-					nil, []int32{portNum})
+				gressPolicyExpectedData1 := getPolicyData(newNetpolDataParams(networkPolicy).
+					withLocalPortUUIDs(nPodTest.portUUID).withTCPPeerPorts(portNum))
 				defaultDenyExpectedData1 := getDefaultDenyData(networkPolicy, []string{nPodTest.portUUID})
 				initData := getUpdatedInitialDB([]testPod{nPodTest})
 				expectedData1 := append(initData, gressPolicyExpectedData1...)
@@ -539,8 +533,8 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				gomega.Expect(portInfo).NotTo(gomega.Equal(nil))
 				ocInfo.asf.ExpectAddressSetWithIPs(namespaceName1, []string{portInfo.podIP})
 
-				gressPolicyExpectedData2 := getMultiPolicyData(networkPolicy, []string{portInfo.portUUID}, nil,
-					[]int32{portNum}, netInfo)
+				gressPolicyExpectedData2 := getPolicyData(newNetpolDataParams(networkPolicy).
+					withLocalPortUUIDs(portInfo.portUUID).withTCPPeerPorts(portNum).withNetInfo(netInfo))
 				defaultDenyExpectedData2 := getMultiDefaultDenyData(networkPolicy, []string{portInfo.portUUID}, netInfo)
 				expectedData2 := append(expectedData1, gressPolicyExpectedData2...)
 				expectedData2 = append(expectedData2, defaultDenyExpectedData2...)
