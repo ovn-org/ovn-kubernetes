@@ -199,8 +199,8 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 
 	// Wait for the caches to be synced
 	klog.Info("Waiting for informer caches to sync")
-	if !util.WaitForNamedCacheSyncWithTimeout(c.controllerName, stopCh, c.anpCacheSynced, c.banpCacheSynced, c.anpNamespaceSynced, c.anpPodSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
+	if !util.WaitForInformerCacheSyncWithTimeout(c.controllerName, stopCh, c.anpCacheSynced, c.banpCacheSynced, c.anpNamespaceSynced, c.anpPodSynced) {
+		utilruntime.HandleError(fmt.Errorf("timed out waiting for admin network policy caches to sync"))
 		klog.Errorf("Error syncing caches for admin network policy and baseline admin network policy")
 		return
 	}

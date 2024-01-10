@@ -228,16 +228,16 @@ func (oc *DefaultNetworkController) runEgressQoSController(wg *sync.WaitGroup, t
 
 	klog.Infof("Starting EgressQoS Controller")
 
-	if !util.WaitForNamedCacheSyncWithTimeout("egressqosnodes", stopCh, oc.egressQoSNodeSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
+	if !util.WaitForInformerCacheSyncWithTimeout("egressqosnodes", stopCh, oc.egressQoSNodeSynced) {
+		return fmt.Errorf("timed out waiting for egress QoS node caches to sync")
 	}
 
-	if !util.WaitForNamedCacheSyncWithTimeout("egressqospods", stopCh, oc.egressQoSPodSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
+	if !util.WaitForInformerCacheSyncWithTimeout("egressqospods", stopCh, oc.egressQoSPodSynced) {
+		return fmt.Errorf("timed out waiting for egress QoS pods caches to sync")
 	}
 
-	if !util.WaitForNamedCacheSyncWithTimeout("egressqos", stopCh, oc.egressQoSSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
+	if !util.WaitForInformerCacheSyncWithTimeout("egressqos", stopCh, oc.egressQoSSynced) {
+		return fmt.Errorf("timed out waiting for egress QoS caches to sync")
 	}
 
 	klog.Infof("Repairing EgressQoSes")

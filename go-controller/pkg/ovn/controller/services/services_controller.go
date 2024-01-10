@@ -167,10 +167,10 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	if err != nil {
 		return err
 	}
-	// We need node cache to be synced first, as we rely on it to properly reprogram initial per node load balancers
-	klog.Info("Waiting for node tracker caches to sync")
-	if !util.WaitForNamedCacheSyncWithTimeout(nodeControllerName, stopCh, nodeHandler.HasSynced) {
-		return fmt.Errorf("error syncing cache")
+	// We need the node tracker to be synced first, as we rely on it to properly reprogram initial per node load balancers
+	klog.Info("Waiting for node tracker handler to sync")
+	if !util.WaitForHandlerSyncWithTimeout(nodeControllerName, stopCh, types.HandlerSyncTimeout, nodeHandler.HasSynced) {
+		return fmt.Errorf("error syncing node tracker handler")
 	}
 
 	klog.Info("Setting up event handlers for services")
@@ -193,10 +193,9 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		return err
 	}
 
-	// Wait for the caches to be synced
-	klog.Info("Waiting for service and endpoint caches to sync")
-	if !util.WaitForNamedCacheSyncWithTimeout(controllerName, stopCh, svcHandler.HasSynced, endpointHandler.HasSynced) {
-		return fmt.Errorf("error syncing cache")
+	klog.Info("Waiting for service and endpoint handlers to sync")
+	if !util.WaitForHandlerSyncWithTimeout(controllerName, stopCh, types.HandlerSyncTimeout, svcHandler.HasSynced, endpointHandler.HasSynced) {
+		return fmt.Errorf("error syncing service and endpoint handlers")
 	}
 
 	if runRepair {
