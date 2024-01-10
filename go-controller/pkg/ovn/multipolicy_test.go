@@ -219,13 +219,13 @@ func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []
 func getMultiPolicyData(networkPolicy *knet.NetworkPolicy, localPortUUIDs []string, peerNamespaces []string,
 	tcpPeerPorts []int32, netInfo util.NetInfo) []libovsdb.TestData {
 	return getPolicyDataHelper(networkPolicy, localPortUUIDs, peerNamespaces, tcpPeerPorts, "",
-		false, false, netInfo)
+		false, netInfo)
 }
 
 func getMultiDefaultDenyData(networkPolicy *knet.NetworkPolicy, ports []string, netInfo util.NetInfo) []libovsdb.TestData {
 	policyTypeIngress, policyTypeEgress := getPolicyType(networkPolicy)
 	return getDefaultDenyDataHelper(networkPolicy.Namespace, policyTypeIngress, policyTypeEgress,
-		ports, "", "", netInfo)
+		ports, "", netInfo)
 }
 
 var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
