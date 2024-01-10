@@ -748,6 +748,12 @@ func servicesOptions() map[string]string {
 	}
 }
 
+func servicesOptionsWithAffinityTimeout() map[string]string {
+	options := servicesOptions()
+	options["affinity_timeout"] = "10800"
+	return options
+}
+
 func templateServicesOptions() map[string]string {
 	// Template LBs need "options:template=true" and "options:address-family" set.
 	opts := servicesOptions()
