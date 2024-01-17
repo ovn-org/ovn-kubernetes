@@ -35,6 +35,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 	const (
 		node1 = "node1"
 		node2 = "node2"
+		node3 = "node3"
 		vm1   = "vm1"
 
 		dhcpv4OptionsUUID = "dhcpv4"
@@ -133,6 +134,14 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				lrpNetworkIPv6:        "fd12::5/64",
 				transitSwitchPortIPv4: "100.65.0.5/24",
 				transitSwitchPortIPv6: "fd13::5/64",
+			},
+			node3: {
+				subnetIPv4:            "10.128.3.0/24",
+				subnetIPv6:            "fd13::/64",
+				lrpNetworkIPv4:        "100.64.0.6/24",
+				lrpNetworkIPv6:        "fd12::6/64",
+				transitSwitchPortIPv4: "100.65.0.6/24",
+				transitSwitchPortIPv6: "fd13::6/64",
 			},
 		}
 		vmByName = map[string]testVM{
@@ -652,6 +661,15 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 									},
 								},
 							},
+							{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: node3,
+									Annotations: map[string]string{
+										"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf(`{"ipv4": %q, "ipv6": %q}`, nodeByName[node3].transitSwitchPortIPv4, nodeByName[node3].transitSwitchPortIPv6),
+										"k8s.ovn.org/node-subnets":                    fmt.Sprintf(`{"default":[%q,%q]}`, nodeByName[node3].subnetIPv4, nodeByName[node3].subnetIPv6),
+									},
+								},
+							},
 						},
 					},
 				)
@@ -659,7 +677,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				if t.migrationTarget.nodeName != "" {
 					t.migrationTarget.populateLogicalSwitchCache(fakeOvn)
 				}
-
 				for _, remoteNode := range t.remoteNodes {
 					fakeOvn.controller.localZoneNodes.Delete(remoteNode)
 				}
@@ -971,6 +988,71 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				migrationTarget: testMigrationTarget{
 					lrpNetworks:         []string{nodeByName[node2].lrpNetworkIPv4, nodeByName[node2].lrpNetworkIPv6},
 					testVirtLauncherPod: virtLauncher2(node2, vm1),
+				},
+				expectedDhcpv4: []testDHCPOptions{{
+					cidr:     nodeByName[node1].subnetIPv4,
+					dns:      dnsServiceIPv4,
+					hostname: vm1,
+				}},
+				expectedDhcpv6: []testDHCPOptions{{
+					cidr:     nodeByName[node1].subnetIPv6,
+					dns:      dnsServiceIPv6,
+					hostname: vm1,
+				}},
+				expectedStaticRoutes: []testStaticRoute{
+					{
+						prefix:     vmByName[vm1].addressIPv4,
+						nexthop:    vmByName[vm1].addressIPv4,
+						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+					{
+						prefix:     vmByName[vm1].addressIPv6,
+						nexthop:    vmByName[vm1].addressIPv6,
+						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+					{
+						prefix:      clusterCIDRIPv4,
+						nexthop:     strings.Split(nodeByName[node2].lrpNetworkIPv4, "/")[0],
+						policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						externalIDs: map[string]string{},
+					},
+					{
+						prefix:      clusterCIDRIPv6,
+						nexthop:     strings.Split(nodeByName[node2].lrpNetworkIPv6, "/")[0],
+						policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						externalIDs: map[string]string{},
+					},
+				},
+			}),
+			Entry("for pre-copy live migration between zones that do not own the original subnet", testData{
+				interconnected: true,
+				ipv4:           true,
+				ipv6:           true,
+				remoteNodes:    []string{node3},
+				lrpNetworks:    []string{nodeByName[node3].lrpNetworkIPv4, nodeByName[node3].lrpNetworkIPv6},
+				dnsServiceIPs:  []string{dnsServiceIPv4, dnsServiceIPv6},
+				testVirtLauncherPod: testVirtLauncherPod{
+					suffix: "1",
+					testPod: testPod{
+						nodeName: node3,
+					},
+					vmName: vm1,
+				},
+				migrationTarget: testMigrationTarget{
+					lrpNetworks:         []string{nodeByName[node2].lrpNetworkIPv4, nodeByName[node2].lrpNetworkIPv6},
+					testVirtLauncherPod: virtLauncher2(node2, vm1),
+				},
+				staticRoutes: []testStaticRoute{
+					{
+						prefix:  vmByName[vm1].addressIPv4,
+						nexthop: strings.Split(nodeByName[node3].transitSwitchPortIPv4, "/")[0],
+						zone:    kubevirt.OvnRemoteZone,
+					},
+					{
+						prefix:  vmByName[vm1].addressIPv6,
+						nexthop: strings.Split(nodeByName[node3].transitSwitchPortIPv6, "/")[0],
+						zone:    kubevirt.OvnRemoteZone,
+					},
 				},
 				expectedDhcpv4: []testDHCPOptions{{
 					cidr:     nodeByName[node1].subnetIPv4,
