@@ -150,7 +150,7 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 			},
 		}
 		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, types.OVNClusterRouter, &ingressRoute, func(item *nbdb.LogicalRouterStaticRoute) bool {
-			matches := item.IPPrefix == ingressRoute.IPPrefix && item.Nexthop == ingressRoute.Nexthop && item.Policy != nil && *item.Policy == *ingressRoute.Policy
+			matches := item.IPPrefix == ingressRoute.IPPrefix && item.Policy != nil && *item.Policy == *ingressRoute.Policy
 			return matches
 		}); err != nil {
 			return fmt.Errorf("failed adding static route: %v", err)
@@ -227,7 +227,7 @@ func EnsureRemoteZonePodAddressesToNodeRoute(controllerName string, watchFactory
 			},
 		}
 		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, types.OVNClusterRouter, &route, func(item *nbdb.LogicalRouterStaticRoute) bool {
-			matches := item.IPPrefix == route.IPPrefix && item.Nexthop == route.Nexthop && item.Policy != nil && *item.Policy == *route.Policy
+			matches := item.IPPrefix == route.IPPrefix && item.Policy != nil && *item.Policy == *route.Policy
 			return matches
 		}); err != nil {
 			return fmt.Errorf("failed adding static route to remote pod: %v", err)
