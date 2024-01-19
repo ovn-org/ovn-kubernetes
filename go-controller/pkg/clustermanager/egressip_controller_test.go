@@ -516,6 +516,107 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 			table.Entry("Non-OVN managed network", "7.7.7.100", "7.7.0.0/16"),
 			table.Entry("Non-OVN managed network", "7.7.8.100", "7.7.0.0/16"),
 		)
+		ginkgo.It("should assign EgressIPs to a linux node when there are windows nodes in the cluster", func() {
+			app.Action = func(ctx *cli.Context) error {
+				node1IPv4OVNManaged := "192.168.126.202/24"
+				node1IPv4NonOVNManaged := "10.10.10.3/24"
+				node1Ipv4NonOVNManaged2 := "7.7.7.7/16"
+				egressIP := "192.168.126.101"
+				egressNamespace := newNamespace(namespace)
+
+				var err error
+				config.Kubernetes.NoHostSubnetNodes, err = metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/os": "windows"},
+				})
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+				node1 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4OVNManaged, ""),
+							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", node1IPv4OVNManaged, node1IPv4NonOVNManaged, node1Ipv4NonOVNManaged2),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
+				hybridOverlayNode := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "hybridOverlayNode",
+						Annotations: map[string]string{
+							"k8s.ovn.org/hybrid-overlay-distributed-router-gateway-mac": "00-15-5D-7B-E7-D2",
+							"k8s.ovn.org/hybrid-overlay-node-subnet":                    "10.132.0.0/24",
+						},
+						Labels: map[string]string{
+							"kubernetes.io/os": "windows",
+						},
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP},
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: egressPodLabel,
+						},
+						NamespaceSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"name": egressNamespace.Name,
+							},
+						},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{},
+					},
+				}
+				fakeClusterManagerOVN.start(
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{node1, hybridOverlayNode},
+					},
+				)
+				_, err = fakeClusterManagerOVN.eIPC.WatchEgressNodes()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = fakeClusterManagerOVN.eIPC.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(1))
+				gomega.Expect(fakeClusterManagerOVN.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
+				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
+
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
+				egressIPs, nodes := getEgressIPStatus(egressIPName)
+				gomega.Expect(nodes[0]).To(gomega.Equal(node1.Name))
+				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 	})
 
 	ginkgo.Context("WatchEgressNodes", func() {

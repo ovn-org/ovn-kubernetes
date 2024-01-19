@@ -1400,6 +1400,10 @@ func (eIPC *egressIPClusterController) isEgressIPAddrConflict(egressIP net.IP) (
 	// iterate through the nodes and ensure no host IP address conflicts with EIP. Note that host-cidrs annotation
 	// does not contain EgressIPs that are assigned to interfaces.
 	for _, node := range nodes {
+		// EgressIP is not supported on hybrid overlay nodes, and OVNNodeHostCIDRs annotation is not present
+		if util.NoHostSubnet(node) {
+			continue
+		}
 		nodeHostAddrsSet, err := util.ParseNodeHostCIDRsDropNetMask(node)
 		if err != nil {
 			return false, "", fmt.Errorf("failed to parse node host cidrs for node %s: %v", node.Name, err)
