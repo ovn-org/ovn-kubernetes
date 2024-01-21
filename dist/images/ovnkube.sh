@@ -82,6 +82,7 @@ fi
 # OVN_EGRESSSERVICE_ENABLE - enable egress Service for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
+# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - Name of interface to be used as ovnkubernetes mgmt port (default: ovn-k8s-mp0)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
 # OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME - ovnkube node management port device plugin resource
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
@@ -277,6 +278,8 @@ ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
+# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - name of interface being used as management port
+ovnkube_node_mgmt_port_intf_name=${OVNKUBE_NODE_MGMT_PORT_INTF_NAME:-}
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 # OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME - is the device plugin resource name that has
@@ -1226,6 +1229,12 @@ ovn-master() {
   fi
   echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
 
+  ovnkube_node_mgmt_port_intf_name_flag=
+  if [[ ${ovnkube_node_mgmt_port_intf_name} != "" ]]; then
+    ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
+  fi
+  echo "ovnkube_node_mgmt_port_intf_name_flag=${ovnkube_node_mgmt_port_intf_name_flag}"
+
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
     init_node_flags="--init-node ${K8S_NODE} --nodeport"
@@ -1272,6 +1281,7 @@ ovn-master() {
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --metrics-enable-pprof \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    ${ovnkube_node_mgmt_port_intf_name_flag} & \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid &
 
   echo "=============== ovn-master ========== running"
@@ -2314,6 +2324,11 @@ ovn-node() {
     node_mgmt_port_netdev_flags="$node_mgmt_port_netdev_flags --ovnkube-node-mgmt-port-dp-resource-name ${ovnkube_node_mgmt_port_dp_resource_name}"
   fi
 
+  ovnkube_node_mgmt_port_intf_name_flag=
+  if [[ ${ovnkube_node_mgmt_port_intf_name} != "" ]]; then
+    ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
+  fi
+
   local ovn_node_ssl_opts=""
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
       [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
@@ -2407,6 +2422,7 @@ ovn-node() {
         ${ovnkube_metrics_tls_opts} \
         ${ovnkube_node_certs_flags} \
         ${ovnkube_node_mgmt_port_netdev_flag} \
+        ${ovnkube_node_mgmt_port_intf_name_flag} \
         ${ovnkube_node_mode_flag} \
         ${ovn_node_ssl_opts} \
         ${ovn_unprivileged_flag} \

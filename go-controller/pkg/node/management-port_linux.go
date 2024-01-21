@@ -222,7 +222,7 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 	// source protocol address to be in the Logical Switch's subnet.
 	if exists, err = util.LinkNeighExists(mpcfg.link, cfg.gwIP, mpcfg.routerMAC); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing arp entry for MAC/IP binding (%s/%s) on link %s",
-			mpcfg.routerMAC.String(), cfg.gwIP, types.K8sMgmtIntfName))
+			mpcfg.routerMAC.String(), cfg.gwIP, util.GetK8sMgmtIntfName()))
 		err = util.LinkNeighAdd(mpcfg.link, cfg.gwIP, mpcfg.routerMAC)
 	}
 	if err != nil {
@@ -230,10 +230,10 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 	}
 
 	createForwardingRule := func(family string) error {
-		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.%s.conf.%s.forwarding=1", family, types.K8sMgmtIntfName))
-		if err != nil || stdout != fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, types.K8sMgmtIntfName) {
+		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.%s.conf.%s.forwarding=1", family, util.GetK8sMgmtIntfName()))
+		if err != nil || stdout != fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, util.GetK8sMgmtIntfName()) {
 			return fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
-				types.K8sMgmtIntfName, stdout, stderr, err)
+				util.GetK8sMgmtIntfName(), stdout, stderr, err)
 		}
 		return nil
 	}
@@ -472,7 +472,7 @@ func DelMgtPortIptRules() {
 	if err != nil {
 		return
 	}
-	rule := []string{"-o", types.K8sMgmtIntfName, "-j", iptableMgmPortChain}
+	rule := []string{"-o", util.GetK8sMgmtIntfName(), "-j", iptableMgmPortChain}
 	_ = ipt.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt6.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt.ClearChain("nat", iptableMgmPortChain)
