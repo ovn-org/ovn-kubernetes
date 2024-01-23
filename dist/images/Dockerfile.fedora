@@ -9,13 +9,13 @@
 # are built locally and included in the image (instead of the rpm)
 #
 
-FROM fedora:37
+FROM fedora:39
 
 USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-ARG ovnver=ovn-23.09.0-91.fc38
+ARG ovnver=ovn-23.09.0-100.fc39
 # Automatically populated when using docker buildx
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
