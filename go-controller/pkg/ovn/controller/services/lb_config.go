@@ -645,7 +645,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 						mvip := conf.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String()
 						targetsETP := joinHostsPort(switchV4targetips, config.eps.Port)
 						if isv6 {
-							mvip = conf.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String()
+							mvip = conf.Gateway.MasqueradeIPs.V6HostETPLocalMasqueradeIP.String()
 							targetsETP = joinHostsPort(switchV6targetips, config.eps.Port)
 						}
 						switchRules = append(switchRules, LBRule{
