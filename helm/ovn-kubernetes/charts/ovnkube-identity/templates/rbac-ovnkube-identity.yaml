@@ -1,0 +1,65 @@
+{{- if eq (hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true) true }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+    name: ovnkube-identity
+    namespace: ovn-kubernetes
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+    name: ovnkube-identity
+roleRef:
+    name: ovnkube-identity
+    kind: ClusterRole
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    - kind: ServiceAccount
+      name: ovnkube-identity
+      namespace: ovn-kubernetes
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+    name: ovnkube-identity-configmaps
+    namespace: ovn-kubernetes
+roleRef:
+    name: ovn-k8s-configmap
+    kind: Role
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    - kind: ServiceAccount
+      name: ovnkube-identity
+      namespace: ovn-kubernetes
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+    name: ovnkube-identity
+rules:
+    - apiGroups: [""]
+      resources:
+          - nodes
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["certificates.k8s.io"]
+      resources:
+          - certificatesigningrequests
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["certificates.k8s.io"]
+      resources:
+          - certificatesigningrequests/approval
+      verbs: ["update"]
+    - apiGroups: [""]
+      resources:
+          - events
+      verbs: ["create", "patch", "update"]
+    - apiGroups: ["certificates.k8s.io"]
+      resources:
+          - signers
+      resourceNames:
+          - kubernetes.io/kube-apiserver-client
+      verbs: ["approve"]
+{{- end }}

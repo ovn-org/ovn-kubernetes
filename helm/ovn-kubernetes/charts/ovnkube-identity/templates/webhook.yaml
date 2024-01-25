@@ -1,0 +1,57 @@
+{{- if eq (hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true) true }}
+# Create self signed CA and webhook cert
+# NOTE: The CA and certificate are not renewed after they expire, this should only be used in development environments
+{{- $ca := genCA "self-signed-ca" 400 }}
+{{- $cert := genSignedCert "localhost" nil (list "localhost") 365 $ca }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ovnkube-webhook-cert
+  namespace: ovn-kubernetes
+data:
+  tls.crt: {{ $cert.Cert | b64enc | quote }}
+  tls.key: {{ $cert.Key | b64enc | quote }}
+type: kubernetes.io/tls
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: ovn-kubernetes-admission-webhook-node
+webhooks:
+  - name: ovn-kubernetes-admission-webhook-node.k8s.io
+    clientConfig:
+      url: https://localhost:9443/node
+      caBundle: {{ $ca.Cert | b64enc | quote }}
+    admissionReviewVersions: ['v1']
+    sideEffects: None
+    rules:
+      - operations: [ "UPDATE" ]
+        apiGroups: ["*"]
+        apiVersions: ["*"]
+        resources: ["nodes/status"] # Using /status subresource doesn't protect from other users changing the annotations
+        scope: "*"
+
+# in non-ic environments ovnkube-node doesn't have the permissions to update pods
+{{- if eq .Values.global.enableInterconnect true }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: ovn-kubernetes-admission-webhook-pod
+webhooks:
+  - name: ovn-kubernetes-admission-webhook-pod.k8s.io
+    clientConfig:
+      url: https://localhost:9443/pod
+      caBundle: {{ $ca.Cert | b64enc | quote }}
+    admissionReviewVersions: ['v1']
+    sideEffects: None
+    rules:
+      - operations: [ "UPDATE" ]
+        apiGroups: ["*"]
+        apiVersions: ["*"]
+        resources: ["pods/status"] # Using /status subresource doesn't protect from other users changing the annotations
+        scope: "*"
+{{- end }}
+{{- end }}

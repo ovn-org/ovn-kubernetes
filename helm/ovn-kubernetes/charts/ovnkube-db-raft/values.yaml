@@ -1,0 +1,11 @@
+replicas: 3
+nbLogLevel: -vconsole:info -vfile:info
+nbRaftPort: 6643
+nbElectionTimer: 1000
+sbLogLevel: -vconsole:info -vfile:info
+sbRaftPort: 6644
+sbElectionTimer: 1000
+dbCheckerLogLevel: 4
+logFileMaxSize: 100
+logFileMaxBackups: 5
+logFileMaxAge: 5
