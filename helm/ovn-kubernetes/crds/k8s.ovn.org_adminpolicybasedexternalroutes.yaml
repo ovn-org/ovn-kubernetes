@@ -1,0 +1,286 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: adminpolicybasedexternalroutes.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: AdminPolicyBasedExternalRoute
+    listKind: AdminPolicyBasedExternalRouteList
+    plural: adminpolicybasedexternalroutes
+    shortNames:
+    - apbexternalroute
+    singular: adminpolicybasedexternalroute
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.lastTransitionTime
+      name: Last Update
+      type: date
+    - jsonPath: .status.status
+      name: Status
+      type: string
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: AdminPolicyBasedExternalRoute is a CRD allowing the cluster administrators
+          to configure policies for external gateway IPs to be applied to all the
+          pods contained in selected namespaces. Egress traffic from the pods that
+          belong to the selected namespaces to outside the cluster is routed through
+          these external gateway IPs.
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AdminPolicyBasedExternalRouteSpec defines the desired state
+              of AdminPolicyBasedExternalRoute
+            properties:
+              from:
+                description: From defines the selectors that will determine the target
+                  namespaces to this CR.
+                properties:
+                  namespaceSelector:
+                    description: NamespaceSelector defines a selector to be used to
+                      determine which namespaces will be targeted by this CR
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: A label selector requirement is a selector
+                            that contains values, a key, and an operator that relates
+                            the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: operator represents a key's relationship
+                                to a set of values. Valid operators are In, NotIn,
+                                Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: values is an array of string values. If
+                                the operator is In or NotIn, the values array must
+                                be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced
+                                during a strategic merge patch.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: matchLabels is a map of {key,value} pairs. A
+                          single {key,value} in the matchLabels map is equivalent
+                          to an element of matchExpressions, whose key field is "key",
+                          the operator is "In", and the values array contains only
+                          "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - namespaceSelector
+                type: object
+              nextHops:
+                description: 'NextHops defines two types of hops: Static and Dynamic.
+                  Each hop defines at least one external gateway IP.'
+                minProperties: 1
+                properties:
+                  dynamic:
+                    description: DynamicHops defines a slices of DynamicHop. This
+                      field is optional.
+                    items:
+                      description: DynamicHop defines the configuration for a dynamic
+                        external gateway interface. These interfaces are wrapped around
+                        a pod object that resides inside the cluster. The field NetworkAttachmentName
+                        captures the name of the multus network name to use when retrieving
+                        the gateway IP to use. The PodSelector and the NamespaceSelector
+                        are mandatory fields.
+                      properties:
+                        bfdEnabled:
+                          default: false
+                          description: BFDEnabled determines if the interface implements
+                            the Bidirectional Forward Detection protocol. Defaults
+                            to false.
+                          type: boolean
+                        namespaceSelector:
+                          description: NamespaceSelector defines a selector to filter
+                            the namespaces where the pod gateways are located.
+                          properties:
+                            matchExpressions:
+                              description: matchExpressions is a list of label selector
+                                requirements. The requirements are ANDed.
+                              items:
+                                description: A label selector requirement is a selector
+                                  that contains values, a key, and an operator that
+                                  relates the key and values.
+                                properties:
+                                  key:
+                                    description: key is the label key that the selector
+                                      applies to.
+                                    type: string
+                                  operator:
+                                    description: operator represents a key's relationship
+                                      to a set of values. Valid operators are In,
+                                      NotIn, Exists and DoesNotExist.
+                                    type: string
+                                  values:
+                                    description: values is an array of string values.
+                                      If the operator is In or NotIn, the values array
+                                      must be non-empty. If the operator is Exists
+                                      or DoesNotExist, the values array must be empty.
+                                      This array is replaced during a strategic merge
+                                      patch.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - key
+                                - operator
+                                type: object
+                              type: array
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              description: matchLabels is a map of {key,value} pairs.
+                                A single {key,value} in the matchLabels map is equivalent
+                                to an element of matchExpressions, whose key field
+                                is "key", the operator is "In", and the values array
+                                contains only "value". The requirements are ANDed.
+                              type: object
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        networkAttachmentName:
+                          default: ""
+                          description: NetworkAttachmentName determines the multus
+                            network name to use when retrieving the pod IPs that will
+                            be used as the gateway IP. When this field is empty, the
+                            logic assumes that the pod is configured with HostNetwork
+                            and is using the node's IP as gateway.
+                          type: string
+                        podSelector:
+                          description: PodSelector defines the selector to filter
+                            the pods that are external gateways.
+                          properties:
+                            matchExpressions:
+                              description: matchExpressions is a list of label selector
+                                requirements. The requirements are ANDed.
+                              items:
+                                description: A label selector requirement is a selector
+                                  that contains values, a key, and an operator that
+                                  relates the key and values.
+                                properties:
+                                  key:
+                                    description: key is the label key that the selector
+                                      applies to.
+                                    type: string
+                                  operator:
+                                    description: operator represents a key's relationship
+                                      to a set of values. Valid operators are In,
+                                      NotIn, Exists and DoesNotExist.
+                                    type: string
+                                  values:
+                                    description: values is an array of string values.
+                                      If the operator is In or NotIn, the values array
+                                      must be non-empty. If the operator is Exists
+                                      or DoesNotExist, the values array must be empty.
+                                      This array is replaced during a strategic merge
+                                      patch.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - key
+                                - operator
+                                type: object
+                              type: array
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              description: matchLabels is a map of {key,value} pairs.
+                                A single {key,value} in the matchLabels map is equivalent
+                                to an element of matchExpressions, whose key field
+                                is "key", the operator is "In", and the values array
+                                contains only "value". The requirements are ANDed.
+                              type: object
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      required:
+                      - namespaceSelector
+                      - podSelector
+                      type: object
+                    type: array
+                  static:
+                    description: StaticHops defines a slice of StaticHop. This field
+                      is optional.
+                    items:
+                      description: StaticHop defines the configuration of a static
+                        IP that acts as an external Gateway Interface. IP field is
+                        mandatory.
+                      properties:
+                        bfdEnabled:
+                          default: false
+                          description: BFDEnabled determines if the interface implements
+                            the Bidirectional Forward Detection protocol. Defaults
+                            to false.
+                          type: boolean
+                        ip:
+                          description: IP defines the static IP to be used for egress
+                            traffic. The IP can be either IPv4 or IPv6.
+                          pattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$|^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s*
+                          type: string
+                      required:
+                      - ip
+                      type: object
+                    type: array
+                type: object
+            required:
+            - from
+            - nextHops
+            type: object
+          status:
+            description: AdminPolicyBasedRouteStatus contains the observed status
+              of the AdminPolicyBased route types.
+            properties:
+              lastTransitionTime:
+                description: Captures the time when the last change was applied.
+                format: date-time
+                type: string
+              messages:
+                description: An array of Human-readable messages indicating details
+                  about the status of the object.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
+              status:
+                description: A concise indication of whether the AdminPolicyBasedRoute
+                  resource is applied with success
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,274 @@
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: ovn-ipsec
+  namespace: ovn-kubernetes
+  annotations:
+    kubernetes.io/description: |
+      This DaemonSet launches the ovn ipsec networking components for all nodes.
+spec:
+  selector:
+    matchLabels:
+      app: ovn-ipsec
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 10%
+  template:
+    metadata:
+      annotations:
+        target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
+      labels:
+        app: ovn-ipsec
+        component: network
+        type: infra
+        openshift.io/component: network
+        kubernetes.io/os: "linux"
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: network.operator.openshift.io/dpu-host
+                operator: DoesNotExist
+      serviceAccountName: ovnkube-node
+      hostNetwork: true
+      dnsPolicy: Default
+      priorityClassName: "system-node-critical"
+      initContainers:
+      - name: ovn-keys
+        image: {{ include "getImage" . }}
+        imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
+        command:
+        - /bin/bash
+        - -c
+        - |
+          #!/bin/bash
+          set -exuo pipefail
+
+          # Every time we restart this container, we will create a new key pair if
+          # we are close to key expiration or if we do not already have a signed key pair.
+          #
+          # Each node has a key pair which is used by OVS to encrypt/decrypt/authenticate traffic
+          # between each node. The CA cert is used as the root of trust for all certs so we need
+          # the CA to sign our certificate signing requests with the CA private key. In this way,
+          # we can validate that any signed certificates that we receive from other nodes are
+          # authentic.
+          echo "Configuring IPsec keys"
+
+          # If the certificate does not exist or it will expire in the next 6 months
+          # (15770000 seconds), we will generate a new one.
+          if [ ! -e /etc/openvswitch/keys/ipsec-cert.pem ] || [ ! openssl x509 -noout -dates -checkend 15770000 ];
+          then
+            # We use the system-id as the CN for our certificate signing request. This
+            # is a requirement by OVN.
+            cn=$(ovs-vsctl --retry -t 60 get Open_vSwitch . external-ids:system-id | tr -d "\"")
+
+            mkdir -p /etc/openvswitch/keys
+
+            # Generate an SSL private key and use the key to create a certitificate signing request
+            umask 077 && openssl genrsa -out /etc/openvswitch/keys/ipsec-privkey.pem 2048
+            openssl req -new -text \
+                        -extensions v3_req \
+                        -addext "subjectAltName = DNS:${cn}" \
+                        -subj "/C=US/O=ovnkubernetes/OU=kind/CN=${cn}" \
+                        -key /etc/openvswitch/keys/ipsec-privkey.pem \
+                        -out /etc/openvswitch/keys/ipsec-req.pem
+
+            csr_64=$(cat /etc/openvswitch/keys/ipsec-req.pem | base64 | tr -d "\n")
+
+            # The signer controller does not allow re-signing a key. We will
+            # delete the old key to be sure it is not there
+            kubectl delete --ignore-not-found=true csr/$(hostname)
+
+            # Request that our generated certificate signing request is
+            # signed by the "network.openshift.io/signer" signer that is
+            # implemented by the CNO signer controller. This will sign the
+            # certificate signing request using the signer-ca which has been
+            # set up by the OperatorPKI. In this way, we have a signed certificate
+            # and our private key has remained private on this host.
+            cat <<EOF | kubectl apply -f -
+            apiVersion: certificates.k8s.io/v1
+            kind: CertificateSigningRequest
+            metadata:
+              name: $(hostname)
+            spec:
+              request: ${csr_64}
+              signerName: network.openshift.io/signer
+              usages:
+              - ipsec tunnel
+          EOF
+
+            # Wait until the certificate signing request has been signed.
+            counter=0
+            until [ ! -z $(kubectl get csr/$(hostname) -o jsonpath='{.status.certificate}' 2>/dev/null) ]
+            do
+              counter=$((counter+1))
+              sleep 1
+              if [ $counter -gt 60 ];
+              then
+                      echo "Unable to sign certificate after $counter seconds"
+                      exit 1
+              fi
+            done
+
+            # Decode the signed certificate.
+            kubectl get csr/$(hostname) -o jsonpath='{.status.certificate}' | base64 -d | openssl x509 -outform pem -text -out /etc/openvswitch/keys/ipsec-cert.pem
+
+            kubectl delete csr/$(hostname)
+
+            # Get the CA certificate so we can authenticate peer nodes.
+            cat /signer-ca/ca-bundle.crt | openssl x509 -outform pem -text > /etc/openvswitch/keys/ipsec-cacert.pem
+          fi
+
+          # Configure OVS with the relevant keys for this node. This is required by ovs-monitor-ipsec.
+          #
+          # Updating the certificates does not need to be an atomic operation as
+          # the will get read and loaded into NSS by the ovs-monitor-ipsec process
+          # which has not started yet.
+          ovs-vsctl --retry -t 60 set Open_vSwitch . other_config:certificate=/etc/openvswitch/keys/ipsec-cert.pem \
+                                                     other_config:private_key=/etc/openvswitch/keys/ipsec-privkey.pem \
+                                                     other_config:ca_cert=/etc/openvswitch/keys/ipsec-cacert.pem
+        env:
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - mountPath: /var/run/openvswitch
+          name: host-var-run-ovs
+        - mountPath: /signer-ca
+          name: signer-ca
+        - mountPath: /etc/openvswitch
+          name: etc-openvswitch
+        resources:
+          requests:
+            cpu: 10m
+            memory: 100Mi
+        terminationMessagePolicy: FallbackToLogsOnError
+      containers:
+      # ovs-monitor-ipsec and libreswan daemons
+      - name: ovn-ipsec
+        image: {{ include "getImage" . }}
+        imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
+        command:
+        - /bin/bash
+        - -c
+        - |
+          #!/bin/bash
+          set -exuo pipefail
+
+          function cleanup()
+          {
+            # In order to maintain traffic flows during container restart, we
+            # need to ensure that xfrm state and policies are not flushed.
+
+            # Don't allow ovs monitor to cleanup persistent state
+            kill $(cat /var/run/openvswitch/ovs-monitor-ipsec.pid 2>/dev/null) 2>/dev/null || true
+            # Don't allow pluto to clear xfrm state and policies on exit
+            kill -9 $(cat /var/run/pluto/pluto.pid 2>/devnull) 2>/dev/null || true
+
+            /usr/sbin/ipsec --stopnflog
+            exit 0
+          }
+          trap cleanup SIGTERM
+
+          # Don't start IPsec until ovnkube-node has finished setting up the node
+          counter=0
+          until [ -f /etc/cni/net.d/10-ovn-kubernetes.conf ]
+          do
+            counter=$((counter+1))
+            sleep 1
+            if [ $counter -gt 300 ];
+            then
+                    echo "ovnkube-node pod has not started after $counter seconds"
+                    exit 1
+            fi
+          done
+          echo "ovnkube-node has configured node."
+
+          # After a restart of this container (or on initial startup), we flush xfrm state and policy
+          # before we start pluto and ovs-monitor-ipsec in order to start in a known good state. This
+          # will result in a small interruption in traffic until pluto and ovs-monitor-ipsec start again.
+          ip x s flush
+          ip x p flush
+
+          # Workaround for https://github.com/libreswan/libreswan/issues/373
+          ulimit -n 1024
+
+          /usr/libexec/ipsec/addconn --config /etc/ipsec.conf --checkconfig
+          # Check kernel modules
+          /usr/libexec/ipsec/_stackmanager start
+          # Check nss database status
+          /usr/sbin/ipsec --checknss
+          # Start the pluto IKE daemon
+          /usr/libexec/ipsec/pluto --leak-detective --config /etc/ipsec.conf --logfile /var/log/openvswitch/libreswan.log
+
+          # Start ovs-monitor-ipsec which will monitor for changes in the ovs
+          # tunnelling configuration (for example addition of a node) and configures
+          # libreswan appropriately.
+          # We are running this in the foreground so that the container will be restarted when ovs-monitor-ipsec fails.
+          # Upstream hack --ipsec-d for https://bugzilla.redhat.com/show_bug.cgi?id=1975039#c11
+          /usr/libexec/platform-python /usr/share/openvswitch/scripts/ovs-monitor-ipsec \
+            --pidfile=/var/run/openvswitch/ovs-monitor-ipsec.pid --ike-daemon=libreswan --no-restart-ike-daemon \
+            --log-file --monitor unix:/var/run/openvswitch/db.sock \
+            --ipsec-d /var/lib/ipsec/nss
+        env:
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          privileged: true
+        volumeMounts:
+        # To check that network setup is complete
+        - mountPath: /etc/cni/net.d
+          name: host-cni-netd
+        - mountPath: /var/run/openvswitch
+          name: host-var-run-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /etc/openvswitch
+          name: etc-openvswitch
+        resources:
+          requests:
+            cpu: 10m
+            memory: 100Mi
+        terminationMessagePolicy: FallbackToLogsOnError
+        livenessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - |
+              #!/bin/bash
+              ipsec status
+          initialDelaySeconds: 15
+          periodSeconds: 60
+      nodeSelector:
+        beta.kubernetes.io/os: "linux"
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: host-var-log-ovs
+        hostPath:
+          path: /var/log/openvswitch
+          type: DirectoryOrCreate
+      - name: host-var-run-ovs
+        hostPath:
+          path: /var/run/openvswitch
+          type: DirectoryOrCreate
+      - name: signer-ca
+        configMap:
+          name: signer-ca
+      - name: etc-openvswitch
+        hostPath:
+          path: /var/lib/openvswitch/etc
+          type: DirectoryOrCreate
+      - name: host-cni-netd
+        hostPath:
+          path: /etc/cni/net.d
+      tolerations:
+      - operator: "Exists"
