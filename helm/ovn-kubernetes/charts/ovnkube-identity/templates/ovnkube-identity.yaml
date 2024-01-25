@@ -1,0 +1,97 @@
+{{- if eq (hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true) true }}
+# ovnkube-identity
+# starts ovnkube-identity
+# it is run on the master(s).
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: ovnkube-identity
+  # namespace set up by install
+  namespace: ovn-kubernetes
+  annotations:
+    kubernetes.io/description: |
+      This Deployment launches the ovnkube-identity networking component.
+spec:
+  progressDeadlineSeconds: 600
+  replicas: {{ default 1 .Values.replicas }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      name: ovnkube-identity
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: ovnkube-identity
+        name: ovnkube-identity
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+    spec:
+      priorityClassName: "system-cluster-critical"
+      serviceAccountName: ovnkube-identity
+      hostNetwork: true
+      dnsPolicy: Default
+      # required to be scheduled on a linux node with node-role.kubernetes.io/control-plane label and
+      # only one instance of ovnkube-control-plane pod per node
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: Exists
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - "linux"
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: name
+                operator: In
+                values:
+                - ovnkube-identity
+            topologyKey: kubernetes.io/hostname
+
+      containers:
+      - name: ovnkube-identity
+        image: {{ include "getImage" . }}
+        imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
+        command: ["/root/ovnkube.sh", "ovnkube-identity"]
+        securityContext:
+          runAsUser: 0
+        terminationMessagePolicy: FallbackToLogsOnError
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        volumeMounts:
+          - mountPath: /etc/webhook-cert/
+            name: webhook-cert
+        env:
+          - name: OVN_DAEMONSET_VERSION
+            value: "3"
+          - name: K8S_APISERVER
+            valueFrom:
+              configMapKeyRef:
+                key: k8s_apiserver
+                name: ovn-config
+          - name: OVNKUBE_LOGLEVEL
+            value: {{ default 4 .Values.logLevel | quote }}
+          - name: OVN_ENABLE_INTERCONNECT
+            value: {{ hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false | quote }}
+          - name: OVN_HYBRID_OVERLAY_ENABLE
+            value: {{ default "" .Values.global.enableHybridOverlay | quote }}
+      volumes:
+        - name: webhook-cert
+          secret:
+            secretName: ovnkube-webhook-cert
+      tolerations:
+      - operator: "Exists"
+{{- end }}

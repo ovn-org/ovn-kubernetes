@@ -1,0 +1,192 @@
+# ovnkube-db
+# daemonset version 3
+# starts ovn NB/SB ovsdb daemons, each in a separate container
+# it is running on master for now, but does not need to be the case
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: ovnkube-db
+  # namespace set up by install
+  namespace: ovn-kubernetes
+  annotations:
+    kubernetes.io/description: |
+      This daemonset launches the OVN NB/SB ovsdb service components.
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      name: ovnkube-db
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        ovn-db-pod: "true"
+        name: ovnkube-db
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+    spec:
+      priorityClassName: "system-cluster-critical"
+      # Requires fairly broad permissions - ability to read all services and network functions as well
+      # as all pods.
+      serviceAccountName: ovnkube-db
+      hostNetwork: true
+      dnsPolicy: Default
+      containers:
+      # firewall rules for ovn - assumed to be setup
+      # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
+      # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
+
+      # nb-ovsdb - v3
+      - name: nb-ovsdb
+        image: {{ include "getImage" . }}
+        imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
+        command: ["/root/ovnkube.sh", "nb-ovsdb"]
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["NET_ADMIN"]
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # ovn db is stored in the pod in /etc/openvswitch
+        # (or in /etc/ovn if OVN from new repository is used)
+        # and on the host in /var/lib/openvswitch/
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVN_LOGLEVEL_NB
+          value: {{ default "-vconsole:info -vfile:info" .Values.nbLogLevel }}
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: OVN_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_SSL_ENABLE
+          value: {{ include "isSslEnabled" . | quote }}
+        - name: OVN_NB_PORT
+          value: {{ default 6641 .Values.global.nbPort | quote }}
+        - name: ENABLE_IPSEC
+          value: {{ hasKey .Values.global "enableIpsec" | ternary .Values.global.enableIpsec false | quote }}
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+      # end of container
+      # sb-ovsdb - v3
+      - name: sb-ovsdb
+        image: {{ include "getImage" . }}
+        imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
+        command: ["/root/ovnkube.sh", "sb-ovsdb"]
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["NET_ADMIN"]
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # ovn db is stored in the pod in /etc/openvswitch
+        # (or in /etc/ovn if OVN from new repository is used)
+        # and on the host in /var/lib/openvswitch/
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVN_LOGLEVEL_SB
+          value: {{ default "-vconsole:info -vfile:info" .Values.sbLogLevel }}
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: OVN_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_SSL_ENABLE
+          value: {{ include "isSslEnabled" . | quote }}
+        - name: OVN_SB_PORT
+          value: {{ default 6642 .Values.sbPort | quote }}
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+
+      # end of container
+
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+        kubernetes.io/os: "linux"
+      volumes:
+      - name: host-var-lib-ovs
+        hostPath:
+          path: /var/lib/openvswitch
+      - name: host-var-log-ovs
+        hostPath:
+          path: /var/log/openvswitch
+      - name: host-ovn-cert
+        hostPath:
+          path: /etc/ovn
+          type: DirectoryOrCreate
+      - name: host-var-run-ovs
+        hostPath:
+          path: /var/run/openvswitch
+      tolerations:
+      - operator: "Exists"
