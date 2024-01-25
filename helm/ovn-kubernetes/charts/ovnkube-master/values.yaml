@@ -1,0 +1,7 @@
+replicas: 1
+dummyGatewayBridge: ""
+logLevel: 4
+northdLogLevel: "-vconsole:info -vfile:info"
+logFileMaxSize: 100
+logFileMaxBackups: 5
+logFileMaxAge: 5

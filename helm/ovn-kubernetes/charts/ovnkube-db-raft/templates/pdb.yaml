@@ -1,0 +1,12 @@
+# ovndb-raft PodDisruptBudget to prevent majority of ovnkube raft cluster
+# nodes from disruption
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ovndb-raft-pdb
+  namespace: ovn-kubernetes
+spec:
+  minAvailable: {{ div (add (default 3 .Values.replicas) 1) 2 }}
+  selector:
+    matchLabels:
+      name: ovnkube-db

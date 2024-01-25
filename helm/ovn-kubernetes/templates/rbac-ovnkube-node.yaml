@@ -1,0 +1,215 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+    name: ovnkube-node
+    namespace: ovn-kubernetes
+
+# When ovn_enable_ovnkube_identity is true, an ovnkube-node process will identify as a user in a system:ovn-nodes group,
+# not the ovnkube-node serviceAccount
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+    name: ovnkube-node
+roleRef:
+    name: ovnkube-node
+    kind: ClusterRole
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    {{- if eq (hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true) true }}
+    - kind: Group
+      name: system:ovn-nodes
+      apiGroup: rbac.authorization.k8s.io
+    {{- else }}
+    - kind: ServiceAccount
+      name: ovnkube-node
+      namespace: ovn-kubernetes
+    {{- end }}
+
+
+# even when ovn_enable_ovnkube_identity is enabled, an ovnkube-node service account
+# is used in the ovnkube-node pod during initialization:
+# https://github.com/ovn-org/ovn-kubernetes/blob/c135b19e0b424c847e1de8bc214d884f8f905a8c/dist/images/ovnkube.sh#L2249
+# https://github.com/ovn-org/ovn-kubernetes/blob/c135b19e0b424c847e1de8bc214d884f8f905a8c/dist/images/ovnkube.sh#L748
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+    name: ovnkube-node-status-reader
+roleRef:
+    name: ovnkube-node-status-reader
+    kind: ClusterRole
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    - kind: ServiceAccount
+      name: ovnkube-node
+      namespace: ovn-kubernetes
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+    name: ovnkube-node-configmaps
+    namespace: ovn-kubernetes
+roleRef:
+    name: ovn-k8s-configmap
+    kind: Role
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    {{- if eq (hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true) true }}
+    - kind: Group
+      name: system:ovn-nodes
+      apiGroup: rbac.authorization.k8s.io
+    {{- else }}
+    - kind: ServiceAccount
+      name: ovnkube-node
+      namespace: ovn-kubernetes
+    {{- end }}
+
+# In IC ovnkube-node pod needs configmap access in ovn-k ns for topology version:
+# https://github.com/ovn-org/ovn-kubernetes/blob/e1e7d40f9a6c6038b52696c1b8f8915a4d73160e/go-controller/pkg/ovn/topology_version.go#L28
+{{- if eq (hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false) true }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+    name: ovnkube-node-ic-configmaps-update
+    namespace: ovn-kubernetes
+roleRef:
+    name: ovn-k8s-configmap-update
+    kind: Role
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    {{- if eq (hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true) true }}
+    - kind: Group
+      name: system:ovn-nodes
+      apiGroup: rbac.authorization.k8s.io
+    {{- else }}
+    - kind: ServiceAccount
+      name: ovnkube-node
+      namespace: ovn-kubernetes
+    {{- end }}
+{{- end }}
+
+# even when ovn_enable_ovnkube_identity is enabled, an ovnkube-node service account
+# is used in the ovnkube-node pod during initialization:
+# https://github.com/ovn-org/ovn-kubernetes/blob/c135b19e0b424c847e1de8bc214d884f8f905a8c/dist/images/ovnkube.sh#L366
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+    name: ovnkube-node-ep
+    namespace: ovn-kubernetes
+roleRef:
+    name: ovnkube-node-ep
+    kind: Role
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    - kind: ServiceAccount
+      name: ovnkube-node
+      namespace: ovn-kubernetes
+
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+    name: ovnkube-node-status-reader
+rules:
+    - apiGroups: [""]
+      resources:
+          - nodes/status
+      verbs: [ "get" ]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+    name: ovnkube-node
+rules:
+    - apiGroups: [""]
+      resources:
+          - namespaces
+          - nodes
+          - pods
+          - services
+          - endpoints
+      verbs: [ "get", "list", "watch" ]
+    - apiGroups: ["discovery.k8s.io"]
+      resources:
+          - endpointslices
+      verbs: [ "get", "list", "watch" ]
+    {{- if eq (hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false) true }}
+    - apiGroups: ["networking.k8s.io"]
+      resources:
+          - networkpolicies
+      verbs: [ "get", "list", "watch" ]
+    - apiGroups: ["k8s.cni.cncf.io"]
+      resources:
+          - network-attachment-definitions
+          - multi-networkpolicies
+      verbs: ["list", "get", "watch"]
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+          - egressfirewalls/status
+          - adminpolicybasedexternalroutes/status
+      verbs: [ "patch", "update" ]
+    - apiGroups: ["policy.networking.k8s.io"]
+      resources:
+          - adminnetworkpolicies/status
+          - baselineadminnetworkpolicies/status
+      verbs: [ "patch", "update" ]
+    {{- end }}
+    - apiGroups: ["policy.networking.k8s.io"]
+      resources:
+          - adminnetworkpolicies
+          - baselineadminnetworkpolicies
+      verbs: ["list", "get", "watch"]
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+          - egressfirewalls
+          - egressips
+          - egressqoses
+          - egressservices
+          - adminpolicybasedexternalroutes
+      verbs: [ "get", "list", "watch" ]
+    {{- if eq (hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true) true }}
+    - apiGroups: ["certificates.k8s.io"]
+      resources:
+          - certificatesigningrequests
+      verbs:
+        - create
+        - get
+        - list
+        - watch
+    {{- end }}
+    - apiGroups: [""]
+      resources:
+          - events
+      verbs: ["create", "patch", "update"]
+    - apiGroups: [""]
+      resources:
+          {{- if eq (hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false) true }}
+          - namespaces/status #TODO(kyrtapz) all of the nodes update the exgw annotation on namespaces, we might need to change that
+          {{- end }}
+          - pods/status # In IC ovnkube-controller, and ovnkube-node in DPU mode updates pod annotations for local pods
+          - nodes/status
+      verbs: [ "patch", "update" ]
+
+# Without IC endpoints are read by ovnkube-node on startup
+# With IC endpoints are created by ovnkube-zone-controller/sb-ovsdb startup script in multinode-zone for IC
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+    name: ovnkube-node-ep
+    namespace: ovn-kubernetes
+rules:
+    - apiGroups: [""]
+      resources:
+          - endpoints
+      verbs:
+          - get
+          {{- if eq (hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false) true }}
+          - create
+          {{- end }}
