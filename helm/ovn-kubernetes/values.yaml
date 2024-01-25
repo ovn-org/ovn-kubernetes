@@ -1,0 +1,145 @@
+# Values for ovn-kubernetes.
+
+# -- list of dependent subcharts that need to be installed for the given deployment mode, these subcharts haven't been tested yet.
+tags:
+  ovn-ipsec: false
+  ovnkube-control-plane: false
+  ovnkube-db-raft: false
+  ovnkube-node-dpu: false
+  ovnkube-node-dpu-host: false
+  ovnkube-single-node-zone: false
+  ovnkube-zone-controller: false
+
+# -- Endpoint of Kubernetes api server
+k8sAPIServer: https://172.25.0.2:6443
+# -- IP range for Kubernetes pods, /14 is the top level range, under which each /23 range will be assigned to a node
+podNetwork: 10.128.0.0/14/23
+# -- A comma-separated set of CIDR notation IP ranges from which k8s assigns service cluster IPs. This should be the same as the value provided for kube-apiserver "--service-cluster-ip-range" option
+serviceNetwork: 172.30.0.0/16
+# -- MTU of network interface in a Kubernetes pod
+mtu: 1400
+# -- Whether or not call `lookup` Helm function, set it to `true` if you want to run `helm dry-run/template/lint`
+skipCallToK8s: false
+
+global:
+  # -- The net device to be used for management port, will be renamed to ovn-k8s-mp0 and used to allow host network services and pods to access k8s pod and service networks
+  nodeMgmtPortNetdev: ""
+  # -- The interface on nodes that will be used for external gateway network traffic
+  extGatewayNetworkInterface: ""
+  # -- GENEVE UDP port (default 6081)
+  encapPort: 6081
+  # -- The gateway mode (shared or local), if not given, gateway functionality is disabled
+  gatewayMode: shared
+  # -- Optional extra gateway options
+  gatewayOpts: ""
+  # -- This allows ovnkube-node to run without SYS_ADMIN capability, by performing interface setup in the CNI plugin
+  unprivilegedMode: false
+  # -- The v4 join subnet used for assigning join switch IPv4 addresses
+  v4JoinSubnet: ""
+  # -- The v4 masquerade subnet used for assigning masquerade IPv4 addresses
+  v4MasqueradeSubnet: ""
+  # -- The v6 join subnet used for assigning join switch IPv6 addresses
+  v6JoinSubnet: ""
+  # -- The v6 masquerade subnet used for assigning masquerade IPv6 addresses
+  v6MasqueradeSubnet: ""
+  # -- Whether or not enable ovnkube identity webhook
+  enableOvnKubeIdentity: true
+  # -- Indicate if ovnkube run master and node in one process
+  enableCompactMode: false
+  # -- Whether or not to enable hybrid overlay functionality
+  enableHybridOverlay: ""
+  # -- A comma separated set of IP subnets and the associated hostsubnetlengths (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\") to use with the extended hybrid network
+  hybridOverlayNetCidr: ""
+  # -- Whether or not to use Admin Network Policy CRD feature with ovn-kubernetes
+  enableAdminNetworkPolicy: ""
+  # -- Configure to use EgressIP CRD feature with ovn-kubernetes
+  enableEgressIp: ""
+  # -- Configure EgressIP node reachability using gRPC on this TCP port
+  egressIpHealthCheckPort: ""
+  # -- Configure to use EgressService CRD feature with ovn-kubernetes
+  enableEgressService: ""
+  # -- Configure to use EgressFirewall CRD feature with ovn-kubernetes
+  enableEgressFirewall: ""
+  # -- Configure to use EgressQoS CRD feature with ovn-kubernetes
+  enableEgressQos: ""
+  # -- Enables multicast support between the pods within the same namespace
+  enableMulticast: ""
+  # -- Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes
+  enableMultiNetwork: false
+  # -- Configure to enable IPsec
+  enableIpsec: false
+  # -- Use SSL transport to NB/SB db and northd
+  enableSsl: false
+  # -- Configure to enable interconnecting multiple zones
+  enableInterConnect: false
+  # -- Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes
+  enableMultiExternalGateway: false
+  # -- Configure to use stateless network policy feature with ovn-kubernetes
+  enableStatelessNetworkPolicy: false
+  # -- Enables metrics related to scaling
+  enableMetricsScale: ""
+  # -- Enables monitoring OVN-Kubernetes master and OVN configuration duration
+  enableConfigDuration: ""
+  # -- Indicates if ovn-controller should enable/disable the logical flow in-memory cache when processing Southbound database logical flow changes
+  # @default -- true
+  enableLFlowCache: true
+  # -- Maximum number of logical flow cache entries ovn-controller may create when the logical flow cache is enabled
+  # @default -- unlimited
+  lFlowCacheLimit: ""
+  # -- Maximum size of the logical flow cache (in KB) ovn-controller may create when the logical flow cache is enabled
+  lFlowCacheLimitKb: ""
+  # -- Whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+  disableSnatMultipleGws: ""
+  # -- Controls if forwarding is allowed on OVNK controlled interfaces
+  # @default -- false
+  disableForwarding: ""
+  # -- Disables adding openflow flows to check packets too large to be delivered to OVN due to pod MTU being lower than NIC MTU
+  disablePacketMtuCheck: ""
+  # -- Deprecated: iface-id-ver is always enabled
+  disableIfaceIdVer: false
+  # -- The largest number of messages per second that gets logged before drop
+  # @default 20
+  aclLoggingRateLimit: 20
+  # -- If set, then load balancers do not get deleted when all backends are removed
+  emptyLbEvents: ""
+  # -- Port of north bound ovsdb
+  nbPort: 6641
+  # -- Port of south bound ovsdb
+  sbPort: 6642
+  # -- A comma separated set of NetFlow collectors to export flow data
+  netFlowTargets: ""
+  # -- A comma separated set of SFlow collectors to export flow data
+  sflowTargets: ""
+  # -- A comma separated set of IPFIX collectors to export flow data
+  ipfixTargets: ""
+  # -- Rate at which packets should be sampled and sent to each target collector
+  # @default 400
+  ipfixSampling: ""
+  # -- Maximum number of IPFIX flow records that can be cached at a time
+  # @default 0, meaning disabled
+  ipfixCacheMaxFlows: ""
+  # -- Maximum period in seconds for which an IPFIX flow record is cached and aggregated before being sent
+  # @default 60
+  ipfixCacheActiveTimeout: ""
+  # -- OVN remote probe interval in ms 
+  # @default 100000
+  remoteProbeInterval: 100000
+  # -- Enable monitoring all data from SB DB instead of conditionally monitoring the data relevant to this node only
+  # @default true
+  monitorAll: ""
+  # -- ovn-controller wait time in ms before clearing OpenFlow rules during start up
+  # @default 0
+  ofctrlWaitBeforeClear: ""
+  # -- Separate log file for libovsdb client 
+  libovsdbClientLogFile: ""
+  image:
+    # -- Image repository for ovn-kubernetes components
+    repository: ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u
+    # -- Specify image tag to run
+    tag: master
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+
+ovnkube-identity:
+    # -- number of ovnube-identity pods, co-located with kube-apiserver process, so need to be the same number of control plane nodes
+    replicas: 1

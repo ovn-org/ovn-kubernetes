@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ovnkube-single-node-zone
+description: Helm chart to deploy single node zone stack
+type: application
+version: 0.1.0
+appVersion: "1.16.0"

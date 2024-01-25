@@ -1,0 +1,186 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: egressips.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: EgressIP
+    listKind: EgressIPList
+    plural: egressips
+    shortNames:
+    - eip
+    singular: egressip
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.egressIPs[*]
+      name: EgressIPs
+      type: string
+    - jsonPath: .status.items[*].node
+      name: Assigned Node
+      type: string
+    - jsonPath: .status.items[*].egressIP
+      name: Assigned EgressIPs
+      type: string
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: EgressIP is a CRD allowing the user to define a fixed source
+          IP for all egress traffic originating from any pods which match the EgressIP
+          resource according to its spec definition.
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Specification of the desired behavior of EgressIP.
+            properties:
+              egressIPs:
+                description: EgressIPs is the list of egress IP addresses requested.
+                  Can be IPv4 and/or IPv6. This field is mandatory.
+                items:
+                  type: string
+                type: array
+              namespaceSelector:
+                description: NamespaceSelector applies the egress IP only to the namespace(s)
+                  whose label matches this definition. This field is mandatory.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: A label selector requirement is a selector that
+                        contains values, a key, and an operator that relates the key
+                        and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: operator represents a key's relationship to
+                            a set of values. Valid operators are In, NotIn, Exists
+                            and DoesNotExist.
+                          type: string
+                        values:
+                          description: values is an array of string values. If the
+                            operator is In or NotIn, the values array must be non-empty.
+                            If the operator is Exists or DoesNotExist, the values
+                            array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: matchLabels is a map of {key,value} pairs. A single
+                      {key,value} in the matchLabels map is equivalent to an element
+                      of matchExpressions, whose key field is "key", the operator
+                      is "In", and the values array contains only "value". The requirements
+                      are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              podSelector:
+                description: 'PodSelector applies the egress IP only to the pods whose
+                  label matches this definition. This field is optional, and in case
+                  it is not set: results in the egress IP being applied to all pods
+                  in the namespace(s) matched by the NamespaceSelector. In case it
+                  is set: is intersected with the NamespaceSelector, thus applying
+                  the egress IP to the pods (in the namespace(s) already matched by
+                  the NamespaceSelector) which match this pod selector.'
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: A label selector requirement is a selector that
+                        contains values, a key, and an operator that relates the key
+                        and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: operator represents a key's relationship to
+                            a set of values. Valid operators are In, NotIn, Exists
+                            and DoesNotExist.
+                          type: string
+                        values:
+                          description: values is an array of string values. If the
+                            operator is In or NotIn, the values array must be non-empty.
+                            If the operator is Exists or DoesNotExist, the values
+                            array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: matchLabels is a map of {key,value} pairs. A single
+                      {key,value} in the matchLabels map is equivalent to an element
+                      of matchExpressions, whose key field is "key", the operator
+                      is "In", and the values array contains only "value". The requirements
+                      are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+            required:
+            - egressIPs
+            - namespaceSelector
+            type: object
+          status:
+            description: Observed status of EgressIP. Read-only.
+            properties:
+              items:
+                description: The list of assigned egress IPs and their corresponding
+                  node assignment.
+                items:
+                  description: The per node status, for those egress IPs who have
+                    been assigned.
+                  properties:
+                    egressIP:
+                      description: Assigned egress IP
+                      type: string
+                    node:
+                      description: Assigned node name
+                      type: string
+                  required:
+                  - egressIP
+                  - node
+                  type: object
+                type: array
+            required:
+            - items
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}
