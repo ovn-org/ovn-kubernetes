@@ -1,0 +1,19 @@
+# service to expose the ovnkube-db pod
+apiVersion: v1
+kind: Service
+metadata:
+  name: ovnkube-db
+  namespace: ovn-kubernetes
+spec:
+  ports:
+  - name: north
+    port: {{ default 6641 .Values.global.nbPort }}
+    protocol: TCP
+    targetPort: {{ default 6641 .Values.global.nbPort }}
+  - name: south
+    port: {{ default 6642 .Values.global.sbPort }}
+    protocol: TCP
+    targetPort: {{ default 6642 .Values.global.sbPort }}
+  sessionAffinity: None
+  clusterIP: None
+  type: ClusterIP
