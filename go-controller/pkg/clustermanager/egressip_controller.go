@@ -699,9 +699,10 @@ func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node)
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	reconcileEgressIPs := make([]*egressipv1.EgressIP, 0, len(egressIPs.Items))
+	reconcileEgressIPs := make([]*egressipv1.EgressIP, 0, len(egressIPs))
 	eIPC.allocator.Lock()
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		for _, status := range egressIP.Status.Items {
 			if status.Node == node.Name {
 				egressIPIP := net.ParseIP(status.EgressIP)
@@ -754,7 +755,8 @@ func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		if len(egressIP.Spec.EgressIPs) != len(egressIP.Status.Items) {
 			// Send a "synthetic update" on all egress IPs which are not fully
 			// assigned, the reconciliation loop for WatchEgressIP will try to
@@ -795,7 +797,8 @@ func (eIPC *egressIPClusterController) deleteEgressNode(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		for _, status := range egressIP.Status.Items {
 			if status.Node == nodeName {
 				// Send a "synthetic update" on all egress IPs which have an
@@ -1397,6 +1400,10 @@ func (eIPC *egressIPClusterController) isEgressIPAddrConflict(egressIP net.IP) (
 	// iterate through the nodes and ensure no host IP address conflicts with EIP. Note that host-cidrs annotation
 	// does not contain EgressIPs that are assigned to interfaces.
 	for _, node := range nodes {
+		// EgressIP is not supported on hybrid overlay nodes, and OVNNodeHostCIDRs annotation is not present
+		if util.NoHostSubnet(node) {
+			continue
+		}
 		nodeHostAddrsSet, err := util.ParseNodeHostCIDRsDropNetMask(node)
 		if err != nil {
 			return false, "", fmt.Errorf("failed to parse node host cidrs for node %s: %v", node.Name, err)
@@ -1559,7 +1566,7 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 			return err
 		}
 		for _, resyncEgressIP := range resyncEgressIPs {
-			if err := eIPC.reconcileEgressIP(nil, &resyncEgressIP); err != nil {
+			if err := eIPC.reconcileEgressIP(nil, resyncEgressIP); err != nil {
 				return fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
 			}
 		}
@@ -1661,7 +1668,7 @@ func cloudPrivateIPConfigNameToIPString(name string) string {
 // removePendingOps removes the existing pending CloudPrivateIPConfig operations
 // from the cache and returns the EgressIP object which can be re-synced given
 // the new assignment possibilities.
-func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPName, egressIP string) ([]egressipv1.EgressIP, error) {
+func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPName, egressIP string) ([]*egressipv1.EgressIP, error) {
 	eIPC.pendingCloudPrivateIPConfigsMutex.Lock()
 	defer eIPC.pendingCloudPrivateIPConfigsMutex.Unlock()
 	ops, pending := eIPC.pendingCloudPrivateIPConfigsOps[egressIPName]
@@ -1690,8 +1697,9 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 	if err != nil {
 		return nil, fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	resyncs := make([]egressipv1.EgressIP, 0, len(egressIPs.Items))
-	for _, egressIP := range egressIPs.Items {
+	resyncs := make([]*egressipv1.EgressIP, 0, len(egressIPs))
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		// Do not process the egress IP object which owns the
 		// CloudPrivateIPConfig for which we are currently processing the
 		// deletion for.
@@ -1703,14 +1711,14 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 		// If the EgressIP was never added to the pending cache to begin
 		// with, but has un-assigned egress IPs, try it.
 		if !pending && unassigned > 0 {
-			resyncs = append(resyncs, egressIP)
+			resyncs = append(resyncs, &egressIP)
 			continue
 		}
 		// If the EgressIP has pending operations, have a look at if the
 		// unassigned operations superseed the pending ones. It could be
 		// that it could only execute a couple of assignments at one point.
 		if pending && unassigned > len(ops) {
-			resyncs = append(resyncs, egressIP)
+			resyncs = append(resyncs, &egressIP)
 		}
 	}
 	return resyncs, nil

@@ -658,7 +658,25 @@ func ReplaceOFFlows(bridgeName string, flows []string) (string, string, error) {
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 
-// Get OpenFlow Port names or numbers for a given bridge
+// GetOFFlows gets all the flows from a bridge
+func GetOFFlows(bridgeName string) ([]string, error) {
+	stdout, stderr, err := RunOVSOfctl("dump-flows", bridgeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get flows on bridge %q:, stderr: %q, error: %v",
+			bridgeName, stderr, err)
+	}
+
+	var flows []string
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "cookie=") {
+			flows = append(flows, strings.TrimSpace(line))
+		}
+	}
+
+	return flows, nil
+}
+
+// GetOpenFlowPorts names or numbers for a given bridge
 func GetOpenFlowPorts(bridgeName string, namedPorts bool) ([]string, error) {
 	stdout, stderr, err := RunOVSOfctl("show", bridgeName)
 	if err != nil {

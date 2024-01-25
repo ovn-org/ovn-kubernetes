@@ -45,7 +45,7 @@ install_kind() {
 }
 
 pushd $TMP_DIR
-K8S_VERSION="v1.26.3"
+K8S_VERSION="v1.28.0"
 
 # Install kubectl for K8S_VERSION in use
 # (to get latest stable version: $(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt )
@@ -65,4 +65,8 @@ popd # go out of $TMP_DIR
 
 pushd $SCRIPT_DIR/../../contrib
 ./kind.sh
+if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
+    sudo mv ./bin/virtctl /usr/local/bin/virtctl
+fi
 popd # go our of $SCRIPT_DIR/../../contrib
+

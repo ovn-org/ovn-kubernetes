@@ -183,7 +183,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 		o.nbClient, o.sbClient,
 		o.fakeRecorder, o.wg)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	o.controller.multicastSupport = true
+	o.controller.multicastSupport = config.EnableMulticast
 	o.controller.clusterLoadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 	o.controller.switchLoadBalancerGroupUUID = types.ClusterSwitchLBGroupName + "-UUID"
 	o.controller.routerLoadBalancerGroupUUID = types.ClusterRouterLBGroupName + "-UUID"
@@ -198,7 +198,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 
 	existingNodes, err := o.controller.kube.GetNodes()
 	if err == nil {
-		for _, node := range existingNodes.Items {
+		for _, node := range existingNodes {
 			o.controller.localZoneNodes.Store(node.Name, true)
 			for _, secondaryController := range o.secondaryControllers {
 				if secondaryController.bnc.localZoneNodes != nil {

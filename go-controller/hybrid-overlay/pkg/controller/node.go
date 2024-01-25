@@ -60,7 +60,8 @@ func nodeChanged(old, new interface{}) bool {
 	newCidr, newNodeIP, newDrMAC, _ := getNodeDetails(newNode)
 
 	return !reflect.DeepEqual(oldCidr, newCidr) || !reflect.DeepEqual(oldNodeIP, newNodeIP) || !reflect.DeepEqual(oldDrMAC, newDrMAC) ||
-		!reflect.DeepEqual(newNode.Annotations[hotypes.HybridOverlayDRIP], oldNode.Annotations[hotypes.HybridOverlayDRIP])
+		!reflect.DeepEqual(newNode.Annotations[hotypes.HybridOverlayDRIP], oldNode.Annotations[hotypes.HybridOverlayDRIP]) ||
+		util.NoHostSubnet(oldNode) != util.NoHostSubnet(newNode)
 }
 
 // podChanged returns true if any relevant pod attributes changed

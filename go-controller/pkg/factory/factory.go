@@ -16,6 +16,7 @@ import (
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
+	egressfirewallinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions/egressfirewall/v1"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -57,6 +58,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -191,6 +193,23 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 	return wf, nil
 }
 
+// Informer transform to trim object fields for memory efficiency.
+func informerObjectTrim(obj interface{}) (interface{}, error) {
+	if accessor, err := meta.Accessor(obj); err == nil {
+		accessor.SetManagedFields(nil)
+	}
+	if pod, ok := obj.(*kapi.Pod); ok {
+		pod.Spec.Volumes = []kapi.Volume{}
+		for i := range pod.Spec.Containers {
+			pod.Spec.Containers[i].Command = nil
+			pod.Spec.Containers[i].Args = nil
+			pod.Spec.Containers[i].Env = nil
+			pod.Spec.Containers[i].VolumeMounts = nil
+		}
+	}
+	return obj, nil
+}
+
 // NewOVNKubeControllerWatchFactory initializes a new watch factory for the ovnkube controller process
 func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClientset) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
@@ -200,7 +219,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:             informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		anpFactory:           anpinformerfactory.NewSharedInformerFactory(ovnClientset.ANPClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
@@ -427,7 +446,7 @@ func (wf *WatchFactory) Start() error {
 // of the localPodSelector or figure out how to deal with selecting all pods everywhere.
 func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:             informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
@@ -545,10 +564,12 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 // mode process.
 func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:             informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
+		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		cpipcFactory:         ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.EgressServiceClient, resyncInterval),
+		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
 	}
@@ -623,6 +644,16 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
+		// make sure shared informer is created for a factory, so on wf.apbRouteFactory.Start() it is initialized and caches are synced.
+		wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer()
+	}
+
+	if config.OVNKubernetesFeature.EnableEgressFirewall {
+		// make sure shared informer is created for a factory, so on wf.efFactory.Start() it is initialized and caches are synced.
+		wf.efFactory.K8s().V1().EgressFirewalls().Informer()
 	}
 
 	return wf, nil
@@ -1235,6 +1266,10 @@ func (wf *WatchFactory) BANPInformer() anpinformer.BaselineAdminNetworkPolicyInf
 
 func (wf *WatchFactory) EgressIPInformer() egressipinformer.EgressIPInformer {
 	return wf.eipFactory.K8s().V1().EgressIPs()
+}
+
+func (wf *WatchFactory) EgressFirewallInformer() egressfirewallinformer.EgressFirewallInformer {
+	return wf.efFactory.K8s().V1().EgressFirewalls()
 }
 
 // withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the

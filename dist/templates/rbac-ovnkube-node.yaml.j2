@@ -151,7 +151,7 @@ rules:
       verbs: ["list", "get", "watch"]
     - apiGroups: ["k8s.ovn.org"]
       resources:
-          - egressfirewalls
+          - egressfirewalls/status
           - adminpolicybasedexternalroutes/status
       verbs: [ "patch", "update" ]
     - apiGroups: ["policy.networking.k8s.io"]
@@ -190,9 +190,9 @@ rules:
     - apiGroups: [""]
       resources:
           {% if ovn_enable_interconnect == "true" -%}
-          - pods/status # In IC ovnkube-controller updates pod annotations for local pods
           - namespaces/status #TODO(kyrtapz) all of the nodes update the exgw annotation on namespaces, we might need to change that
           {%- endif %}
+          - pods/status # In IC ovnkube-controller, and ovnkube-node in DPU mode updates pod annotations for local pods
           - nodes/status
       verbs: [ "patch", "update" ]
 

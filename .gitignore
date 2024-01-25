@@ -3,3 +3,5 @@
 
 # Temporary binaries for bulding the cluster (i.e: kubectl)
 contrib/bin
+
+ovn-kubernetes-anp-test-report.yaml

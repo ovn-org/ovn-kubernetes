@@ -27,6 +27,10 @@ if [ "$KIND_IPV4_SUPPORT" == true ]; then
     fi
 fi
 
+if [ "$KIND_IPV4_SUPPORT" == false ]; then
+  SKIPPED_TESTS+="\[IPv4\]"
+fi
+
 if [ "$OVN_HA" == false ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
   	SKIPPED_TESTS+="|"
@@ -78,13 +82,13 @@ if [ "$ENABLE_MULTI_NET" != "true" ]; then
   SKIPPED_TESTS+="Multi Homing"
 fi
 
-# Only run Node IP address migration tests if they are explicitly requested
-IP_MIGRATION_TESTS="Node IP address migration"
+# Only run Node IP/MAC address migration tests if they are explicitly requested
+IP_MIGRATION_TESTS="Node IP and MAC address migration"
 if [ "${WHAT}" != "${IP_MIGRATION_TESTS}" ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
 	SKIPPED_TESTS+="|"
   fi
-  SKIPPED_TESTS+="Node IP address migration"
+  SKIPPED_TESTS+="Node IP and MAC address migration"
 fi
 
 # Only run Multi node zones interconnect tests if they are explicitly requested

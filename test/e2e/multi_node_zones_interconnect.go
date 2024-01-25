@@ -109,7 +109,7 @@ var _ = ginkgo.Describe("Multi node zones interconnect", func() {
 		cs = fr.ClientSet
 		//ns = fr.Namespace.Name
 
-		nodes, err := e2enode.GetReadySchedulableNodes(cs)
+		nodes, err := e2enode.GetReadySchedulableNodes(context.TODO(), cs)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 3 {
 			e2eskipper.Skipf(
@@ -148,13 +148,13 @@ var _ = ginkgo.Describe("Multi node zones interconnect", func() {
 		cmd := httpServerContainerCmd(8000)
 		serverPod := e2epod.NewAgnhostPod(fr.Namespace.Name, serverPodName, nil, nil, nil, cmd...)
 		serverPod.Spec.NodeName = serverPodNodeName
-		e2epod.NewPodClient(fr).CreateSync(serverPod)
+		e2epod.NewPodClient(fr).CreateSync(context.TODO(), serverPod)
 
 		// Create a client pod on zone - zone-2
 		cmd = []string{}
 		clientPod := e2epod.NewAgnhostPod(fr.Namespace.Name, clientPodName, nil, nil, nil, cmd...)
 		clientPod.Spec.NodeName = clientPodNodeName
-		e2epod.NewPodClient(fr).CreateSync(clientPod)
+		e2epod.NewPodClient(fr).CreateSync(context.TODO(), clientPod)
 
 		ginkgo.By("asserting the *client* pod can contact the server pod exposed endpoint")
 		checkPodsInterconnectivity(clientPod, serverPod, fr.Namespace.Name, cs)

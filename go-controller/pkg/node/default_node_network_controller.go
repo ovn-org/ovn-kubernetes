@@ -33,6 +33,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -342,13 +343,18 @@ func setupOVNNode(node *kapi.Node) error {
 	return nil
 }
 
-func setEncapPort() error {
+func setEncapPort(ctx context.Context) error {
 	systemID, err := util.GetNodeChassisID()
 	if err != nil {
 		return err
 	}
-	uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
-		fmt.Sprintf("chassis_name=%s", systemID))
+	var uuid string
+	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true,
+		func(ctx context.Context) (bool, error) {
+			uuid, _, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
+				fmt.Sprintf("chassis_name=%s", systemID))
+			return len(uuid) != 0, err
+		})
 	if err != nil {
 		return err
 	}
@@ -694,6 +700,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		nc.routeManager.Run(nc.stopChan, 4*time.Minute)
 	}()
 
+	// Bootstrap flows in OVS if just normal flow is present
+	if err := bootstrapOVSFlows(); err != nil {
+		return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
+	}
+
 	if node, err = nc.Kube.GetNode(nc.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 	}
@@ -711,25 +722,28 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// Wait for 300s before giving up
 	var sbZone string
 	var err1 error
-	err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
-		sbZone, err = getOVNSBZone()
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		// There is no SBDB to connect to in DPU Host mode, so we will just take the default input config zone
+		sbZone = config.Default.Zone
+	} else {
+		err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+			sbZone, err = getOVNSBZone()
+			if err != nil {
+				err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+				return false, nil
+			}
+
+			if config.Default.Zone != sbZone {
+				err1 = fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
+				return false, nil
+			}
+			return true, nil
+		})
 		if err != nil {
-			err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
-			return false, nil
+			return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err: %v, err1: %v", config.Default.Zone, err, err1)
 		}
 
-		if config.Default.Zone != sbZone {
-			err1 = fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
-			return false, nil
-		}
-		return true, nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err: %v, err1: %v", config.Default.Zone, err, err1)
-	}
-
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// if its nonIC OR IC=true and if its phase1 OR if its IC to IC upgrades
 		if !config.OVNKubernetesFeature.EnableInterconnect || sbZone == types.OvnDefaultZone || util.HasNodeMigratedZone(node) { // if its nonIC or if its phase1
 			for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
@@ -829,8 +843,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// We set the encap port after annotating the zone name so that ovnkube-controller has come up
 	// and configured the chassis in SBDB (ovnkube-controller waits for ovnkube-node to set annotation
 	// for at least one node in the given zone)
-	if config.Default.EncapPort != config.DefaultEncapPort {
-		if err := setEncapPort(); err != nil {
+	// NOTE: ovnkube-node in DPU-host mode has no SBDB to connect to. The encap port will be handled by the
+	// ovnkube-node running in DPU mode on behalf of the host.
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Default.EncapPort != config.DefaultEncapPort {
+		if err := setEncapPort(ctx); err != nil {
 			return err
 		}
 	}
@@ -854,8 +870,9 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// STEP5: Legacy ovnkube-master sees "k8s.ovn.org/remote-zone-migrated" annotation on this node and now knows that
 	//        this node has remote-zone-migrated successfully and tears down old setup and creates new IC resource
 	//        plumbing (takes 80ms based on what we saw in CI runs so we might still have that small window of disruption).
+	// NOTE: ovnkube-node in DPU host mode doesn't go through upgrades for OVN-IC and has no SBDB to connect to. Thus this part shall be skipped.
 	var syncNodes, syncServices, syncPods bool
-	if config.OVNKubernetesFeature.EnableInterconnect && sbZone != types.OvnDefaultZone && !util.HasNodeMigratedZone(node) { // so this should be done only once in phase2 (not in phase1)
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableInterconnect && sbZone != types.OvnDefaultZone && !util.HasNodeMigratedZone(node) { // so this should be done only once in phase2 (not in phase1)
 		klog.Info("Upgrade Hack: Interconnect is enabled")
 		var err1 error
 		start := time.Now()
@@ -867,7 +884,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 					err1 = fmt.Errorf("upgrade hack: error retrieving node %s: %v", nc.name, err)
 					return false, nil
 				}
-				for _, node := range nodes.Items {
+				for _, node := range nodes {
+					node := *node
 					if nc.name != node.Name && util.GetNodeZone(&node) != config.Default.Zone && !util.NoHostSubnet(&node) {
 						nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
 						if err != nil {
@@ -1142,10 +1160,13 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
+	// create link manager, will work for egress IP as well as monitoring MAC changes to default gw bridge
+	linkManager := linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode, nc.updateGatewayMAC)
+
 	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
 		c, err := egressip.NewController(nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
 			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.routeManager, config.IPv4Mode,
-			config.IPv6Mode, nc.name)
+			config.IPv6Mode, nc.name, linkManager)
 		if err != nil {
 			return fmt.Errorf("failed to create egress IP controller: %v", err)
 		}
@@ -1156,6 +1177,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	} else {
 		klog.Infof("Egress IP for non-OVN managed networks is disabled")
 	}
+
+	linkManager.Run(nc.stopChan, nc.wg)
 
 	nc.wg.Add(1)
 	go func() {
@@ -1238,7 +1261,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 				oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
 				// upon an update event, remove conntrack entries for IP addresses that are no longer
 				// in the endpointslice, skip otherwise
-				if newEndpointSlice != nil && util.DoesEndpointSliceContainEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
+				if newEndpointSlice != nil && util.DoesEndpointSliceContainEligibleEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
 					continue
 				}
 				// upon update and delete events, flush conntrack only for UDP

@@ -192,7 +192,7 @@ var ovnControllerCoverageShowMetricsMap = map[string]*metricDetails{
 		help: "Number of netlink messages received by the kernel.",
 	},
 	"netlink_recv_jumbo": {
-		help: "Number of netlink messages that were received from" +
+		help: "Number of netlink messages that were received from " +
 			"the kernel were more than the allocated buffer.",
 	},
 	"netlink_overflow": {

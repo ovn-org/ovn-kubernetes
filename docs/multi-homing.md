@@ -116,7 +116,6 @@ spec:
   network will only provide layer 2 communication, and the users must configure
   IPs for the pods. Port security will only prevent MAC spoofing.
 - switched - layer2 - secondary networks **only** allow for east/west traffic.
-- this topology is not supported when Interconnect feature is enabled with multiple zones.
 
 ### Switched - localnet - topology
 This topology interconnects the workloads via a cluster-wide logical switch to
@@ -167,7 +166,6 @@ localnet network.
 - when the subnets attribute is omitted, the logical switch implementing the
   network will only provide layer 2 communication, and the users must configure
   IPs for the pods. Port security will only prevent MAC spoofing.
-- this topology is not supported when Interconnect feature is enabled with multiple zones.
 
 ## Pod configuration
 The user must specify the secondary network attachments via the

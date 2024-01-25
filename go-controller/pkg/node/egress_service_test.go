@@ -42,6 +42,9 @@ var _ = Describe("Egress Service Operations", func() {
 		app.Flags = config.Flags
 		fExec = ovntest.NewLooseCompareFakeExec()
 		fakeOvnNode = NewFakeOVNNode(fExec)
+		fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=15 --no-heading --data=bare --format=csv --columns name list interface",
+		})
 
 		config.OVNKubernetesFeature.EnableEgressService = true
 		_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
@@ -271,8 +274,8 @@ var _ = Describe("Egress Service Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"OVN-KUBE-EGRESS-SVC": []string{
-							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
-							"-s 10.128.0.3 -m comment --comment namespace1/service1 -j SNAT --to-source 5.5.5.5",
+							"-A OVN-KUBE-EGRESS-SVC -m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
+							"-A OVN-KUBE-EGRESS-SVC -s 10.128.0.3 -m comment --comment namespace1/service1 -j SNAT --to-source 5.5.5.5",
 						},
 					},
 					"filter": {},

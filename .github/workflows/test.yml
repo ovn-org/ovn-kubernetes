@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.19.6"
-  K8S_VERSION: v1.24.0
+  GO_VERSION: "1.20.6"
+  K8S_VERSION: v1.28.0
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
@@ -277,6 +277,7 @@ jobs:
 
     - name: Free up disk space
       run: |
+        sudo apt-get update
         sudo eatmydata apt-get purge --auto-remove -y \
           azure-cli aspnetcore-* dotnet-* ghc-* firefox \
           google-chrome-stable \
@@ -372,7 +373,7 @@ jobs:
       fail-fast: false
       matrix:
         # Valid options are:
-        # target: ["shard-conformance", "control-plane", "multi-homing", "multi-node-zones", "node-ip-migration", "compact-mode"]
+        # target: ["shard-conformance", "control-plane", "multi-homing", "multi-node-zones", "node-ip-mac-migration", "compact-mode"]
         #         shard-conformance: hybrid-overlay = multicast-enable = emptylb-enable = false
         #         control-plane: hybrid-overlay = multicast-enable = emptylb-enable = true
         # ha: ["HA", "noHA"]
@@ -383,6 +384,7 @@ jobs:
         # ic: ["ic-disabled", "ic-single-node-zones", "ic-multi-node-zones"]
         # num-workers : "<integer value>"
         # num-nodes-per-zone : "<integer value>"
+        # forwarding : ["", "disable-forwarding"]
         include:
           - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "local",  "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
@@ -394,8 +396,8 @@ jobs:
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
-          - {"target": "node-ip-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
-          - {"target": "node-ip-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "node-ip-mac-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "node-ip-mac-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "compact-mode",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "multi-node-zones",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-multi-node-zones", "num-workers": "3", "num-nodes-per-zone": "2"}
@@ -403,6 +405,7 @@ jobs:
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "control-plane", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "forwarding": "disable-forwarding"}
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
@@ -423,10 +426,12 @@ jobs:
       OVN_ENABLE_INTERCONNECT: "${{ matrix.ic == 'ic-single-node-zones' ||  matrix.ic == 'ic-multi-node-zones'}}"
       KIND_NUM_WORKER: "${{ matrix.num-workers }}"
       KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
+      OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
     steps:
 
     - name: Free up disk space
       run: |
+        sudo apt-get update
         sudo eatmydata apt-get purge --auto-remove -y \
           azure-cli aspnetcore-* dotnet-* ghc-* firefox \
           google-chrome-stable \
@@ -481,8 +486,8 @@ jobs:
       run: |
         if [ "${{ matrix.target }}" == "multi-homing" ]; then
           make -C test control-plane WHAT="Multi Homing"
-        elif [ "${{ matrix.target }}" == "node-ip-migration" ]; then
-          make -C test control-plane WHAT="Node IP address migration"
+        elif [ "${{ matrix.target }}" == "node-ip-mac-migration" ]; then
+          make -C test control-plane WHAT="Node IP and MAC address migration"
         elif [ "${{ matrix.target }}" == "compact-mode" ]; then
           SINGLE_NODE_CLUSTER="true" make -C test shard-network
         elif [ "${{ matrix.target }}" == "multi-node-zones" ]; then
@@ -636,7 +641,9 @@ jobs:
     steps:
 
       - name: Free up disk space
-        run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
+        run: |
+          sudo apt-get update
+          sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
 
       - name: Set up Go
         uses: actions/setup-go@v3

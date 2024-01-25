@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"sync/atomic"
@@ -32,6 +33,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 	expectedLogicalPorts := make(map[string]bool)
 	vms := make(map[ktypes.NamespacedName]bool)
 	var err error
+	switchesNotFound := make(map[string]bool)
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
 		if !ok {
@@ -46,7 +48,17 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 				return err
 			}
 		} else if oc.isPodScheduledinLocalZone(pod) {
+			if switchesNotFound[pod.Spec.NodeName] {
+				klog.Warningf("Cannot allocate IPs for %s/%s, node was not found after 30 seconds", pod.Namespace, pod.Name)
+				continue
+			}
 			expectedLogicalPortName, annotations, err = oc.allocateSyncPodsIPs(pod)
+
+			if errors.Is(err, nodeNotFoundError) {
+				klog.Warningf("Cannot allocate IPs for %s/%s, node was not found after 30 seconds", pod.Namespace, pod.Name)
+				switchesNotFound[pod.Spec.NodeName] = true
+				continue
+			}
 			if err != nil {
 				return err
 			}
@@ -216,7 +228,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Ensure the namespace/nsInfo exists
-	routingExternalGWs, routingPodGWs, addOps, err := oc.addPodToNamespace(pod.Namespace, podAnnotation.IPs)
+	routingExternalGWs, routingPodGWs, addOps, err := oc.addLocalPodToNamespace(pod.Namespace, podAnnotation.IPs, lsp.UUID)
 	if err != nil {
 		return err
 	}
@@ -283,20 +295,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(pod, switchName, ovntypes.DefaultNetworkName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
-
-	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
-	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
-	// it's rare and easily worked around for now.
-	ns, err := oc.watchFactory.GetNamespace(pod.Namespace)
-	if err != nil {
-		return err
-	}
-	if oc.multicastSupport && isNamespaceMulticastEnabled(ns.Annotations) {
-		if err := oc.podAddAllowMulticastPolicy(pod.Namespace, portInfo); err != nil {
-			return err
-		}
-	}
+	_ = oc.logicalPortCache.add(pod, switchName, ovntypes.DefaultNetworkName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
 
 	if kubevirt.IsPodLiveMigratable(pod) {
 		if err := kubevirt.EnsureDHCPOptionsForMigratablePod(oc.controllerName, oc.nbClient, oc.watchFactory, pod, podAnnotation.IPs, lsp); err != nil {

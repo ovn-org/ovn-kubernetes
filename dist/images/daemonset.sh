@@ -4,23 +4,23 @@
 #Always exit on errors
 set -e
 
-install_j2_renderer() {
-  # ensure j2 renderer installed
+install_jinjanator_renderer() {
+  # ensure jinjanator renderer installed
   pip install wheel --user
-  pip freeze | grep j2cli || pip install "j2cli[yaml]" --user
+  pip freeze | grep jinjanator || pip install "jinjanator[yaml]" --user
   export PATH=~/.local/bin:$PATH
 }
 
 # The script renders j2 templates into yaml files in ../yaml/
 
-# ensure j2 renderer installed
-if ! command -v j2 >/dev/null 2>&1 ; then
+# ensure jinjanator renderer installed
+if ! command -v jinjanate >/dev/null 2>&1 ; then
   if ! command -v pip >/dev/null 2>&1 ; then
-    echo "Dependency not met: 'j2' not installed and cannot install with 'pip'"
+    echo "Dependency not met: 'jinjanator' not installed and cannot install with 'pip'"
     exit 1
   fi
-  echo "'j2' not found, installing with 'pip'"
-  install_j2_renderer
+  echo "'jinjanate' not found, installing with 'pip'"
+  install_jinjanator_renderer
 fi
 
 OVN_OUTPUT_DIR=""
@@ -545,7 +545,57 @@ ovn_image=${ovnkube_image} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovnkube_app_name=ovnkube-node \
-  j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
+  jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
+
+ovn_image=${ovnkube_image} \
+  ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
+  ovnkube_node_loglevel=${node_loglevel} \
+  ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
+  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+  ovn_monitor_all=${ovn_monitor_all} \
+  ovn_ofctrl_wait_before_clear=${ovn_ofctrl_wait_before_clear} \
+  ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
+  ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
+  ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
+  ovn_netflow_targets=${ovn_netflow_targets} \
+  ovn_sflow_targets=${ovn_sflow_targets} \
+  ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovn_ipfix_sampling=${ovn_ipfix_sampling} \
+  ovn_ipfix_cache_max_flows=${ovn_ipfix_cache_max_flows} \
+  ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
+  ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  ovnkube_app_name=ovnkube-node-dpu \
+  jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu.yaml
 
 # ovnkube node for dpu-host daemonset
 # TODO: we probably dont need all of these when running on dpu host
@@ -585,8 +635,9 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovnkube_app_name=ovnkube-node-dpu-host \
-  j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu-host.yaml
+  jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu-host.yaml
 
 ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -629,7 +680,7 @@ ovn_image=${ovnkube_image} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
+  jinjanate ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -665,7 +716,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  j2 ../templates/ovnkube-control-plane.yaml.j2 -o ${output_dir}/ovnkube-control-plane.yaml
+  jinjanate ../templates/ovnkube-control-plane.yaml.j2 -o ${output_dir}/ovnkube-control-plane.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -675,7 +726,7 @@ ovn_image=${image} \
   ovn_nb_port=${ovn_nb_port} \
   ovn_sb_port=${ovn_sb_port} \
   enable_ipsec=${enable_ipsec} \
-  j2 ../templates/ovnkube-db.yaml.j2 -o ${output_dir}/ovnkube-db.yaml
+  jinjanate ../templates/ovnkube-db.yaml.j2 -o ${output_dir}/ovnkube-db.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -694,7 +745,7 @@ ovn_image=${image} \
   ovn_nb_raft_port=${ovn_nb_raft_port} \
   ovn_sb_raft_port=${ovn_sb_raft_port} \
   enable_ipsec=${enable_ipsec} \
-  j2 ../templates/ovnkube-db-raft.yaml.j2 -o ${output_dir}/ovnkube-db-raft.yaml
+  jinjanate ../templates/ovnkube-db-raft.yaml.j2 -o ${output_dir}/ovnkube-db-raft.yaml
 
 ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -713,6 +764,7 @@ ovn_image=${ovnkube_image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
   ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
@@ -750,7 +802,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  j2 ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
+  jinjanate ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
 
 ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -806,12 +858,12 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  j2 ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
+  jinjanate ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
-  j2 ../templates/ovs-node.yaml.j2 -o ${output_dir}/ovs-node.yaml
+  jinjanate ../templates/ovs-node.yaml.j2 -o ${output_dir}/ovs-node.yaml
 
 ovnkube_certs_dir="/tmp/ovnkube-certs"
 ovnkube_webhook_name="ovnkube-webhook"
@@ -836,11 +888,11 @@ ovn_image=${ovnkube_image} \
   webhook_cert=$(cat "${path_prefix}.crt" | base64 -w0) \
   ovn_enable_multi_node_zone=${ovn_enable_multi_node_zone} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
-  j2 ../templates/ovnkube-identity.yaml.j2 -o ${output_dir}/ovnkube-identity.yaml
+  jinjanate ../templates/ovnkube-identity.yaml.j2 -o ${output_dir}/ovnkube-identity.yaml
 
 if ${enable_ipsec}; then
   ovn_image=${image} \
-    j2 ../templates/ovn-ipsec.yaml.j2 -o ${output_dir}/ovn-ipsec.yaml
+    jinjanate ../templates/ovn-ipsec.yaml.j2 -o ${output_dir}/ovn-ipsec.yaml
 fi
 
 # ovn-setup.yaml
@@ -861,11 +913,11 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   mtu_value=${mtu} k8s_apiserver=${k8s_apiserver} \
   host_network_namespace=${host_network_namespace} \
   in_upgrade=${in_upgrade} \
-  j2 ../templates/ovn-setup.yaml.j2 -o ${output_dir}/ovn-setup.yaml
+  jinjanate ../templates/ovn-setup.yaml.j2 -o ${output_dir}/ovn-setup.yaml
 
 ovn_enable_interconnect=${ovn_enable_interconnect} \
 ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  j2 ../templates/rbac-ovnkube-node.yaml.j2 -o ${output_dir}/rbac-ovnkube-node.yaml
+  jinjanate ../templates/rbac-ovnkube-node.yaml.j2 -o ${output_dir}/rbac-ovnkube-node.yaml
 
 cp ../templates/rbac-ovnkube-identity.yaml.j2 ${output_dir}/rbac-ovnkube-identity.yaml
 cp ../templates/rbac-ovnkube-master.yaml.j2 ${output_dir}/rbac-ovnkube-master.yaml

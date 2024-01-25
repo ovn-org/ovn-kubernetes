@@ -157,6 +157,8 @@ type operationModel struct {
 	OnModelMutations []interface{}
 	// OnModelUpdates specifies the fields from Model that will be used as
 	// the update value.
+	// Note: while it is okay to have update and mutate operations on the same row, it
+	// is an undefined behavior if the same column is used in both update and mutate.
 	OnModelUpdates []interface{}
 	// ErrNotFound flags this operation to fail with ErrNotFound if a model is
 	// not found.
@@ -191,8 +193,8 @@ it returns ErrNotFound
 b) if OnModelUpdates is specified; it performs a direct update of the model if
 it exists.
 
-c) if b) is not true, but OnModelMutations is specified; it performs a direct
-mutation (insert) of the Model if it exists.
+c) if OnModelMutations is specified; it performs a direct mutation (insert) of
+the Model if it exists.
 
 d) if b) and c) are not true, but Model is provided, it creates the Model
 if it does not exist.
@@ -217,14 +219,19 @@ func (m *modelClient) CreateOrUpdateOps(ops []ovsdb.Operation, opModels ...opera
 func (m *modelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...operationModel) (interface{}, []ovsdb.Operation, error) {
 	hasGuardOp := len(ops) > 0 && isGuardOp(&ops[0])
 	guardOp := []ovsdb.Operation{}
-	doWhenFound := func(model interface{}, opModel *operationModel) ([]ovsdb.Operation, error) {
+	doWhenFound := func(model interface{}, opModel *operationModel) (o []ovsdb.Operation, err error) {
 		// nil represents onModelUpdatesNone
 		if opModel.OnModelUpdates != nil {
-			return m.update(model, opModel)
-		} else if opModel.OnModelMutations != nil {
-			return m.mutate(model, opModel, ovsdb.MutateOperationInsert)
+			o, err = m.update(model, opModel)
 		}
-		return nil, nil
+		// Note: while it is okay to have update and mutate operations on the same row, it is
+		// an undefined behavior if the same exact column is used in both update and mutate.
+		if err == nil && opModel.OnModelMutations != nil {
+			var o2 []ovsdb.Operation
+			o2, err = m.mutate(model, opModel, ovsdb.MutateOperationInsert)
+			o = append(o, o2...)
+		}
+		return
 	}
 	doWhenNotFound := func(model interface{}, opModel *operationModel) ([]ovsdb.Operation, error) {
 		if !hasGuardOp {

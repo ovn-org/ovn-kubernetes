@@ -24,7 +24,6 @@ should have ipv4 and ipv6 internal node ip
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
 should set TCP CLOSE_WAIT timeout
-\[Feature:ProxyTerminatingEndpoints\]
 
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
@@ -125,6 +124,13 @@ if [ "$DUALSTACK_CONVERSION" == true ]; then
   SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_CONVERSION_TESTS
 fi
 
+if [ "$OVN_GATEWAY_MODE" == "local" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+    SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="should fallback to local terminating endpoints when there are no ready endpoints with externalTrafficPolicy=Local"
+fi
+
 SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
 
 # if we set PARALLEL=true, skip serial test
@@ -170,7 +176,7 @@ ginkgo --nodes=${NUM_NODES} \
 	--focus=${FOCUS} \
 	--skip=${SKIPPED_TESTS} \
 	--timeout=3h \
-	--flakeAttempts=${FLAKE_ATTEMPTS} \
+	--flake-attempts=${FLAKE_ATTEMPTS} \
 	/usr/local/bin/e2e.test \
 	-- \
 	--kubeconfig=${HOME}/ovn.conf \

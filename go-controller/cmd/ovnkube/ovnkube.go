@@ -505,6 +505,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			err = cm.Start(ctx)
 			if err != nil {
 				ovnkubeControllerStartErr = fmt.Errorf("failed to start ovnkube controller: %w", err)
+				klog.Error(ovnkubeControllerStartErr)
 				return
 			}
 			// record delay until ready

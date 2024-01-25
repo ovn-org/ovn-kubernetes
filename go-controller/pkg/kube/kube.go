@@ -15,10 +15,12 @@ import (
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes"
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/pager"
 	"k8s.io/klog/v2"
 	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 )
@@ -31,8 +33,8 @@ type InterfaceOVN interface {
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
 	PatchEgressIP(name string, patchData []byte) error
 	GetEgressIP(name string) (*egressipv1.EgressIP, error)
-	GetEgressIPs() (*egressipv1.EgressIPList, error)
-	GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error)
+	GetEgressIPs() ([]*egressipv1.EgressIP, error)
+	GetEgressFirewalls() ([]*egressfirewall.EgressFirewall, error)
 	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
@@ -53,9 +55,9 @@ type Interface interface {
 	UpdateNodeStatus(node *kapi.Node) error
 	UpdatePodStatus(pod *kapi.Pod) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
-	GetNodes() (*kapi.NodeList, error)
-	GetNamespaces(labelSelector metav1.LabelSelector) (*kapi.NamespaceList, error)
-	GetPods(namespace string, labelSelector metav1.LabelSelector) (*kapi.PodList, error)
+	GetNodes() ([]*kapi.Node, error)
+	GetNamespaces(labelSelector metav1.LabelSelector) ([]*kapi.Namespace, error)
+	GetPods(namespace string, opts metav1.ListOptions) ([]*kapi.Pod, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetNode(name string) (*kapi.Node, error)
 	Events() kv1core.EventInterface
@@ -323,19 +325,31 @@ func (k *Kube) GetAnnotationsOnPod(namespace, name string) (map[string]string, e
 }
 
 // GetNamespaces returns the list of all Namespace objects matching the labelSelector
-func (k *Kube) GetNamespaces(labelSelector metav1.LabelSelector) (*kapi.NamespaceList, error) {
-	return k.KClient.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{
+func (k *Kube) GetNamespaces(labelSelector metav1.LabelSelector) ([]*kapi.Namespace, error) {
+	list := []*kapi.Namespace{}
+	err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		return k.KClient.CoreV1().Namespaces().List(ctx, opts)
+	}).EachListItem(context.TODO(), metav1.ListOptions{
 		LabelSelector:   labels.Set(labelSelector.MatchLabels).String(),
 		ResourceVersion: "0",
+	}, func(obj runtime.Object) error {
+		list = append(list, obj.(*kapi.Namespace))
+		return nil
 	})
+	return list, err
 }
 
-// GetPods returns the list of all Pod objects in a namespace matching the labelSelector
-func (k *Kube) GetPods(namespace string, labelSelector metav1.LabelSelector) (*kapi.PodList, error) {
-	return k.KClient.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector:   labels.Set(labelSelector.MatchLabels).String(),
-		ResourceVersion: "0",
+// GetPods returns the list of all Pod objects in a namespace matching the options
+func (k *Kube) GetPods(namespace string, opts metav1.ListOptions) ([]*kapi.Pod, error) {
+	list := []*kapi.Pod{}
+	opts.ResourceVersion = "0"
+	err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		return k.KClient.CoreV1().Pods(namespace).List(ctx, opts)
+	}).EachListItem(context.TODO(), opts, func(obj runtime.Object) error {
+		list = append(list, obj.(*kapi.Pod))
+		return nil
 	})
+	return list, err
 }
 
 // GetPod obtains the pod from kubernetes apiserver, given the name and namespace
@@ -344,10 +358,17 @@ func (k *Kube) GetPod(namespace, name string) (*kapi.Pod, error) {
 }
 
 // GetNodes returns the list of all Node objects from kubernetes
-func (k *Kube) GetNodes() (*kapi.NodeList, error) {
-	return k.KClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{
+func (k *Kube) GetNodes() ([]*kapi.Node, error) {
+	list := []*kapi.Node{}
+	err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		return k.KClient.CoreV1().Nodes().List(ctx, opts)
+	}).EachListItem(context.TODO(), metav1.ListOptions{
 		ResourceVersion: "0",
+	}, func(obj runtime.Object) error {
+		list = append(list, obj.(*kapi.Node))
+		return nil
 	})
+	return list, err
 }
 
 // GetNode returns the Node resource from kubernetes apiserver, given its name
@@ -385,17 +406,31 @@ func (k *KubeOVN) GetEgressIP(name string) (*egressipv1.EgressIP, error) {
 }
 
 // GetEgressIPs returns the list of all EgressIP objects from kubernetes
-func (k *KubeOVN) GetEgressIPs() (*egressipv1.EgressIPList, error) {
-	return k.EIPClient.K8sV1().EgressIPs().List(context.TODO(), metav1.ListOptions{
+func (k *KubeOVN) GetEgressIPs() ([]*egressipv1.EgressIP, error) {
+	list := []*egressipv1.EgressIP{}
+	err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		return k.EIPClient.K8sV1().EgressIPs().List(ctx, opts)
+	}).EachListItem(context.TODO(), metav1.ListOptions{
 		ResourceVersion: "0",
+	}, func(obj runtime.Object) error {
+		list = append(list, obj.(*egressipv1.EgressIP))
+		return nil
 	})
+	return list, err
 }
 
 // GetEgressFirewalls returns the list of all EgressFirewall objects from kubernetes
-func (k *KubeOVN) GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error) {
-	return k.EgressFirewallClient.K8sV1().EgressFirewalls(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{
+func (k *KubeOVN) GetEgressFirewalls() ([]*egressfirewall.EgressFirewall, error) {
+	list := []*egressfirewall.EgressFirewall{}
+	err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		return k.EgressFirewallClient.K8sV1().EgressFirewalls(metav1.NamespaceAll).List(ctx, opts)
+	}).EachListItem(context.TODO(), metav1.ListOptions{
 		ResourceVersion: "0",
+	}, func(obj runtime.Object) error {
+		list = append(list, obj.(*egressfirewall.EgressFirewall))
+		return nil
 	})
+	return list, err
 }
 
 func (k *KubeOVN) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {

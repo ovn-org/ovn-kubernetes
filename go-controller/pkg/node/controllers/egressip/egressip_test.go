@@ -204,8 +204,9 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 	if err := watchFactory.Start(); err != nil {
 		return nil, nil, err
 	}
+	linkManager := linkmanager.NewController(node1Name, v4, v6, nil)
 	c, err := NewController(watchFactory.EgressIPInformer(), watchFactory.NodeInformer(), watchFactory.NamespaceInformer(),
-		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name)
+		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name, linkManager)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -260,12 +261,8 @@ func runController(testNS ns.NetNS, c *Controller) (cleanupFn, error) {
 	// we do not call start for our controller because the newly created goroutines will not be set to the correct network namespace,
 	// so we invoke them manually here and call reconcile manually
 	// normally executed during Run but we call it manually here because run spawns a go routine that we cannot control its netns during test
-	wg.Add(1)
-	go testNS.Do(func(netNS ns.NetNS) error {
-		c.linkManager.Run(stopCh, 10*time.Millisecond)
-		wg.Done()
-		return nil
-	})
+	c.linkManager.Run(stopCh, wg)
+
 	wg.Add(1)
 	go testNS.Do(func(netNS ns.NetNS) error {
 		c.iptablesManager.Run(stopCh, 10*time.Millisecond)

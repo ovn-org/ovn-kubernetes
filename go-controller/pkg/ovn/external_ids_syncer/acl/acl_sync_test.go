@@ -30,7 +30,7 @@ type aclSync struct {
 }
 
 func testSyncerWithData(data []aclSync, controllerName string, initialDbState, finalDbState []libovsdbtest.TestData,
-	existingNodes []v1.Node) {
+	existingNodes []*v1.Node) {
 	// create initial db setup
 	dbSetup := libovsdbtest.TestSetup{NBData: initialDbState}
 	for _, asSync := range data {
@@ -61,7 +61,7 @@ func testSyncerWithData(data []aclSync, controllerName string, initialDbState, f
 	}
 	// run sync
 	syncer := NewACLSyncer(libovsdbOvnNBClient, controllerName)
-	err = syncer.SyncACLs(&v1.NodeList{Items: existingNodes})
+	err = syncer.SyncACLs(existingNodes)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	// check results
 	gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDbState))
@@ -292,7 +292,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 		hostSubnets := map[string][]string{types.DefaultNetworkName: {"10.244.0.0/24", "fd02:0:0:2::2895/64"}}
 		bytes, err := json.Marshal(hostSubnets)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-		existingNodes := []v1.Node{{
+		existingNodes := []*v1.Node{{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        nodeName,
 				Annotations: map[string]string{"k8s.ovn.org/node-subnets": string(bytes)},
@@ -748,5 +748,92 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 			},
 		}
 		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil, nil)
+	})
+	ginkgo.It("deletes leftover multicast acls", func() {
+		egressACL := libovsdbops.BuildACL(
+			"",
+			nbdb.ACLDirectionFromLport,
+			types.DefaultRoutedMcastAllowPriority,
+			"inport == @"+types.ClusterRtrPortGroupNameBase+" && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))",
+			nbdb.ACLActionAllow,
+			types.OvnACLLoggingMeter,
+			"",
+			false,
+			map[string]string{
+				defaultDenyPolicyTypeACLExtIdKey: "Egress",
+			},
+			nil,
+			types.PlaceHolderACLTier,
+		)
+		egressACL.UUID = "egress-multicast-UUID"
+		ingressACL := libovsdbops.BuildACL(
+			joinACLName(namespace1, "MulticastAllowIngress"),
+			nbdb.ACLDirectionToLport,
+			types.DefaultRoutedMcastAllowPriority,
+			"outport == @"+types.ClusterRtrPortGroupNameBase+" && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))",
+			nbdb.ACLActionAllow,
+			types.OvnACLLoggingMeter,
+			"",
+			false,
+			map[string]string{
+				defaultDenyPolicyTypeACLExtIdKey: "Ingress",
+			},
+			nil,
+			types.PlaceHolderACLTier,
+		)
+		ingressACL.UUID = "ingress-multicast-UUID"
+
+		clusterRtrPortGroup := buildPortGroup(
+			types.ClusterRtrPortGroupNameBase,
+			types.ClusterRtrPortGroupNameBase,
+			nil,
+			[]*nbdb.ACL{egressACL, ingressACL},
+		)
+		clusterRtrPortGroup.UUID = clusterRtrPortGroup.Name + "-UUID"
+		initialDb := []libovsdbtest.TestData{clusterRtrPortGroup, egressACL, ingressACL}
+		// acls will stay since they are not garbage-collected by test server
+		finalClusterRtrPortGroup := buildPortGroup(
+			types.ClusterRtrPortGroupNameBase,
+			types.ClusterRtrPortGroupNameBase,
+			nil,
+			nil,
+		)
+		finalClusterRtrPortGroup.UUID = finalClusterRtrPortGroup.Name + "-UUID"
+		// ACLs will actually be deleted, but with the test db server it won't
+		// therefore tier wil be updated
+		finalEgressACL := libovsdbops.BuildACL(
+			"",
+			nbdb.ACLDirectionFromLport,
+			types.DefaultRoutedMcastAllowPriority,
+			"inport == @"+types.ClusterRtrPortGroupNameBase+" && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))",
+			nbdb.ACLActionAllow,
+			types.OvnACLLoggingMeter,
+			"",
+			false,
+			map[string]string{
+				defaultDenyPolicyTypeACLExtIdKey: "Egress",
+			},
+			nil,
+			types.DefaultACLTier,
+		)
+		finalEgressACL.UUID = "egress-multicast-UUID"
+		finalIngressACL := libovsdbops.BuildACL(
+			joinACLName(namespace1, "MulticastAllowIngress"),
+			nbdb.ACLDirectionToLport,
+			types.DefaultRoutedMcastAllowPriority,
+			"outport == @"+types.ClusterRtrPortGroupNameBase+" && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))",
+			nbdb.ACLActionAllow,
+			types.OvnACLLoggingMeter,
+			"",
+			false,
+			map[string]string{
+				defaultDenyPolicyTypeACLExtIdKey: "Ingress",
+			},
+			nil,
+			types.DefaultACLTier,
+		)
+		finalIngressACL.UUID = "ingress-multicast-UUID"
+		finalDb := []libovsdbtest.TestData{finalClusterRtrPortGroup, finalEgressACL, finalIngressACL}
+		testSyncerWithData([]aclSync{}, controllerName, initialDb, finalDb, nil)
 	})
 })

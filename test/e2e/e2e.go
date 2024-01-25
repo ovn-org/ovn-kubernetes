@@ -107,7 +107,7 @@ func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host
 		return
 	}
 
-	err = e2epod.WaitForPodNotPending(f.ClientSet, f.Namespace.Name, podName)
+	err = e2epod.WaitForPodNotPending(context.TODO(), f.ClientSet, f.Namespace.Name, podName)
 	if err != nil {
 		errChan <- err
 		return
@@ -122,10 +122,10 @@ func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host
 	errChan <- nil
 	podChan <- podGet
 
-	err = e2epod.WaitForPodSuccessInNamespace(f.ClientSet, podName, f.Namespace.Name)
+	err = e2epod.WaitForPodSuccessInNamespace(context.TODO(), f.ClientSet, podName, f.Namespace.Name)
 
 	if err != nil {
-		logs, logErr := e2epod.GetPodLogs(f.ClientSet, f.Namespace.Name, pod.Name, contName)
+		logs, logErr := e2epod.GetPodLogs(context.TODO(), f.ClientSet, f.Namespace.Name, pod.Name, contName)
 		if logErr != nil {
 			framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, logErr)
 		} else {
@@ -193,10 +193,10 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 		framework.Failf("Error trying to get the pod annotation")
 	}
 
-	err = e2epod.WaitForPodSuccessInNamespace(f.ClientSet, podName, f.Namespace.Name)
+	err = e2epod.WaitForPodSuccessInNamespace(context.TODO(), f.ClientSet, podName, f.Namespace.Name)
 
 	if err != nil {
-		logs, logErr := e2epod.GetPodLogs(f.ClientSet, f.Namespace.Name, pod.Name, contName)
+		logs, logErr := e2epod.GetPodLogs(context.TODO(), f.ClientSet, f.Namespace.Name, pod.Name, contName)
 		if logErr != nil {
 			framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, logErr)
 		} else {
@@ -389,10 +389,10 @@ func createPod(f *framework.Framework, podName, nodeSelector, namespace string, 
 		return nil, errors.Wrapf(err, "Failed to create pod %s %s", pod.Name, namespace)
 	}
 
-	err = e2epod.WaitForPodRunningInNamespace(f.ClientSet, res)
+	err = e2epod.WaitForPodRunningInNamespace(context.TODO(), f.ClientSet, res)
 
 	if err != nil {
-		logs, logErr := e2epod.GetPodLogs(f.ClientSet, namespace, pod.Name, contName)
+		logs, logErr := e2epod.GetPodLogs(context.TODO(), f.ClientSet, namespace, pod.Name, contName)
 		if logErr != nil {
 			framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, logErr)
 		} else {
@@ -462,7 +462,7 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 		return fmt.Errorf("could not find ovnkube-node pod running on node %s", nodeName)
 	}
 	for _, pod := range ovnKubeNodePods.Items {
-		if err := e2epod.DeletePodWithWait(clientset, &pod); err != nil {
+		if err := e2epod.DeletePodWithWait(context.TODO(), clientset, &pod); err != nil {
 			return fmt.Errorf("could not delete ovnkube-node pod on node %s: %w", nodeName, err)
 		}
 	}
@@ -518,7 +518,7 @@ func getOVNKubePodLogsFiltered(clientset kubernetes.Interface, namespace, nodeNa
 		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node pods: %w", err)
 	}
 
-	logs, err := e2epod.GetPodLogs(clientset, ovnNamespace, ovnKubeNodePods.Items[0].Name, getNodeContainerName())
+	logs, err := e2epod.GetPodLogs(context.TODO(), clientset, ovnNamespace, ovnKubeNodePods.Items[0].Name, getNodeContainerName())
 	if err != nil {
 		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node [%s/%s] logs: %w",
 			ovnNamespace, ovnKubeNodePods.Items[0].Name, err)
@@ -667,7 +667,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		}
 
 		ginkgo.By("Deleting ovnkube control plane pod " + podName)
-		e2epod.DeletePodWithWaitByName(f.ClientSet, podName, ovnNs)
+		e2epod.DeletePodWithWaitByName(context.TODO(), f.ClientSet, podName, ovnNs)
 		framework.Logf("Deleted ovnkube control plane pod %q", podName)
 
 		ginkgo.By("Ensring there were no connectivity errors")
@@ -708,7 +708,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 				pod.Name != "etcd-ovn-control-plane" &&
 				!strings.HasPrefix(pod.Name, "ovs-node") {
 				framework.Logf("%q", pod.Namespace)
-				e2epod.DeletePodWithWaitByName(f.ClientSet, pod.Name, ovnNs)
+				e2epod.DeletePodWithWaitByName(context.TODO(), f.ClientSet, pod.Name, ovnNs)
 				framework.Logf("Deleted control plane pod %q", pod.Name)
 			}
 		}
@@ -741,7 +741,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		for _, pod := range podList.Items {
 			if strings.HasPrefix(pod.Name, controlPlanePodName) && !strings.HasPrefix(pod.Name, "ovs-node") {
 				framework.Logf("%q", pod.Namespace)
-				e2epod.DeletePodWithWaitByName(f.ClientSet, pod.Name, ovnNs)
+				e2epod.DeletePodWithWaitByName(context.TODO(), f.ClientSet, pod.Name, ovnNs)
 				framework.Logf("Deleted control plane pod %q", pod.Name)
 			}
 		}
@@ -994,7 +994,7 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
-		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 2)
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 2)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 2 {
 			framework.Failf(
@@ -1195,7 +1195,7 @@ spec:
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 		// create host networked pod
-		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 		framework.ExpectNoError(err)
 
 		if len(nodes.Items) < 3 {
@@ -1451,7 +1451,7 @@ spec:
 		framework.ExpectNoError(err)
 
 		ginkgo.By("Waiting for the endpoints to pop up")
-		err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, 1, time.Second, wait.ForeverTestTimeout)
+		err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, 1, time.Second, wait.ForeverTestTimeout)
 		framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 		nodeIP := serverNodeInfo.nodeIP
@@ -1480,9 +1480,17 @@ spec:
 				externalContainerName, err)
 		}
 
-		// 3. Apply deny-all egress firewall
+		// 3. Apply deny-all egress firewall and wait for it to be applied
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+
+		gomega.Eventually(func() bool {
+			output, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "egressfirewall", "default")
+			if err != nil {
+				framework.Failf("could not get the egressfirewall default in namespace: %s", f.Namespace.Name)
+			}
+			return strings.Contains(output, "EgressFirewall Rules applied")
+		}, 10*time.Second).Should(gomega.BeTrue())
 
 		// 4. Check that only inbound traffic is allowed
 		// pod -> external container should be blocked
@@ -1528,16 +1536,16 @@ var _ = ginkgo.Describe("e2e network policy hairpinning validation", func() {
 		// pod1 is a client and a service backend for hairpinned traffic
 		pod1 := newAgnhostPod(namespaceName, "pod1", cmd...)
 		pod1.Labels = hairpinPodSel
-		pod1 = e2epod.NewPodClient(f).CreateSync(pod1)
+		pod1 = e2epod.NewPodClient(f).CreateSync(context.TODO(), pod1)
 		// pod2 is another pod in the same namespace, that should be denied
 		pod2 := newAgnhostPod(namespaceName, "pod2", cmd...)
-		pod2 = e2epod.NewPodClient(f).CreateSync(pod2)
+		pod2 = e2epod.NewPodClient(f).CreateSync(context.TODO(), pod2)
 
 		ginkgo.By("creating a service with a single backend")
 		svcIP, err := createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, endpointHTTPPort, "ClusterIP", hairpinPodSel)
 		framework.ExpectNoError(err, fmt.Sprintf("unable to create ClusterIP svc: %v", err))
 
-		err = framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, "service-for-pods", 1, time.Second, wait.ForeverTestTimeout)
+		err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, "service-for-pods", 1, time.Second, wait.ForeverTestTimeout)
 		framework.ExpectNoError(err, fmt.Sprintf("ClusterIP svc never had an endpoint, expected 1: %v", err))
 
 		ginkgo.By("verify hairpinned connection from a pod to its own service is allowed")
@@ -1580,7 +1588,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			nodesHostnames = sets.NewString()
 
 			var err error
-			nodes, err = e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 			framework.ExpectNoError(err)
 
 			if len(nodes.Items) < 3 {
@@ -1640,7 +1648,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			for _, protocol := range []string{"http", "udp"} {
@@ -1716,7 +1724,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			ginkgo.By("Collecting IPv4 and IPv6 node addresses")
@@ -1851,7 +1859,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			for _, protocol := range []string{"http", "udp"} {
@@ -1936,7 +1944,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			for _, externalAddress := range addresses {
@@ -1992,7 +2000,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			nodesHostnames = sets.NewString()
 
 			var err error
-			nodes, err = e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 			framework.ExpectNoError(err)
 
 			if len(nodes.Items) < 3 {
@@ -2078,7 +2086,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			for _, protocol := range []string{"http", "udp"} {
@@ -2142,7 +2150,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 			nodesHostnames = sets.NewString()
 
 			var err error
-			nodes, err = e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 			framework.ExpectNoError(err)
 
 			if len(nodes.Items) < 3 {
@@ -2185,7 +2193,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 			deleteClusterExternalContainer(clientContainerName)
 			// f.Delete will delete the namespace and run WaitForNamespacesDeleted
 			// This is inside the Context and will happen before the framework's teardown inside the Describe
-			f.DeleteNamespace(f.Namespace.Name)
+			f.DeleteNamespace(context.TODO(), f.Namespace.Name)
 		})
 
 		// Make sure ingress traffic can reach host pod backends for a service without SNAT when externalTrafficPolicy is set to local
@@ -2198,7 +2206,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			for _, protocol := range []string{"http", "udp"} {
@@ -2425,7 +2433,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		max_tries := 6               // 6 tries to waiting for the pod to restart
 		cooldown := 10 * time.Second // 10 sec to cooldown between each try
 		for i := 0; i < max_tries; i++ {
-			err := e2epod.WaitForPodCondition(f.ClientSet, ns, podName, desc, 5*time.Minute, condition)
+			err := e2epod.WaitForPodCondition(context.TODO(), f.ClientSet, ns, podName, desc, 5*time.Minute, condition)
 			if apierrors.IsNotFound(err) {
 				// pod not found,try again after cooldown
 				time.Sleep(cooldown)
@@ -2679,7 +2687,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		}
 
 		dbDeployment := getDeployment(f, ovnNs, "ovnkube-db")
-		dbPods, err := e2edeployment.GetPodsForDeployment(f.ClientSet, dbDeployment)
+		dbPods, err := e2edeployment.GetPodsForDeployment(context.TODO(), f.ClientSet, dbDeployment)
 		if err != nil {
 			framework.Failf("Error: Failed to get pods, err: %v", err)
 		}
@@ -2710,7 +2718,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 	})
 
 	ginkgo.It("Should validate connectivity before and after deleting all the db-pods at once in HA mode", func() {
-		dbPods, err := e2epod.GetPods(f.ClientSet, ovnNs, map[string]string{"name": databasePodPrefix})
+		dbPods, err := e2epod.GetPods(context.TODO(), f.ClientSet, ovnNs, map[string]string{"name": databasePodPrefix})
 		if err != nil {
 			framework.Failf("Error: Failed to get pods, err: %v", err)
 		}

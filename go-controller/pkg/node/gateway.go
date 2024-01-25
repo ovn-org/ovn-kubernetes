@@ -9,13 +9,16 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	"github.com/pkg/errors"
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 )
 
@@ -25,9 +28,11 @@ import (
 // are kept in sync
 type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
-	Init(factory.NodeWatchFactory, <-chan struct{}, *sync.WaitGroup) error
+	Init(<-chan struct{}, *sync.WaitGroup) error
 	Start()
 	GetGatewayBridgeIface() string
+	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
+	Reconcile() error
 }
 
 type gateway struct {
@@ -43,6 +48,8 @@ type gateway struct {
 	nodeIPManager   *addressManager
 	initFunc        func() error
 	readyFunc       func() (bool, error)
+
+	servicesRetryFramework *retry.RetryFramework
 
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
@@ -204,7 +211,7 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 
 }
 
-func (g *gateway) Init(wf factory.NodeWatchFactory, stopChan <-chan struct{}, wg *sync.WaitGroup) error {
+func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	g.stopChan = stopChan
 	g.wg = wg
 
@@ -212,8 +219,8 @@ func (g *gateway) Init(wf factory.NodeWatchFactory, stopChan <-chan struct{}, wg
 	if err = g.initFunc(); err != nil {
 		return err
 	}
-	servicesRetryFramework := g.newRetryFrameworkNode(factory.ServiceForGatewayType)
-	if _, err = servicesRetryFramework.WatchResource(); err != nil {
+	g.servicesRetryFramework = g.newRetryFrameworkNode(factory.ServiceForGatewayType)
+	if _, err = g.servicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching services: %v", err)
 	}
 
@@ -356,7 +363,62 @@ func gatewayReady(patchPort string) (bool, error) {
 }
 
 func (g *gateway) GetGatewayBridgeIface() string {
-	return g.openflowManager.defaultBridge.bridgeName
+	return g.openflowManager.getDefaultBridgeName()
+}
+
+// getMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
+func getMaxFrameLength() int {
+	return config.Default.MTU + 14
+}
+
+// SetDefaultGatewayBridgeMAC updates the mac address for the OFM used to render flows with
+func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
+	g.openflowManager.setDefaultBridgeMAC(macAddr)
+	klog.Infof("Default gateway bridge MAC address updated to %s", macAddr)
+}
+
+// Reconcile handles triggering updates to different components of a gateway, like OFM, Services
+func (g *gateway) Reconcile() error {
+	klog.Info("Reconciling gateway with updates")
+	node, err := g.watchFactory.GetNode(g.nodeIPManager.nodeName)
+	if err != nil {
+		return err
+	}
+	subnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	if err != nil {
+		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update", node.Name)
+	}
+	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses()); err != nil {
+		return err
+	}
+	// Services create OpenFlow flows as well, need to update them all
+	if g.servicesRetryFramework != nil {
+		if errs := g.addAllServices(); errs != nil {
+			err := kerrors.NewAggregate(errs)
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *gateway) addAllServices() []error {
+	errs := []error{}
+	svcs, err := g.watchFactory.GetServices()
+	if err != nil {
+		errs = append(errs, err)
+	} else {
+		for _, svc := range svcs {
+			svc := *svc
+			klog.V(5).Infof("Adding service %s/%s to retryServices", svc.Namespace, svc.Name)
+			err = g.servicesRetryFramework.AddRetryObjWithAddNoBackoff(&svc)
+			if err != nil {
+				err = fmt.Errorf("failed to add service %s/%s to retry framework: %w", svc.Namespace, svc.Name, err)
+				errs = append(errs, err)
+			}
+		}
+	}
+	g.servicesRetryFramework.RequestRetryObjs()
+	return errs
 }
 
 type bridgeConfiguration struct {

@@ -159,6 +159,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				node1Switch.QOSRules = []string{qos1.UUID, qos2.UUID}
 				node2Switch.QOSRules = []string{qos1.UUID, qos2.UUID}
 				expectedDatabaseState := []libovsdbtest.TestData{
+					staleQoS,
 					qos1,
 					qos2,
 					node1Switch,
@@ -190,6 +191,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				node1Switch.QOSRules = []string{qos3.UUID}
 				node2Switch.QOSRules = []string{qos3.UUID}
 				expectedDatabaseState = []libovsdbtest.TestData{
+					staleQoS,
 					qos3,
 					node1Switch,
 					node2Switch,
@@ -204,6 +206,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				node1Switch.QOSRules = []string{}
 				node2Switch.QOSRules = []string{}
 				expectedDatabaseState = []libovsdbtest.TestData{
+					staleQoS,
 					node1Switch,
 					node2Switch,
 					joinSwitch,
@@ -340,6 +343,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				node1Switch.QOSRules = []string{qos1.UUID, qos2.UUID}
 				node2Switch.QOSRules = []string{qos1.UUID, qos2.UUID}
 				expectedDatabaseState := []libovsdbtest.TestData{
+					staleQoS,
 					qos1,
 					qos2,
 					node1Switch,
@@ -376,6 +380,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				node1Switch.QOSRules = []string{qos3.UUID}
 				node2Switch.QOSRules = []string{qos3.UUID}
 				expectedDatabaseState = []libovsdbtest.TestData{
+					staleQoS,
 					qos3,
 					node1Switch,
 					node2Switch,
@@ -390,6 +395,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				node1Switch.QOSRules = []string{}
 				node2Switch.QOSRules = []string{}
 				expectedDatabaseState = []libovsdbtest.TestData{
+					staleQoS,
 					node1Switch,
 					node2Switch,
 					joinSwitch,

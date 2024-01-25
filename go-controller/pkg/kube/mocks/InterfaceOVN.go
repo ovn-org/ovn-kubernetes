@@ -98,15 +98,15 @@ func (_m *InterfaceOVN) GetAnnotationsOnPod(namespace string, name string) (map[
 }
 
 // GetEgressFirewalls provides a mock function with given fields:
-func (_m *InterfaceOVN) GetEgressFirewalls() (*egressfirewallv1.EgressFirewallList, error) {
+func (_m *InterfaceOVN) GetEgressFirewalls() ([]*egressfirewallv1.EgressFirewall, error) {
 	ret := _m.Called()
 
-	var r0 *egressfirewallv1.EgressFirewallList
-	if rf, ok := ret.Get(0).(func() *egressfirewallv1.EgressFirewallList); ok {
+	var r0 []*egressfirewallv1.EgressFirewall
+	if rf, ok := ret.Get(0).(func() []*egressfirewallv1.EgressFirewall); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*egressfirewallv1.EgressFirewallList)
+			r0 = ret.Get(0).([]*egressfirewallv1.EgressFirewall)
 		}
 	}
 
@@ -144,15 +144,15 @@ func (_m *InterfaceOVN) GetEgressIP(name string) (*egressipv1.EgressIP, error) {
 }
 
 // GetEgressIPs provides a mock function with given fields:
-func (_m *InterfaceOVN) GetEgressIPs() (*egressipv1.EgressIPList, error) {
+func (_m *InterfaceOVN) GetEgressIPs() ([]*egressipv1.EgressIP, error) {
 	ret := _m.Called()
 
-	var r0 *egressipv1.EgressIPList
-	if rf, ok := ret.Get(0).(func() *egressipv1.EgressIPList); ok {
+	var r0 []*egressipv1.EgressIP
+	if rf, ok := ret.Get(0).(func() []*egressipv1.EgressIP); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*egressipv1.EgressIPList)
+			r0 = ret.Get(0).([]*egressipv1.EgressIP)
 		}
 	}
 
@@ -167,15 +167,15 @@ func (_m *InterfaceOVN) GetEgressIPs() (*egressipv1.EgressIPList, error) {
 }
 
 // GetNamespaces provides a mock function with given fields: labelSelector
-func (_m *InterfaceOVN) GetNamespaces(labelSelector metav1.LabelSelector) (*apicorev1.NamespaceList, error) {
+func (_m *InterfaceOVN) GetNamespaces(labelSelector metav1.LabelSelector) ([]*apicorev1.Namespace, error) {
 	ret := _m.Called(labelSelector)
 
-	var r0 *apicorev1.NamespaceList
-	if rf, ok := ret.Get(0).(func(metav1.LabelSelector) *apicorev1.NamespaceList); ok {
+	var r0 []*apicorev1.Namespace
+	if rf, ok := ret.Get(0).(func(metav1.LabelSelector) []*apicorev1.Namespace); ok {
 		r0 = rf(labelSelector)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*apicorev1.NamespaceList)
+			r0 = ret.Get(0).([]*apicorev1.Namespace)
 		}
 	}
 
@@ -213,15 +213,15 @@ func (_m *InterfaceOVN) GetNode(name string) (*apicorev1.Node, error) {
 }
 
 // GetNodes provides a mock function with given fields:
-func (_m *InterfaceOVN) GetNodes() (*apicorev1.NodeList, error) {
+func (_m *InterfaceOVN) GetNodes() ([]*apicorev1.Node, error) {
 	ret := _m.Called()
 
-	var r0 *apicorev1.NodeList
-	if rf, ok := ret.Get(0).(func() *apicorev1.NodeList); ok {
+	var r0 []*apicorev1.Node
+	if rf, ok := ret.Get(0).(func() []*apicorev1.Node); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*apicorev1.NodeList)
+			r0 = ret.Get(0).([]*apicorev1.Node)
 		}
 	}
 
@@ -258,22 +258,22 @@ func (_m *InterfaceOVN) GetPod(namespace string, name string) (*apicorev1.Pod, e
 	return r0, r1
 }
 
-// GetPods provides a mock function with given fields: namespace, labelSelector
-func (_m *InterfaceOVN) GetPods(namespace string, labelSelector metav1.LabelSelector) (*apicorev1.PodList, error) {
-	ret := _m.Called(namespace, labelSelector)
+// GetPods provides a mock function with given fields: namespace, opts
+func (_m *InterfaceOVN) GetPods(namespace string, opts metav1.ListOptions) ([]*apicorev1.Pod, error) {
+	ret := _m.Called(namespace, opts)
 
-	var r0 *apicorev1.PodList
-	if rf, ok := ret.Get(0).(func(string, metav1.LabelSelector) *apicorev1.PodList); ok {
-		r0 = rf(namespace, labelSelector)
+	var r0 []*apicorev1.Pod
+	if rf, ok := ret.Get(0).(func(string, metav1.ListOptions) []*apicorev1.Pod); ok {
+		r0 = rf(namespace, opts)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*apicorev1.PodList)
+			r0 = ret.Get(0).([]*apicorev1.Pod)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, metav1.LabelSelector) error); ok {
-		r1 = rf(namespace, labelSelector)
+	if rf, ok := ret.Get(1).(func(string, metav1.ListOptions) error); ok {
+		r1 = rf(namespace, opts)
 	} else {
 		r1 = ret.Error(1)
 	}

@@ -389,8 +389,10 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 				return err
 			}
 			if !podSelector.Empty() {
-				newMatches := podSelector.Matches(newPodLabels)
-				oldMatches := podSelector.Matches(oldPodLabels)
+				// Use "new" and "old" instead of "newPod" and "oldPod" to determine whether
+				// pods was created or is being deleted.
+				newMatches := new != nil && podSelector.Matches(newPodLabels)
+				oldMatches := old != nil && podSelector.Matches(oldPodLabels)
 				// If the podSelector doesn't match the pod, then continue
 				// because this EgressIP intends to match other pods in that
 				// namespace and not this one. Other EgressIP objects might
@@ -399,8 +401,7 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 					continue
 				}
 				// Check if the pod stopped matching. If the pod was deleted,
-				// "new" will be nil and newPodLabels will not match, so this is
-				// should cover that case.
+				// "new" will be nil, so this must account for that case.
 				if !newMatches && oldMatches {
 					if err := oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod); err != nil {
 						return err

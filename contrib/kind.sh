@@ -424,11 +424,10 @@ print_params() {
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
        echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
-     fi
-
-     if [ "${KIND_NUM_NODES_PER_ZONE}" -gt 1 ] && [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" = "true" ]; then
-       echo "multi_node_zone is not compatible with ovnkube_identity, disabling ovnkube_identity"
-       OVN_ENABLE_OVNKUBE_IDENTITY="false"
+       if [ "${KIND_NUM_NODES_PER_ZONE}" -gt 1 ] && [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" = "true" ]; then
+         echo "multi_node_zone is not compatible with ovnkube_identity, disabling ovnkube_identity"
+         OVN_ENABLE_OVNKUBE_IDENTITY="false"
+       fi
      fi
      echo "OVN_ENABLE_OVNKUBE_IDENTITY = $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
@@ -440,10 +439,10 @@ command_exists() {
   command -v ${cmd} >/dev/null 2>&1
 }
 
-install_j2_renderer() {
-  # ensure j2 renderer installed
+install_jinjanator_renderer() {
+  # ensure jinjanator renderer installed
   pip install wheel --user
-  pip freeze | grep j2cli || pip install j2cli[yaml] --user
+  pip freeze | grep jinjanator || pip install jinjanator[yaml] --user
   export PATH=~/.local/bin:$PATH
 }
 
@@ -473,13 +472,13 @@ check_dependencies() {
     exit 1
   fi
 
-  if ! command_exists j2 ; then
+  if ! command_exists jinjanate ; then
     if ! command_exists pip ; then
-      echo "Dependency not met: 'j2' not installed and cannot install with 'pip'"
+      echo "Dependency not met: 'jinjanator' not installed and cannot install with 'pip'"
       exit 1
     fi
-    echo "'j2' not found, installing with 'pip'"
-    install_j2_renderer
+    echo "'jinjanate' not found, installing with 'pip'"
+    install_jinjanator_renderer
   fi
 
   if ! command_exists docker && ! command_exists podman; then
@@ -523,7 +522,7 @@ set_default_params() {
   fi
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
-  K8S_VERSION=${K8S_VERSION:-v1.26.3}
+  K8S_VERSION=${K8S_VERSION:-v1.28.0}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
@@ -726,7 +725,7 @@ EOF
 }
 
 create_kind_cluster() {
-  # Output of the j2 command
+  # Output of the jinjanate command
   KIND_CONFIG_LCL=${DIR}/kind-${KIND_CLUSTER_NAME}.yaml
 
   ovn_ip_family=${IP_FAMILY} \
@@ -740,7 +739,7 @@ create_kind_cluster() {
   cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
   kind_local_registry_port=${KIND_LOCAL_REGISTRY_PORT} \
   kind_local_registry_name=${KIND_LOCAL_REGISTRY_NAME} \
-  j2 "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
+  jinjanate "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
 
   # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
   if kind get clusters | grep ovn; then
@@ -1029,58 +1028,57 @@ install_ovn() {
 }
 
 install_ingress() {
-  run_kubectl apply -f ingress/mandatory.yaml
-  run_kubectl apply -f ingress/service-nodeport.yaml
+  run_kubectl apply -f "${DIR}/ingress/mandatory.yaml"
+  run_kubectl apply -f "${DIR}/ingress/service-nodeport.yaml"
 }
 
+METALLB_DIR="/tmp/metallb"
 install_metallb() {
-  if  ! ( command -v controller-gen > /dev/null ); then
-    echo "controller-gen not found, installing sigs.k8s.io/controller-tools"
-    olddir="${PWD}"
-    builddir="$(mktemp -d)"
-    cd "${builddir}"
-    GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
-    cd "${olddir}"
-    if [[ "${builddir}" == /tmp/* ]]; then #paranoia
-        rm -rf "${builddir}"
-    fi
-  fi
+  mkdir -p /tmp/metallb
+  local builddir
+  builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
+
+  pushd "${builddir}"
   git clone https://github.com/metallb/metallb.git
-  pushd metallb
-  # temporary fix for metallb issue
-  # https://github.com/metallb/metallb/commit/fdf92741c7fac20eedf3caa0aa922f9ff0f0e7dd#r110009241
-  git reset --hard f5ba918
+  cd metallb
   pip install -r dev-env/requirements.txt
-  inv dev-env -n ovn -b frr -p bgp
+  # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
+  GOBIN="" inv dev-env -n ovn -b frr -p bgp
   docker network create --driver bridge clientnet
   docker network connect clientnet frr
   docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
   popd
-  sudo rm -rf metallb
-  local frr_ips=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}#{{end}}' frr)
-  echo $frr_ips
-  local kind_network=$(echo $frr_ips | cut -d '#' -f 2)
-  echo $kind_network
-  local client_network=$(echo $frr_ips | cut -d '#' -f 1)
-  echo $client_network
-  local subnet=$(echo ${client_network%?}0)
-  echo $subnet
+  delete_metallb_dir
+
+  local frr_ips
+  frr_ips=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}#{{end}}' frr)
+  echo "${frr_ips}"
+  local kind_network
+  kind_network=$(echo "${frr_ips}" | cut -d '#' -f 2)
+  echo "${kind_network}"
+  local client_network
+  client_network=$(echo "${frr_ips}" | cut -d '#' -f 1)
+  echo "${client_network}"
+  # The following only works for single stack, to be modified if dualstack is to be supported:
+  local client_subnet
+  client_subnet=$(docker network inspect clientnet -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+  echo "${client_subnet}"
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  for n in $KIND_NODES; do
-    docker exec "$n" ip route add $subnet/16 via $kind_network
+  for n in ${KIND_NODES}; do
+    docker exec "${n}" ip route add "${client_subnet}" via "${kind_network}"
   done
   # TODO(tssurya): expand this to be more dynamic in the future when needed.
   # for now, we only run one test with metalLB load balancer for which this
   # one svcVIP (192.168.10.0) is more than enough since at a time we will only
   # have one load balancer service
-  docker exec lbclient ip route add 192.168.10.0 via $client_network dev eth0
+  docker exec lbclient ip route add 192.168.10.0 via "${client_network}" dev eth0
   sleep 30
 }
 
 install_plugins() {
   git clone https://github.com/containernetworking/plugins.git
   pushd plugins
-  ./build_linux.sh
+  CGO_ENABLED=0 ./build_linux.sh
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   # Opted for not overwritting the existing plugins
   for node in $KIND_NODES; do
@@ -1093,10 +1091,27 @@ install_plugins() {
 }
 
 destroy_metallb() {
-  docker stop lbclient || true # its possible the lbclient doesn't exist which is fine, ignore error
-  docker stop frr || true # its possible the lbclient doesn't exist which is fine, ignore error
-  docker network rm clientnet || true # its possible the clientnet network doesn't exist which is fine, ignore error
-  sudo rm -rf metallb || true # this repo is removed in install_metallb(), but in case of trouble it may still be around
+  if docker ps --format '{{.Names}}' | grep -Eq '^lbclient$'; then
+      docker stop lbclient
+  fi
+  if docker ps --format '{{.Names}}' | grep -Eq '^frr$'; then
+      docker stop frr
+  fi
+  if docker network ls --format '{{.Name}}' | grep -q '^clientnet$'; then
+      docker network rm clientnet
+  fi
+  delete_metallb_dir
+}
+
+delete_metallb_dir() {
+  if ! [ -d "${METALLB_DIR}" ]; then
+      return
+  fi
+
+  # The build directory will contain read only directories after building. Files cannot be deleted, even by the owner.
+  # Therefore, set all dirs to u+rwx.
+  find "${METALLB_DIR}" -type d -exec chmod u+rwx "{}" \;
+  rm -rf "${METALLB_DIR}"
 }
 
 install_multus() {
@@ -1309,6 +1324,7 @@ function is_nested_virt_enabled() {
 }
 
 function install_kubevirt() {
+    local kubevirt_version="$(curl -L https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)"
     for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_instances=512' >> /etc/sysctl.conf"
@@ -1317,13 +1333,12 @@ function install_kubevirt() {
             kubectl label nodes $node node-role.kubernetes.io/worker="" --overwrite=true
         fi
     done
-    local nightly_build_base_url="https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt"
-    local latest=$(curl -sL "${nightly_build_base_url}/latest")
+    local kubevirt_release_url="https://github.com/kubevirt/kubevirt/releases/download/${kubevirt_version}"
 
     echo "Deploy latest nighly build Kubevirt"
     if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
-      kubectl apply -f "${nightly_build_base_url}/${latest}/kubevirt-operator.yaml"
-      kubectl apply -f "${nightly_build_base_url}/${latest}/kubevirt-cr.yaml"
+      kubectl apply -f "${kubevirt_release_url}/kubevirt-operator.yaml"
+      kubectl apply -f "${kubevirt_release_url}/kubevirt-cr.yaml"
       if ! is_nested_virt_enabled; then
         kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
       fi
@@ -1336,6 +1351,29 @@ function install_kubevirt() {
             kubectl logs --all-containers=true -n kubevirt $p || true
         done
     fi
+    
+    if [ ! -d "./bin" ]
+    then
+        mkdir -p ./bin
+        if_error_exit "Failed to create bin dir!"
+    fi
+
+    if [[ "$OSTYPE" == "linux-gnu" ]]; then
+        OS_TYPE="linux"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        OS_TYPE="darwin"
+    fi
+
+    pushd ./bin
+       if [ ! -f ./virtctl ]; then
+           cli_name="virtctl-${kubevirt_version}-${OS_TYPE}-${ARCH}"
+           curl -LO "${kubevirt_release_url}/${cli_name}"
+           mv ${cli_name} virtctl
+           if_error_exit "Failed to download virtctl!"
+       fi
+    popd
+
+    chmod +x ./bin/virtctl
 }
 
 check_dependencies

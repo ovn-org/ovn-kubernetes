@@ -178,6 +178,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		cnci.nbClient,
 		addressSetFactory,
 		DefaultNetworkControllerName,
+		cnci.zone,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new admin policy based external route controller while creating new default network controller :%w", err)
@@ -342,7 +343,7 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 		klog.Errorf("Error in fetching nodes: %v", err)
 		return err
 	}
-	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes.Items))
+	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes))
 	err = oc.upgradeOVNTopology(existingNodes)
 	if err != nil {
 		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
@@ -387,7 +388,8 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 
 	networkID := util.InvalidNetworkID
 	nodeNames := []string{}
-	for _, node := range existingNodes.Items {
+	for _, node := range existingNodes {
+		node := *node
 		nodeNames = append(nodeNames, node.Name)
 
 		if config.OVNKubernetesFeature.EnableInterconnect && networkID == util.InvalidNetworkID {
@@ -735,6 +737,16 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
+		if config.HybridOverlay.Enabled {
+			if util.NoHostSubnet(node) {
+				return h.oc.addUpdateHoNodeEvent(node)
+			} else {
+				// clean possible remainings for a node that is used to be a HO node
+				if err := h.oc.deleteHoNodeEvent(node); err != nil {
+					return err
+				}
+			}
+		}
 		if h.oc.isLocalZoneNode(node) {
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
@@ -767,16 +779,9 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		}
 
 	case factory.EgressFirewallType:
-		var err error
 		egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-		if err = h.oc.addEgressFirewall(egressFirewall); err != nil {
-			egressFirewall.Status.Status = egressFirewallAddError
-		} else {
-			egressFirewall.Status.Status = egressFirewallAppliedCorrectly
-			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
-			metrics.IncrementEgressFirewallCount()
-		}
-		if statusErr := h.oc.updateEgressFirewallStatusWithRetry(egressFirewall); statusErr != nil {
+		err := h.oc.addEgressFirewall(egressFirewall)
+		if statusErr := h.oc.setEgressFirewallStatus(egressFirewall, err); statusErr != nil {
 			klog.Errorf("Failed to update egress firewall status %s, error: %v",
 				getEgressFirewallNamespacedName(egressFirewall), statusErr)
 		}
@@ -857,6 +862,19 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
+		var switchToOvnNode bool
+		if config.HybridOverlay.Enabled {
+			if util.NoHostSubnet(newNode) && !util.NoHostSubnet(oldNode) {
+				klog.Infof("Node %s has been updated to be a remote/unmanaged hybrid overlay node", newNode.Name)
+				return h.oc.addUpdateHoNodeEvent(newNode)
+			} else if !util.NoHostSubnet(newNode) && util.NoHostSubnet(oldNode) {
+				klog.Infof("Node %s has been updated to be an ovn-kubernetes managed node", newNode.Name)
+				if err := h.oc.deleteHoNodeEvent(newNode); err != nil {
+					return err
+				}
+				switchToOvnNode = true
+			}
+		}
 
 		// +--------------------+-------------------+-------------------------------------------------+
 		// |    oldNode         |      newNode      |       Action                                    |
@@ -916,7 +934,8 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 
 			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
 			// Also check if node subnet changed, so static routes are properly set
-			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged || zoneClusterChanged || primaryAddrChanged(oldNode, newNode)
+			// Also check if the node is used to be a hybrid overlay node
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged || zoneClusterChanged || primaryAddrChanged(oldNode, newNode) || switchToOvnNode
 			if syncZoneIC {
 				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
 					newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)

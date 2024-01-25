@@ -14,6 +14,7 @@ import (
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -370,6 +371,10 @@ func setPodAnnotations(podObj *v1.Pod, testPod testPod) {
 }
 
 func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbtest.TestData {
+	return getExpectedDataPodsSwitchesPortGroup(pods, nodes, "")
+}
+
+func getExpectedDataPodsSwitchesPortGroup(pods []testPod, nodes []string, namespacedPortGroup string) []libovsdbtest.TestData {
 	nodeslsps := make(map[string][]string)
 	var logicalSwitchPorts []*nbdb.LogicalSwitchPort
 	for _, pod := range pods {
@@ -417,6 +422,18 @@ func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbte
 	for _, ls := range logicalSwitches {
 		data = append(data, ls)
 	}
+	if namespacedPortGroup != "" {
+		// namespace port group is created
+		fakeController := getFakeController(DefaultNetworkControllerName)
+		pg := fakeController.buildPortGroup(
+			libovsdbutil.HashedPortGroup(namespacedPortGroup),
+			namespacedPortGroup,
+			logicalSwitchPorts,
+			nil,
+		)
+		pg.UUID = pg.Name + "-UUID"
+		data = append(data, pg)
+	}
 
 	return data
 }
@@ -460,7 +477,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("reconciles an existing pod", func() {
 			app.Action = func(ctx *cli.Context) error {
-
+				// this flag will create namespaced port group
+				config.OVNKubernetesFeature.EnableEgressFirewall = true
 				namespaceT := *newNamespace("namespace1")
 				// Setup an unassigned pod, perform an update later on which assigns it.
 				t := newTPod(
@@ -526,7 +544,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
+					getExpectedDataPodsSwitchesPortGroup([]testPod{t}, []string{"node1"}, namespaceT.Name)))
 
 				return nil
 			}
@@ -2437,6 +2457,47 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				return nil
 			}
 
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+		ginkgo.It("should correctly handle a pod running on no node", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				myPod.Status.Phase = v1.PodRunning
+				setPodAnnotations(myPod, t)
+				initialDB = libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{},
+				}
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*myPod},
+					},
+				)
+
+				fakeOvn.controller.localZoneNodes = nil
+				err := fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				return nil
+			}
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
