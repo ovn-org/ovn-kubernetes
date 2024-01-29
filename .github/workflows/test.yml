@@ -77,14 +77,14 @@ jobs:
         if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz ]; then
             cp ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz ${CI_IMAGE_MASTER_TAR}.gz
             gunzip ${CI_IMAGE_MASTER_TAR}.gz
-            echo "::set-output name=MASTER_IMAGE_RESTORED_FROM_CACHE::true"
+            echo "MASTER_IMAGE_RESTORED_FROM_CACHE=true" >> "$GITHUB_OUTPUT"
             exit 0
         fi
 
         if docker pull ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-f:master; then
             docker tag ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-f:master ovn-daemonset-f:dev
 
-            echo "::set-output name=MASTER_IMAGE_RESTORED_FROM_GHCR::true"
+            echo "MASTER_IMAGE_RESTORED_FROM_GHCR=true" >> "$GITHUB_OUTPUT"
             exit 0
         fi
     # only run the following steps if the master image was not found in the cache
@@ -164,7 +164,7 @@ jobs:
             mkdir -p ${CI_DIST_IMAGES_OUTPUT}
             cp ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}.gz ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_PR_TAR}.gz
             gunzip ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_PR_TAR}.gz
-            echo "::set-output name=PR_IMAGE_RESTORED::true"
+            echo "PR_IMAGE_RESTORED=true" >> "$GITHUB_OUTPUT"
         fi
 
     # only run the following steps if the PR image was not found in the cache
