@@ -38,10 +38,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Check out code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
@@ -61,7 +61,7 @@ jobs:
     # Create a cache for the built master image
     - name: Restore master image cache
       id: image_cache_master
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ${{ env.CI_IMAGE_CACHE }}
@@ -90,14 +90,14 @@ jobs:
     # only run the following steps if the master image was not found in the cache
     - name: Set up Go
       if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
 
     - name: Check out code into the Go module directory - from master branch
       if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_GHCR != 'true' && steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         ref: master
 
@@ -137,7 +137,7 @@ jobs:
         gzip ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
 
     # run the following always if none of the steps before failed
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       with:
         name: test-image-master
         path: ${{ env.CI_IMAGE_MASTER_TAR }}
@@ -149,7 +149,7 @@ jobs:
     # Create a cache for the build PR image
     - name: Restore PR image cache
       id: image_cache_pr
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ${{ env.CI_IMAGE_CACHE }}
@@ -170,14 +170,14 @@ jobs:
     # only run the following steps if the PR image was not found in the cache
     - name: Set up Go
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
 
     - name: Check out code into the Go module directory - from current pr branch
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Build and Test - from current pr branch
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
@@ -237,7 +237,7 @@ jobs:
         gzip ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}
 
     # run the following if none of the previous steps failed
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       with:
         name: test-image-pr
         path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}
@@ -264,7 +264,7 @@ jobs:
       OVN_MULTICAST_ENABLE:  "false"
     steps:
     - name: Set up Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
@@ -286,7 +286,7 @@ jobs:
           powershell temurin-* zulu-*
 
     - name: Download test-image-master
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: test-image-master
 
@@ -302,7 +302,7 @@ jobs:
 
     - name: Check out code into the Go module directory - from Master branch
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
           ref: master
 
@@ -324,13 +324,13 @@ jobs:
 
     - name: Upload kind logs
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
 
     - name: Download test-image-pr
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: test-image-pr
 
@@ -339,7 +339,7 @@ jobs:
         docker load --input ${CI_IMAGE_PR_TAR} && rm -rf ${CI_IMAGE_PR_TAR}
 
     - name: Check out code into the Go module directory - from PR branch
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: ovn upgrade
       run: |
@@ -358,7 +358,7 @@ jobs:
 
     - name: Upload kind logs
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}-after-upgrade
         path: /tmp/kind/logs-kind-pr-branch
@@ -440,13 +440,13 @@ jobs:
           powershell temurin-* zulu-*
 
     - name: Set up Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
 
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up environment
       run: |
@@ -465,7 +465,7 @@ jobs:
         sudo ufw disable
 
     - name: Download test-image-pr
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: test-image-pr
 
@@ -509,7 +509,7 @@ jobs:
 
     - name: Upload kind logs
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
@@ -542,13 +542,13 @@ jobs:
     steps:
 
     - name: Set up Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
 
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up environment
       run: |
@@ -563,7 +563,7 @@ jobs:
         sudo ufw disable
 
     - name: Download test-image-pr
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: test-image-pr
 
@@ -596,7 +596,7 @@ jobs:
 
     - name: Upload kind logs
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
@@ -613,7 +613,7 @@ jobs:
 
     - name: Upload ovn dbs
       if: ${{ failure() }}
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kind-ovndbs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/ovndbs
@@ -646,13 +646,13 @@ jobs:
           sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
 
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
         id: go
 
       - name: Check out code into the Go module directory
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up environment
         run: |
@@ -664,7 +664,7 @@ jobs:
         # Not needed for KIND deployments, so just disable all the time.
         run: |
           sudo ufw disable
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: test-image-pr
       - name: Load docker image
@@ -684,7 +684,7 @@ jobs:
           kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
           path: /tmp/kind/logs
