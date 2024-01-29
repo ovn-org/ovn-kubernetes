@@ -511,8 +511,11 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			// record delay until ready
 			metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
 		}()
+		// make sure ovnkubeController started in a separate goroutine will execute .Stop() on shutdown.
+		// Stop() only makes sense to call if Start() succeeded.
 		defer func() {
-			if ovnkubeControllerStartErr != nil {
+			ovnkubeControllerWG.Wait()
+			if ovnkubeControllerStartErr == nil {
 				cm.Stop()
 			}
 		}()
@@ -552,6 +555,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		metrics.MetricNodeReadyDuration.Set(time.Since(startTime).Seconds())
 	}
 
+	// wait for ovnkubeController to start and check error
 	if runMode.ovnkubeController {
 		ovnkubeControllerWG.Wait()
 		if ovnkubeControllerStartErr != nil {
