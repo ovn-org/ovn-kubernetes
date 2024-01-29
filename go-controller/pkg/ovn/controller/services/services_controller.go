@@ -126,6 +126,11 @@ type Controller struct {
 	// nodeTracker
 	nodeTracker *nodeTracker
 
+	// startupDone is false up until the node tracker, service and endpointslice initial sync
+	// in Run() is completed
+	startupDone     bool
+	startupDoneLock sync.RWMutex
+
 	// Per node information and template variables.  The latter expand to each
 	// chassis' node IP (v4 and v6).
 	// Must be accessed only with the nodeInfo mutex taken.
@@ -169,6 +174,9 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	}
 	// We need the node tracker to be synced first, as we rely on it to properly reprogram initial per node load balancers
 	klog.Info("Waiting for node tracker handler to sync")
+	c.startupDoneLock.Lock()
+	c.startupDone = false
+	c.startupDoneLock.Unlock()
 	if !util.WaitForHandlerSyncWithTimeout(nodeControllerName, stopCh, types.HandlerSyncTimeout, nodeHandler.HasSynced) {
 		return fmt.Errorf("error syncing node tracker handler")
 	}
@@ -208,6 +216,10 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	if err := c.initTopLevelCache(); err != nil {
 		return fmt.Errorf("error initializing alreadyApplied cache: %w", err)
 	}
+
+	c.startupDoneLock.Lock()
+	c.startupDone = true
+	c.startupDoneLock.Unlock()
 
 	// Start the workers after the repair loop to avoid races
 	klog.Info("Starting workers")
@@ -511,15 +523,21 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 	// Resync node infos and node IP templates.
 	c.syncNodeInfos(nodeInfos)
 
-	// Resync services.
-	services, err := c.serviceLister.List(labels.Everything())
-	if err != nil {
-		klog.Errorf("Cached lister failed!? %v", err)
-		return
-	}
+	// Resync all services unless we're processing the initial node tracker sync (in which case
+	// the service add will happen at the next step in the services controller Run() and workers
+	// aren't up yet anyway: no need to do it during node tracker startup then)
+	c.startupDoneLock.RLock()
+	defer c.startupDoneLock.RUnlock()
+	if c.startupDone {
+		services, err := c.serviceLister.List(labels.Everything())
+		if err != nil {
+			klog.Errorf("Cached lister failed!? %v", err)
+			return
+		}
 
-	for _, service := range services {
-		c.onServiceAdd(service)
+		for _, service := range services {
+			c.onServiceAdd(service)
+		}
 	}
 }
 
