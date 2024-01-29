@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	ovnconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	eipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
 	egressiplisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
@@ -47,6 +48,7 @@ import (
 
 const (
 	rulePriority        = 6000 // the priority of the ip routing rules created by the controller. Egress Service priority is 5000.
+	ruleFwMarkPriority  = 5999 // the priority of the ip routing rules for LGW mode when we want to skip processing eip ip rules because dst is a node ip. Pkt will be fw marked with 1008.
 	routingTableIDStart = 1000
 	chainName           = "OVN-KUBE-EGRESS-IP-MULTI-NIC"
 	iptChainName        = utiliptables.Chain(chainName)
@@ -58,6 +60,8 @@ var (
 	_, defaultV6AnyCIDR, _ = net.ParseCIDR("::/0")
 	_, linkLocalCIDR, _    = net.ParseCIDR("fe80::/64")
 	iptJumpRule            = iptables.RuleArg{Args: []string{"-j", chainName}}
+	iptSaveMarkRule        = iptables.RuleArg{Args: []string{"-m", "mark", "--mark", "1008", "-j", "CONNMARK", "--save-mark"}} // 1008 is pkt mark for node ip
+	iptRestoreMarkRule     = iptables.RuleArg{Args: []string{"-m", "mark", "--mark", "0", "-j", "CONNMARK", "--restore-mark"}}
 )
 
 // eIPConfig represents exactly one EgressIP IP. It contains non-pod related EIP configuration information only.
@@ -252,6 +256,15 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		if err = c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv4, iptJumpRule); err != nil {
 			return fmt.Errorf("failed to create rule in chain %s to jump to chain %s: %v", utiliptables.ChainPostrouting, iptChainName, err)
 		}
+		// for LGW mode, we need to restore pkt mark from conntrack in-order for RP filtering not to fail for return packets from cluster nodes
+		if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
+			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptRestoreMarkRule); err != nil {
+				return fmt.Errorf("failed to create rule in chain %s to restore pkt marking: %v", utiliptables.ChainPrerouting, err)
+			}
+			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptSaveMarkRule); err != nil {
+				return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
+			}
+		}
 	}
 	if c.v6 {
 		if err := c.iptablesManager.OwnChain(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6); err != nil {
@@ -259,6 +272,27 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		}
 		if err = c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv6, iptJumpRule); err != nil {
 			return fmt.Errorf("unable to ensure iptables rules for jump rule: %v", err)
+		}
+		// for LGW mode, we need to restore pkt mark from conntrack in-order for RP filtering not to fail for return packets from cluster nodes
+		if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
+			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptRestoreMarkRule); err != nil {
+				return fmt.Errorf("failed to create rule in chain %s to restore pkt marking: %v", utiliptables.ChainPrerouting, err)
+			}
+			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptSaveMarkRule); err != nil {
+				return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
+			}
+		}
+	}
+	if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
+		// If dst is a node IP, use main routing table and skip EIP routing tables
+		if err = c.ruleManager.Add(getNodeIPFwMarkIPRule()); err != nil {
+			return fmt.Errorf("failed to create IP rule for node IPs: %v", err)
+		}
+		// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
+		// used for routing traffic in both directions.
+		stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
+		if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
+			return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
 		}
 	}
 
@@ -1462,4 +1496,12 @@ func isValidIP(ipStr string) bool {
 		return false
 	}
 	return len(ip) > 0
+}
+
+func getNodeIPFwMarkIPRule() netlink.Rule {
+	r := netlink.NewRule()
+	r.Priority = ruleFwMarkPriority
+	r.Mark = 1008 // pkt marked with 1008 is a node IP
+	r.Table = 254 // main
+	return *r
 }
