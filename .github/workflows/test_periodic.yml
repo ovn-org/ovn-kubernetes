@@ -110,11 +110,6 @@ jobs:
           msbuild mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
 
-    - name: Install KIND
-      run: |
-        sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
-        sudo chmod +x /usr/local/bin/kind
-
     - uses: actions/download-artifact@v4
       with:
         name: test-image
