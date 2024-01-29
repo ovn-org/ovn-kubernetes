@@ -60,28 +60,6 @@ jobs:
         name: test-image
         path: dist/images/_output/image.tar
 
-  k8s:
-    if: github.repository == 'ovn-org/ovn-kubernetes' || github.event_name == 'workflow_dispatch'
-    name: Build k8s
-    runs-on: ubuntu-latest
-    steps:
-
-    - name: Set up environment
-      run: |
-        export GOPATH=$(go env GOPATH)
-        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "$GOPATH/bin" >> $GITHUB_PATH
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Install KIND
-      run: |
-        sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
-        sudo chmod +x /usr/local/bin/kind
-        
   e2e-dual:
     if: github.repository == 'ovn-org/ovn-kubernetes' || github.event_name == 'workflow_dispatch'
     name: e2e-dual
