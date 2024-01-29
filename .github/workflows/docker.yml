@@ -21,14 +21,15 @@ jobs:
     name: Build Images
     runs-on: ubuntu-latest
     steps:
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v4
+
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
+        cache-dependency-path: "**/*.sum"
       id: go
-
-    - name: Check out code into the Go module directory
-      uses: actions/checkout@v4
 
     - name: Log in to the GH Container registry
       uses: docker/login-action@v3
