@@ -1136,11 +1136,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err := cniServer.Start(cni.ServerRunDir); err != nil {
 			return err
 		}
-
-		// Write CNI config file if it doesn't already exist
-		if err := config.WriteCNIConfig(); err != nil {
-			return err
-		}
+	}
+	
+	// Write CNI config file if it doesn't already exist
+	if err := config.WriteCNIConfig(); err != nil {
+		return err
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
