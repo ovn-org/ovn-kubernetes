@@ -172,7 +172,7 @@ func (c *Controller) reconcileEgressFirewall(key string) error {
 	// Split the key in namespace and name of the corresponding object.
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
-		klog.Errorf("failed to split meta namespace cache key %s for egress firewall: %v", key, err)
+		klog.Errorf("reconcileEgressFirewall failed to split meta namespace cache key %s for egress firewall: %v", key, err)
 		return nil
 	}
 	// Fetch the egress firewall object using the name and namespace.
