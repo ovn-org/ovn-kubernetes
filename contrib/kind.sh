@@ -1050,6 +1050,16 @@ install_metallb() {
   popd
   delete_metallb_dir
 
+  # The metallb commit https://github.com/metallb/metallb/commit/1a8e52c393d40efd17f28491616f6f9f7790a522
+  # removes control plane node from acting as a bgp speaker for service routes.
+  # Hence remove node.kubernetes.io/exclude-from-external-load-balancers label from control-plane nodes
+  # so that they are also available for advertising bgp routes which are needed for ovnkube's service
+  # specific e2e tests.
+  MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
+  for n in $MASTER_NODES; do
+    kubectl label node "$n" node.kubernetes.io/exclude-from-external-load-balancers-
+  done
+
   local frr_ips
   frr_ips=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}#{{end}}' frr)
   echo "${frr_ips}"
