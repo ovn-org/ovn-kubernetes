@@ -93,8 +93,8 @@ spec:
                             only one label. Additionally, only a single '*' can be
                             used at the beginning of the wildcard DNS name. For example,
                             '*.example.com' will match 'sub1.example.com' but won't
-                            match 'sub2.sub1.example.com'
-                          pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\.)+[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\.?$
+                            match 'sub2.sub1.example.com'.
+                          pattern: ^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$
                           type: string
                         nodeSelector:
                           description: nodeSelector will allow/deny traffic to the
