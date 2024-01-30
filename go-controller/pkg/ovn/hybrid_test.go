@@ -1534,15 +1534,25 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, "", hoSubnet, nodeHOIP, nodeHOMAC)
 
+			var node1LogicalRouter *nbdb.LogicalRouter
+			var basicNode1StaticRoutes []string
+
 			for _, obj := range expectedDatabaseState {
 				if logicalRouter, ok := obj.(*nbdb.LogicalRouter); ok {
 					if logicalRouter.Name == "GR_node1" {
+						// keep a referance so that we can edit this object
+						node1LogicalRouter = logicalRouter
+						basicNode1StaticRoutes = logicalRouter.StaticRoutes
 						logicalRouter.StaticRoutes = append(logicalRouter.StaticRoutes, hybridLogicalRouterStaticRoute.UUID)
 					}
 				}
 			}
 
+			// keep copies of these before appending hybrid overlay elements
 			basicExpectedNodeSwitchPorts := expectedNodeSwitch.Ports
+			basicExpectedOVNClusterRouterPolicies := expectedOVNClusterRouter.Policies
+			basicExpectedOVNClusterStaticRoutes := expectedOVNClusterRouter.StaticRoutes
+
 			expectedNodeSwitch.Ports = append(expectedNodeSwitch.Ports, hybridLogicalSwitchPort.UUID)
 			expectedOVNClusterRouter.Policies = append(expectedOVNClusterRouter.Policies, hybridSubnetLRP1.UUID, hybridSubnetLRP2.UUID)
 			expectedOVNClusterRouter.StaticRoutes = append(expectedOVNClusterRouter.StaticRoutes, hybridSubnetStaticRoute1.UUID)
@@ -1571,12 +1581,12 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				return updatedNode.Annotations, nil
 			}, 5).ShouldNot(gomega.HaveKey(hotypes.HybridOverlayDRMAC))
 
+			// restore values from the non-hybrid versions
 			expectedNodeSwitch.Ports = basicExpectedNodeSwitchPorts
+			expectedOVNClusterRouter.Policies = basicExpectedOVNClusterRouterPolicies
+			expectedOVNClusterRouter.StaticRoutes = basicExpectedOVNClusterStaticRoutes
+			node1LogicalRouter.StaticRoutes = basicNode1StaticRoutes
 
-			// Even though we  the hybrid overlay routes and policies would normally be deleted in the fake database that is not done for us
-			expectedDatabaseState = append(expectedDatabaseState, hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2)
-			// The HO mac binding is not removed
-			expectedDatabaseState = append(expectedDatabaseState, expectedStaticMACBinding)
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			return nil
@@ -1591,7 +1601,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	ginkgo.It("cleans up a Linux node that has hybridOverlay annotations when hybrid overlay is disabled", func() {
+	ginkgo.It("cleans up a Linux node that has hybridOverlay annotations and database objects when hybrid overlay is disabled", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeHOMAC string = "0a:58:0a:01:01:03"
@@ -1676,6 +1686,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
+			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, "", hoSubnet, nodeHOIP, nodeHOMAC)
+			expectedStaticMACBinding := &nbdb.StaticMACBinding{
+				UUID:               "MAC-binding-HO-UUID",
+				IP:                 nodeHOIP,
+				LogicalPort:        "rtos-node1",
+				MAC:                nodeHOMAC,
+				OverrideDynamicMAC: true,
+			}
+
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					newClusterJoinSwitch(),
@@ -1687,6 +1706,12 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					expectedClusterLBGroup,
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
+					hybridSubnetStaticRoute1,
+					hybridLogicalRouterStaticRoute,
+					hybridSubnetLRP1,
+					hybridSubnetLRP2,
+					hybridLogicalSwitchPort,
+					expectedStaticMACBinding,
 				},
 			}
 			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
@@ -1737,6 +1762,47 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				}
 				return updatedNode.Annotations, nil
 			}, 2).ShouldNot(gomega.HaveKey(hotypes.HybridOverlayDRIP))
+
+			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
+				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+					if item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" ||
+						strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") {
+						return true
+					}
+					return false
+				}
+				logicalRouterStaticRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(clusterController.nbClient, p)
+				if err != nil {
+					return nil, err
+				}
+				return logicalRouterStaticRoutes, nil
+			}, 2).Should(gomega.HaveLen(0))
+
+			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
+				p := func(item *nbdb.LogicalRouterPolicy) bool {
+					if strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") ||
+						item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" {
+						return true
+					}
+					return false
+				}
+				logicalRouterPolicies, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(clusterController.nbClient, p)
+				if err != nil {
+					return nil, err
+				}
+				return logicalRouterPolicies, nil
+
+			}, 2).Should(gomega.HaveLen(0))
+
+			gomega.Eventually(func() error {
+				_, err := libovsdbops.GetLogicalSwitchPort(clusterController.nbClient, &nbdb.LogicalSwitchPort{Name: "int-node1"})
+				if err != nil {
+					return err
+				}
+				return nil
+			}, 2).Should(gomega.Equal(libovsdbclient.ErrNotFound))
+
+			gomega.Eventually(clusterController.nbClient.Get(context.Background(), expectedStaticMACBinding), 2).Should(gomega.Equal(libovsdbclient.ErrNotFound))
 
 			return nil
 		}
