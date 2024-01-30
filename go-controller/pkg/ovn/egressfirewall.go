@@ -3,10 +3,10 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/miekg/dns"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns-name-resolver"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
@@ -27,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -86,34 +88,17 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 		access: rawEgressFirewallRule.Type,
 	}
 
-	if rawEgressFirewallRule.To.DNSName != "" {
-		// Validate DNS name is not wildcard when DNSNameResolver is not enabled.
-		if !config.OVNKubernetesFeature.EnableDNSNameResolver && util.IsWildcard(rawEgressFirewallRule.To.DNSName) {
-			return nil, fmt.Errorf("wildcard dns name is not supported as rule destination, %s", rawEgressFirewallRule.To.DNSName)
-		}
-		efr.to.dnsName = rawEgressFirewallRule.To.DNSName
-	} else if len(rawEgressFirewallRule.To.CIDRSelector) > 0 {
-		_, ipNet, err := net.ParseCIDR(rawEgressFirewallRule.To.CIDRSelector)
-		if err != nil {
-			return nil, err
-		}
-		efr.to.cidrSelector = rawEgressFirewallRule.To.CIDRSelector
-		intersect := false
-		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			if clusterSubnet.CIDR.Contains(ipNet.IP) || ipNet.Contains(clusterSubnet.CIDR.IP) {
-				intersect = true
-				break
-			}
-		}
-		efr.to.clusterSubnetIntersection = intersect
-	} else {
-		efr.to.nodeSelector = rawEgressFirewallRule.To.NodeSelector
+	// Validate the egress firewall rule destination and update the appropriate
+	// fields of efr.
+	var err error
+	efr.to.cidrSelector, efr.to.dnsName, efr.to.clusterSubnetIntersection, efr.to.nodeSelector, err =
+		util.ValidateAndGetEgressFirewallDestination(rawEgressFirewallRule.To)
+	if err != nil {
+		return efr, err
+	}
+	// If nodeSelector is set then fetch the node addresses.
+	if efr.to.nodeSelector != nil {
 		efr.to.nodeAddrs = sets.New[string]()
-		// validate node selector
-		_, err := metav1.LabelSelectorAsSelector(rawEgressFirewallRule.To.NodeSelector)
-		if err != nil {
-			return nil, fmt.Errorf("rule destination has invalid node selector, err: %v", err)
-		}
 		nodes, err := oc.watchFactory.GetNodesByLabelSelector(*rawEgressFirewallRule.To.NodeSelector)
 		if err != nil {
 			return efr, fmt.Errorf("unable to query nodes for egress firewall: %w", err)
@@ -367,10 +352,18 @@ func (oc *DefaultNetworkController) deleteEgressFirewall(egressFirewallObj *egre
 	if err := oc.deleteEgressFirewallRules(egressFirewallObj.Namespace); err != nil {
 		return err
 	}
-	if deleteDNS && !config.OVNKubernetesFeature.EnableDNSNameResolver {
-		// Invoke egressFirewallDNS.Delete if DNSNameResolver is not enabled.
-		if err := oc.egressFirewallDNS.Delete(egressFirewallObj.Namespace); err != nil {
-			return err
+	if deleteDNS {
+		if !config.OVNKubernetesFeature.EnableDNSNameResolver {
+			// Invoke dnsNameResolver.Delete if DNSNameResolver is not enabled.
+			if deleteResp := oc.dnsNameResolver.Delete(dnsnameresolver.DeleteRequest{Namespace: egressFirewallObj.Namespace}); deleteResp.Err != nil {
+				return deleteResp.Err
+			}
+		} else {
+			// Invoke dnsNameResolver.RemoveNamespace if DNSNameResolver is enabled.
+			if removeNamespaceResp := oc.dnsNameResolver.RemoveNamespace(
+				dnsnameresolver.RemoveNamespaceRequest{Namespace: egressFirewallObj.Namespace}); removeNamespaceResp.Err != nil {
+				return removeNamespaceResp.Err
+			}
 		}
 	}
 	oc.egressFirewalls.Delete(egressFirewallObj.Namespace)
@@ -421,25 +414,46 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, p
 		} else if len(rule.to.dnsName) > 0 {
 			// rule based on DNS NAME
 			var dnsNameAddressSets addressset.AddressSet
-			var err error
-			// If DNSNameResolver is enabled, then use the resolver to get the address
+			// If DNSNameResolver is enabled, then use the egressFirewallExternalDNS to get the address
 			// set corresponding to the DNS name, otherwise use the egressFirewallDNS
 			// to get the address set.
 			if config.OVNKubernetesFeature.EnableDNSNameResolver {
 				// Convert the DNS name to lower case fully qualified domain name.
 				dnsName := strings.ToLower(dns.Fqdn(rule.to.dnsName))
-				// Get the corresponding address set for the DNS name from the resolver
-				// without updating the current IPs added to the address set, if any.
-				dnsNameAddressSets, err = oc.resolver.Add(dnsName, nil, false)
-				if err != nil {
-					return fmt.Errorf("error with Resolver - %v", err)
+				var getAddressSetErr, addNamespaceErr error
+				waitErr := wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 1*time.Second, true, func(ctx context.Context) (bool, error) {
+					// Get the corresponding address set for the DNS name from the ExternalEgressDNS.
+					getAddrSetResp := oc.dnsNameResolver.GetAddressSet(dnsnameresolver.GetAddressSetRequest{DNSName: dnsName})
+					dnsNameAddressSets = getAddrSetResp.DNSAddressSet
+					getAddressSetErr = getAddrSetResp.Err
+					if getAddressSetErr != nil {
+						return false, nil
+					}
+					// Add the namespace to the set of namespaces where the DNS name is being used.
+					addNamespaceResp := oc.dnsNameResolver.AddNamespace(dnsnameresolver.AddNamespaceRequest{Namespace: ef.namespace, DNSName: dnsName})
+					addNamespaceErr = addNamespaceResp.Err
+					if addNamespaceErr != nil {
+						return false, nil
+					}
+					return true, nil
+				})
+				if waitErr != nil {
+					errs := []error{waitErr}
+					if getAddressSetErr != nil {
+						errs = append(errs, getAddressSetErr)
+					}
+					if addNamespaceErr != nil {
+						errs = append(errs, addNamespaceErr)
+					}
+					return fmt.Errorf("error with ExternalEgressDNS - %v", errors.NewAggregate(errs))
 				}
 			} else {
 				// Get the corresponding address set for the DNS name from the
-				// egressFirewallDNS.
-				dnsNameAddressSets, err = oc.egressFirewallDNS.Add(ef.namespace, rule.to.dnsName)
-				if err != nil {
-					return fmt.Errorf("error with EgressFirewallDNS - %v", err)
+				// EgressDNS.
+				addResp := oc.dnsNameResolver.Add(dnsnameresolver.AddRequest{Namespace: ef.namespace, DNSName: rule.to.dnsName})
+				dnsNameAddressSets = addResp.DNSAddressSet
+				if addResp.Err != nil {
+					return fmt.Errorf("error with EgressDNS - %v", addResp.Err)
 				}
 			}
 			dnsNameIPv4ASHashName, dnsNameIPv6ASHashName := dnsNameAddressSets.GetASHashNames()

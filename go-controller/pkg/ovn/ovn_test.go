@@ -144,7 +144,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		ANPClient:                anpfake.NewSimpleClientset(anpObjects...),
 		EgressIPClient:           egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient:     egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
-		NetworkClient:            ocpnetworkfake.NewSimpleClientset(dnsNameResolverObjects...),
+		OCPNetworkClient:         ocpnetworkfake.NewSimpleClientset(dnsNameResolverObjects...),
 		EgressQoSClient:          egressqosfake.NewSimpleClientset(egressQoSObjects...),
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),

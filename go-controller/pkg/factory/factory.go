@@ -25,6 +25,7 @@ import (
 	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
 	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
+	ocpnetworkinformerv1alpha1 "github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1"
 	ocpnetworklister "github.com/openshift/client-go/network/listers/network/v1alpha1"
 
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -90,7 +91,7 @@ type WatchFactory struct {
 	anpFactory           anpinformerfactory.SharedInformerFactory
 	eipFactory           egressipinformerfactory.SharedInformerFactory
 	efFactory            egressfirewallinformerfactory.SharedInformerFactory
-	dnrFactory           ocpnetworkinformerfactory.SharedInformerFactory
+	dnsFactory           ocpnetworkinformerfactory.SharedInformerFactory
 	cpipcFactory         ocpcloudnetworkinformerfactory.SharedInformerFactory
 	egressQoSFactory     egressqosinformerfactory.SharedInformerFactory
 	mnpFactory           mnpinformerfactory.SharedInformerFactory
@@ -230,7 +231,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		anpFactory:           anpinformerfactory.NewSharedInformerFactory(ovnClientset.ANPClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
-		dnrFactory:           ocpnetworkinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.NetworkClient, resyncInterval, ocpnetworkinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
+		dnsFactory:           ocpnetworkinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.OCPNetworkClient, resyncInterval, ocpnetworkinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
 		egressQoSFactory:     egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
 		mnpFactory:           mnpinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
@@ -342,7 +343,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 
 		if config.OVNKubernetesFeature.EnableDNSNameResolver {
-			wf.informers[DNSNameResolverType], err = newInformer(DNSNameResolverType, wf.dnrFactory.Network().V1alpha1().DNSNameResolvers().Informer())
+			wf.informers[DNSNameResolverType], err = newInformer(DNSNameResolverType, wf.dnsFactory.Network().V1alpha1().DNSNameResolvers().Informer())
 			if err != nil {
 				return nil, err
 			}
@@ -409,9 +410,9 @@ func (wf *WatchFactory) Start() error {
 			}
 		}
 
-		if config.OVNKubernetesFeature.EnableDNSNameResolver && wf.dnrFactory != nil {
-			wf.dnrFactory.Start(wf.stopChan)
-			for oType, synced := range waitForCacheSyncWithTimeout(wf.dnrFactory, wf.stopChan) {
+		if config.OVNKubernetesFeature.EnableDNSNameResolver && wf.dnsFactory != nil {
+			wf.dnsFactory.Start(wf.stopChan)
+			for oType, synced := range waitForCacheSyncWithTimeout(wf.dnsFactory, wf.stopChan) {
 				if !synced {
 					return fmt.Errorf("error in syncing cache for %v informer", oType)
 				}
@@ -596,7 +597,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		cpipcFactory:         ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.EgressServiceClient, resyncInterval),
-		dnrFactory:           ocpnetworkinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.NetworkClient, resyncInterval, ocpnetworkinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
+		dnsFactory:           ocpnetworkinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.OCPNetworkClient, resyncInterval, ocpnetworkinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
 		egressQoSFactory:     egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
@@ -697,7 +698,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			return nil, err
 		}
 
-		wf.informers[DNSNameResolverType], err = newInformer(DNSNameResolverType, wf.dnrFactory.Network().V1alpha1().DNSNameResolvers().Informer())
+		wf.informers[DNSNameResolverType], err = newInformer(DNSNameResolverType, wf.dnsFactory.Network().V1alpha1().DNSNameResolvers().Informer())
 		if err != nil {
 			return nil, err
 		}
@@ -1166,6 +1167,11 @@ func (wf *WatchFactory) GetNode(name string) (*kapi.Node, error) {
 	return nodeLister.Get(name)
 }
 
+// GetNodeLister return a lister for node resources
+func (wf *WatchFactory) GetNodeLister() listers.NodeLister {
+	return wf.informers[NodeType].lister.(listers.NodeLister)
+}
+
 // GetNodesByLabelSelector returns all the nodes selected by the label selector
 func (wf *WatchFactory) GetNodesByLabelSelector(labelSelector metav1.LabelSelector) ([]*kapi.Node, error) {
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
@@ -1355,6 +1361,10 @@ func (wf *WatchFactory) EgressIPInformer() egressipinformer.EgressIPInformer {
 
 func (wf *WatchFactory) EgressFirewallInformer() egressfirewallinformer.EgressFirewallInformer {
 	return wf.efFactory.K8s().V1().EgressFirewalls()
+}
+
+func (wf *WatchFactory) DNSNameResolverInformer() ocpnetworkinformerv1alpha1.DNSNameResolverInformer {
+	return wf.dnsFactory.Network().V1alpha1().DNSNameResolvers()
 }
 
 // withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the

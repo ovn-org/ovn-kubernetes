@@ -377,7 +377,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			EgressIPClient:       egressIPFakeClient,
 			CloudNetworkClient:   cloudNetworkFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
-			NetworkClient:        networkFakeClient,
+			OCPNetworkClient:     networkFakeClient,
 			EgressQoSClient:      egressQoSFakeClient,
 			EgressServiceClient:  egressServiceFakeClient,
 		}
@@ -387,7 +387,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			CloudNetworkClient:   cloudNetworkFakeClient,
 			EgressServiceClient:  egressServiceFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
-			NetworkClient:        networkFakeClient,
+			OCPNetworkClient:     networkFakeClient,
 		}
 
 		pods = make([]*v1.Pod, 0)

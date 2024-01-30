@@ -112,7 +112,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 			return nil, err
 		}
 	}
-	if config.OVNKubernetesFeature.EnableEgressFirewall && config.OVNKubernetesFeature.EnableDNSNameResolver {
+	if util.IsDNSNameResolverEnabled() {
 		cm.dnsNameResolverController = dnsnameresolver.NewController(ovnClient, wf)
 	}
 	return cm, nil
@@ -157,7 +157,7 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	if config.OVNKubernetesFeature.EnableEgressFirewall && config.OVNKubernetesFeature.EnableDNSNameResolver {
+	if util.IsDNSNameResolverEnabled() {
 		if err := cm.dnsNameResolverController.Start(); err != nil {
 			return err
 		}
@@ -180,7 +180,7 @@ func (cm *ClusterManager) Stop() {
 		cm.egressServiceController.Stop()
 	}
 	cm.statusManager.Stop()
-	if config.OVNKubernetesFeature.EnableEgressFirewall && config.OVNKubernetesFeature.EnableDNSNameResolver {
+	if util.IsDNSNameResolverEnabled() {
 		cm.dnsNameResolverController.Stop()
 	}
 }

@@ -57,7 +57,7 @@ type OVNClientset struct {
 	ANPClient                anpclientset.Interface
 	EgressIPClient           egressipclientset.Interface
 	EgressFirewallClient     egressfirewallclientset.Interface
-	NetworkClient            ocpnetworkclientset.Interface
+	OCPNetworkClient         ocpnetworkclientset.Interface
 	CloudNetworkClient       ocpcloudnetworkclientset.Interface
 	EgressQoSClient          egressqosclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
@@ -73,7 +73,7 @@ type OVNMasterClientset struct {
 	EgressIPClient           egressipclientset.Interface
 	CloudNetworkClient       ocpcloudnetworkclientset.Interface
 	EgressFirewallClient     egressfirewallclientset.Interface
-	NetworkClient            ocpnetworkclientset.Interface
+	OCPNetworkClient         ocpnetworkclientset.Interface
 	EgressQoSClient          egressqosclientset.Interface
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 	EgressServiceClient      egressserviceclientset.Interface
@@ -86,7 +86,7 @@ type OVNKubeControllerClientset struct {
 	ANPClient                anpclientset.Interface
 	EgressIPClient           egressipclientset.Interface
 	EgressFirewallClient     egressfirewallclientset.Interface
-	NetworkClient            ocpnetworkclientset.Interface
+	OCPNetworkClient         ocpnetworkclientset.Interface
 	EgressQoSClient          egressqosclientset.Interface
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 	EgressServiceClient      egressserviceclientset.Interface
@@ -109,7 +109,7 @@ type OVNClusterManagerClientset struct {
 	AdminPolicyRouteClient adminpolicybasedrouteclientset.Interface
 	EgressFirewallClient   egressfirewallclientset.Interface
 	EgressQoSClient        egressqosclientset.Interface
-	NetworkClient          ocpnetworkclientset.Interface
+	OCPNetworkClient       ocpnetworkclientset.Interface
 }
 
 const (
@@ -129,7 +129,7 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		EgressIPClient:           cs.EgressIPClient,
 		CloudNetworkClient:       cs.CloudNetworkClient,
 		EgressFirewallClient:     cs.EgressFirewallClient,
-		NetworkClient:            cs.NetworkClient,
+		OCPNetworkClient:         cs.OCPNetworkClient,
 		EgressQoSClient:          cs.EgressQoSClient,
 		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
 		EgressServiceClient:      cs.EgressServiceClient,
@@ -143,7 +143,7 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		ANPClient:                cs.ANPClient,
 		EgressIPClient:           cs.EgressIPClient,
 		EgressFirewallClient:     cs.EgressFirewallClient,
-		NetworkClient:            cs.NetworkClient,
+		OCPNetworkClient:         cs.OCPNetworkClient,
 		EgressQoSClient:          cs.EgressQoSClient,
 		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
 		EgressServiceClient:      cs.EgressServiceClient,
@@ -157,7 +157,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		ANPClient:                cs.ANPClient,
 		EgressIPClient:           cs.EgressIPClient,
 		EgressFirewallClient:     cs.EgressFirewallClient,
-		NetworkClient:            cs.NetworkClient,
+		OCPNetworkClient:         cs.OCPNetworkClient,
 		EgressQoSClient:          cs.EgressQoSClient,
 		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
 		EgressServiceClient:      cs.EgressServiceClient,
@@ -175,7 +175,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		AdminPolicyRouteClient: cs.AdminPolicyRouteClient,
 		EgressFirewallClient:   cs.EgressFirewallClient,
 		EgressQoSClient:        cs.EgressQoSClient,
-		NetworkClient:          cs.NetworkClient,
+		OCPNetworkClient:       cs.OCPNetworkClient,
 	}
 }
 
@@ -444,7 +444,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		ANPClient:                anpClientset,
 		EgressIPClient:           egressIPClientset,
 		EgressFirewallClient:     egressFirewallClientset,
-		NetworkClient:            networkClientset,
+		OCPNetworkClient:         networkClientset,
 		CloudNetworkClient:       cloudNetworkClientset,
 		EgressQoSClient:          egressqosClientset,
 		NetworkAttchDefClient:    networkAttchmntDefClientset,

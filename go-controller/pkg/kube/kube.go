@@ -79,7 +79,7 @@ type KubeOVN struct {
 	ANPClient            anpclientset.Interface
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
-	NetworkClient        ocpnetworkclientset.Interface
+	OCPNetworkClient     ocpnetworkclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
 	EgressServiceClient  egressserviceclientset.Interface
 	APBRouteClient       adminpolicybasedrouteclientset.Interface
@@ -438,12 +438,12 @@ func (k *KubeOVN) GetEgressFirewalls() ([]*egressfirewall.EgressFirewall, error)
 // CreateDNSNameResolver creates the DNSNameResolver object in the namespace with the provided
 // DNSNameResolver data
 func (k *KubeOVN) CreateDNSNameResolver(dnsNameResolver *ocpnetworkapiv1alpha1.DNSNameResolver, namespace string) (*ocpnetworkapiv1alpha1.DNSNameResolver, error) {
-	return k.NetworkClient.NetworkV1alpha1().DNSNameResolvers(namespace).Create(context.TODO(), dnsNameResolver, metav1.CreateOptions{})
+	return k.OCPNetworkClient.NetworkV1alpha1().DNSNameResolvers(namespace).Create(context.TODO(), dnsNameResolver, metav1.CreateOptions{})
 }
 
 // DeleteDNSNameResolver deletes the DNSNameResolver object in the namespace from kubernetes
 func (k *KubeOVN) DeleteDNSNameResolver(name, namespace string) error {
-	return k.NetworkClient.NetworkV1alpha1().DNSNameResolvers(namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
+	return k.OCPNetworkClient.NetworkV1alpha1().DNSNameResolvers(namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
 }
 
 func (k *KubeOVN) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {

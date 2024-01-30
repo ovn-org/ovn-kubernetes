@@ -322,14 +322,6 @@ func (oc *DefaultNetworkController) WatchEgressFirewall() error {
 	return err
 }
 
-// WatchDNSNameResolver starts the watching of dnsnameresolver resource in
-// config.Kubernetes.OVNConfigNamespace namespace and calls back the
-// appropriate handler logic
-func (oc *DefaultNetworkController) WatchDNSNameResolver() error {
-	_, err := oc.retryDNSNameResolvers.WatchResourceFiltered(config.Kubernetes.OVNConfigNamespace, nil)
-	return err
-}
-
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
 // back the appropriate handler logic.
 func (oc *DefaultNetworkController) WatchEgressNodes() error {

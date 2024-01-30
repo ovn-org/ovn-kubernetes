@@ -4,26 +4,29 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/fnv"
-	"net"
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/miekg/dns"
 	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	ocpnetworklisterv1alpha1 "github.com/openshift/client-go/network/listers/network/v1alpha1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/rand"
-	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	hashutil "k8s.io/kubernetes/pkg/util/hash"
 )
@@ -32,386 +35,216 @@ import (
 // DNSNameResolver objects. The controller maintains the DNSNameResolver
 // objects in the cluster.
 type Controller struct {
-	lock         sync.Mutex
-	kube         *kube.KubeOVN
-	stopChan     chan struct{}
-	wg           *sync.WaitGroup
-	watchFactory *factory.WatchFactory
+	lock sync.Mutex
+	kube *kube.KubeOVN
 
-	// retry framework for egress firewall
-	retryEgressFirewalls *retry.RetryFramework
-	// retry framework for dns name resolver
-	retryDNSNameResolvers *retry.RetryFramework
-	// egressFirewallHandler events factory handler
-	egressFirewallHandler *factory.Handler
-	// dnsNameResolver events factory handler
-	dnsNameResolverHandler *factory.Handler
-	// maps to hold the details of the DNS names and the corresponding
-	// DNSNameResolver objects.
-	dnsNameObj map[string]resolverDetails
-	objDNSName sets.Set[string]
+	// controller for egress firewall
+	efController controller.Controller
+	// Lister for egress firewall
+	efLister egressfirewalllister.EgressFirewallLister
+	// controller for dns name resolver
+	dnsController controller.Controller
+	// Lister for dns name resolver
+	dnsLister ocpnetworklisterv1alpha1.DNSNameResolverLister
 
-	// map to hold the current DNS names used in a namespace corresponding
-	// to an EgressFirewall.
-	efNamespaceDNSNames map[string]sets.Set[string]
+	resInfo *resolverInfo
 }
 
-// resolverDetails holds the information regarding the DNSNameResolver
-// object corresponding to a DNS name.
-type resolverDetails struct {
-	// objName gives the name of the DNSNameResolver object corresponding
-	// to the DNS name.
-	objName string
-	// namespaces stores those namespaces where the DNS name is being used.
-	namespaces sets.Set[string]
-	// collisionCount is used during the creation of the DNSNameResolver
-	// object to ensure that its name does not have a collision with any
-	// existing DNSNameResolver objects.
-	collisionCount int
-}
-
-// NewController returns an instance of the Controller. The retry framework is also
+// NewController returns an instance of the Controller. The level-driven controller is also
 // initialized before returning the Controller intance.
 func NewController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *Controller {
-	wg := &sync.WaitGroup{}
-	c := &Controller{
-		kube: &kube.KubeOVN{
-			NetworkClient: ovnClient.NetworkClient,
-		},
-		stopChan:            make(chan struct{}),
-		wg:                  wg,
-		watchFactory:        wf,
-		dnsNameObj:          make(map[string]resolverDetails),
-		objDNSName:          sets.New[string](),
-		efNamespaceDNSNames: make(map[string]sets.Set[string]),
+	kube := &kube.KubeOVN{
+		OCPNetworkClient: ovnClient.OCPNetworkClient,
 	}
-	c.initRetryFramework()
+	c := &Controller{
+		kube:    kube,
+		resInfo: newResolverInfo(kube),
+	}
+	c.initControllers(wf)
 	return c
 }
 
-// initRetryFramework initializes the retry frameworks for the different resource
+// initControllers initializes the controllers for the different resource
 // types related to DNSNameResolver.
-func (c *Controller) initRetryFramework() {
-	c.retryEgressFirewalls = c.newRetryFramework(factory.EgressFirewallType)
-	c.retryDNSNameResolvers = c.newRetryFramework(factory.DNSNameResolverType)
+func (c *Controller) initControllers(watchFactory *factory.WatchFactory) {
+	efSharedIndexInformer := watchFactory.EgressFirewallInformer().Informer()
+	c.efLister = watchFactory.EgressFirewallInformer().Lister()
+	efConfig := &controller.Config[egressfirewall.EgressFirewall]{
+		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		Informer:       efSharedIndexInformer,
+		Lister:         c.efLister.List,
+		ObjNeedsUpdate: efNeedsUpdate,
+		Reconcile:      c.reconcileEgressFirewall,
+	}
+	c.efController = controller.NewController[egressfirewall.EgressFirewall]("cm-ef-controller", efConfig)
+
+	dnsSharedIndexInformer := watchFactory.DNSNameResolverInformer().Informer()
+	c.dnsLister = ocpnetworklisterv1alpha1.NewDNSNameResolverLister(dnsSharedIndexInformer.GetIndexer())
+	dnsConfig := &controller.Config[ocpnetworkapiv1alpha1.DNSNameResolver]{
+		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		Informer:       dnsSharedIndexInformer,
+		Lister:         c.dnsLister.List,
+		ObjNeedsUpdate: dnsNeedsUpdate,
+		Reconcile:      c.reconcileDNSNameResolver,
+		InitialSync:    c.syncDNSNames,
+	}
+	c.dnsController = controller.NewController[ocpnetworkapiv1alpha1.DNSNameResolver]("cm-dns-controller", dnsConfig)
 }
 
-// newRetryFramework builds and returns a retry framework for the input resource
-// type and assigns the resource handler containing the event handler in the
-// returned struct which will be used by the retry logic in the retry package
-// when WatchResource() is called.
-func (c *Controller) newRetryFramework(
-	objectType reflect.Type) *retry.RetryFramework {
-	eventHandler := &EventHandler{
-		objType:      objectType,
-		watchFactory: c.watchFactory,
-		c:            c,
+// efNeedsUpdate returns true if an egress firewall object is either added
+// or deleted. If an egress firewall is updated, then efNeedsUpdate returns
+// true if the .spec of the object is modified.
+func efNeedsUpdate(oldObj, newObj *egressfirewall.EgressFirewall) bool {
+	if oldObj == nil || newObj == nil {
+		return true
 	}
-	resourceHandler := &retry.ResourceHandler{
-		HasUpdateFunc:          true,
-		NeedsUpdateDuringRetry: true,
-		ObjType:                objectType,
-		EventHandler:           eventHandler,
+	return !reflect.DeepEqual(oldObj.Spec, newObj.Spec)
+}
+
+// dnsNeedsUpdate returns true if a dns name resolver object is either added
+// or deleted. If a dns name resolver is updated, then dnsNeedsUpdate returns
+// true if the .status of the object is modified.
+func dnsNeedsUpdate(oldObj, newObj *ocpnetworkapiv1alpha1.DNSNameResolver) bool {
+	if oldObj == nil || newObj == nil {
+		return true
 	}
-	r := retry.NewRetryFramework(
-		c.stopChan,
-		c.wg,
-		c.watchFactory,
-		resourceHandler,
-	)
-	return r
+	return !reflect.DeepEqual(oldObj.Status, newObj.Status)
 }
 
 // Start initializes the handlers for EgressFirewall and DNSNameResolver
 // by watching the corresponding resource types.
 func (c *Controller) Start() error {
-	var err error
-	if c.egressFirewallHandler, err = c.WatchEgressFirewalls(); err != nil {
-		return fmt.Errorf("unable to watch egress firewalls %w", err)
+	if err := c.efController.Start(1); err != nil {
+		return fmt.Errorf("unable to start egress firewall controller %w", err)
 	}
-	if c.dnsNameResolverHandler, err = c.WatchDNSNameResolvers(); err != nil {
-		return fmt.Errorf("unable to watch dns name resolvers %w", err)
+	if err := c.dnsController.Start(1); err != nil {
+		return fmt.Errorf("unable to start dns name resolver controller %w", err)
 	}
 	return nil
-}
-
-// WatchEgressFirewalls starts the watching of egress firewall
-// resource and calls back the appropriate handler logic.
-func (c *Controller) WatchEgressFirewalls() (*factory.Handler, error) {
-	return c.retryEgressFirewalls.WatchResource()
-}
-
-// WatchDNSNameResolvers starts the watching of dns name resolver
-// resource in config.Kubernetes.OVNConfigNamespace namespaces and
-// calls back the appropriate handler logic.
-func (c *Controller) WatchDNSNameResolvers() (*factory.Handler, error) {
-	return c.retryDNSNameResolvers.WatchResourceFiltered(config.Kubernetes.OVNConfigNamespace, nil)
 }
 
 // Stop gracefully stops the controller. The handlers for EgressFirewall
 // and DNSNameResolver are removed.
 func (c *Controller) Stop() {
-	close(c.stopChan)
-	c.wg.Wait()
-	if c.egressFirewallHandler != nil {
-		c.watchFactory.RemoveEgressFirewallHandler(c.egressFirewallHandler)
-	}
-	if c.dnsNameResolverHandler != nil {
-		c.watchFactory.RemoveDNSNameResolverHandler(c.dnsNameResolverHandler)
-	}
+	c.efController.Stop()
+	c.dnsController.Stop()
 }
 
 // syncDNSNames syncs the existing EgressFirewall and DNSNameResolver objects
 // after a restart and updates the dnsNameObj and objDNSName maps. After the
 // sync these two maps will only contain the details of the DNS names which
 // are used in at least one namespace.
-func (c *Controller) syncDNSNames(dnsNameResolvers []interface{}) error {
+func (c *Controller) syncDNSNames() error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	// Iterate through the existing DNSNameResolver objects and add the
-	// corresponding details to the dnsNameObj and objDNSName maps.
-	for _, dnsNameResolverInterface := range dnsNameResolvers {
-		dnsNameResolverObj, ok := dnsNameResolverInterface.(*ocpnetworkapiv1alpha1.DNSNameResolver)
-		if !ok {
-			klog.Errorf("Could not cast %T object to *ocpnetworkapiv1alpha1.DNSNameResolver", dnsNameResolverObj)
-			continue
-		}
-		c.dnsNameObj[string(dnsNameResolverObj.Spec.Name)] = resolverDetails{
-			objName:    dnsNameResolverObj.Name,
-			namespaces: sets.New[string](),
-		}
-		c.objDNSName.Insert(dnsNameResolverObj.Name)
-	}
-
-	// Fetch the existing EgressFirewall objects.
-	egressFirewalls, err := c.watchFactory.GetEgressFirewalls()
+	// Fetch the existing DNSNameResolver objects.
+	dnsNameResolvers, err := c.dnsLister.DNSNameResolvers(config.Kubernetes.OVNConfigNamespace).List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("syncDNSNames unable to get Egress Firewalls: %w", err)
 	}
 
-	// Iterate through the existing EgressFirewall objects. For each
-	// EgressFirewall object iterate through the DNS names in it and
-	// add the namespace of the EgressFirewall to the list of
-	// namespaces of each DNS name. Also add the DNS names to the set
-	// of DNS names mapped to each namespace.
-	for _, egressFirewall := range egressFirewalls {
-		existingDNSNames := sets.New[string]()
-		getDNSNames(egressFirewall, existingDNSNames, c.watchFactory)
-		dnsNames, exists := c.efNamespaceDNSNames[egressFirewall.Namespace]
-		if !exists {
-			dnsNames = sets.New[string]()
-		}
-		for dnsName := range existingDNSNames {
-			if objDetails, exists := c.dnsNameObj[dnsName]; exists {
-				objDetails.namespaces.Insert(egressFirewall.Namespace)
-				c.dnsNameObj[dnsName] = objDetails
-				dnsNames.Insert(dnsName)
-			}
-		}
-		c.efNamespaceDNSNames[egressFirewall.Namespace] = dnsNames
+	dnsNameToResolver := make(map[string]string)
+	for _, dnsNameResolver := range dnsNameResolvers {
+		dnsNameToResolver[string(dnsNameResolver.Spec.Name)] = dnsNameResolver.Name
 	}
 
-	// Delete the details of the DNS names from the dnsNameObj and
-	// the objDNSName if the DNS name is not used in any namespace.
-	for dnsName, objDetails := range c.dnsNameObj {
-		if objDetails.namespaces.Len() == 0 {
-			c.objDNSName.Delete(objDetails.objName)
-			delete(c.dnsNameObj, dnsName)
-		}
+	// Fetch the existing EgressFirewall objects.
+	egressFirewalls, err := c.efLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("syncDNSNames unable to get Egress Firewalls: %w", err)
 	}
+
+	namespaceToDNSNames := make(map[string][]string)
+	for _, egressFirewall := range egressFirewalls {
+		namespaceToDNSNames[egressFirewall.Namespace] = getDNSNames(egressFirewall)
+	}
+
+	c.resInfo.syncResolverInfo(dnsNameToResolver, namespaceToDNSNames)
 
 	return nil
 }
 
-// egressFirewallChanged reconciles an EgressFirewall object. Based on the
-// create/update/delete event, newly added and deleted DNS names are
-// obtained. For the newly added DNS names, the addDNSName function is
-// called and for the deleted DNS names, the deleteDNSName function is
-// called.
-func (c *Controller) egressFirewallChanged(oldEf, newEf *egressfirewall.EgressFirewall) error {
+// reconcileEgressFirewall reconciles an EgressFirewall object.
+func (c *Controller) reconcileEgressFirewall(key string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-
-	oldDNSNames := sets.New[string]()
-	newDNSNames := sets.New[string]()
-
-	// For the update or delete event, get the DNS names which are used in
-	// old EgressFirewall object.
-	if oldEf != nil {
-		getDNSNames(oldEf, oldDNSNames, c.watchFactory)
+	// Split the key in namespace and name of the corresponding object.
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		klog.Errorf("failed to split meta namespace cache key %s for egress firewall: %v", key, err)
+		return nil
 	}
-	// For the update or create event, get the DNS names which are used in
-	// new EgressFirewall object.
-	if newEf != nil {
-		// If it is an add event, add all the existing DNS names corresponding
-		// to the EgressFirewall object's namespace, if any, to oldDNSNames.
-		if oldEf == nil {
-			if dnsNames, exists := c.efNamespaceDNSNames[newEf.Namespace]; exists {
-				oldDNSNames.Insert(dnsNames.UnsortedList()...)
-			}
+	// Fetch the egress firewall object using the name and namespace.
+	ef, err := c.efLister.EgressFirewalls(namespace).Get(name)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			// EgressFirewall object was deleted. Delete all the DNSNameResolver
+			// objects corresponding to the DNS names used in the EgressFirewall
+			// object.
+			return c.resInfo.deleteDNSNamesForNamespace(namespace)
 		}
-		getDNSNames(newEf, newDNSNames, c.watchFactory)
+		return fmt.Errorf("failed to fetch egress firewall %s in namespace %s", name, namespace)
 	}
 
-	// Get the newly added DNS names.
-	addedDNSNames := newDNSNames.Difference(oldDNSNames)
-	// Get the deleted DNS names.
-	deletedDNSNames := oldDNSNames.Difference(newDNSNames)
-
-	var errorList []error
-	// Iterated through each newly added DNS name and call the addDNSName.
-	for addedDNSName := range addedDNSNames {
-		if err := c.addDNSName(addedDNSName, newEf.Namespace); err != nil {
-			errorList = append(errorList, err)
-		}
-	}
-
-	// Iterated through each newly added DNS name and call the deleteDNSName.
-	for deletedDNSName := range deletedDNSNames {
-		if err := c.deleteDNSName(deletedDNSName, oldEf.Namespace); err != nil {
-			errorList = append(errorList, err)
-		}
-	}
-
-	return errors.NewAggregate(errorList)
+	// EgressFirewall object was added/updated. Check the DNS names which are
+	// newly added and create the corresponding DNSNameResolver objects. Also
+	// check the DNS names which are deleted and delete the corresponding
+	// DNSNameResolver objects.
+	return c.resInfo.modifyDNSNamesForNamespace(getDNSNames(ef), namespace)
 }
 
-// dnsNameResolverChanged reconciles a DNSNameResolver object. If an object
-// was deleted, but it was not supposed to, then it is recreated. If an
-// object is created, but it was not supposed to, then it is deleted.
-func (c *Controller) dnsNameResolverChanged(oldDnr, newDnr *ocpnetworkapiv1alpha1.DNSNameResolver) error {
+// reconcileDNSNameResolver reconciles a DNSNameResolver object. If an object
+// was deleted, but it was not supposed to, then it is recreated. If an object
+// is created, but it was not supposed to, then it is deleted.
+func (c *Controller) reconcileDNSNameResolver(key string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
+	// Split the key in namespace and name of the corresponding object.
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		klog.Errorf("reconcileDNSNameResolver failed to split meta namespace cache key %s for dns name resolver: %v", key, err)
+		return nil
+	}
+	// Fetch the dns name resolver object using the name and namespace.
+	resolverObj, err := c.dnsLister.DNSNameResolvers(namespace).Get(name)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			// DNSNameResolver object was deleted. If it is not supposed to be deleted,
+			// recreate it.
 
-	// DNSNameResolver object was deleted. If it is not supposed to be deleted,
-	// recreate it with the existing status.
-	if oldDnr != nil && newDnr == nil {
-		dnsName := string(oldDnr.Spec.Name)
-		if objDetails, exists := c.dnsNameObj[dnsName]; exists && objDetails.objName == oldDnr.Name {
-			// Check if the DNS name is used in any of the namespaces. If not,
-			// then remove the details of the DNS name and the object.
-			if objDetails.namespaces.Len() == 0 {
-				delete(c.dnsNameObj, dnsName)
-				c.objDNSName.Delete(objDetails.objName)
+			// Check if the DNSNameResolver object should exist. If so, then get the
+			// corresponding DNS name.
+			dnsName, found := c.resInfo.getDNSNameForResolver(name)
+			if !found {
 				return nil
 			}
 
 			// Recreate the DNSNameResolver object.
-			klog.Warningf("Recreating deleted dns name resolver object %s for dns name %s", oldDnr.Name, dnsName)
-			return c.createDNSNameResolver(oldDnr.Name, dnsName, oldDnr.Status)
+			klog.Warningf("Recreating deleted dns name resolver object %s for dns name %s", name, dnsName)
+			return createDNSNameResolver(c.kube, name, dnsName)
+
 		}
+		return fmt.Errorf("reconcileDNSNameResolver failed to fetch dns name resolver %s in namespace %s", name, namespace)
 	}
 
 	// DNSNameResolver object was added/updated. If it is not supposed to exist,
 	// delete the object.
-	if newDnr != nil {
-		dnsName := string(newDnr.Spec.Name)
-		if objDetails, exists := c.dnsNameObj[dnsName]; !exists || objDetails.objName != newDnr.Name {
-			// Delete the DNSNameResolver object.
-			klog.Warningf("Deleting additional dns name resolver object %s for dns name %s", newDnr.Name, dnsName)
-			return c.deleteDNSNameResolver(newDnr.Name)
-		}
+
+	// Check if the DNSNameResolver object matches the DNS name.
+	dnsName := string(resolverObj.Spec.Name)
+	if !c.resInfo.isDNSNameMatchingResolverName(dnsName, resolverObj.Name) {
+		// Delete the DNSNameResolver object.
+		klog.Warningf("Deleting additional dns name resolver object %s for dns name %s", resolverObj.Name, dnsName)
+		return deleteDNSNameResolver(c.kube, resolverObj.Name)
 	}
-
-	return nil
-}
-
-// addDNSName creates the corresponding DNSNameResolver object for the DNS name
-// if not already created. The namespace is added to the list of namespaces where
-// the DNS name is used.
-func (c *Controller) addDNSName(dnsName, namespace string) error {
-	objDetails, exists := c.dnsNameObj[dnsName]
-	// Create the DNSNameResolver object if its details are not available.
-	if !exists || objDetails.objName == "" {
-		// The collisionCount variable for the DNS name is incremented a maximum
-		// of 10 times for generating a name for the corresponding dns name
-		// resolver object without any collision.
-		maxRetry := objDetails.collisionCount + 10
-		for ; objDetails.collisionCount < maxRetry; objDetails.collisionCount++ {
-			objDetails.objName = "dns-" + computeHash(dnsName, objDetails.collisionCount)
-			// Check if the generated object name matches with any of the existing
-			// object's name.
-			if _, found := c.objDNSName[objDetails.objName]; !found {
-				break
-			}
-		}
-		// If the maximum retry is reached, then return an error so that it can be
-		// retried again via the retry framework.
-		if objDetails.collisionCount == maxRetry {
-			objDetails.objName = ""
-			c.dnsNameObj[dnsName] = objDetails
-			return fmt.Errorf("encountered collision in name while creating dns name resolver object for %s", dnsName)
-		}
-		if err := c.createDNSNameResolver(objDetails.objName, dnsName, ocpnetworkapiv1alpha1.DNSNameResolverStatus{}); err != nil {
-			return err
-		}
-		if objDetails.namespaces == nil {
-			objDetails.namespaces = sets.New[string]()
-		}
-	}
-
-	// Add the DNS name to the set of DNS names belonging
-	// to the namespace.
-	dnsNames, exists := c.efNamespaceDNSNames[namespace]
-	if !exists {
-		dnsNames = sets.New[string]()
-	}
-	dnsNames.Insert(dnsName)
-	c.efNamespaceDNSNames[namespace] = dnsNames
-
-	objDetails.namespaces.Insert(namespace)
-
-	c.dnsNameObj[dnsName] = objDetails
-	c.objDNSName.Insert(objDetails.objName)
-
-	return nil
-}
-
-// deleteDNSName removes the namespace from the list of namespaces the
-// DNS name is currently used. If the DNS name, is not used in any other
-// namespace, then the corresponding DNSNameResolver object is deleted
-// and the details of the DNS name is removed.
-func (c *Controller) deleteDNSName(dnsName, namespace string) error {
-	objDetails, exists := c.dnsNameObj[dnsName]
-	if exists {
-		delete(objDetails.namespaces, namespace)
-		if objDetails.namespaces.Len() == 0 {
-			err := c.deleteDNSNameResolver(objDetails.objName)
-			if err != nil {
-				// Insert back the namespace when an error is encountered
-				// while deleting the DNSNameResolver object.
-				objDetails.namespaces.Insert(namespace)
-				return err
-			}
-			delete(c.dnsNameObj, dnsName)
-			c.objDNSName.Delete(objDetails.objName)
-		}
-	}
-
-	// Remove the DNS name from the set of DNS names belonging
-	// to the namespace. If the set is empty, then delete the
-	// mapping to the namespace.
-	dnsNames, exists := c.efNamespaceDNSNames[namespace]
-	if exists {
-		dnsNames.Delete(dnsName)
-		if dnsNames.Len() == 0 {
-			delete(c.efNamespaceDNSNames, namespace)
-		} else {
-			c.efNamespaceDNSNames[namespace] = dnsNames
-		}
-	}
-
-	c.dnsNameObj[dnsName] = objDetails
-	c.objDNSName.Insert(objDetails.objName)
-
 	return nil
 }
 
 // createDNSNameResolver creates a DNSNameResolver object for the DNS name
 // and adds the status, if any, to the object. The error, if any, encountered
 // during the object creation is returned.
-func (c *Controller) createDNSNameResolver(objName, dnsName string, status ocpnetworkapiv1alpha1.DNSNameResolverStatus) error {
+func createDNSNameResolver(kube *kube.KubeOVN, objName, dnsName string) error {
 	dnsNameResolverObj := &ocpnetworkapiv1alpha1.DNSNameResolver{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      objName,
@@ -420,9 +253,8 @@ func (c *Controller) createDNSNameResolver(objName, dnsName string, status ocpne
 		Spec: ocpnetworkapiv1alpha1.DNSNameResolverSpec{
 			Name: ocpnetworkapiv1alpha1.DNSName(dnsName),
 		},
-		Status: status,
 	}
-	_, err := c.kube.CreateDNSNameResolver(dnsNameResolverObj, config.Kubernetes.OVNConfigNamespace)
+	_, err := kube.CreateDNSNameResolver(dnsNameResolverObj, config.Kubernetes.OVNConfigNamespace)
 
 	return err
 
@@ -430,8 +262,8 @@ func (c *Controller) createDNSNameResolver(objName, dnsName string, status ocpne
 
 // deleteDNSNameResolver deletes a DNSNameResolver object and if an error
 // is encountered, which is not IsNotFound, then it is returned.
-func (c *Controller) deleteDNSNameResolver(objName string) error {
-	err := c.kube.DeleteDNSNameResolver(objName, config.Kubernetes.OVNConfigNamespace)
+func deleteDNSNameResolver(kube *kube.KubeOVN, objName string) error {
+	err := kube.DeleteDNSNameResolver(objName, config.Kubernetes.OVNConfigNamespace)
 	if err != nil && !kerrors.IsNotFound(err) {
 		return err
 	}
@@ -440,7 +272,7 @@ func (c *Controller) deleteDNSNameResolver(objName string) error {
 
 // getDNSNames iterates through the egress firewall rules and returns the DNS
 // names present in them after validating the rules.
-func getDNSNames(ef *egressfirewall.EgressFirewall, dnsNames sets.Set[string], wf *factory.WatchFactory) {
+func getDNSNames(ef *egressfirewall.EgressFirewall) []string {
 	var dnsNameSlice []string
 	for i, egressFirewallRule := range ef.Spec.Egress {
 		if i > types.EgressFirewallStartPriority-types.MinimumReservedEgressFirewallPriority {
@@ -448,31 +280,19 @@ func getDNSNames(ef *egressfirewall.EgressFirewall, dnsNames sets.Set[string], w
 			break
 		}
 
-		// Validate the egress firewall rules.
-		if len(egressFirewallRule.To.CIDRSelector) > 0 {
-			// Validate CIDR selector.
-			_, _, err := net.ParseCIDR(egressFirewallRule.To.CIDRSelector)
-			if err != nil {
-				return
-			}
+		// Validate egress firewall rule destination and get the DNS name
+		// if used in the rule.
+		_, dnsName, _, _, err := util.ValidateAndGetEgressFirewallDestination(egressFirewallRule.To)
+		if err != nil {
+			return []string{}
+		}
 
-		} else if egressFirewallRule.To.NodeSelector != nil {
-			// Validate node selector.
-			_, err := metav1.LabelSelectorAsSelector(egressFirewallRule.To.NodeSelector)
-			if err != nil {
-				return
-			}
-			_, err = wf.GetNodesByLabelSelector(*egressFirewallRule.To.NodeSelector)
-			if err != nil {
-				return
-			}
-		} else {
-			dnsName := strings.ToLower(dns.Fqdn(egressFirewallRule.To.DNSName))
-			dnsNameSlice = append(dnsNameSlice, dnsName)
+		if dnsName != "" {
+			dnsNameSlice = append(dnsNameSlice, strings.ToLower(dns.Fqdn(dnsName)))
 		}
 	}
 
-	dnsNames.Insert(dnsNameSlice...)
+	return dnsNameSlice
 }
 
 // computeHash returns a hash value calculated from dns name and a collisionCount

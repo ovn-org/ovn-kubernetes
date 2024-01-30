@@ -11,6 +11,7 @@ import (
 	"github.com/miekg/dns"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 
 	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
@@ -20,16 +21,20 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns-name-resolver"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	t "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	utilnet "k8s.io/utils/net"
 )
 
 func newObjectMeta(name, namespace string) metav1.ObjectMeta {
@@ -97,6 +102,39 @@ func getEFExpectedDbAfterDelete(prevExpectedData []libovsdbtest.TestData) []libo
 	return append(prevExpectedData[:len(prevExpectedData)-2], pg)
 }
 
+func generateRR(dnsName, ip, nextQueryTime string) dns.RR {
+	var rr dns.RR
+	if utilnet.IsIPv6(net.ParseIP(ip)) {
+		rr, _ = dns.NewRR(dnsName + ".        " + nextQueryTime + "     IN      AAAA       " + ip)
+	} else {
+		rr, _ = dns.NewRR(dnsName + ".        " + nextQueryTime + "     IN      A       " + ip)
+	}
+	return rr
+}
+
+func setDNSOpsMock(dnsName, retIP string) {
+	mockDnsOps := new(util_mocks.DNSOps)
+	util.SetDNSLibOpsMockInst(mockDnsOps)
+	methods := []ovntest.TestifyMockHelper{
+		{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
+			Servers: []string{"1.1.1.1"},
+			Port:    "1234"}, nil}, 0, 1},
+		{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{dnsName}, 0, 1},
+		{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+		{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(dnsName, retIP, "300")}}, 500 * time.Second, nil}, 0, 1},
+	}
+	for _, item := range methods {
+		call := mockDnsOps.On(item.OnCallMethodName)
+		for _, arg := range item.OnCallMethodArgType {
+			call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+		}
+		for _, ret := range item.RetArgList {
+			call.ReturnArguments = append(call.ReturnArguments, ret)
+		}
+		call.Once()
+	}
+}
+
 var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 	var (
 		app                    *cli.App
@@ -137,7 +175,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		if config.OVNKubernetesFeature.EnableDNSNameResolver {
-			err = fakeOVN.controller.WatchDNSNameResolver()
+			err = fakeOVN.controller.dnsNameResolverController.Start(1)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}
 
@@ -1005,7 +1043,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					var err error
 					setDNSOpsMock(dnsName, resolvedIP)
-					fakeOVN.controller.egressFirewallDNS, err = NewEgressDNS(fakeOVN.controller.addressSetFactory,
+					fakeOVN.controller.dnsNameResolver, err = dnsnameresolver.NewEgressDNS(fakeOVN.controller.addressSetFactory,
 						fakeOVN.controller.controllerName, fakeOVN.controller.stopChan)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1020,7 +1058,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					// check dns address set was created
 					addrSet, _ := addressset.GetTestDbAddrSets(
-						getEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
+						dnsnameresolver.GetEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
 						[]net.IP{net.ParseIP(resolvedIP)})
 					expectedDatabaseState := append(initialData, addrSet)
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -1073,8 +1111,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					startOvn(dbSetup, []v1.Namespace{namespace1}, nil)
 
 					var err error
-					// Initialize the resolver.
-					fakeOVN.controller.resolver = NewResolver(fakeOVN.controller.addressSetFactory,
+					// Initialize the dnsNameResolver.
+					fakeOVN.controller.dnsNameResolver = dnsnameresolver.NewExternalEgressDNS(fakeOVN.controller.addressSetFactory,
 						fakeOVN.controller.controllerName)
 
 					// Create the egress firewall object.
@@ -1083,13 +1121,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// Create the dns name resolver object.
-					_, err = fakeOVN.fakeClient.NetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
+					_, err = fakeOVN.fakeClient.OCPNetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
 						Create(context.TODO(), dnsNameResolver, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// check dns address set was created along with the acl and pg.
 					addrSet, _ := addressset.GetTestDbAddrSets(
-						getEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
+						dnsnameresolver.GetEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
 						[]net.IP{net.ParseIP(resolvedIP)})
 					addrSetUUID := strings.TrimSuffix(addrSet.UUID, "-UUID")
 					dbWithACLAndPG := getEFExpectedDb(initialData, fakeOVN, namespace1.Name,
@@ -1103,7 +1141,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// delete the dns name resolver object.
-					err = fakeOVN.fakeClient.NetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
+					err = fakeOVN.fakeClient.OCPNetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
 						Delete(context.TODO(), dnsNameResolver.Name, metav1.DeleteOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1148,8 +1186,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				startOvn(dbSetup, []v1.Namespace{namespace1}, nil)
 
 				var err error
-				// Initialize the resolver.
-				fakeOVN.controller.resolver = NewResolver(fakeOVN.controller.addressSetFactory,
+				// Initialize the dnsNameResolver.
+				fakeOVN.controller.dnsNameResolver = dnsnameresolver.NewExternalEgressDNS(fakeOVN.controller.addressSetFactory,
 					fakeOVN.controller.controllerName)
 
 				// Create the egress firewall object.
@@ -1158,13 +1196,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Create the dns name resolver object.
-				_, err = fakeOVN.fakeClient.NetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
+				_, err = fakeOVN.fakeClient.OCPNetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
 					Create(context.TODO(), dnsNameResolver, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// check dns address set was created along with the acl and pg.
 				addrSet, _ := addressset.GetTestDbAddrSets(
-					getEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
+					dnsnameresolver.GetEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
 					[]net.IP{net.ParseIP(resolvedIP)})
 				addrSetUUID := strings.TrimSuffix(addrSet.UUID, "-UUID")
 				dbWithACLAndPG := getEFExpectedDb(initialData, fakeOVN, namespace1.Name,
@@ -1178,7 +1216,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// delete the dns name resolver object.
-				err = fakeOVN.fakeClient.NetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
+				err = fakeOVN.fakeClient.OCPNetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
 					Delete(context.TODO(), dnsNameResolver.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 

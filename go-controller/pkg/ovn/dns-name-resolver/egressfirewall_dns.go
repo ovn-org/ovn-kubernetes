@@ -1,4 +1,4 @@
-package ovn
+package dnsnameresolver
 
 import (
 	"fmt"
@@ -33,6 +33,8 @@ type EgressDNS struct {
 	controllerStop <-chan struct{}
 }
 
+var _ DNSNameResolver = &EgressDNS{}
+
 type dnsEntry struct {
 	// this map holds all the namespaces that a dnsName appears in
 	namespaces map[string]struct{}
@@ -43,7 +45,7 @@ type dnsEntry struct {
 	dnsAddressSet addressset.AddressSet
 }
 
-func getEgressFirewallDNSAddrSetDbIDs(dnsName, controller string) *libovsdbops.DbObjectIDs {
+func GetEgressFirewallDNSAddrSetDbIDs(dnsName, controller string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressFirewallDNS, controller,
 		map[libovsdbops.ExternalIDKey]string{
 			// dns address sets are cluster-wide objects, they have unique names
@@ -73,44 +75,55 @@ func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerName
 	return egressDNS, nil
 }
 
-func (e *EgressDNS) Add(namespace, dnsName string) (addressset.AddressSet, error) {
+func (e *EgressDNS) Add(request AddRequest) AddResponse {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 
-	if _, exists := e.dnsEntries[dnsName]; !exists {
+	if _, exists := e.dnsEntries[request.DNSName]; !exists {
 		var err error
 		dnsEntry := dnsEntry{
 			namespaces: make(map[string]struct{}),
 		}
 		if e.addressSetFactory == nil {
-			return nil, fmt.Errorf("error adding EgressFirewall DNS rule for host %s, in namespace %s: addressSetFactory is nil", dnsName, namespace)
+			return AddResponse{
+				DNSAddressSet: nil,
+				Err: fmt.Errorf("error adding EgressFirewall DNS rule for host %s, in namespace %s: addressSetFactory is nil", request.DNSName,
+					request.Namespace),
+			}
 		}
-		asIndex := getEgressFirewallDNSAddrSetDbIDs(dnsName, e.controllerName)
+		asIndex := GetEgressFirewallDNSAddrSetDbIDs(request.DNSName, e.controllerName)
 		dnsEntry.dnsAddressSet, err = e.addressSetFactory.NewAddressSet(asIndex, nil)
 		if err != nil {
-			return nil, fmt.Errorf("cannot create addressSet for %s: %v", dnsName, err)
+			return AddResponse{
+				DNSAddressSet: nil,
+				Err:           fmt.Errorf("cannot create addressSet for %s: %v", request.DNSName, err),
+			}
 		}
-		e.dnsEntries[dnsName] = &dnsEntry
-		go e.addToDNS(dnsName)
+		e.dnsEntries[request.DNSName] = &dnsEntry
+		go e.addToDNS(request.DNSName)
 	}
-	e.dnsEntries[dnsName].namespaces[namespace] = struct{}{}
-	return e.dnsEntries[dnsName].dnsAddressSet, nil
-
+	e.dnsEntries[request.DNSName].namespaces[request.Namespace] = struct{}{}
+	return AddResponse{
+		DNSAddressSet: e.dnsEntries[request.DNSName].dnsAddressSet,
+		Err:           nil,
+	}
 }
 
-func (e *EgressDNS) Delete(namespace string) error {
+func (e *EgressDNS) Delete(request DeleteRequest) DeleteResponse {
 	e.lock.Lock()
 	var dnsNamesToDelete []string
 
 	// go through all dnsNames for namespaces
 	for dnsName, dnsEntry := range e.dnsEntries {
 		// delete the dnsEntry
-		delete(dnsEntry.namespaces, namespace)
+		delete(dnsEntry.namespaces, request.Namespace)
 		if len(dnsEntry.namespaces) == 0 {
 			// the dnsEntry appears in no other namespace, so delete the address_set
 			err := dnsEntry.dnsAddressSet.Destroy()
 			if err != nil {
-				return fmt.Errorf("error deleting EgressFirewall AddressSet for dnsName: %s %v", dnsName, err)
+				return DeleteResponse{
+					Err: fmt.Errorf("error deleting EgressFirewall AddressSet for dnsName: %s %v", request.DNSName, err),
+				}
 			}
 			// the dnsEntry is no longer needed because nothing references it, so delete it
 			delete(e.dnsEntries, dnsName)
@@ -125,11 +138,17 @@ func (e *EgressDNS) Delete(namespace string) error {
 		// blocks only if Run() is busy updating its internal values)
 		e.deleted <- name
 	}
-	return nil
+	return DeleteResponse{
+		Err: nil,
+	}
 }
 
-func (e *EgressDNS) Update(dns string) (bool, error) {
-	return e.dns.Update(dns)
+func (e *EgressDNS) Update(request UpdateRequest) UpdateResponse {
+	isupdated, err := e.dns.Update(request.DNSName)
+	return UpdateResponse{
+		IsUpdated: isupdated,
+		Err:       err,
+	}
 }
 
 func (e *EgressDNS) updateEntryForName(dnsName string) error {
@@ -189,12 +208,12 @@ func (e *EgressDNS) addToDNS(dnsName string) {
 //     and the durationTillNextQuery is updated
 //  2. e.added is received and durationTillNextQuery is recomputed
 //  3. e.deleted is received and coincides with dnsName
-func (e *EgressDNS) Run(defaultInterval time.Duration) {
+func (e *EgressDNS) Run(request RunRequest) {
 	var domainNameExpiringNext, domainNameDeleted string
 	var ttl time.Time
 	var timeSet bool
 	// initially the next DNS Query happens at the default interval
-	durationTillNextQuery := defaultInterval
+	durationTillNextQuery := request.DefaultInterval
 	go func() {
 		timer := time.NewTicker(durationTillNextQuery)
 		defer timer.Stop()
@@ -207,8 +226,8 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 				//on update need to check if the GetNextQueryTime has changed
 			case <-timer.C:
 				if len(domainNameExpiringNext) > 0 {
-					if _, err := e.Update(domainNameExpiringNext); err != nil {
-						utilruntime.HandleError(err)
+					if resp := e.Update(UpdateRequest{DNSName: domainNameExpiringNext}); resp.Err != nil {
+						utilruntime.HandleError(resp.Err)
 					}
 					if err := e.updateEntryForName(domainNameExpiringNext); err != nil {
 						utilruntime.HandleError(err)
@@ -230,8 +249,8 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 			// set timer to what's sooner: default update interval or next expiration time
 			ttl, domainNameExpiringNext, timeSet = e.dns.GetNextQueryTime()
 			ttlDuration := time.Until(ttl)
-			if ttlDuration > defaultInterval || !timeSet {
-				durationTillNextQuery = defaultInterval
+			if ttlDuration > request.DefaultInterval || !timeSet {
+				durationTillNextQuery = request.DefaultInterval
 			} else if ttlDuration.Seconds() > 0 {
 				durationTillNextQuery = ttlDuration
 			} else {
@@ -246,4 +265,16 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 
 func (e *EgressDNS) Shutdown() {
 	close(e.stopChan)
+}
+
+func (e *EgressDNS) AddNamespace(AddNamespaceRequest) AddNamespaceResponse {
+	return AddNamespaceResponse{}
+}
+
+func (e *EgressDNS) RemoveNamespace(RemoveNamespaceRequest) RemoveNamespaceResponse {
+	return RemoveNamespaceResponse{}
+}
+
+func (e *EgressDNS) GetAddressSet(GetAddressSetRequest) GetAddressSetResponse {
+	return GetAddressSetResponse{}
 }
