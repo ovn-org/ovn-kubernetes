@@ -24,16 +24,17 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-    - name: Set up Go
-      uses: actions/setup-go@v3
-      with:
-        go-version: ${{ env.GO_VERSION }}
-      id: go
-
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         ref: master
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache-dependency-path: "**/*.sum"
+      id: go
 
     - name: Build
       run: |
@@ -54,33 +55,11 @@ jobs:
           docker save ovn-daemonset-f:dev > _output/image.tar
         popd
 
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       with:
         name: test-image
         path: dist/images/_output/image.tar
 
-  k8s:
-    if: github.repository == 'ovn-org/ovn-kubernetes' || github.event_name == 'workflow_dispatch'
-    name: Build k8s
-    runs-on: ubuntu-latest
-    steps:
-
-    - name: Set up environment
-      run: |
-        export GOPATH=$(go env GOPATH)
-        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "$GOPATH/bin" >> $GITHUB_PATH
-
-    - name: Set up Go
-      uses: actions/setup-go@v3
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Install KIND
-      run: |
-        sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
-        sudo chmod +x /usr/local/bin/kind
-        
   e2e-dual:
     if: github.repository == 'ovn-org/ovn-kubernetes' || github.event_name == 'workflow_dispatch'
     name: e2e-dual
@@ -106,15 +85,15 @@ jobs:
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
     steps:
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
+        cache-dependency-path: "**/*.sum"
       id: go
-
-    - name: Check out code into the Go module directory
-      uses: actions/checkout@v3
 
     - name: Set up environment
       run: |
@@ -131,12 +110,7 @@ jobs:
           msbuild mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
 
-    - name: Install KIND
-      run: |
-        sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
-        sudo chmod +x /usr/local/bin/kind
-
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: test-image
    
@@ -161,7 +135,7 @@ jobs:
 
     - name: Upload logs
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs

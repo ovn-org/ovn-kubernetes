@@ -366,28 +366,36 @@ func getOvsDatapaths(ovsAppctl ovsClient) (datapathsList []string, err error) {
 			return nil, fmt.Errorf("datapath %s is not of format Type@Name", output)
 		}
 		metricOvsDp.WithLabelValues(datapathName, datapathType).Set(1)
-		datapathsList = append(datapathsList, datapathName)
+		datapathsList = append(datapathsList, output)
 	}
 	metricOvsDpTotal.Set(float64(len(datapathsList)))
 	return datapathsList, nil
 }
 
 func setOvsDatapathMetrics(ovsAppctl ovsClient, datapaths []string) (err error) {
-	var stdout, stderr, datapathName string
+	var stdout, stderr, datapath string
 
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("recovering from a panic while parsing the ovs-appctl dpctl/"+
-				"show %s output : %v", datapathName, r)
+				"show %s output : %v", datapath, r)
 		}
 	}()
 
-	for _, datapathName = range datapaths {
-		stdout, stderr, err = ovsAppctl("dpctl/show", datapathName)
+	for _, datapath = range datapaths {
+		// For example, datapath is 'system@ovs-system' where 'system' denotes
+		// the datapath type and 'ovs-system' the datapath name. To uniquely
+		// identify a datapath, both are required when querying OVS. If type is
+		// omitted, OVS will assume 'system'.
+		stdout, stderr, err = ovsAppctl("dpctl/show", datapath)
 		if err != nil {
 			return fmt.Errorf("failed to get datapath stats for %s "+
-				"stderr(%s) :(%v)", datapathName, stderr, err)
+				"stderr(%s) :(%v)", datapath, stderr, err)
 		}
+
+		// For metrics, only a datapath name will be used to identify datapaths
+		// in order to keep backward compatibility with previous behaviour.
+		datapathName := strings.Split(datapath, "@")[1]
 		var datapathPortCount float64
 		for i, kvPair := range strings.Split(stdout, "\n") {
 			if i <= 0 {

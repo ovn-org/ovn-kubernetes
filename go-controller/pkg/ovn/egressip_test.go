@@ -45,8 +45,8 @@ var (
 )
 
 const (
-	namespace       = "egressip-namespace"
-	namespace2      = "egressip-namespace2"
+	eipNamespace    = "egressip-namespace"
+	eipNamespace2   = "egressip-namespace2"
 	podV4IP         = "10.128.0.15"
 	podV4IP2        = "10.128.0.16"
 	podV4IP3        = "10.128.1.3"
@@ -252,8 +252,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			node1IPv4NonOVNManaged2 := "5.5.5.10/24"
 			node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
 
-			egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-			egressNamespace := newNamespace(namespace)
+			egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+			egressNamespace := newNamespace(eipNamespace)
 			nodes := getIPv4Nodes([]nodeInfo{{node1IPv4Addresses, zone, node1IPv4TranSwitchIP}})
 			node1 := nodes[0]
 			node1.Labels = map[string]string{
@@ -418,8 +418,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 			node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
 
-			egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-			egressNamespace := newNamespace(namespace)
+			egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+			egressNamespace := newNamespace(eipNamespace)
 			nodes := getIPv4Nodes([]nodeInfo{{node1IPv4Addresses, zone, node1IPv4TranSwitchIP}})
 			node1 := nodes[0]
 			node1.Labels = map[string]string{
@@ -589,8 +589,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged1, node1IPv4NonOVNManaged2}
 					node2IPv4Addresses := []string{node2IPv4OVNManaged, node2IPv4NonOVNManaged1, node2IPv4NonOVNManaged2}
 
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 					nodes := getIPv4Nodes([]nodeInfo{{node1IPv4Addresses, zone, node1IPv4TranSwitchIP},
 						{node2IPv4Addresses, zone, node2IPv4TranSwitchIP}})
 					node1 := nodes[0]
@@ -849,8 +849,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node2 := nodes[1]
 					node3 := nodes[2]
 					config.IPv4Mode = true
-					egressPod := *newPodWithLabels(namespace, podName, node3Name, podV4IP, egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node3Name, podV4IP, egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 
 					eIP := egressipv1.EgressIP{
 						ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1177,8 +1177,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node2 := nodes[1]
 					node3 := nodes[2]
 					config.IPv4Mode = true
-					egressPod := *newPodWithLabels(namespace, podName, node3Name, podV4IP, egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node3Name, podV4IP, egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 
 					eIP := egressipv1.EgressIP{
 						ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1511,8 +1511,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					if node2Zone != "global" {
 						node2.Annotations["k8s.ovn.org/remote-zone-migrated"] = node2Zone // used only for ic=true test
 					}
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 
 					eIP := egressipv1.EgressIP{
 						ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1780,12 +1780,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						"k8s.ovn.org/egress-assignable": "",
 					}
 					node2 := nodes[1]
-					egressNamespace := newNamespace(namespace)
-					egressNamespace2 := newNamespace(namespace2)
-					egressPod1Node1 := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-					egressPod2Node1 := *newPodWithLabels(namespace2, podName, node1Name, podV4IP2, egressPodLabel)
-					egressPod3Node2 := *newPodWithLabels(namespace, podName2, node2Name, podV4IP3, egressPodLabel)
-					egressPod4Node2 := *newPodWithLabels(namespace2, podName2, node2Name, podV4IP4, egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
+					egressNamespace2 := newNamespace(eipNamespace2)
+					egressPod1Node1 := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+					egressPod2Node1 := *newPodWithLabels(eipNamespace2, podName, node1Name, podV4IP2, egressPodLabel)
+					egressPod3Node2 := *newPodWithLabels(eipNamespace, podName2, node2Name, podV4IP3, egressPodLabel)
+					egressPod4Node2 := *newPodWithLabels(eipNamespace2, podName2, node2Name, podV4IP4, egressPodLabel)
 
 					eIPOVNManaged := egressipv1.EgressIP{
 						ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2133,8 +2133,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
 
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 					annotations := map[string]string{
 						"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
@@ -2547,8 +2547,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
 
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 
 					node1IPv4Addresses := []string{node1IPv4OVNManaged, node1IPv4NonOVNManaged}
 					node2IPv4Addresses := []string{node2IPv4OVNManaged}
@@ -2814,8 +2814,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 					egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV6IP, egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 					node1IPv4 := "192.168.126.210/24"
 					_, node1SubnetV4, _ := net.ParseCIDR(v4Node1Subnet)
 					_, node1SubnetV6, _ := net.ParseCIDR(v6Node1Subnet)
@@ -3007,7 +3007,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(nodes[0]).To(gomega.Equal(node2Name))
 					gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP.String()))
 
-					podUpdate := newPod(namespace, podName, node1Name, podV6IP)
+					podUpdate := newPod(eipNamespace, podName, node1Name, podV6IP)
 
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 					gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -3072,8 +3072,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 					egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0f")
 
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV6IP, egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 					nodes := getIPv6Nodes([]nodeInfo{
 						{[]string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, podZone, "100.88.0.2/16"},
 						{[]string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, "global", "100.88.0.3/16"},
@@ -3220,7 +3220,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(assignedNodes[0]).To(gomega.Equal(node2Name))
 					gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP.String()))
 
-					podUpdate := newPod(namespace, podName, node1Name, podV6IP)
+					podUpdate := newPod(eipNamespace, podName, node1Name, podV6IP)
 					ginkgo.By("Bringing down NBDB")
 					// inject transient problem, nbdb is down
 					fakeOvn.controller.nbClient.Close()
@@ -3269,8 +3269,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
-				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-				egressNamespace := newNamespace(namespace)
+				egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV6IP, egressPodLabel)
+				egressNamespace := newNamespace(eipNamespace)
 				_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 				_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
 
@@ -3414,7 +3414,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(nodes[0]).To(gomega.Equal(node2Name))
 				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP.String()))
 
-				podUpdate := newPodWithLabels(namespace, podName, node1Name, podV6IP, map[string]string{
+				podUpdate := newPodWithLabels(eipNamespace, podName, node1Name, podV6IP, map[string]string{
 					"egress": "needed",
 					"some":   "update",
 				})
@@ -3596,8 +3596,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 					egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, "", egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
 					fakeOvn.startWithDBSetup(
@@ -3678,7 +3678,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(nodes[0]).To(gomega.Equal(node2Name))
 					gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP.String()))
 
-					podUpdate := newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
+					podUpdate := newPodWithLabels(eipNamespace, podName, node1Name, podV6IP, egressPodLabel)
 					podUpdate.Annotations = map[string]string{
 						"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV6IP, v6GatewayIP, podV6IP, v6GatewayIP),
 					}
@@ -3751,8 +3751,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
-				egressPod := *newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
-				egressNamespace := newNamespace(namespace)
+				egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, "", egressPodLabel)
+				egressNamespace := newNamespace(eipNamespace)
 				fakeOvn.startWithDBSetup(clusterRouterDbSetup,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{*egressNamespace},
@@ -3818,8 +3818,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 					egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-					egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV6IP, egressPodLabel)
+					egressNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
 					// pod lives on node 1, therefore set the zone
 					node1 := newNodeGlobalZoneNotEgressableV6Only(node1Name, "0:0:0:0:0:feff:c0a8:8e0c/64")
 					node1.Annotations["k8s.ovn.org/zone-name"] = podZone
@@ -4008,8 +4008,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 					egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-					egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV6IP, egressPodLabel)
+					egressNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
 					// pod is host by node 1 therefore we set its zone
 					node1 := newNodeGlobalZoneNotEgressableV6Only(node1Name, "0:0:0:0:0:fedf:c0a8:8e0c/64")
 					node1.Annotations["k8s.ovn.org/zone-name"] = podZone
@@ -4217,8 +4217,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 					egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-					egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV6IP, egressPodLabel)
+					egressNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
 					// pod is hosted by node 1 therefore we set its zone
 					node1 := newNodeGlobalZoneNotEgressableV6Only(node1Name, "0:0:0:0:0:feff:c0a8:8e0c/64")
 					node1.Annotations["k8s.ovn.org/zone-name"] = podZone
@@ -4366,7 +4366,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(nodes[0]).To(gomega.Equal(node2Name))
 					gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP.String()))
 
-					namespaceUpdate := newNamespace(namespace)
+					namespaceUpdate := newNamespace(eipNamespace)
 
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpdate, metav1.UpdateOptions{})
 					gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -4419,8 +4419,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
-				egressPod := *newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
-				egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
+				egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, "", egressPodLabel)
+				egressNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
 				fakeOvn.startWithDBSetup(clusterRouterDbSetup,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{*egressNamespace},
@@ -4465,7 +4465,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(nodes[0]).To(gomega.Equal(node2Name))
 				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP.String()))
 
-				namespaceUpdate := newNamespace(namespace)
+				namespaceUpdate := newNamespace(eipNamespace)
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpdate, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -4492,8 +4492,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node2IPv4 := "192.168.126.51"
 					node2IPv4CIDR := node2IPv4 + "/24"
 					_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
-					egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 					annotations := map[string]string{
 						"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
@@ -4940,8 +4940,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 				updatedEgressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8ffd")
 
-				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-				egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
+				egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV6IP, egressPodLabel)
+				egressNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
 				_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 				_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
 
@@ -5131,7 +5131,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				// Remove pod and ensure LRP and SNAT are removed as well
 				ginkgo.By("Deleting the completed pod should update EIPs SNATs")
-				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespace).Delete(context.TODO(), podName, metav1.DeleteOptions{})
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(eipNamespace).Delete(context.TODO(), podName, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				expectedDatabaseState2 := []libovsdbtest.TestData{
@@ -5504,8 +5504,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1IPv4 := "192.168.126.12"
 				node1IPv4CIDR := node1IPv4 + "/24"
 				_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
-				egressPod1 := *newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
-				egressNamespace := newNamespace(namespace)
+				egressPod1 := *newPodWithLabels(eipNamespace, podName, node1Name, "", egressPodLabel)
+				egressNamespace := newNamespace(eipNamespace)
 				annotations := map[string]string{
 					"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4CIDR),
 					"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
@@ -5810,10 +5810,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1IPv4CIDR := node1IPv4 + "/24"
 				_, node1Subnet, _ := net.ParseCIDR(v4Node1Subnet)
 				oldEgressPodIP := "10.128.0.50"
-				egressPod1 := newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
+				egressPod1 := newPodWithLabels(eipNamespace, podName, node1Name, "", egressPodLabel)
 				oldAnnotation := map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["10.128.0.50/24"],"mac_address":"0a:58:0a:80:00:05","gateway_ips":["10.128.0.1"],"routes":[{"dest":"10.128.0.0/24","nextHop":"10.128.0.1"}],"ip_address":"10.128.0.50/24","gateway_ip":"10.128.0.1"}}`}
 				egressPod1.Annotations = oldAnnotation
-				egressNamespace := newNamespace(namespace)
+				egressNamespace := newNamespace(eipNamespace)
 
 				annotations := map[string]string{
 					"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4CIDR),
@@ -6070,7 +6070,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// recreate pod with same name immediately;
 				ginkgo.By("should add egress IP setup for the NEW pod which exists in logicalPortCache")
 				newEgressPodIP := "10.128.0.60"
-				egressPod1 = newPodWithLabels(namespace, podName, node1Name, newEgressPodIP, egressPodLabel)
+				egressPod1 = newPodWithLabels(eipNamespace, podName, node1Name, newEgressPodIP, egressPodLabel)
 				egressPod1.Annotations = map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["10.128.0.60/24"],"mac_address":"0a:58:0a:80:00:06","gateway_ips":["10.128.0.1"],"routes":[{"dest":"10.128.0.0/24","nextHop":"10.128.0.1"}],"ip_address":"10.128.0.60/24","gateway_ip":"10.128.0.1"}}`}
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod1.Namespace).Create(context.TODO(), egressPod1, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -6154,8 +6154,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node2IPv4Net := "192.168.126.0/24"
 					node2IPv4CIDR := node2IPv4 + "/24"
 
-					egressPod1 := *newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
-					egressNamespace := newNamespace(namespace)
+					egressPod1 := *newPodWithLabels(eipNamespace, podName, node1Name, "", egressPodLabel)
+					egressNamespace := newNamespace(eipNamespace)
 					annotations := map[string]string{
 						"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4CIDR),
 						"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
@@ -7361,8 +7361,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node2IPv4Net := "192.168.126.0/24"
 				node2IPv4CIDR := node2IPv4 + "/24"
 
-				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-				egressNamespace := newNamespace(namespace)
+				egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressNamespace := newNamespace(eipNamespace)
 				annotations := map[string]string{
 					"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
@@ -7591,7 +7591,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1IPv4 := "192.168.126.51"
 				node1IPv4CIDR := node1IPv4 + "/24"
 
-				egressNamespace := newNamespace(namespace)
+				egressNamespace := newNamespace(eipNamespace)
 
 				annotations := map[string]string{
 					"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
@@ -7762,8 +7762,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1IPv4Net := "192.168.126.0/24"
 				node1IPv4CIDR := node1IPv4 + "/24"
 
-				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-				egressNamespace := newNamespace(namespace)
+				egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressNamespace := newNamespace(eipNamespace)
 
 				annotations := map[string]string{
 					"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4CIDR),
@@ -8553,9 +8553,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1IPv4Net := "192.168.126.0/24"
 				node1IPv4CIDR := node1IPv4 + "/24"
 
-				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
 				egressPod.Status.Phase = v1.PodSucceeded
-				egressNamespace := newNamespace(namespace)
+				egressNamespace := newNamespace(eipNamespace)
 
 				node1 := v1.Node{
 					ObjectMeta: metav1.ObjectMeta{
@@ -8735,8 +8735,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1IPv4Net := "192.168.126.0/24"
 				node1IPv4CIDR := node1IPv4 + "/24"
 
-				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-				egressNamespace := newNamespace(namespace)
+				egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressNamespace := newNamespace(eipNamespace)
 
 				node1 := v1.Node{
 					ObjectMeta: metav1.ObjectMeta{
@@ -8989,9 +8989,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node2IPv4 := "192.168.126.51"
 				node2IPv4CIDR := node2IPv4 + "/24"
 
-				egressPod1 := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-				egressPod2 := *newPodWithLabels(namespace, "egress-pod2", node2Name, "10.128.0.16", egressPodLabel)
-				egressNamespace := newNamespace(namespace)
+				egressPod1 := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressPod2 := *newPodWithLabels(eipNamespace, "egress-pod2", node2Name, "10.128.0.16", egressPodLabel)
+				egressNamespace := newNamespace(eipNamespace)
 				annotations := map[string]string{
 					"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4CIDR),
 					"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),

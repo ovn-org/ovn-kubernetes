@@ -793,7 +793,11 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			errs = append(errs, fmt.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err))
 		}
 	} else {
-		// the node needs to cleanup Hybrid overlay annotations if it has them and hybrid overlay is not enabled
+		// the node needs to cleanup Hybrid overlay annotations LogicalRouterPolicies and Hybrid overlay port
+		// if it has them and hybrid overlay is not enabled
+		if err := oc.deleteHybridOverlayPort(node); err != nil {
+			errs = append(errs, err)
+		}
 		if _, exist := node.Annotations[hotypes.HybridOverlayDRMAC]; exist {
 			annotator.Delete(hotypes.HybridOverlayDRMAC)
 		}
@@ -903,11 +907,8 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 
 func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
 	if config.HybridOverlay.Enabled {
-		if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok && !util.NoHostSubnet(node) {
-			oc.deleteHybridOverlayPort(node)
-		}
-		if err := oc.removeHybridLRPolicySharedGW(node); err != nil {
-			return err
+		if err := oc.deleteHybridOverlayPort(node); err != nil {
+			return fmt.Errorf("failed to delete hybrid overlay switch port for node %s: %w", node.Name, err)
 		}
 	}
 

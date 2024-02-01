@@ -33,13 +33,15 @@ mkdir -p $HOME/work/src/github.com/ovn-org
 cd $HOME/work/src/github.com/ovn-org
 git clone https://github.com/ovn-org/ovn-kubernetes
 cd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
-./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
+./daemonset.sh --image=ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u:master \
     --net-cidr=192.168.0.0/16/24 --svc-cidr=172.16.1.0/24 \
     --gateway-mode="local" \
     --k8s-apiserver=https://$MASTER_IP:6443
 ```
 
-Take note that the image `docker.io/ovnkube/ovn-daemonset-u:latest` is horribly outdated. You should [build your own image](#building-the-daemonset-container) and use that instead.
+Take note that the image `ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u:master` comes from the tip
+of this repo's master branch. You should [build your own image](#building-the-daemonset-container)
+and use that instead.
 
 To set specific logging level for OVN components, pass the related parameter from the below mentioned
 list to the above command. Set values are the default values.
@@ -61,16 +63,12 @@ kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovs
 Apply OVN DaemonSet and Deployment yamls.
 
 ```
-# Create OVN namespace, service accounts, ovnkube-db headless service, configmap, and policies
+# Create OVN namespace, service accounts, ovnkube-db headless service, configmap, policies and identity
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn-setup.yaml
-
-# Optionally, if you plan to use the Egress IPs or EgressFirewall features, create the corresponding CRDs:
-# create egressips.k8s.ovn.org CRD
-kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressips.yaml
-# create egressfirewalls.k8s.ovn.org CRD
-kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressfirewalls.yaml
-# create adminpolicybasedexternalroute.k8s.ovn.org CRD
-kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
+for yaml in `echo rbac-ovnkube-cluster-manager.yaml rbac-ovnkube-db.yaml rbac-ovnkube-identity.yaml rbac-ovnkube-master.yaml rbac-ovnkube-node.yaml`; do
+        kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/$yaml
+done
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-identity.yaml
 
 # Run ovnkube-db deployment.
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
@@ -81,6 +79,15 @@ kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn
 
 # Run ovnkube daemonset for nodes
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-node.yaml
+
+# Optionally, if you plan to use the Egress IPs or EgressFirewall features, create the corresponding CRDs:
+# create egressips.k8s.ovn.org CRD
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressips.yaml
+# create egressfirewalls.k8s.ovn.org CRD
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressfirewalls.yaml
+# create adminpolicybasedexternalroute.k8s.ovn.org CRD
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
+
 ```
 
 NOTE: You don't need kube-proxy for OVN to work. You can delete that from your
