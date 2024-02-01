@@ -318,16 +318,28 @@ func StartNodeCertificateManager(ctx context.Context, wg *sync.WaitGroup, nodeNa
 	}()
 
 	klog.Infof("Waiting for certificate")
-	var storeErr error
 	err = wait.PollUntilContextTimeout(context.TODO(), time.Second, 2*time.Minute, true, func(_ context.Context) (bool, error) {
-		var currentCert *tls.Certificate
-		currentCert, storeErr = certificateStore.Current()
-		return currentCert != nil && storeErr == nil, nil
+		return certManager.Current() != nil, nil
 	})
 	if err != nil {
-		return fmt.Errorf("certificate was not signed, last cert store err: %v err: %v", storeErr, err)
+		return fmt.Errorf("certificate was not signed: %v", err)
 	}
 	klog.Infof("Certificate found")
+
+	// certManager is responsible for rotating the certificates; it determines when to rotate and sets up a timer.
+	// With this approach, a certificate may become invalid if the system time changes unexpectedly
+	// and the process is not restarted (which is common in suspended clusters).
+	// After retrieving the initial certificate, run a periodic check to ensure it is valid.
+	const retryInterval = time.Second * 10
+	go wait.Until(func() {
+		// certManager.Current() returns nil when the current cert has expired.
+		currentCert := certManager.Current()
+		if currentCert == nil || (currentCert.Leaf != nil && time.Now().Before(currentCert.Leaf.NotBefore)) {
+			klog.Errorf("The current certificate is invalid, exiting.")
+			os.Exit(1)
+		}
+
+	}, retryInterval, ctx.Done())
 	return nil
 }
 
