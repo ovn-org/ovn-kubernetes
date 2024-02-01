@@ -14,6 +14,7 @@ import (
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	kube_test "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -125,10 +126,11 @@ func TestSyncServices(t *testing.T) {
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 	_, cidr6, _ := net.ParseCIDR("fe00::/64")
 	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
-
+	var (
+		nodeA = "node-a"
+		nodeB = "node-b"
+	)
 	const (
-		nodeA           = "node-a"
-		nodeB           = "node-b"
 		nodeAEndpointIP = "10.128.0.2"
 		nodeBEndpointIP = "10.128.1.2"
 		nodeAHostIP     = "10.0.0.1"
@@ -303,6 +305,7 @@ func TestSyncServices(t *testing.T) {
 							Ready: utilpointer.Bool(true),
 						},
 						Addresses: []string{"10.128.0.2", "10.128.1.2"},
+						NodeName:  &nodeA,
 					},
 				},
 			},
@@ -384,6 +387,7 @@ func TestSyncServices(t *testing.T) {
 							Ready: utilpointer.Bool(true),
 						},
 						Addresses: []string{"10.128.0.2", "10.128.1.2"},
+						NodeName:  &nodeA,
 					},
 				},
 			},
@@ -516,16 +520,17 @@ func Test_ETPCluster_NodePort_Service_WithMultipleIPAddresses(t *testing.T) {
 	_, cidr6, _ := net.ParseCIDR("fe00:0:0:0:5555::0/64")
 	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{CIDR: cidr4, HostSubnetLength: 16}, {CIDR: cidr6, HostSubnetLength: 64}}
 
+	nodeName := "node-a"
 	nodeIPv4 := []net.IP{net.ParseIP("10.1.1.1"), net.ParseIP("10.2.2.2"), net.ParseIP("10.3.3.3")}
 	nodeIPv6 := []net.IP{net.ParseIP("fd00:0:0:0:1::1"), net.ParseIP("fd00:0:0:0:2::2")}
 
 	nodeA := nodeInfo{
-		name:               "node-a",
+		name:               nodeName,
 		l3gatewayAddresses: []net.IP{nodeIPv4[0], nodeIPv6[0]},
 		hostAddresses:      append(nodeIPv4, nodeIPv6...),
-		gatewayRouterName:  nodeGWRouterName("node-a"),
-		switchName:         nodeSwitchName("node-a"),
-		chassisID:          "node-a",
+		gatewayRouterName:  nodeGWRouterName(nodeName),
+		switchName:         nodeSwitchName(nodeName),
+		chassisID:          nodeName,
 		zone:               types.OvnDefaultZone,
 	}
 
@@ -555,9 +560,7 @@ func Test_ETPCluster_NodePort_Service_WithMultipleIPAddresses(t *testing.T) {
 		},
 		Ports:       []discovery.EndpointPort{{Protocol: &tcp, Port: &outport}},
 		AddressType: discovery.AddressTypeIPv4,
-		Endpoints: []discovery.Endpoint{
-			readyEndpointsWithAddresses("10.128.0.2", "10.128.1.2"),
-		},
+		Endpoints:   kube_test.MakeReadyEndpointList(nodeName, "10.128.0.2", "10.128.1.2"),
 	}
 
 	endPointSliceV6 := &discovery.EndpointSlice{
@@ -568,9 +571,7 @@ func Test_ETPCluster_NodePort_Service_WithMultipleIPAddresses(t *testing.T) {
 		},
 		Ports:       []discovery.EndpointPort{{Protocol: &tcp, Port: &outport}},
 		AddressType: discovery.AddressTypeIPv6,
-		Endpoints: []discovery.Endpoint{
-			readyEndpointsWithAddresses("fe00:0:0:0:5555::2", "fe00:0:0:0:5555::3"),
-		},
+		Endpoints:   kube_test.MakeReadyEndpointList(nodeName, "fe00:0:0:0:5555::2", "fe00:0:0:0:5555::3"),
 	}
 
 	controller, err := newControllerWithDBSetup(libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{
