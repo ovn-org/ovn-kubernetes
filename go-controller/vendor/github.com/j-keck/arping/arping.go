@@ -121,7 +121,6 @@ func PingOverIface(dstIP net.IP, iface net.Interface) (net.HardwareAddr, time.Du
 	if err != nil {
 		return nil, 0, err
 	}
-	defer sock.deinitialize()
 
 	type PingResult struct {
 		mac      net.HardwareAddr
@@ -131,6 +130,7 @@ func PingOverIface(dstIP net.IP, iface net.Interface) (net.HardwareAddr, time.Du
 	pingResultChan := make(chan PingResult, 1)
 
 	go func() {
+		defer sock.deinitialize()
 		// send arp request
 		verboseLog.Printf("arping '%s' over interface: '%s' with address: '%s'\n", dstIP, iface.Name, srcIP)
 		if sendTime, err := sock.send(request); err != nil {
@@ -163,7 +163,6 @@ func PingOverIface(dstIP net.IP, iface net.Interface) (net.HardwareAddr, time.Du
 	case pingResult := <-pingResultChan:
 		return pingResult.mac, pingResult.duration, pingResult.err
 	case <-time.After(timeout):
-		sock.deinitialize()
 		return nil, 0, ErrTimeout
 	}
 }
