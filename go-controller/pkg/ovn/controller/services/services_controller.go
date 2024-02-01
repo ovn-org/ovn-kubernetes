@@ -409,16 +409,14 @@ func (c *Controller) syncService(key string) error {
 	}
 
 	// Build the abstract LB configs for this service
-	perNodeConfigs, templateConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices,
-		c.useLBGroups, c.useTemplates)
+	perNodeConfigs, templateConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices, c.nodeInfos, c.useLBGroups, c.useTemplates)
 	klog.V(5).Infof("Built service %s LB cluster-wide configs %#v", key, clusterConfigs)
 	klog.V(5).Infof("Built service %s LB per-node configs %#v", key, perNodeConfigs)
 	klog.V(5).Infof("Built service %s LB template configs %#v", key, templateConfigs)
 
 	// Convert the LB configs in to load-balancer objects
 	clusterLBs := buildClusterLBs(service, clusterConfigs, c.nodeInfos, c.useLBGroups)
-	templateLBs := buildTemplateLBs(service, templateConfigs, c.nodeInfos,
-		c.nodeIPv4Templates, c.nodeIPv6Templates)
+	templateLBs := buildTemplateLBs(service, templateConfigs, c.nodeInfos, c.nodeIPv4Templates, c.nodeIPv6Templates)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, c.nodeInfos)
 	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
 	klog.V(5).Infof("Built service %s per-node LB %#v", key, perNodeLBs)
