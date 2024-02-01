@@ -8,17 +8,23 @@ import (
 	"testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	kube_test "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
 	"github.com/stretchr/testify/assert"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
-	utilpointer "k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
+)
+
+var (
+	nodeA = "node-a"
+	nodeB = "node-b"
 )
 
 // Go Daddy Class 2 CA
@@ -420,1026 +426,6 @@ func makeNodeWithAddresses(name, internal, external string) *v1.Node {
 	return node
 }
 
-func Test_getLbEndpoints(t *testing.T) {
-	type args struct {
-		slices  []*discovery.EndpointSlice
-		svcPort v1.ServicePort
-		service *v1.Service
-	}
-	tests := []struct {
-		name string
-		args args
-		want LbEndpoints
-	}{
-		{
-			name: "empty slices",
-			args: args{
-				slices: []*discovery.EndpointSlice{},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{},
-		},
-		{
-			name: "slice with one endpoint",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, []string{}, 80},
-		},
-		{
-			name: "slice with different port name than the service",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example-wrong"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(8080)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{}, []string{}, 0},
-		},
-		{
-			name: "slice and service without a port name",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(8080)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, []string{}, 8080},
-		},
-		{
-			name: "slice with an IPv6 endpoint",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{}, []string{"2001:db2::2"}, 80},
-		},
-		{
-			name: "a slice with an IPv4 endpoint and a slice with an IPv6 endpoint (dualstack cluster)",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab24",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, []string{"2001:db2::2"}, 80},
-		},
-		{
-			name: "multiples slices with a duplicate endpoint",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2", "10.1.1.2"},
-							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab24",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2", "10.2.2.2"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{"10.0.0.2", "10.1.1.2", "10.2.2.2"}, []string{}, 80},
-		},
-		{
-			name: "multiples slices with different ports",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2", "10.1.1.2"},
-							},
-						},
-					},
-					{ // this slice should be ignored, we're considering only one service port per execution
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab24",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("other-port"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(8080)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.3", "10.2.2.3"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{"10.0.0.2", "10.1.1.2"}, []string{}, 80},
-		},
-		{
-			name: "slice with a mix of ready and terminating (serving and non-serving) endpoints",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"2001:db2::3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::5"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::6"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{}, []string{"2001:db2::2", "2001:db2::3"}, 80},
-		},
-		{
-			name: "slice with a mix of terminating (serving and non-serving) endpoints and no ready endpoints",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::5"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::6"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::7"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{}, []string{"2001:db2::4", "2001:db2::5"}, 80},
-		},
-		{
-			name: "slice with only terminating non-serving endpoints",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::6"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::7"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{}, []string{}, 80},
-		},
-		{
-			name: "multiple slices with a mix terminating (serving and non-serving) endpoints and no ready endpoints",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::3"},
-							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab24",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::5"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{}, []string{"2001:db2::3", "2001:db2::4"}, 80},
-		},
-		{
-			name: "multiple slices with only terminating non-serving endpoints",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab24",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::5"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{}, []string{}, 80},
-		},
-		{
-			name: "multiple slices with a mix of IPv4 and IPv6 ready and terminating (serving and non-serving) endpoints (dualstack cluster)",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.4"},
-							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab24",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, []string{"2001:db2::2"}, 80},
-		},
-		{
-			name: "multiple slices with a mix of IPv4 and IPv6 terminating (serving and non-serving) endpoints and no ready endpoints (dualstack cluster)",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.4"},
-							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab24",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{"10.0.0.3"}, []string{"2001:db2::3"}, 80},
-		},
-		{
-			name: "multiple slices with a mix of IPv4 and IPv6 terminating non-serving endpoints (dualstack cluster)",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.4"},
-							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab24",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(false),
-			},
-			want: LbEndpoints{[]string{}, []string{}, 80},
-		},
-		{
-			name: "multiple slices with a mix of IPv4 and IPv6 ready and terminating (serving and non-serving) endpoints (dualstack cluster) and service.PublishNotReadyAddresses=true",
-			args: args{
-				slices: []*discovery.EndpointSlice{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab23",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.4"},
-							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "svc-ab24",
-							Namespace: "ns",
-							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-						},
-						Ports: []discovery.EndpointPort{
-							{
-								Name:     utilpointer.StringPtr("tcp-example"),
-								Protocol: protoPtr(v1.ProtocolTCP),
-								Port:     utilpointer.Int32Ptr(int32(80)),
-							},
-						},
-						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
-						},
-					},
-				},
-				svcPort: v1.ServicePort{
-					Name:       "tcp-example",
-					TargetPort: intstr.FromInt(80),
-					Protocol:   v1.ProtocolTCP,
-				},
-				service: getSampleService(true), // <-- publishNotReadyAddresses=true
-			},
-			want: LbEndpoints{[]string{"10.0.0.2", "10.0.0.3", "10.0.0.4"}, []string{"2001:db2::2", "2001:db2::3", "2001:db2::4"}, 80},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := GetLbEndpoints(tt.args.slices, tt.args.svcPort, tt.args.service)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 // protoPtr takes a Protocol and returns a pointer to it.
 func protoPtr(proto v1.Protocol) *v1.Protocol {
 	return &proto
@@ -1513,6 +499,8 @@ var (
 	tcpv1      v1.Protocol = v1.ProtocolTCP
 	udpv1      v1.Protocol = v1.ProtocolUDP
 
+	httpPortName    string = "http"
+	httpPortValue   int32  = int32(80)
 	httpsPortName   string = "https"
 	httpsPortValue  int32  = int32(443)
 	customPortName  string = "customApp"
@@ -1532,14 +520,6 @@ func getSampleService(publishNotReadyAddresses bool) *v1.Service {
 			PublishNotReadyAddresses: publishNotReadyAddresses,
 		},
 	}
-}
-
-func getSampleEndpointSliceOnAnotherNode(service *kapi.Service) *discovery.EndpointSlice {
-	endpointSlice := getSampleEndpointSlice(service)
-	for i := range endpointSlice.Endpoints {
-		endpointSlice.Endpoints[i].NodeName = &otherNode
-	}
-	return endpointSlice
 }
 
 // returns an endpoint slice with three endpoints, two of which belong to the expected local node
@@ -1584,21 +564,21 @@ func getSampleEndpointSlice(service *kapi.Service) *discovery.EndpointSlice {
 }
 
 func setEndpointToReady(endpoint *discovery.Endpoint) {
-	endpoint.Conditions.Ready = utilpointer.Bool(true)
-	endpoint.Conditions.Serving = utilpointer.Bool(true)
-	endpoint.Conditions.Terminating = utilpointer.Bool(false)
+	endpoint.Conditions.Ready = ptr.To(true)
+	endpoint.Conditions.Serving = ptr.To(true)
+	endpoint.Conditions.Terminating = ptr.To(false)
 }
 
 func setEndpointToTerminatingAndServing(endpoint *discovery.Endpoint) {
-	endpoint.Conditions.Ready = utilpointer.Bool(false)
-	endpoint.Conditions.Serving = utilpointer.Bool(true)
-	endpoint.Conditions.Terminating = utilpointer.Bool(true)
+	endpoint.Conditions.Ready = ptr.To(false)
+	endpoint.Conditions.Serving = ptr.To(true)
+	endpoint.Conditions.Terminating = ptr.To(true)
 }
 
 func setEndpointToTerminatingAndNotServing(endpoint *discovery.Endpoint) {
-	endpoint.Conditions.Ready = utilpointer.Bool(false)
-	endpoint.Conditions.Serving = utilpointer.Bool(false)
-	endpoint.Conditions.Terminating = utilpointer.Bool(true)
+	endpoint.Conditions.Ready = ptr.To(false)
+	endpoint.Conditions.Serving = ptr.To(false)
+	endpoint.Conditions.Terminating = ptr.To(true)
 }
 
 func setAllEndpointsToTerminatingAndServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
@@ -1629,88 +609,38 @@ func setEndpointsToAMixOfStatusConditions(endpointSlice *discovery.EndpointSlice
 	return endpointSlice
 }
 
-func setNodeEndpointsToReady(endpointSlice *discovery.EndpointSlice, nodeName string) *discovery.EndpointSlice {
-	for i := range endpointSlice.Endpoints {
-		if *endpointSlice.Endpoints[i].NodeName == nodeName {
-			setEndpointToReady(&endpointSlice.Endpoints[i])
-		}
-	}
-	return endpointSlice
-}
-func setNodeEndpointsToTerminatingAndServing(endpointSlice *discovery.EndpointSlice, nodeName string) *discovery.EndpointSlice {
-	for i := range endpointSlice.Endpoints {
-		if *endpointSlice.Endpoints[i].NodeName == nodeName {
-			setEndpointToTerminatingAndServing(&endpointSlice.Endpoints[i])
-		}
-	}
-	return endpointSlice
-}
-
-func setNodeEndpointsToTerminatingAndNotServing(endpointSlice *discovery.EndpointSlice, nodeName string) *discovery.EndpointSlice {
-	for i := range endpointSlice.Endpoints {
-		if *endpointSlice.Endpoints[i].NodeName == testNode {
-			setEndpointToTerminatingAndNotServing(&endpointSlice.Endpoints[i])
-		}
-	}
-	return endpointSlice
-}
-
-func setLocalEndpointsToReady(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToReady(endpointSlice, testNode)
-}
-
-func setLocalEndpointsToTerminatingAndServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToTerminatingAndServing(endpointSlice, testNode)
-}
-
-func setLocalEndpointsToTerminatingAndNotServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToTerminatingAndNotServing(endpointSlice, testNode)
-}
-
-func setRemoteEndpointsToReady(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToReady(endpointSlice, otherNode)
-}
-
-func setRemoteEndpointsToTerminatingAndServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToTerminatingAndServing(endpointSlice, otherNode)
-}
-
-func setRemoteEndpointsToTerminatingAndNotServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToTerminatingAndNotServing(endpointSlice, otherNode)
-}
-
 func TestGetEndpointAddresses(t *testing.T) {
 	service := getSampleService(false)
 	var tests = []struct {
 		name          string
 		endpointSlice *discovery.EndpointSlice
-		want          sets.Set[string]
+		want          []string
 	}{
 		{
 			"Tests an endpointslice with all ready endpoints",
 			setAllEndpointsToReady(getSampleEndpointSlice(service)),
-			sets.New(ep1Address, ep2Address, ep3Address),
+			[]string{ep1Address, ep2Address, ep3Address},
 		},
 		{
 			"Tests an endpointslice with all non-ready, serving, terminating endpoints",
 			setAllEndpointsToTerminatingAndServing(getSampleEndpointSlice(service)),
-			sets.New(ep1Address, ep2Address, ep3Address), // with no ready endpoints, we fallback to terminating serving endpoints
+			[]string{ep1Address, ep2Address, ep3Address}, // with no ready endpoints, we fallback to terminating serving endpoints
 		},
 		{
 			"Tests an endpointslice with all non-ready, non-serving, terminating endpoints",
 			setAllEndpointsToTerminatingAndNotServing(getSampleEndpointSlice(service)),
-			sets.New[string](),
+			[]string{},
 		},
 		{
 			"Tests an endpointslice with endpoints showing a mix of status conditions",
 			setEndpointsToAMixOfStatusConditions(getSampleEndpointSlice(service)),
-			sets.New(ep1Address), // only the ready endpoint is included
+			[]string{ep1Address}, // only the ready endpoint is included
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			answer := GetEligibleEndpointAddresses([]*discovery.EndpointSlice{tt.endpointSlice}, service)
+			answer := GetEligibleEndpointAddressesFromSlices([]*discovery.EndpointSlice{tt.endpointSlice}, service)
 			if !reflect.DeepEqual(answer, tt.want) {
 				t.Errorf("got %v, want %v", answer, tt.want)
 			}
@@ -1756,68 +686,159 @@ func TestHasLocalHostNetworkEndpoints(t *testing.T) {
 	}
 }
 
-func TestGetLocalEligibleEndpointAddresses(t *testing.T) {
+func TestGetEligibleEndpointAddresses(t *testing.T) {
 	service := getSampleService(false)
 	var tests = []struct {
-		name          string
-		endpointSlice *discovery.EndpointSlice
-		want          sets.Set[string]
+		name      string
+		endpoints []discovery.Endpoint
+		node      string
+		want      []string
 	}{
 		{
-			"Tests an endpointslice with all ready endpoints, one of which is on a different node",
-			setAllEndpointsToReady(getSampleEndpointSlice(service)),
-			sets.New(ep1Address, ep2Address),
+			"Get all eligible endpoints from an endpointslice with all ready endpoints, one of which is on a different node",
+			[]discovery.Endpoint{
+				kube_test.MakeReadyEndpoint(testNode, ep1Address),
+				kube_test.MakeReadyEndpoint(testNode, ep2Address),
+				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+			},
+			"", // get all endpoints
+			[]string{ep1Address, ep2Address, ep3Address},
 		},
 		{
-			"Tests an endpointslice with all ready endpoints, all of which are on a different node",
-			setAllEndpointsToReady(getSampleEndpointSliceOnAnotherNode(service)),
-			sets.New[string](),
+			"Get all eligible local endpoints from an endpointslice with all ready endpoints, one of which is on a different node",
+			[]discovery.Endpoint{
+				kube_test.MakeReadyEndpoint(testNode, ep1Address),
+				kube_test.MakeReadyEndpoint(testNode, ep2Address),
+				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+			},
+			testNode,
+			[]string{ep1Address, ep2Address},
 		},
 		{
-			"Tests an endpointslice with all non-ready, serving, terminating endpoints, one of which is on a different node",
-			setAllEndpointsToTerminatingAndServing(getSampleEndpointSlice(service)),
-			sets.New(ep1Address, ep2Address), // with no ready endpoints, we fallback to terminating serving endpoints
+			"Get all eligible local endpoints from an endpointslice with all ready endpoints, all of which are on another node",
+			[]discovery.Endpoint{
+				kube_test.MakeReadyEndpoint(otherNode, ep1Address),
+				kube_test.MakeReadyEndpoint(otherNode, ep2Address),
+				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+			},
+			testNode,
+			[]string{},
 		},
 		{
-			"Tests an endpointslice with all non-ready, serving, terminating endpoints, all of which are on a different node",
-			setAllEndpointsToTerminatingAndServing(getSampleEndpointSliceOnAnotherNode(service)),
-			sets.New[string](),
+			"Get all eligible endpoints from an endpointslice with all non-ready, serving, terminating endpoints, one of which is on a different node",
+			[]discovery.Endpoint{
+				kube_test.MakeTerminatingServingEndpoint(testNode, ep1Address),
+				kube_test.MakeTerminatingServingEndpoint(testNode, ep2Address),
+				kube_test.MakeTerminatingServingEndpoint(otherNode, ep3Address),
+			},
+			"",
+			[]string{ep1Address, ep2Address, ep3Address}, // with no ready endpoints, we fallback to terminating serving endpoints
 		},
 		{
-			"Tests an endpointslice with all non-ready, non-serving, terminating endpoints, one of which is on a different node",
-			setAllEndpointsToTerminatingAndNotServing(getSampleEndpointSlice(service)),
-			sets.New[string](),
+			"Get all eligible local endpoints from an endpointslice with all non-ready, serving, terminating endpoints, one of which is on a different node",
+			[]discovery.Endpoint{
+				kube_test.MakeTerminatingServingEndpoint(testNode, ep1Address),
+				kube_test.MakeTerminatingServingEndpoint(testNode, ep2Address),
+				kube_test.MakeTerminatingServingEndpoint(otherNode, ep3Address),
+			},
+			testNode,
+			[]string{ep1Address, ep2Address}, // with no ready endpoints, we fallback to terminating serving endpoints
 		},
 		{
-			"Tests an endpointslice with all non-ready, non-serving, terminating endpoints, all of which are on a different node",
-			setAllEndpointsToTerminatingAndNotServing(getSampleEndpointSliceOnAnotherNode(service)),
-			sets.New[string](),
+			"Get all eligible local endpoints from an endpointslice with all non-ready, serving, terminating endpoints, all of which are on a different node",
+			[]discovery.Endpoint{
+				kube_test.MakeTerminatingServingEndpoint(otherNode, ep1Address),
+				kube_test.MakeTerminatingServingEndpoint(otherNode, ep2Address),
+				kube_test.MakeTerminatingServingEndpoint(otherNode, ep3Address),
+			},
+			testNode,
+			[]string{},
 		},
 		{
-			"Tests an endpointslice with endpoints showing a mix of status conditions, one of which is on a different node",
-			setEndpointsToAMixOfStatusConditions(getSampleEndpointSlice(service)),
-			sets.New(ep1Address), // only the ready endpoint is included
+			"Get all eligible endpoints from an endpointslice with all non-ready, non-serving, terminating endpoints, one of which is on a different node",
+			[]discovery.Endpoint{
+				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
+				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
+				kube_test.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
+			},
+			"",
+			[]string{},
 		},
 		{
-			"Tests an endpointslice with endpoints showing a mix of status conditions, all of which are on a different node",
-			setEndpointsToAMixOfStatusConditions(getSampleEndpointSliceOnAnotherNode(service)),
-			sets.New[string](),
+			"Get all eligible local endpoints from an endpointslice with all non-ready, non-serving, terminating endpoints, one of which is on a different node",
+			[]discovery.Endpoint{
+				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
+				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
+				kube_test.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
+			},
+			testNode,
+			[]string{},
 		},
 		{
-			"Tests an endpointslice where all local endpoints are serving and terminating and a remote endpoint is ready",
-			setLocalEndpointsToTerminatingAndServing(setRemoteEndpointsToReady(getSampleEndpointSlice(service))),
-			sets.New(ep1Address, ep2Address), // fallback to serving&terminating should apply
+			"Get all eligible local endpoints from an endpointslice with endpoints showing a mix of status conditions, one of which is on a different node",
+			[]discovery.Endpoint{
+				kube_test.MakeReadyEndpoint(testNode, ep1Address),
+				kube_test.MakeTerminatingServingEndpoint(testNode, ep2Address),
+				kube_test.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
+			},
+			testNode,
+			[]string{ep1Address}, // only the ready endpoint is included
 		},
 		{
-			"Tests an endpointslice where all local endpoints are terminating and not serving and a remote endpoint is ready",
-			setLocalEndpointsToTerminatingAndNotServing(setRemoteEndpointsToReady(getSampleEndpointSlice(service))),
-			sets.New[string](),
+			"Get all eligible local endpoints from an endpointslice with endpoints showing a mix of status conditions, all of which are on a different node",
+			[]discovery.Endpoint{
+				kube_test.MakeReadyEndpoint(otherNode, ep1Address),
+				kube_test.MakeTerminatingServingEndpoint(otherNode, ep2Address),
+				kube_test.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
+			},
+			testNode,
+			[]string{},
+		},
+		{
+			"Get all eligible endpoints from an endpointslice where all local endpoints are serving and terminating and a remote endpoint is ready",
+			[]discovery.Endpoint{
+				kube_test.MakeTerminatingServingEndpoint(testNode, ep1Address),
+				kube_test.MakeTerminatingServingEndpoint(testNode, ep2Address),
+				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+			},
+			"",
+			[]string{ep3Address}, // fallback to serving&terminating should apply
+		},
+		{
+			"Get all eligible local endpoints from an endpointslice where all local endpoints are serving and terminating and a remote endpoint is ready",
+			[]discovery.Endpoint{
+				kube_test.MakeTerminatingServingEndpoint(testNode, ep1Address),
+				kube_test.MakeTerminatingServingEndpoint(testNode, ep2Address),
+				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+			},
+			testNode,
+			[]string{ep1Address, ep2Address}, // fallback to serving&terminating should apply
+		},
+		{
+			"Get all eligible endpoints from an endpointslice where all local endpoints are terminating and not serving and a remote endpoint is ready",
+			[]discovery.Endpoint{
+				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
+				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
+				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+			},
+			"",
+			[]string{ep3Address},
+		},
+		{
+			"Get all eligible local endpoints from an endpointslice where all local endpoints are terminating and not serving and a remote endpoint is ready",
+			[]discovery.Endpoint{
+				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
+				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
+				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+			},
+			testNode,
+			[]string{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			answer := GetLocalEligibleEndpointAddresses([]*discovery.EndpointSlice{tt.endpointSlice}, service, testNode)
+			answer := getEligibleEndpointAddresses(tt.endpoints, service, tt.node)
 			if !reflect.DeepEqual(answer, tt.want) {
 				t.Errorf("got %v, want %v", answer, tt.want)
 			}
