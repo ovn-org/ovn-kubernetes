@@ -96,6 +96,11 @@ func (s *BsdSocket) receive() (arpDatagram, time.Time, error) {
 	// skip bpf header + 14 bytes ethernet header
 	var hdrLength = bpfHdrLength + 14
 
+	if n <= hdrLength || len(buffer) <= hdrLength {
+		// amount of bytes read by socket is less than an ethernet header. clearly not what we look for
+		return arpDatagram{}, time.Now(), fmt.Errorf("buffer with invalid length")
+
+	}
 	return parseArpDatagram(buffer[hdrLength:n]), time.Now(), nil
 }
 
