@@ -1016,7 +1016,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 						return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
 					}
 					var gwIP net.IP
-					var routes []routemanager.Route
 					for _, subnet := range config.Kubernetes.ServiceCIDRs {
 						if utilnet.IsIPv4CIDR(subnet) {
 							gwIP = mgmtPortConfig.ipv4.gwIP
@@ -1024,14 +1023,13 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 							gwIP = mgmtPortConfig.ipv6.gwIP
 						}
 						subnet := *subnet
-						routes = append(routes, routemanager.Route{
-							GwIP:   gwIP,
-							Subnet: &subnet,
-							MTU:    config.Default.RoutableMTU,
-							SrcIP:  nil,
+						nc.routeManager.Add(netlink.Route{
+							LinkIndex: link.Attrs().Index,
+							Gw:        gwIP,
+							Dst:       &subnet,
+							MTU:       config.Default.RoutableMTU,
 						})
 					}
-					nc.routeManager.Add(routemanager.RoutesPerLink{Link: link, Routes: routes})
 				}
 			}
 		}
@@ -1164,7 +1162,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	linkManager := linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode, nc.updateGatewayMAC)
 
 	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
-		c, err := egressip.NewController(nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
+		c, err := egressip.NewController(nc.Kube, nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
 			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.routeManager, config.IPv4Mode,
 			config.IPv6Mode, nc.name, linkManager)
 		if err != nil {
@@ -1175,7 +1173,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to run egress IP controller: %v", err)
 		}
 	} else {
-		klog.Infof("Egress IP for non-OVN managed networks is disabled")
+		klog.Infof("Egress IP for secondary host network is disabled")
 	}
 
 	linkManager.Run(nc.stopChan, nc.wg)
@@ -1434,7 +1432,7 @@ func upgradeServiceRoute(routeManager *routemanager.Controller, bridgeName strin
 	}
 	for _, serviceCIDR := range config.Kubernetes.ServiceCIDRs {
 		serviceCIDR := *serviceCIDR
-		routeManager.Add(routemanager.RoutesPerLink{Link: link, Routes: []routemanager.Route{{Subnet: &serviceCIDR}}})
+		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Dst: &serviceCIDR})
 	}
 
 	// add route via OVS bridge

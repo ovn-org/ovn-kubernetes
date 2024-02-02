@@ -14,11 +14,33 @@ import (
 	kexec "k8s.io/utils/exec"
 )
 
-// Chain allows users to manage rules for a particular iptables table and chain for ipv4 and ipv6 protocols
-type Chain struct {
+// rulesIndex structure is used as a golang map key to point to a set of IPTable rules. It holds all the necessary info
+// to retrieve IPTable rules
+type rulesIndex struct {
 	Table iptables.Table
 	Chain iptables.Chain
 	Proto iptables.Protocol
+}
+
+// rules represents one or more rules within a chain of a specific IP version
+type rules struct {
+	// exclusive represents whether the set of rules specified in ruleArgs are the exclusive set of rules allowed in a chain or not.
+	// if exclusive is true, only the ruleArgs are allowed in a chain. If exclusive is false, other rules are allowed to co-exist.
+	exclusive bool
+	ruleArgs  []RuleArg
+}
+
+func (r rules) has(candidateRuleArg RuleArg) bool {
+	for _, ruleArg := range r.ruleArgs {
+		if ruleArg.equal(candidateRuleArg) {
+			return true
+		}
+	}
+	return false
+}
+
+func newRules() rules {
+	return rules{ruleArgs: make([]RuleArg, 0)}
 }
 
 // RuleArg represents a single iptables rule entry
@@ -32,21 +54,21 @@ func (r RuleArg) equal(r2 RuleArg) bool {
 
 // Controller manages iptables for clients
 type Controller struct {
-	mu         *sync.Mutex
-	chainRules map[Chain][]RuleArg
-	chains     []Chain
-	iptV4      iptables.Interface
-	iptV6      iptables.Interface
+	mu    *sync.Mutex // used to sync interaction with iptables or rules map
+	store map[rulesIndex]rules
+	iptV4 iptables.Interface
+	iptV6 iptables.Interface
 }
 
-// NewController creates a controller to manage chains and rules
+// NewController creates a controller to manage chains and rules. Provides functionality to "own" a chain which
+// allows consumers to ensure only the rules submitted to the controller persist and unmanaged rules are removed.
+// If a chain is unowned, then only the rules that are submitted persist.
 func NewController() *Controller {
 	return &Controller{
-		chainRules: make(map[Chain][]RuleArg, 0),
-		chains:     make([]Chain, 0),
-		mu:         &sync.Mutex{},
-		iptV4:      iptables.New(kexec.New(), iptables.ProtocolIPv4),
-		iptV6:      iptables.New(kexec.New(), iptables.ProtocolIPv6),
+		store: make(map[rulesIndex]rules, 0),
+		mu:    &sync.Mutex{},
+		iptV4: iptables.New(kexec.New(), iptables.ProtocolIPv4),
+		iptV6: iptables.New(kexec.New(), iptables.ProtocolIPv6),
 	}
 }
 
@@ -71,43 +93,26 @@ func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 // OwnChain ensures this chain exists and any rules within it this component exclusively owns. Any rules that we do not
 // manage for this chain will be removed.
 func (c *Controller) OwnChain(table iptables.Table, chain iptables.Chain, proto iptables.Protocol) error {
+	klog.Infof("IPTables manager: own chain: table %s, chain %s, protocol %s", table, chain, proto)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	newChain := Chain{
+	ruleIndex := rulesIndex{
 		Table: table,
 		Chain: chain,
 		Proto: proto,
 	}
-	var alreadyExists bool
-	for _, existingChain := range c.chains {
-		if existingChain == newChain {
-			alreadyExists = true
-		}
+	rules, found := c.store[ruleIndex]
+	if !found {
+		rules = newRules()
+		rules.exclusive = true
 	}
-	if alreadyExists {
-		return nil
-	}
-	c.chains = append(c.chains, newChain)
+	c.store[ruleIndex] = rules
 	return c.reconcile()
 }
 
-// FlushChain removes any rules within a chain
-func (c *Controller) FlushChain(table iptables.Table, chain iptables.Chain, proto iptables.Protocol) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	ch := Chain{
-		Table: table,
-		Chain: chain,
-		Proto: proto,
-	}
-	if _, ok := c.chainRules[ch]; !ok {
-		return nil
-	}
-	c.chainRules[ch] = make([]RuleArg, 0)
-	return c.reconcile()
-}
-
+// DeleteRule deletes an iptable rule
 func (c *Controller) DeleteRule(table iptables.Table, chain iptables.Chain, proto iptables.Protocol, ruleArg RuleArg) error {
+	klog.Infof("IPTables manager: delete rule - table %s, chain %s, protocol %s, rule %v", table, chain, proto, ruleArg)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var err error
@@ -134,49 +139,62 @@ func (c *Controller) DeleteRule(table iptables.Table, chain iptables.Chain, prot
 			return fmt.Errorf("failed to IPv6 delete rule %v on table %s and chain %s: %v", ruleArg.Args, table, chain, err)
 		}
 	}
-	ch := Chain{
+	ruleIndex := rulesIndex{
 		Table: table,
 		Chain: chain,
 		Proto: proto,
 	}
-	temp := make([]RuleArg, 0)
-	for _, existingRuleArg := range c.chainRules[ch] {
+	savedRules, alreadyExists := c.store[ruleIndex]
+	if !alreadyExists {
+		return nil
+	}
+	tempRules := newRules()
+	tempRules.exclusive = savedRules.exclusive
+	for _, existingRuleArg := range savedRules.ruleArgs {
 		if !existingRuleArg.equal(ruleArg) {
-			temp = append(temp, existingRuleArg)
+			tempRules.ruleArgs = append(tempRules.ruleArgs, existingRuleArg)
 		}
 	}
-	c.chainRules[ch] = temp
+	c.store[ruleIndex] = tempRules
 	return nil
 }
 
-// EnsureRules ensures only the subset of rules specified in the function description will be present on the chain
-func (c *Controller) EnsureRules(table iptables.Table, chain iptables.Chain, proto iptables.Protocol, newRuleArgs []RuleArg) error {
+// EnsureRule adds an iptable rule that will persist until deleted
+func (c *Controller) EnsureRule(table iptables.Table, chain iptables.Chain, proto iptables.Protocol, ruleArg RuleArg) error {
+	klog.Infof("IPTables manager: ensure rule - table %s, chain %s, protocol %s, rule: %v", table, chain, proto, ruleArg)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	newChain := Chain{
+	ruleIndex := rulesIndex{
 		Table: table,
 		Chain: chain,
 		Proto: proto,
 	}
-	wantedRuleArgs, alreadyExists := c.chainRules[newChain]
-	if !alreadyExists {
-		c.chainRules[newChain] = newRuleArgs
+	existingRuleArgs, exists := c.store[ruleIndex]
+	if !exists {
+		rules := newRules()
+		rules.ruleArgs = []RuleArg{ruleArg}
+		c.store[ruleIndex] = rules
 	} else {
-		for _, newRuleArg := range newRuleArgs {
-			alreadyExists = false
-
-			for _, existingRuleArg := range wantedRuleArgs {
-				if existingRuleArg.equal(newRuleArg) {
-					alreadyExists = true
-					break
-				}
-			}
-			if !alreadyExists {
-				c.chainRules[newChain] = append(c.chainRules[newChain], newRuleArg)
+		exists = false
+		for _, existingRuleArg := range existingRuleArgs.ruleArgs {
+			if existingRuleArg.equal(ruleArg) {
+				exists = true
+				break
 			}
 		}
+		if !exists {
+			existingRuleArgs.ruleArgs = append(existingRuleArgs.ruleArgs, ruleArg)
+		}
+		c.store[ruleIndex] = existingRuleArgs
 	}
 	return c.reconcile()
+}
+
+func (c *Controller) GetChainRuleArgs(table iptables.Table, chain iptables.Chain, proto iptables.Protocol) ([]RuleArg, error) {
+	if proto == iptables.ProtocolIPv4 {
+		return c.GetIPv4ChainRuleArgs(table, chain)
+	}
+	return c.GetIPv6ChainRuleArgs(table, chain)
 }
 
 // GetIPv4ChainRuleArgs returns IPv4 RuleArgs
@@ -208,56 +226,23 @@ func getChainRuleArgs(ipt iptables.Interface, table iptables.Table, chain iptabl
 				Args: strings.Split(line, " ")[2:],
 			})
 		}
-
 	}
 	return rules, nil
 }
 
-func processRules(ipt iptables.Interface, ownedChains []Chain, wantedChainRules map[Chain][]RuleArg, existingChainRules map[Chain][]RuleArg) error {
+func processRules(ipt iptables.Interface, wantedChainRules map[rulesIndex]rules, existingChainRules map[rulesIndex]rules) error {
 	var err error
-	for _, wantedChain := range ownedChains {
-		err = execIPTablesWithRetry(func() error {
-			_, err = ipt.EnsureChain(wantedChain.Table, wantedChain.Chain)
-			if err != nil {
-				return fmt.Errorf("failed to ensure chain %s in table %s: %v", wantedChain.Chain, wantedChain.Table, err)
-			}
-			return nil
-		})
-		if err != nil {
-			return fmt.Errorf("failed to process iptables rules in table %s: %v", wantedChain.Table, err)
-		}
-	}
-	for existingChain, existingRuleArgs := range existingChainRules {
-		if existingChain.Proto != ipt.Protocol() {
+	// cleanup any rules we see that we do not expect if the chain is 'owned'
+	for rulesIndex, existingRules := range existingChainRules {
+		if rulesIndex.Proto != ipt.Protocol() {
 			continue
 		}
-		wantedRuleArgs, found := wantedChainRules[existingChain]
-		if !found {
-			// we don't delete chains we don't manage, but we ensure rules are removed
-			continue
-		}
-		err = execIPTablesWithRetry(func() error {
-			_, err = ipt.EnsureChain(existingChain.Table, existingChain.Chain)
-			if err != nil {
-				return fmt.Errorf("failed to ensure chain %s in table %s: %v", existingChain.Chain, existingChain.Table, err)
-			}
-			return nil
-		})
-		if err != nil {
-			klog.Errorf("IPTables manager: failed to process iptables rules: %v", err)
-		}
-		var isOwnedChain bool
-		for _, ownedChain := range ownedChains {
-			if ownedChain == existingChain {
-				isOwnedChain = true
-				break
-			}
-		}
+		wantedRules, found := wantedChainRules[rulesIndex]
 		// owned chains means we exclusively control all rules in the chain and therefore remove any rules which we do not want
-		if isOwnedChain {
-			for _, existingRuleArg := range existingRuleArgs {
+		if found && wantedRules.exclusive {
+			for _, existingRuleArg := range existingRules.ruleArgs {
 				found = false
-				for _, wantedRuleArg := range wantedRuleArgs {
+				for _, wantedRuleArg := range wantedRules.ruleArgs {
 					if wantedRuleArg.equal(existingRuleArg) {
 						found = true
 						break
@@ -265,75 +250,72 @@ func processRules(ipt iptables.Interface, ownedChains []Chain, wantedChainRules 
 				}
 				if !found {
 					err = execIPTablesWithRetry(func() error {
-						if err = ipt.DeleteRule(existingChain.Table, existingChain.Chain, existingRuleArg.Args...); err != nil {
+						if err = ipt.DeleteRule(rulesIndex.Table, rulesIndex.Chain, existingRuleArg.Args...); err != nil {
 							return fmt.Errorf("failed to delete stale rule (%s) in table %s and chain %s: %v",
-								strings.Join(existingRuleArg.Args, " "), existingChain.Table, existingChain.Chain, err)
+								strings.Join(existingRuleArg.Args, " "), rulesIndex.Table, rulesIndex.Chain, err)
 						}
 						return nil
 					})
 					if err != nil {
-						klog.Errorf("IPTables manager: failed to process iptables rules: %v", err)
+						klog.Errorf("IPTables manager: failed to process iptables rule: %v", err)
 					}
 				}
 			}
 		}
-		// add the rules we want
-		for _, wantedRule := range wantedRuleArgs {
+	}
+	// add the rules we want that do not exist
+	for rulesIndex, wantedRules := range wantedChainRules {
+		if rulesIndex.Proto != ipt.Protocol() {
+			continue
+		}
+		for _, wantedRuleArg := range wantedRules.ruleArgs {
+			if existingChainRules[rulesIndex].has(wantedRuleArg) {
+				continue
+			}
 			err = execIPTablesWithRetry(func() error {
-				_, err = ipt.EnsureRule(iptables.Prepend, existingChain.Table, existingChain.Chain, wantedRule.Args...)
+				_, err = ipt.EnsureRule(iptables.Prepend, rulesIndex.Table, rulesIndex.Chain, wantedRuleArg.Args...)
 				if err != nil {
-					return fmt.Errorf("failed to ensure rule (%v) in chain %s and table %s: %v", wantedRule.Args,
-						existingChain.Chain, existingChain.Table, err)
+					return fmt.Errorf("failed to ensure rule (%v) in chain %s and table %s: %v", wantedRuleArg.Args,
+						rulesIndex.Chain, rulesIndex.Table, err)
 				}
 				return nil
 			})
 			if err != nil {
-				return fmt.Errorf("failed to process iptables rules (%+v) in chain %s and table %s: %v", wantedRule.Args,
-					existingChain.Chain, existingChain.Table, err)
+				return err
 			}
 		}
 	}
+
 	return nil
 }
 
-// reconcile configures IPTables to ensure the correct chains and rules
+// reconcile configures IPTables to ensure the correct chains and rules.
 // CPU starvation or iptables lock held by an external entity may cause this function to take some time to execute.
+// callers must hold the lock for mutex mu.
 func (c *Controller) reconcile() error {
 	start := time.Now()
 	defer func() {
 		klog.V(5).Infof("Reconciling IPTables rules took %v", time.Since(start))
 	}()
 
-	existingChainRulesV4 := make(map[Chain][]RuleArg)
-	existingChainRulesV6 := make(map[Chain][]RuleArg)
-
-	// Gather existing rules from tables and chains
-	for chain := range c.chainRules {
-		if chain.Proto == iptables.ProtocolIPv4 {
-			rules, err := c.GetIPv4ChainRuleArgs(chain.Table, chain.Chain)
-			if err != nil {
-				return fmt.Errorf("failed to find IPv4 rules for chain %s in table %s", chain.Chain, chain.Table)
-			} else {
-				existingChainRulesV4[chain] = rules
-			}
-		} else if chain.Proto == iptables.ProtocolIPv6 {
-			rules, err := c.GetIPv6ChainRuleArgs(chain.Table, chain.Chain)
-			if err != nil {
-				return fmt.Errorf("failed to find IPv6 rules for chain %s in table %s", chain.Chain, chain.Table)
-			} else {
-				existingChainRulesV6[chain] = rules
-			}
+	existingChainRules := make(map[rulesIndex]rules)
+	// Gather existing rules from tables and chains that we care about
+	for ruleIndex := range c.store {
+		if err := ensureChainExistsWithRetry(getIPTableClient(c.iptV4, c.iptV6, ruleIndex.Proto), ruleIndex.Table, ruleIndex.Chain); err != nil {
+			return fmt.Errorf("failed to ensure chain %s: %v", ruleIndex.Chain, err)
 		}
+		ruleArgs, err := c.GetChainRuleArgs(ruleIndex.Table, ruleIndex.Chain, ruleIndex.Proto)
+		if err != nil {
+			return fmt.Errorf("failed to get %s rules for chain %s in table %s: %v", ruleIndex.Proto, ruleIndex.Chain, ruleIndex.Table, err)
+		}
+		existingChainRules[ruleIndex] = rules{ruleArgs: ruleArgs}
 	}
-
-	if err := processRules(c.iptV4, c.chains, c.chainRules, existingChainRulesV4); err != nil {
+	if err := processRules(c.iptV4, c.store, existingChainRules); err != nil {
 		return fmt.Errorf("failed to process IPv4 rules: %v", err)
 	}
-
-	if err := processRules(c.iptV6, c.chains, c.chainRules, existingChainRulesV6); err != nil {
+	if err := processRules(c.iptV6, c.store, existingChainRules); err != nil {
 		return fmt.Errorf("failed to process IPv6 rules: %v", err)
 	}
-
 	return nil
 }
 
@@ -368,4 +350,18 @@ func isResourceError(err error) bool {
 		return ee.ExitStatus() == iptablesStatusResourceProblem
 	}
 	return false
+}
+
+func ensureChainExistsWithRetry(ipt iptables.Interface, table iptables.Table, chain iptables.Chain) error {
+	return execIPTablesWithRetry(func() error {
+		_, err := ipt.EnsureChain(table, chain)
+		return err
+	})
+}
+
+func getIPTableClient(ipv4, ipv6 iptables.Interface, proto iptables.Protocol) iptables.Interface {
+	if proto == iptables.ProtocolIPv4 {
+		return ipv4
+	}
+	return ipv6
 }

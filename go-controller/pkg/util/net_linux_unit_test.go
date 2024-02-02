@@ -427,7 +427,7 @@ func TestLinkRoutesDel(t *testing.T) {
 					OnCallMethodArgType: []string{"*mocks.Link", "int"},
 					RetArgList: []interface{}{
 						[]netlink.Route{
-							{Dst: nil},
+							{Dst: getAnyNetwork(false)},
 							{Dst: ovntest.MustParseIPNet("192.168.1.0/24")},
 						},
 						nil,
@@ -1137,4 +1137,14 @@ func TestIsAddressReservedForInternalUse(t *testing.T) {
 			assert.Equal(t, res, tc.outExp)
 		})
 	}
+}
+
+func getAnyNetwork(v6 bool) *net.IPNet {
+	var ipNet *net.IPNet
+	if v6 {
+		_, ipNet, _ = net.ParseCIDR("::/0")
+	} else {
+		_, ipNet, _ = net.ParseCIDR("0.0.0.0/0")
+	}
+	return ipNet
 }

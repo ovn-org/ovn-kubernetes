@@ -1986,34 +1986,17 @@ func addMasqueradeRoute(routeManager *routemanager.Controller, netIfaceName, nod
 		return fmt.Errorf("unable to find shared gw bridge interface: %s", netIfaceName)
 	}
 	mtu := 0
-	var routes []routemanager.Route
 	if ipv4 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String()))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv4)
-
-		routes = append(routes, routemanager.Route{
-			GwIP:   nil,
-			Subnet: masqIPNet,
-			MTU:    mtu,
-			SrcIP:  ipv4,
-		})
+		routeManager.Add(netlink.Route{LinkIndex: netIfaceLink.Attrs().Index, Dst: masqIPNet, MTU: mtu, Src: ipv4})
 	}
 
 	if ipv6 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/128", config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String()))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv6)
-
-		routes = append(routes, routemanager.Route{
-			GwIP:   nil,
-			Subnet: masqIPNet,
-			MTU:    mtu,
-			SrcIP:  ipv6,
-		})
+		routeManager.Add(netlink.Route{LinkIndex: netIfaceLink.Attrs().Index, Dst: masqIPNet, MTU: mtu, Src: ipv6})
 	}
-	if len(routes) > 0 {
-		routeManager.Add(routemanager.RoutesPerLink{Link: netIfaceLink, Routes: routes})
-	}
-
 	return nil
 }
 
