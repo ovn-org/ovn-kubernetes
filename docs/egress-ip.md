@@ -115,19 +115,19 @@ COMMIT
 ...
 ```
 
-IPRoute2 rules will look like the following - note rule with priority `6000` and also the refered table `1008`:
+IPRoute2 rules will look like the following - note rule with priority `6000` and also the table `1111`:
 ```shell
 sh-5.2# ip rule
 0:	from all lookup local
 30:	from all fwmark 0x1745ec lookup 7
-6000:	from 10.244.2.3 lookup 1008
+6000:	from 10.244.2.3 lookup 1111
 32766:	from all lookup main
 32767:	from all lookup default
 ```
 
-And the default route in the correct table `1008`:
+And the default route in the correct table `1111`:
 ```shell
-sh-5.2# ip route show table 1008
+sh-5.2# ip route show table 1111
 default dev dummy
 ```
 
