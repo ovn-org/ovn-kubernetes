@@ -253,7 +253,7 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 }
 
 // syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
-// NOTE: We could have created the router port in ensureNodeLogicalNetwork() instead of here,
+// NOTE: We could have created the router port in createNodeLogicalSwitch() instead of here,
 // but chassis ID is not available at that moment. We need the chassis ID to set the
 // gateway-chassis, which in effect pins the logical switch to the current node in OVN.
 // Otherwise, ovn-controller will flood-fill unrelated datapaths unnecessarily, causing scale
