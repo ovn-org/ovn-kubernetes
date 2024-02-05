@@ -1033,8 +1033,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				NodeMgmtPortMAC:      "0a:58:0a:01:02:02",
 				DnatSnatIP:           "169.254.0.1",
 			}
-			testNode1 := node1.k8sNode("1")
-			testNode2 := node2.k8sNode("2")
+			testNode1 := node1.k8sNode("2")
+			testNode2 := node2.k8sNode("3")
 			testNode2.Annotations["k8s.ovn.org/node-subnets"] = "{\"default\":[\"10.1.3.0/24\"]}"
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -1184,7 +1184,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
 				p := func(item *nbdb.LogicalRouterPolicy) bool {
 					return item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" &&
-						item.Match == fmt.Sprintf("ip4.src == 100.64.0.1 && ip4.dst == %s", hoNodeSubnet) &&
+						item.Match == fmt.Sprintf("ip4.src == 100.64.0.2 && ip4.dst == %s", hoNodeSubnet) &&
 						item.Action == "reroute" &&
 						item.Nexthops[0] == nodeHOIP
 				}
