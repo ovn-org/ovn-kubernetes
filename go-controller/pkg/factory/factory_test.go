@@ -320,6 +320,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		adminNetworkPolicies                []*anpapi.AdminNetworkPolicy
 		baselineAdminNetworkPolicies        []*anpapi.BaselineAdminNetworkPolicy
 		err                                 error
+		shutdown                            bool
 	)
 
 	const (
@@ -478,10 +479,13 @@ var _ = Describe("Watch Factory Operations", func() {
 			}
 			return true, obj, nil
 		})
+		shutdown = false
 	})
 
 	AfterEach(func() {
-		wf.Shutdown()
+		if !shutdown {
+			wf.Shutdown()
+		}
 	})
 
 	Context("when a processExisting is given", func() {
@@ -744,6 +748,27 @@ var _ = Describe("Watch Factory Operations", func() {
 			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP"))
 			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP2"))
 			testExisting(BaselineAdminNetworkPolicyType)
+		})
+		It("doesn't deadlock when factory is shutdown", func() {
+			// every queue has length 10, but some events may be handled before the stop channel event is selected,
+			// so multiply by 15 instead of 10 to ensure overflow
+			for i := uint32(1); i <= defaultNumEventQueues*15; i++ {
+				pods = append(pods, newPod(fmt.Sprintf("pod%d", i), "default"))
+			}
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			wf.Shutdown()
+			shutdown = true
+			h, err := wf.addHandler(PodType, "", nil,
+				cache.ResourceEventHandlerFuncs{
+					AddFunc:    func(obj interface{}) {},
+					UpdateFunc: func(old, new interface{}) {},
+					DeleteFunc: func(obj interface{}) {},
+				}, nil, wf.GetHandlerPriority(PodType))
+			Expect(err).NotTo(HaveOccurred())
+			wf.removeHandler(PodType, h)
 		})
 	})
 
