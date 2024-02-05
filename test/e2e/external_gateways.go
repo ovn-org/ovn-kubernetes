@@ -25,6 +25,7 @@ import (
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	"k8s.io/kubernetes/test/e2e/framework/skipper"
+	utilnet "k8s.io/utils/net"
 )
 
 // This is the image used for the containers acting as externalgateways, built
@@ -780,8 +781,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 				if protocol == "udp" {
-					gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
-					gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
+					// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
+					if utilnet.IsIPv4String(addresses.gatewayIPs[0]) {
+						gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
+						gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
+					} else {
+						gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0))
+						gomega.Expect(totalPodConnEntries).To(gomega.Equal(4)) // 6-2
+					}
 				} else {
 					gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
 					gomega.Expect(totalPodConnEntries).To(gomega.Equal(6))
@@ -871,8 +878,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 				if protocol == "udp" {
-					gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
-					gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
+					// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
+					if utilnet.IsIPv4String(addresses.gatewayIPs[0]) {
+						gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
+						gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
+					} else {
+						gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0))
+						gomega.Expect(totalPodConnEntries).To(gomega.Equal(4)) // 6-2
+					}
 				} else {
 					gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
 					gomega.Expect(totalPodConnEntries).To(gomega.Equal(6))
@@ -1376,7 +1389,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 						skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 					}
-					createAPBExternalRouteCRWithDynamicHop(defaultPolicyName, f.Namespace.Name, servingNamespace, false, addressesv4.gatewayIPs)
+					createAPBExternalRouteCRWithDynamicHop(defaultPolicyName, f.Namespace.Name, servingNamespace, false, addresses.gatewayIPs)
 
 					ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways", addresses.srcPodIP))
 					for _, gwContainer := range gwContainers {
@@ -1708,8 +1721,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 				updateAPBExternalRouteCRWithStaticHop(defaultPolicyName, f.Namespace.Name, false, addresses.gatewayIPs[0])
 				if protocol == "udp" {
-					podConnEntriesWithMACLabelsSet = 1 // we still have the conntrack entry for the remaining gateway
-					totalPodConnEntries = 5            // 6-1
+					// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
+					if utilnet.IsIPv4String(addresses.gatewayIPs[0]) {
+						podConnEntriesWithMACLabelsSet = 1 // we still have the conntrack entry for the remaining gateway
+						totalPodConnEntries = 5            // 6-1
+					} else {
+						podConnEntriesWithMACLabelsSet = 0
+						totalPodConnEntries = 4 // 6-2
+					}
 				}
 
 				gomega.Eventually(func() int {
@@ -1753,7 +1772,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					annotateMultusNetworkStatusInPodGateway(gwPod, servingNamespace, []string{addresses.gatewayIPs[i], addresses.gatewayIPs[i]})
 				}
 
-				createAPBExternalRouteCRWithDynamicHop(defaultPolicyName, f.Namespace.Name, servingNamespace, false, addressesv4.gatewayIPs)
+				createAPBExternalRouteCRWithDynamicHop(defaultPolicyName, f.Namespace.Name, servingNamespace, false, addresses.gatewayIPs)
 
 				setupIperf3Client := func(container, address string, port int) {
 					// note iperf3 even when using udp also spawns tcp connection first; so we indirectly also have the tcp connection when using "-u" flag
@@ -1792,8 +1811,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 				if protocol == "udp" {
-					podConnEntriesWithMACLabelsSet = 1
-					totalPodConnEntries = 5
+					// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
+					if utilnet.IsIPv4String(addresses.gatewayIPs[0]) {
+						podConnEntriesWithMACLabelsSet = 1
+						totalPodConnEntries = 5
+					} else {
+						podConnEntriesWithMACLabelsSet = 0
+						totalPodConnEntries = 4
+					}
 				}
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -2483,22 +2508,38 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					// in hex without leading 0s.
 					macAddressGW[i] = strings.TrimLeft(strings.Replace(macAddressExtGW.String(), ":", "", -1), "0")
 				}
+
+				nodeName := getPod(f, srcPodName).Spec.NodeName
+				expectedTotalEntries := 6
+				expectedMACEntries := 2
+				ginkgo.By("Check to ensure initial conntrack entries are 2 mac address label, and 6 total entries")
+				gomega.Eventually(func() int {
+					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
+					klog.Infof("Number of entries with macAddressGW %s:%d", macAddressGW, n)
+					return n
+				}, time.Minute, 5).Should(gomega.Equal(expectedMACEntries))
+				gomega.Expect(pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)).To(gomega.Equal(expectedTotalEntries)) // total conntrack entries for this pod/protocol
+
 				ginkgo.By("Removing the namespace annotations to leave only the CR policy active")
 				annotateNamespaceForGateway(f.Namespace.Name, false, "")
 
-				ginkgo.By("Check if conntrack entries for ECMP routes are created for the 2 external gateways")
-				nodeName := getPod(f, srcPodName).Spec.NodeName
-				podConnEntriesWithMACLabelsSet := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
-				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
+				ginkgo.By("Check if conntrack entries for ECMP routes still exist for the 2 external gateways")
+				if protocol == "udp" {
+					// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
+					if utilnet.IsIPv6String(addresses.gatewayIPs[0]) {
+						expectedTotalEntries = 4
+						expectedMACEntries = 0
+					}
+				}
+
+				gomega.Eventually(func() int {
+					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
+					klog.Infof("Number of entries with macAddressGW %s:%d", macAddressGW, n)
+					return n
+				}, time.Minute, 5).Should(gomega.Equal(expectedMACEntries))
+
 				totalPodConnEntries := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
-				gomega.Expect(totalPodConnEntries).To(gomega.Equal(6)) // total conntrack entries for this pod/protocol
-
-				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
-				podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
-				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
-
-				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
-				gomega.Expect(totalPodConnEntries).To(gomega.Equal(6))
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(expectedTotalEntries)) // total conntrack entries for this pod/protocol
 
 			},
 				ginkgo.Entry("IPV4 udp", &addressesv4, "udp"),
@@ -2506,7 +2547,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.Entry("IPV6 udp", &addressesv6, "udp"),
 				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp"))
 
-			ginkgo.DescribeTable("ExternalGWPod annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the pods while the CR dynamic hop still references the same pods with the pod selector", func(addresses *gatewayTestIPs, protocol string) {
+			ginkgo.DescribeTable("ExternalGWPod annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the pods while the CR dynamic hop still "+
+				"references the same pods with the pod selector", func(addresses *gatewayTestIPs, protocol string) {
 				if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 					skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 				}
@@ -2518,13 +2560,13 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					}
 					annotatePodForGateway(gwPod, servingNamespace, f.Namespace.Name, networkIPs, false)
 				}
-				createAPBExternalRouteCRWithDynamicHop(defaultPolicyName, f.Namespace.Name, servingNamespace, false, addressesv4.gatewayIPs)
+				createAPBExternalRouteCRWithDynamicHop(defaultPolicyName, f.Namespace.Name, servingNamespace, false, addresses.gatewayIPs)
 				// ensure the conntrack deletion tracker annotation is updated
 				if !isInterconnectEnabled() {
 					ginkgo.By("Check if the k8s.ovn.org/external-gw-pod-ips got updated for the app namespace")
 					err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 						ns := getNamespace(f, f.Namespace.Name)
-						return (ns.Annotations[externalGatewayPodIPsAnnotation] == fmt.Sprintf("%s,%s", addresses.gatewayIPs[0], addresses.gatewayIPs[1])), nil
+						return ns.Annotations[externalGatewayPodIPsAnnotation] == fmt.Sprintf("%s,%s", addresses.gatewayIPs[0], addresses.gatewayIPs[1]), nil
 					})
 					framework.ExpectNoError(err, "Check if the k8s.ovn.org/external-gw-pod-ips got updated, failed: %v", err)
 				}
@@ -2692,9 +2734,13 @@ func setupGatewayContainers(f *framework.Framework, nodes *v1.NodeList, containe
 
 	if addressesv6.srcPodIP != "" && addressesv6.nodeIP != "" {
 		testIPv6 = true
+	} else {
+		addressesv6 = gatewayTestIPs{}
 	}
 	if addressesv4.srcPodIP != "" && addressesv4.nodeIP != "" {
 		testIPv4 = true
+	} else {
+		addressesv4 = gatewayTestIPs{}
 	}
 	if !testIPv4 && !testIPv6 {
 		framework.Fail("No ipv4 nor ipv6 addresses found in nodes and src pod")
@@ -2764,9 +2810,19 @@ func setupAnnotatedGatewayPods(f *framework.Framework, nodes *v1.NodeList, pod1,
 	}
 
 	for i, gwPod := range gwPods {
-		networkIPs := fmt.Sprintf("\"%s\"", addressesv4.gatewayIPs[i])
+		var networkIPs string
+		if len(addressesv4.gatewayIPs) > 0 {
+			// IPv4
+			networkIPs = fmt.Sprintf("\"%s\"", addressesv4.gatewayIPs[i])
+		}
 		if addressesv6.srcPodIP != "" && addressesv6.nodeIP != "" {
-			networkIPs = fmt.Sprintf("\"%s\", \"%s\"", addressesv4.gatewayIPs[i], addressesv6.gatewayIPs[i])
+			if len(networkIPs) > 0 {
+				// IPv4 and IPv6
+				networkIPs = fmt.Sprintf("%s, \"%s\"", networkIPs, addressesv6.gatewayIPs[i])
+			} else {
+				// IPv6 only
+				networkIPs = fmt.Sprintf("\"%s\"", addressesv6.gatewayIPs[i])
+			}
 		}
 		annotatePodForGateway(gwPod, ns, f.Namespace.Name, networkIPs, bfd)
 	}
@@ -2786,7 +2842,14 @@ func setupPolicyBasedGatewayPods(f *framework.Framework, nodes *v1.NodeList, pod
 	}
 
 	for i, gwPod := range gwPods {
-		annotateMultusNetworkStatusInPodGateway(gwPod, ns, []string{addressesv4.gatewayIPs[i]})
+		gwIPs := []string{}
+		if len(addressesv4.gatewayIPs) > 0 {
+			gwIPs = append(gwIPs, addressesv4.gatewayIPs[i])
+		}
+		if len(addressesv6.gatewayIPs) > 0 {
+			gwIPs = append(gwIPs, addressesv6.gatewayIPs[i])
+		}
+		annotateMultusNetworkStatusInPodGateway(gwPod, ns, gwIPs)
 	}
 
 	return gwPods
