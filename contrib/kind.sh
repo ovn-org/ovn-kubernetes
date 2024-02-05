@@ -1043,7 +1043,7 @@ install_metallb() {
   cd metallb
   pip install -r dev-env/requirements.txt
   # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
-  GOBIN="" inv dev-env -n ovn -b frr -p bgp
+  GOBIN="" inv dev-env -n ovn -b frr-k8s -p bgp
   docker network create --driver bridge clientnet
   docker network connect clientnet frr
   docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
