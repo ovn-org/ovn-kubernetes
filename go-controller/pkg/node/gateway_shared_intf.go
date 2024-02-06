@@ -487,13 +487,13 @@ func addServiceRules(service *kapi.Service, localEndpoints []string, svcHasLocal
 		npw.ofm.requestFlowSync()
 		if !npw.dpuMode {
 			// add iptable rules only in full mode
-			if err = addGatewayIptRules(service, localEndpoints, svcHasLocalHostNetEndPnt); err != nil {
+			if err = addGatewayIptRules(service, localEndpoints, svcHasLocalHostNetEndPnt, npw.nodeIPManager.mgmtPortConfig); err != nil {
 				errors = append(errors, err)
 			}
 		}
 	} else {
 		// For Host Only Mode
-		if err = addGatewayIptRules(service, localEndpoints, svcHasLocalHostNetEndPnt); err != nil {
+		if err = addGatewayIptRules(service, localEndpoints, svcHasLocalHostNetEndPnt, npw.nodeIPManager.mgmtPortConfig); err != nil {
 			errors = append(errors, err)
 		}
 
@@ -540,19 +540,19 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 			// |                          |                       |                       |   + default dnat towards CIP   |
 			// +--------------------------+-----------------------+-----------------------+--------------------------------+
 
-			if err = delGatewayIptRules(service, localEndpoints, true); err != nil {
+			if err = delGatewayIptRules(service, localEndpoints, true, npw.nodeIPManager.mgmtPortConfig); err != nil {
 				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 			}
-			if err = delGatewayIptRules(service, localEndpoints, false); err != nil {
+			if err = delGatewayIptRules(service, localEndpoints, false, npw.nodeIPManager.mgmtPortConfig); err != nil {
 				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 			}
 		}
 	} else {
 
-		if err = delGatewayIptRules(service, localEndpoints, true); err != nil {
+		if err = delGatewayIptRules(service, localEndpoints, true, npw.nodeIPManager.mgmtPortConfig); err != nil {
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
-		if err = delGatewayIptRules(service, localEndpoints, false); err != nil {
+		if err = delGatewayIptRules(service, localEndpoints, false, npw.nodeIPManager.mgmtPortConfig); err != nil {
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
 	}
@@ -770,7 +770,8 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		}
 		// Add correct iptables rules only for Full mode
 		if !npw.dpuMode {
-			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, sets.List(localEndpoints), hasLocalHostNetworkEp)...)
+			keepIPTRules = append(keepIPTRules,
+				getGatewayIPTRules(service, sets.List(localEndpoints), hasLocalHostNetworkEp, npw.nodeIPManager.mgmtPortConfig)...)
 		}
 	}
 
@@ -1050,7 +1051,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		}
 		// Add correct iptables rules.
 		// TODO: ETP and ITP is not implemented for smart NIC mode.
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false)...)
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false, nil)...)
 	}
 
 	// sync IPtables rules once

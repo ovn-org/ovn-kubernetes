@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -306,19 +307,19 @@ func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRou
 	expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup,
 	node *tNode) []libovsdbtest.TestData {
 	return addNodeLogicalFlowsHelper(testData, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup,
-		expectedClusterPortGroup, node, false)
+		expectedClusterPortGroup, node, false, false)
 }
 
 func addNodeLogicalFlowsWithServiceController(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
 	expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup,
-	node *tNode, svcTemplateSupport bool) []libovsdbtest.TestData {
+	node *tNode, svcTemplateSupport bool, fakeAddrSet bool) []libovsdbtest.TestData {
 	return addNodeLogicalFlowsHelper(testData, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup,
-		expectedClusterPortGroup, node, svcTemplateSupport)
+		expectedClusterPortGroup, node, svcTemplateSupport, fakeAddrSet)
 }
 
 func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
 	expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup,
-	node *tNode, serviceControllerEnabled bool) []libovsdbtest.TestData {
+	node *tNode, serviceControllerEnabled bool, fakeAddrSet bool) []libovsdbtest.TestData {
 
 	lrpName := types.RouterToSwitchPrefix + node.Name
 	chassisName := node.SystemID
@@ -369,8 +370,22 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 	expectedNodeSwitch.Ports = append(expectedNodeSwitch.Ports, types.K8sPrefix+node.Name+"-UUID")
 	expectedClusterPortGroup.Ports = []string{types.K8sPrefix + node.Name + "-UUID"}
 
+	addrSetName := fmt.Sprintf("%s-node-ips", node.Name)
+	dbIDs := getNodeIPAddrSetDbIDs(addrSetName, DefaultNetworkControllerName)
+	if !fakeAddrSet {
+		nodeIP := net.ParseIP(node.NodeIP)
+		// IPv6 not used in testing yet
+		v4Set, _ := addressset.GetTestDbAddrSets(dbIDs, []net.IP{nodeIP})
+		if v4Set != nil {
+			v4Set.UUID = "nodeIPV4Addrs-UUID"
+			testData = append(testData, v4Set)
+		}
+	}
+	v4NodeIPAddrSetHash, _ := addressset.GetHashNamesForAS(dbIDs)
+
 	matchStr1 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, node.Name, node.GatewayRouterIP, node.Name)
 	matchStr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, node.Name, node.NodeIP, node.Name)
+	matchStr3 := fmt.Sprintf(`ip4.dst == $%s`, v4NodeIPAddrSetHash)
 	intPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
 	testData = append(testData, &nbdb.LogicalRouterPolicy{
 		UUID:     "policy-based-route-1-UUID",
@@ -386,7 +401,16 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 		Nexthops: []string{node.NodeMgmtPortIP},
 		Priority: intPriority,
 	})
-	expectedOVNClusterRouter.Policies = append(expectedOVNClusterRouter.Policies, []string{"policy-based-route-1-UUID", "policy-based-route-2-UUID"}...)
+	testData = append(testData, &nbdb.LogicalRouterPolicy{
+		UUID:     "policy-based-route-3-UUID",
+		Action:   nbdb.LogicalRouterPolicyActionReroute,
+		Match:    matchStr3,
+		Nexthops: []string{node.NodeMgmtPortIP},
+		Priority: types.HostAccessPolicyPriority,
+	})
+
+	expectedOVNClusterRouter.Policies = append(expectedOVNClusterRouter.Policies,
+		[]string{"policy-based-route-1-UUID", "policy-based-route-2-UUID", "policy-based-route-3-UUID"}...)
 	testData = append(testData, expectedClusterPortGroup)
 	testData = append(testData, expectedClusterRouterPortGroup)
 	return testData
@@ -1077,7 +1101,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		oc.SCTPSupport = true
 
 		expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
-			expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
+			expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport, false)
 	})
 
 	ginkgo.AfterEach(func() {

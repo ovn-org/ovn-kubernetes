@@ -898,6 +898,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
 		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode)
 		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode)
+		hostIPsChanged := util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -906,7 +907,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
 				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
-				mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged
+				mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged || hostIPsChanged
 				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
 				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
 					nodeSubnetChanged || hostCIDRsChanged(oldNode, newNode) ||
@@ -935,7 +936,8 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
 			// Also check if node subnet changed, so static routes are properly set
 			// Also check if the node is used to be a hybrid overlay node
-			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged || zoneClusterChanged || primaryAddrChanged(oldNode, newNode) || switchToOvnNode
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged || zoneClusterChanged ||
+				primaryAddrChanged(oldNode, newNode) || switchToOvnNode || hostIPsChanged
 			if syncZoneIC {
 				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
 					newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)

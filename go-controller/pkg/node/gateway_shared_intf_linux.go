@@ -56,8 +56,8 @@ func deleteLocalNodeAccessBridge() error {
 }
 
 // addGatewayIptRules adds the necessary iptable rules for a service on the node
-func addGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) error {
-	rules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+func addGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool, config *managementPortConfig) error {
+	rules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt, config)
 
 	if err := insertIptRules(rules); err != nil {
 		return fmt.Errorf("failed to add iptables rules for service %s/%s: %v",
@@ -67,8 +67,8 @@ func addGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLo
 }
 
 // delGatewayIptRules removes the iptable rules for a service from the node
-func delGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) error {
-	rules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+func delGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool, config *managementPortConfig) error {
+	rules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt, config)
 
 	if err := nodeipt.DelRules(rules); err != nil {
 		return fmt.Errorf("failed to delete iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
