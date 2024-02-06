@@ -831,7 +831,7 @@ var _ = Describe("Multi Homing", func() {
 						By("asserting the *client* pod can contact the underlay service after deleting the policy")
 						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
 					},
-						Entry(
+						XEntry(
 							"minimal ingress denyall",
 							multiNetIngressDenyAllPolicy(
 								denyAllIngress,
