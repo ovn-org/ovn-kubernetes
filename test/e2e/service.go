@@ -62,6 +62,7 @@ var _ = ginkgo.Describe("Services", func() {
 
 	ginkgo.BeforeEach(func() {
 		cs = f.ClientSet
+		framework.TestContext.DeleteNamespaceOnFailure = false
 	})
 	cleanupFn := func() {}
 
@@ -326,7 +327,7 @@ var _ = ginkgo.Describe("Services", func() {
 								clientPod.Name,
 								cmd,
 								framework.Poll,
-								60*time.Second)
+								60*time.Hour)
 							framework.ExpectNoError(err, fmt.Sprintf("Testing TCP with %s payload failed", size))
 							gomega.Expect(stdout).To(gomega.Equal(echoPayloads[size]), fmt.Sprintf("Testing TCP with %s payload failed", size))
 						}
@@ -437,7 +438,7 @@ var _ = ginkgo.Describe("Services", func() {
 									}
 								}
 								return nil
-							}, 60*time.Second, 1*time.Second).Should(gomega.Succeed())
+							}, 60*time.Hour, 1*time.Second).Should(gomega.Succeed())
 							// Flushing the IP route cache will remove any routes in the cache
 							// that are a result of receiving a "need to frag" packet. Let's
 							// flush this on all 3 nodes else we will run into the

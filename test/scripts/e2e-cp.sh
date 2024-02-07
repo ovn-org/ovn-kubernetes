@@ -138,6 +138,7 @@ go test -test.timeout 180m -v . \
         -ginkgo.v \
         -ginkgo.focus ${FOCUS:-.} \
         -ginkgo.timeout 3h \
+        -ginkgo.failFast \
         -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
         -ginkgo.skip="${SKIPPED_TESTS}" \
         -provider skeleton \
