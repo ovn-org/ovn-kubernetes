@@ -73,9 +73,28 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 		httpServerTestPods         = []*corev1.Pod{}
 		singleConnectionHTTPClient *http.Client
 		clientSet                  kubernetes.Interface
-		butane                     = `
+		// Systemd resolvd prevent resolving kube api service by fqdn, so
+		// we replace it here with NetworkManager
+		butane = `
 variant: fcos
 version: 1.4.0
+systemd:
+  units:
+    - name: systemd-resolved.service
+      mask: true
+    - name: replace-resolved.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Replace systemd resolvd with NetworkManager
+        Wants=network-online.target
+        After=network-online.target
+        [Service]
+        ExecStart=rm -f /etc/resolv.conf
+        ExecStart=systemctl restart NetworkManager
+        Type=oneshot
+        [Install]
+        WantedBy=multi-user.target
 passwd:
   users:
   - name: core
@@ -317,7 +336,7 @@ passwd:
 			step = by(vmName, stage+": Check n/s tcp traffic")
 			output := ""
 			Eventually(func() error {
-				output, err = kubevirt.RunCommand(vmi, "curl -kL https://www.ovn.org", polling)
+				output, err = kubevirt.RunCommand(vmi, "curl -kL https://kubernetes.default.svc.cluster.local", polling)
 				return err
 			}).
 				WithOffset(1).
