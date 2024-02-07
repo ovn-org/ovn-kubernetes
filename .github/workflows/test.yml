@@ -286,6 +286,7 @@ jobs:
 
     - name: Free up disk space
       run: |
+        sudo rm -rf /usr/local/lib/android/sdk
         sudo apt-get update
         sudo eatmydata apt-get purge --auto-remove -y \
           azure-cli aspnetcore-* dotnet-* ghc-* firefox \
