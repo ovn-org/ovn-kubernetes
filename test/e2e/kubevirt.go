@@ -56,6 +56,9 @@ func newControllerRuntimeClient() (crclient.Client, error) {
 		return nil, err
 	}
 	return crclient.New(config, crclient.Options{
+		WarningHandler: crclient.WarningHandlerOptions{
+			SuppressWarnings: true,
+		},
 		Scheme: scheme,
 	})
 }
