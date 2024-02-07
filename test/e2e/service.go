@@ -917,6 +917,7 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 		svcName          = "lbservice-test"
 		backendName      = "lb-backend-pod"
 		endpointHTTPPort = 80
+		endpointUDPPort  = 10001
 		loadBalancerYaml = "loadbalancer.yaml"
 		bgpAddYaml       = "bgpAdd.yaml"
 		bgpEmptyYaml     = "bgpEmptyAdd.yaml"
@@ -988,6 +989,13 @@ spec:
         ports:
         - name: http
           containerPort: 80
+      - name: udp-server
+        image: quay.io/rhn-support-gizzi/udp-server:1.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 10001
+          protocol: UDP
+          name: udp
       nodeSelector:
         kubernetes.io/hostname: ` + backendNodeName + `
 
@@ -1002,6 +1010,10 @@ spec:
     port: 80
     protocol: TCP
     targetPort: 80
+  - name: udp
+    port: 10001
+    protocol: UDP
+    targetPort: 10001
   selector:
     app: nginx
   type: LoadBalancer
@@ -1205,7 +1217,7 @@ metadata:
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
 		numberOfETPRules := pokeIPTableRules(backendNodeName, "OVN-KUBE-EXTERNALIP")
-		framework.ExpectEqual(numberOfETPRules, 4)
+		framework.ExpectEqual(numberOfETPRules, 5)
 
 		// curl the LB service from the client container to trigger BGP route advertisement
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
@@ -1339,12 +1351,12 @@ spec:
 		}
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(2, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(4, "OVN-KUBE-EXTERNALIP"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(5, "OVN-KUBE-EXTERNALIP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(3, "OVN-KUBE-SNAT-MGMTPORT"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " from backend pod " + backendName)
+		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
 		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
@@ -1365,12 +1377,12 @@ spec:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(6, "OVN-KUBE-ETP"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(10, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(7, "OVN-KUBE-SNAT-MGMTPORT"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(11, "OVN-KUBE-SNAT-MGMTPORT"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " from backend pod " + backendName)
+		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
 		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
@@ -1386,13 +1398,13 @@ spec:
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
-		// number of iptable rules should have decreased by 1
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(5, "OVN-KUBE-ETP"))
+		// number of iptable rules should have decreased by 2
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(8, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(6, "OVN-KUBE-SNAT-MGMTPORT"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(9, "OVN-KUBE-SNAT-MGMTPORT"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " from backend pod " + backendName)
+		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
 		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
@@ -1402,6 +1414,97 @@ spec:
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-SNAT-MGMTPORT"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
+	})
+
+	ginkgo.It("Should ensure load balancer service works when ETP=local and session affinity is set", func() {
+
+		err := framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*120)
+		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an enpoint, err: %v", svcName, err))
+
+		ginkgo.By("patching service " + svcName + " to externalTrafficPolicy=local")
+		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/externalTrafficPolicy", "Local")
+		framework.ExpectNoError(err)
+		output := e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.externalTrafficPolicy}'")
+		framework.ExpectEqual(output, "'Local'")
+		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
+
+		ginkgo.By("1 nodeIP route is advertised correctly by metalb BGP routes")
+		// since ETP=local; ensure only this node's IP route is advertised correctly by metalb BGP routes
+		// sample:
+		// 192.168.10.0 nhid 31 via 172.19.0.4 dev eth0 proto bgp metric 20
+		nodeIP, err := getNodeIP(f.ClientSet, backendNodeName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get nodes's %s node ip address", backendNodeName))
+		framework.Logf("NodeIP of node %s is %s", backendNodeName, nodeIP)
+		cmd := []string{containerRuntime, "exec", routerContainer}
+		bgpRouteCommand := strings.Split("ip route show 192.168.10.0", " ")
+		cmd = append(cmd, bgpRouteCommand...)
+		gomega.Eventually(func() bool {
+			routes, err := runCommand(cmd...)
+			framework.ExpectNoError(err, "failed to get BGP routes from intermediary router")
+			framework.Logf("Routes in FRR %s", routes)
+			routeCount := 0
+			matchedRoute := ""
+			for _, route := range strings.Split(routes, "\n") {
+				match := strings.Contains(route, nodeIP)
+				if match {
+					framework.Logf("DEBUG: Matched route %s for pattern %s", route, nodeIP)
+					matchedRoute = route
+				}
+				if strings.Contains(route, "via") {
+					routeCount++
+				}
+			}
+			return routeCount == 1 && strings.Contains(matchedRoute, nodeIP)
+		}, 60*time.Second).Should(gomega.BeTrue())
+
+		ginkgo.By("by sending a UDP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
+		netcatCmd := fmt.Sprintf("echo hostname | nc -uv -w2 %s %d",
+			svcIP,
+			endpointUDPPort,
+		)
+		cmd = []string{containerRuntime, "exec", clientContainer, "bash", "-x", "-c", netcatCmd}
+		framework.Logf("netcat command %s", cmd)
+		output, err = runCommand(cmd...)
+		framework.ExpectNoError(err, "failed to connect to load balancer service")
+		framework.Logf("netcat command output %s", output)
+
+		ginkgo.By("ensure the sourceIP of the external container is preserved!")
+		// Check that sourceIP of the LBService is preserved
+		targetPodLogs, err := e2ekubectl.RunKubectl("default", "logs", "-l", "app=nginx", "--container", "udp-server")
+		framework.ExpectNoError(err, "failed to inspect logs in backend pods")
+		framework.Logf("%v", targetPodLogs)
+		lbClientIPv4, _ := getContainerAddressesForNetwork(clientContainer, "clientnet")
+		framework.Logf("%v", lbClientIPv4)
+		if strings.Contains(targetPodLogs, lbClientIPv4) {
+			framework.Logf("found the expected srcIP %s!", lbClientIPv4)
+		} else {
+			framework.Failf("could not get expected srcIP!")
+		}
+
+		ginkgo.By("patching service " + svcName + " to sessionAffinity=ClientIP at default timeout of 10800")
+		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/sessionAffinity", "ClientIP")
+		framework.ExpectNoError(err)
+		output = e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.sessionAffinity}'")
+		framework.ExpectEqual(output, "'ClientIP'")
+		output = e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.sessionAffinityConfig.clientIP.timeoutSeconds}'")
+		framework.ExpectEqual(output, "'10800'")
+		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
+
+		ginkgo.By("by sending a UDP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
+		output, err = runCommand(cmd...)
+		framework.ExpectNoError(err, "failed to curl load balancer service")
+		framework.Logf("netcat command output %s", output)
+
+		// Check that sourceIP of the LBService is preserved
+		ginkgo.By("ensure the sourceIP of the external container is preserved!")
+		targetPodLogs, err = e2ekubectl.RunKubectl("default", "logs", "-l", "app=nginx", "--container", "udp-server")
+		framework.ExpectNoError(err, "failed to inspect logs in backend pods")
+		framework.Logf("%v", targetPodLogs)
+		if strings.Count(targetPodLogs, lbClientIPv4) >= 2 {
+			framework.Logf("found the expected srcIP %s!", lbClientIPv4)
+		} else {
+			framework.Failf("could not get expected srcIP!")
+		}
 	})
 
 })
