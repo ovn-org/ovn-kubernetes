@@ -76,6 +76,23 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 		butane                     = `
 variant: fcos
 version: 1.4.0
+systemd:
+  units:
+    - name: systemd-resolved.service
+      mask: true
+    - name: replace-resolved.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Replace systemd resolvd with NetworkManager
+        Wants=network-online.target
+        After=network-online.target
+        [Service]
+        ExecStart=rm -f /etc/resolv.conf
+        ExecStart=systemctl restart NetworkManager
+        Type=oneshot
+        [Install]
+        WantedBy=multi-user.target
 passwd:
   users:
   - name: core
