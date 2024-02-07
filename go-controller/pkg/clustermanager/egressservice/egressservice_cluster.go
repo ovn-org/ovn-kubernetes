@@ -168,20 +168,20 @@ func (c *Controller) Start(threadiness int) error {
 	defer utilruntime.HandleCrash()
 
 	klog.Infof("Starting Egress Services Controller")
-	if !util.WaitForNamedCacheSyncWithTimeout("egressservices", c.stopCh, c.egressServiceSynced) {
-		return fmt.Errorf("timed out waiting for egressservice caches to sync")
+	if !util.WaitForInformerCacheSyncWithTimeout("egressservices", c.stopCh, c.egressServiceSynced) {
+		return fmt.Errorf("timed out waiting for egress service caches to sync")
 	}
 
-	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_services", c.stopCh, c.servicesSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
+	if !util.WaitForInformerCacheSyncWithTimeout("egressservices_services", c.stopCh, c.servicesSynced) {
+		return fmt.Errorf("timed out waiting for service caches (for egress services) to sync")
 	}
 
-	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_endpointslices", c.stopCh, c.endpointSlicesSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
+	if !util.WaitForInformerCacheSyncWithTimeout("egressservices_endpointslices", c.stopCh, c.endpointSlicesSynced) {
+		return fmt.Errorf("timed out waiting for endpoint slice caches (for egress services) to sync")
 	}
 
-	if !util.WaitForNamedCacheSyncWithTimeout("egressservices_nodes", c.stopCh, c.nodesSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
+	if !util.WaitForInformerCacheSyncWithTimeout("egressservices_nodes", c.stopCh, c.nodesSynced) {
+		return fmt.Errorf("timed out waiting for node caches (for egress services) to sync")
 	}
 
 	klog.Infof("Repairing Egress Services")

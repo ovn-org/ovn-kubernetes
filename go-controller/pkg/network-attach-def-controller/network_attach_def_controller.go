@@ -141,8 +141,8 @@ func (nadController *NetAttachDefinitionController) Start() error {
 
 func (nadController *NetAttachDefinitionController) start() error {
 	nadController.nadFactory.Start(nadController.stopChan)
-	if !util.WaitForNamedCacheSyncWithTimeout(nadController.name, nadController.stopChan, nadController.netAttachDefSynced) {
-		return fmt.Errorf("stop requested while syncing caches")
+	if !util.WaitForInformerCacheSyncWithTimeout(nadController.name, nadController.stopChan, nadController.netAttachDefSynced) {
+		return fmt.Errorf("stop requested while syncing %s caches", nadController.name)
 	}
 
 	err := nadController.SyncNetworkControllers()

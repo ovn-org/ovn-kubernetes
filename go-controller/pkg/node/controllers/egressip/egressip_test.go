@@ -291,7 +291,7 @@ func runController(testNS ns.NetNS, c *Controller) (cleanupFn, error) {
 		{"eippod", c.podInformer.HasSynced},
 	} {
 		func(resourceName string, syncFn cache.InformerSynced) {
-			if !util.WaitForNamedCacheSyncWithTimeout(resourceName, stopCh, syncFn) {
+			if !util.WaitForInformerCacheSyncWithTimeout(resourceName, stopCh, syncFn) {
 				gomega.PanicWith(fmt.Sprintf("timed out waiting for %q caches to sync", resourceName))
 			}
 		}(se.resourceName, se.syncFn)

@@ -190,9 +190,14 @@ const (
 	// Logical Switch or Router Port
 	MaxLogicalPortTunnelKey = 32767
 
-	// InformerSyncTimeout is used to wait from the initial informer cache sync.
+	// InformerSyncTimeout is used when waiting for the initial informer cache sync
+	// (i.e. all existing objects should be listed by the informer).
 	// It allows ~4 list() retries with the default reflector exponential backoff config
 	InformerSyncTimeout = 20 * time.Second
+
+	// HandlerSyncTimeout is used when waiting for initial object handler sync.
+	// (i.e. all the ADD events should be processed for the existing objects by the event handler)
+	HandlerSyncTimeout = 20 * time.Second
 
 	// GRMACBindingAgeThreshold is the lifetime in seconds of each MAC binding
 	// entry for the gateway routers. After this time, the entry is removed and

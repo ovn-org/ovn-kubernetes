@@ -222,7 +222,7 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		syncWg.Add(1)
 		go func(resourceName string, syncFn cache.InformerSynced) {
 			defer syncWg.Done()
-			if !util.WaitForNamedCacheSyncWithTimeout(resourceName, stopCh, syncFn) {
+			if !util.WaitForInformerCacheSyncWithTimeout(resourceName, stopCh, syncFn) {
 				syncErrs = append(syncErrs, fmt.Errorf("timed out waiting for %q caches to sync", resourceName))
 			}
 		}(se.resourceName, se.syncFn)
