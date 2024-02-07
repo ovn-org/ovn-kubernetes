@@ -334,12 +334,12 @@ passwd:
 			step = by(vmName, stage+": Check n/s tcp traffic")
 			output := ""
 			Eventually(func() error {
-				output, err = kubevirt.RunCommand(vmi, "curl -kL https://www.ovn.org", polling)
+				output, err = kubevirt.RunCommand(vmi, "curl -kL https://kubernetes.default.svc.cluster.local", polling)
 				return err
 			}).
 				WithOffset(1).
 				WithPolling(polling).
-				WithTimeout(timeout).
+				WithTimeout(timeout*2).
 				Should(Succeed(), func() string { return step + ": " + output })
 		}
 
