@@ -80,13 +80,28 @@ storage:
         local: kubevirt/echoserver/main.go
 systemd:
   units:
+    - name: systemd-resolved.service
+      mask: true
+    - name: replace-resolved.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Replace systemd resolvd with NetworkManager
+        Wants=network-online.target
+        After=network-online.target
+        [Service]
+        ExecStart=rm -f /etc/resolv.conf
+        ExecStart=systemctl restart NetworkManager
+        Type=oneshot
+        [Install]
+        WantedBy=multi-user.target
     - name: echoserver.service
       enabled: true
       contents: |
         [Unit]
         Description=Golang echo server
-        Wants=network-online.target
-        After=network-online.target
+        Wants=replace-resolved.service
+        After=replace-resolved.service
         [Service]
         ExecStart=podman run --name tcpserver --tls-verify=false --privileged --net=host -v /root/test:/test:z registry.access.redhat.com/ubi9/go-toolset:1.20 go run /test/server.go %d
         [Install]
