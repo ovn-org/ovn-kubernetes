@@ -57,6 +57,7 @@ require (
 	k8s.io/utils v0.0.0-20230505201702-9f6742963106
 	kubevirt.io/api v1.0.0-alpha.0
 	sigs.k8s.io/controller-runtime v0.15.1
+	sigs.k8s.io/knftables v0.0.14
 	sigs.k8s.io/network-policy-api v0.1.2
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3
 )

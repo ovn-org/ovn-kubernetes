@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"sigs.k8s.io/knftables"
 )
 
 const (
@@ -486,14 +487,14 @@ func addServiceRules(service *kapi.Service, localEndpoints []string, svcHasLocal
 		}
 		npw.ofm.requestFlowSync()
 		if !npw.dpuMode {
-			// add iptable rules only in full mode
-			if err = addGatewayIptRules(service, localEndpoints, svcHasLocalHostNetEndPnt); err != nil {
+			// add iptables/nftables rules only in full mode
+			if err = addGatewayNFRules(service, localEndpoints, svcHasLocalHostNetEndPnt); err != nil {
 				errors = append(errors, err)
 			}
 		}
 	} else {
 		// For Host Only Mode
-		if err = addGatewayIptRules(service, localEndpoints, svcHasLocalHostNetEndPnt); err != nil {
+		if err = addGatewayNFRules(service, localEndpoints, svcHasLocalHostNetEndPnt); err != nil {
 			errors = append(errors, err)
 		}
 
@@ -540,19 +541,19 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 			// |                          |                       |                       |   + default dnat towards CIP   |
 			// +--------------------------+-----------------------+-----------------------+--------------------------------+
 
-			if err = delGatewayIptRules(service, localEndpoints, true); err != nil {
+			if err = delGatewayNFRules(service, localEndpoints, true); err != nil {
 				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 			}
-			if err = delGatewayIptRules(service, localEndpoints, false); err != nil {
+			if err = delGatewayNFRules(service, localEndpoints, false); err != nil {
 				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 			}
 		}
 	} else {
 
-		if err = delGatewayIptRules(service, localEndpoints, true); err != nil {
+		if err = delGatewayNFRules(service, localEndpoints, true); err != nil {
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
-		if err = delGatewayIptRules(service, localEndpoints, false); err != nil {
+		if err = delGatewayNFRules(service, localEndpoints, false); err != nil {
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
 	}
@@ -732,7 +733,8 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
 func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
-	keepIPTRules := []nodeipt.Rule{}
+	var keepIPTRules []nodeipt.Rule
+	var keepNFTElems []*knftables.Element
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
 
@@ -768,24 +770,32 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		if err = npw.updateServiceFlowCache(service, true, hasLocalHostNetworkEp); err != nil {
 			errors = append(errors, err)
 		}
-		// Add correct iptables rules only for Full mode
+		// Add correct netfilter rules only for Full mode
 		if !npw.dpuMode {
-			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, sets.List(localEndpoints), hasLocalHostNetworkEp)...)
+			localEndpointsArray := sets.List(localEndpoints)
+			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
+			keepNFTElems = append(keepNFTElems, getGatewayNFTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
 		}
 	}
 
 	// sync OF rules once
 	npw.ofm.requestFlowSync()
-	// sync IPtables rules once only for Full mode
+	// sync netfilter rules once only for Full mode
 	if !npw.dpuMode {
 		// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
-		for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain, iptableMgmPortChain} {
+		for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
 			if err = recreateIPTRules("nat", chain, keepIPTRules); err != nil {
 				errors = append(errors, err)
 			}
 		}
 		if err = recreateIPTRules("mangle", iptableITPChain, keepIPTRules); err != nil {
 			errors = append(errors, err)
+		}
+
+		for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
+			if err = recreateNFTSet(set, keepNFTElems); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	return apierrors.NewAggregate(errors)
@@ -1037,6 +1047,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 	var err error
 	var errors []error
 	keepIPTRules := []nodeipt.Rule{}
+	keepNFTElems := []*knftables.Element{}
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
 		if !ok {
@@ -1051,11 +1062,17 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		// Add correct iptables rules.
 		// TODO: ETP and ITP is not implemented for smart NIC mode.
 		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false)...)
+		keepNFTElems = append(keepNFTElems, getGatewayNFTRules(service, nil, false)...)
 	}
 
-	// sync IPtables rules once
+	// sync rules once
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		if err = recreateIPTRules("nat", chain, keepIPTRules); err != nil {
+			errors = append(errors, err)
+		}
+	}
+	for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
+		if err = recreateNFTSet(set, keepNFTElems); err != nil {
 			errors = append(errors, err)
 		}
 	}
