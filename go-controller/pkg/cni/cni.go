@@ -198,13 +198,13 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 			netdevName = dpuCD.VfNetdevName
 		} else {
 			// Find the hostInterface name
-			condString := "external-ids:sandbox=" + pr.SandboxID
+			condString := []string{"external-ids:sandbox=" + pr.SandboxID}
 			if pr.netName != types.DefaultNetworkName {
-				condString += fmt.Sprintf(" external_ids:%s=%s", types.NADExternalID, pr.nadName)
+				condString = append(condString, fmt.Sprintf(" external_ids:%s=%s", types.NADExternalID, pr.nadName))
 			} else {
-				condString += fmt.Sprintf(" external_ids:%s{=}[]", types.NADExternalID)
+				condString = append(condString, fmt.Sprintf(" external_ids:%s{=}[]", types.NADExternalID))
 			}
-			ovsIfNames, err := ovsFind("Interface", "name", condString)
+			ovsIfNames, err := ovsFind("Interface", "name", condString...)
 			if err != nil || len(ovsIfNames) != 1 {
 				klog.Warningf("Couldn't find the OVS interface for pod %s/%s NAD %s: %v",
 					pr.PodNamespace, pr.PodName, pr.nadName, err)
