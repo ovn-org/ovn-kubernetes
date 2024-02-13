@@ -761,7 +761,8 @@ spec:
 		if utilnet.IsIPv6String(egress2Node.nodeIP) {
 			otherDstIP = "fc00:f853:ccd:e793:ffff::1"
 		} else {
-			otherDstIP = "172.18.1.1"
+			// TODO(mk): replace with non-repeating IP allocator
+			otherDstIP = "172.18.1.99"
 		}
 		_, err := runCommand(containerRuntime, "exec", egress2Node.name, "ip", "addr", "add", otherDstIP, "dev", "breth0")
 		if err != nil {
