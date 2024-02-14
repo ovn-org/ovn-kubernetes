@@ -10,6 +10,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
 
 	"k8s.io/klog/v2"
 )
@@ -63,7 +64,6 @@ type AddressSetsSyncer struct {
 	nbClient       libovsdbclient.Client
 	controllerName string
 	// txnBatchSize is used to control how many address sets will be updated with 1 db transaction.
-	// Set to 0 to disable batching
 	txnBatchSize       int
 	ignoredAddressSets int
 }
@@ -370,16 +370,11 @@ func (syncer *AddressSetsSyncer) SyncAddressSets() error {
 	if err != nil {
 		return fmt.Errorf("failed to find stale address sets: %v", err)
 	}
-	updatedCount := 0
-	defer func() {
-		klog.Infof("SyncAddressSets handled %d of %d stale address sets, %d of them were ignored",
-			updatedCount-syncer.ignoredAddressSets, len(addrSetList), syncer.ignoredAddressSets)
-	}()
-	i := 0
-	for i < len(addrSetList) {
+
+	err = batching.Batch[*nbdb.AddressSet](syncer.txnBatchSize, addrSetList, func(batchAddrSets []*nbdb.AddressSet) error {
 		addrSetInfos := []*updateAddrSetInfo{}
-		for j := 0; (j < syncer.txnBatchSize || syncer.txnBatchSize == 0) && i < len(addrSetList); i, j = i+1, j+1 {
-			updateInfo, err := syncer.getAddrSetUpdateInfo(addrSetList[i])
+		for _, addrSet := range batchAddrSets {
+			updateInfo, err := syncer.getAddrSetUpdateInfo(addrSet)
 			if err != nil {
 				return err
 			}
@@ -394,7 +389,9 @@ func (syncer *AddressSetsSyncer) SyncAddressSets() error {
 		if err != nil {
 			return fmt.Errorf("failed to transact address set sync ops: %v", err)
 		}
-		updatedCount = i
-	}
+		return nil
+	})
+	klog.Infof("SyncAddressSets found %d stale address sets, %d of them were ignored",
+		len(addrSetList), syncer.ignoredAddressSets)
 	return nil
 }
