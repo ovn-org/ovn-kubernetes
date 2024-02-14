@@ -354,10 +354,13 @@ func multiNetEgressLimitingIPBlockPolicy(
 	}
 }
 
-func multiNetIngressDenyAllPolicy(
+func multiNetPolicy(
 	policyName string,
 	policyFor string,
 	appliesFor metav1.LabelSelector,
+	policyTypes []mnpapi.MultiPolicyType,
+	ingress []mnpapi.MultiNetworkPolicyIngressRule,
+	egress []mnpapi.MultiNetworkPolicyEgressRule,
 ) *mnpapi.MultiNetworkPolicy {
 	return &mnpapi.MultiNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -368,29 +371,9 @@ func multiNetIngressDenyAllPolicy(
 		},
 		Spec: mnpapi.MultiNetworkPolicySpec{
 			PodSelector: appliesFor,
-			PolicyTypes: []mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
-		},
-	}
-}
-
-func multiNetIngressDenyAllEgressAllowAllPolicy(
-	policyName string,
-	policyFor string,
-	appliesFor metav1.LabelSelector,
-) *mnpapi.MultiNetworkPolicy {
-	return &mnpapi.MultiNetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: policyName,
-			Annotations: map[string]string{
-				PolicyForAnnotation: policyFor,
-			},
-		},
-		Spec: mnpapi.MultiNetworkPolicySpec{
-			PodSelector: appliesFor,
-			PolicyTypes: []mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
-			Egress: []mnpapi.MultiNetworkPolicyEgressRule{
-				mnpapi.MultiNetworkPolicyEgressRule{},
-			},
+			PolicyTypes: policyTypes,
+			Ingress:     ingress,
+			Egress:      egress,
 		},
 	}
 }
