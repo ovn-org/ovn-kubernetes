@@ -750,6 +750,16 @@ func ParseNodeHostCIDRsDropNetMask(node *kapi.Node) (sets.Set[string], error) {
 	return sets.New(cfg...), nil
 }
 
+// GetNodeHostAddrs returns the parsed Host CIDR annotation of the given node
+// as an array of strings. If the annotation is not set, then we return empty list.
+func GetNodeHostAddrs(node *kapi.Node) ([]string, error) {
+	hostAddresses, err := ParseNodeHostCIDRsDropNetMask(node)
+	if err != nil && !IsAnnotationNotSetError(err) {
+		return nil, fmt.Errorf("failed to get node host CIDRs for %s: %s", node.Name, err.Error())
+	}
+	return hostAddresses.UnsortedList(), nil
+}
+
 func ParseNodeHostCIDRsExcludeOVNNetworks(node *kapi.Node) ([]string, error) {
 	networks, err := ParseNodeHostCIDRsList(node)
 	if err != nil {
