@@ -298,7 +298,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 }
 
 func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
-	hostSubnets []*net.IPNet, hostAddrs sets.Set[string]) error {
+	hostSubnets []*net.IPNet, hostAddrs []string) error {
 	var err error
 	var gwLRPIPs, clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
@@ -324,7 +324,7 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		if err != nil {
 			return err
 		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), sets.List(hostAddrs))
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
 		if err != nil && err != util.ErrorNoIP {
 			return err
 		}

@@ -23,7 +23,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
 	listers "k8s.io/client-go/listers/core/v1"
 	ref "k8s.io/client-go/tools/reference"
@@ -374,9 +373,9 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if hostSubnets != nil {
-		var hostAddrs sets.Set[string]
+		var hostAddrs []string
 		if config.Gateway.Mode == config.GatewayModeShared {
-			hostAddrs, err = util.ParseNodeHostCIDRsDropNetMask(node)
+			hostAddrs, err = util.GetNodeHostAddrs(node)
 			if err != nil && !util.IsAnnotationNotSetError(err) {
 				return fmt.Errorf("failed to get host CIDRs for node: %s: %v", node.Name, err)
 			}

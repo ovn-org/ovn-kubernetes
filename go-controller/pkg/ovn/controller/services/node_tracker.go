@@ -12,7 +12,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -251,14 +250,13 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		}
 		chassisID = gwConf.ChassisID
 	}
-	hostAddresses, err := util.ParseNodeHostCIDRsDropNetMask(node)
+	hostAddresses, err := util.GetNodeHostAddrs(node)
 	if err != nil {
 		klog.Warningf("Failed to get node host CIDRs for [%s]: %s", node.Name, err.Error())
-		hostAddresses = sets.New[string]()
 	}
 
 	hostAddressesIPs := make([]net.IP, 0, len(hostAddresses))
-	for _, ipStr := range hostAddresses.UnsortedList() {
+	for _, ipStr := range hostAddresses {
 		ip := net.ParseIP(ipStr)
 		hostAddressesIPs = append(hostAddressesIPs, ip)
 	}
