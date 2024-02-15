@@ -1168,7 +1168,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to create egress IP controller: %v", err)
 		}
-		nc.wg.Add(1)
 		if err = c.Run(nc.stopChan, nc.wg, 1); err != nil {
 			return fmt.Errorf("failed to run egress IP controller: %v", err)
 		}
