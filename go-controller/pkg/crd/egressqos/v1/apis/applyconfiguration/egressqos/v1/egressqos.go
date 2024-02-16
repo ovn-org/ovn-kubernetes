@@ -18,7 +18,6 @@ limitations under the License.
 package v1
 
 import (
-	crdegressqosv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
@@ -29,8 +28,8 @@ import (
 type EgressQoSApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
-	Spec                             *EgressQoSSpecApplyConfiguration `json:"spec,omitempty"`
-	Status                           *crdegressqosv1.EgressQoSStatus  `json:"status,omitempty"`
+	Spec                             *EgressQoSSpecApplyConfiguration   `json:"spec,omitempty"`
+	Status                           *EgressQoSStatusApplyConfiguration `json:"status,omitempty"`
 }
 
 // EgressQoS constructs an declarative configuration of the EgressQoS type for use with
@@ -213,7 +212,7 @@ func (b *EgressQoSApplyConfiguration) WithSpec(value *EgressQoSSpecApplyConfigur
 // WithStatus sets the Status field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Status field is set to the value of the last call.
-func (b *EgressQoSApplyConfiguration) WithStatus(value crdegressqosv1.EgressQoSStatus) *EgressQoSApplyConfiguration {
-	b.Status = &value
+func (b *EgressQoSApplyConfiguration) WithStatus(value *EgressQoSStatusApplyConfiguration) *EgressQoSApplyConfiguration {
+	b.Status = value
 	return b
 }

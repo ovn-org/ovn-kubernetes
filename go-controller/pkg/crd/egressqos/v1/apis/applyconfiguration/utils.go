@@ -34,6 +34,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &egressqosv1.EgressQoSRuleApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EgressQoSSpec"):
 		return &egressqosv1.EgressQoSSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("EgressQoSStatus"):
+		return &egressqosv1.EgressQoSStatusApplyConfiguration{}
 
 	}
 	return nil
