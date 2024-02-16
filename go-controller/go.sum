@@ -498,8 +498,8 @@ github.com/k8snetworkplumbingwg/govdpa v0.1.5-0.20230926073613-07c1031aea47 h1:i
 github.com/k8snetworkplumbingwg/govdpa v0.1.5-0.20230926073613-07c1031aea47/go.mod h1:SPaDIyUmwN03Bgn0u/mhoiE4o/+koeKh11VUsdsUX0U=
 github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170 h1:rtPle+U5e7Fia0j44gm+p5QMgOIXXB3A8GtFeCCh8Kk=
 github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170/go.mod h1:CF9uYILB8GY25A/6Hhi1AWKc29qbyLu8r7Gs+uINGZE=
-github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0 h1:VzM3TYHDgqPkettiP6I6q2jOeQFL4nrJM+UcAc4f6Fs=
-github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0/go.mod h1:nqCI7aelBJU61wiBeeZWJ6oi4bJy5nrjkM6lWIMA4j0=
+github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.6.0 h1:BT3ghAY0q7lWib9rz+tVXDFkm27dJV6SLCn7TunZwo4=
+github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.6.0/go.mod h1:wxt2YWRVItDtaQmVSmaN5ubE2L1c9CiNoHQwSJnM8Ko=
 github.com/k8snetworkplumbingwg/sriovnet v1.2.1-0.20230427090635-4929697df2dc h1:v6+jUd70AayPbIRgTYUNpnBLG5cBPTY0+10y80CZeMk=
 github.com/k8snetworkplumbingwg/sriovnet v1.2.1-0.20230427090635-4929697df2dc/go.mod h1:jyWzGe6ZtYiPq6ih6aXCOy6mZ49Y9mNyBOLBBXnli+k=
 github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI2bnpBCr8=
