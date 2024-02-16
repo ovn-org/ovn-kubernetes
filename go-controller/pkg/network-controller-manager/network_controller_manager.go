@@ -184,6 +184,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 			EgressServiceClient:  ovnClient.EgressServiceClient,
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
+			EgressQoSClient:      ovnClient.EgressQoSClient,
 		},
 		stopChan:     make(chan struct{}),
 		watchFactory: wf,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
+	"time"
 
 	"github.com/onsi/ginkgo"
 	ginkgotable "github.com/onsi/ginkgo/extensions/table"
@@ -18,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/pointer"
@@ -168,6 +171,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				// Ensure default EgressQoS object is updated with zone success status.
+				expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 				// Update the EgressQoS
 				eq.Spec.Egress = []egressqosapi.EgressQoSRule{
@@ -199,6 +204,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				// Ensure default EgressQoS object is updated with zone success status.
+				expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 				// Delete the EgressQoS
 				err = fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Delete(context.TODO(), eq.Name, metav1.DeleteOptions{})
@@ -213,6 +220,12 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				// Ensure EgressQoS object is no longer exists.
+				gomega.Eventually(func() bool {
+					_, err := fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Get(context.TODO(),
+						"default", metav1.GetOptions{})
+					return apierrors.IsNotFound(err)
+				}, time.Second).Should(gomega.Equal(true))
 
 				return nil
 			}
@@ -352,6 +365,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				// Ensure default EgressQoS object is updated with zone success status.
+				expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 				// Update the EgressQoS
 				eq.Spec.Egress = []egressqosapi.EgressQoSRule{
@@ -388,6 +403,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				// Ensure default EgressQoS object is updated with zone success status.
+				expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 				// Delete the EgressQoS
 				err = fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Delete(context.TODO(), eq.Name, metav1.DeleteOptions{})
@@ -402,6 +419,12 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				// Ensure EgressQoS object is no longer exists.
+				gomega.Eventually(func() bool {
+					_, err := fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Get(context.TODO(),
+						"default", metav1.GetOptions{})
+					return apierrors.IsNotFound(err)
+				}, time.Second).Should(gomega.Equal(true))
 
 				return nil
 			}
@@ -419,6 +442,75 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && (ip4.src == $%s || ip6.src == $%s)", qosASv4, qosASv6),
 			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && (ip4.src == $%s || ip6.src == $%s)", asv4, asv6)),
 	)
+
+	ginkgo.It("Validate status with invalid QoS Object", func() {
+		app.Action = func(ctx *cli.Context) error {
+			namespaceT := *newNamespace("namespace1")
+			maxEgressQoSRetries = 0
+			defer func() {
+				maxEgressQoSRetries = 10
+			}()
+
+			node1Switch := &nbdb.LogicalSwitch{
+				UUID: "node1-UUID",
+				Name: node1Name,
+			}
+
+			node2Switch := &nbdb.LogicalSwitch{
+				UUID: "node2-UUID",
+				Name: node2Name,
+			}
+
+			joinSwitch := &nbdb.LogicalSwitch{
+				UUID: "join-UUID",
+				Name: types.OVNJoinSwitch,
+			}
+
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					node1Switch,
+					node2Switch,
+					joinSwitch,
+				},
+			}
+
+			fakeOVN.startWithDBSetup(dbSetup,
+				&v1.NamespaceList{
+					Items: []v1.Namespace{
+						namespaceT,
+					},
+				},
+			)
+
+			// Create an EgressQoS object with invalid pod selector.
+			eq := newEgressQoSObject("default", namespaceT.Name, []egressqosapi.EgressQoSRule{
+				{
+					DstCIDR: pointer.String("1.2.3.4/32"),
+					DSCP:    50,
+					PodSelector: metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "foo",
+						Operator: "invalid_op", Values: []string{"bar", "bar"}}}},
+				},
+			})
+			_, err := fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Create(context.TODO(), eq, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			fakeOVN.InitAndRunEgressQoSController()
+
+			expectedDatabaseState := []libovsdbtest.TestData{
+				node1Switch,
+				node2Switch,
+				joinSwitch,
+			}
+
+			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			// Ensure default EgressQoS object is updated with zone failure status.
+			expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, true)
+
+			return nil
+		}
+		err := app.Run([]string{app.Name})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
 
 	ginkgo.It("should respond to node events correctly", func() {
 		app.Action = func(ctx *cli.Context) error {
@@ -498,6 +590,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			}
 
 			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			// Ensure default EgressQoS object is updated with zone success status.
+			expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 			_, node3Switch, err := createNodeAndLS(fakeOVN, "node3", "global")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -513,6 +607,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			}
 
 			gomega.Eventually(fakeOVN.nbClient, 3).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			// Ensure default EgressQoS object is updated with zone success status.
+			expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 			// Delete the EgressQoS
 			err = fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Delete(context.TODO(), eq.Name, metav1.DeleteOptions{})
@@ -528,6 +624,12 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			}
 
 			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			// Ensure EgressQoS object is no longer exists.
+			gomega.Eventually(func() bool {
+				_, err := fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Get(context.TODO(),
+					"default", metav1.GetOptions{})
+				return apierrors.IsNotFound(err)
+			}, time.Second).Should(gomega.Equal(true))
 
 			return nil
 		}
@@ -614,6 +716,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			}
 
 			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			// Ensure default EgressQoS object is updated with zone success status.
+			expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 			kapiNode, node3Switch, err := createNodeAndLS(fakeOVN, "node3", "non-global")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -636,6 +740,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			// we will now add qos objects because node became local
 			node3Switch.QOSRules = []string{qos1.UUID, qos2.UUID}
 			gomega.Eventually(fakeOVN.nbClient, 3).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			// Ensure default EgressQoS object is updated with zone success status.
+			expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 			// Delete the EgressQoS
 			err = fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Delete(context.TODO(), eq.Name, metav1.DeleteOptions{})
@@ -651,6 +757,12 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			}
 
 			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			// Ensure EgressQoS object is no longer exists.
+			gomega.Eventually(func() bool {
+				_, err := fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespaceT.Name).Get(context.TODO(),
+					"default", metav1.GetOptions{})
+				return apierrors.IsNotFound(err)
+			}, time.Second).Should(gomega.Equal(true))
 
 			return nil
 		}
@@ -775,6 +887,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			}
 
 			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			// Ensure default EgressQoS object is updated with zone success status.
+			expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 			qos2AS := getEgressQosAddrSetDbIDs(namespaceT.Name, "999", controllerName)
 			qos3AS := getEgressQosAddrSetDbIDs(namespaceT.Name, "998", controllerName)
 
@@ -805,6 +919,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos2AS, []string{})
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos3AS, []string{"10.128.1.3", "10.128.2.3"})
+			// Ensure default EgressQoS object is updated with zone success status.
+			expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 			ginkgo.By("Deleting the local pods should be remove its ips from the address sets")
 			err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podLocalT.Namespace).Delete(context.TODO(), podLocalT.Name, metav1.DeleteOptions{})
@@ -813,6 +929,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos2AS, []string{})
 			fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qos3AS, []string{})
+			// Ensure default EgressQoS object is updated with zone success status.
+			expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 			return nil
 		}
@@ -900,6 +1018,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				nodeSwitch,
 			}
 			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			// Ensure default EgressQoS object is updated with zone success status.
+			expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
 
 			if podZone == "local" {
 				fakeOVN.controller.localZoneNodes.Store(podT.Spec.NodeName, true)
@@ -971,4 +1091,19 @@ func createNodeAndLS(fakeOVN *FakeOVN, name, zone string) (*v1.Node, *nbdb.Logic
 	}
 
 	return kapiNode, logicalSwitch, nil
+}
+
+func expectEgressQoSStatusMessageEventually(fakeOVN *FakeOVN, namespace string, expectFailure bool) {
+	gomega.Eventually(func() bool {
+		defaultEq, err := fakeOVN.fakeClient.EgressQoSClient.K8sV1().EgressQoSes(namespace).Get(context.TODO(),
+			"default", metav1.GetOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		if expectFailure {
+			return len(defaultEq.Status.Conditions) > 0 &&
+				strings.Contains(defaultEq.Status.Conditions[0].Message, types.EgressQoSErrorMsg)
+		} else {
+			return len(defaultEq.Status.Conditions) > 0 &&
+				strings.Contains(defaultEq.Status.Conditions[0].Message, egressQoSAppliedCorrectly)
+		}
+	}).Should(gomega.Equal(true), fmt.Sprintf("expected EgressQoS status message with expectFailure=%v", expectFailure))
 }
