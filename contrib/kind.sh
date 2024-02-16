@@ -1183,6 +1183,12 @@ install_mpolicy_crd() {
   run_kubectl apply -f "$mpolicy_manifest"
 }
 
+install_ipamclaim_crd() {
+  echo "Installing IPAMClaim CRD ..."
+  ipamclaims_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml"
+  run_kubectl apply -f "$ipamclaims_manifest"
+}
+
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
 # DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
 # Next, it iterates over all pods with name=ovnkube-db and ovnkube-master and waits for them to post "Ready".
@@ -1480,6 +1486,7 @@ fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
   install_multus
   install_mpolicy_crd
+  install_ipamclaim_crd
   docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
 fi
 kubectl_wait_pods
