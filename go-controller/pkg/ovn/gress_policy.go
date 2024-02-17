@@ -24,8 +24,6 @@ const (
 	noneMatch = "None"
 	// emptyIdx is used to create ACL for gressPolicy that doesn't have ipBlocks
 	emptyIdx = -1
-	// emptyProtocol is used to create ACL for gressPolicy that doesn't have port policies hence no protocols
-	emptyProtocol = "None"
 )
 
 type gressPolicy struct {
@@ -340,7 +338,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libov
 	}
 	protocolPortsMap := gp.getProtocolPortsMap()
 	if len(protocolPortsMap) == 0 {
-		protocolPortsMap[emptyProtocol] = nil
+		protocolPortsMap[libovsdbutil.UnspecifiedL4Protocol] = nil
 	}
 	for protocol, ports := range protocolPortsMap {
 		l4Match = noneMatch

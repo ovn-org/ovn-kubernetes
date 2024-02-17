@@ -127,10 +127,6 @@ func constructMatchFromAddressSet(gressPrefix string, addrSetIndex *libovsdbops.
 // some of the common functions to the libovsdbutil package and leverage that.
 // For now blatantly copying it so that we can leverage the new indices for ports and merge ANP
 // without having to do yet another refactor PR
-const (
-	// emptyProtocol is used to create ACL for gressPolicy that doesn't have port policies hence no protocols
-	emptyProtocol = "None"
-)
 
 // for a given ingress/egress rule, captures all the provided port ranges and
 // individual ports

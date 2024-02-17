@@ -207,3 +207,12 @@ func UpdateACLLogging(nbClient libovsdbclient.Client, ACLs []*nbdb.ACL, aclLoggi
 	}
 	return nil
 }
+
+// ACL L4 Match Construct Utils
+const (
+	// UnspecifiedL4Protocol is used to create ACL for gressPolicy that
+	// doesn't have port policies hence no protocols. The value "None" here is
+	// used as the value in libovsdbops.PortPolicyProtocolKey DB Index and hence
+	// that shouldn't be changed since it will cause a full ACL update during upgrades.
+	UnspecifiedL4Protocol = "None"
+)
