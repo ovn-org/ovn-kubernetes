@@ -273,7 +273,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
-				peerASIngressRule0v4, peerASIngressRule0v6 = buildBANPAddressSets(banp, 0, []net.IP{testing.MustParseIP(t2.podIP)}, libovsdbutil.ACLIngress) // address-set will be empty since no pods match it
+				peerASIngressRule0v4, peerASIngressRule0v6 = buildBANPAddressSets(banp, 0, []net.IP{testing.MustParseIP(t2.podIP)}, libovsdbutil.ACLIngress) // podIP should be added to v4 address-set
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
