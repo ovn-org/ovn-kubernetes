@@ -63,6 +63,7 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, config *manage
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	mgr.sync()
+
 	return mgr
 }
 

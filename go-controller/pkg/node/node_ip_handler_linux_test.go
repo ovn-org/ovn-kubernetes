@@ -15,8 +15,9 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/vishvananda/netlink"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -65,56 +66,8 @@ var _ = Describe("Node IP Handler tests", func() {
 	)
 
 	BeforeEach(func() {
-		node := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: nodeName,
-				Annotations: map[string]string{
-					util.OVNNodeHostCIDRs:           `["10.1.1.10/24", "2001:db8::10/64"]`,
-					"k8s.ovn.org/l3-gateway-config": `{"default":{"mac-address":"52:54:00:e2:ed:d0","ip-addresses":["192.168.122.14/24"],"ip-address":"192.168.122.14/24","next-hops":["192.168.122.1"],"next-hop":"192.168.122.1"}}`,
-				},
-			},
-		}
-
-		tc = &testCtx{
-			doneWg:      &sync.WaitGroup{},
-			stopCh:      make(chan struct{}),
-			fakeClient:  fake.NewSimpleClientset(node),
-			mgmtPortIP4: ovntest.MustParseIPNet("10.1.1.2/24"),
-			mgmtPortIP6: ovntest.MustParseIPNet("2001:db8::1/64"),
-		}
-
-		var err error
-		fakeClientset := &util.OVNNodeClientset{
-			KubeClient: tc.fakeClient,
-		}
-		tc.watchFactory, err = factory.NewNodeWatchFactory(fakeClientset, nodeName)
-		Expect(err).NotTo(HaveOccurred())
-		err = tc.watchFactory.Start()
-		Expect(err).NotTo(HaveOccurred())
-
-		fakeMgmtPortConfig := &managementPortConfig{
-			ifName:    nodeName,
-			link:      nil,
-			routerMAC: nil,
-			ipv4: &managementPortIPFamilyConfig{
-				ipt:        nil,
-				allSubnets: nil,
-				ifAddr:     tc.mgmtPortIP4,
-				gwIP:       tc.mgmtPortIP4.IP,
-			},
-			ipv6: &managementPortIPFamilyConfig{
-				ipt:        nil,
-				allSubnets: nil,
-				ifAddr:     tc.mgmtPortIP6,
-				gwIP:       tc.mgmtPortIP6.IP,
-			},
-		}
-
-		fakeBridgeConfiguration := &bridgeConfiguration{}
-
-		k := &kube.Kube{KClient: tc.fakeClient}
-		tc.ipManager = newAddressManagerInternal(nodeName, k, fakeMgmtPortConfig, tc.watchFactory, fakeBridgeConfiguration, false)
-
+		useNetlink := false
+		tc = configureKubeOVNContext(nodeName, useNetlink)
 		// We need to wait until the ipManager's goroutine runs the subscribe
 		// function at least once. We can't use a WaitGroup because we have
 		// no way to Add(1) to it, and WaitGroups must have matched Add/Done
@@ -198,3 +151,82 @@ var _ = Describe("Node IP Handler tests", func() {
 		})
 	})
 })
+
+func configureKubeOVNContextWithNs(nodeName string) *testCtx {
+	testNs, err := testutils.NewNS()
+	Expect(err).NotTo(HaveOccurred())
+	setupPrimaryInfFn := func() error {
+		link := ovntest.AddLink("breth0")
+		if err = netlink.AddrAdd(link, &netlink.Addr{IPNet: ovntest.MustParseIPNet("10.1.1.10/24")}); err != nil {
+			return err
+		}
+		return nil
+	}
+	Expect(testNs.Do(func(netNS ns.NetNS) error {
+		return setupPrimaryInfFn()
+	}))
+	useNetlink := true
+	var tc *testCtx
+	testNs.Do(func(netNS ns.NetNS) error {
+		tc = configureKubeOVNContext(nodeName, useNetlink)
+		return nil
+	})
+	tc.ns = testNs
+	return tc
+}
+
+func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				util.OVNNodeHostCIDRs:           `["10.1.1.10/24", "2001:db8::10/64"]`,
+				"k8s.ovn.org/l3-gateway-config": `{"default":{"mac-address":"52:54:00:e2:ed:d0","ip-addresses":["10.1.1.10/24"],"ip-address":"10.1.1.10/24","next-hops":["10.1.1.1"],"next-hop":"10.1.1.1"}}`,
+			},
+		},
+		Status: corev1.NodeStatus{
+			Addresses: []corev1.NodeAddress{{Address: "10.1.1.10", Type: corev1.NodeInternalIP}},
+		},
+	}
+
+	tc := &testCtx{
+		doneWg:      &sync.WaitGroup{},
+		stopCh:      make(chan struct{}),
+		fakeClient:  fake.NewSimpleClientset(node),
+		mgmtPortIP4: ovntest.MustParseIPNet("10.1.1.2/24"),
+		mgmtPortIP6: ovntest.MustParseIPNet("2001:db8::1/64"),
+	}
+
+	var err error
+	fakeClientset := &util.OVNNodeClientset{
+		KubeClient: tc.fakeClient,
+	}
+	tc.watchFactory, err = factory.NewNodeWatchFactory(fakeClientset, nodeName)
+	Expect(err).NotTo(HaveOccurred())
+	err = tc.watchFactory.Start()
+	Expect(err).NotTo(HaveOccurred())
+
+	fakeMgmtPortConfig := &managementPortConfig{
+		ifName:    nodeName,
+		link:      nil,
+		routerMAC: nil,
+		ipv4: &managementPortIPFamilyConfig{
+			ipt:        nil,
+			allSubnets: nil,
+			ifAddr:     tc.mgmtPortIP4,
+			gwIP:       tc.mgmtPortIP4.IP,
+		},
+		ipv6: &managementPortIPFamilyConfig{
+			ipt:        nil,
+			allSubnets: nil,
+			ifAddr:     tc.mgmtPortIP6,
+			gwIP:       tc.mgmtPortIP6.IP,
+		},
+	}
+
+	fakeBridgeConfiguration := &bridgeConfiguration{bridgeName: "breth0"}
+
+	k := &kube.Kube{KClient: tc.fakeClient}
+	tc.ipManager = newAddressManagerInternal(nodeName, k, fakeMgmtPortConfig, tc.watchFactory, fakeBridgeConfiguration, useNetlink)
+	return tc
+}
