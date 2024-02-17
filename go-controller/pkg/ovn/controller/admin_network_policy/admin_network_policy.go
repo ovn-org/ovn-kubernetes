@@ -252,14 +252,14 @@ func (c *Controller) convertANPPeersToIPs(anp *adminNetworkPolicyState) error {
 	// TODO(tssurya): Use address-sets of namespaces whereever it makes sense; specially if namespace is already created
 	var err error
 	for _, ingressRule := range anp.ingressRules {
-		ingressRule.podIPs, err = c.convertANPPeersToIPSet(ingressRule.peers)
+		ingressRule.peerIPs, err = c.convertANPPeersToIPSet(ingressRule.peers)
 		if err != nil {
 			return fmt.Errorf("unable to create address set for "+
 				" rule %s with priority %d: %w", ingressRule.name, ingressRule.priority, err)
 		}
 	}
 	for _, egressRule := range anp.egressRules {
-		egressRule.podIPs, err = c.convertANPPeersToIPSet(egressRule.peers)
+		egressRule.peerIPs, err = c.convertANPPeersToIPSet(egressRule.peers)
 		if err != nil {
 			return fmt.Errorf("unable to create address set for "+
 				" rule %s with priority %d: %w", egressRule.name, egressRule.priority, err)
@@ -269,12 +269,12 @@ func (c *Controller) convertANPPeersToIPs(anp *adminNetworkPolicyState) error {
 	return nil
 }
 
-// convertANPPeersToIPSet creates a set of podIPs for all the peers passed as argument
+// convertANPPeersToIPSet creates a set of peerIPs for all the peers passed as argument
 // This function also takes care of populating the adminNetworkPolicyPeer.namespaces cache
-// It also adds up all the podIPs that are supposed to be present in the created AS and returns them on
+// It also adds up all the peerIPs that are supposed to be present in the created AS and returns them on
 // a per-rule basis so that the actual ops to transact these into the AS can be constructed using that
 func (c *Controller) convertANPPeersToIPSet(peers []*adminNetworkPolicyPeer) (sets.Set[string], error) {
-	peerPodIPs := sets.Set[string]{}
+	peerIPs := sets.Set[string]{}
 	for _, peer := range peers {
 		// TODO: Double check how empty selector means all labels match works
 		namespaces, err := c.anpNamespaceLister.List(peer.namespaceSelector)
@@ -309,13 +309,27 @@ func (c *Controller) convertANPPeersToIPSet(peers []*adminNetworkPolicyPeer) (se
 					}
 					return nil, err
 				}
-				peerPodIPs.Insert(util.StringSlice(podIPs)...)
+				peerIPs.Insert(util.StringSlice(podIPs)...)
 				podCache.Insert(pod.Name)
 			}
 		}
 		peer.namespaces = namespaceCache
+		nodes, err := c.anpNodeLister.List(peer.nodeSelector)
+		if err != nil {
+			return nil, err
+		}
+		nodeCache := make(sets.Set[string])
+		for _, node := range nodes {
+			nodeIPs, err := util.GetNodeHostAddrs(node)
+			if err != nil { // Annotation not found errors are ignored, they will come as node updates
+				return nil, err
+			}
+			peerIPs.Insert(nodeIPs...)
+			nodeCache.Insert(node.Name)
+		}
+		peer.nodes = nodeCache
 	}
-	return peerPodIPs, nil
+	return peerIPs, nil
 }
 
 // convertANPSubjectToLSPs calculates all the LSP's that match for the provided anp's subject and returns them
@@ -482,7 +496,7 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	// The fields that we care about for rebuilding ACLs are
 	// (i) `ports` (ii) `actions` (iii) priority for a given rule
 	// The changes to peer labels, peer pod label updates, namespace label updates etc can be inferred
-	// from the podIPs cache we store.
+	// from the peerIPs cache we store.
 	// Did the ANP.Spec.Ingress.Peers Change?
 	// 1) ANP.Spec.Ingress.Peers.Namespaces changed && ||
 	// 2) ANP.Spec.Ingress.Peers.Pods changed && ||
@@ -505,8 +519,10 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	// Did the ANP.Spec.Egress.Peers Change?
 	// 1) ANP.Spec.Egress.Peers.Namespaces changed && ||
 	// 2) ANP.Spec.Egress.Peers.Pods changed && ||
-	// 3) A namespace started or stopped matching the peer && ||
-	// 4) A pod started or stopped matching the peer
+	// 3) ANP.Spec.Egress.Peers.Nodes changed && ||
+	// 4) A namespace started or stopped matching the peer && ||
+	// 5) A pod started or stopped matching the peer && ||
+	// 6) A node started or stopped matching the peer
 	// If yes we need to recompute the IPs present in our ANP's peer's address-sets
 	if !fullPeerRecompute && !reflect.DeepEqual(desiredANPState.egressRules, currentANPState.egressRules) {
 		addrOps, err := c.constructOpsForPeerChanges(desiredANPState.egressRules,
@@ -594,7 +610,7 @@ func (c *Controller) constructOpsForRuleChanges(desiredANPState *adminNetworkPol
 	}
 	for _, rule := range desiredANPState.ingressRules {
 		asIndex := GetANPPeerAddrSetDbIDs(desiredANPState.name, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), c.controllerName, isBanp)
-		_, addrSetOps, err := c.addressSetFactory.NewAddressSetOps(asIndex, util.StringsToIPs(rule.podIPs.UnsortedList()))
+		_, addrSetOps, err := c.addressSetFactory.NewAddressSetOps(asIndex, util.StringsToIPs(rule.peerIPs.UnsortedList()))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address-sets for ANP %s's"+
 				" ingress rule %s/%s/%d: %v", desiredANPState.name, rule.name, rule.gressPrefix, rule.priority, err)
@@ -603,7 +619,7 @@ func (c *Controller) constructOpsForRuleChanges(desiredANPState *adminNetworkPol
 	}
 	for _, rule := range desiredANPState.egressRules {
 		asIndex := GetANPPeerAddrSetDbIDs(desiredANPState.name, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), c.controllerName, isBanp)
-		_, addrSetOps, err := c.addressSetFactory.NewAddressSetOps(asIndex, util.StringsToIPs(rule.podIPs.UnsortedList()))
+		_, addrSetOps, err := c.addressSetFactory.NewAddressSetOps(asIndex, util.StringsToIPs(rule.peerIPs.UnsortedList()))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address-sets for ANP %s's"+
 				" egress rule %s/%s/%d: %v", desiredANPState.name, rule.name, rule.gressPrefix, rule.priority, err)
@@ -614,7 +630,7 @@ func (c *Controller) constructOpsForRuleChanges(desiredANPState *adminNetworkPol
 }
 
 // constructOpsForPeerChanges takes the desired and current rules of the anp and returns the corresponding ops
-// for updating NBDB AddressSetobjects for those peers
+// for updating NBDB AddressSet objects for those peers
 // This should be called if namespace/pod is being created/updated
 func (c *Controller) constructOpsForPeerChanges(desiredRules, currentRules []*gressRule,
 	anpName string, isBanp bool) ([]ovsdb.Operation, error) {
@@ -622,14 +638,14 @@ func (c *Controller) constructOpsForPeerChanges(desiredRules, currentRules []*gr
 	for i := range desiredRules {
 		desiredRule := desiredRules[i]
 		currentRule := currentRules[i]
-		ipsToAdd := desiredRule.podIPs.Difference(currentRule.podIPs)
+		ipsToAdd := desiredRule.peerIPs.Difference(currentRule.peerIPs)
 		asIndex := GetANPPeerAddrSetDbIDs(anpName, desiredRule.gressPrefix, fmt.Sprintf("%d", desiredRule.gressIndex), c.controllerName, isBanp)
 		if len(ipsToAdd) > 0 {
 			as, err := c.addressSetFactory.GetAddressSet(asIndex)
 			if err != nil {
 				return nil, fmt.Errorf("cannot ensure that addressSet %+v exists: err %v", asIndex.GetExternalIDs(), err)
 			}
-			klog.Infof("Adding podIPs %+v to address-set %s for ANP %s", ipsToAdd, as.GetName(), anpName)
+			klog.Infof("Adding peerIPs %+v to address-set %s for ANP %s", ipsToAdd, as.GetName(), anpName)
 			addrOps, err := as.AddIPsReturnOps(util.StringsToIPs(ipsToAdd.UnsortedList()))
 			if err != nil {
 				return nil, fmt.Errorf("failed to construct address-set %s's IP add ops for anp %s's rule"+
@@ -638,13 +654,13 @@ func (c *Controller) constructOpsForPeerChanges(desiredRules, currentRules []*gr
 			}
 			ops = append(ops, addrOps...)
 		}
-		ipsToRemove := currentRule.podIPs.Difference(desiredRule.podIPs)
+		ipsToRemove := currentRule.peerIPs.Difference(desiredRule.peerIPs)
 		if len(ipsToRemove) > 0 {
 			as, err := c.addressSetFactory.GetAddressSet(asIndex)
 			if err != nil {
 				return nil, fmt.Errorf("cannot ensure that addressSet %+v exists: err %v", asIndex.GetExternalIDs(), err)
 			}
-			klog.Infof("Deleting podIPs %+v from address-set %s for ANP %s", ipsToRemove, as.GetName(), anpName)
+			klog.Infof("Deleting peerIPs %+v from address-set %s for ANP %s", ipsToRemove, as.GetName(), anpName)
 			addrOps, err := as.DeleteIPsReturnOps(util.StringsToIPs(ipsToRemove.UnsortedList()))
 			if err != nil {
 				return nil, fmt.Errorf("failed to construct address-set %s's IP delete ops for anp %s's rule"+
