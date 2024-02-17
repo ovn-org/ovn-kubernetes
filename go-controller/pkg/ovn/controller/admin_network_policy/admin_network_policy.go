@@ -121,16 +121,16 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	// 2) Construct Address-sets with IPs of the peers in the rules
 	// 3) Construct ACLs using AS-es and PGs
 	portGroupName, _ := getAdminNetworkPolicyPGName(desiredANPState.name, false)
-	desiredPorts, err := c.getPortsOfSubject(desiredANPState.subject)
+	desiredPorts, err := c.convertANPSubjectToLSPs(desiredANPState.subject)
 	if err != nil {
 		return fmt.Errorf("unable to fetch ports for anp %s: %v", desiredANPState.name, err)
 	}
-	err = c.constructIPSetOfPeers(desiredANPState)
+	err = c.convertANPPeersToIPs(desiredANPState)
 	if err != nil {
 		return fmt.Errorf("unable to construct IPsets for anp %s: %v", desiredANPState.name, err)
 	}
 	atLeastOneRuleUpdated := false
-	desiredACLs := c.getACLsOfRules(desiredANPState, currentANPState, portGroupName, &atLeastOneRuleUpdated, false)
+	desiredACLs := c.convertANPRulesToACLs(desiredANPState, currentANPState, portGroupName, &atLeastOneRuleUpdated, false)
 
 	if !loaded {
 		// this is a fresh ANP create
@@ -170,10 +170,10 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	return nil
 }
 
-// getACLsOfRules takes all the rules belonging to the ANP and initiates the conversion of rule->acl
+// convertANPRulesToACLs takes all the rules belonging to the ANP and initiates the conversion of rule->acl
 // if currentANPState exists; then we also see if any of the current v/s desired ACLs had a state change
 // and if so, we return atLeastOneRuleUpdated=true
-func (c *Controller) getACLsOfRules(desiredANPState, currentANPState *adminNetworkPolicyState, pgName string, atLeastOneRuleUpdated *bool, isBanp bool) []*nbdb.ACL {
+func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adminNetworkPolicyState, pgName string, atLeastOneRuleUpdated *bool, isBanp bool) []*nbdb.ACL {
 	acls := []*nbdb.ACL{}
 	// isAtLeastOneRuleUpdatedCheckRequired is set to true, if we had an anp already in cache (update) AND the rule lengths are the same
 	// if the rule lengths are different we do a full peer recompute in ensureAdminNetworkPolicy anyways
@@ -241,10 +241,9 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 	return acls
 }
 
-// constructIPSetOfPeers takes all the peers belonging to each of the ANP rule and initiates the conversion
+// convertANPPeersToIPs takes all the peers belonging to each of the ANP rule and initiates the conversion
 // of rule.peer->set of ips. These set of ips are then used to create the address-sets
-func (c *Controller) constructIPSetOfPeers(anp *adminNetworkPolicyState) error {
-	// create address-set
+func (c *Controller) convertANPPeersToIPs(anp *adminNetworkPolicyState) error {
 	// TODO (tssurya): Revisit this logic to see if its better to do one address-set per peer
 	// and join them with OR if that is more perf efficient. Had briefly discussed this OVN team
 	// We are not yet clear which is better since both have advantages and disadvantages.
@@ -318,10 +317,10 @@ func (c *Controller) convertANPPeersToIPSet(peers []*adminNetworkPolicyPeer) (se
 	return peerPodIPs, nil
 }
 
-// getPortsOfSubject calculates all the LSP's that match for the provided anp's subject and returns them
+// convertANPSubjectToLSPs calculates all the LSP's that match for the provided anp's subject and returns them
 // It also populates the adminNetworkPolicySubject.namespaces and adminNetworkPolicySubject.podPorts
 // pieces of the cache
-func (c *Controller) getPortsOfSubject(anpSubject *adminNetworkPolicySubject) ([]*nbdb.LogicalSwitchPort, error) {
+func (c *Controller) convertANPSubjectToLSPs(anpSubject *adminNetworkPolicySubject) ([]*nbdb.LogicalSwitchPort, error) {
 	ports := []*nbdb.LogicalSwitchPort{}
 	anpSubject.podPorts = sets.Set[string]{}
 	namespaces, err := c.anpNamespaceLister.List(anpSubject.namespaceSelector)

@@ -127,16 +127,16 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 	// 2) Construct Address-sets with IPs of the peers in the rules
 	// 3) Construct ACLs using AS-es and PGs
 	portGroupName, _ := getAdminNetworkPolicyPGName(desiredBANPState.name, true)
-	desiredPorts, err := c.getPortsOfSubject(desiredBANPState.subject)
+	desiredPorts, err := c.convertANPSubjectToLSPs(desiredBANPState.subject)
 	if err != nil {
 		return fmt.Errorf("unable to fetch ports for banp %s: %v", desiredBANPState.name, err)
 	}
-	err = c.constructIPSetOfPeers(desiredBANPState)
+	err = c.convertANPPeersToIPs(desiredBANPState)
 	if err != nil {
 		return fmt.Errorf("unable to build IPsets for banp %s: %v", desiredBANPState.name, err)
 	}
 	atLeastOneRuleUpdated := false
-	desiredACLs := c.getACLsOfRules(desiredBANPState, currentBANPState, portGroupName, &atLeastOneRuleUpdated, true)
+	desiredACLs := c.convertANPRulesToACLs(desiredBANPState, currentBANPState, portGroupName, &atLeastOneRuleUpdated, true)
 
 	// Comparing names for figuring out if cache is populated or not is safe
 	// because the singleton BANP will always be called "default" in any cluster
