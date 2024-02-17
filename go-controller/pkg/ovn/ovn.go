@@ -497,6 +497,7 @@ func (oc *DefaultNetworkController) newANPController() error {
 		oc.watchFactory.BANPInformer(),
 		oc.watchFactory.NamespaceCoreInformer(),
 		oc.watchFactory.PodCoreInformer(),
+		oc.watchFactory.NodeCoreInformer(),
 		oc.addressSetFactory,
 		oc.isPodScheduledinLocalZone,
 		oc.zone,
