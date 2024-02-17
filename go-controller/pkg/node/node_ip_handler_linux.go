@@ -33,7 +33,7 @@ type addressManager struct {
 	// useNetlink indicates the addressManager should use machine
 	// information from netlink. Set to false for testcases.
 	useNetlink bool
-
+	syncPeriod time.Duration
 	// compare node primary IP change
 	nodePrimaryAddr net.IP
 	gatewayBridge   *bridgeConfiguration
@@ -59,6 +59,7 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, config *manage
 		gatewayBridge:  gwBridge,
 		OnChanged:      func() {},
 		useNetlink:     useNetlink,
+		syncPeriod:     30 * time.Second,
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	mgr.sync()
@@ -145,7 +146,7 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 // Event 2: Ticker events which is used to trigger a sync func. This is required in-case address change events are missed.
 // Event 3: Stop events which stops event watching and returns.
 func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscribeFn) {
-	addressSyncTimer := time.NewTicker(30 * time.Second)
+	addressSyncTimer := time.NewTicker(c.syncPeriod)
 	defer addressSyncTimer.Stop()
 
 	subscribed, addrChan, err := subscribe()
@@ -156,7 +157,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscri
 	for {
 		select {
 		case a, ok := <-addrChan:
-			addressSyncTimer.Reset(30 * time.Second)
+			addressSyncTimer.Reset(c.syncPeriod)
 			if !ok {
 				if subscribed, addrChan, err = subscribe(); err != nil {
 					klog.Errorf("Error during netlink re-subscribe due to channel closing for IP Manager: %v", err)
