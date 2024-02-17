@@ -406,9 +406,9 @@ func (c *addressManager) sync() {
 			return
 		}
 		for _, link := range links {
-			foundAddrs, err := util.GetFilteredInterfaceAddrs(link, config.IPv4Mode, config.IPv6Mode)
+			foundAddrs, err := netlink.AddrList(link, getSupportedIPFamily())
 			if err != nil {
-				klog.Errorf("Unable to retrieve addresses for link %s: %v", link.Attrs().Name, err)
+				klog.Errorf("Failed sync due to being unable to list addresses for %q: %v", link.Attrs().Name, err)
 				return
 			}
 			addrs = append(addrs, foundAddrs...)
@@ -495,4 +495,14 @@ func updateOVNEncapIPAndReconnect(newIP net.IP) {
 		klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
 		return
 	}
+}
+
+func getSupportedIPFamily() int {
+	var ipFamily int // value of 0 means include both IP v4 and v6 addresses
+	if config.IPv4Mode && !config.IPv6Mode {
+		ipFamily = netlink.FAMILY_V4
+	} else if !config.IPv4Mode && config.IPv6Mode {
+		ipFamily = netlink.FAMILY_V6
+	}
+	return ipFamily
 }
