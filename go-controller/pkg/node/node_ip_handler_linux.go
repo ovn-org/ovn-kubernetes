@@ -129,26 +129,18 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 		c.sync()
 		return true, addrChan, nil
 	}
-
+	c.addHandlerForPrimaryAddrChange()
 	c.runInternal(stopChan, doneWg, subscribe)
 }
 
-// runInternal can be used by testcases to provide a fake subscription function
-// rather than using netlink
+// runInternal gathers node IP information and publishes it on the k8 node annotations.
+// The annotations it updates are k8s.ovn.org/host-cidrs, k8s.ovn.org/node-primary-ifaddr and k8s.ovn.org/l3-gateway-config.
+// It waits on 3 events and only the "stop" event may end execution.
+// Event 1: Address change events using a subscription func. In normal execution, this is a netlink addr subscription func that returns a channel that
+// conveys address updates that can be processed upon immediately.
+// Event 2: Ticker events which is used to trigger a sync func. This is required in-case address change events are missed.
+// Event 3: Stop events which stops event watching and returns.
 func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGroup, subscribe subscribeFn) {
-	// Add an event handler to the node informer. This is needed for cases where users first update the node's IP
-	// address but only later update kubelet configuration and restart kubelet (which in turn will update the reported
-	// IP address inside the node's status field).
-	nodeInformer := c.watchFactory.NodeInformer()
-	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(old, new interface{}) {
-			c.handleNodePrimaryAddrChange()
-		},
-	})
-	if err != nil {
-		klog.Fatalf("Could not add node event handler while starting address manager %v", err)
-	}
-
 	doneWg.Add(1)
 	go func() {
 		defer doneWg.Done()
@@ -203,6 +195,22 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	}()
 
 	klog.Info("Node IP manager is running")
+}
+
+// addHandlerForPrimaryAddrChange handles reconfiguration of a node primary IP address change
+func (c *addressManager) addHandlerForPrimaryAddrChange() {
+	// Add an event handler to the node informer. This is needed for cases where users first update the node's IP
+	// address but only later update kubelet configuration and restart kubelet (which in turn will update the reported
+	// IP address inside the node's status field).
+	nodeInformer := c.watchFactory.NodeInformer()
+	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
+			c.handleNodePrimaryAddrChange()
+		},
+	})
+	if err != nil {
+		klog.Fatalf("Could not add node event handler while starting address manager %v", err)
+	}
 }
 
 // updates OVN's EncapIP if the node IP changed
