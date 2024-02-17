@@ -48,7 +48,7 @@ func (c *Controller) syncAdminNetworkPolicyPod(key string) error {
 	defer c.Unlock()
 	startTime := time.Now()
 	// Iterate all ANPs and check if this namespace start/stops matching
-	// any and add/remove the setup accordingly. Namespaces can match multiple
+	// any ANP and add/remove the setup accordingly. Namespaces can match multiple
 	// ANPs objects, so continue iterating all ANP objects before finishing.
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {

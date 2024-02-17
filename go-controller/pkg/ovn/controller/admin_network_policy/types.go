@@ -46,9 +46,12 @@ type adminNetworkPolicySubject struct {
 type adminNetworkPolicyPeer struct {
 	namespaceSelector labels.Selector
 	podSelector       labels.Selector
+	nodeSelector      labels.Selector
 	// map of namespaces matching the provided namespaceSelector
 	// {K: namespace name; V: {set of pods matching the provided podSelector}}
 	namespaces map[string]sets.Set[string]
+	// set of nodes matching the provided nodeSelector
+	nodes sets.Set[string]
 }
 
 type gressRule struct {
@@ -231,6 +234,7 @@ func newAdminNetworkPolicyPeer(rawNamespaces *anpapi.NamespacedPeer, rawPods *an
 			podSelector:       peerPodSelector,
 		}
 	}
+	anpPeer.nodeSelector = labels.Nothing() // Nodes are not supported as ingress peers and for egress peers this will get overwritten
 	return anpPeer, nil
 }
 
@@ -243,7 +247,29 @@ func newAdminNetworkPolicyIngressPeer(raw anpapi.AdminNetworkPolicyIngressPeer) 
 // newAdminNetworkPolicyEgressPeer takes the provided ANP API Peer and creates a new corresponding
 // adminNetworkPolicyPeer cache object for that Peer.
 func newAdminNetworkPolicyEgressPeer(raw anpapi.AdminNetworkPolicyEgressPeer) (*adminNetworkPolicyPeer, error) {
-	return newAdminNetworkPolicyPeer(raw.Namespaces, raw.Pods)
+	var anpPeer *adminNetworkPolicyPeer
+	if raw.Namespaces != nil || raw.Pods != nil {
+		return newAdminNetworkPolicyPeer(raw.Namespaces, raw.Pods)
+	} else if raw.Nodes != nil {
+		peerNodeSelector, err := metav1.LabelSelectorAsSelector(raw.Nodes)
+		if err != nil {
+			return nil, err
+		}
+		if !peerNodeSelector.Empty() {
+			anpPeer = &adminNetworkPolicyPeer{
+				namespaceSelector: labels.Nothing(), // doesn't match any namespaces
+				podSelector:       labels.Nothing(), // doesn't match any pods
+				nodeSelector:      peerNodeSelector,
+			}
+		} else {
+			anpPeer = &adminNetworkPolicyPeer{
+				namespaceSelector: labels.Nothing(),    // doesn't match any namespaces
+				podSelector:       labels.Nothing(),    // doesn't match any pods
+				nodeSelector:      labels.Everything(), // matches all nodes
+			}
+		}
+	}
+	return anpPeer, nil
 }
 
 // newAdminNetworkPolicyIngressRule takes the provided ANP API Ingress Rule and creates a new corresponding
