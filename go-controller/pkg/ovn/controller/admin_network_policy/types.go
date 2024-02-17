@@ -66,8 +66,8 @@ type gressRule struct {
 	action string
 	peers  []*adminNetworkPolicyPeer
 	ports  []*libovsdbutil.NetworkPolicyPort
-	// all the podIPs of the peer pods selected by this ANP Rule
-	podIPs sets.Set[string]
+	// all the peerIPs of the peer entities (pods, nodes) selected by this ANP Rule
+	peerIPs sets.Set[string]
 }
 
 // adminNetworkPolicyState is the cache that keeps the state of a single
