@@ -150,7 +150,7 @@ func getStalePolicyACLs(gressIdx int, namespace, policyName string, peerNamespac
 		gressAsMatch := asMatch(hashedASNames)
 		match := fmt.Sprintf("ip4.%s == {%s} && %s == @%s", ipDir, gressAsMatch, portDir, pgName)
 		action := nbdb.ACLActionAllowRelated
-		dbIDs := gp.getNetpolACLDbIDs(emptyIdx, emptyProtocol)
+		dbIDs := gp.getNetpolACLDbIDs(emptyIdx, libovsdbutil.UnspecifiedL4Protocol)
 		staleName := namespace + "_" + policyName + "_0"
 		// build the most ancient ACL version, which includes
 		// - old name

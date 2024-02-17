@@ -320,7 +320,7 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 	if len(rule.ports) == 0 {
 		match = fmt.Sprintf("%s && %s", l3Match, lportMatch)
 		acl := libovsdbutil.BuildANPACL(
-			getANPRuleACLDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), emptyProtocol, c.controllerName, isBanp),
+			getANPRuleACLDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), libovsdbutil.UnspecifiedL4Protocol, c.controllerName, isBanp),
 			int(rule.priority),
 			match,
 			rule.action,
