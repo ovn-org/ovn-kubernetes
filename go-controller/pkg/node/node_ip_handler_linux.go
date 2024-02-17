@@ -130,7 +130,11 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 		return true, addrChan, nil
 	}
 	c.addHandlerForPrimaryAddrChange()
-	c.runInternal(stopChan, doneWg, subscribe)
+	doneWg.Add(1)
+	go func() {
+		c.runInternal(stopChan, subscribe)
+		doneWg.Done()
+	}()
 }
 
 // runInternal gathers node IP information and publishes it on the k8 node annotations.
@@ -140,61 +144,55 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 // conveys address updates that can be processed upon immediately.
 // Event 2: Ticker events which is used to trigger a sync func. This is required in-case address change events are missed.
 // Event 3: Stop events which stops event watching and returns.
-func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGroup, subscribe subscribeFn) {
-	doneWg.Add(1)
-	go func() {
-		defer doneWg.Done()
+func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscribeFn) {
+	addressSyncTimer := time.NewTicker(30 * time.Second)
+	defer addressSyncTimer.Stop()
 
-		addressSyncTimer := time.NewTicker(30 * time.Second)
-		defer addressSyncTimer.Stop()
-
-		subscribed, addrChan, err := subscribe()
-		if err != nil {
-			klog.Errorf("Error during netlink subscribe for IP Manager: %v", err)
-		}
-
-		for {
-			select {
-			case a, ok := <-addrChan:
-				addressSyncTimer.Reset(30 * time.Second)
-				if !ok {
-					if subscribed, addrChan, err = subscribe(); err != nil {
-						klog.Errorf("Error during netlink re-subscribe due to channel closing for IP Manager: %v", err)
-					}
-					continue
-				}
-				addrChanged := false
-				if a.NewAddr {
-					addrChanged = c.addAddr(a.LinkAddress)
-				} else {
-					addrChanged = c.delAddr(a.LinkAddress)
-				}
-
-				c.handleNodePrimaryAddrChange()
-				if addrChanged || !c.doNodeHostCIDRsMatch() {
-					klog.Infof("Host CIDRs changed to %v. Updating node address annotations.", c.cidrs)
-					err := c.updateNodeAddressAnnotations()
-					if err != nil {
-						klog.Errorf("Address Manager failed to update node address annotations: %v", err)
-					}
-					c.OnChanged()
-				}
-			case <-addressSyncTimer.C:
-				if subscribed {
-					klog.V(5).Info("Node IP manager calling sync() explicitly")
-					c.sync()
-				} else {
-					if subscribed, addrChan, err = subscribe(); err != nil {
-						klog.Errorf("Error during netlink re-subscribe for IP Manager: %v", err)
-					}
-				}
-			case <-stopChan:
-				return
-			}
-		}
-	}()
-
+	subscribed, addrChan, err := subscribe()
+	if err != nil {
+		klog.Errorf("Error during netlink subscribe for IP Manager: %v", err)
+	}
 	klog.Info("Node IP manager is running")
+	for {
+		select {
+		case a, ok := <-addrChan:
+			addressSyncTimer.Reset(30 * time.Second)
+			if !ok {
+				if subscribed, addrChan, err = subscribe(); err != nil {
+					klog.Errorf("Error during netlink re-subscribe due to channel closing for IP Manager: %v", err)
+				}
+				continue
+			}
+			addrChanged := false
+			if a.NewAddr {
+				addrChanged = c.addAddr(a.LinkAddress)
+			} else {
+				addrChanged = c.delAddr(a.LinkAddress)
+			}
+
+			c.handleNodePrimaryAddrChange()
+			if addrChanged || !c.doNodeHostCIDRsMatch() {
+				klog.Infof("Host CIDRs changed to %v. Updating node address annotations.", c.cidrs)
+				err := c.updateNodeAddressAnnotations()
+				if err != nil {
+					klog.Errorf("Address Manager failed to update node address annotations: %v", err)
+				}
+				c.OnChanged()
+			}
+		case <-addressSyncTimer.C:
+			if subscribed {
+				klog.V(5).Info("Node IP manager calling sync() explicitly")
+				c.sync()
+			} else {
+				if subscribed, addrChan, err = subscribe(); err != nil {
+					klog.Errorf("Error during netlink re-subscribe for IP Manager: %v", err)
+				}
+			}
+		case <-stopChan:
+			klog.Info("Node IP manager is finished")
+			return
+		}
+	}
 }
 
 // addHandlerForPrimaryAddrChange handles reconfiguration of a node primary IP address change

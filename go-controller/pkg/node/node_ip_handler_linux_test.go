@@ -125,7 +125,11 @@ var _ = Describe("Node IP Handler tests", func() {
 			tc.ipManager.sync()
 			return true, tc.addrChan, nil
 		}
-		tc.ipManager.runInternal(tc.stopCh, tc.doneWg, subscribe)
+		tc.doneWg.Add(1)
+		go func() {
+			tc.ipManager.runInternal(tc.stopCh, subscribe)
+			tc.doneWg.Done()
+		}()
 		Eventually(func() bool {
 			return atomic.LoadUint32(&tc.subscribed) == 1
 		}, 5).Should(BeTrue())
