@@ -426,6 +426,10 @@ spec:
           value: "{{ ovn_empty_lb_events }}"
         - name: OVN_ACL_LOGGING_RATE_LIMIT
           value: "{{ ovn_acl_logging_rate_limit }}"
+        - name: OVN_BFD_RATE_LIMIT
+          value: "{{ ovn_bfd_rate_limit }}"
+        - name: OVN_DEFAULT_RATE_LIMIT
+          value: "{{ ovn_default_rate_limit }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:

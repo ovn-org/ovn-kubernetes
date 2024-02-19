@@ -49,6 +49,8 @@ OVNKUBE_LOGFILE_MAXBACKUPS=""
 OVNKUBE_LOGFILE_MAXAGE=""
 OVNKUBE_LIBOVSDB_CLIENT_LOGFILE=""
 OVN_ACL_LOGGING_RATE_LIMIT=""
+OVN_BFD_RATE_LIMIT=""
+OVN_DEFAULT_RATE_LIMIT=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_MONITOR_ALL=""
@@ -189,6 +191,12 @@ while [ "$1" != "" ]; do
     ;;
   --acl-logging-rate-limit)
     OVN_ACL_LOGGING_RATE_LIMIT=$VALUE
+    ;;
+  --bfd-rate-limit)
+    OVN_BFD_RATE_LIMIT=$VALUE
+    ;;
+  --default-rate-limit)
+    OVN_DEFAULT_RATE_LIMIT=$VALUE
     ;;
   --ssl)
     OVN_SSL_ENABLE="yes"
@@ -395,6 +403,10 @@ ovnkube_libovsdb_client_logfile=${OVNKUBE_LIBOVSDB_CLIENT_LOGFILE}
 echo "ovnkube_libovsdb_client_logfile: ${ovnkube_libovsdb_client_logfile}"
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 echo "ovn_acl_logging_rate_limit: ${ovn_acl_logging_rate_limit}"
+ovn_bfd_rate_limit=${OVN_BFD_RATE_LIMIT:-"50"}
+echo "ovn_bfd_rate_limit: ${ovn_bfd_rate_limit}"
+ovn_default_rate_limit=${OVN_DEFAULT_RATE_LIMIT:-"25"}
+echo "ovn_default_rate_limit: ${ovn_default_rate_limit}"
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE}
 echo "ovn_hybrid_overlay_enable: ${ovn_hybrid_overlay_enable}"
 ovn_admin_network_policy_enable=${OVN_ADMIN_NETWORK_POLICY_ENABLE}
@@ -650,6 +662,8 @@ ovn_image=${ovnkube_image} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
+  ovn_bfd_rate_limit=${ovn_bfd_rate_limit} \
+  ovn_default_rate_limit=${ovn_default_rate_limit} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
@@ -797,6 +811,8 @@ ovn_image=${ovnkube_image} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
   ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
+  ovn_bfd_rate_limit=${ovn_bfd_rate_limit} \
+  ovn_default_rate_limit=${ovn_default_rate_limit} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
@@ -853,6 +869,8 @@ ovn_image=${ovnkube_image} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
   ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
+  ovn_bfd_rate_limit=${ovn_bfd_rate_limit} \
+  ovn_default_rate_limit=${ovn_default_rate_limit} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \

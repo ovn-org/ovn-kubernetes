@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
@@ -43,6 +44,13 @@ func getMeterNameForProtocol(protocol string) string {
 	return protocol + "-" + types.OvnRateLimitingMeter
 }
 
+func getMeterBand(rate int) *nbdb.MeterBand {
+	return &nbdb.MeterBand{
+		Action: types.MeterAction,
+		Rate:   rate,
+	}
+}
+
 // EnsureDefaultCOPP creates the default COPP that needs to be added to each GR
 // if not already present. Also cleans up old COPP entries if required.
 func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
@@ -54,13 +62,11 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 		return "", fmt.Errorf("failed to delete duplicate COPPs: %w", err)
 	}
 
-	band := &nbdb.MeterBand{
-		Action: types.MeterAction,
-		Rate:   int(25), // hard-coding for now. TODO(tssurya): make this configurable if needed
-	}
-	ops, err = libovsdbops.CreateMeterBandOps(nbClient, ops, band)
+	defaultBand := getMeterBand(config.PktRateLimiter.DefaultRateLimit)
+	bfdBand := getMeterBand(config.PktRateLimiter.BFDRateLimit)
+	ops, err = libovsdbops.CreateMeterBandOps(nbClient, ops, []*nbdb.MeterBand{defaultBand, bfdBand})
 	if err != nil {
-		return "", fmt.Errorf("can't create meter band %v: %v", band, err)
+		return "", fmt.Errorf("can't create meter band %v: %v", defaultBand, err)
 	}
 
 	meterNames := make(map[string]string, len(defaultProtocolNames))
@@ -75,8 +81,13 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 			Fair: &meterFairness,
 			Unit: types.PacketsPerSecond,
 		}
-		ops, err = libovsdbops.CreateOrUpdateMeterOps(nbClient, ops, meter, []*nbdb.MeterBand{band},
-			&meter.Bands, &meter.Fair, &meter.Unit)
+		if protocol == OVNBFDRateLimiter {
+			ops, err = libovsdbops.CreateOrUpdateMeterOps(nbClient, ops, meter, []*nbdb.MeterBand{bfdBand},
+				&meter.Bands, &meter.Fair, &meter.Unit)
+		} else {
+			ops, err = libovsdbops.CreateOrUpdateMeterOps(nbClient, ops, meter, []*nbdb.MeterBand{defaultBand},
+				&meter.Bands, &meter.Fair, &meter.Unit)
+		}
 		if err != nil {
 			return "", fmt.Errorf("can't create meter %v: %v", meter, err)
 		}

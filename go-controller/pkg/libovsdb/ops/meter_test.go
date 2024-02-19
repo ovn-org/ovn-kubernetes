@@ -48,7 +48,7 @@ func TestCreateMeterBandOps(t *testing.T) {
 			t.Cleanup(cleanup.Cleanup)
 
 			meterBand := tt.inputMeterBand.DeepCopy()
-			_, err = CreateMeterBandOps(nbClient, nil, meterBand)
+			_, err = CreateMeterBandOps(nbClient, nil, []*nbdb.MeterBand{meterBand})
 			if err != nil {
 				t.Fatal(fmt.Errorf("%s: got unexpected error: %v", tt.desc, err))
 			}

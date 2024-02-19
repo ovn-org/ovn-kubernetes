@@ -133,6 +133,11 @@ var (
 	// OvnSouth holds southbound OVN database client and server authentication and location details
 	OvnSouth OvnAuthConfig
 
+	PktRateLimiter = PktRateLimiterConfig{
+		DefaultRateLimit: 25,
+		BFDRateLimit:     50,
+	}
+
 	// Gateway holds node gateway-related parsed config file parameters and command-line overrides
 	Gateway = GatewayConfig{
 		V4JoinSubnet:       "100.64.0.0/16",
@@ -395,6 +400,16 @@ type OVNKubernetesFeatureConfig struct {
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
 	EnableInterconnect              bool `gcfg:"enable-interconnect"`
 	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
+}
+
+// PktRateLimiterConfig holds packet-rate-limiter related configs used to define
+// MeterBands in OVN for CoPP via OVNK Routers
+type PktRateLimiterConfig struct {
+	// DefaultRateLimit holds the allowed rate of packets per second to be delivered to OVN Controller for protocols
+	// which don't have specific limits set. Currently this value is used for arp, icmp, event-elb, svc-monitor, rejects, resets
+	DefaultRateLimit int `gcfg:"default-rate-limit"`
+	// BFDRateLimit holds the allowed rate of BFD packets per second to be delivered to OVN Controller
+	BFDRateLimit int `gcfg:"bfd-rate-limit"`
 }
 
 // GatewayMode holds the node gateway mode

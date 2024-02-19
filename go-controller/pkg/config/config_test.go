@@ -588,6 +588,7 @@ var _ = Describe("Config Operations", func() {
 			"enable-multi-external-gateway=true",
 			"enable-admin-network-policy=true",
 			"zone=foo",
+			"bfd-rate-limit=75",
 		)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -605,6 +606,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Logging.File).To(gomega.Equal("/var/log/ovnkube.log"))
 			gomega.Expect(Logging.Level).To(gomega.Equal(5))
 			gomega.Expect(Logging.ACLLoggingRateLimit).To(gomega.Equal(20))
+			gomega.Expect(PktRateLimiter.BFDRateLimit).To(gomega.Equal(75))
+			gomega.Expect(PktRateLimiter.DefaultRateLimit).To(gomega.Equal(25))
 			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal("2.2.2.2:2055"))
 			gomega.Expect(Monitoring.RawSFlowTargets).To(gomega.Equal("2.2.2.2:2056"))
 			gomega.Expect(Monitoring.RawIPFIXTargets).To(gomega.Equal("2.2.2.2:2057"))
@@ -713,6 +716,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Logging.File).To(gomega.Equal("/some/logfile"))
 			gomega.Expect(Logging.Level).To(gomega.Equal(3))
 			gomega.Expect(Logging.ACLLoggingRateLimit).To(gomega.Equal(30))
+			gomega.Expect(PktRateLimiter.BFDRateLimit).To(gomega.Equal(50))
+			gomega.Expect(PktRateLimiter.DefaultRateLimit).To(gomega.Equal(25))
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/some/cni/dir"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))

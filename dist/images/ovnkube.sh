@@ -61,6 +61,8 @@ fi
 # OVNKUBE_LOGFILE_MAXAGE - log file max age in days (default 5 days)
 # OVNKUBE_LIBOVSDB_CLIENT_LOGFILE - separate log file for libovsdb client (default: do not separate from logfile)
 # OVN_ACL_LOGGING_RATE_LIMIT - specify default ACL logging rate limit in messages per second (default: 20)
+# OVN_BFD_RATE_LIMIT - specify default BFD rate limit in packets per second (default: 50)
+# OVN_default_RATE_LIMIT - specify default rate limit in packets per second (default: 25)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
 # OVN_NB_RAFT_PORT - ovn north db raft port (default 6643)
@@ -260,6 +262,8 @@ ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple network support for ovn-kubernetes
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
+ovn_bfd_logging_rate_limit=${OVN_BFD_RATE_LIMIT:-"50"}
+ovn_default_logging_rate_limit=${OVN_DEFAULT_RATE_LIMIT:-"25"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
 ovn_ipfix_targets=${OVN_IPFIX_TARGETS:-}
@@ -1149,6 +1153,16 @@ ovn-master() {
       ovn_acl_logging_rate_limit_flag="--acl-logging-rate-limit ${ovn_acl_logging_rate_limit}"
   fi
 
+  ovn_bfd_rate_limit_flag=
+  if [[ -n ${ovn_bfd_rate_limit} ]]; then
+      ovn_bfd_rate_limit_flag="--bfd-rate-limit ${ovn_bfd_rate_limit}"
+  fi
+
+  ovn_default_rate_limit_flag=
+  if [[ -n ${ovn_default_rate_limit} ]]; then
+      ovn_default_rate_limit_flag="--default-rate-limit ${ovn_default_rate_limit}"
+  fi
+
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
@@ -1251,6 +1265,8 @@ ovn-master() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
+    ${ovn_bfd_rate_limit_flag} \
+    ${ovn_default_rate_limit_flag} \
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -1384,6 +1400,18 @@ ovnkube-controller() {
   fi
   echo "ovn_acl_logging_rate_limit_flag=${ovn_acl_logging_rate_limit_flag}"
 
+  ovn_bfd_rate_limit_flag=
+  if [[ -n ${ovn_bfd_rate_limit} ]]; then
+      ovn_bfd_rate_limit_flag="--bfd-rate-limit ${ovn_bfd_rate_limit}"
+  fi
+  echo "ovn_bfd_rate_limit_flag=${ovn_bfd_rate_limit_flag}"
+
+  ovn_default_rate_limit_flag=
+  if [[ -n ${ovn_default_rate_limit} ]]; then
+      ovn_default_rate_limit_flag="--default-rate-limit ${ovn_default_rate_limit}"
+  fi
+  echo "ovn_default_rate_limit_flag=${ovn_default_rate_limit_flag}"
+
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
@@ -1509,6 +1537,8 @@ ovnkube-controller() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
+    ${ovn_bfd_rate_limit_flag} \
+    ${ovn_default_rate_limit_flag} \
     ${ovn_dbs} \
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_enable_interconnect_flag} \
@@ -1644,6 +1674,18 @@ ovnkube-controller-with-node() {
       ovn_acl_logging_rate_limit_flag="--acl-logging-rate-limit ${ovn_acl_logging_rate_limit}"
   fi
   echo "ovn_acl_logging_rate_limit_flag=${ovn_acl_logging_rate_limit_flag}"
+
+  ovn_bfd_rate_limit_flag=
+  if [[ -n ${ovn_bfd_rate_limit} ]]; then
+      ovn_bfd_rate_limit_flag="--bfd-rate-limit ${ovn_bfd_rate_limit}"
+  fi
+  echo "ovn_bfd_rate_limit_flag=${ovn_bfd_rate_limit_flag}"
+
+  ovn_default_rate_limit_flag=
+  if [[ -n ${ovn_default_rate_limit} ]]; then
+      ovn_default_rate_limit_flag="--default-rate-limit ${ovn_default_rate_limit}"
+  fi
+  echo "ovn_default_rate_limit_flag=${ovn_default_rate_limit_flag}"
 
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
@@ -1899,6 +1941,8 @@ ovnkube-controller-with-node() {
     ${netflow_targets} \
     ${ofctrl_wait_before_clear} \
     ${ovn_acl_logging_rate_limit_flag} \
+    ${ovn_bfd_rate_limit_flag} \
+    ${ovn_default_rate_limit_flag} \
     ${ovn_dbs} \
     ${ovn_encap_ip_flag} \
     ${ovn_encap_port_flag} \

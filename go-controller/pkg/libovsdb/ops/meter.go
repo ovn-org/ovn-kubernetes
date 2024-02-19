@@ -17,31 +17,36 @@ func equalsMeterBand(a, b *nbdb.MeterBand) bool {
 		reflect.DeepEqual(a.ExternalIDs, b.ExternalIDs)
 }
 
-// CreateMeterBandOps creates the provided meter band if it does not exist
-func CreateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, meterBand *nbdb.MeterBand) ([]ovsdb.Operation, error) {
+// CreateMeterBandOps creates the provided meter bands if they do not exist
+func CreateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, meterBands []*nbdb.MeterBand) ([]ovsdb.Operation, error) {
 	bands := []*nbdb.MeterBand{}
-	opModel := operationModel{
-		Model:          meterBand,
-		ModelPredicate: func(item *nbdb.MeterBand) bool { return equalsMeterBand(item, meterBand) },
-		OnModelUpdates: onModelUpdatesNone(),
-		ExistingResult: &bands,
-		DoAfter: func() {
-			// in case we have multiple equal bands, pick the first one for
-			// convergence, OVSDB will remove unreferenced ones
-			if len(bands) > 0 {
-				uuids := sets.NewString()
-				for _, band := range bands {
-					uuids.Insert(band.UUID)
+	opModels := make([]operationModel, 0, len(meterBands))
+	for i := range meterBands {
+		meterBand := meterBands[i]
+		opModel := operationModel{
+			Model:          meterBand,
+			ModelPredicate: func(item *nbdb.MeterBand) bool { return equalsMeterBand(item, meterBand) },
+			OnModelUpdates: onModelUpdatesNone(),
+			ExistingResult: &bands,
+			DoAfter: func() {
+				// in case we have multiple equal bands, pick the first one for
+				// convergence, OVSDB will remove unreferenced ones
+				if len(bands) > 0 {
+					uuids := sets.NewString()
+					for _, band := range bands {
+						uuids.Insert(band.UUID)
+					}
+					meterBand.UUID = uuids.List()[0]
 				}
-				meterBand.UUID = uuids.List()[0]
-			}
-		},
-		ErrNotFound: false,
-		BulkOp:      true,
+			},
+			ErrNotFound: false,
+			BulkOp:      true,
+		}
+		opModels = append(opModels, opModel)
 	}
 
 	m := newModelClient(nbClient)
-	return m.CreateOrUpdateOps(ops, opModel)
+	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
 // CreateOrUpdateMeterOps creates or updates the provided meter associated to
