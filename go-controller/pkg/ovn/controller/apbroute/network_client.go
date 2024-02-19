@@ -417,6 +417,46 @@ func (nb *northBoundClient) createOrUpdateBFDStaticRoute(bfdEnabled bool, gw str
 		return fmt.Errorf("error transacting static route: %v", err)
 	}
 
+	if bfdEnabled {
+		// determine if the BFD rate limits need to be increased (we need to do this only if the BFD Create/Update succeeded)
+		// Fetch all current BFD ECMP routes on this GR
+		newPredicate := func(item *nbdb.BFD) bool {
+			return item.LogicalPort == port
+		}
+		bfds, err := libovsdbops.FindBFDWithPredicate(nb.nbClient, newPredicate)
+		if err != nil {
+			return fmt.Errorf("failed to list bfds for %s: %w", gr, err)
+		}
+		p := func(item *nbdb.MeterBand) bool {
+			return item.ExternalIDs["bfd-"+types.OvnRateLimitingMeter] == "true"
+		}
+		bfdBands, err := libovsdbops.FindMeterBandWithPredicate(nb.nbClient, p)
+		if err != nil {
+			return fmt.Errorf("failed to list bfd band for %s: %w", gr, err)
+		}
+		if len(bfdBands) == 0 {
+			return nil // nothing to do
+		}
+		currentRate := bfdBands[0].Rate
+
+		if len(bfds) > currentRate {
+			// we need to adjust the meterband accordingly
+			// In OVN BFD heartbeats are configured at 1sec interval by default
+			// That means rate of BFD packets per second = number of BFD's configured on the given GR
+			bfdBands[0].Rate = len(bfds)
+			ops, err := libovsdbops.CreateOrUpdateMeterBandOps(nb.nbClient, ops, []*nbdb.MeterBand{bfdBands[0]})
+			if err != nil {
+				return fmt.Errorf("can't update meter band %v: %v", bfdBands[0], err)
+			}
+			_, err = libovsdbops.TransactAndCheck(nb.nbClient, ops)
+			if err != nil {
+				return fmt.Errorf("error transacting static route: %v", err)
+			}
+			return nil
+		}
+
+	}
+
 	return nil
 }
 

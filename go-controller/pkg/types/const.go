@@ -115,6 +115,8 @@ const (
 	OvnRateLimitingMeter = "rate-limiter"
 	PacketsPerSecond     = "pktps"
 	MeterAction          = "drop"
+	BFDRateLimit         = 50
+	DefaultRateLimit     = 25
 
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
