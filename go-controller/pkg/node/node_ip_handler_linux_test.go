@@ -5,6 +5,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -18,6 +19,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -42,6 +44,7 @@ func nodeHasAddress(fakeClient kubernetes.Interface, nodeName string, ipNet *net
 }
 
 type testCtx struct {
+	ns           ns.NetNS
 	ipManager    *addressManager
 	watchFactory factory.NodeWatchFactory
 	fakeClient   kubernetes.Interface
@@ -53,7 +56,7 @@ type testCtx struct {
 	subscribed   uint32
 }
 
-var _ = Describe("Node IP Handler tests", func() {
+var _ = Describe("Node IP Handler event tests", func() {
 	// To ensure that variables don't leak between parallel Ginkgo specs,
 	// put all test context into a single struct and reference it via
 	// a pointer. The pointer will be different for each spec.
@@ -148,6 +151,66 @@ var _ = Describe("Node IP Handler tests", func() {
 			Eventually(func() bool {
 				return nodeHasAddress(tc.fakeClient, nodeName, ipNet)
 			}, 5).Should(BeFalse())
+		})
+	})
+})
+
+var _ = Describe("Node IP Handler tests", func() {
+	// To ensure that variables don't leak between parallel Ginkgo specs,
+	// put all test context into a single struct and reference it via
+	// a pointer. The pointer will be different for each spec.
+	var tc *testCtx
+
+	const (
+		nodeName                = "node1"
+		dummyBrName             = "breth0"
+		dummyBrInternalIPv4     = "10.1.1.10"
+		dummyAdditionalIPv4CIDR = "192.168.2.2/32"
+	)
+
+	BeforeEach(func() {
+		fexec := ovntest.NewFakeExec()
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
+			Output: dummyBrInternalIPv4,
+		})
+		Expect(util.SetExec(fexec)).ShouldNot(HaveOccurred())
+		tc = configureKubeOVNContextWithNs(nodeName)
+		tc.ipManager.syncPeriod = 10 * time.Millisecond
+		tc.doneWg.Add(1)
+		go tc.ns.Do(func(netNS ns.NetNS) error {
+			tc.ipManager.runInternal(tc.stopCh, tc.ipManager.getNetlinkAddrSubFunc(tc.stopCh))
+			tc.doneWg.Done()
+			return nil
+		})
+	})
+
+	AfterEach(func() {
+		close(tc.stopCh)
+		tc.doneWg.Wait()
+		tc.watchFactory.Shutdown()
+		Expect(tc.ns.Close()).ShouldNot(HaveOccurred())
+		util.ResetRunner()
+	})
+
+	Context("valid addresses", func() {
+		It("allows keepalived VIP", func() {
+			Expect(tc.ns.Do(func(netNS ns.NetNS) error {
+				link, err := netlink.LinkByName(dummyBrName)
+				if err != nil {
+					return err
+				}
+				return netlink.AddrAdd(link, &netlink.Addr{
+					LinkIndex: link.Attrs().Index, Scope: unix.RT_SCOPE_UNIVERSE, Label: dummyBrName + ":vip", IPNet: ovntest.MustParseIPNet(dummyAdditionalIPv4CIDR),
+				})
+			})).ShouldNot(HaveOccurred())
+			Eventually(func() bool {
+				return nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyAdditionalIPv4CIDR))
+			}, 5).Should(BeTrue())
+			// ensure a sync doesnt remove it
+			Consistently(func() bool {
+				return nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyAdditionalIPv4CIDR))
+			}, 3).Should(BeTrue())
 		})
 	})
 })
