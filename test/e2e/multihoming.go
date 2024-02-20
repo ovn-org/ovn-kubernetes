@@ -792,6 +792,111 @@ var _ = Describe("Multi Homing", func() {
 						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(MatchError(ContainSubstring("Connection timeout")))
 					})
 				})
+
+				When("a policy is provisioned", func() {
+					var clientPodConfig podConfiguration
+					allPodsSelector := map[string]string{}
+
+					const (
+						denyAllIngress = "deny-all-ingress"
+						allowAllEgress = "allow-all-egress"
+						denyAllEgress  = "deny-all-egress"
+					)
+
+					BeforeEach(func() {
+						clientPodConfig = podConfiguration{
+							name:        clientPodName,
+							namespace:   f.Namespace.Name,
+							attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+							labels:      allPodsSelector,
+						}
+						kickstartPod(cs, clientPodConfig)
+					})
+
+					DescribeTable("can communicate over a localnet secondary network from pod to gw", func(mnp *mnpapi.MultiNetworkPolicy) {
+						By("provisioning the multi-network policy")
+						_, err := mnpClient.MultiNetworkPolicies(clientPodConfig.namespace).Create(
+							context.Background(),
+							mnp,
+							metav1.CreateOptions{},
+						)
+						Expect(err).NotTo(HaveOccurred())
+
+						if mnp.Name != denyAllEgress {
+							Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
+						} else {
+							Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Not(Succeed()))
+						}
+
+						By("deleting the multi-network policy")
+						Expect(mnpClient.MultiNetworkPolicies(clientPodConfig.namespace).Delete(
+							context.Background(),
+							mnp.Name,
+							metav1.DeleteOptions{},
+						)).To(Succeed())
+
+						By("asserting the *client* pod can contact the underlay service after deleting the policy")
+						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
+					},
+						XEntry(
+							"ingress denyall, ingress policy should have no impact on egress",
+							multiNetPolicy(
+								denyAllIngress,
+								secondaryNetworkName,
+								metav1.LabelSelector{
+									MatchLabels: allPodsSelector,
+								},
+								[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
+								nil,
+								nil,
+							),
+							Label("BUG", "OCPBUGS-25928"),
+						),
+						Entry(
+							"ingress denyall, egress allow all, ingress policy should have no impact on egress",
+							multiNetPolicy(
+								denyAllIngress,
+								secondaryNetworkName,
+								metav1.LabelSelector{
+									MatchLabels: allPodsSelector,
+								},
+								[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
+								nil,
+								[]mnpapi.MultiNetworkPolicyEgressRule{
+									mnpapi.MultiNetworkPolicyEgressRule{},
+								},
+							),
+						),
+						Entry(
+							"egress allow all",
+							multiNetPolicy(
+								allowAllEgress,
+								secondaryNetworkName,
+								metav1.LabelSelector{
+									MatchLabels: allPodsSelector,
+								},
+								[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeEgress},
+								nil,
+								[]mnpapi.MultiNetworkPolicyEgressRule{
+									mnpapi.MultiNetworkPolicyEgressRule{},
+								},
+							),
+						),
+						Entry(
+							"egress deny all",
+							multiNetPolicy(
+								denyAllEgress,
+								secondaryNetworkName,
+								metav1.LabelSelector{
+									MatchLabels: allPodsSelector,
+								},
+								[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeEgress},
+								nil,
+								nil,
+							),
+						),
+					)
+				})
 			})
 		})
 
