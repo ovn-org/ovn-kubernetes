@@ -115,26 +115,10 @@ func (c *addressManager) ListAddresses() []net.IP {
 type subscribeFn func() (bool, chan netlink.AddrUpdate, error)
 
 func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
-	addrSubscribeOptions := netlink.AddrSubscribeOptions{
-		ErrorCallback: func(err error) {
-			klog.Errorf("Failed during AddrSubscribe callback: %v", err)
-			// Note: Not calling sync() from here: it is redudant and unsafe when stopChan is closed.
-		},
-	}
-
-	subscribe := func() (bool, chan netlink.AddrUpdate, error) {
-		addrChan := make(chan netlink.AddrUpdate)
-		if err := netlink.AddrSubscribeWithOptions(addrChan, stopChan, addrSubscribeOptions); err != nil {
-			return false, nil, err
-		}
-		// sync the manager with current addresses on the node
-		c.sync()
-		return true, addrChan, nil
-	}
 	c.addHandlerForPrimaryAddrChange()
 	doneWg.Add(1)
 	go func() {
-		c.runInternal(stopChan, subscribe)
+		c.runInternal(stopChan, c.getNetlinkAddrSubFunc(stopChan))
 		doneWg.Done()
 	}()
 }
@@ -194,6 +178,24 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscri
 			klog.Info("Node IP manager is finished")
 			return
 		}
+	}
+}
+
+func (c *addressManager) getNetlinkAddrSubFunc(stopChan <-chan struct{}) func() (bool, chan netlink.AddrUpdate, error) {
+	addrSubscribeOptions := netlink.AddrSubscribeOptions{
+		ErrorCallback: func(err error) {
+			klog.Errorf("Failed during AddrSubscribe callback: %v", err)
+			// Note: Not calling sync() from here: it is redudant and unsafe when stopChan is closed.
+		},
+	}
+	return func() (bool, chan netlink.AddrUpdate, error) {
+		addrChan := make(chan netlink.AddrUpdate)
+		if err := netlink.AddrSubscribeWithOptions(addrChan, stopChan, addrSubscribeOptions); err != nil {
+			return false, nil, err
+		}
+		// sync the manager with current addresses on the node
+		c.sync()
+		return true, addrChan, nil
 	}
 }
 
