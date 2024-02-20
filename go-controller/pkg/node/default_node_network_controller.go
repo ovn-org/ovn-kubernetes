@@ -31,8 +31,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
-	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -982,74 +980,16 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
 	// is not needed. Future upgrade flows will need to take DPUs into account.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
-		// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
-		upgradeController := upgrade.NewController(nc.client, nc.watchFactory)
-		initialTopoVersion, err := upgradeController.GetTopologyVersion(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get initial topology version: %w", err)
-		}
-		klog.Infof("Current control-plane topology version is %d", initialTopoVersion)
-
 		bridgeName := ""
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
 			bridgeName = nc.gateway.GetGatewayBridgeIface()
-
-			needLegacySvcRoute := true
-			if (initialTopoVersion >= types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
-				(initialTopoVersion >= types.OvnRoutingViaHostTopoVersion) {
-				// Configure route for svc towards shared gw bridge
-				// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
-				if err := configureSvcRouteViaBridge(nc.routeManager, bridgeName); err != nil {
-					return err
-				}
-				needLegacySvcRoute = false
-			}
-
-			// Determine if we need to run upgrade checks
-			if initialTopoVersion != types.OvnCurrentTopologyVersion {
-				if needLegacySvcRoute {
-					klog.Info("System may be upgrading, falling back to legacy K8S Service via management port")
-					// add back legacy route for service via management port
-					link, err := util.LinkSetUp(types.K8sMgmtIntfName)
-					if err != nil {
-						return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
-					}
-					var gwIP net.IP
-					for _, subnet := range config.Kubernetes.ServiceCIDRs {
-						if utilnet.IsIPv4CIDR(subnet) {
-							gwIP = mgmtPortConfig.ipv4.gwIP
-						} else {
-							gwIP = mgmtPortConfig.ipv6.gwIP
-						}
-						subnet := *subnet
-						nc.routeManager.Add(netlink.Route{
-							LinkIndex: link.Attrs().Index,
-							Gw:        gwIP,
-							Dst:       &subnet,
-							MTU:       config.Default.RoutableMTU,
-						})
-					}
-				}
+			// Configure route for svc towards shared gw bridge
+			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
+			if err := configureSvcRouteViaBridge(nc.routeManager, bridgeName); err != nil {
+				return err
 			}
 		}
 
-		// need to run upgrade controller
-		go func() {
-			if err := upgradeController.WaitForTopologyVersion(ctx, types.OvnCurrentTopologyVersion, 30*time.Minute); err != nil {
-				klog.Fatalf("Error while waiting for Topology Version to be updated: %v", err)
-			}
-			// upgrade complete now see what needs upgrading
-			if config.OvnKubeNode.Mode == types.NodeModeFull {
-				// migrate service route from ovn-k8s-mp0 to shared gw bridge
-				if (initialTopoVersion < types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
-					(initialTopoVersion < types.OvnRoutingViaHostTopoVersion) {
-					if err := upgradeServiceRoute(nc.routeManager, bridgeName); err != nil {
-						klog.Fatalf("Failed to upgrade service route for node, error: %v", err)
-					}
-				}
-			}
-		}()
 	}
 
 	if config.HybridOverlay.Enabled {
@@ -1420,46 +1360,6 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 
 func configureSvcRouteViaBridge(routeManager *routemanager.Controller, bridge string) error {
 	return configureSvcRouteViaInterface(routeManager, bridge, DummyNextHopIPs())
-}
-
-func upgradeServiceRoute(routeManager *routemanager.Controller, bridgeName string) error {
-	klog.Info("Updating K8S Service route")
-	// Flush old routes
-	link, err := util.LinkSetUp(types.K8sMgmtIntfName)
-	if err != nil {
-		return fmt.Errorf("unable to get link: %s, error: %v", types.K8sMgmtIntfName, err)
-	}
-	for _, serviceCIDR := range config.Kubernetes.ServiceCIDRs {
-		serviceCIDR := *serviceCIDR
-		srcIP := config.Gateway.MasqueradeIPs.V4HostMasqueradeIP
-		if utilnet.IsIPv6CIDR(&serviceCIDR) {
-			srcIP = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP
-		}
-		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Dst: &serviceCIDR, Src: srcIP})
-	}
-
-	// add route via OVS bridge
-	if err := configureSvcRouteViaBridge(routeManager, bridgeName); err != nil {
-		return fmt.Errorf("unable to add svc route via OVS bridge interface, error: %v", err)
-	}
-	klog.Info("Successfully updated Kubernetes service route towards OVS")
-	// Clean up gw0 and local ovs bridge as best effort
-	if err := deleteLocalNodeAccessBridge(); err != nil {
-		klog.Warningf("Error while removing Local Node Access Bridge, error: %v", err)
-	}
-	// Clean up gw0 related IPTable rules as best effort.
-	for _, ip := range []string{types.V4NodeLocalNATSubnet, types.V6NodeLocalNATSubnet} {
-		_, IPNet, err := net.ParseCIDR(ip)
-		if err != nil {
-			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
-		}
-		rules := getLocalGatewayNATRules(types.LocalnetGatewayNextHopPort, IPNet)
-		rules = append(rules, getLocalGatewayFilterRules(types.LocalnetGatewayNextHopPort, IPNet)...)
-		if err := nodeipt.DelRules(rules); err != nil {
-			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
-		}
-	}
-	return nil
 }
 
 // DummyNextHopIPs returns the fake next hops used for service traffic routing.
