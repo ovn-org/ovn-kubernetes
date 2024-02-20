@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"reflect"
-	"strconv"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -281,11 +280,6 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 		return err
 	}
 
-	// controller is fully running and resource handlers have synced, update Topology version in OVN
-	if err := oc.updateL2TopologyVersion(); err != nil {
-		return fmt.Errorf("failed to update topology version for network %s: %v", oc.GetNetworkName(), err)
-	}
-
 	return nil
 }
 
@@ -297,7 +291,6 @@ func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchNa
 	}
 	logicalSwitch.ExternalIDs[types.NetworkExternalID] = oc.GetNetworkName()
 	logicalSwitch.ExternalIDs[types.TopologyExternalID] = oc.TopologyType()
-	logicalSwitch.ExternalIDs[types.TopologyVersionExternalID] = strconv.Itoa(oc.topologyVersion)
 
 	hostSubnets := make([]*net.IPNet, 0, len(clusterSubnets))
 	for _, clusterSubnet := range clusterSubnets {

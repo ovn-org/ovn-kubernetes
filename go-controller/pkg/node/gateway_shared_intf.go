@@ -490,14 +490,14 @@ func addServiceRules(service *kapi.Service, localEndpoints []string, svcHasLocal
 		npw.ofm.requestFlowSync()
 		if !npw.dpuMode {
 			// add iptable rules only in full mode
-			if err = addGatewayIptRules(service, localEndpoints, svcHasLocalHostNetEndPnt); err != nil {
-				errors = append(errors, err)
+			if err = insertIptRules(getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)); err != nil {
+				errors = append(errors, fmt.Errorf("failed to add iptables rules for service: %v", err))
 			}
 		}
 	} else {
 		// For Host Only Mode
-		if err = addGatewayIptRules(service, localEndpoints, svcHasLocalHostNetEndPnt); err != nil {
-			errors = append(errors, err)
+		if err = insertIptRules(getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)); err != nil {
+			errors = append(errors, fmt.Errorf("failed to add iptables rules for service: %v", err))
 		}
 
 	}
@@ -543,19 +543,19 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 			// |                          |                       |                       |   + default dnat towards CIP   |
 			// +--------------------------+-----------------------+-----------------------+--------------------------------+
 
-			if err = delGatewayIptRules(service, localEndpoints, true); err != nil {
+			if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, true)); err != nil {
 				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 			}
-			if err = delGatewayIptRules(service, localEndpoints, false); err != nil {
+			if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, false)); err != nil {
 				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 			}
 		}
 	} else {
 
-		if err = delGatewayIptRules(service, localEndpoints, true); err != nil {
+		if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, true)); err != nil {
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
-		if err = delGatewayIptRules(service, localEndpoints, false); err != nil {
+		if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, false)); err != nil {
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
 	}
