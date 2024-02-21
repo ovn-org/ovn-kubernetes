@@ -45,8 +45,8 @@ var (
 
 var _ = ginkgo.Describe("Services", func() {
 	const (
-		serviceName = "testservice"
-
+		serviceName               = "testservice"
+		ovnWorkerNode             = "ovn-worker"
 		echoServerPodNameTemplate = "echo-server-pod-%d"
 		echoClientPodName         = "echo-client-pod"
 		echoServiceNameTemplate   = "echo-service-%d"
@@ -464,7 +464,49 @@ var _ = ginkgo.Describe("Services", func() {
 				})
 			})
 		})
+
 	}
+
+	ginkgo.It("does not use host masquerade address as source IP address when communicating externally", func() {
+		const (
+			v6ExternAddr = "2001:db8:3333:4444:CCCC:DDDD:EEEE:FFFF"
+			v4ExternAddr = "8.8.8.8"
+			hostMasqIPv4 = "169.254.169.2"
+			hostMasqIPv6 = "fd69::2"
+		)
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, e2eservice.MaxNodesForEndpointsTests)
+		framework.ExpectNoError(err)
+		v4NodeAddrs := e2enode.FirstAddressByTypeAndFamily(nodes, v1.NodeInternalIP, v1.IPv4Protocol)
+		v6NodeAddrs := e2enode.FirstAddressByTypeAndFamily(nodes, v1.NodeInternalIP, v1.IPv6Protocol)
+		if v4NodeAddrs == "" && v6NodeAddrs == "" {
+			framework.Failf("unable to detect if cluster supports IPv4 or IPv6")
+		}
+		getIPRouteGetOutput := func(dst string) string {
+			cmd := []string{containerRuntime, "exec", ovnWorkerNode, "ip"}
+			if utilnet.IsIPv6String(dst) {
+				cmd = append(cmd, "-6")
+			}
+			cmd = append(cmd, "route", "get", dst)
+			output, err := runCommand(cmd...)
+			framework.ExpectNoError(err, fmt.Sprintf("failed to exec '%v': %v", cmd, err))
+			return output
+		}
+		isHostMasqSrcIP := func(dst, masqIP string) bool {
+			output := getIPRouteGetOutput(dst)
+			// if its not included in the output of ip route get, its sufficient to say, its not being used as src ip
+			if strings.Contains(output, masqIP) {
+				return true
+			}
+			return false
+		}
+		explain := "host masquerade IP incorrectly used as source IP for external communication"
+		if v4NodeAddrs != "" { // v4 enabled
+			gomega.Expect(isHostMasqSrcIP(v4ExternAddr, hostMasqIPv4)).Should(gomega.BeFalse(), explain)
+		}
+		if v6NodeAddrs != "" { // v6 enabled
+			gomega.Expect(isHostMasqSrcIP(v6ExternAddr, hostMasqIPv6)).Should(gomega.BeFalse(), explain)
+		}
+	})
 
 	// This test checks a special case: we add another IP address on the node *and* manually set that
 	// IP address in to endpoints. It is used for some special apiserver hacks by remote cluster people.
