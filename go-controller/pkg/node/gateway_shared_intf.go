@@ -1760,7 +1760,11 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			}
 			if config.Gateway.DisableForwarding {
 				if err := initExternalBridgeDropForwardingRules(exGwBridge.bridgeName); err != nil {
-					return fmt.Errorf("failed to add forwarding block rules for bridge %s: err %v", exGwBridge.bridgeName, err)
+					return fmt.Errorf("failed to add drop rules in forwarding table for bridge %s: err %v", exGwBridge.bridgeName, err)
+				}
+			} else {
+				if err := delExternalBridgeDropForwardingRules(exGwBridge.bridgeName); err != nil {
+					return fmt.Errorf("failed to delete drop rules in forwarding table for bridge %s: err %v", exGwBridge.bridgeName, err)
 				}
 			}
 		}
@@ -1865,17 +1869,24 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 		}
 	}
 
+	var subnets []*net.IPNet
+	for _, subnet := range config.Default.ClusterSubnets {
+		subnets = append(subnets, subnet.CIDR)
+	}
+	subnets = append(subnets, config.Kubernetes.ServiceCIDRs...)
 	if config.Gateway.DisableForwarding {
-		var subnets []*net.IPNet
-		for _, subnet := range config.Default.ClusterSubnets {
-			subnets = append(subnets, subnet.CIDR)
-		}
-		subnets = append(subnets, config.Kubernetes.ServiceCIDRs...)
 		if err := initExternalBridgeServiceForwardingRules(subnets); err != nil {
-			return nil, fmt.Errorf("failed to add forwarding rules for bridge %s: err %v", gwBridge.bridgeName, err)
+			return nil, fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", gwBridge.bridgeName, err)
 		}
 		if err := initExternalBridgeDropForwardingRules(gwBridge.bridgeName); err != nil {
-			return nil, fmt.Errorf("failed to add forwarding rules for bridge %s: err %v", gwBridge.bridgeName, err)
+			return nil, fmt.Errorf("failed to add drop rules in forwarding table for bridge %s: err %v", gwBridge.bridgeName, err)
+		}
+	} else {
+		if err := delExternalBridgeServiceForwardingRules(subnets); err != nil {
+			return nil, fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", gwBridge.bridgeName, err)
+		}
+		if err := delExternalBridgeDropForwardingRules(gwBridge.bridgeName); err != nil {
+			return nil, fmt.Errorf("failed to delete drop rules in forwarding table for bridge %s: err %v", gwBridge.bridgeName, err)
 		}
 	}
 

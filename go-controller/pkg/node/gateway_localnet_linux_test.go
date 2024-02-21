@@ -33,6 +33,7 @@ const (
 	v4localnetGatewayIP = "10.244.0.1"
 	v6localnetGatewayIP = "fd00:96:1::1"
 	gwMAC               = "0a:0b:0c:0d:0e:0f"
+	linkName            = "breth0"
 )
 
 func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher {
@@ -76,6 +77,29 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset,
 	localHostNetEp := "192.168.18.15/32"
 	ip, ipnet, _ := net.ParseCIDR(localHostNetEp)
 	n.nodeIPManager.addAddr(net.IPNet{IP: ip, Mask: ipnet.Mask})
+
+	// Add or delete iptables rules from FORWARD chain based on DisableForwarding. This is
+	// to imitate addition or deletion of iptales rules done in newNodePortWatcher().
+	var subnets []*net.IPNet
+	for _, subnet := range config.Default.ClusterSubnets {
+		subnets = append(subnets, subnet.CIDR)
+	}
+	subnets = append(subnets, config.Kubernetes.ServiceCIDRs...)
+	if config.Gateway.DisableForwarding {
+		if err := initExternalBridgeServiceForwardingRules(subnets); err != nil {
+			return fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", linkName, err)
+		}
+		if err := initExternalBridgeDropForwardingRules(linkName); err != nil {
+			return fmt.Errorf("failed to add drop rules in forwarding table for bridge %s: err %v", linkName, err)
+		}
+	} else {
+		if err := delExternalBridgeServiceForwardingRules(subnets); err != nil {
+			return fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", linkName, err)
+		}
+		if err := delExternalBridgeDropForwardingRules(linkName); err != nil {
+			return fmt.Errorf("failed to delete drop rules in forwarding table for bridge %s: err %v", linkName, err)
+		}
+	}
 
 	// set up a controller to handle events on services to mock the nodeportwatcher bits
 	// in gateway.go and trigger code in gateway_shared_intf.go
@@ -2758,4 +2782,125 @@ var _ = Describe("Node Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
+
+	Context("disable-forwarding", func() {
+		It("adds or removes iptables rules upon change in forwarding mode", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.Gateway.DisableForwarding = true
+				fakeOvnNode.start(ctx)
+				fNPW.watchFactory = fakeOvnNode.watcher
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				expectedTables := map[string]util.FakeTable{
+					"nat": {
+						"PREROUTING": []string{
+							"-j OVN-KUBE-ETP",
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OUTPUT": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+							"-j OVN-KUBE-ITP",
+						},
+						"OVN-KUBE-NODEPORT":   []string{},
+						"OVN-KUBE-EXTERNALIP": []string{},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
+						"OVN-KUBE-SNAT-MGMTPORT": []string{},
+						"OVN-KUBE-ETP":           []string{},
+						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
+					},
+					"filter": {
+						"FORWARD": []string{
+							"-d 169.254.169.1 -j ACCEPT",
+							"-s 169.254.169.1 -j ACCEPT",
+							"-d 172.16.1.0/24 -j ACCEPT",
+							"-s 172.16.1.0/24 -j ACCEPT",
+							"-d 10.1.0.0/16 -j ACCEPT",
+							"-s 10.1.0.0/16 -j ACCEPT",
+							"-i breth0 -j DROP",
+							"-o breth0 -j DROP",
+						},
+					},
+					"mangle": {
+						"OUTPUT": []string{
+							"-j OVN-KUBE-ITP",
+						},
+						"OVN-KUBE-ITP": []string{},
+					},
+				}
+
+				f4 := iptV4.(*util.FakeIPTables)
+				err := f4.MatchState(expectedTables)
+				Expect(err).NotTo(HaveOccurred())
+				expectedTables = map[string]util.FakeTable{
+					"nat":    {},
+					"filter": {},
+					"mangle": {},
+				}
+				f6 := iptV6.(*util.FakeIPTables)
+				err = f6.MatchState(expectedTables)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Enable forwarding and test deletion of iptables rules from FORWARD chain
+				config.Gateway.DisableForwarding = false
+				fNPW.watchFactory = fakeOvnNode.watcher
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				expectedTables = map[string]util.FakeTable{
+					"nat": {
+						"PREROUTING": []string{
+							"-j OVN-KUBE-ETP",
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OUTPUT": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+							"-j OVN-KUBE-ITP",
+						},
+						"OVN-KUBE-NODEPORT":   []string{},
+						"OVN-KUBE-EXTERNALIP": []string{},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
+						"OVN-KUBE-SNAT-MGMTPORT": []string{},
+						"OVN-KUBE-ETP":           []string{},
+						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
+					},
+					"filter": {
+						"FORWARD": []string{},
+					},
+					"mangle": {
+						"OUTPUT": []string{
+							"-j OVN-KUBE-ITP",
+						},
+						"OVN-KUBE-ITP": []string{},
+					},
+				}
+
+				f4 = iptV4.(*util.FakeIPTables)
+				err = f4.MatchState(expectedTables)
+				Expect(err).NotTo(HaveOccurred())
+				expectedTables = map[string]util.FakeTable{
+					"nat":    {},
+					"filter": {},
+					"mangle": {},
+				}
+				f6 = iptV6.(*util.FakeIPTables)
+				err = f6.MatchState(expectedTables)
+				Expect(err).NotTo(HaveOccurred())
+				return nil
+			}
+			err := app.Run([]string{
+				app.Name,
+				"--cluster-subnets=" + "10.1.0.0/16",
+				"--k8s-service-cidrs=" + "172.16.1.0/24",
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
 })

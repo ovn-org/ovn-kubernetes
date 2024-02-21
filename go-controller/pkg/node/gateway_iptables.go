@@ -72,6 +72,11 @@ func appendIptRules(rules []nodeipt.Rule) error {
 	return nodeipt.AddRules(rules, true)
 }
 
+// deleteIptRules removes provided rules from the chain
+func deleteIptRules(rules []nodeipt.Rule) error {
+	return nodeipt.DelRules(rules)
+}
+
 func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
 	iptRules := []nodeipt.Rule{}
 	if chain == egressservice.Chain {
@@ -396,12 +401,24 @@ func initExternalBridgeServiceForwardingRules(cidrs []*net.IPNet) error {
 	return insertIptRules(getGatewayForwardRules(cidrs))
 }
 
+// delExternalBridgeServiceForwardingRules removes iptables rules which might
+// have been added to disable forwarding
+func delExternalBridgeServiceForwardingRules(cidrs []*net.IPNet) error {
+	return deleteIptRules(getGatewayForwardRules(cidrs))
+}
+
 // initExternalBridgeDropRules sets up iptables rules to block forwarding
 // in br-* interfaces (also for 2ndary bridge) - we block for v4 and v6 based on clusterStack
 // -A FORWARD -i breth1 -j DROP
 // -A FORWARD -o breth1 -j DROP
 func initExternalBridgeDropForwardingRules(ifName string) error {
 	return appendIptRules(getGatewayDropRules(ifName))
+}
+
+// delExternalBridgeDropForwardingRules removes iptables rules which might
+// have been added to disable forwarding
+func delExternalBridgeDropForwardingRules(ifName string) error {
+	return deleteIptRules(getGatewayDropRules(ifName))
 }
 
 func getLocalGatewayFilterRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
