@@ -789,6 +789,13 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
+	// Set forwarding related sysctl parameters. initGateway() and
+	// createNodeManagementPorts() may override forwarding sysctl
+	// parameters set for breth0 and mp0 interfaces down the line
+	if err = setGlobalForwardingRule(); err != nil {
+		return err
+	}
+
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 	waiter := newStartupWaiter()
 
@@ -1472,4 +1479,30 @@ func DummyNextHopIPs() []net.IP {
 		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP)
 	}
 	return nextHops
+}
+
+// setGlobalForwardingRule either enables or disables forwarding for
+// all IPv4 and IPv6 interfaces by setting sysctl parameters based on
+// config.Gateway.DisableForwarding
+func setGlobalForwardingRule() error {
+	setForwardingSysctl := func(value string) error {
+		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.ip_forward=%s", value), fmt.Sprintf("net.ipv6.conf.all.forwarding=%s", value))
+		if err != nil || stdout != fmt.Sprintf("%s\n%s", fmt.Sprintf("net.ipv4.ip_forward = %s", value), fmt.Sprintf("net.ipv6.conf.all.forwarding = %s", value)) {
+			return fmt.Errorf("could not set the correct forwarding value for all ipv4 and ipv6 interfaces: stdout: %v, stderr: %v, err: %v",
+				stdout, stderr, err)
+		}
+		return nil
+	}
+	if config.Gateway.DisableForwarding {
+		err := setForwardingSysctl("0")
+		if err != nil {
+			return err
+		}
+	} else {
+		err := setForwardingSysctl("1")
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

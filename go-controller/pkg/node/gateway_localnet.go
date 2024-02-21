@@ -83,6 +83,10 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 				if err := initExternalBridgeDropForwardingRules(exGwBridge.bridgeName); err != nil {
 					return fmt.Errorf("failed to add forwarding block rules for bridge %s: err %v", exGwBridge.bridgeName, err)
 				}
+			} else {
+				if err := delExternalBridgeDropForwardingRules(exGwBridge.bridgeName); err != nil {
+					return fmt.Errorf("failed to delete forwarding block rules for bridge %s: err %v", exGwBridge.bridgeName, err)
+				}
 			}
 		}
 
