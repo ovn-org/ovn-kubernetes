@@ -861,7 +861,7 @@ var _ = Describe("Multi Homing", func() {
 								metav1.LabelSelector{
 									MatchLabels: allPodsSelector,
 								},
-								[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
+								[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress, mnpapi.PolicyTypeEgress},
 								nil,
 								[]mnpapi.MultiNetworkPolicyEgressRule{
 									mnpapi.MultiNetworkPolicyEgressRule{},
