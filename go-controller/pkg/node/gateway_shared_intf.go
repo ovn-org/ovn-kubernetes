@@ -1764,7 +1764,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			npw.updateGatewayIPs(gw.nodeIPManager)
 			// Services create OpenFlow flows as well, need to update them all
 			if gw.servicesRetryFramework != nil {
-				if errs := gw.addAllServices(); errs != nil {
+				if errs := gw.addAllServices(); len(errs) > 0 {
 					err := kerrors2.NewAggregate(errs)
 					klog.Errorf("Failed to sync all services after node IP change: %v", err)
 				}
