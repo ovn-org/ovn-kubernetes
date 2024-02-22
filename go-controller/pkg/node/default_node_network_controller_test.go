@@ -40,6 +40,9 @@ var _ = Describe("Node", func() {
 			linkIPNet = "10.1.0.40/32"
 			linkIndex = 4
 
+			linkIPNet2 = "10.2.0.50/32"
+			linkIndex2 = 5
+
 			configDefaultMTU               = 1500 //value for config.Default.MTU
 			mtuTooSmallForIPv4AndIPv6      = configDefaultMTU + types.GeneveHeaderLengthIPv4 - 1
 			mtuOkForIPv4ButTooSmallForIPv6 = configDefaultMTU + types.GeneveHeaderLengthIPv4
@@ -55,7 +58,9 @@ var _ = Describe("Node", func() {
 
 			util.SetNetLinkOpMockInst(netlinkOpsMock)
 			netlinkOpsMock.On("AddrList", nil, netlink.FAMILY_V4).
-				Return([]netlink.Addr{{LinkIndex: linkIndex, IPNet: ovntest.MustParseIPNet(linkIPNet)}}, nil)
+				Return([]netlink.Addr{
+					{LinkIndex: linkIndex, IPNet: ovntest.MustParseIPNet(linkIPNet)},
+					{LinkIndex: linkIndex2, IPNet: ovntest.MustParseIPNet(linkIPNet2)}}, nil)
 			netlinkOpsMock.On("LinkByIndex", 4).Return(netlinkLinkMock, nil)
 
 			nc = &DefaultNodeNetworkController{
@@ -208,6 +213,27 @@ var _ = Describe("Node", func() {
 				})
 			})
 		})
+
+		Context("with multiple ovn encap IPs", func() {
+
+			BeforeEach(func() {
+				config.IPv4Mode = true
+				config.IPv6Mode = false
+				config.Default.EncapIP = "10.1.0.40,10.2.0.50"
+				netlinkOpsMock.On("LinkByIndex", 5).Return(netlinkLinkMock, nil)
+			})
+
+			It("all interfaces have big enough MTU", func() {
+				netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
+					MTU:  mtuOkForIPv4AndIPv6,
+					Name: linkName,
+				})
+
+				err := nc.validateVTEPInterfaceMTU()
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
 	})
 
 	Describe("Node Operations", func() {

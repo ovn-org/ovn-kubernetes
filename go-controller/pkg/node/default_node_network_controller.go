@@ -281,8 +281,12 @@ func setupOVNNode(node *kapi.Node) error {
 		}
 		config.Default.EncapIP = encapIP
 	} else {
-		if ip := net.ParseIP(encapIP); ip == nil {
-			return fmt.Errorf("invalid encapsulation IP provided %q", encapIP)
+		// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma.
+		ovnEncapIps := strings.Split(encapIP, ",")
+		for _, ovnEncapIp := range ovnEncapIps {
+			if ip := net.ParseIP(strings.TrimSpace(ovnEncapIp)); ip == nil {
+				return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIp, encapIP)
+			}
 		}
 	}
 
@@ -1272,34 +1276,39 @@ func (nc *DefaultNodeNetworkController) WatchNamespaces() error {
 // enough to carry the `config.Default.MTU` and the Geneve header. If the MTU is not big
 // enough, it will return an error
 func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
-	ovnEncapIP := net.ParseIP(config.Default.EncapIP)
-	if ovnEncapIP == nil {
-		return fmt.Errorf("the set OVN Encap IP is invalid: (%s)", config.Default.EncapIP)
-	}
-	interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
-	if err != nil {
-		return fmt.Errorf("could not get MTU for the interface with address %s: %w", ovnEncapIP, err)
-	}
-
-	// calc required MTU
-	var requiredMTU int
-	if config.Gateway.SingleNode {
-		requiredMTU = config.Default.MTU
-	} else {
-		if config.IPv4Mode && !config.IPv6Mode {
-			// we run in single-stack IPv4 only
-			requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
-		} else {
-			// we run in single-stack IPv6 or dual-stack mode
-			requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
+	// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma
+	ovnEncapIps := strings.Split(config.Default.EncapIP, ",")
+	for _, ip := range ovnEncapIps {
+		ovnEncapIP := net.ParseIP(strings.TrimSpace(ip))
+		if ovnEncapIP == nil {
+			return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIP, config.Default.EncapIP)
 		}
-	}
+		interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
+		if err != nil {
+			return fmt.Errorf("could not get MTU for the interface with address %s: %w", ovnEncapIP, err)
+		}
 
-	if mtu < requiredMTU {
-		return fmt.Errorf("interface MTU (%d) is too small for specified overlay MTU (%d)", mtu, requiredMTU)
+		// calc required MTU
+		var requiredMTU int
+		if config.Gateway.SingleNode {
+			requiredMTU = config.Default.MTU
+		} else {
+			if config.IPv4Mode && !config.IPv6Mode {
+				// we run in single-stack IPv4 only
+				requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
+			} else {
+				// we run in single-stack IPv6 or dual-stack mode
+				requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
+			}
+		}
+
+		if mtu < requiredMTU {
+			return fmt.Errorf("MTU (%d) of network interface %s is too small for specified overlay MTU (%d)",
+				mtu, interfaceName, requiredMTU)
+		}
+		klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). ",
+			mtu, interfaceName, requiredMTU)
 	}
-	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). ",
-		mtu, interfaceName, requiredMTU)
 	return nil
 }
 
