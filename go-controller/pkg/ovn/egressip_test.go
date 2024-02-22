@@ -105,10 +105,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 	clusterRouterDbSetup := libovsdbtest.TestSetup{
 		NBData: []libovsdbtest.TestData{
-			&nbdb.LogicalRouter{
-				Name: ovntypes.OVNClusterRouter,
-				UUID: ovntypes.OVNClusterRouter + "-UUID",
-			},
+			clusterRouter(),
 		},
 	}
 
@@ -291,10 +288,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
 							Networks: []string{nodeLogicalRouterIfAddrV4},
 						},
-						&nbdb.LogicalRouter{
-							Name: ovntypes.OVNClusterRouter,
-							UUID: ovntypes.OVNClusterRouter + "-UUID",
-						},
+						clusterRouter(),
 						&nbdb.LogicalRouter{
 							Name: ovntypes.GWRouterPrefix + node1.Name,
 							UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -457,10 +451,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
 							Networks: []string{nodeLogicalRouterIfAddrV4},
 						},
-						&nbdb.LogicalRouter{
-							Name: ovntypes.OVNClusterRouter,
-							UUID: ovntypes.OVNClusterRouter + "-UUID",
-						},
+						clusterRouter(),
 						&nbdb.LogicalRouter{
 							Name: ovntypes.GWRouterPrefix + node1.Name,
 							UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -635,10 +626,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
 									Networks: []string{nodeLogicalRouterIfAddrV4},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1.Name,
 									UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -886,10 +874,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node3.Name,
 								Networks: []string{node3LogicalRouterIfAddrV4},
 							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1.Name,
 								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -1214,10 +1199,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node3.Name,
 								Networks: []string{node3LogicalRouterIfAddrV4},
 							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1.Name,
 								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -1545,10 +1527,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2.Name,
 									Networks: []string{node2LogicalRouterIfAddrV4},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1.Name,
 									UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -1836,10 +1815,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2.Name,
 									Networks: []string{node2LogicalRouterIfAddrV4},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1.Name,
 									UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -2193,10 +2169,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2.Name,
 									Networks: []string{node2LogicalRouterIfAddrV4},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1.Name,
 									UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -2592,10 +2565,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2.Name,
 									Networks: []string{node2LogicalRouterIfAddrV4},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1.Name,
 									UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -2866,10 +2836,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
 									Networks: []string{node2LogicalRouterIfAddrV6, node2LogicalRouterIfAddrV6},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1Name,
 									UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
@@ -3096,10 +3063,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
 									Networks: []string{node2LogicalRouterIfAddrV6},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1Name,
 									UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
@@ -3282,10 +3246,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
 								Networks: []string{nodeLogicalRouterIfAddrV6},
 							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1Name,
 								UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
@@ -3486,10 +3447,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalSwitchPort{
 								UUID:      "k8s-" + node2Name + "-UUID",
 								Name:      "k8s-" + node2Name,
@@ -3608,10 +3566,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
 									Networks: []string{node2LogicalRouterIfAddrV6},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1Name,
 									UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
@@ -3836,10 +3791,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
 									Networks: []string{node2LogicalRouterIfAddrV6},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1Name,
 									UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
@@ -3960,10 +3912,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					expectedDatabaseState = []libovsdbtest.TestData{
-						&nbdb.LogicalRouter{
-							Name: ovntypes.OVNClusterRouter,
-							UUID: ovntypes.OVNClusterRouter + "-UUID",
-						},
+						clusterRouter(),
 						&nbdb.LogicalRouterPort{
 							UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name + "-UUID",
 							Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
@@ -4026,10 +3975,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
 									Networks: []string{nodeLogicalRouterIfAddrV6},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1Name,
 									UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
@@ -4169,10 +4115,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					expectedDatabaseState = []libovsdbtest.TestData{
-						&nbdb.LogicalRouter{
-							Name: ovntypes.OVNClusterRouter,
-							UUID: ovntypes.OVNClusterRouter + "-UUID",
-						},
+						clusterRouter(),
 						&nbdb.LogicalRouterPort{
 							UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name + "-UUID",
 							Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
@@ -4235,10 +4178,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
 									Networks: []string{node2LogicalRouterIfAddrV6},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1Name,
 									UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
@@ -4373,10 +4313,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
 
 					expectedDatabaseState = []libovsdbtest.TestData{
-						&nbdb.LogicalRouter{
-							Name: ovntypes.OVNClusterRouter,
-							UUID: ovntypes.OVNClusterRouter + "-UUID",
-						},
+						clusterRouter(),
 						&nbdb.LogicalRouterPort{
 							UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name + "-UUID",
 							Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
@@ -4552,10 +4489,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
 									Networks: []string{nodeLogicalRouterIfAddrV4},
 								},
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								&nbdb.LogicalRouter{
 									Name: ovntypes.GWRouterPrefix + node1.Name,
 									UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -4953,10 +4887,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2Name,
 								Networks: []string{node2LogicalRouterIfAddrV6},
 							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1Name,
 								UUID: ovntypes.GWRouterPrefix + node1Name + "-UUID",
@@ -5226,10 +5157,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node2 := getNodeObj(node2Name, annotations, map[string]string{})
 				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
-						&nbdb.LogicalRouter{
-							Name: ovntypes.OVNClusterRouter,
-							UUID: ovntypes.OVNClusterRouter + "-UUID",
-						},
+						clusterRouter(),
 						&nbdb.LogicalRouter{
 							Name: ovntypes.GWRouterPrefix + node1.Name,
 							UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -5385,10 +5313,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
-						&nbdb.LogicalRouter{
-							Name: ovntypes.OVNClusterRouter,
-							UUID: ovntypes.OVNClusterRouter + "-UUID",
-						},
+						clusterRouter(),
 						&nbdb.LogicalRouter{
 							Name: ovntypes.GWRouterPrefix + node.Name,
 							UUID: ovntypes.GWRouterPrefix + node.Name + "-UUID",
@@ -5548,10 +5473,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1.Name,
 								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -5857,10 +5779,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1.Name,
 								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -6253,10 +6172,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
-								&nbdb.LogicalRouter{
-									Name: ovntypes.OVNClusterRouter,
-									UUID: ovntypes.OVNClusterRouter + "-UUID",
-								},
+								clusterRouter(),
 								node1GR, node2GR,
 								node1LSP, node2LSP,
 								&nbdb.LogicalRouterPort{
@@ -6813,10 +6729,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node.Name,
 								UUID: ovntypes.GWRouterPrefix + node.Name + "-UUID",
@@ -7017,10 +6930,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1.Name,
 								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -7172,10 +7082,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1.Name,
 								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -7814,10 +7721,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							node1GR,
 							node1LSP,
 							&nbdb.LogicalRouterPort{
@@ -7982,10 +7886,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1.Name,
 								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -8273,10 +8174,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1.Name,
 								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -8618,10 +8516,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							node1GR,
 							node1LSP,
 							&nbdb.LogicalRouterPort{
@@ -8799,10 +8694,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							node1GR,
 							node1LSP,
 							&nbdb.LogicalRouterPort{
@@ -9030,10 +8922,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1.Name,
 								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
@@ -9770,10 +9659,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2.Name,
 								Networks: []string{node2LogicalRouterIfAddrV4},
 							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 							&nbdb.LogicalRouter{
 								Name: ovntypes.GWRouterPrefix + node1.Name,
 								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",

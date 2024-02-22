@@ -41,6 +41,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		bfd1NamedUUID     = "bfd-1-UUID"
 		bfd2NamedUUID     = "bfd-2-UUID"
 		logicalRouterPort = "rtoe-GR_node1"
+
+		node1 tNode
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -52,6 +54,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
+		node1 = tNode{
+			Name:       "node1",
+			NodeSubnet: "192.168.126.202/24",
+		}
+
 		fakeOvn = NewFakeOVN(true)
 	})
 
@@ -61,7 +68,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 	ginkgo.Context("on setting namespace gateway annotations", func() {
 
-		table.DescribeTable("reconciles an new pod with namespace single exgw annotation already set", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		table.DescribeTable("reconciles a new pod with namespace single exgw annotation already set", func(bfd bool, bfdDependentComponents []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace(namespaceName)
@@ -83,14 +90,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							node1.logicalSwitch(),
+							node1.nodeGWRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -100,7 +101,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					&v1.NodeList{
 						Items: []v1.Node{
-							*newNode("node1", "192.168.126.202/24"),
+							*newNode(node1.Name, node1.NodeSubnet),
 						},
 					},
 					&v1.PodList{
@@ -113,12 +114,23 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 
 				injectNode(fakeOvn)
+
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
+				node1.StaticRoutes = []string{"static-route-1-UUID"}
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				finalNB := []libovsdbtest.TestData{
+					lsp,
+					node1.logicalSwitch(),
+					node1.nodeGWRouter(),
+				}
+				finalNB = append(finalNB, bfdDependentComponents...)
+
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				return nil
 			}
@@ -126,25 +138,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
-			&nbdb.LogicalSwitchPort{
-				UUID:      "lsp1",
-				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				ExternalIDs: map[string]string{
-					"pod":       "true",
-					"namespace": namespaceName,
-				},
-				Name: "namespace1_myPod",
-				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
-				},
-				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-			},
-			&nbdb.LogicalSwitch{
-				UUID:  "node1",
-				Name:  "node1",
-				Ports: []string{"lsp1"},
-			},
 			&nbdb.LogicalRouterStaticRoute{
 				UUID:       "static-route-1-UUID",
 				IPPrefix:   "10.128.1.3/32",
@@ -155,32 +148,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					"ecmp_symmetric_reply": "true",
 				},
 			},
-			&nbdb.LogicalRouter{
-				UUID:         "GR_node1-UUID",
-				Name:         "GR_node1",
-				StaticRoutes: []string{"static-route-1-UUID"},
-			},
 		}),
 			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
-				&nbdb.LogicalSwitchPort{
-					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					ExternalIDs: map[string]string{
-						"pod":       "true",
-						"namespace": namespaceName,
-					},
-					Name: "namespace1_myPod",
-					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
-					},
-					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:  "node1",
-					Name:  "node1",
-					Ports: []string{"lsp1"},
-				},
 				&nbdb.BFD{
 					UUID:        bfd1NamedUUID,
 					DstIP:       "9.0.0.1",
@@ -197,14 +166,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						"ecmp_symmetric_reply": "true",
 					},
 				},
-				&nbdb.LogicalRouter{
-					UUID:         "GR_node1-UUID",
-					Name:         "GR_node1",
-					StaticRoutes: []string{"static-route-1-UUID"},
-				},
 			}))
 
-		table.DescribeTable("reconciles an new pod with namespace single exgw annotation already set with pod event first", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		table.DescribeTable("reconciles an new pod with namespace single exgw annotation already set with pod event first", func(bfd bool, bfdDependentComponents []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace(namespaceName)
@@ -226,19 +190,13 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							node1.logicalSwitch(),
+							node1.nodeGWRouter(),
 						},
 					},
 					&v1.NodeList{
 						Items: []v1.Node{
-							*newNode("node1", "192.168.126.202/24"),
+							*newNode(node1.Name, node1.NodeSubnet),
 						},
 					},
 					&v1.PodList{
@@ -259,122 +217,96 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
+				node1.StaticRoutes = []string{"static-route-1-UUID"}
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				finalNB := []libovsdbtest.TestData{
+					lsp,
+					node1.logicalSwitch(),
+					node1.nodeGWRouter(),
+				}
+				finalNB = append(finalNB, bfdDependentComponents...)
+
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
-			&nbdb.LogicalSwitchPort{
-				UUID:      "lsp1",
-				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				ExternalIDs: map[string]string{
-					"pod":       "true",
-					"namespace": namespaceName,
-				},
-				Name: "namespace1_myPod",
-				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
-				},
-				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-			},
-			&nbdb.LogicalSwitch{
-				UUID:  "node1",
-				Name:  "node1",
-				Ports: []string{"lsp1"},
-			},
-			&nbdb.LogicalRouterStaticRoute{
-				UUID:       "static-route-1-UUID",
-				IPPrefix:   "10.128.1.3/32",
-				Nexthop:    "9.0.0.1",
-				Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-				OutputPort: &logicalRouterPort,
-				Options: map[string]string{
-					"ecmp_symmetric_reply": "true",
-				},
-			},
-			&nbdb.LogicalRouter{
-				UUID:         "GR_node1-UUID",
-				Name:         "GR_node1",
-				StaticRoutes: []string{"static-route-1-UUID"},
-			},
-		}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
-				&nbdb.LogicalSwitchPort{
-					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					ExternalIDs: map[string]string{
-						"pod":       "true",
-						"namespace": namespaceName,
-					},
-					Name: "namespace1_myPod",
-					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
-					},
-					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:  "node1",
-					Name:  "node1",
-					Ports: []string{"lsp1"},
-				},
-				&nbdb.BFD{
-					UUID:        bfd1NamedUUID,
-					DstIP:       "9.0.0.1",
-					LogicalPort: "rtoe-GR_node1",
-				},
+		}, table.Entry("No BFD", false,
+			[]libovsdbtest.TestData{
 				&nbdb.LogicalRouterStaticRoute{
 					UUID:       "static-route-1-UUID",
 					IPPrefix:   "10.128.1.3/32",
 					Nexthop:    "9.0.0.1",
-					BFD:        &bfd1NamedUUID,
 					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 					OutputPort: &logicalRouterPort,
 					Options: map[string]string{
 						"ecmp_symmetric_reply": "true",
 					},
 				},
-				&nbdb.LogicalRouter{
-					UUID:         "GR_node1-UUID",
-					Name:         "GR_node1",
-					StaticRoutes: []string{"static-route-1-UUID"},
-				},
-			}))
+			}),
+			table.Entry("BFD Enabled", true,
+				[]libovsdbtest.TestData{
+					&nbdb.BFD{
+						UUID:        bfd1NamedUUID,
+						DstIP:       "9.0.0.1",
+						LogicalPort: "rtoe-GR_node1",
+					},
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "10.128.1.3/32",
+						Nexthop:    "9.0.0.1",
+						BFD:        &bfd1NamedUUID,
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						OutputPort: &logicalRouterPort,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
+						},
+					},
+				}))
 
-		table.DescribeTable("reconciles an new pod with namespace double exgw annotation already set", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		table.DescribeTable("reconciles a new pod with namespace double exgw annotation already set and handles deletion of that pod", func(bfd bool, isIPV6 bool, bfdDependentComponents []libovsdbtest.TestData) {
 
 			app.Action = func(ctx *cli.Context) error {
-
 				namespaceT := *newNamespace(namespaceName)
-				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1,9.0.0.2"}
 				if bfd {
 					namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
 				}
-				t := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespaceT.Name,
-				)
+				var t testPod
+				if !isIPV6 {
+					namespaceT.Annotations["k8s.ovn.org/routing-external-gws"] = "9.0.0.1,9.0.0.2"
+					t = newTPod(
+						"node1",
+						"10.128.1.0/24",
+						"10.128.1.2",
+						"10.128.1.1",
+						"myPod",
+						"10.128.1.3",
+						"0a:58:0a:80:01:03",
+						namespaceT.Name,
+					)
+				} else {
+					namespaceT.Annotations["k8s.ovn.org/routing-external-gws"] = "fd2e:6f44:5dd8::89,fd2e:6f44:5dd8::76"
+					t = newTPod(
+						"node1",
+						"fd00:10:244:2::0/64",
+						"fd00:10:244:2::2",
+						"fd00:10:244:2::1",
+						"myPod",
+						"fd00:10:244:2::3",
+						"0a:58:49:a1:93:cb",
+						namespaceT.Name,
+					)
+					config.IPv6Mode = true
+
+				}
 
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							node1.logicalSwitch(),
+							node1.nodeGWRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -384,7 +316,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					&v1.NodeList{
 						Items: []v1.Node{
-							*newNode("node1", "192.168.126.202/24"),
+							*newNode(node1.Name, node1.NodeSubnet),
 						},
 					},
 					&v1.PodList{
@@ -402,186 +334,36 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
+				node1.StaticRoutes = []string{"static-route-1-UUID", "static-route-2-UUID"}
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				finalNB := []libovsdbtest.TestData{
+					lsp,
+					node1.logicalSwitch(),
+					node1.nodeGWRouter(),
+				}
+				finalNB = append(finalNB, bfdDependentComponents...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+
+				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				node1.StaticRoutes = []string{}
+				node1.Ports = []string{}
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
+					[]libovsdbtest.TestData{
+						node1.logicalSwitch(),
+						node1.nodeGWRouter(),
+					}))
+
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		},
-			table.Entry("No BFD", false, []libovsdbtest.TestData{
-				&nbdb.LogicalSwitchPort{
-					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					ExternalIDs: map[string]string{
-						"pod":       "true",
-						"namespace": namespaceName,
-					},
-					Name: "namespace1_myPod",
-					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
-					},
-					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:  "node1",
-					Name:  "node1",
-					Ports: []string{"lsp1"},
-				},
-				&nbdb.LogicalRouterStaticRoute{
-					UUID:       "static-route-1-UUID",
-					IPPrefix:   "10.128.1.3/32",
-					Nexthop:    "9.0.0.1",
-					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-					OutputPort: &logicalRouterPort,
-					Options: map[string]string{
-						"ecmp_symmetric_reply": "true",
-					},
-				},
-				&nbdb.LogicalRouterStaticRoute{
-					UUID:       "static-route-2-UUID",
-					IPPrefix:   "10.128.1.3/32",
-					Nexthop:    "9.0.0.2",
-					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-					OutputPort: &logicalRouterPort,
-					Options: map[string]string{
-						"ecmp_symmetric_reply": "true",
-					},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "GR_node1-UUID",
-					Name:         "GR_node1",
-					StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
-				},
-			}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
-				&nbdb.LogicalSwitchPort{
-					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					ExternalIDs: map[string]string{
-						"pod":       "true",
-						"namespace": namespaceName,
-					},
-					Name: "namespace1_myPod",
-					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
-					},
-					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:  "node1",
-					Name:  "node1",
-					Ports: []string{"lsp1"},
-				},
-				&nbdb.BFD{
-					UUID:        bfd1NamedUUID,
-					DstIP:       "9.0.0.1",
-					LogicalPort: "rtoe-GR_node1",
-				},
-				&nbdb.BFD{
-					UUID:        bfd2NamedUUID,
-					DstIP:       "9.0.0.2",
-					LogicalPort: "rtoe-GR_node1",
-				},
-				&nbdb.LogicalRouterStaticRoute{
-					UUID:       "static-route-1-UUID",
-					IPPrefix:   "10.128.1.3/32",
-					Nexthop:    "9.0.0.1",
-					BFD:        &bfd1NamedUUID,
-					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-					OutputPort: &logicalRouterPort,
-					Options: map[string]string{
-						"ecmp_symmetric_reply": "true",
-					},
-				},
-				&nbdb.LogicalRouterStaticRoute{
-					UUID:       "static-route-2-UUID",
-					IPPrefix:   "10.128.1.3/32",
-					Nexthop:    "9.0.0.2",
-					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-					BFD:        &bfd2NamedUUID,
-					OutputPort: &logicalRouterPort,
-					Options: map[string]string{
-						"ecmp_symmetric_reply": "true",
-					},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "GR_node1-UUID",
-					Name:         "GR_node1",
-					StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
-				},
-			}),
-		)
-
-		table.DescribeTable("reconciles deleting a pod with namespace double exgw annotation already set",
-			func(bfd bool,
-				initNB []libovsdbtest.TestData,
-				finalNB []libovsdbtest.TestData,
-			) {
-				app.Action = func(ctx *cli.Context) error {
-
-					namespaceT := *newNamespace(namespaceName)
-					namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1,9.0.0.2"}
-					if bfd {
-						namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
-					}
-					t := newTPod(
-						"node1",
-						"10.128.1.0/24",
-						"10.128.1.2",
-						"10.128.1.1",
-						"myPod",
-						"10.128.1.3",
-						"0a:58:0a:80:01:03",
-						namespaceT.Name,
-					)
-
-					fakeOvn.startWithDBSetup(
-						libovsdbtest.TestSetup{
-							NBData: initNB,
-						},
-						&v1.NamespaceList{
-							Items: []v1.Namespace{
-								namespaceT,
-							},
-						},
-						&v1.NodeList{
-							Items: []v1.Node{
-								*newNode("node1", "192.168.126.202/24"),
-							},
-						},
-						&v1.PodList{
-							Items: []v1.Pod{
-								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
-							},
-						},
-					)
-					t.populateLogicalSwitchCache(fakeOvn)
-
-					injectNode(fakeOvn)
-					err := fakeOvn.controller.WatchNamespaces()
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchPods()
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-
-					err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
-					return nil
-				}
-				err := app.Run([]string{app.Name})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			},
-			table.Entry("No BFD", false,
+			table.Entry("No BFD IPv4", false, false,
 				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: "node1",
-						Name: "node1",
-					},
 					&nbdb.LogicalRouterStaticRoute{
 						UUID:       "static-route-1-UUID",
 						IPPrefix:   "10.128.1.3/32",
@@ -602,30 +384,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"ecmp_symmetric_reply": "true",
 						},
 					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
-					},
-				},
+				}),
+			table.Entry("BFD Enabled IPv4", true, false,
 				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: "node1",
-						Name: "node1",
-					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{},
-					},
-				},
-			),
-			table.Entry("BFD", true,
-				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: "node1",
-						Name: "node1",
-					},
 					&nbdb.BFD{
 						UUID:        bfd1NamedUUID,
 						DstIP:       "9.0.0.1",
@@ -640,8 +401,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						UUID:       "static-route-1-UUID",
 						IPPrefix:   "10.128.1.3/32",
 						Nexthop:    "9.0.0.1",
-						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 						BFD:        &bfd1NamedUUID,
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 						OutputPort: &logicalRouterPort,
 						Options: map[string]string{
 							"ecmp_symmetric_reply": "true",
@@ -658,136 +419,40 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"ecmp_symmetric_reply": "true",
 						},
 					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
-					},
-				},
+				}),
+			table.Entry("BFD IPV6", true, true,
 				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: "node1",
-						Name: "node1",
-					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{},
-					},
-				},
-			),
-		)
-
-		table.DescribeTable("reconciles deleting a pod with namespace double exgw annotation already set IPV6",
-			func(bfd bool,
-				initNB []libovsdbtest.TestData,
-				finalNB []libovsdbtest.TestData) {
-				app.Action = func(ctx *cli.Context) error {
-					namespaceT := *newNamespace(namespaceName)
-					namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "fd2e:6f44:5dd8::89,fd2e:6f44:5dd8::76"}
-					if bfd {
-						namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
-					}
-					t := newTPod(
-						"node1",
-						"fd00:10:244:2::0/64",
-						"fd00:10:244:2::2",
-						"fd00:10:244:2::1",
-						"myPod",
-						"fd00:10:244:2::3",
-						"0a:58:49:a1:93:cb",
-						namespaceT.Name,
-					)
-
-					fakeOvn.startWithDBSetup(
-						libovsdbtest.TestSetup{
-							NBData: initNB,
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "fd00:10:244:2::3/128",
+						BFD:        &bfd1NamedUUID,
+						OutputPort: &logicalRouterPort,
+						Nexthop:    "fd2e:6f44:5dd8::89",
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
 						},
-						&v1.NamespaceList{
-							Items: []v1.Namespace{
-								namespaceT,
-							},
-						},
-						&v1.NodeList{
-							Items: []v1.Node{
-								*newNode("node1", "192.168.126.202/24"),
-							},
-						},
-						&v1.PodList{
-							Items: []v1.Pod{
-								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
-							},
-						},
-					)
-					config.IPv6Mode = true
-					t.populateLogicalSwitchCache(fakeOvn)
-					injectNode(fakeOvn)
-					err := fakeOvn.controller.WatchNamespaces()
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchPods()
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-
-					err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB...))
-					return nil
-				}
-				err := app.Run([]string{app.Name})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			},
-			table.Entry("BFD IPV6", true, []libovsdbtest.TestData{
-				&nbdb.LogicalSwitch{
-					UUID: "node1",
-					Name: "node1",
-				},
-				&nbdb.LogicalRouterStaticRoute{
-					UUID:       "static-route-1-UUID",
-					IPPrefix:   "fd00:10:244:2::3/128",
-					BFD:        &bfd1NamedUUID,
-					OutputPort: &logicalRouterPort,
-					Nexthop:    "fd2e:6f44:5dd8::89",
-					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-					Options: map[string]string{
-						"ecmp_symmetric_reply": "true",
 					},
-				},
-				&nbdb.LogicalRouterStaticRoute{
-					UUID:       "static-route-2-UUID",
-					IPPrefix:   "fd00:10:244:2::3/128",
-					BFD:        &bfd1NamedUUID,
-					OutputPort: &logicalRouterPort,
-					Nexthop:    "fd2e:6f44:5dd8::76",
-					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-					Options: map[string]string{
-						"ecmp_symmetric_reply": "true",
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-2-UUID",
+						IPPrefix:   "fd00:10:244:2::3/128",
+						BFD:        &bfd2NamedUUID,
+						OutputPort: &logicalRouterPort,
+						Nexthop:    "fd2e:6f44:5dd8::76",
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
+						},
 					},
-				},
-				&nbdb.BFD{
-					UUID:        bfd2NamedUUID,
-					DstIP:       "fd2e:6f44:5dd8::76",
-					LogicalPort: "rtoe-GR_node1",
-				},
-				&nbdb.BFD{
-					UUID:        bfd1NamedUUID,
-					DstIP:       "fd2e:6f44:5dd8::89",
-					LogicalPort: "rtoe-GR_node1",
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "GR_node1-UUID",
-					Name:         "GR_node1",
-					StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
-				},
-			},
-				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: "node1",
-						Name: "node1",
+					&nbdb.BFD{
+						UUID:        bfd2NamedUUID,
+						DstIP:       "fd2e:6f44:5dd8::76",
+						LogicalPort: "rtoe-GR_node1",
 					},
-					&nbdb.LogicalRouter{
-						UUID: "GR_node1-UUID",
-						Name: "GR_node1",
+					&nbdb.BFD{
+						UUID:        bfd1NamedUUID,
+						DstIP:       "fd2e:6f44:5dd8::89",
+						LogicalPort: "rtoe-GR_node1",
 					},
 				},
 			),
@@ -795,8 +460,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 		table.DescribeTable("reconciles deleting a exgw namespace with active pod",
 			func(bfd bool,
-				initNB []libovsdbtest.TestData,
-				finalNB []libovsdbtest.TestData,
+				initBFDDependentComponents []libovsdbtest.TestData,
 			) {
 				app.Action = func(ctx *cli.Context) error {
 
@@ -815,6 +479,13 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						"0a:58:0a:80:01:03",
 						namespaceT.Name,
 					)
+					node1.StaticRoutes = []string{"static-route-1-UUID", "static-route-2-UUID"}
+					initNB := []libovsdbtest.TestData{
+
+						node1.logicalSwitch(),
+						node1.nodeGWRouter(),
+					}
+					initNB = append(initNB, initBFDDependentComponents...)
 
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
@@ -827,7 +498,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						&v1.NodeList{
 							Items: []v1.Node{
-								*newNode("node1", "192.168.126.202/24"),
+								*newNode(node1.Name, node1.NodeSubnet),
 							},
 						},
 						&v1.PodList{
@@ -848,6 +519,14 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 					err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), t.namespace, *metav1.NewDeleteOptions(0))
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					node1.StaticRoutes = []string{}
+					lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					finalNB := []libovsdbtest.TestData{
+						lsp,
+						node1.logicalSwitch(),
+						node1.nodeGWRouter(),
+					}
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 					return nil
 				}
@@ -857,10 +536,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			},
 			table.Entry("No BFD", false,
 				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: "node1",
-						Name: "node1",
-					},
 					&nbdb.LogicalRouterStaticRoute{
 						UUID:       "static-route-1-UUID",
 						IPPrefix:   "10.128.1.3/32",
@@ -881,45 +556,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"ecmp_symmetric_reply": "true",
 						},
 					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
-					},
-				},
-				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": namespaceName,
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID:  "node1",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{},
-					},
 				},
 			),
 			table.Entry("BFD", true,
 				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: "node1",
-						Name: "node1",
-					},
 					&nbdb.BFD{
 						UUID:        "bfd1-UUID",
 						DstIP:       "9.0.0.1",
@@ -952,37 +592,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"ecmp_symmetric_reply": "true",
 						},
 					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
-					},
-				},
-				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": namespaceName,
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID:  "node1",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{},
-					},
 				},
 			))
 	})
@@ -992,7 +601,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			namespace2Name = "namespace2"
 			gwPodName      = "gwPod"
 		)
-		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for new pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for new pod", func(bfd bool, bfdDependentComponents []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace(namespaceName)
@@ -1016,18 +625,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
+							node1.logicalSwitch(),
 							&nbdb.LogicalSwitch{
 								UUID: "node2",
 								Name: "node2",
 							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							node1.nodeGWRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -1061,100 +664,59 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Eventually(func() string {
 					return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)[util.ExternalGatewayPodIPsAnnotation]
 				}).Should(gomega.Equal("9.0.0.1"))
+				node1.StaticRoutes = []string{"static-route-1-UUID"}
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				finalNB := []libovsdbtest.TestData{
+					lsp,
+					node1.logicalSwitch(),
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					node1.nodeGWRouter(),
+				}
+				finalNB = append(finalNB, bfdDependentComponents...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
-			&nbdb.LogicalSwitchPort{
-				UUID:      "lsp1",
-				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				ExternalIDs: map[string]string{
-					"pod":       "true",
-					"namespace": namespaceName,
-				},
-				Name: "namespace1_myPod",
-				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
-				},
-				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-			},
-			&nbdb.LogicalSwitch{
-				UUID:  "node1",
-				Name:  "node1",
-				Ports: []string{"lsp1"},
-			},
-			&nbdb.LogicalSwitch{
-				UUID: "node2",
-				Name: "node2",
-			},
-			&nbdb.LogicalRouterStaticRoute{
-				UUID:       "static-route-1-UUID",
-				IPPrefix:   "10.128.1.3/32",
-				Nexthop:    "9.0.0.1",
-				Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-				OutputPort: &logicalRouterPort,
-				Options: map[string]string{
-					"ecmp_symmetric_reply": "true",
-				},
-			},
-			&nbdb.LogicalRouter{
-				UUID:         "GR_node1-UUID",
-				Name:         "GR_node1",
-				StaticRoutes: []string{"static-route-1-UUID"},
-			},
-		}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
-				&nbdb.LogicalSwitchPort{
-					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					ExternalIDs: map[string]string{
-						"pod":       "true",
-						"namespace": namespaceName,
-					},
-					Name: "namespace1_myPod",
-					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
-					},
-					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:  "node1",
-					Name:  "node1",
-					Ports: []string{"lsp1"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID: "node2",
-					Name: "node2",
-				},
-				&nbdb.BFD{
-					UUID:        bfd1NamedUUID,
-					DstIP:       "9.0.0.1",
-					LogicalPort: "rtoe-GR_node1",
-				},
+		}, table.Entry("No BFD", false,
+			[]libovsdbtest.TestData{
 				&nbdb.LogicalRouterStaticRoute{
 					UUID:       "static-route-1-UUID",
 					IPPrefix:   "10.128.1.3/32",
 					Nexthop:    "9.0.0.1",
-					BFD:        &bfd1NamedUUID,
 					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 					OutputPort: &logicalRouterPort,
 					Options: map[string]string{
 						"ecmp_symmetric_reply": "true",
 					},
 				},
-				&nbdb.LogicalRouter{
-					UUID:         "GR_node1-UUID",
-					Name:         "GR_node1",
-					StaticRoutes: []string{"static-route-1-UUID"},
-				},
-			}))
+			}),
+			table.Entry("BFD Enabled", true,
+				[]libovsdbtest.TestData{
+					&nbdb.BFD{
+						UUID:        bfd1NamedUUID,
+						DstIP:       "9.0.0.1",
+						LogicalPort: "rtoe-GR_node1",
+					},
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "10.128.1.3/32",
+						Nexthop:    "9.0.0.1",
+						BFD:        &bfd1NamedUUID,
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						OutputPort: &logicalRouterPort,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
+						},
+					},
+				}))
 
-		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for existing pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for existing pod", func(bfd bool, bfdDependentComponents []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace(namespaceName)
@@ -1178,18 +740,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
+							node1.logicalSwitch(),
 							&nbdb.LogicalSwitch{
 								UUID: "node2",
 								Name: "node2",
 							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							node1.nodeGWRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -1218,6 +774,19 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				node1.StaticRoutes = []string{"static-route-1-UUID"}
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				finalNB := []libovsdbtest.TestData{
+					lsp,
+					node1.logicalSwitch(),
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					node1.nodeGWRouter(),
+				}
+				finalNB = append(finalNB, bfdDependentComponents...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				gomega.Eventually(func() string {
 					return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)[util.ExternalGatewayPodIPsAnnotation]
@@ -1227,94 +796,40 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
-			&nbdb.LogicalSwitchPort{
-				UUID:      "lsp1",
-				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				ExternalIDs: map[string]string{
-					"pod":       "true",
-					"namespace": namespaceName,
-				},
-				Name: "namespace1_myPod",
-				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
-				},
-				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-			},
-			&nbdb.LogicalSwitch{
-				UUID:  "node1",
-				Name:  "node1",
-				Ports: []string{"lsp1"},
-			},
-			&nbdb.LogicalSwitch{
-				UUID: "node2",
-				Name: "node2",
-			},
-			&nbdb.LogicalRouterStaticRoute{
-				UUID:       "static-route-1-UUID",
-				IPPrefix:   "10.128.1.3/32",
-				Nexthop:    "9.0.0.1",
-				Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-				OutputPort: &logicalRouterPort,
-				Options: map[string]string{
-					"ecmp_symmetric_reply": "true",
-				},
-			},
-			&nbdb.LogicalRouter{
-				UUID:         "GR_node1-UUID",
-				Name:         "GR_node1",
-				StaticRoutes: []string{"static-route-1-UUID"},
-			},
-		}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
-				&nbdb.LogicalSwitchPort{
-					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					ExternalIDs: map[string]string{
-						"pod":       "true",
-						"namespace": namespaceName,
-					},
-					Name: "namespace1_myPod",
-					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
-					},
-					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:  "node1",
-					Name:  "node1",
-					Ports: []string{"lsp1"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID: "node2",
-					Name: "node2",
-				},
-				&nbdb.BFD{
-					UUID:        bfd1NamedUUID,
-					DstIP:       "9.0.0.1",
-					LogicalPort: "rtoe-GR_node1",
-				},
+		}, table.Entry("No BFD", false,
+			[]libovsdbtest.TestData{
 				&nbdb.LogicalRouterStaticRoute{
 					UUID:       "static-route-1-UUID",
 					IPPrefix:   "10.128.1.3/32",
 					Nexthop:    "9.0.0.1",
-					BFD:        &bfd1NamedUUID,
 					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 					OutputPort: &logicalRouterPort,
 					Options: map[string]string{
 						"ecmp_symmetric_reply": "true",
 					},
 				},
-				&nbdb.LogicalRouter{
-					UUID:         "GR_node1-UUID",
-					Name:         "GR_node1",
-					StaticRoutes: []string{"static-route-1-UUID"},
-				},
-			}))
+			}),
+			table.Entry("BFD Enabled", true,
+				[]libovsdbtest.TestData{
+					&nbdb.BFD{
+						UUID:        bfd1NamedUUID,
+						DstIP:       "9.0.0.1",
+						LogicalPort: "rtoe-GR_node1",
+					},
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "10.128.1.3/32",
+						Nexthop:    "9.0.0.1",
+						BFD:        &bfd1NamedUUID,
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						OutputPort: &logicalRouterPort,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
+						},
+					},
+				}))
 
-		table.DescribeTable("reconciles a multus networked pod acting as a exgw for another namespace for new pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		table.DescribeTable("reconciles a multus networked pod acting as a exgw for another namespace for new pod", func(bfd bool, bfdDependentComponents []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 				ns := nettypes.NetworkStatus{Name: "dummy", IPs: []string{"11.0.0.1"}}
 				networkStatuses := []nettypes.NetworkStatus{ns}
@@ -1346,18 +861,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
+							node1.logicalSwitch(),
 							&nbdb.LogicalSwitch{
 								UUID: "node2",
 								Name: "node2",
 							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							node1.nodeGWRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -1391,103 +900,61 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Eventually(func() string {
 					return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)[util.ExternalGatewayPodIPsAnnotation]
 				}).Should(gomega.Equal("11.0.0.1"))
+				node1.StaticRoutes = []string{"static-route-1-UUID"}
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				finalNB := []libovsdbtest.TestData{
+					lsp,
+					node1.logicalSwitch(),
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					node1.nodeGWRouter(),
+				}
+				finalNB = append(finalNB, bfdDependentComponents...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
-			&nbdb.LogicalSwitchPort{
-				UUID:      "lsp1",
-				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				ExternalIDs: map[string]string{
-					"pod":       "true",
-					"namespace": namespaceName,
-				},
-				Name: "namespace1_myPod",
-				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
-				},
-				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-			},
-			&nbdb.LogicalSwitch{
-				UUID:  "node1",
-				Name:  "node1",
-				Ports: []string{"lsp1"},
-			},
-			&nbdb.LogicalSwitch{
-				UUID: "node2",
-				Name: "node2",
-			},
-			&nbdb.LogicalRouterStaticRoute{
-				UUID:       "static-route-1-UUID",
-				IPPrefix:   "10.128.1.3/32",
-				Nexthop:    "11.0.0.1",
-				Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-				OutputPort: &logicalRouterPort,
-				Options: map[string]string{
-					"ecmp_symmetric_reply": "true",
-				},
-			},
-			&nbdb.LogicalRouter{
-				UUID:         "GR_node1-UUID",
-				Name:         "GR_node1",
-				StaticRoutes: []string{"static-route-1-UUID"},
-			},
-		}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
-				&nbdb.LogicalSwitchPort{
-					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					ExternalIDs: map[string]string{
-						"pod":       "true",
-						"namespace": namespaceName,
-					},
-					Name: "namespace1_myPod",
-					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
-					},
-					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:  "node1",
-					Name:  "node1",
-					Ports: []string{"lsp1"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID: "node2",
-					Name: "node2",
-				},
-				&nbdb.BFD{
-					UUID:        bfd1NamedUUID,
-					DstIP:       "11.0.0.1",
-					LogicalPort: "rtoe-GR_node1",
-				},
+		}, table.Entry("No BFD", false,
+			[]libovsdbtest.TestData{
 				&nbdb.LogicalRouterStaticRoute{
 					UUID:       "static-route-1-UUID",
 					IPPrefix:   "10.128.1.3/32",
 					Nexthop:    "11.0.0.1",
-					BFD:        &bfd1NamedUUID,
 					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 					OutputPort: &logicalRouterPort,
 					Options: map[string]string{
 						"ecmp_symmetric_reply": "true",
 					},
 				},
-				&nbdb.LogicalRouter{
-					UUID:         "GR_node1-UUID",
-					Name:         "GR_node1",
-					StaticRoutes: []string{"static-route-1-UUID"},
-				},
-			}))
+			}),
+			table.Entry("BFD Enabled", true,
+				[]libovsdbtest.TestData{
+					&nbdb.BFD{
+						UUID:        bfd1NamedUUID,
+						DstIP:       "11.0.0.1",
+						LogicalPort: "rtoe-GR_node1",
+					},
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "10.128.1.3/32",
+						Nexthop:    "11.0.0.1",
+						BFD:        &bfd1NamedUUID,
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						OutputPort: &logicalRouterPort,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
+						},
+					},
+				}))
 
 		table.DescribeTable("reconciles deleting a host networked pod acting as a exgw for another namespace for existing pod",
 			func(bfd bool,
-				beforeDeleteNB []libovsdbtest.TestData,
-				afterDeleteNB []libovsdbtest.TestData,
+				beforeDeleteNBBFDDependentComponents []libovsdbtest.TestData,
 				expectedNamespaceAnnotation string,
 				apbExternalRouteCRList *adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList) {
 				app.Action = func(ctx *cli.Context) error {
@@ -1513,18 +980,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
-								&nbdb.LogicalSwitch{
-									UUID: "node1",
-									Name: "node1",
-								},
+								node1.logicalSwitch(),
 								&nbdb.LogicalSwitch{
 									UUID: "node2",
 									Name: "node2",
 								},
-								&nbdb.LogicalRouter{
-									UUID: "GR_node1-UUID",
-									Name: "GR_node1",
-								},
+								node1.nodeGWRouter(),
 							},
 						},
 						&v1.NamespaceList{
@@ -1556,6 +1017,19 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					node1.StaticRoutes = []string{"static-route-1-UUID"}
+					lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					beforeDeleteNB := []libovsdbtest.TestData{
+						lsp,
+						node1.logicalSwitch(),
+						&nbdb.LogicalSwitch{
+							UUID: "node2",
+							Name: "node2",
+						},
+						node1.nodeGWRouter(),
+					}
+					beforeDeleteNB = append(beforeDeleteNB, beforeDeleteNBBFDDependentComponents...)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(beforeDeleteNB))
 					gomega.Eventually(func() string {
 						return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)[util.ExternalGatewayPodIPsAnnotation]
@@ -1563,7 +1037,16 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 					err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Delete(context.TODO(), gwPod.Name, *metav1.NewDeleteOptions(0))
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(afterDeleteNB))
+					node1.StaticRoutes = []string{}
+					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{
+						lsp,
+						node1.logicalSwitch(),
+						&nbdb.LogicalSwitch{
+							UUID: "node2",
+							Name: "node2",
+						},
+						node1.nodeGWRouter(),
+					}))
 					gomega.Eventually(func() string {
 						return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)[util.ExternalGatewayPodIPsAnnotation]
 					}).Should(gomega.Equal(expectedNamespaceAnnotation))
@@ -1578,29 +1061,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			},
 			table.Entry("No BFD", false,
 				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": namespaceName,
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID:  "node1",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID: "node2",
-						Name: "node2",
-					},
 					&nbdb.LogicalRouterStaticRoute{
 						UUID:       "static-route-1-UUID",
 						IPPrefix:   "10.128.1.3/32",
@@ -1611,119 +1071,27 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"ecmp_symmetric_reply": "true",
 						},
 					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID"},
-					},
-				},
-				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": namespaceName,
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID:  "node1",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID: "node2",
-						Name: "node2",
-					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{},
-					},
 				},
 				"",
 				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{},
 			),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
-				&nbdb.LogicalSwitchPort{
-					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					ExternalIDs: map[string]string{
-						"pod":       "true",
-						"namespace": namespaceName,
-					},
-					Name: "namespace1_myPod",
-					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
-					},
-					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:  "node1",
-					Name:  "node1",
-					Ports: []string{"lsp1"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID: "node2",
-					Name: "node2",
-				},
-				&nbdb.BFD{
-					UUID:        bfd1NamedUUID,
-					DstIP:       "9.0.0.1",
-					LogicalPort: "rtoe-GR_node1",
-				},
-				&nbdb.LogicalRouterStaticRoute{
-					UUID:       "static-route-1-UUID",
-					IPPrefix:   "10.128.1.3/32",
-					Nexthop:    "9.0.0.1",
-					BFD:        &bfd1NamedUUID,
-					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-					OutputPort: &logicalRouterPort,
-					Options: map[string]string{
-						"ecmp_symmetric_reply": "true",
-					},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "GR_node1-UUID",
-					Name:         "GR_node1",
-					StaticRoutes: []string{"static-route-1-UUID"},
-				},
-			},
+			table.Entry("BFD Enabled", true,
 				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": namespaceName,
-						},
-						Name: "namespace1_myPod",
+					&nbdb.BFD{
+						UUID:        bfd1NamedUUID,
+						DstIP:       "9.0.0.1",
+						LogicalPort: "rtoe-GR_node1",
+					},
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "10.128.1.3/32",
+						Nexthop:    "9.0.0.1",
+						BFD:        &bfd1NamedUUID,
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						OutputPort: &logicalRouterPort,
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"ecmp_symmetric_reply": "true",
 						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID:  "node1",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID: "node2",
-						Name: "node2",
-					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{},
 					},
 				},
 				"",
@@ -1731,29 +1099,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			),
 			table.Entry("No BFD and with overlapping APB External Route CR and annotation", false,
 				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": namespaceName,
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID:  "node1",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID: "node2",
-						Name: "node2",
-					},
 					&nbdb.LogicalRouterStaticRoute{
 						UUID:       "static-route-1-UUID",
 						IPPrefix:   "10.128.1.3/32",
@@ -1763,41 +1108,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Options: map[string]string{
 							"ecmp_symmetric_reply": "true",
 						},
-					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID"},
-					},
-				},
-				[]libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": namespaceName,
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID:  "node1",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID: "node2",
-						Name: "node2",
-					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{},
 					},
 				},
 				"",
@@ -1841,18 +1151,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
+							node1.logicalSwitch(),
 							&nbdb.LogicalSwitch{
 								UUID: "node2",
 								Name: "node2",
 							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							node1.nodeGWRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -1883,26 +1187,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				node1.StaticRoutes = []string{"static-route-1-UUID", "static-route-2-UUID"}
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				finalNB := []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": namespaceName,
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID:  "node1",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
+					lsp,
+					node1.logicalSwitch(),
 					&nbdb.LogicalSwitch{
 						UUID: "node2",
 						Name: "node2",
@@ -1933,11 +1223,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"ecmp_symmetric_reply": "true",
 						},
 					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
-					},
+					node1.nodeGWRouter(),
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				gomega.Eventually(func() string {
@@ -1974,18 +1260,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
+							node1.logicalSwitch(),
 							&nbdb.LogicalSwitch{
 								UUID: "node2",
 								Name: "node2",
 							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							node1.nodeGWRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -2016,26 +1296,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				node1.StaticRoutes = []string{"static-route-1-UUID", "static-route-2-UUID"}
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				finalNB := []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": namespaceName,
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID:  "node1",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
+					lsp,
+					node1.logicalSwitch(),
 					&nbdb.LogicalSwitch{
 						UUID: "node2",
 						Name: "node2",
@@ -2066,11 +1332,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"ecmp_symmetric_reply": "true",
 						},
 					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
-					},
+					node1.nodeGWRouter(),
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				gomega.Eventually(func() string {
@@ -2098,14 +1360,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
+				node1.StaticRoutes = []string{"static-route-1-UUID"}
 
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
+							node1.logicalSwitch(),
 							&nbdb.BFD{
 								UUID:        bfd1NamedUUID,
 								DstIP:       "9.0.0.1",
@@ -2122,11 +1382,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 									"ecmp_symmetric_reply": "true",
 								},
 							},
-							&nbdb.LogicalRouter{
-								UUID:         "GR_node1-UUID",
-								Name:         "GR_node1",
-								StaticRoutes: []string{"static-route-1-UUID"},
-							},
+							node1.nodeGWRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -2156,27 +1412,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.Background(), &namespaceT, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				finalNB := []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": namespaceName,
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalSwitch{
-						UUID:  "node1",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
+					lsp,
+					node1.logicalSwitch(),
 					&nbdb.LogicalRouterStaticRoute{
 						UUID:       "static-route-1-UUID",
 						IPPrefix:   "10.128.1.3/32",
@@ -2187,11 +1428,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"ecmp_symmetric_reply": "true",
 						},
 					},
-					&nbdb.LogicalRouter{
-						UUID:         "GR_node1-UUID",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID"},
-					},
+					node1.nodeGWRouter(),
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				return nil
@@ -2214,10 +1451,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
 								Networks: []string{"100.64.0.4/32"},
 							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 						},
 					},
 				)
@@ -2231,11 +1465,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Nexthops: []string{"100.64.0.4"},
 						Match:    "inport == \"rtos-node1\" && ip4.src == $" + asv4 + " && ip4.dst != 10.128.0.0/14",
 					},
-					&nbdb.LogicalRouter{
-						Name:     ovntypes.OVNClusterRouter,
-						UUID:     ovntypes.OVNClusterRouter + "-UUID",
-						Policies: []string{"2a7a61cb-fb13-4266-a3f0-9ac5c4471123 [u2596996164]"},
-					},
+					clusterRouter("2a7a61cb-fb13-4266-a3f0-9ac5c4471123 [u2596996164]"),
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
@@ -2275,23 +1505,14 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
+							node1.logicalSwitch(),
 							&nbdb.LogicalRouterPort{
 								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
 								Networks: []string{"100.64.0.4/32"},
 							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							node1.nodeGWRouter(),
+							clusterRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -2320,6 +1541,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				asIndex := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				asv4, _ := addressset.GetHashNamesForAS(asIndex)
+				node1.StaticRoutes = []string{"static-route-1-UUID"}
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nbWithLRP := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						UUID:     "lrp1",
@@ -2343,35 +1567,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						OutputPort: &logicalRouterPort,
 						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 					},
-					&nbdb.LogicalSwitch{
-						UUID:  "493c61b4-2f97-446d-a1f0-1f713b510bbf",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": "namespace1",
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"requested-chassis": "node1",
-							"iface-id-ver":      "myPod",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalRouter{
-						UUID:     "e496b76e-18a1-461e-a919-6dcf0b3c35db",
-						Name:     "ovn_cluster_router",
-						Policies: []string{"lrp1"},
-					},
-					&nbdb.LogicalRouter{
-						UUID:         "8945d2c1-bf8a-43ab-aa9f-6130eb525682",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID"},
-					},
+					node1.logicalSwitch(),
+					lsp,
+					clusterRouter("lrp1"),
+					node1.nodeGWRouter(),
 				}
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
@@ -2379,25 +1578,18 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				node1.deleteLogicalSwitchPortFromNode(t)
 
+				node1.StaticRoutes = []string{}
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
 						Networks: []string{"100.64.0.4/32"},
 					},
-					&nbdb.LogicalSwitch{
-						UUID: "493c61b4-2f97-446d-a1f0-1f713b510bbf",
-						Name: "node1",
-					},
-					&nbdb.LogicalRouter{
-						UUID: "e496b76e-18a1-461e-a919-6dcf0b3c35db",
-						Name: "ovn_cluster_router",
-					},
-					&nbdb.LogicalRouter{
-						UUID: "8945d2c1-bf8a-43ab-aa9f-6130eb525682",
-						Name: "GR_node1",
-					},
+					node1.logicalSwitch(),
+					clusterRouter(),
+					node1.nodeGWRouter(),
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 
@@ -2428,23 +1620,14 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
+							node1.logicalSwitch(),
 							&nbdb.LogicalRouterPort{
 								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
 								Networks: []string{"100.64.0.4/32"},
 							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							node1.nodeGWRouter(),
+							clusterRouter(),
 						},
 					},
 					&v1.NamespaceList{
@@ -2499,6 +1682,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 				asIndex := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
 				asv4, _ := addressset.GetHashNamesForAS(asIndex)
+				node1.StaticRoutes = []string{"static-route-1-UUID"}
+				lsp, err := node1.generateLogicalSwitchPortAddToNode(t)
 				nbWithLRP := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						UUID:     "lrp1",
@@ -2522,35 +1707,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						OutputPort: &logicalRouterPort,
 						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 					},
-					&nbdb.LogicalSwitch{
-						UUID:  "493c61b4-2f97-446d-a1f0-1f713b510bbf",
-						Name:  "node1",
-						Ports: []string{"lsp1"},
-					},
-					&nbdb.LogicalSwitchPort{
-						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-						ExternalIDs: map[string]string{
-							"pod":       "true",
-							"namespace": "namespace1",
-						},
-						Name: "namespace1_myPod",
-						Options: map[string]string{
-							"requested-chassis": "node1",
-							"iface-id-ver":      "myPod",
-						},
-						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
-					},
-					&nbdb.LogicalRouter{
-						UUID:     "e496b76e-18a1-461e-a919-6dcf0b3c35db",
-						Name:     "ovn_cluster_router",
-						Policies: []string{"lrp1"},
-					},
-					&nbdb.LogicalRouter{
-						UUID:         "8945d2c1-bf8a-43ab-aa9f-6130eb525682",
-						Name:         "GR_node1",
-						StaticRoutes: []string{"static-route-1-UUID"},
-					},
+					node1.logicalSwitch(),
+					lsp,
+					clusterRouter("lrp1"),
+					node1.nodeGWRouter(),
 				}
 
 				gomega.Eventually(func() string {
@@ -2586,10 +1746,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
 								Networks: []string{"100.64.0.4/32"},
 							},
-							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
-							},
+							clusterRouter(),
 						},
 					},
 				)
@@ -2603,11 +1760,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Nexthops: []string{"100.64.0.4"},
 						Match:    "inport == \"rtos-node1\" && ip4.src == $" + asv4 + " && ip4.dst != 10.128.0.0/14",
 					},
-					&nbdb.LogicalRouter{
-						Name:     ovntypes.OVNClusterRouter,
-						UUID:     ovntypes.OVNClusterRouter + "-UUID",
-						Policies: []string{"lrp1"},
-					},
+					clusterRouter("lrp1"),
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
@@ -2656,15 +1809,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								Nexthops: []string{"100.64.0.4"},
 								Match:    "inport == \"rtos-node1\" && ip4.src == $" + asv4 + " && ip4.dst != 10.128.0.0/14",
 							},
-							&nbdb.LogicalRouter{
-								Name:     ovntypes.OVNClusterRouter,
-								UUID:     ovntypes.OVNClusterRouter + "-UUID",
-								Policies: []string{"2a7a61cb-fb13-4266-a3f0-9ac5c4471123 [u2596996164]"},
-							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							clusterRouter("2a7a61cb-fb13-4266-a3f0-9ac5c4471123 [u2596996164]"),
+							node1.nodeGWRouter(),
 							&nbdb.LogicalRouterPort{
 								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
@@ -2674,15 +1820,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				finalNB := []libovsdbtest.TestData{
-					&nbdb.LogicalRouter{
-						Name:     ovntypes.OVNClusterRouter,
-						UUID:     ovntypes.OVNClusterRouter + "-UUID",
-						Policies: []string{},
-					},
-					&nbdb.LogicalRouter{
-						UUID: "GR_node1-UUID",
-						Name: "GR_node1",
-					},
+					clusterRouter(),
+					node1.nodeGWRouter(),
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
@@ -2726,15 +1865,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								Nexthops: []string{"100.64.1.4"},
 								Match:    "inport == \"rtos-node2\" && ip4.src == $" + as2v4 + " && ip4.dst != 10.128.0.0/14",
 							},
-							&nbdb.LogicalRouter{
-								Name:     ovntypes.OVNClusterRouter,
-								UUID:     ovntypes.OVNClusterRouter + "-UUID",
-								Policies: []string{"501-1st-UUID", "501-2nd-UUID"},
-							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							clusterRouter("501-1st-UUID", "501-2nd-UUID"),
+							node1.nodeGWRouter(),
 							&nbdb.LogicalRouterPort{
 								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
@@ -2744,15 +1876,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				finalNB := []libovsdbtest.TestData{
-					&nbdb.LogicalRouter{
-						Name:     ovntypes.OVNClusterRouter,
-						UUID:     ovntypes.OVNClusterRouter + "-UUID",
-						Policies: []string{},
-					},
-					&nbdb.LogicalRouter{
-						UUID: "GR_node1-UUID",
-						Name: "GR_node1",
-					},
+					clusterRouter(),
+					node1.nodeGWRouter(),
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
@@ -2800,15 +1925,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								Nexthops: []string{"100.64.1.4"},
 								Match:    "inport == \"rtos-node2\" && ip4.src == $" + asv4 + " && ip4.dst != 10.128.0.0/14",
 							},
-							&nbdb.LogicalRouter{
-								Name:     ovntypes.OVNClusterRouter,
-								UUID:     ovntypes.OVNClusterRouter + "-UUID",
-								Policies: []string{"501-1st-UUID", "501-2nd-UUID", "501-new-UUID"},
-							},
-							&nbdb.LogicalRouter{
-								UUID: "GR_node1-UUID",
-								Name: "GR_node1",
-							},
+							clusterRouter("501-1st-UUID", "501-2nd-UUID", "501-new-UUID"),
+							node1.nodeGWRouter(),
 							&nbdb.LogicalRouterPort{
 								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
@@ -2825,15 +1943,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Nexthops: []string{"100.64.1.4"},
 						Match:    "inport == \"rtos-node2\" && ip4.src == $" + asv4 + " && ip4.dst != 10.128.0.0/14",
 					},
-					&nbdb.LogicalRouter{
-						Name:     ovntypes.OVNClusterRouter,
-						UUID:     ovntypes.OVNClusterRouter + "-UUID",
-						Policies: []string{"501-new-UUID"},
-					},
-					&nbdb.LogicalRouter{
-						UUID: "GR_node1-UUID",
-						Name: "GR_node1",
-					},
+					clusterRouter("501-new-UUID"),
+					node1.nodeGWRouter(),
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
@@ -2875,6 +1986,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					NodeMgmtPortIP:       "10.1.1.2",
 					NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
 					DnatSnatIP:           "169.254.0.1",
+
+					StaticRoutes: []string{"static-route-1-UUID"},
 				}
 				// create a test node and annotate it with host subnet
 				testNode := node1.k8sNode("2")
@@ -2899,16 +2012,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								Nexthops: []string{"100.64.0.4"},
 								Match:    "inport == \"rtos-node1\" && ip4.src == $" + asv4 + " && ip4.dst != 10.128.0.0/14",
 							},
-							&nbdb.LogicalRouter{
-								Name:     ovntypes.OVNClusterRouter,
-								UUID:     ovntypes.OVNClusterRouter + "-UUID",
-								Policies: []string{"501-new-UUID"},
-							},
-							&nbdb.LogicalRouter{
-								UUID:         "GR_node1-UUID",
-								Name:         "GR_node1",
-								StaticRoutes: []string{"static-route-1-UUID"},
-							},
+							clusterRouter("501-new-UUID"),
+							node1.nodeGWRouter(),
 							&nbdb.LogicalRouterPort{
 								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
@@ -2936,15 +2041,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				// add address set with one legit IP that exists in a ecmp route, and one that doesn't
 				_, err = fakeOvn.asf.NewAddressSet(asIndex, []net.IP{net.ParseIP("10.128.1.3"), net.ParseIP("1.1.1.1")})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				node1.StaticRoutes = []string{}
 				finalNB := []libovsdbtest.TestData{
-					&nbdb.LogicalRouter{
-						Name: ovntypes.OVNClusterRouter,
-						UUID: ovntypes.OVNClusterRouter + "-UUID",
-					},
-					&nbdb.LogicalRouter{
-						UUID: "GR_node1-UUID",
-						Name: "GR_node1",
-					},
+					clusterRouter(),
+					node1.nodeGWRouter(),
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
@@ -2995,14 +2096,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName,
 								Networks: []string{"100.64.0.4/32"},
 							},
-							&nbdb.LogicalRouter{
-								Name: types.GWRouterPrefix + nodeName,
-								UUID: types.GWRouterPrefix + nodeName + "-UUID",
-							},
-							&nbdb.LogicalSwitch{
-								UUID: "node1",
-								Name: "node1",
-							},
+							node1.nodeGWRouter(),
+							node1.logicalSwitch(),
 						},
 					},
 					&v1.NamespaceList{
@@ -3019,6 +2114,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Items: pod,
 					},
 				)
+				node1.Nat = []string{"nat-UUID"}
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.NAT{
 						UUID:       "nat-UUID",
@@ -3027,20 +2123,13 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Options:    map[string]string{"stateless": "false"},
 						Type:       nbdb.NATTypeSNAT,
 					},
-					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + nodeName,
-						UUID: types.GWRouterPrefix + nodeName + "-UUID",
-						Nat:  []string{"nat-UUID"},
-					},
+					node1.nodeGWRouter(),
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName,
 						Networks: []string{"100.64.0.4/32"},
 					},
-					&nbdb.LogicalSwitch{
-						UUID: "node1",
-						Name: "node1",
-					},
+					node1.logicalSwitch(),
 				}
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
@@ -3056,21 +2145,15 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					addOrUpdatePodSNAT(fakeOvn.controller.nbClient, pod[0].Spec.NodeName, extIPs, []*net.IPNet{fullMaskPodNet}),
 				).To(gomega.Succeed())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				node1.Nat = []string{}
 				finalNB = []libovsdbtest.TestData{
-					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + nodeName,
-						UUID: types.GWRouterPrefix + nodeName + "-UUID",
-						Nat:  []string{},
-					},
+					node1.nodeGWRouter(),
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName,
 						Networks: []string{"100.64.0.4/32"},
 					},
-					&nbdb.LogicalSwitch{
-						UUID: "node1",
-						Name: "node1",
-					},
+					node1.logicalSwitch(),
 				}
 				err = fakeOvn.controller.deletePodSNAT(nodeName, extIPs, []*net.IPNet{fullMaskPodNet})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3090,9 +2173,10 @@ func injectNode(fakeOvn *FakeOVN) {
 	node := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node1",
-			Annotations: map[string]string{"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`,
-				"k8s.ovn.org/node-chassis-id": "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
-				"k8s.ovn.org/node-subnets":    `{"default":"10.128.1.0/24"}`,
+			Annotations: map[string]string{
+				"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`,
+				"k8s.ovn.org/node-chassis-id":   "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
+				"k8s.ovn.org/node-subnets":      `{"default":"10.128.1.0/24"}`,
 			},
 		},
 	}

@@ -251,8 +251,9 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			expectedClusterLBGroup := newLoadBalancerGroup(ovntypes.ClusterLBGroupName)
 			expectedSwitchLBGroup := newLoadBalancerGroup(ovntypes.ClusterSwitchLBGroupName)
 			expectedRouterLBGroup := newLoadBalancerGroup(ovntypes.ClusterRouterLBGroupName)
-			expectedOVNClusterRouter := newOVNClusterRouter()
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			expectedOVNClusterRouter := clusterRouter()
+			node1.LoadBalancerGroupUUIDs = []string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID}
+			expectedNodeSwitch := node1.logicalSwitch()
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
