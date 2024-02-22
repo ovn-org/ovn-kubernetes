@@ -821,6 +821,115 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
+	ginkgotable.DescribeTable("Ensure QoS AddressSet is updated properly for pod events",
+		func(podZone string) {
+			namespaceT := *newNamespace("namespace1")
+
+			nodeSwitch := &nbdb.LogicalSwitch{
+				UUID: "node1-UUID",
+				Name: node1Name,
+			}
+
+			podT := newPodWithLabels(
+				namespaceT.Name,
+				"myPod",
+				node1Name,
+				"10.128.1.3",
+				map[string]string{"rule1": "1"},
+			)
+
+			eq := newEgressQoSObject("default", namespaceT.Name, []egressqosapi.EgressQoSRule{
+				{
+					DstCIDR: pointer.String("1.2.3.4/32"),
+					DSCP:    40,
+				},
+				{
+					DstCIDR: pointer.String("5.6.7.8/32"),
+					DSCP:    50,
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"rule1": "1",
+						},
+					},
+				},
+			})
+
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					nodeSwitch,
+				},
+			}
+
+			fakeOVN.startWithDBSetup(dbSetup,
+				&v1.NamespaceList{
+					Items: []v1.Namespace{
+						namespaceT,
+					},
+				},
+				&egressqosapi.EgressQoSList{
+					Items: []egressqosapi.EgressQoS{
+						*eq,
+					},
+				},
+			)
+
+			fakeOVN.InitAndRunEgressQoSController()
+
+			qos1 := &nbdb.QoS{
+				Direction:   nbdb.QoSDirectionToLport,
+				Match:       fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", asv4),
+				Priority:    EgressQoSFlowStartPriority,
+				Action:      map[string]int{nbdb.QoSActionDSCP: 40},
+				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				UUID:        "qos1-UUID",
+			}
+			qosAS := getEgressQosAddrSetDbIDs(namespaceT.Name, fmt.Sprintf("%d", EgressQoSFlowStartPriority-1), controllerName)
+			qosASv4, _ := addressset.GetHashNamesForAS(qosAS)
+			qos2 := &nbdb.QoS{
+				Direction:   nbdb.QoSDirectionToLport,
+				Match:       fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", qosASv4),
+				Priority:    EgressQoSFlowStartPriority - 1,
+				Action:      map[string]int{nbdb.QoSActionDSCP: 50},
+				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				UUID:        "qos2-UUID",
+			}
+			nodeSwitch.QOSRules = append(nodeSwitch.QOSRules, qos1.UUID, qos2.UUID)
+			expectedDatabaseState := []libovsdbtest.TestData{
+				qos1,
+				qos2,
+				nodeSwitch,
+			}
+			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+			if podZone == "local" {
+				fakeOVN.controller.localZoneNodes.Store(podT.Spec.NodeName, true)
+			}
+
+			ginkgo.By("Create pod and validate its ip address in the address set")
+			_, err := fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podT.Namespace).Create(context.TODO(), podT, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			qosAS = getEgressQosAddrSetDbIDs(namespaceT.Name, "999", controllerName)
+			if podZone == "local" {
+				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qosAS, []string{"10.128.1.3"})
+			} else {
+				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qosAS, nil)
+			}
+
+			ginkgo.By("Update pod with additional labels and validate its ip address in the address set")
+			podT.Labels = map[string]string{"rule1": "1", "rule2": "2"}
+			podT.ResourceVersion = "100"
+			_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podT.Namespace).Update(context.TODO(), podT, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			qosAS = getEgressQosAddrSetDbIDs(namespaceT.Name, "999", controllerName)
+			if podZone == "local" {
+				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qosAS, []string{"10.128.1.3"})
+			} else {
+				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(qosAS, nil)
+			}
+		},
+		ginkgotable.Entry("create and update pod in local zone", "local"),
+		ginkgotable.Entry("create and update pod in remote zone", "remote"),
+	)
 })
 
 func (o *FakeOVN) InitAndRunEgressQoSController() {

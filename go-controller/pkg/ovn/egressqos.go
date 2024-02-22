@@ -719,7 +719,7 @@ func (oc *DefaultNetworkController) syncEgressQoSPod(key string) error {
 
 	klog.V(5).Infof("Pod %s retrieved from lister: %v", pod.Name, pod)
 
-	if util.PodWantsHostNetwork(pod) { // we don't handle HostNetworked pods
+	if util.PodWantsHostNetwork(pod) || !oc.isPodScheduledinLocalZone(pod) { // we don't handle HostNetworked or remote zone pods
 		return nil
 	}
 
