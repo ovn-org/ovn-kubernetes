@@ -93,7 +93,7 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				nc, err := sncm.NewNetworkController(netInfo)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(nc).NotTo(gomega.BeNil())
-				nc.Start(ctx.Context)
+				gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
 				defer nc.Stop()
 
 				// Check that network controller for "blue" network has set the subnet annotation for each node.
