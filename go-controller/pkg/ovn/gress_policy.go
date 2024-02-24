@@ -15,8 +15,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	knet "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -46,7 +44,7 @@ type gressPolicy struct {
 
 	// portPolicies represents all the ports to which traffic is allowed for
 	// the rule in question.
-	portPolicies []*portPolicy
+	portPolicies []*libovsdbutil.NetworkPolicyPort
 
 	ipBlocks []*knet.IPBlock
 
@@ -58,12 +56,6 @@ type gressPolicy struct {
 	ipv6Mode bool
 }
 
-type portPolicy struct {
-	protocol string
-	port     int32
-	endPort  int32
-}
-
 // for a given ingress/egress rule, captures all the provided port ranges and
 // individual ports
 type gressPolicyPorts struct {
@@ -71,26 +63,18 @@ type gressPolicyPorts struct {
 	portRange []string // list of provided port ranges in OVN ACL format
 }
 
-var supportedProtocols = sets.NewString(TCP, UDP, SCTP)
-
 func (gp *gressPolicy) getProtocolPortsMap() map[string]*gressPolicyPorts {
 	gressProtoPortsMap := make(map[string]*gressPolicyPorts)
 	for _, pp := range gp.portPolicies {
-		if found := supportedProtocols.Has(pp.protocol); !found {
-			klog.Warningf("Unknown protocol %v, while processing network policy %s/%s",
-				pp.protocol, gp.policyNamespace, gp.policyName)
-			continue
-		}
-		protocol := strings.ToLower(pp.protocol)
-		gpp, ok := gressProtoPortsMap[protocol]
+		gpp, ok := gressProtoPortsMap[pp.Protocol]
 		if !ok {
 			gpp = &gressPolicyPorts{portList: []string{}, portRange: []string{}}
-			gressProtoPortsMap[protocol] = gpp
+			gressProtoPortsMap[pp.Protocol] = gpp
 		}
-		if pp.endPort != 0 && pp.endPort != pp.port {
-			gpp.portRange = append(gpp.portRange, fmt.Sprintf("%d<=%s.dst<=%d", pp.port, protocol, pp.endPort))
-		} else if pp.port != 0 {
-			gpp.portList = append(gpp.portList, fmt.Sprintf("%d", pp.port))
+		if pp.EndPort != 0 && pp.EndPort != pp.Port {
+			gpp.portRange = append(gpp.portRange, fmt.Sprintf("%d<=%s.dst<=%d", pp.Port, pp.Protocol, pp.EndPort))
+		} else if pp.Port != 0 {
+			gpp.portList = append(gpp.portList, fmt.Sprintf("%d", pp.Port))
 		}
 	}
 	return gressProtoPortsMap
@@ -129,7 +113,7 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, contro
 		idx:               idx,
 		peerV4AddressSets: &sync.Map{},
 		peerV6AddressSets: &sync.Map{},
-		portPolicies:      make([]*portPolicy, 0),
+		portPolicies:      make([]*libovsdbutil.NetworkPolicyPort, 0),
 		isNetPolStateless: isNetPolStateless,
 		ipv4Mode:          ipv4Mode,
 		ipv6Mode:          ipv6Mode,
@@ -163,15 +147,13 @@ func (gp *gressPolicy) addPeerAddressSets(asHashNameV4, asHashNameV6 string) {
 
 // If the port is not specified, it implies all ports for that protocol
 func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
-	pp := &portPolicy{protocol: string(*portJSON.Protocol),
-		port:    0,
-		endPort: 0,
-	}
-	if portJSON.Port != nil {
-		pp.port = portJSON.Port.IntVal
-	}
-	if portJSON.EndPort != nil {
-		pp.endPort = *portJSON.EndPort
+	var pp *libovsdbutil.NetworkPolicyPort
+	if portJSON.Port != nil && portJSON.EndPort != nil {
+		pp = libovsdbutil.GetNetworkPolicyPort(*portJSON.Protocol, portJSON.Port.IntVal, *portJSON.EndPort)
+	} else if portJSON.Port != nil {
+		pp = libovsdbutil.GetNetworkPolicyPort(*portJSON.Protocol, portJSON.Port.IntVal, 0)
+	} else {
+		pp = libovsdbutil.GetNetworkPolicyPort(*portJSON.Protocol, 0, 0)
 	}
 	gp.portPolicies = append(gp.portPolicies, pp)
 }

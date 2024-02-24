@@ -11,26 +11,11 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
-	v1 "k8s.io/api/core/v1"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 )
 
 var ErrorANPPriorityUnsupported = errors.New("OVNK only supports priority ranges 0-99")
 var ErrorANPWithDuplicatePriority = errors.New("exists with the same priority")
-
-// getPortProtocol returns the OVN syntax-specific protocol value for a v1.Protocol K8s type
-func getPortProtocol(proto v1.Protocol) string {
-	var protocol string
-	switch proto {
-	case v1.ProtocolTCP:
-		protocol = "tcp"
-	case v1.ProtocolSCTP:
-		protocol = "sctp"
-	case v1.ProtocolUDP:
-		protocol = "udp"
-	}
-	return protocol
-}
 
 // getAdminNetworkPolicyPGName will return the hashed name and provided anp name as the port group name
 func getAdminNetworkPolicyPGName(name string, isBanp bool) (hashedPGName, readablePGName string) {
@@ -135,19 +120,19 @@ type gressPolicyPorts struct {
 	portRange []string // list of provided port ranges in OVN ACL format
 }
 
-func getProtocolPortsMap(anpRulePorts []*adminNetworkPolicyPort) map[string]*gressPolicyPorts {
+func getProtocolPortsMap(anpRulePorts []*libovsdbutil.NetworkPolicyPort) map[string]*gressPolicyPorts {
 	gressProtoPortsMap := make(map[string]*gressPolicyPorts)
 	for _, pp := range anpRulePorts {
-		protocol := pp.protocol
+		protocol := pp.Protocol
 		gpp, ok := gressProtoPortsMap[protocol]
 		if !ok {
 			gpp = &gressPolicyPorts{portList: []string{}, portRange: []string{}}
 			gressProtoPortsMap[protocol] = gpp
 		}
-		if pp.endPort != 0 && pp.endPort != pp.port {
-			gpp.portRange = append(gpp.portRange, fmt.Sprintf("%d<=%s.dst<=%d", pp.port, protocol, pp.endPort))
-		} else if pp.port != 0 {
-			gpp.portList = append(gpp.portList, fmt.Sprintf("%d", pp.port))
+		if pp.EndPort != 0 && pp.EndPort != pp.Port {
+			gpp.portRange = append(gpp.portRange, fmt.Sprintf("%d<=%s.dst<=%d", pp.Port, protocol, pp.EndPort))
+		} else if pp.Port != 0 {
+			gpp.portList = append(gpp.portList, fmt.Sprintf("%d", pp.Port))
 		}
 	}
 	return gressProtoPortsMap

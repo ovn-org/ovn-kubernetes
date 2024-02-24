@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/assert"
 
@@ -126,17 +127,17 @@ func TestGetL4Match(t *testing.T) {
 	testcases := []struct {
 		desc        string
 		protocol    string
-		portPolices []*portPolicy
+		portPolices []*libovsdbutil.NetworkPolicyPort
 		expected    string
 	}{
 		{
 			"unsupported protocol",
 			"kube",
-			[]*portPolicy{
+			[]*libovsdbutil.NetworkPolicyPort{
 				{
-					protocol: "kube",
-					port:     0,
-					endPort:  0,
+					Protocol: "kube",
+					Port:     0,
+					EndPort:  0,
 				},
 			},
 			"",
@@ -144,16 +145,16 @@ func TestGetL4Match(t *testing.T) {
 		{
 			"empty port policies",
 			"tcp",
-			[]*portPolicy{},
+			[]*libovsdbutil.NetworkPolicyPort{},
 			"",
 		},
 		{
 			"single tcp port",
 			"tcp",
-			[]*portPolicy{
+			[]*libovsdbutil.NetworkPolicyPort{
 				{
-					protocol: "TCP",
-					port:     800,
+					Protocol: "TCP",
+					Port:     800,
 				},
 			},
 			"tcp && tcp.dst==800",
@@ -161,18 +162,18 @@ func TestGetL4Match(t *testing.T) {
 		{
 			"valid individual tcp ports",
 			"tcp",
-			[]*portPolicy{
+			[]*libovsdbutil.NetworkPolicyPort{
 				{
-					protocol: "TCP",
-					port:     800,
+					Protocol: "TCP",
+					Port:     800,
 				},
 				{
-					protocol: "TCP",
-					port:     900,
+					Protocol: "TCP",
+					Port:     900,
 				},
 				{
-					protocol: "TCP",
-					port:     1900,
+					Protocol: "TCP",
+					Port:     1900,
 				},
 			},
 			"tcp && tcp.dst=={800,900,1900}",
@@ -180,11 +181,11 @@ func TestGetL4Match(t *testing.T) {
 		{
 			"single udp port range",
 			"udp",
-			[]*portPolicy{
+			[]*libovsdbutil.NetworkPolicyPort{
 				{
-					protocol: "UDP",
-					port:     800,
-					endPort:  850,
+					Protocol: "UDP",
+					Port:     800,
+					EndPort:  850,
 				},
 			},
 			"udp && 800<=udp.dst<=850",
@@ -192,21 +193,21 @@ func TestGetL4Match(t *testing.T) {
 		{
 			"valid tcp port ranges only",
 			"tcp",
-			[]*portPolicy{
+			[]*libovsdbutil.NetworkPolicyPort{
 				{
-					protocol: "TCP",
-					port:     800,
-					endPort:  850,
+					Protocol: "TCP",
+					Port:     800,
+					EndPort:  850,
 				},
 				{
-					protocol: "TCP",
-					port:     900,
-					endPort:  950,
+					Protocol: "TCP",
+					Port:     900,
+					EndPort:  950,
 				},
 				{
-					protocol: "TCP",
-					port:     1900,
-					endPort:  2000,
+					Protocol: "TCP",
+					Port:     1900,
+					EndPort:  2000,
 				},
 			},
 			"tcp && (800<=tcp.dst<=850 || 900<=tcp.dst<=950 || 1900<=tcp.dst<=2000)",
@@ -214,24 +215,24 @@ func TestGetL4Match(t *testing.T) {
 		{
 			"valid udp ports and ranges",
 			"udp",
-			[]*portPolicy{
+			[]*libovsdbutil.NetworkPolicyPort{
 				{
-					protocol: "UDP",
-					port:     800,
+					Protocol: "UDP",
+					Port:     800,
 				},
 				{
-					protocol: "UDP",
-					port:     900,
+					Protocol: "UDP",
+					Port:     900,
 				},
 				{
-					protocol: "UDP",
-					port:     1900,
-					endPort:  2000,
+					Protocol: "UDP",
+					Port:     1900,
+					EndPort:  2000,
 				},
 				{
-					protocol: "UDP",
-					port:     4900,
-					endPort:  5000,
+					Protocol: "UDP",
+					Port:     4900,
+					EndPort:  5000,
 				},
 			},
 			"udp && (udp.dst=={800,900} || 1900<=udp.dst<=2000 || 4900<=udp.dst<=5000)",
@@ -239,9 +240,9 @@ func TestGetL4Match(t *testing.T) {
 		{
 			"just sctp",
 			"sctp",
-			[]*portPolicy{
+			[]*libovsdbutil.NetworkPolicyPort{
 				{
-					protocol: "SCTP",
+					Protocol: "SCTP",
 				},
 			},
 			"sctp",
