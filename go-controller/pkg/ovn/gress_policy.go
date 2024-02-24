@@ -56,52 +56,6 @@ type gressPolicy struct {
 	ipv6Mode bool
 }
 
-// for a given ingress/egress rule, captures all the provided port ranges and
-// individual ports
-type gressPolicyPorts struct {
-	portList  []string // list of provided ports as string
-	portRange []string // list of provided port ranges in OVN ACL format
-}
-
-func (gp *gressPolicy) getProtocolPortsMap() map[string]*gressPolicyPorts {
-	gressProtoPortsMap := make(map[string]*gressPolicyPorts)
-	for _, pp := range gp.portPolicies {
-		gpp, ok := gressProtoPortsMap[pp.Protocol]
-		if !ok {
-			gpp = &gressPolicyPorts{portList: []string{}, portRange: []string{}}
-			gressProtoPortsMap[pp.Protocol] = gpp
-		}
-		if pp.EndPort != 0 && pp.EndPort != pp.Port {
-			gpp.portRange = append(gpp.portRange, fmt.Sprintf("%d<=%s.dst<=%d", pp.Port, pp.Protocol, pp.EndPort))
-		} else if pp.Port != 0 {
-			gpp.portList = append(gpp.portList, fmt.Sprintf("%d", pp.Port))
-		}
-	}
-	return gressProtoPortsMap
-}
-
-func getL4Match(protocol string, ports *gressPolicyPorts) string {
-	allL4Matches := []string{}
-	if len(ports.portList) > 0 {
-		// if there is just one port, then don't use `{}`
-		template := "%s.dst==%s"
-		if len(ports.portList) > 1 {
-			template = "%s.dst=={%s}"
-		}
-		allL4Matches = append(allL4Matches, fmt.Sprintf(template, protocol, strings.Join(ports.portList, ",")))
-	}
-	allL4Matches = append(allL4Matches, ports.portRange...)
-	l4Match := protocol
-	if len(allL4Matches) > 0 {
-		template := "%s && %s"
-		if len(allL4Matches) > 1 {
-			template = "%s && (%s)"
-		}
-		l4Match = fmt.Sprintf(template, protocol, strings.Join(allL4Matches, " || "))
-	}
-	return l4Match
-}
-
 func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string, isNetPolStateless bool, netInfo util.BasicNetInfo) *gressPolicy {
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
 	return &gressPolicy{
@@ -312,21 +266,11 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libov
 	} else {
 		lportMatch = fmt.Sprintf("inport == @%s", portGroupName)
 	}
-	var l4Match string
 	action := nbdb.ACLActionAllowRelated
 	if gp.isNetPolStateless {
 		action = nbdb.ACLActionAllowStateless
 	}
-	protocolPortsMap := gp.getProtocolPortsMap()
-	if len(protocolPortsMap) == 0 {
-		protocolPortsMap[libovsdbutil.UnspecifiedL4Protocol] = nil
-	}
-	for protocol, ports := range protocolPortsMap {
-		l4Match = libovsdbutil.UnspecifiedL4Match
-		if ports != nil {
-			l4Match = getL4Match(protocol, ports)
-		}
-
+	for protocol, l4Match := range libovsdbutil.GetL4MatchesFromNetworkPolicyPorts(gp.portPolicies) {
 		if len(gp.ipBlocks) > 0 {
 			// Add ACL allow rule for IPBlock CIDR
 			ipBlockMatches := gp.getMatchFromIPBlock(lportMatch, l4Match)

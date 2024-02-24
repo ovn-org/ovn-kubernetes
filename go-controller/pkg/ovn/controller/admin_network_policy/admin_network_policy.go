@@ -316,29 +316,13 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 	lportMatch := libovsdbutil.GetACLMatch(pgName, "", libovsdbutil.ACLDirection(rule.gressPrefix))
 	var match string
 	acls := []*nbdb.ACL{}
-	// no ports in this rule; so its a single ACL
-	if len(rule.ports) == 0 {
-		match = fmt.Sprintf("%s && %s", l3Match, lportMatch)
-		acl := libovsdbutil.BuildANPACL(
-			getANPRuleACLDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), libovsdbutil.UnspecifiedL4Protocol, c.controllerName, isBanp),
-			int(rule.priority),
-			match,
-			rule.action,
-			libovsdbutil.ACLDirectionToACLPipeline(libovsdbutil.ACLDirection(rule.gressPrefix)),
-		)
-		acls = append(acls, acl)
-		return acls
-	}
-
-	// TODO(tssurya): https://github.com/ovn-org/ovn-kubernetes/pull/3582 merged and we should port
-	// some of the common functions to the libovsdbutil package and leverage that.
-	// For now blatantly copying it so that we can leverage the new indices for ports and merge ANP
-	// without having to do yet another refactor PR
-	// We will have one ACL per protocol
-	protocolPortsMap := getProtocolPortsMap(rule.ports)
-	for protocol, ports := range protocolPortsMap {
-		l4Match := constructMatchFromProtocolPorts(protocol, ports)
-		match = fmt.Sprintf("%s && %s && %s", l3Match, lportMatch, l4Match)
+	// We will have one ACL per protocol if len(rule.ports) > 0 and one single ACL if len(rule.ports) == 0
+	for protocol, l4Match := range libovsdbutil.GetL4MatchesFromNetworkPolicyPorts(rule.ports) {
+		if l4Match == libovsdbutil.UnspecifiedL4Match {
+			match = fmt.Sprintf("%s && %s", l3Match, lportMatch)
+		} else {
+			match = fmt.Sprintf("%s && %s && %s", l3Match, lportMatch, l4Match)
+		}
 		acl := libovsdbutil.BuildANPACL(
 			getANPRuleACLDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), protocol, c.controllerName, isBanp),
 			int(rule.priority),

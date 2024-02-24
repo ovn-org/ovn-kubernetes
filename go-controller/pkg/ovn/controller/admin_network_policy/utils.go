@@ -2,7 +2,6 @@ package adminnetworkpolicy
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -106,56 +105,4 @@ func constructMatchFromAddressSet(gressPrefix string, addrSetIndex *libovsdbops.
 	}
 
 	return fmt.Sprintf("(%s)", match)
-}
-
-// TODO(tssurya): https://github.com/ovn-org/ovn-kubernetes/pull/3582 merged and we should port
-// some of the common functions to the libovsdbutil package and leverage that.
-// For now blatantly copying it so that we can leverage the new indices for ports and merge ANP
-// without having to do yet another refactor PR
-
-// for a given ingress/egress rule, captures all the provided port ranges and
-// individual ports
-type gressPolicyPorts struct {
-	portList  []string // list of provided ports as string
-	portRange []string // list of provided port ranges in OVN ACL format
-}
-
-func getProtocolPortsMap(anpRulePorts []*libovsdbutil.NetworkPolicyPort) map[string]*gressPolicyPorts {
-	gressProtoPortsMap := make(map[string]*gressPolicyPorts)
-	for _, pp := range anpRulePorts {
-		protocol := pp.Protocol
-		gpp, ok := gressProtoPortsMap[protocol]
-		if !ok {
-			gpp = &gressPolicyPorts{portList: []string{}, portRange: []string{}}
-			gressProtoPortsMap[protocol] = gpp
-		}
-		if pp.EndPort != 0 && pp.EndPort != pp.Port {
-			gpp.portRange = append(gpp.portRange, fmt.Sprintf("%d<=%s.dst<=%d", pp.Port, protocol, pp.EndPort))
-		} else if pp.Port != 0 {
-			gpp.portList = append(gpp.portList, fmt.Sprintf("%d", pp.Port))
-		}
-	}
-	return gressProtoPortsMap
-}
-
-func constructMatchFromProtocolPorts(protocol string, ports *gressPolicyPorts) string {
-	allL4Matches := []string{}
-	if len(ports.portList) > 0 {
-		// if there is just one port, then don't use `{}`
-		template := "%s.dst==%s"
-		if len(ports.portList) > 1 {
-			template = "%s.dst=={%s}"
-		}
-		allL4Matches = append(allL4Matches, fmt.Sprintf(template, protocol, strings.Join(ports.portList, ",")))
-	}
-	allL4Matches = append(allL4Matches, ports.portRange...)
-	l4Match := protocol
-	if len(allL4Matches) > 0 {
-		template := "%s && %s"
-		if len(allL4Matches) > 1 {
-			template = "%s && (%s)"
-		}
-		l4Match = fmt.Sprintf(template, protocol, strings.Join(allL4Matches, " || "))
-	}
-	return l4Match
 }
