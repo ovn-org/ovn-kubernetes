@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 )
 
@@ -221,3 +222,36 @@ const (
 	// This value shouldn't be changed.
 	UnspecifiedL4Match = "None"
 )
+
+// convertK8sProtocolToOVNProtocol returns the OVN syntax-specific protocol value for a v1.Protocol K8s type
+func convertK8sProtocolToOVNProtocol(proto v1.Protocol) string {
+	var protocol string
+	switch proto {
+	case v1.ProtocolTCP:
+		protocol = "tcp"
+	case v1.ProtocolSCTP:
+		protocol = "sctp"
+	case v1.ProtocolUDP:
+		protocol = "udp"
+	}
+	return protocol
+}
+
+// NetworkPolicyPort is an internal representation of
+// knet.NetworkPolicyPort and anpapi.AdminNetworkPolicyPort
+// in a simpler representation format for the caches
+type NetworkPolicyPort struct {
+	Protocol string // will store the OVN protocol string syntax for the corresponding K8s protocol
+	Port     int32  // will store startPort if its a range
+	EndPort  int32
+}
+
+// GetNetworkPolicyPort returns an internal NetworkPolicyPort struct
+// It also sets the provided protocol, port and endPort fields
+func GetNetworkPolicyPort(proto v1.Protocol, port, endPort int32) *NetworkPolicyPort {
+	return &NetworkPolicyPort{
+		Protocol: convertK8sProtocolToOVNProtocol(proto),
+		Port:     port,
+		EndPort:  endPort,
+	}
+}
