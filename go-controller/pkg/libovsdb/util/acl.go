@@ -215,4 +215,9 @@ const (
 	// used as the value in libovsdbops.PortPolicyProtocolKey DB Index and hence
 	// that shouldn't be changed since it will cause a full ACL update during upgrades.
 	UnspecifiedL4Protocol = "None"
+	// UnspecifiedL4Match is used to create ACL for gressPolicy that
+	// doesn't have port policies hence no L4Match. The value "None" here is used
+	// as the value of l4MatchACLExtIdKey in acl external_ids_syncer for older ACLs.
+	// This value shouldn't be changed.
+	UnspecifiedL4Match = "None"
 )

@@ -8,6 +8,7 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -422,7 +423,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					"",
 					false,
 					map[string]string{
-						l4MatchACLExtIdKey:     noneMatch,
+						l4MatchACLExtIdKey:     libovsdbutil.UnspecifiedL4Match,
 						ipBlockCIDRACLExtIdKey: "false",
 						namespaceACLExtIdKey:   policyNamespace,
 						policyACLExtIdKey:      policyName,

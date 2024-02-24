@@ -10,6 +10,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -32,7 +33,6 @@ const (
 	policyACLExtIdKey                = "policy"
 	policyTypeACLExtIdKey            = "policy_type"
 	policyTypeNumACLExtIdKey         = "%s_num"
-	noneMatch                        = "None"
 	emptyIdx                         = -1
 	defaultDenyACL                   = "defaultDeny"
 	arpAllowACL                      = "arpAllow"
@@ -386,7 +386,7 @@ func (syncer *aclSyncer) updateStaleGressPolicies(legacyACLs []*nbdb.ACL) (updat
 		}
 		var portIdx int
 		l4Match := acl.ExternalIDs[l4MatchACLExtIdKey]
-		if l4Match == noneMatch {
+		if l4Match == libovsdbutil.UnspecifiedL4Match {
 			portIdx = emptyIdx
 		} else {
 			if _, ok := gressPolicyPortCount[gressACLID][l4Match]; !ok {
