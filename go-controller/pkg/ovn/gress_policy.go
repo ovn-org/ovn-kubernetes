@@ -21,7 +21,6 @@ import (
 )
 
 const (
-	noneMatch = "None"
 	// emptyIdx is used to create ACL for gressPolicy that doesn't have ipBlocks
 	emptyIdx = -1
 )
@@ -248,7 +247,7 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string 
 			matchStr = fmt.Sprintf("%s.%s == %s && %s.%s != {%s}", ipVersion, direction, ipBlock.CIDR,
 				ipVersion, direction, strings.Join(ipBlock.Except, ", "))
 		}
-		if l4Match == noneMatch {
+		if l4Match == libovsdbutil.UnspecifiedL4Match {
 			matchStr = fmt.Sprintf("%s && %s", matchStr, lportMatch)
 		} else {
 			matchStr = fmt.Sprintf("%s && %s && %s", matchStr, l4Match, lportMatch)
@@ -341,7 +340,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libov
 		protocolPortsMap[libovsdbutil.UnspecifiedL4Protocol] = nil
 	}
 	for protocol, ports := range protocolPortsMap {
-		l4Match = noneMatch
+		l4Match = libovsdbutil.UnspecifiedL4Match
 		if ports != nil {
 			l4Match = getL4Match(protocol, ports)
 		}
@@ -366,7 +365,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libov
 				l3Match = gp.getL3MatchFromAddressSet()
 			}
 
-			if l4Match == noneMatch {
+			if l4Match == libovsdbutil.UnspecifiedL4Match {
 				addrSetMatch = fmt.Sprintf("%s && %s", l3Match, lportMatch)
 			} else {
 				addrSetMatch = fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
