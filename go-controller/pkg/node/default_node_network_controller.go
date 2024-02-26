@@ -706,13 +706,17 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		nc.routeManager.Run(nc.stopChan, 4*time.Minute)
 	}()
 
-	if err = configureGlobalForwarding(); err != nil {
-		return err
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		if err = configureGlobalForwarding(); err != nil {
+			return err
+		}
 	}
 
-	// Bootstrap flows in OVS if just normal flow is present
-	if err := bootstrapOVSFlows(); err != nil {
-		return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// Bootstrap flows in OVS if just normal flow is present
+		if err := bootstrapOVSFlows(); err != nil {
+			return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
+		}
 	}
 
 	if node, err = nc.Kube.GetNode(nc.name); err != nil {
