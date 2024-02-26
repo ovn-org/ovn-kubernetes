@@ -727,7 +727,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		// There is no SBDB to connect to in DPU Host mode, so we will just take the default input config zone
 		sbZone = config.Default.Zone
 	} else {
-		err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 			sbZone, err = getOVNSBZone()
 			if err != nil {
 				err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
@@ -760,7 +760,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
-	err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		if node, err = nc.Kube.GetNode(nc.name); err != nil {
 			klog.Infof("Waiting to retrieve node %s: %v", nc.name, err)
 			return false, nil
@@ -876,7 +876,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Info("Upgrade Hack: Interconnect is enabled")
 		var err1 error
 		start := time.Now()
-		err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 			// we loop through all the nodes in the cluster and ensure ovnkube-controller has finished creating the LRSR required for pod2pod overlay communication
 			if !syncNodes {
 				nodes, err := nc.Kube.GetNodes()
@@ -952,18 +952,18 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			return true, nil
 		})
 		if err != nil {
-			klog.Exitf("Upgrade hack: Timed out waiting for the remote ovnkube-controller to be ready even after 5 minutes, err : %v, %v", err, err1)
+			return fmt.Errorf("upgrade hack: failed while waiting for the remote ovnkube-controller to be ready: %v, %v", err, err1)
 		}
 		if err := util.SetNodeZoneMigrated(nodeAnnotator, sbZone); err != nil {
-			klog.Exitf("Upgrade hack: failed to set node zone annotation for node %s: %w", nc.name, err)
+			return fmt.Errorf("upgrade hack: failed to set node zone annotation for node %s: %w", nc.name, err)
 		}
 		if err := nodeAnnotator.Run(); err != nil {
-			klog.Exitf("Upgrade hack: failed to set node %s annotations: %w", nc.name, err)
+			return fmt.Errorf("upgrade hack: failed to set node %s annotations: %w", nc.name, err)
 		}
 		klog.Infof("ovnkube-node %s finished annotating node with remote-zone-migrated; took: %v", nc.name, time.Since(start))
 		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 			if err := auth.SetDBAuth(); err != nil {
-				klog.Exitf("Upgrade hack: Unable to set the authentication towards OVN local dbs")
+				return fmt.Errorf("upgrade hack: Unable to set the authentication towards OVN local dbs")
 			}
 		}
 		klog.Infof("Upgrade hack: ovnkube-node %s finished setting DB Auth; took: %v", nc.name, time.Since(start))

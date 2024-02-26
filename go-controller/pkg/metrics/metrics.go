@@ -478,82 +478,56 @@ func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, k
 		// Allow changes to log level at runtime
 		mux.HandleFunc("/debug/flags/v", stringFlagPutHandler(klogSetter))
 	}
-	wg.Add(1)
 
-	go func() {
-		defer wg.Done()
-		var server *http.Server
-		go utilwait.Until(func() {
-			klog.Infof("Starting metrics server to serve at address %q", bindAddress)
-			var err error
-			if certFile != "" && keyFile != "" {
-				server = getTLSServer(bindAddress, certFile, keyFile, mux)
-				err = server.ListenAndServeTLS("", "")
-			} else {
-				server = &http.Server{
-					Addr:    bindAddress,
-					Handler: mux,
-				}
-				err = server.ListenAndServe()
-			}
-			if err != nil && err != http.ErrServerClosed {
-				utilruntime.HandleError(fmt.Errorf("starting metrics server to serve at address %q failed: %v", bindAddress, err))
-			}
-			klog.Infof("Metrics server has stopped serving at address %q", bindAddress)
-		}, 5*time.Second, stopChan)
-
-		<-stopChan
-		klog.Infof("Stopping metrics server %s", server.Addr)
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			klog.Errorf("Error stopping metrics server: %v", err)
-		}
-	}()
+	startMetricsServer(bindAddress, certFile, keyFile, mux, stopChan, wg)
 }
 
 var ovnRegistry = prometheus.NewRegistry()
 
 // StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
-func StartOVNMetricsServer(bindAddress, certFile, keyFile string,
-	stopChan <-chan struct{}, wg *sync.WaitGroup) {
+func StartOVNMetricsServer(bindAddress, certFile, keyFile string, stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
 		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", handler)
 
+	startMetricsServer(bindAddress, certFile, keyFile, mux, stopChan, wg)
+}
+
+func startMetricsServer(bindAddress, certFile, keyFile string, handler http.Handler, stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	var server *http.Server
 	wg.Add(1)
-
 	go func() {
 		defer wg.Done()
-		go utilwait.Until(func() {
-			klog.Infof("Starting OVN related metrics server to serve at address %q", bindAddress)
-			var err error
+		utilwait.Until(func() {
+			klog.Infof("Starting metrics server at address %q", bindAddress)
+			var listenAndServe func() error
 			if certFile != "" && keyFile != "" {
-				server = getTLSServer(bindAddress, certFile, keyFile, mux)
-				err = server.ListenAndServeTLS("", "")
+				server = getTLSServer(bindAddress, certFile, keyFile, handler)
+				listenAndServe = func() error { return server.ListenAndServeTLS("", "") }
 			} else {
-				server = &http.Server{
-					Addr:    bindAddress,
-					Handler: mux,
-				}
-				err = server.ListenAndServe()
+				server = &http.Server{Addr: bindAddress, Handler: handler}
+				listenAndServe = func() error { return server.ListenAndServe() }
 			}
-			if err != nil && err != http.ErrServerClosed {
-				utilruntime.HandleError(fmt.Errorf("starting OVN related metrics server to serve at address %q failed: %v",
-					bindAddress, err))
-			}
-			klog.Infof("OVN related metrics server has stopped serving at address %q", bindAddress)
-		}, 5*time.Second, stopChan)
 
-		<-stopChan
-		klog.Infof("Stopping OVN metrics server %s", server.Addr)
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			klog.Errorf("Error stopping OVN metrics server: %v", err)
-		}
+			errCh := make(chan error)
+			go func() {
+				errCh <- listenAndServe()
+			}()
+			var err error
+			select {
+			case err = <-errCh:
+				err = fmt.Errorf("failed while running metrics server at address %q: %w", bindAddress, err)
+				utilruntime.HandleError(err)
+			case <-stopChan:
+				klog.Infof("Stopping metrics server at address %q", bindAddress)
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := server.Shutdown(shutdownCtx); err != nil {
+					klog.Errorf("Error stopping metrics server at address %q: %v", bindAddress, err)
+				}
+			}
+		}, 5*time.Second, stopChan)
 	}()
 }
 
