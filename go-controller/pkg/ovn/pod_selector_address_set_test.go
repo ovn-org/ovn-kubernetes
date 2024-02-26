@@ -346,6 +346,10 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			netpolACL,
 			refPodSelAS,
 			podSelACL,
+			&nbdb.LogicalSwitch{
+				UUID: "node",
+				ACLs: []string{podSelACL.UUID, netpolACL.UUID},
+			},
 		}
 		dbSetup := libovsdbtest.TestSetup{NBData: initialDb}
 		fakeOvn.startWithDBSetup(dbSetup)
@@ -358,6 +362,10 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			netpolACL,
 			refPodSelAS,
 			podSelACL,
+			&nbdb.LogicalSwitch{
+				UUID: "node",
+				ACLs: []string{podSelACL.UUID, netpolACL.UUID},
+			},
 		}
 		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDB))
 	})

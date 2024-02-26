@@ -1,4 +1,5 @@
 /*
-Package database provides an in-memory database implementation.
+Package database collects database related types, interfaces and
+implementations.
 */
 package database

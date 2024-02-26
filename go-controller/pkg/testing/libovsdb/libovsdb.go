@@ -19,6 +19,7 @@ import (
 	"github.com/mitchellh/copystructure"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/database"
+	"github.com/ovn-org/libovsdb/database/inmemory"
 	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
@@ -178,6 +179,14 @@ func newSBClient(cfg config.OvnAuthConfig, testCtx *Context) (libovsdbclient.Cli
 	if err != nil {
 		return nil, err
 	}
+
+	// we require additional monitoring for testing
+	// see CreateTransitSwitchPortBindings
+	_, err = sbClient.Monitor(context.Background(), sbClient.NewMonitor(libovsdbclient.WithTable(&sbdb.DatapathBinding{})))
+	if err != nil {
+		return nil, err
+	}
+
 	clientWaitOnCleanup(testCtx, sbClient, stopChan)
 	return sbClient, err
 }
@@ -263,8 +272,8 @@ func updateData(db database.Database, dbMod model.DatabaseModel, data []TestData
 		return err
 	}
 
-	t := database.NewTransaction(dbMod, dbMod.Schema.Name, db, nil)
-	res, updates := t.Transact(ops)
+	t := db.NewTransaction(dbMod.Schema.Name)
+	res, updates := t.Transact(ops...)
 
 	cr := make([]ovsdb.OperationResult, 0, len(res))
 	for _, r := range res {
@@ -297,7 +306,7 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 	}
 	serverSchema := serverdb.Schema()
 
-	db := database.NewInMemoryDatabase(map[string]model.ClientDBModel{
+	db := inmemory.NewDatabase(map[string]model.ClientDBModel{
 		schema.Name:       dbModel,
 		serverSchema.Name: serverDBModel,
 	})

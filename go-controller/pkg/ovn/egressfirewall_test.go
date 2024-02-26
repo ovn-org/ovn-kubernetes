@@ -76,11 +76,9 @@ func getEFExpectedDb(initialData []libovsdbtest.TestData, fakeOVN *FakeOVN, nsNa
 }
 
 func getEFExpectedDbAfterDelete(prevExpectedData []libovsdbtest.TestData) []libovsdbtest.TestData {
-	// de-referenced ACLs are not garbage-collected by the test server,
-	// therefore they will stay in the db
 	pg := prevExpectedData[len(prevExpectedData)-1].(*nbdb.PortGroup)
 	pg.ACLs = nil
-	return prevExpectedData
+	return append(prevExpectedData[:len(prevExpectedData)-2], pg)
 }
 
 var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
@@ -298,7 +296,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					updateACL.Tier = t.DefaultACLTier // ensure the tier of the ACL is updated from 0 to 2
 
 					expectedDatabaseState := []libovsdb.TestData{
-						purgeACL,
 						purgeACL2,
 						ignoreACL,
 						updateACL,
@@ -921,7 +918,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// ACL should be removed from the port group egfw is deleted
-					pg.ACLs = []string{}
+					expectedDatabaseState = getEFExpectedDbAfterDelete(dbWith1ACL)
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					return nil

@@ -355,8 +355,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			pg := &nbdb.PortGroup{
 				Name:        libovsdbutil.HashedPortGroup(namespaceName),
 				ExternalIDs: map[string]string{"name": namespaceName},
-				ACLs:        []string{"test-UUID"},
-				Ports:       []string{"test-UUID"},
 			}
 			pg.UUID = pg.Name + "-UUID"
 			initialData := []libovsdb.TestData{pg}
@@ -385,8 +383,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			pg := &nbdb.PortGroup{
 				Name:        libovsdbutil.HashedPortGroup(namespaceName),
 				ExternalIDs: nil,
-				ACLs:        []string{"test-UUID"},
-				Ports:       []string{"test-UUID"},
 			}
 			pg.UUID = pg.Name + "-UUID"
 			initialData := []libovsdb.TestData{pg}
@@ -414,8 +410,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			pg := &nbdb.PortGroup{
 				Name:        libovsdbutil.HashedPortGroup(namespaceName),
 				ExternalIDs: nil,
-				ACLs:        []string{"test-UUID"},
-				Ports:       []string{"test-UUID"},
 			}
 			pg.UUID = pg.Name + "-UUID"
 			initialData := []libovsdb.TestData{pg}

@@ -32,7 +32,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
-	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -92,8 +91,8 @@ func (n tNode) k8sNode(nodeID string) v1.Node {
 				ovnNodePrimaryIfAddr:  fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", fmt.Sprintf("%s/24", n.NodeIP), ""),
 			},
 		},
-		Status: kapi.NodeStatus{
-			Addresses: []kapi.NodeAddress{{Type: kapi.NodeExternalIP, Address: n.NodeIP}},
+		Status: v1.NodeStatus{
+			Addresses: []v1.NodeAddress{{Type: v1.NodeExternalIP, Address: n.NodeIP}},
 		},
 	}
 
@@ -1002,13 +1001,13 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		dbSetup = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				newClusterJoinSwitch(),
-				expectedNodeSwitch,
+				expectedNodeSwitch.DeepCopy(),
 				newOVNClusterRouter(),
 				newRouterPortGroup(),
 				newClusterPortGroup(),
-				expectedClusterLBGroup,
-				expectedSwitchLBGroup,
-				expectedRouterLBGroup,
+				expectedClusterLBGroup.DeepCopy(),
+				expectedSwitchLBGroup.DeepCopy(),
+				expectedRouterLBGroup.DeepCopy(),
 			},
 		}
 		testNode = node1.k8sNode("2")
@@ -1029,7 +1028,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		}
 
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient}, testNode.Name)
+		nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
 		l3GatewayConfig = node1.gatewayConfig(config.GatewayModeLocal, uint(vlanID))
 		err = util.SetL3GatewayConfig(nodeAnnotator, l3GatewayConfig)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1052,14 +1051,12 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		recorder = record.NewFakeRecorder(10)
-		oc, _ = NewOvnController(fakeClient, f, stopChan, nil, nbClient, sbClient, recorder, wg)
+		oc, err = NewOvnController(fakeClient, f, stopChan, nil, nbClient, sbClient, recorder, wg)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		oc.clusterLoadBalancerGroupUUID = expectedClusterLBGroup.UUID
-		oc.switchLoadBalancerGroupUUID = expectedSwitchLBGroup.UUID
-		oc.routerLoadBalancerGroupUUID = expectedRouterLBGroup.UUID
 		gomega.Expect(oc).NotTo(gomega.BeNil())
-		oc.defaultCOPPUUID, err = EnsureDefaultCOPP(nbClient)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		setupCOPP := true
+		setupClusterController(oc, setupCOPP)
 
 		// record events for testcases to check
 		wg.Add(1)
@@ -1584,9 +1581,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				eventsLock.Lock()
 				defer eventsLock.Unlock()
 				eventsCopy := make([]string, 0, len(events))
-				for _, e := range events {
-					eventsCopy = append(eventsCopy, e)
-				}
+				eventsCopy = append(eventsCopy, events...)
 				return eventsCopy
 			}, 10).Should(gomega.ContainElement(gomega.ContainSubstring("failed to get expected host subnets for node newNode; expected v4 true have true, expected v6 false have true")))
 
@@ -1695,9 +1690,14 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				Datapath:    "tstor-node1",
 				TunnelKey:   5,
 			}
+			dp := &sbdb.DatapathBinding{
+				UUID:      "tstor-node1",
+				TunnelKey: 6,
+			}
 			dbSetup.SBData = append(
 				dbSetup.SBData,
 				pb,
+				dp,
 			)
 
 			// transit_switch is required to be able to start OVN with an empty

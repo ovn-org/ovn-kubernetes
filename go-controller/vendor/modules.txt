@@ -305,11 +305,13 @@ github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1
 # github.com/openshift/custom-resource-status v1.1.2
 ## explicit; go 1.12
 github.com/openshift/custom-resource-status/conditions/v1
-# github.com/ovn-org/libovsdb v0.6.1-0.20230711201130-6785b52d4020
+# github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892
 ## explicit; go 1.18
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
 github.com/ovn-org/libovsdb/database
+github.com/ovn-org/libovsdb/database/inmemory
+github.com/ovn-org/libovsdb/database/transaction
 github.com/ovn-org/libovsdb/mapper
 github.com/ovn-org/libovsdb/model
 github.com/ovn-org/libovsdb/ovsdb
