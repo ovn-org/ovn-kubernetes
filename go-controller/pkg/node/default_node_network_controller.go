@@ -703,15 +703,18 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := level.Set("5"); err != nil {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
+
 	nc.wg.Add(1)
 	go func() {
 		defer nc.wg.Done()
 		nc.routeManager.Run(nc.stopChan, 4*time.Minute)
 	}()
 
-	// Bootstrap flows in OVS if just normal flow is present
-	if err := bootstrapOVSFlows(); err != nil {
-		return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// Bootstrap flows in OVS if just normal flow is present
+		if err := bootstrapOVSFlows(); err != nil {
+			return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
+		}
 	}
 
 	if node, err = nc.Kube.GetNode(nc.name); err != nil {
