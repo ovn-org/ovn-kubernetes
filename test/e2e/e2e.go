@@ -299,6 +299,83 @@ func createServiceForPodsWithLabel(f *framework.Framework, namespace string, ser
 	return res.Spec.ClusterIP, nil
 }
 
+// HACK: 'container runtime' is statically set to docker. For EIP multi network scenario, we require ip6tables support to
+// allow isolated ipv6 networks and prevent the bridges from forwarding to each other.
+// Docker ipv6+ip6tables support is currently experimental (11/23) [1], and enabling this requires altering the
+// container runtime config. To avoid altering the runtime config, add ip6table rules to prevent the bridges talking
+// to each other. Not required to remove the iptables, because when we delete the network, the iptable rules will be removed.
+// Remove when this func when it is no longer experimental.
+// [1] https://docs.docker.com/config/daemon/ipv6/
+func isolateIPv6Networks(networkA, networkB string) error {
+	if containerRuntime != "docker" {
+		panic("unsupported container runtime")
+	}
+	var bridgeInfNames []string
+	// docker creates bridges by appending 12 chars from network ID to 'br-'
+	bridgeIDLimit := 12
+	for _, network := range []string{networkA, networkB} {
+		// output will be wrapped in single quotes
+		id, err := runCommand(containerRuntime, "inspect", network, "--format", "'{{.Id}}'")
+		if err != nil {
+			return err
+		}
+		if len(id) <= bridgeIDLimit+1 {
+			return fmt.Errorf("invalid bridge ID %q", id)
+		}
+		bridgeInfName := fmt.Sprintf("br-%s", id[1:bridgeIDLimit+1])
+		// validate bridge exists
+		_, err = runCommand("ip", "link", "show", bridgeInfName)
+		if err != nil {
+			return fmt.Errorf("bridge %q doesnt exist: %v", bridgeInfName, err)
+		}
+		bridgeInfNames = append(bridgeInfNames, bridgeInfName)
+	}
+	if len(bridgeInfNames) != 2 {
+		return fmt.Errorf("expected two bridge names but found %d", len(bridgeInfNames))
+	}
+	_, err := runCommand("ip6tables", "-t", "filter", "-A", "FORWARD", "-i", bridgeInfNames[0], "-o", bridgeInfNames[1], "-j", "DROP")
+	if err != nil {
+		return err
+	}
+	_, err = runCommand("ip6tables", "-t", "filter", "-A", "FORWARD", "-i", bridgeInfNames[1], "-o", bridgeInfNames[0], "-j", "DROP")
+	return err
+}
+
+func createNetwork(networkName string, subnet string, v6 bool) {
+	args := []string{containerRuntime, "network", "create", "--internal", "--driver", "bridge", networkName, "--subnet", subnet}
+	if v6 {
+		args = append(args, "--ipv6")
+	}
+	_, err := runCommand(args...)
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		framework.Failf("failed to create secondary network %q with subnet(s) %v: %v", networkName, subnet, err)
+	}
+}
+
+func deleteNetwork(networkName string) {
+	args := []string{containerRuntime, "network", "rm", networkName}
+	_, err := runCommand(args...)
+	if err != nil && !strings.Contains(err.Error(), "not found") {
+		framework.Failf("failed to delete network %q: %v", networkName, err)
+	}
+}
+
+func attachNetwork(networkName, containerName string) {
+	args := []string{containerRuntime, "network", "connect", networkName, containerName}
+	_, err := runCommand(args...)
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		framework.Failf("failed to attach network %q to container %q: %v", networkName, containerName, err)
+	}
+}
+
+func detachNetwork(networkName, containerName string) {
+	args := []string{containerRuntime, "network", "disconnect", networkName, containerName}
+	_, err := runCommand(args...)
+	if err != nil {
+		framework.Failf("failed to attach network %q to container %q: %v", networkName, containerName, err)
+	}
+}
+
 func createClusterExternalContainer(containerName string, containerImage string, dockerArgs []string, entrypointArgs []string) (string, string) {
 	args := []string{containerRuntime, "run", "-itd"}
 	args = append(args, dockerArgs...)
@@ -315,6 +392,9 @@ func createClusterExternalContainer(containerName string, containerImage string,
 	ipv6, err := runCommand(containerRuntime, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.GlobalIPv6Address}}{{end}}", containerName)
 	if err != nil {
 		framework.Failf("failed to inspect external test container for its IP (v6): %v", err)
+	}
+	if ipv4 == "" && ipv6 == "" {
+		framework.Failf("failed to get IPv4 or IPv6 address for container %s", containerName)
 	}
 	return strings.Trim(ipv4, "\n"), strings.Trim(ipv6, "\n")
 }

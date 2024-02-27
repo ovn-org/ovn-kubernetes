@@ -132,6 +132,16 @@ func mergeModifyRow(ts *ovsdb.TableSchema, o, a, b *ovsdb.Row) *ovsdb.Row {
 				// assume zero value if original does not have the column
 				o = reflect.Zero(reflect.TypeOf(v)).Interface()
 			}
+			if set, ok := o.(ovsdb.OvsSet); ok {
+				// atomic optional values are cleared out with an empty set
+				// if the original value was also cleared out, use an empty set
+				// instead of a nil set so that mergeAtomicDifference notices
+				// that we are returning to the original value
+				if set.GoSet == nil {
+					set.GoSet = []interface{}{}
+				}
+				o = set
+			}
 			result, changed = mergeAtomicDifference(o, aMod[k], v)
 		}
 

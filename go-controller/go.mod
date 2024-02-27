@@ -29,7 +29,7 @@ require (
 	github.com/onsi/gomega v1.27.7
 	github.com/openshift/api v0.0.0-20230807132801-600991d550ac
 	github.com/openshift/client-go v0.0.0-20230503144108-75015d2347cb
-	github.com/ovn-org/libovsdb v0.6.1-0.20230711201130-6785b52d4020
+	github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/client_model v0.4.0
@@ -37,7 +37,7 @@ require (
 	github.com/spf13/afero v1.9.5
 	github.com/stretchr/testify v1.8.2
 	github.com/urfave/cli/v2 v2.2.0
-	github.com/vishvananda/netlink v1.2.1-beta.2.0.20230420174744-55c8b9515a01
+	github.com/vishvananda/netlink v1.2.1-beta.2.0.20231024175852-77df5d35f725
 	golang.org/x/exp v0.0.0-20230811145659-89c5cff77bcb
 	golang.org/x/net v0.17.0
 	golang.org/x/sync v0.2.0
@@ -131,4 +131,5 @@ require (
 replace (
 	github.com/Microsoft/hcsshim => github.com/Microsoft/hcsshim v0.8.20
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
+	github.com/j-keck/arping => github.com/JacobTanenbaum/arping v0.0.0-20240209152419-3987db83bd51
 )

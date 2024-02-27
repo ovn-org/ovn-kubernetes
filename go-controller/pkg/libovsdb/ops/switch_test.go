@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -50,6 +51,8 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 					fakeSwitch1.DeepCopy(),
 					fakeSwitch2.DeepCopy(),
 					fakeSwitch3.DeepCopy(),
+					fakeACL1.DeepCopy(),
+					fakeACL2.DeepCopy(),
 				},
 			},
 			expectedNbdb: libovsdbtest.TestSetup{
@@ -89,9 +92,16 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 			}
 			t.Cleanup(cleanup.Cleanup)
 
-			ACLs := []*nbdb.ACL{
-				&fakeACL1,
-				&fakeACL2,
+			var ACLs []*nbdb.ACL
+			err = nbClient.List(context.Background(), &ACLs)
+			if err != nil {
+				t.Fatalf("test: \"%s\" failed to list ACLs: %v", tt.desc, err)
+			}
+			if len(ACLs) == 0 {
+				ACLs = []*nbdb.ACL{
+					&fakeACL1,
+					&fakeACL2,
+				}
 			}
 
 			p := func(item *nbdb.LogicalSwitch) bool { return true }

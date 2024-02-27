@@ -105,7 +105,7 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Node", obj2)
 		}
 		if reflect.DeepEqual(oldNode.Labels, newNode.Labels) &&
-			reflect.DeepEqual(oldNode.Status.Addresses, newNode.Status.Addresses) {
+			!util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
 			return true, nil
 		}
 		return false, nil

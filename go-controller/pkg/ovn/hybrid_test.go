@@ -129,16 +129,6 @@ func setupHybridOverlayOVNObjects(node tNode, hoNodeName, hoSubnet, nodeHOIP, no
 
 }
 
-func setupClusterController(clusterController *DefaultNetworkController, clusterLBUUID, switchLBUUID, routerLBUUID, expectedNodeSwitchUUID, node1Name string) {
-	var err error
-	clusterController.SCTPSupport = true
-	clusterController.clusterLoadBalancerGroupUUID = clusterLBUUID
-	clusterController.switchLoadBalancerGroupUUID = switchLBUUID
-	clusterController.routerLoadBalancerGroupUUID = routerLBUUID
-	clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(clusterController.nbClient)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-}
-
 var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 	var (
 		app             *cli.App
@@ -320,6 +310,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
@@ -378,7 +369,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+
+			setupCOPP := true
+			setupClusterController(clusterController, setupCOPP)
 
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
@@ -386,6 +379,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
 			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			err = clusterManager.Start(c)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -411,7 +405,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRIP, nodeHOIP))
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs.UnsortedList())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			var clusterSubnets []*net.IPNet
@@ -585,6 +579,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -609,7 +604,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
 			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
-			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -671,9 +665,11 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
+			setupCOPP := true
+			setupClusterController(clusterController, setupCOPP)
+
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs.UnsortedList())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			//assuming all the pods have finished processing
@@ -683,6 +679,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
 			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			err = clusterManager.Start(c)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -780,6 +777,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
@@ -838,7 +836,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+
+			setupCOPP := true
+			setupClusterController(clusterController, setupCOPP)
 
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
@@ -847,6 +847,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
 			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			err = clusterManager.Start(c)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -863,7 +864,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs.UnsortedList())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			var clusterSubnets []*net.IPNet
@@ -1033,8 +1034,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				NodeMgmtPortMAC:      "0a:58:0a:01:02:02",
 				DnatSnatIP:           "169.254.0.1",
 			}
-			testNode1 := node1.k8sNode("1")
-			testNode2 := node2.k8sNode("2")
+			testNode1 := node1.k8sNode("2")
+			testNode2 := node2.k8sNode("3")
 			testNode2.Annotations["k8s.ovn.org/node-subnets"] = "{\"default\":[\"10.1.3.0/24\"]}"
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -1118,7 +1119,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+
+			setupCOPP := true
+			setupClusterController(clusterController, setupCOPP)
 
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
@@ -1152,7 +1155,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			//ensure hybrid overlay elements have been added
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs.UnsortedList())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
@@ -1184,7 +1187,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
 				p := func(item *nbdb.LogicalRouterPolicy) bool {
 					return item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" &&
-						item.Match == fmt.Sprintf("ip4.src == 100.64.0.1 && ip4.dst == %s", hoNodeSubnet) &&
+						item.Match == fmt.Sprintf("ip4.src == 100.64.0.2 && ip4.dst == %s", hoNodeSubnet) &&
 						item.Action == "reroute" &&
 						item.Nexthops[0] == nodeHOIP
 				}
@@ -1319,7 +1322,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+
+			setupCOPP := true
+			setupClusterController(clusterController, setupCOPP)
 
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
@@ -1345,7 +1350,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs.UnsortedList())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// switch the node to a ovn node
@@ -1444,6 +1449,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
@@ -1502,7 +1508,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient, f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+
+			setupCOPP := true
+			setupClusterController(clusterController, setupCOPP)
 
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
@@ -1518,7 +1526,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs.UnsortedList())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			var clusterSubnets []*net.IPNet
@@ -1534,15 +1542,25 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, "", hoSubnet, nodeHOIP, nodeHOMAC)
 
+			var node1LogicalRouter *nbdb.LogicalRouter
+			var basicNode1StaticRoutes []string
+
 			for _, obj := range expectedDatabaseState {
 				if logicalRouter, ok := obj.(*nbdb.LogicalRouter); ok {
 					if logicalRouter.Name == "GR_node1" {
+						// keep a referance so that we can edit this object
+						node1LogicalRouter = logicalRouter
+						basicNode1StaticRoutes = logicalRouter.StaticRoutes
 						logicalRouter.StaticRoutes = append(logicalRouter.StaticRoutes, hybridLogicalRouterStaticRoute.UUID)
 					}
 				}
 			}
 
+			// keep copies of these before appending hybrid overlay elements
 			basicExpectedNodeSwitchPorts := expectedNodeSwitch.Ports
+			basicExpectedOVNClusterRouterPolicies := expectedOVNClusterRouter.Policies
+			basicExpectedOVNClusterStaticRoutes := expectedOVNClusterRouter.StaticRoutes
+
 			expectedNodeSwitch.Ports = append(expectedNodeSwitch.Ports, hybridLogicalSwitchPort.UUID)
 			expectedOVNClusterRouter.Policies = append(expectedOVNClusterRouter.Policies, hybridSubnetLRP1.UUID, hybridSubnetLRP2.UUID)
 			expectedOVNClusterRouter.StaticRoutes = append(expectedOVNClusterRouter.StaticRoutes, hybridSubnetStaticRoute1.UUID)
@@ -1571,12 +1589,12 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				return updatedNode.Annotations, nil
 			}, 5).ShouldNot(gomega.HaveKey(hotypes.HybridOverlayDRMAC))
 
+			// restore values from the non-hybrid versions
 			expectedNodeSwitch.Ports = basicExpectedNodeSwitchPorts
+			expectedOVNClusterRouter.Policies = basicExpectedOVNClusterRouterPolicies
+			expectedOVNClusterRouter.StaticRoutes = basicExpectedOVNClusterStaticRoutes
+			node1LogicalRouter.StaticRoutes = basicNode1StaticRoutes
 
-			// Even though we  the hybrid overlay routes and policies would normally be deleted in the fake database that is not done for us
-			expectedDatabaseState = append(expectedDatabaseState, hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2)
-			// The HO mac binding is not removed
-			expectedDatabaseState = append(expectedDatabaseState, expectedStaticMACBinding)
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			return nil
@@ -1591,7 +1609,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	ginkgo.It("cleans up a Linux node that has hybridOverlay annotations when hybrid overlay is disabled", func() {
+	ginkgo.It("cleans up a Linux node that has hybridOverlay annotations and database objects when hybrid overlay is disabled", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeHOMAC string = "0a:58:0a:01:01:03"
@@ -1676,6 +1694,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
+			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, "", hoSubnet, nodeHOIP, nodeHOMAC)
+			expectedStaticMACBinding := &nbdb.StaticMACBinding{
+				UUID:               "MAC-binding-HO-UUID",
+				IP:                 nodeHOIP,
+				LogicalPort:        "rtos-node1",
+				MAC:                nodeHOMAC,
+				OverrideDynamicMAC: true,
+			}
+
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					newClusterJoinSwitch(),
@@ -1687,19 +1714,24 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					expectedClusterLBGroup,
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
+					hybridSubnetStaticRoute1,
+					hybridLogicalRouterStaticRoute,
+					hybridSubnetLRP1,
+					hybridSubnetLRP2,
+					hybridLogicalSwitchPort,
+					expectedStaticMACBinding,
 				},
 			}
 			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedDatabaseState := []libovsdbtest.TestData{ovnClusterRouterLRP}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
-
 			clusterController, err := NewOvnController(fakeClient, f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+
+			setupCOPP := true
+			setupClusterController(clusterController, setupCOPP)
 
 			gomega.Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
@@ -1737,6 +1769,47 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				}
 				return updatedNode.Annotations, nil
 			}, 2).ShouldNot(gomega.HaveKey(hotypes.HybridOverlayDRIP))
+
+			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
+				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+					if item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" ||
+						strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") {
+						return true
+					}
+					return false
+				}
+				logicalRouterStaticRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(clusterController.nbClient, p)
+				if err != nil {
+					return nil, err
+				}
+				return logicalRouterStaticRoutes, nil
+			}, 2).Should(gomega.HaveLen(0))
+
+			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
+				p := func(item *nbdb.LogicalRouterPolicy) bool {
+					if strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") ||
+						item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" {
+						return true
+					}
+					return false
+				}
+				logicalRouterPolicies, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(clusterController.nbClient, p)
+				if err != nil {
+					return nil, err
+				}
+				return logicalRouterPolicies, nil
+
+			}, 2).Should(gomega.HaveLen(0))
+
+			gomega.Eventually(func() error {
+				_, err := libovsdbops.GetLogicalSwitchPort(clusterController.nbClient, &nbdb.LogicalSwitchPort{Name: "int-node1"})
+				if err != nil {
+					return err
+				}
+				return nil
+			}, 2).Should(gomega.Equal(libovsdbclient.ErrNotFound))
+
+			gomega.Eventually(clusterController.nbClient.Get(context.Background(), expectedStaticMACBinding), 2).Should(gomega.Equal(libovsdbclient.ErrNotFound))
 
 			return nil
 		}

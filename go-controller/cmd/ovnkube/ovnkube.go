@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +20,6 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
@@ -426,153 +426,176 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		return ovnnode.CleanupClusterNode(runMode.identity)
 	}
 
-	stopChan := make(chan struct{})
-	wg := &sync.WaitGroup{}
-	defer func() {
-		close(stopChan)
-		wg.Wait()
-	}()
-
-	var masterWatchFactory *factory.WatchFactory
-
-	if runMode.ovnkubeController {
-		// create factory and start the controllers asked for
-		masterWatchFactory, err = factory.NewOVNKubeControllerWatchFactory(ovnClientset.GetOVNKubeControllerClientset())
-		if err != nil {
-			return err
-		}
-		defer masterWatchFactory.Shutdown()
+	watchFactory, err := newWatchFactory(runMode, ovnClientset)
+	if err != nil {
+		return fmt.Errorf("failed to initialize watch factory: %w", err)
 	}
+
+	// there might be dependencies across components when starting so run them
+	// in separate threads
+	wg := &sync.WaitGroup{}
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithCancel(ctx)
+	var managerErr, controllerErr, nodeErr error
 
 	if runMode.clusterManager {
-		var clusterManagerWatchFactory *factory.WatchFactory
-		if runMode.ovnkubeController {
-			// if CM and NCM modes are enabled, then we should call the combo mode - NewMasterWatchFactory
-			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
-			if err != nil {
-				return err
-			}
-			clusterManagerWatchFactory = masterWatchFactory
-		} else {
-			clusterManagerWatchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset.GetClusterManagerClientset())
-			if err != nil {
-				return err
-			}
-			defer clusterManagerWatchFactory.Shutdown()
-		}
-
-		cm, err := clustermanager.NewClusterManager(ovnClientset.GetClusterManagerClientset(), clusterManagerWatchFactory,
-			runMode.identity, wg, eventRecorder)
-		if err != nil {
-			return fmt.Errorf("failed to create new cluster manager: %w", err)
-		}
-		metrics.RegisterClusterManagerFunctional()
-		err = cm.Start(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to start cluster manager: %w", err)
-		}
-		defer cm.Stop()
-
-		// record delay until ready
-		metrics.MetricClusterManagerReadyDuration.Set(time.Since(startTime).Seconds())
-	}
-
-	var ovnkubeControllerStartErr error
-	ovnkubeControllerWG := sync.WaitGroup{}
-	if runMode.ovnkubeController {
-		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
-
-		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
-			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
-		}
-
-		if libovsdbOvnSBClient, err = libovsdb.NewSBClient(stopChan); err != nil {
-			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
-		}
-
-		cm, err := controllerManager.NewNetworkControllerManager(ovnClientset, masterWatchFactory, libovsdbOvnNBClient, libovsdbOvnSBClient, eventRecorder, wg)
-		if err != nil {
-			return err
-		}
-
-		// start NetworkControllerManager in a separate goroutine to allow parallel startup for NodeNetworkControllerManager.
-		// NetworkControllerManager during startup waits for ovnkube-node to set ovnNodeZoneName annotation, therefore
-		// they can't run sequentially (unless we use default "global" zone).
-		// Another advantage of running startup in parallel is reducing the startup time.
-		ovnkubeControllerWG.Add(1)
+		wg.Add(1)
 		go func() {
-			defer ovnkubeControllerWG.Done()
-			err = cm.Start(ctx)
+			defer cancel()
+			defer wg.Done()
+
+			clusterManager, err := clustermanager.NewClusterManager(
+				ovnClientset.GetClusterManagerClientset(),
+				watchFactory,
+				runMode.identity,
+				wg,
+				eventRecorder)
 			if err != nil {
-				ovnkubeControllerStartErr = fmt.Errorf("failed to start ovnkube controller: %w", err)
-				klog.Error(ovnkubeControllerStartErr)
+				managerErr = fmt.Errorf("failed to create new cluster manager: %w", err)
 				return
 			}
+
+			metrics.RegisterClusterManagerFunctional()
+
+			err = clusterManager.Start(ctx)
+			if err != nil {
+				managerErr = fmt.Errorf("failed to start cluster manager: %w", err)
+				return
+			}
+
+			// record delay until ready
+			metrics.MetricClusterManagerReadyDuration.Set(time.Since(startTime).Seconds())
+
+			<-ctx.Done()
+			clusterManager.Stop()
+		}()
+	}
+
+	if runMode.ovnkubeController {
+		wg.Add(1)
+		go func() {
+			defer cancel()
+			defer wg.Done()
+
+			libovsdbOvnNBClient, err := libovsdb.NewNBClient(ctx.Done())
+			if err != nil {
+				controllerErr = fmt.Errorf("failed to initialize libovsdb NB client: %w", err)
+				return
+			}
+
+			libovsdbOvnSBClient, err := libovsdb.NewSBClient(ctx.Done())
+			if err != nil {
+				controllerErr = fmt.Errorf("failed to initialize libovsdb SB client: %w", err)
+				return
+			}
+
+			networkControllerManager, err := controllerManager.NewNetworkControllerManager(
+				ovnClientset,
+				watchFactory,
+				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
+				eventRecorder,
+				wg)
+			if err != nil {
+				controllerErr = fmt.Errorf("failed to initialize network controller: %w", err)
+				return
+			}
+
+			err = networkControllerManager.Start(ctx)
+			if err != nil {
+				controllerErr = fmt.Errorf("failed to start network controller: %w", err)
+				return
+			}
+
 			// record delay until ready
 			metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
-		}()
-		defer func() {
-			if ovnkubeControllerStartErr != nil {
-				cm.Stop()
-			}
+
+			<-ctx.Done()
+			networkControllerManager.Stop()
 		}()
 	}
 
 	if runMode.node {
-		var nodeWatchFactory factory.NodeWatchFactory
+		wg.Add(1)
+		go func() {
+			defer cancel()
+			defer wg.Done()
 
-		if runMode.ovnkubeController {
-			// masterWatchFactory would be initialized as NewOVNKubeControllerWatchFactory already, let's use that
-			nodeWatchFactory = masterWatchFactory
-		} else {
-			var err error
-			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), runMode.identity)
-			if err != nil {
-				return err
+			if config.Kubernetes.Token == "" {
+				nodeErr = fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
+				return
 			}
-			defer nodeWatchFactory.Shutdown()
-		}
 
-		if config.Kubernetes.Token == "" {
-			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
-		}
-		// register ovnkube node specific prometheus metrics exported by the node
-		metrics.RegisterNodeMetrics()
-		ncm, err := controllerManager.NewNodeNetworkControllerManager(ovnClientset, nodeWatchFactory, runMode.identity, eventRecorder)
-		if err != nil {
-			return fmt.Errorf("failed to create ovnkube node ovnkube controller: %w", err)
-		}
-		err = ncm.Start(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to start node network manager: %w", err)
-		}
-		defer ncm.Stop()
+			// register ovnkube node specific prometheus metrics exported by the node
+			metrics.RegisterNodeMetrics()
 
-		// record delay until ready
-		metrics.MetricNodeReadyDuration.Set(time.Since(startTime).Seconds())
-	}
+			nodeNetworkControllerManager, err := controllerManager.NewNodeNetworkControllerManager(
+				ovnClientset,
+				watchFactory,
+				runMode.identity,
+				eventRecorder)
+			if err != nil {
+				nodeErr = fmt.Errorf("failed to create node network controller: %w", err)
+				return
+			}
 
-	if runMode.ovnkubeController {
-		ovnkubeControllerWG.Wait()
-		if ovnkubeControllerStartErr != nil {
-			return ovnkubeControllerStartErr
-		}
+			err = nodeNetworkControllerManager.Start(ctx)
+			if err != nil {
+				nodeErr = fmt.Errorf("failed to start node network controller: %w", err)
+				return
+			}
+
+			// record delay until ready
+			metrics.MetricNodeReadyDuration.Set(time.Since(startTime).Seconds())
+
+			<-ctx.Done()
+			nodeNetworkControllerManager.Stop()
+		}()
 	}
 
 	// start the prometheus server to serve OVS and OVN Metrics (default port: 9476)
 	// Note: for ovnkube node mode dpu-host no metrics is required as ovs/ovn is not running on the node.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Metrics.OVNMetricsBindAddress != "" {
 		if config.Metrics.ExportOVSMetrics {
-			metrics.RegisterOvsMetricsWithOvnMetrics(stopChan)
+			metrics.RegisterOvsMetricsWithOvnMetrics(ctx.Done())
 		}
-		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, runMode.identity, stopChan)
+		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, runMode.identity, ctx.Done())
 		metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress,
-			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, stopChan, wg)
+			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), wg)
 	}
 
 	// run until cancelled
 	<-ctx.Done()
+	klog.Infof("Stopping ovnkube...")
+	cancel()
+	watchFactory.Shutdown()
+	wg.Wait()
+	klog.Infof("Stopped ovnkube")
+
+	err = errors.Join(managerErr, controllerErr, nodeErr)
+	if err != nil {
+		return fmt.Errorf("failed to run ovnkube: %w", err)
+	}
+
 	return nil
+}
+
+// newWatchFactory returns the proper watch factory to use depending on the run
+// mode
+func newWatchFactory(runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset) (watchFactory *factory.WatchFactory, err error) {
+	switch {
+	case runMode.clusterManager && runMode.ovnkubeController:
+		watchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+	case runMode.clusterManager:
+		watchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset.GetClusterManagerClientset())
+	case runMode.ovnkubeController:
+		watchFactory, err = factory.NewOVNKubeControllerWatchFactory(ovnClientset.GetOVNKubeControllerClientset())
+	case runMode.node:
+		watchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), runMode.identity)
+	default:
+		err = fmt.Errorf("unsupported ovnkube run mode: %+v", runMode)
+	}
+	return
 }
 
 type leaderMetrics struct {

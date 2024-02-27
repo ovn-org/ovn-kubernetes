@@ -15,10 +15,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	utilnet "k8s.io/utils/net"
 )
 
 // Validate the egress firewall policies by applying a policy and verify
@@ -52,6 +54,10 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 	)
 
 	f := wrappedTestFramework(svcname)
+	// node2ndaryIPs holds the nodeName as the key and the value is
+	// a map with ipFamily(v4 or v6) as the key and the secondaryIP as the value
+	// This is defined here globally to allow us to cleanup in AfterEach
+	node2ndaryIPs := make(map[string]map[int]string)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -86,7 +92,19 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 		}
 	})
 
-	ginkgo.AfterEach(func() {})
+	ginkgo.AfterEach(func() {
+		ginkgo.By("Deleting additional IP addresses from nodes")
+		for nodeName, ipFamilies := range node2ndaryIPs {
+			for _, ip := range ipFamilies {
+				_, err := runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "delete",
+					fmt.Sprintf("%s/32", ip), "dev", "breth0")
+				if err != nil && !strings.Contains(err.Error(),
+					"RTNETLINK answers: Cannot assign requested address") {
+					framework.Failf("failed to remove ip address %s from node %s, err: %q", ip, nodeName, err)
+				}
+			}
+		}
+	})
 
 	ginkgo.It("Should validate the egress firewall policy functionality against remote hosts", func() {
 		srcPodName := "e2e-egress-fw-src-pod"
@@ -290,6 +308,38 @@ spec:
 
 		}
 
+		ginkgo.By("Selecting additional IP addresses for serverNode on which source pod lives (networking routing to secondaryIP address on other nodes is harder to achieve)")
+		// add new secondary IP from node subnet to the node where the source pod lives on,
+		// if the cluster is v6 add an ipv6 address
+		toCurlSecondaryNodeIPAddresses := sets.NewString()
+		// Calculate and store for AfterEach new target IP addresses.
+		var newIP string
+		if node2ndaryIPs[serverNodeInfo.name] == nil {
+			node2ndaryIPs[serverNodeInfo.name] = make(map[int]string)
+		}
+		if utilnet.IsIPv6String(e2enode.GetAddresses(&nodes.Items[1], v1.NodeInternalIP)[0]) {
+			newIP = "fc00:f853:ccd:e794::" + strconv.Itoa(12)
+			framework.Logf("Secondary nodeIP %s for node %s", serverNodeInfo.name, newIP)
+			node2ndaryIPs[serverNodeInfo.name][6] = newIP
+		} else {
+			newIP = "172.18.1." + strconv.Itoa(13)
+			framework.Logf("Secondary nodeIP %s for node %s", serverNodeInfo.name, newIP)
+			node2ndaryIPs[serverNodeInfo.name][4] = newIP
+		}
+
+		ginkgo.By("Adding additional IP addresses to node on which source pod lives")
+		for nodeName, ipFamilies := range node2ndaryIPs {
+			for _, ip := range ipFamilies {
+				// manually add the a secondary IP to each node
+				framework.Logf("Adding IP %s to node %s", ip, nodeName)
+				_, err = runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "add", ip, "dev", "breth0")
+				if err != nil && !strings.Contains(err.Error(),	"Address already assigned") {
+					framework.Failf("failed to add new IP address %s to node %s: %v", ip, nodeName, err)
+				}
+				toCurlSecondaryNodeIPAddresses.Insert(ip)
+			}
+		}
+
 		// Verify basic external connectivity to ensure egress firewall is working for normal conditions
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
 		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
@@ -324,6 +374,18 @@ spec:
 			}
 		}
 
+		ginkgo.By("Should NOT be able to reach each secondary hostIP via node selector")
+		for _, address := range toCurlSecondaryNodeIPAddresses.List() {
+			if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) ||  IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
+				continue
+			}
+			path := fmt.Sprintf("http://%s:%d/hostname", address, hostNetworkPort)
+			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "curl", "-g", "--max-time", "2", path)
+			if err == nil {
+				framework.Failf("Was able to curl node %s from container %s on nodeIP %s with no allow rule for egress firewall", address, srcPodName, serverNodeInfo.name)
+			}
+		}
+
 		ginkgo.By("Apply label to nodes " + f.Namespace.Name + ":" + labelMatch)
 		patch := struct {
 			Metadata map[string]interface{} `json:"metadata"`
@@ -347,6 +409,17 @@ spec:
 			}
 		}
 
+		ginkgo.By("Should be able to reach secondary hostIP via node selector")
+		for _, address := range toCurlSecondaryNodeIPAddresses.List() {
+			if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) ||  IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
+				continue
+			}
+			path := fmt.Sprintf("http://%s:%d/hostname", address, hostNetworkPort)
+			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "curl", "-g", "--max-time", "2", path)
+			if err != nil {
+				framework.Failf("Failed to curl node %s from container %s on nodeIP %s", address, srcPodName, serverNodeInfo.name)
+			}
+		}
 	})
 
 	ginkgo.It("Should validate the egress firewall DNS does not deadlock when adding many dnsNames", func() {

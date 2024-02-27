@@ -101,8 +101,9 @@ func ovsGet(table, record, column, key string) (string, error) {
 }
 
 // Returns the given column of records that match the condition
-func ovsFind(table, column, condition string) ([]string, error) {
-	output, err := ovsExec("--no-heading", "--format=csv", "--data=bare", "--columns="+column, "find", table, condition)
+func ovsFind(table, column string, conditions ...string) ([]string, error) {
+	args := append([]string{"--no-heading", "--format=csv", "--data=bare", "--columns=" + column, "find", table}, conditions...)
+	output, err := ovsExec(args...)
 	if err != nil {
 		return nil, err
 	}

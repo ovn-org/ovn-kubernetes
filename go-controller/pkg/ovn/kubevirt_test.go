@@ -35,6 +35,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 	const (
 		node1 = "node1"
 		node2 = "node2"
+		node3 = "node3"
 		vm1   = "vm1"
 
 		dhcpv4OptionsUUID = "dhcpv4"
@@ -134,6 +135,14 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				transitSwitchPortIPv4: "100.65.0.5/24",
 				transitSwitchPortIPv6: "fd13::5/64",
 			},
+			node3: {
+				subnetIPv4:            "10.128.3.0/24",
+				subnetIPv6:            "fd13::/64",
+				lrpNetworkIPv4:        "100.64.0.6/24",
+				lrpNetworkIPv6:        "fd12::6/64",
+				transitSwitchPortIPv4: "100.65.0.6/24",
+				transitSwitchPortIPv6: "fd13::6/64",
+			},
 		}
 		vmByName = map[string]testVM{
 			vm1: {
@@ -217,18 +226,22 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			}
 			data := getExpectedDataPodsAndSwitches(testPods, nodes)
 			for _, d := range data {
-				lsp, ok := d.(*nbdb.LogicalSwitchPort)
-				if ok {
+				switch model := d.(type) {
+				case *nbdb.LogicalSwitchPort:
 					for _, p := range testVirtLauncherPods {
 						portName := util.GetLogicalPortName(p.namespace, p.podName)
-						if lsp.Name == portName {
+						if model.Name == portName {
 							if findDHCPOptionsWithHostname(t.expectedDhcpv4, p.vmName) != nil {
-								lsp.Dhcpv4Options = pointer.String(dhcpv4OptionsUUID + p.vmName)
+								model.Dhcpv4Options = pointer.String(dhcpv4OptionsUUID + p.vmName)
 							}
 							if findDHCPOptionsWithHostname(t.expectedDhcpv6, p.vmName) != nil {
-								lsp.Dhcpv6Options = pointer.String(dhcpv6OptionsUUID + p.vmName)
+								model.Dhcpv6Options = pointer.String(dhcpv6OptionsUUID + p.vmName)
 							}
 						}
+					}
+				case *nbdb.LogicalSwitch:
+					if nodeSet[model.Name] {
+						model.Ports = append(model.Ports, ovntypes.SwitchToRouterPrefix+model.Name+"-UUID")
 					}
 				}
 			}
@@ -351,10 +364,10 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						continue
 					}
 					expectedStaticRoutesAfterCleanup = append(expectedStaticRoutesAfterCleanup, staticRoute.UUID)
-					// OVN Garbage collector remove them if not referenced at LSP
 				} else if _, ok := nbData.(*nbdb.DHCPOptions); ok {
+					// OVN Garbage collector removes them if not referenced at LSP
 					continue
-				} else if lr, ok := nbData.(*nbdb.LogicalRouter); ok {
+				} else if lr, ok := nbData.(*nbdb.LogicalRouter); ok && lr.Name == ovntypes.OVNClusterRouter {
 					expectedOvnClusterRouterAfterCleanup = lr
 				}
 				data = append(data, nbData)
@@ -515,6 +528,11 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				Name: ovntypes.OVNClusterRouter,
 				UUID: ovntypes.OVNClusterRouter + "-UUID",
 			}
+			gwRouter := &nbdb.LogicalRouter{
+				UUID:  ovntypes.GWRouterPrefix + t.nodeName + "-UUID",
+				Name:  ovntypes.GWRouterPrefix + t.nodeName,
+				Ports: []string{ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + t.nodeName + "-UUID"},
+			}
 			logicalRouterPort = &nbdb.LogicalRouterPort{
 				UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + t.nodeName + "-UUID",
 				Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + t.nodeName,
@@ -530,11 +548,13 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				},
 			}
 			logicalSwitch = &nbdb.LogicalSwitch{
-				Name: t.nodeName,
-				UUID: t.nodeName + "-UUID",
+				Name:  t.nodeName,
+				UUID:  t.nodeName + "-UUID",
+				Ports: []string{ovntypes.SwitchToRouterPrefix + t.nodeName + "-UUID"},
 			}
 			var migrationTargetLRP *nbdb.LogicalRouterPort
 			var migrationTargetLS *nbdb.LogicalSwitch
+			var migrationTargetGWRouter *nbdb.LogicalRouter
 
 			initialDB = libovsdb.TestSetup{NBData: []libovsdb.TestData{}}
 
@@ -563,10 +583,16 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			initialDB.NBData = append(initialDB.NBData,
 				logicalSwitch,
 				initialOvnClusterRouter,
+				gwRouter,
 				logicalRouterPort,
 				migrationSourceLSRP)
 
 			if t.migrationTarget.nodeName != "" {
+				migrationTargetGWRouter = &nbdb.LogicalRouter{
+					UUID:  ovntypes.GWRouterPrefix + t.migrationTarget.nodeName + "-UUID",
+					Name:  ovntypes.GWRouterPrefix + t.migrationTarget.nodeName,
+					Ports: []string{ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + t.migrationTarget.nodeName + "-UUID"},
+				}
 				migrationTargetLRP = &nbdb.LogicalRouterPort{
 					UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + t.migrationTarget.nodeName + "-UUID",
 					Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + t.migrationTarget.nodeName,
@@ -582,12 +608,14 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					},
 				}
 				migrationTargetLS = &nbdb.LogicalSwitch{
-					Name: t.migrationTarget.nodeName,
-					UUID: t.migrationTarget.nodeName + "-UUID",
+					Name:  t.migrationTarget.nodeName,
+					UUID:  t.migrationTarget.nodeName + "-UUID",
+					Ports: []string{ovntypes.SwitchToRouterPrefix + t.migrationTarget.nodeName + "-UUID"},
 				}
 				initialDB.NBData = append(initialDB.NBData,
 					migrationTargetLRP,
 					migrationTargetLSRP,
+					migrationTargetGWRouter,
 					migrationTargetLS,
 				)
 			}
@@ -652,6 +680,15 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 									},
 								},
 							},
+							{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: node3,
+									Annotations: map[string]string{
+										"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf(`{"ipv4": %q, "ipv6": %q}`, nodeByName[node3].transitSwitchPortIPv4, nodeByName[node3].transitSwitchPortIPv6),
+										"k8s.ovn.org/node-subnets":                    fmt.Sprintf(`{"default":[%q,%q]}`, nodeByName[node3].subnetIPv4, nodeByName[node3].subnetIPv6),
+									},
+								},
+							},
 						},
 					},
 				)
@@ -659,7 +696,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				if t.migrationTarget.nodeName != "" {
 					t.migrationTarget.populateLogicalSwitchCache(fakeOvn)
 				}
-
 				for _, remoteNode := range t.remoteNodes {
 					fakeOvn.controller.localZoneNodes.Delete(remoteNode)
 				}
@@ -741,6 +777,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				expectedSourceLSRP := migrationSourceLSRP.DeepCopy()
 				expectedOVN = append(expectedOVN,
 					expectedOVNClusterRouter,
+					gwRouter,
 					logicalRouterPort,
 					expectedSourceLSRP,
 				)
@@ -751,6 +788,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					expectedOVN = append(expectedOVN,
 						migrationTargetLRP,
 						expectedTargetLSRP,
+						migrationTargetGWRouter,
 					)
 				}
 				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedOVN), "should populate ovn")
@@ -971,6 +1009,71 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				migrationTarget: testMigrationTarget{
 					lrpNetworks:         []string{nodeByName[node2].lrpNetworkIPv4, nodeByName[node2].lrpNetworkIPv6},
 					testVirtLauncherPod: virtLauncher2(node2, vm1),
+				},
+				expectedDhcpv4: []testDHCPOptions{{
+					cidr:     nodeByName[node1].subnetIPv4,
+					dns:      dnsServiceIPv4,
+					hostname: vm1,
+				}},
+				expectedDhcpv6: []testDHCPOptions{{
+					cidr:     nodeByName[node1].subnetIPv6,
+					dns:      dnsServiceIPv6,
+					hostname: vm1,
+				}},
+				expectedStaticRoutes: []testStaticRoute{
+					{
+						prefix:     vmByName[vm1].addressIPv4,
+						nexthop:    vmByName[vm1].addressIPv4,
+						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+					{
+						prefix:     vmByName[vm1].addressIPv6,
+						nexthop:    vmByName[vm1].addressIPv6,
+						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+					{
+						prefix:      clusterCIDRIPv4,
+						nexthop:     strings.Split(nodeByName[node2].lrpNetworkIPv4, "/")[0],
+						policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						externalIDs: map[string]string{},
+					},
+					{
+						prefix:      clusterCIDRIPv6,
+						nexthop:     strings.Split(nodeByName[node2].lrpNetworkIPv6, "/")[0],
+						policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						externalIDs: map[string]string{},
+					},
+				},
+			}),
+			Entry("for pre-copy live migration between zones that do not own the original subnet", testData{
+				interconnected: true,
+				ipv4:           true,
+				ipv6:           true,
+				remoteNodes:    []string{node3},
+				lrpNetworks:    []string{nodeByName[node3].lrpNetworkIPv4, nodeByName[node3].lrpNetworkIPv6},
+				dnsServiceIPs:  []string{dnsServiceIPv4, dnsServiceIPv6},
+				testVirtLauncherPod: testVirtLauncherPod{
+					suffix: "1",
+					testPod: testPod{
+						nodeName: node3,
+					},
+					vmName: vm1,
+				},
+				migrationTarget: testMigrationTarget{
+					lrpNetworks:         []string{nodeByName[node2].lrpNetworkIPv4, nodeByName[node2].lrpNetworkIPv6},
+					testVirtLauncherPod: virtLauncher2(node2, vm1),
+				},
+				staticRoutes: []testStaticRoute{
+					{
+						prefix:  vmByName[vm1].addressIPv4,
+						nexthop: strings.Split(nodeByName[node3].transitSwitchPortIPv4, "/")[0],
+						zone:    kubevirt.OvnRemoteZone,
+					},
+					{
+						prefix:  vmByName[vm1].addressIPv6,
+						nexthop: strings.Split(nodeByName[node3].transitSwitchPortIPv6, "/")[0],
+						zone:    kubevirt.OvnRemoteZone,
+					},
 				},
 				expectedDhcpv4: []testDHCPOptions{{
 					cidr:     nodeByName[node1].subnetIPv4,

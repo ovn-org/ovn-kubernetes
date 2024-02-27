@@ -58,7 +58,9 @@ func (oc *DefaultNetworkController) handleHybridOverlayPort(node *kapi.Node, ann
 		// No subnet allocated yet; clean up
 		klog.V(5).Infof("No subnet allocation yet for %s", node.Name)
 		if annotationOK {
-			oc.deleteHybridOverlayPort(node)
+			if err := oc.deleteHybridOverlayPort(node); err != nil {
+				return err
+			}
 			annotator.Delete(types.HybridOverlayDRMAC)
 		}
 		return nil
@@ -115,7 +117,7 @@ func (oc *DefaultNetworkController) handleHybridOverlayPort(node *kapi.Node, ann
 
 		err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &lsp)
 		if err != nil {
-			return fmt.Errorf("failed to add hybrid overlay port %+v for node %s: %v", lsp, node.Name, err)
+			return fmt.Errorf("failed to add hybrid overlay port %+v for node %s: %w", lsp, node.Name, err)
 		}
 		for _, subnet := range subnets {
 			if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(oc.nbClient, node.Name, subnet); err != nil {
@@ -134,14 +136,18 @@ func (oc *DefaultNetworkController) handleHybridOverlayPort(node *kapi.Node, ann
 	return nil
 }
 
-func (oc *DefaultNetworkController) deleteHybridOverlayPort(node *kapi.Node) {
+func (oc *DefaultNetworkController) deleteHybridOverlayPort(node *kapi.Node) error {
 	klog.Infof("Removing node %s hybrid overlay port", node.Name)
 	portName := util.GetHybridOverlayPortName(node.Name)
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
 	sw := nbdb.LogicalSwitch{Name: node.Name}
 	if err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp); err != nil {
-		klog.Errorf("Failed deleting hybrind overlay port %s for node %s err: %v", portName, node.Name, err)
+		return err
 	}
+	if err := oc.removeHybridLRPolicySharedGW(node); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet, nodeName string, portMac net.HardwareAddr, drIPs net.IP) error {

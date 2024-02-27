@@ -253,7 +253,7 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 }
 
 // syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
-// NOTE: We could have created the router port in ensureNodeLogicalNetwork() instead of here,
+// NOTE: We could have created the router port in createNodeLogicalSwitch() instead of here,
 // but chassis ID is not available at that moment. We need the chassis ID to set the
 // gateway-chassis, which in effect pins the logical switch to the current node in OVN.
 // Otherwise, ovn-controller will flood-fill unrelated datapaths unnecessarily, causing scale
@@ -796,6 +796,11 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.
 }
 
 func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.IPNet) ([]*net.IPNet, error) {
+	// live migration is not supported in combination with secondary networks
+	if bnc.IsSecondary() {
+		return nil, nil
+	}
+
 	ipSet := sets.New[string]()
 	ipList := []*net.IPNet{}
 	liveMigratablePods, err := kubevirt.FindLiveMigratablePods(bnc.watchFactory)
@@ -816,7 +821,16 @@ func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.
 		}
 		podAnnotation, err := util.UnmarshalPodAnnotation(liveMigratablePod.Annotations, bnc.GetNetworkName())
 		if err != nil {
-			return nil, err
+			// even though it can be normal to not have an annotation now, live
+			// migration is a sensible process that might be used when draining
+			// nodes on upgrades, so log a warning in every case to have the
+			// information available
+			klog.Warningf("Could not get pod annotation of pod %s/%s for network %s: %v",
+				liveMigratablePod.Namespace,
+				liveMigratablePod.Name,
+				bnc.GetNetworkName(),
+				err)
+			continue
 		}
 		for _, podIP := range podAnnotation.IPs {
 			if util.IsContainedInAnyCIDR(podIP, subnets...) {

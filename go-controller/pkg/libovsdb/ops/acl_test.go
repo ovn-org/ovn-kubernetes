@@ -116,8 +116,15 @@ func TestCreateOrUpdateACL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
+			sw := &nbdb.LogicalSwitch{
+				Name: "sw1",
+				UUID: buildNamedUUID(),
+				ACLs: []string{tt.initialACL.UUID},
+			}
+
 			nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
+					sw,
 					tt.initialACL,
 				},
 			}, nil)
@@ -136,13 +143,16 @@ func TestCreateOrUpdateACL(t *testing.T) {
 			if len(initialACLs) != 1 {
 				t.Fatalf("test: \"%s\" found %d intitial ACls, expected 1", tt.desc, len(initialACLs))
 			}
-			tt.finalACL.UUID = initialACLs[0].UUID
 
-			err = CreateOrUpdateACLs(nbClient, tt.finalACL)
+			updatedACL := tt.finalACL.DeepCopy()
+			updatedACL.UUID = initialACLs[0].UUID
+			err = CreateOrUpdateACLs(nbClient, updatedACL)
 			if err != nil {
 				t.Fatalf("test: \"%s\" failed to set up test harness: %v", tt.desc, err)
 			}
-			matcher := libovsdbtest.HaveData([]libovsdbtest.TestData{tt.finalACL})
+
+			tt.finalACL.UUID = tt.initialACL.UUID
+			matcher := libovsdbtest.HaveData([]libovsdbtest.TestData{sw, tt.finalACL})
 			success, err := matcher.Match(nbClient)
 			if !success {
 				t.Fatal(fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %v", tt.desc, matcher.FailureMessage(nbClient)))

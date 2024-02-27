@@ -150,8 +150,8 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		}
 		if isHostCIDRsAltered {
 			// we only need to consider EIPs that are assigned to networks that aren't managed by OVN
-			if err := h.eIPC.reconcileNonOVNNetworkEIPs(newNode); err != nil {
-				return fmt.Errorf("failed to reconsider egress IPs that are host on non-OVN managed networks: %v", err)
+			if err := h.eIPC.reconcileSecondaryHostNetworkEIPs(newNode); err != nil {
+				return fmt.Errorf("failed to reconsider egress IPs that are secondary host networks: %v", err)
 			}
 		}
 		return nil

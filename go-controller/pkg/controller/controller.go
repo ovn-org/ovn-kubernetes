@@ -80,8 +80,8 @@ func (c *controller[T]) Start(threadiness int) error {
 		return fmt.Errorf("failed to add event handler: %w", err)
 	}
 
-	if !util.WaitForNamedCacheSyncWithTimeout(c.name, c.stopChan, c.eventHandler.HasSynced) {
-		return fmt.Errorf("timed out waiting for egressservice caches to sync")
+	if !util.WaitForInformerCacheSyncWithTimeout(c.name, c.stopChan, c.config.Informer.HasSynced) {
+		return fmt.Errorf("timed out waiting for %s informer cache to sync", c.name)
 	}
 
 	// now we have already started receiving events and putting keys in the queue.

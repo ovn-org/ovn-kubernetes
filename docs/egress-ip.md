@@ -39,7 +39,7 @@ It specifies to use `172.18.0.33` or `172.18.0.44` egressIP for pods that are la
 Both selectors use the [generic kubernetes label selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors).
 
 ## Traffic flows
-If the Egress IP(s) are hosted on the OVN managed primary network then the implementation is redirecting the POD traffic
+If the Egress IP(s) are hosted on the OVN primary network then the implementation is redirecting the POD traffic
 to an egress node where it is SNATed and sent out.  
 
 Using the example EgressIP and a matching pod with `10.244.1.3` IP, the following logical router policies are configured in `ovn_cluster_router`:
@@ -71,8 +71,8 @@ TYPE             GATEWAY_PORT          EXTERNAL_IP        EXTERNAL_PORT    LOGIC
 snat                                   172.18.0.44                         10.244.1.3
 ```
 
-Lets now imagine the Egress IP(s) mentioned previously, are not hosted by the OVN managed primary network and is hosted
-in a non-OVN managed network interface, a redirect to the egress-able node management port IP address:
+Lets now imagine the Egress IP(s) mentioned previously, are not hosted by the OVN primary network and is hosted
+by a secondary host network which is assigned to a standard linux interface, a redirect to the egress-able node management port IP address:
 ```shell
 Routing Policies
   1004 inport == "rtos-ovn-control-plane" && ip4.dst == 172.18.0.4 /* ovn-control-plane */                            reroute  10.244.0.2
@@ -131,7 +131,7 @@ sh-5.2# ip route show table 1008
 default dev dummy
 ```
 
-No NAT is required on the OVN managed primary network gateway router.
+No NAT is required on the OVN primary network gateway router.
 OVN-Kubernetes (ovnkube-node) takes care of adding a rule to the rule table with src IP of the pod and routed towards a
 new routing table specifically created to route the traffic out the correct interface. IPTables is also altered and an entry
 is created within the chain `OVN-KUBE-EGRESS-IP-Multi-NIC` for each pod to allow SNAT to occur when a src IP is match
@@ -173,8 +173,8 @@ priority=104,ip,in_port=2,nw_src=<clusterSubnet> actions=drop
 priority=100,ip,in_port=2 actions=ct(commit,zone=64000,exec(set_field:0x1->ct_mark)),output:1
 ```
 
-## Special considerations for non-OVN managed Egress IPs
-If you wish to assign an Egress IP to a non-OVN managed network, then the following is required:
+## Special considerations for Egress IPs hosted by standard linux interfaces
+If you wish to assign an Egress IP to a standard linux interface (non OVS type), then the following is required:
 * Link is up
 * IP address must have scope universe / global
 * Links and their addresses must not be removed during runtime after an egress IP is assigned to it. If you wish to remove the link, first

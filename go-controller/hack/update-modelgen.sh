@@ -9,7 +9,7 @@ if  ! ( command -v modelgen > /dev/null ); then
   builddir="$(mktemp -d)"
   cd "${builddir}"
   # ensure the hash value is not outdated, if wrong bindings are being generated re-install modelgen
-  GO111MODULE=on go install github.com/ovn-org/libovsdb/cmd/modelgen@a4f2602f585a3c2995a0abea7010b333631341d9
+  GO111MODULE=on go install github.com/ovn-org/libovsdb/cmd/modelgen@03f787b1a8922c112936f4f4d1d75db04967d1be
   cd "${olddir}"
   if [[ "${builddir}" == /tmp/* ]]; then #paranoia
       rm -rf "${builddir}"

@@ -542,22 +542,14 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta1().MultiNetworkPolicies(mpolicy.Namespace).
 					Delete(context.TODO(), mpolicy.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
-				expectedData3 := append(expectedData1, gressPolicyExpectedData2[:len(gressPolicyExpectedData1)-1]...)
-				expectedData3 = append(expectedData3, defaultDenyExpectedData2[:len(defaultDenyExpectedData2)-2]...)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData3))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData1))
 
 				ginkgo.By("Deleting the network policy")
 				err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
 					Delete(context.TODO(), networkPolicy.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
-				expectedData4 := append(initData, gressPolicyExpectedData1[:len(gressPolicyExpectedData1)-1]...)
-				expectedData4 = append(expectedData4, gressPolicyExpectedData2[:len(gressPolicyExpectedData2)-1]...)
-				expectedData4 = append(expectedData4, defaultDenyExpectedData1[:len(defaultDenyExpectedData1)-2]...)
-				expectedData4 = append(expectedData4, defaultDenyExpectedData2[:len(defaultDenyExpectedData2)-2]...)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData4))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(initData))
 				return nil
 			}
 

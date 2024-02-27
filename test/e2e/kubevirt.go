@@ -81,6 +81,23 @@ passwd:
   - name: core
     password_hash: $y$j9T$b7RFf2LW7MUOiF4RyLHKA0$T.Ap/uzmg8zrTcUNXyXvBvT26UgkC6zZUVg3UKXeEp5
 `
+		labelNode = func(nodeName, label string) error {
+			patch := fmt.Sprintf(`{"metadata": {"labels": {"%s": ""}}}`, label)
+			_, err := fr.ClientSet.CoreV1().Nodes().Patch(context.Background(), nodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+
+		unlabelNode = func(nodeName, label string) error {
+			patch := fmt.Sprintf(`[{"op": "remove", "path": "/metadata/labels/%s"}]`, label)
+			_, err := clientSet.CoreV1().Nodes().Patch(context.Background(), nodeName, types.JSONPatchType, []byte(patch), metav1.PatchOptions{})
+			if err != nil {
+				return err
+			}
+			return nil
+		}
 	)
 
 	BeforeEach(func() {
@@ -122,31 +139,31 @@ passwd:
 		}
 
 		selectedNodes = []corev1.Node{}
-		// If there is one global zone select the first two for the
+		// If there is one global zone select the first three for the
 		// migration
 		if len(nodesByOVNZone) == 1 {
 			selectedNodes = []corev1.Node{
 				workerNodeList.Items[0],
 				workerNodeList.Items[1],
+				workerNodeList.Items[2],
 			}
 			// Otherwise select a pair of nodes from different OVN zones
 		} else {
 			for _, nodes := range nodesByOVNZone {
 				selectedNodes = append(selectedNodes, nodes[0])
-				if len(selectedNodes) == 2 {
-					break // we want just a pair of them
+				if len(selectedNodes) == 3 {
+					break // we want just three of them
 				}
 			}
 		}
+
+		Expect(selectedNodes).To(HaveLen(3), "at least three nodes in different zones are needed for interconnect scenarios")
 
 		// Label the selected nodes with the generated namespaces, so we can
 		// configure VM nodeSelector with it and live migration will take only
 		// them into consideration
 		for _, node := range selectedNodes {
-			node.Labels[namespace] = ""
-			patch := fmt.Sprintf(`{"metadata": {"labels": {"%s": ""}}}`, namespace)
-			_, err := fr.ClientSet.CoreV1().Nodes().Patch(context.Background(), node.Name, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
-			Expect(err).ToNot(HaveOccurred())
+			Expect(labelNode(node.Name, namespace)).To(Succeed())
 		}
 
 		singleConnectionHTTPClient = &http.Client{
@@ -159,10 +176,7 @@ passwd:
 
 	AfterEach(func() {
 		for _, node := range selectedNodes {
-			patch := fmt.Sprintf(`[{"op": "remove", "path": "/metadata/labels/%s"}]`, namespace)
-			_, err := clientSet.CoreV1().Nodes().Patch(context.Background(), node.Name, types.JSONPatchType, []byte(patch), metav1.PatchOptions{})
-			Expect(err).ToNot(HaveOccurred())
-
+			unlabelNode(node.Name, namespace)
 		}
 	})
 
@@ -560,6 +574,11 @@ passwd:
 			}
 			return vms, nil
 		}
+		liveMigrateAndCheck = func(vmName string, migrationMode kubevirtv1.MigrationMode, endpoints []string, step string) {
+			liveMigrateVirtualMachine(vmName, migrationMode)
+			checkLiveMigrationSucceeded(vmName, migrationMode)
+			checkConnectivityAndNetworkPolicies(vmName, endpoints, step)
+		}
 
 		runTest = func(td liveMigrationTestData, vm *kubevirtv1.VirtualMachine) {
 			defer GinkgoRecover()
@@ -612,20 +631,33 @@ passwd:
 				Should(Succeed(), step)
 
 			checkConnectivityAndNetworkPolicies(vm.Name, endpoints, "before live migration")
-
-			for i := 1; i <= len(selectedNodes); i++ {
-
-				by(vm.Name, fmt.Sprintf("Live migrate virtual machine, migration #%d", i))
+			// Do just one migration that will fail
+			if td.shouldExpectFailure {
+				by(vm.Name, fmt.Sprintf("Live migrate virtual machine to check failed migration"))
 				liveMigrateVirtualMachine(vm.Name, td.mode)
-				if td.shouldExpectFailure {
-					checkLiveMigrationFailed(vm.Name)
-				} else {
-					checkLiveMigrationSucceeded(vm.Name, td.mode)
+				checkLiveMigrationFailed(vm.Name)
+				checkConnectivityAndNetworkPolicies(vm.Name, endpoints, "after live migrate to check failed migration")
+			} else {
+				originalNode := vmi.Status.NodeName
+				by(vm.Name, fmt.Sprintf("Live migrate for the first time"))
+				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migrate for the first time")
+
+				by(vm.Name, fmt.Sprintf("Live migrate for the second time to a node not owning the subnet"))
+				// Remove the node selector label from original node to force
+				// live migration to a different one.
+				Expect(unlabelNode(originalNode, namespace)).To(Succeed())
+				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migration for the second time to node not owning subnet")
+
+				by(vm.Name, fmt.Sprintf("Live migrate for the third time to the node owning the subnet"))
+				// Patch back the original node with the label and remove it
+				// from the rest of nodes to force live migration target to it.
+				Expect(labelNode(originalNode, namespace)).To(Succeed())
+				for _, selectedNode := range selectedNodes {
+					if selectedNode.Name != originalNode {
+						Expect(unlabelNode(selectedNode.Name, namespace)).To(Succeed())
+					}
 				}
-				checkConnectivityAndNetworkPolicies(vm.Name, endpoints, fmt.Sprintf("after live migrate, migration #%d", i))
-				if td.shouldExpectFailure {
-					break
-				}
+				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migration to node owning the subnet")
 			}
 
 		}

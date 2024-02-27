@@ -302,9 +302,6 @@ func (k *Kube) PatchNode(old, new *kapi.Node) error {
 func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 	klog.Infof("Updating status on node %s", node.Name)
 	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(context.TODO(), node, metav1.UpdateOptions{})
-	if err != nil {
-		klog.Errorf("Error in updating status on node %s: %v", node.Name, err)
-	}
 	return err
 }
 

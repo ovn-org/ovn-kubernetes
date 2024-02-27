@@ -184,9 +184,9 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 		o.fakeRecorder, o.wg)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = config.EnableMulticast
-	o.controller.clusterLoadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
-	o.controller.switchLoadBalancerGroupUUID = types.ClusterSwitchLBGroupName + "-UUID"
-	o.controller.routerLoadBalancerGroupUUID = types.ClusterRouterLBGroupName + "-UUID"
+
+	setupCOPP := false
+	setupClusterController(o.controller, setupCOPP)
 
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -206,6 +206,31 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 				}
 			}
 		}
+	}
+}
+
+func setupClusterController(clusterController *DefaultNetworkController, setupCOPP bool) {
+	var err error
+	clusterController.SCTPSupport = true
+
+	clusterLBGroup := &nbdb.LoadBalancerGroup{Name: types.ClusterLBGroupName}
+	err = clusterController.nbClient.Get(context.Background(), clusterLBGroup)
+	gomega.Expect(err).To(gomega.SatisfyAny(gomega.BeNil(), gomega.MatchError(libovsdbclient.ErrNotFound)))
+	clusterController.clusterLoadBalancerGroupUUID = clusterLBGroup.UUID
+
+	clusterSwitchLBGroup := &nbdb.LoadBalancerGroup{Name: types.ClusterSwitchLBGroupName}
+	err = clusterController.nbClient.Get(context.Background(), clusterSwitchLBGroup)
+	gomega.Expect(err).To(gomega.SatisfyAny(gomega.BeNil(), gomega.MatchError(libovsdbclient.ErrNotFound)))
+	clusterController.switchLoadBalancerGroupUUID = clusterSwitchLBGroup.UUID
+
+	clusterRouterLBGroup := &nbdb.LoadBalancerGroup{Name: types.ClusterRouterLBGroupName}
+	err = clusterController.nbClient.Get(context.Background(), clusterRouterLBGroup)
+	gomega.Expect(err).To(gomega.SatisfyAny(gomega.BeNil(), gomega.MatchError(libovsdbclient.ErrNotFound)))
+	clusterController.routerLoadBalancerGroupUUID = clusterRouterLBGroup.UUID
+
+	if setupCOPP {
+		clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(clusterController.nbClient)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 }
 

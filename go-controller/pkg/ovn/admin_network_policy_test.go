@@ -701,16 +701,11 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				anp.Spec.Egress = []anpapi.AdminNetworkPolicyEgressRule{egressRules[0], egressRules[2]}     // allow is gone
 				anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// TODO: test server does not garbage collect ACLs, so we just expect port groups to be updated for the old priority ACLs.
-				// Both oldACLs and newACLs will be found in test server.
+
 				newACLs := getACLsForANPRules(anp)
 				pg = getDefaultPGForANPSubject(anp.Name, []string{t.portUUID}, newACLs, false) // only newACLs are hosted
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
-				// note that the ACLs in 0th index for ingress and egress are merely "updated" since even if priority changes their aclIndex stays the same,
-				// so those are excluded from being garbage ACLs
-				garbageCollectACLs := []*nbdb.ACL{acls[1], acls[2], acls[3], acls[4], acls[6], acls[7], acls[8], acls[9]} // ones that are stuck due to test server not being able to do garbage collection
-				acls = append(garbageCollectACLs, newACLs...)
-				for _, acl := range acls {
+				for _, acl := range newACLs {
 					acl := acl
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
@@ -742,7 +737,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				pg = getDefaultPGForANPSubject(anp.Name, []string{t.portUUID}, newACLs, false)           // only newACLs are hosted
 				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(anpPeerNamespaceName, []net.IP{}) // pod is gone from peer namespace address-set
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
-				for _, acl := range acls {
+				for _, acl := range newACLs {
 					acl := acl
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
@@ -773,7 +768,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				pg = getDefaultPGForANPSubject(anp.Name, nil, newACLs, false) // no ports in PG
 				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(anpSubjectNamespaceName, []net.IP{})
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
-				for _, acl := range acls {
+				for _, acl := range newACLs {
 					acl := acl
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
@@ -805,7 +800,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				pg = getDefaultPGForANPSubject(anp.Name, []string{t.portUUID}, newACLs, false)
 				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(anpSubjectNamespaceName, []net.IP{testing.MustParseIP(t.podIP)})
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
-				for _, acl := range acls {
+				for _, acl := range newACLs {
 					acl := acl
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
@@ -831,7 +826,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				t2.podMAC = "0a:58:0a:80:01:06"
 				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(anpPeerNamespaceName, []net.IP{testing.MustParseIP(t2.podIP)})
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
-				for _, acl := range acls {
+				for _, acl := range newACLs {
 					acl := acl
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
@@ -853,7 +848,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				pg = getDefaultPGForANPSubject(anp.Name, nil, newACLs, false) // no ports in PG
 				expectedDatabaseState = []libovsdbtest.TestData{pg}           // namespace address-sets are gone
-				for _, acl := range acls {
+				for _, acl := range newACLs {
 					acl := acl
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
@@ -877,11 +872,6 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				pg = getDefaultPGForANPSubject(anp.Name, nil, nil, false) // no ports and acls in PG
 				expectedDatabaseState = []libovsdbtest.TestData{pg}
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// at this point all acls are for garbage collection
-				for _, acl := range acls {
-					acl := acl
-					expectedDatabaseState = append(expectedDatabaseState, acl)
-				}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -891,11 +881,6 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				expectedDatabaseState = []libovsdbtest.TestData{} // port group should be deleted
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// at this point all acls are for garbage collection
-				for _, acl := range acls {
-					acl := acl
-					expectedDatabaseState = append(expectedDatabaseState, acl)
-				}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 

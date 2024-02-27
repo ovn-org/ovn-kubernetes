@@ -2,8 +2,6 @@ package linkmanager
 
 import (
 	"fmt"
-	"net/netip"
-	"strings"
 	"sync"
 	"time"
 
@@ -127,10 +125,9 @@ func (c *Controller) AddAddress(address netlink.Addr) error {
 	if err != nil {
 		return fmt.Errorf("no valid link associated with addresses %s: %v", address.String(), err)
 	}
+	klog.Infof("Link manager: adding address %s to link %s", address.String(), link.Attrs().Name)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// overwrite label to the name of this component in-order to aid address ownership. Label must start with link name.
-	address.Label = GetAssignedAddressLabel(link.Attrs().Name)
 	c.addAddressToStore(link.Attrs().Name, address)
 	return c.syncLink(link)
 }
@@ -144,10 +141,16 @@ func (c *Controller) DelAddress(address netlink.Addr) error {
 	if err != nil && !util.GetNetLinkOps().IsLinkNotFoundError(err) {
 		return fmt.Errorf("no valid link associated with addresses %s: %v", address.String(), err)
 	}
+	klog.Infof("Link manager: deleting address %s from link %s", address.String(), link.Attrs().Name)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := util.GetNetLinkOps().AddrDel(link, &address); err != nil {
+		if !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return fmt.Errorf("failed to delete address %s: %v", address.String(), err)
+		}
+	}
 	c.delAddressFromStore(link.Attrs().Name, address)
-	return c.syncLink(link)
+	return nil
 }
 
 // syncLinkLocked is just a wrapper around syncLink that ensures the mutex is locked in advance
@@ -167,24 +170,11 @@ func (c *Controller) syncLink(link netlink.Link) error {
 	}
 	linkName := link.Attrs().Name
 	// get all addresses associated with the link depending on which IP families we support
-	foundAddresses, err := getAllLinkAddressesByIPFamily(link, c.ipv4Enabled, c.ipv6Enabled)
+	foundAddresses, err := util.GetFilteredInterfaceAddrs(link, c.ipv4Enabled, c.ipv6Enabled)
 	if err != nil {
 		return fmt.Errorf("failed to get address from link %q: %w", linkName, err)
 	}
 	wantedAddresses, found := c.store[linkName]
-	// cleanup any stale addresses on the link
-	for _, foundAddress := range foundAddresses {
-		// we label any address we create, so if we aren't managing a link, we must remove any stale addresses
-		if foundAddress.Label == GetAssignedAddressLabel(linkName) && !containsAddress(wantedAddresses, foundAddress) {
-			if err := util.GetNetLinkOps().AddrDel(link, &foundAddress); err != nil && !util.GetNetLinkOps().IsLinkNotFoundError(err) {
-				klog.Errorf("Link Network Manager: failed to delete address %q from link %q",
-					foundAddress.String(), linkName)
-			} else {
-				klog.Infof("Link Network Manager: successfully removed stale address %q from link %q",
-					foundAddress.String(), linkName)
-			}
-		}
-	}
 	// we don't manage this link therefore we don't need to add any addresses
 	if !found {
 		return nil
@@ -205,21 +195,18 @@ func (c *Controller) syncLink(link netlink.Link) error {
 					linkName, err)
 			}
 		}
-		klog.Infof("Link manager completed adding address %s to link %s", addressWanted, linkName)
+		klog.Infof("Link manager: completed adding address %s to link %s", addressWanted, linkName)
 	}
-
 	return nil
 }
 
 func (c *Controller) sync() {
 	// 1. get all the links on the node
 	// 2. iterate over the links and get the addresses associated with it
-	// 3. cleanup any stale addresses from link that we no longer managed
-	// 4. remove any stale addresses from links that we do manage
-	// 5. add addresses that are missing from a link that we managed
+	// 3. add addresses that are missing from a link that we manage
 	links, err := util.GetNetLinkOps().LinkList()
 	if err != nil {
-		klog.Errorf("Link Network Manager: failed to list links: %v", err)
+		klog.Errorf("Link manager: failed to list links: %v", err)
 		return
 	}
 	c.mu.Lock()
@@ -280,121 +267,9 @@ func (c *Controller) isAddressValid(address netlink.Addr) bool {
 	return true
 }
 
-// GetAssignedAddressLabel returns the label that must be assigned to each egress IP address bound to an interface
-func GetAssignedAddressLabel(linkName string) string {
+// DeprecatedGetAssignedAddressLabel returns the label that must be assigned to each egress IP address bound to an interface
+func DeprecatedGetAssignedAddressLabel(linkName string) string {
 	return fmt.Sprintf("%sovn", linkName)
-}
-
-// GetExternallyAvailableAddressesExcludeAssigned gets all addresses assigned on an interface with the following characteristics:
-// Must be up
-// Address must have scope universe
-// Assigned addresses are excluded
-func GetExternallyAvailableAddressesExcludeAssigned(link netlink.Link, v4, v6 bool) ([]netlink.Addr, error) {
-	addresses, err := GetExternallyAvailableAddresses(link, v4, v6)
-	if err != nil {
-		return nil, err
-	}
-	if len(addresses) == 0 {
-		return addresses, nil
-	}
-	tmp := addresses[:0]
-	for _, address := range addresses {
-		if address.Label == GetAssignedAddressLabel(link.Attrs().Name) {
-			continue
-		}
-		tmp = append(tmp, address)
-	}
-	return tmp, nil
-}
-
-// GetExternallyAvailableAddresses gets all addresses assigned on an interface with the following characteristics:
-// Must be up
-// Address must have scope universe
-// Assigned addresses are included
-func GetExternallyAvailableAddresses(link netlink.Link, v4, v6 bool) ([]netlink.Addr, error) {
-	validAddresses := make([]netlink.Addr, 0)
-	flags := link.Attrs().Flags.String()
-	if !isValidLinkFlags(flags) {
-		return validAddresses, nil
-	}
-	linkAddresses, err := getAllLinkAddressesByIPFamily(link, v4, v6)
-	if err != nil {
-		return validAddresses, fmt.Errorf("failed to get all valid link addresses: %v", err)
-	}
-	for _, address := range linkAddresses {
-		// consider only GLOBAL scope addresses
-		if address.Scope != int(netlink.SCOPE_UNIVERSE) {
-			continue
-		}
-		validAddresses = append(validAddresses, address)
-	}
-	return validAddresses, nil
-}
-
-// GetExternallyAvailablePrefixesExcludeAssigned returns address Prefixes from interfaces with the following characteristics:
-// Must be up
-// Must not be loopback
-// Must not have a parent
-// Address must have scope universe
-// Address must not be an address assigned to a link by link manager
-func GetExternallyAvailablePrefixesExcludeAssigned(link netlink.Link, v4, v6 bool) ([]netip.Prefix, error) {
-	validAddresses := make([]netip.Prefix, 0)
-	flags := link.Attrs().Flags.String()
-	if !isValidLinkFlags(flags) {
-		return validAddresses, nil
-	}
-	linkAddresses, err := getAllLinkAddressesByIPFamily(link, v4, v6)
-	if err != nil {
-		return validAddresses, fmt.Errorf("failed to get all valid link addresses: %v", err)
-	}
-	// netip pkg does not expose addresses labels. We must get addresses with netlink lib first to check if addr
-	// is managed or not
-	for _, address := range linkAddresses {
-		// check for assigned address - assigned addresses contain a well-known label
-		if address.Label != "" {
-			link, err := netlink.LinkByIndex(address.LinkIndex)
-			if err != nil {
-				return nil, fmt.Errorf("failed to understand if address (%s) is managed or not by link with index %d: %v",
-					address.String(), address.LinkIndex, err)
-			}
-			if address.Label == GetAssignedAddressLabel(link.Attrs().Name) {
-				continue
-			}
-		}
-		addr, err := netip.ParsePrefix(address.IPNet.String())
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse address %s on link %s: %v", address.String(), link.Attrs().Name, err)
-		}
-		if !addr.Addr().IsGlobalUnicast() {
-			continue
-		}
-		validAddresses = append(validAddresses, addr)
-	}
-	return validAddresses, nil
-}
-
-func isValidLinkFlags(flags string) bool {
-	// exclude interfaces that aren't up
-	return strings.Contains(flags, "up")
-}
-
-func getAllLinkAddressesByIPFamily(link netlink.Link, v4, v6 bool) ([]netlink.Addr, error) {
-	links := make([]netlink.Addr, 0)
-	if v4 {
-		linksFound, err := util.GetNetLinkOps().AddrList(link, netlink.FAMILY_V4)
-		if err != nil {
-			return links, fmt.Errorf("failed to list link addresses: %v", err)
-		}
-		links = linksFound
-	}
-	if v6 {
-		linksFound, err := util.GetNetLinkOps().AddrList(link, netlink.FAMILY_V6)
-		if err != nil {
-			return links, fmt.Errorf("failed to list link addresses: %v", err)
-		}
-		links = append(links, linksFound...)
-	}
-	return links, nil
 }
 
 func containsAddress(addresses []netlink.Addr, candidate netlink.Addr) bool {

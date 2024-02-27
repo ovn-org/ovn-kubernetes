@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"hash/fnv"
+	"math"
 	"net"
 	"reflect"
 	"strings"
@@ -99,8 +100,10 @@ type serviceConfig struct {
 }
 
 type cidrAndFlags struct {
-	ipNet *net.IPNet
-	flags int
+	ipNet             *net.IPNet
+	flags             int
+	preferredLifetime int
+	validLifetime     int
 }
 
 func (npw *nodePortWatcher) updateGatewayIPs(addressManager *addressManager) {
@@ -1993,34 +1996,17 @@ func addMasqueradeRoute(routeManager *routemanager.Controller, netIfaceName, nod
 		return fmt.Errorf("unable to find shared gw bridge interface: %s", netIfaceName)
 	}
 	mtu := 0
-	var routes []routemanager.Route
 	if ipv4 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String()))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv4)
-
-		routes = append(routes, routemanager.Route{
-			GwIP:   nil,
-			Subnet: masqIPNet,
-			MTU:    mtu,
-			SrcIP:  ipv4,
-		})
+		routeManager.Add(netlink.Route{LinkIndex: netIfaceLink.Attrs().Index, Dst: masqIPNet, MTU: mtu, Src: ipv4})
 	}
 
 	if ipv6 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/128", config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String()))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv6)
-
-		routes = append(routes, routemanager.Route{
-			GwIP:   nil,
-			Subnet: masqIPNet,
-			MTU:    mtu,
-			SrcIP:  ipv6,
-		})
+		routeManager.Add(netlink.Route{LinkIndex: netIfaceLink.Attrs().Index, Dst: masqIPNet, MTU: mtu, Src: ipv6})
 	}
-	if len(routes) > 0 {
-		routeManager.Add(routemanager.RoutesPerLink{Link: netIfaceLink, Routes: routes})
-	}
-
 	return nil
 }
 
@@ -2040,13 +2026,43 @@ func setNodeMasqueradeIPOnExtBridge(extBridgeName string) error {
 	if config.IPv6Mode {
 		_, masqIPNet, _ := net.ParseCIDR(config.Gateway.V6MasqueradeSubnet)
 		masqIPNet.IP = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP
-		bridgeCIDRs = append(bridgeCIDRs, cidrAndFlags{ipNet: masqIPNet, flags: unix.IFA_F_NODAD})
+		// Deprecate the IPv6 host masquerade IP address to ensure its not used in source address selection except
+		// if a route explicitly sets its src IP as this masquerade IP. See RFC 3484 for more details for linux src address selection.
+		// Currently, we set a route with destination as the service CIDR with source IP as the host masquerade IP.
+		// Also, ideally we would only set the preferredLifetime to 0, but because this is the default value of this type, the netlink lib
+		// will only propagate preferred lifetime to netlink if either preferred lifetime or valid lifetime is set greater than 0.
+		// Set valid lifetime to max will achieve our goal of setting preferred lifetime 0.
+		bridgeCIDRs = append(bridgeCIDRs, cidrAndFlags{ipNet: masqIPNet, flags: unix.IFA_F_NODAD, preferredLifetime: 0,
+			validLifetime: math.MaxUint32})
 	}
 
 	for _, bridgeCIDR := range bridgeCIDRs {
 		if exists, err := util.LinkAddrExist(extBridge, bridgeCIDR.ipNet); err == nil && !exists {
-			if err := util.LinkAddrAdd(extBridge, bridgeCIDR.ipNet, bridgeCIDR.flags); err != nil {
-				return err
+			if err := util.LinkAddrAdd(extBridge, bridgeCIDR.ipNet, bridgeCIDR.flags, bridgeCIDR.preferredLifetime,
+				bridgeCIDR.validLifetime); err != nil {
+				return fmt.Errorf("failed to set node masq IP on bridge %s because unable to add address %s: %v",
+					extBridgeName, bridgeCIDR.ipNet.String(), err)
+			}
+		} else if err == nil && exists && utilnet.IsIPv6(bridgeCIDR.ipNet.IP) {
+			// FIXME(mk): remove this logic when it is no longer possible to upgrade from a version which doesn't have
+			// a deprecated ipv6 host masq addr
+
+			// Deprecate IPv6 address to prevent connections from using it as its source address. For connections towards
+			// a service VIP, routes exist to explicitly add this address as source.
+			isDeprecated, err := util.IsDeprecatedAddr(extBridge, bridgeCIDR.ipNet)
+			if err != nil {
+				return fmt.Errorf("failed to set node masq IP on bridge %s because unable to detect if address %s is deprecated: %v",
+					extBridgeName, bridgeCIDR.ipNet.String(), err)
+			}
+			if !isDeprecated {
+				if err = util.LinkAddrDel(extBridge, bridgeCIDR.ipNet); err != nil {
+					klog.Warningf("Failed to delete stale masq IP %s on bridge %s because unable to delete it: %v",
+						bridgeCIDR.ipNet.String(), extBridgeName, err)
+				}
+				if err = util.LinkAddrAdd(extBridge, bridgeCIDR.ipNet, bridgeCIDR.flags, bridgeCIDR.preferredLifetime,
+					bridgeCIDR.validLifetime); err != nil {
+					return err
+				}
 			}
 		} else if err != nil {
 			return fmt.Errorf(

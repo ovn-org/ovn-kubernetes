@@ -218,11 +218,8 @@ func (o *OvsdbServer) Transact(client *rpc2.Client, args []json.RawMessage, repl
 }
 
 func (o *OvsdbServer) transact(name string, operations []ovsdb.Operation) ([]*ovsdb.OperationResult, database.Update) {
-	o.modelsMutex.Lock()
-	dbModel := o.models[name]
-	o.modelsMutex.Unlock()
-	transaction := database.NewTransaction(dbModel, name, o.db, &o.logger)
-	return transaction.Transact(operations)
+	transaction := o.db.NewTransaction(name)
+	return transaction.Transact(operations...)
 }
 
 // Cancel cancels the last transaction
@@ -255,21 +252,20 @@ func (o *OvsdbServer) Monitor(client *rpc2.Client, args []json.RawMessage, reply
 		}
 	}
 
-	o.modelsMutex.Lock()
-	dbModel := o.models[db]
-	o.modelsMutex.Unlock()
-	transaction := database.NewTransaction(dbModel, db, o.db, &o.logger)
+	transaction := o.db.NewTransaction(db)
 
 	tableUpdates := make(ovsdb.TableUpdates)
 	for t, request := range request {
-		rows := transaction.Select(t, nil, request.Columns)
-		if len(rows.Rows) == 0 {
+		op := ovsdb.Operation{Op: ovsdb.OperationSelect, Table: t, Columns: request.Columns}
+		result, _ := transaction.Transact(op)
+		if len(result) == 0 || len(result[0].Rows) == 0 {
 			continue
 		}
-		tableUpdates[t] = make(ovsdb.TableUpdate, len(rows.Rows))
-		for i := range rows.Rows {
-			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
-			tableUpdates[t][uuid] = &ovsdb.RowUpdate{New: &rows.Rows[i]}
+		rows := result[0].Rows
+		tableUpdates[t] = make(ovsdb.TableUpdate, len(rows))
+		for i := range rows {
+			uuid := rows[i]["_uuid"].(ovsdb.UUID).GoUUID
+			tableUpdates[t][uuid] = &ovsdb.RowUpdate{New: &rows[i]}
 		}
 	}
 	*reply = tableUpdates
@@ -302,21 +298,20 @@ func (o *OvsdbServer) MonitorCond(client *rpc2.Client, args []json.RawMessage, r
 		}
 	}
 
-	o.modelsMutex.Lock()
-	dbModel := o.models[db]
-	o.modelsMutex.Unlock()
-	transaction := database.NewTransaction(dbModel, db, o.db, &o.logger)
+	transaction := o.db.NewTransaction(db)
 
 	tableUpdates := make(ovsdb.TableUpdates2)
 	for t, request := range request {
-		rows := transaction.Select(t, nil, request.Columns)
-		if len(rows.Rows) == 0 {
+		op := ovsdb.Operation{Op: ovsdb.OperationSelect, Table: t, Columns: request.Columns}
+		result, _ := transaction.Transact(op)
+		if len(result) == 0 || len(result[0].Rows) == 0 {
 			continue
 		}
-		tableUpdates[t] = make(ovsdb.TableUpdate2, len(rows.Rows))
-		for i := range rows.Rows {
-			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
-			tableUpdates[t][uuid] = &ovsdb.RowUpdate2{Initial: &rows.Rows[i]}
+		rows := result[0].Rows
+		tableUpdates[t] = make(ovsdb.TableUpdate2, len(rows))
+		for i := range rows {
+			uuid := rows[i]["_uuid"].(ovsdb.UUID).GoUUID
+			tableUpdates[t][uuid] = &ovsdb.RowUpdate2{Initial: &rows[i]}
 		}
 	}
 	*reply = tableUpdates
@@ -349,21 +344,20 @@ func (o *OvsdbServer) MonitorCondSince(client *rpc2.Client, args []json.RawMessa
 		}
 	}
 
-	o.modelsMutex.Lock()
-	dbModel := o.models[db]
-	o.modelsMutex.Unlock()
-	transaction := database.NewTransaction(dbModel, db, o.db, &o.logger)
+	transaction := o.db.NewTransaction(db)
 
 	tableUpdates := make(ovsdb.TableUpdates2)
 	for t, request := range request {
-		rows := transaction.Select(t, nil, request.Columns)
-		if len(rows.Rows) == 0 {
+		op := ovsdb.Operation{Op: ovsdb.OperationSelect, Table: t, Columns: request.Columns}
+		result, _ := transaction.Transact(op)
+		if len(result) == 0 || len(result[0].Rows) == 0 {
 			continue
 		}
-		tableUpdates[t] = make(ovsdb.TableUpdate2, len(rows.Rows))
-		for i := range rows.Rows {
-			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
-			tableUpdates[t][uuid] = &ovsdb.RowUpdate2{Initial: &rows.Rows[i]}
+		rows := result[0].Rows
+		tableUpdates[t] = make(ovsdb.TableUpdate2, len(rows))
+		for i := range rows {
+			uuid := rows[i]["_uuid"].(ovsdb.UUID).GoUUID
+			tableUpdates[t][uuid] = &ovsdb.RowUpdate2{Initial: &rows[i]}
 		}
 	}
 	*reply = ovsdb.MonitorCondSinceReply{Found: false, LastTransactionID: "00000000-0000-0000-000000000000", Updates: tableUpdates}

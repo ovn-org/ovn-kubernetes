@@ -81,9 +81,10 @@ type initialAddFn func(*Handler, []interface{})
 
 type queueMap struct {
 	sync.Mutex
-	entries map[ktypes.NamespacedName]*queueMapEntry
-	queues  []chan *event
-	wg      *sync.WaitGroup
+	entries  map[ktypes.NamespacedName]*queueMapEntry
+	queues   []chan *event
+	wg       *sync.WaitGroup
+	stopChan chan struct{}
 }
 
 type queueMapEntry struct {
@@ -221,11 +222,12 @@ func (i *informer) removeHandler(handler *Handler) {
 	}()
 }
 
-func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup) *queueMap {
+func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct{}) *queueMap {
 	qm := &queueMap{
-		entries: make(map[ktypes.NamespacedName]*queueMapEntry),
-		queues:  make([]chan *event, numEventQueues),
-		wg:      wg,
+		entries:  make(map[ktypes.NamespacedName]*queueMapEntry),
+		queues:   make([]chan *event, numEventQueues),
+		wg:       wg,
+		stopChan: stopChan,
 	}
 	for j := 0; j < int(numEventQueues); j++ {
 		qm.queues[j] = make(chan *event, 10)
@@ -233,7 +235,7 @@ func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup) *queueMap {
 	return qm
 }
 
-func (qm *queueMap) processEvents(queue chan *event, stopChan <-chan struct{}) {
+func (qm *queueMap) processEvents(queue chan *event) {
 	defer qm.wg.Done()
 	for {
 		select {
@@ -242,16 +244,16 @@ func (qm *queueMap) processEvents(queue chan *event, stopChan <-chan struct{}) {
 				return
 			}
 			e.process(e)
-		case <-stopChan:
+		case <-qm.stopChan:
 			return
 		}
 	}
 }
 
-func (qm *queueMap) start(stopChan chan struct{}) {
+func (qm *queueMap) start() {
 	qm.wg.Add(len(qm.queues))
 	for _, q := range qm.queues {
-		go qm.processEvents(q, stopChan)
+		go qm.processEvents(q)
 	}
 }
 
@@ -352,13 +354,18 @@ func (qm *queueMap) releaseQueueMapEntry(key ktypes.NamespacedName, entry *queue
 // enqueueEvent adds an event to the appropriate queue for the object
 func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, oType reflect.Type, isDel bool, processFunc func(*event)) {
 	key, entry := qm.getQueueMapEntry(oType, obj)
-	qm.queues[entry.queue] <- &event{
+	event := &event{
 		obj:    obj,
 		oldObj: oldObj,
 		process: func(e *event) {
 			processFunc(e)
 			qm.releaseQueueMapEntry(key, entry, isDel)
 		},
+	}
+	select {
+	case qm.queues[entry.queue] <- event:
+	case <-qm.stopChan:
+		return
 	}
 }
 
@@ -565,8 +572,8 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	if err != nil {
 		return nil, err
 	}
-	i.queueMap = newQueueMap(numEventQueues, &i.shutdownWg)
-	i.queueMap.start(stopChan)
+	i.queueMap = newQueueMap(numEventQueues, &i.shutdownWg, stopChan)
+	i.queueMap.start()
 
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
 		// Make a handler-specific channel array across which the
@@ -574,8 +581,8 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// is added, only that handler should receive events for all
 		// existing objects.
 		addsWg := &sync.WaitGroup{}
-		addsMap := newQueueMap(numEventQueues, addsWg)
-		addsMap.start(stopChan)
+		addsMap := newQueueMap(numEventQueues, addsWg, stopChan)
+		addsMap.start()
 
 		// Distribute the existing items into the handler-specific
 		// channel array.

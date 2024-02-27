@@ -383,6 +383,7 @@ spec:
 			if protocol == v1.IPv6Protocol {
 				otherDstIP = "fc00:f853:ccd:e793:ffff::1"
 			} else {
+				// TODO(mk): replace with non-repeating IP allocator
 				otherDstIP = "172.18.1.1"
 			}
 			_, err = runCommand(containerRuntime, "exec", dstNode.Name, "ip", "addr", "add", otherDstIP, "dev", "breth0")
