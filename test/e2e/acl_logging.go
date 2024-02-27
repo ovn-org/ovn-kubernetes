@@ -174,15 +174,7 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 		allowACLVerdict          = "allow"
 		namespacePrefix          = "acl-log-egressfw"
 		secondaryNamespacePrefix = "acl-log-egressfw-sec"
-
-		// These targets must be off cluster - traffic to the cluster should always be
-		// allowed: https://docs.openshift.com/container-platform/4.10/networking/openshift_sdn/configuring-egress-firewall.html
-		// "As a cluster administrator, you can create an egress firewall for a project that restricts egress traffic leaving
-		// your OpenShift Container Platform cluster."
-		// Because the egress firewall feature only affects traffic leaving the cluster, we will not log for on-cluster targets.
-		allowedDstIP = "172.18.0.1"
-		deniedDstIP  = "172.19.0.10"
-		dstPort      = 8080
+		dstPort                  = 8080
 	)
 
 	fr := wrappedTestFramework(namespacePrefix)
@@ -192,15 +184,32 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 		nsNameSecondary  string
 		pokePod          *v1.Pod
 		pokePodSecondary *v1.Pod
+		allowedDstIP     string
+		deniedDstIP      string
 	)
 
 	BeforeEach(func() {
+		// These targets must be off cluster - traffic to the cluster should always be
+		// allowed: https://docs.openshift.com/container-platform/4.10/networking/openshift_sdn/configuring-egress-firewall.html
+		// "As a cluster administrator, you can create an egress firewall for a project that restricts egress traffic leaving
+		// your OpenShift Container Platform cluster."
+		// Because the egress firewall feature only affects traffic leaving the cluster, we will not log for on-cluster targets.
+		allowedDstIP = "172.18.0.1"
+		deniedDstIP  = "172.19.0.10"
+		mask         := "32"
+		denyCIDR     := "0.0.0.0/0"
+		if IsIPv6Cluster(fr.ClientSet) {
+			allowedDstIP = "2001:4860:4860::8888"
+			deniedDstIP  = "2001:4860:4860::8844"
+			mask         = "128"
+			denyCIDR     = "::/0"
+		}
 		By("configuring the ACL logging level within the namespace")
 		nsName = fr.Namespace.Name
 		Expect(setNamespaceACLLogSeverity(fr, nsName, initialDenyACLSeverity, initialAllowACLSeverity, aclRemoveOptionDelete)).To(Succeed())
 
 		By("creating a \"default deny\" Egress Firewall")
-		err := makeEgressFirewall(nsName)
+		err := makeEgressFirewall(nsName, allowedDstIP, mask, denyCIDR)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("creating a pod running agnhost netexec")
@@ -221,7 +230,7 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 		Expect(setNamespaceACLLogSeverity(fr, nsNameSecondary, initialDenyACLSeverity, initialAllowACLSeverity, aclRemoveOptionDelete)).To(Succeed())
 
 		By("creating a \"default deny\" Egress Firewall inside the secondary namespace")
-		err = makeEgressFirewall(nsNameSecondary)
+		err = makeEgressFirewall(nsNameSecondary, allowedDstIP, mask, denyCIDR)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("creating a pod running agnhost netexec inside the secondary namespace")
@@ -621,7 +630,7 @@ func makeDenyAllPolicy(f *framework.Framework, ns string, policyName string) (*k
 	return f.ClientSet.NetworkingV1().NetworkPolicies(ns).Create(context.TODO(), policy, metav1.CreateOptions{})
 }
 
-func makeEgressFirewall(ns string) error {
+func makeEgressFirewall(ns, allowedDstIP, mask, denyCIDR string) error {
 	egressFirewallYaml := "egressfirewall.yaml"
 	var egressFirewallConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressFirewall
@@ -632,11 +641,11 @@ spec:
   egress:
   - type: Allow
     to:
-      cidrSelector: 172.18.0.1/32
+      cidrSelector: %s/%s
   - type: Deny
     to:
-      cidrSelector: 0.0.0.0/0
-`)
+      cidrSelector: %s
+`, allowedDstIP, mask, denyCIDR)
 
 	if err := os.WriteFile(egressFirewallYaml, []byte(egressFirewallConfig), 0644); err != nil {
 		framework.Failf("Unable to write CRD config to disk: %v", err)

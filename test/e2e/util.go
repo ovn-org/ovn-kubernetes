@@ -757,6 +757,9 @@ func pokeAllPodIPs(fr *framework.Framework, srcPodName string, dstPod *v1.Pod) e
 }
 
 func pokeExternalHostFromPod(fr *framework.Framework, namespace string, srcPodName, dstIp string, dstPort int) error {
+	if utilnet.IsIPv6String(dstIp) {
+		dstIp = fmt.Sprintf("[%s]", dstIp)
+	}
 	stdout, stderr, err := ExecShellInPodWithFullOutput(
 		fr,
 		namespace,
