@@ -3,7 +3,8 @@ package kube
 import (
 	"context"
 	"encoding/json"
-
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+	ipamclaimssclientset "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
@@ -40,6 +41,7 @@ type InterfaceOVN interface {
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
 	UpdateEgressServiceStatus(namespace, name, host string) error
+	UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -81,6 +83,7 @@ type KubeOVN struct {
 	EgressServiceClient  egressserviceclientset.Interface
 	APBRouteClient       adminpolicybasedrouteclientset.Interface
 	EgressQoSClient      egressqosclientset.Interface
+	IPAMClaimsClient     ipamclaimssclientset.Interface
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -453,5 +456,10 @@ func (k *KubeOVN) UpdateEgressServiceStatus(namespace, name, host string) error 
 	es.Status.Host = host
 
 	_, err = k.EgressServiceClient.K8sV1().EgressServices(es.Namespace).UpdateStatus(context.TODO(), es, metav1.UpdateOptions{})
+	return err
+}
+
+func (k *KubeOVN) UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error {
+	_, err := k.IPAMClaimsClient.K8sV1alpha1().IPAMClaims(updatedIPAMClaim.Namespace).UpdateStatus(context.TODO(), updatedIPAMClaim, metav1.UpdateOptions{})
 	return err
 }
