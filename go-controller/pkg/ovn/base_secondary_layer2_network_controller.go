@@ -407,12 +407,13 @@ func (oc *BaseSecondaryLayer2NetworkController) syncNodes(nodes []interface{}) e
 }
 
 func (oc *BaseSecondaryLayer2NetworkController) syncIPAMClaims(ipamClaims []interface{}) error {
-	switchType := types.OVNLayer2Switch
-	if oc.NetInfo.TopologyType() == types.LocalnetTopology {
-		switchType = types.OVNLocalnetSwitch
+	switchName, err := oc.getExpectedSwitchName(dummyPod())
+	if err != nil {
+		return err
 	}
-	if oc.allocatesPodAnnotation() {
-		return oc.ipamClaimsReconciler.Sync(ipamClaims, oc.lsManager.ForSwitch(oc.GetNetworkScopedName(switchType)))
-	}
-	return nil
+	return oc.ipamClaimsReconciler.Sync(ipamClaims, oc.lsManager.ForSwitch(switchName))
+}
+
+func dummyPod() *corev1.Pod {
+	return &corev1.Pod{Spec: corev1.PodSpec{NodeName: ""}}
 }
