@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 )
@@ -385,6 +386,11 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			continue
 		}
 
+		_, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
+		if err != nil {
+			return err
+		}
+
 		bsnc.logicalPortCache.remove(pod, nadName)
 		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfoMap[nadName], nadName)
 		if err != nil {
@@ -402,6 +408,32 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			continue
 		}
 
+		network := networkMap[nadName]
+		hasIPAMClaims := network.IPAMClaimReference != ""
+		if hasIPAMClaims {
+			ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
+			if err == nil {
+				hasIPAMClaims = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+			} else if apierrors.IsNotFound(err) {
+				klog.Errorf("Failed to retrieve IPAMClaim %q but will release IPs: %v", network.IPAMClaimReference, err)
+				hasIPAMClaims = false
+			} else {
+				return fmt.Errorf(
+					"failed to find IPAMClaim %q",
+					fmt.Sprintf("%s/%s", network.Namespace, network.IPAMClaimReference),
+				)
+			}
+		}
+		if hasIPAMClaims {
+			klog.Infof(
+				"will not release IPs for pod %s/%s, ips: %s network %s because it has IPAM claims",
+				pod.Namespace,
+				pod.Name,
+				util.JoinIPNetIPs(pInfo.ips, " "),
+				bsnc.GetNetworkName(),
+			)
+			continue
+		}
 		// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
 		// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
 		// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
