@@ -79,6 +79,8 @@ func (bsnc *BaseSecondaryNetworkController) AddSecondaryNetworkResourceCommon(ob
 				mp.Namespace, mp.Name, err)
 			return err
 		}
+	case factory.IPAMClaimsType:
+		return nil
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
@@ -139,6 +141,8 @@ func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon
 				return err
 			}
 		}
+	case factory.IPAMClaimsType:
+		return nil
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
@@ -604,6 +608,19 @@ func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
 	handler, err := bsnc.retryNetworkPolicies.WatchResource()
 	if err != nil {
 		bsnc.policyHandler = handler
+	}
+	return err
+}
+
+// WatchIPAMClaims starts the watching of IPAMClaim resources and calls
+// back the appropriate handler logic
+func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
+	if bsnc.ipamClaimsHandler != nil {
+		return nil
+	}
+	handler, err := bsnc.retryIPAMClaims.WatchResource()
+	if err != nil {
+		bsnc.ipamClaimsHandler = handler
 	}
 	return err
 }

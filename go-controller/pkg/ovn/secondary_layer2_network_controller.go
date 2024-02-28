@@ -69,6 +69,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			ipamClaimsAllocator := persistentips.NewPersistentIPsAllocator(
 				cnci.kube,
 				oc.lsManager.ForSwitch(oc.GetNetworkScopedName(types.OVNLayer2Switch)),
+				netInfo.GetNetworkName(),
 			)
 			fetcher := persistentips.NewIPAMClaimsFetcher(netInfo, cnci.watchFactory.IPAMClaimsInformer().Lister())
 			podAnnotationAllocator = pod.NewPodAnnotationAllocatorWithPersistentIPs(
@@ -79,6 +80,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 				fetcher,
 			)
 			oc.ipamClaimsFetcher = fetcher
+			oc.persistentIPsAllocator = ipamClaimsAllocator
 		}
 		oc.podAnnotationAllocator = podAnnotationAllocator
 	}
