@@ -402,7 +402,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			idallocator := &idAllocatorStub{}
 
 			podListerMock := &v1mocks.PodLister{}
-			kubeMock := &kubemocks.Interface{}
+			kubeMock := &kubemocks.InterfaceOVN{}
 			podNamespaceLister := &v1mocks.PodNamespaceLister{}
 
 			podListerMock.On("Pods", mock.AnythingOfType("string")).Return(podNamespaceLister)

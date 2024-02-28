@@ -98,7 +98,7 @@ type BaseNetworkController struct {
 	lsManager *lsm.LogicalSwitchManager
 
 	// An utility to allocate the PodAnnotation to pods
-	podAnnotationAllocator *pod.PodAnnotationAllocator
+	podAnnotationAllocator pod.AnnotationAllocator
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache

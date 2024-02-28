@@ -14,6 +14,9 @@ import (
 	"k8s.io/klog/v2"
 
 	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/persistentips"
+	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -30,7 +33,7 @@ import (
 // level to support the necessary configuration for the cluster networks.
 type networkClusterController struct {
 	watchFactory *factory.WatchFactory
-	kube         kube.Interface
+	kube         kube.InterfaceOVN
 	stopChan     chan struct{}
 	wg           *sync.WaitGroup
 
@@ -52,8 +55,11 @@ type networkClusterController struct {
 }
 
 func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
-	kube := &kube.Kube{
-		KClient: ovnClient.KubeClient,
+	kube := &kube.KubeOVN{
+		Kube: kube.Kube{
+			KClient: ovnClient.KubeClient,
+		},
+		IPAMClaimsClient: ovnClient.IPAMClaimsClient,
 	}
 
 	wg := &sync.WaitGroup{}
@@ -135,7 +141,30 @@ func (ncc *networkClusterController) init() error {
 	if ncc.hasPodAllocation() {
 		ncc.retryPods = ncc.newRetryFramework(factory.PodType, true)
 
-		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, ncc.watchFactory.PodCoreInformer().Lister(), ncc.kube)
+		var (
+			ipAllocator                                                = subnet.NewAllocator()
+			podAllocationAnnotator annotationalloc.AnnotationAllocator = annotationalloc.NewPodAnnotationAllocator(
+				ncc.NetInfo,
+				ncc.watchFactory.PodCoreInformer().Lister(),
+				ncc.kube,
+			)
+		)
+
+		if util.DoesNetworkRequireIPAM(ncc.NetInfo) {
+			ipamClaimsAllocator := persistentips.NewPersistentIPsAllocator(
+				ncc.kube,
+				ipAllocator.ForSubnet(ncc.NetInfo.GetNetworkName()),
+			)
+			podAllocationAnnotator = annotationalloc.NewPodAnnotationAllocatorWithPersistentIPs(
+				ncc.NetInfo,
+				ncc.watchFactory.PodCoreInformer().Lister(),
+				ncc.kube,
+				ipamClaimsAllocator,
+				persistentips.NewIPAMClaimsFetcher(ncc.NetInfo, ncc.watchFactory.IPAMClaimsInformer().Lister()),
+			)
+		}
+
+		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, ncc.kube, podAllocationAnnotator, ipAllocator)
 		err := ncc.podAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
