@@ -8,6 +8,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -99,6 +100,9 @@ type BaseNetworkController struct {
 
 	// An utility to allocate the PodAnnotation to pods
 	podAnnotationAllocator pod.AnnotationAllocator
+
+	// A utility to fish for IPAMClaims
+	ipamClaimsFetcher *persistentips.IPAMClaimFetcher
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
