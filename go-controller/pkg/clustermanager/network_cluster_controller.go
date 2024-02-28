@@ -2,6 +2,7 @@ package clustermanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -13,6 +14,8 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
+
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 
 	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
@@ -379,6 +382,20 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
 		return h.ncc.nodeAllocator.HandleDeleteNode(node)
+	case factory.IPAMClaimsType:
+		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
+		if !ok {
+			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
+		}
+
+		ipAllocator := h.ncc.subnetAllocator.ForSubnet(h.ncc.NetInfo.GetNetworkName())
+		err := h.ncc.ipamClaimReconciler.Reconcile(ipamClaim, nil, ipAllocator)
+		if err != nil && !errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			return fmt.Errorf("error deleting IPAMClaim: %w", err)
+		} else if errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			return nil // let's avoid the log below, since nothing was released.
+		}
+		klog.Infof("Released IPs %q for network %q", ipamClaim.Status.IPs, ipamClaim.Spec.Network)
 	}
 	return nil
 }

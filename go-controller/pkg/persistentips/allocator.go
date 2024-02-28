@@ -19,6 +19,7 @@ import (
 )
 
 var (
+	ErrIgnoredIPAMClaim                   = errors.New("ignored IPAMClaim: it belongs to other network")
 	ErrPersistentIPsNotAvailableOnNetwork = errors.New("ipam claims not supported on this network")
 )
 
@@ -76,6 +77,13 @@ func (icr *IPAMClaimReconciler) Reconcile(
 	}
 
 	if ipamClaim == nil {
+		return nil
+	}
+
+	if newIPAMClaim == nil {
+		if err := icr.releaseIPs(oldIPAMClaim, ipReleaser); err != nil {
+			return fmt.Errorf("error releasing IPs %q from IPAM claim: %w", oldIPAMClaim.Status.IPs, err)
+		}
 		return nil
 	}
 
@@ -168,5 +176,25 @@ func (icr *IPAMClaimReconciler) Sync(objs []interface{}, ipAllocator IPAllocator
 			return fmt.Errorf("failed allocating persistent ips: %w", err)
 		}
 	}
+	return nil
+}
+
+func (icr *IPAMClaimReconciler) releaseIPs(ipamClaim *ipamclaimsapi.IPAMClaim, ipReleaser IPReleaser) error {
+	if ipamClaim.Spec.Network != icr.netInfo.GetNetworkName() {
+		return ErrIgnoredIPAMClaim
+	}
+	ips, err := util.ParseIPNets(ipamClaim.Status.IPs)
+	if err != nil {
+		klog.Errorf(
+			"Failed parsing ipnets while trying to release persistent IPs %q: %v",
+			ipamClaim.Status.IPs,
+			err,
+		)
+		return nil
+	}
+	if err := ipReleaser.ReleaseIPs(ips); err != nil {
+		return fmt.Errorf("failed releasing persistent IPs: %v", err)
+	}
+	klog.V(5).Infof("Released IPs: %+v", ips)
 	return nil
 }

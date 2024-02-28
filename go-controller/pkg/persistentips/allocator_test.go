@@ -200,6 +200,35 @@ var _ = Describe("Persistent IP allocator operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(namedAllocator.AllocateIPs(ips)).To(MatchError(ip.ErrAllocated))
 		})
+
+		It("successfully de-allocates an IP address from the pool", func() {
+			Expect(
+				ipamClaimsReconciler.releaseIPs(
+					ipamClaimWithIPs(namespace, claimName, networkName, initialIPs...),
+					namedAllocator,
+				)).To(Succeed())
+
+			// we allocate the same IPs again, to ensure they were release with the call above
+			Expect(
+				namedAllocator.AllocateIPs(ovntest.MustParseIPNets(initialIPs...)),
+			).To(Succeed())
+		})
+
+		It("the reconcile function releases IP allocations when the IPAMClaim is removed", func() {
+			// we allocate the same IPs again, to ensure they are currently allocated
+			Expect(namedAllocator.AllocateIPs(ovntest.MustParseIPNets(initialIPs...))).To(MatchError(ip.ErrAllocated))
+
+			Expect(
+				ipamClaimsReconciler.Reconcile(
+					ipamClaimWithIPs(namespace, claimName, networkName, initialIPs...),
+					nil,
+					namedAllocator,
+				)).To(Succeed())
+
+			// we allocate the same IPs again, to ensure they were released with the call above
+			Expect(namedAllocator.AllocateIPs(ovntest.MustParseIPNets(initialIPs...))).To(Succeed())
+		})
+
 	})
 
 	Context("retrieving IPAMClaims", func() {
@@ -231,15 +260,15 @@ var _ = Describe("Persistent IP allocator operations", func() {
 				"when the claim we're looking for is actually passed in layer2 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer2Topology, Subnets: "192.10.10.0/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 			),
 			table.Entry(
 				"when the claim we're looking for is actually passed in localnet topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.LocalnetTopology, Subnets: "192.10.10.0/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 			),
 		)
 
@@ -326,7 +355,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 				"when the claim we're looking for is actually passed in layer3 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer3Topology, Subnets: "192.10.10.0/16/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				ErrPersistentIPsNotAvailableOnNetwork,
 			),
 		)

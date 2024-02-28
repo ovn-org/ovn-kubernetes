@@ -1,19 +1,23 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
 	"time"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -185,6 +189,25 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 				mp.Namespace, mp.Name, err)
 			return err
 		}
+
+	case factory.IPAMClaimsType:
+		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
+		if !ok {
+			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
+		}
+
+		switchName, err := bsnc.getExpectedSwitchName(dummyPod())
+		if err != nil {
+			return err
+		}
+		ipAllocator := bsnc.lsManager.ForSwitch(switchName)
+		err = bsnc.ipamClaimsReconciler.Reconcile(ipamClaim, nil, ipAllocator)
+		if err != nil && !errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			return fmt.Errorf("error deleting IPAMClaim: %w", err)
+		} else if errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			return nil // let's avoid the log below, since nothing was released.
+		}
+		klog.Infof("Released IPs %q for network %q", ipamClaim.Status.IPs, ipamClaim.Spec.Network)
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
@@ -413,29 +436,29 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		}
 
 		network := networkMap[nadName]
-		hasIPAMClaims := network.IPAMClaimReference != ""
-		if hasIPAMClaims {
+
+		hasPersistentIPs := bsnc.allowPersistentIPs()
+		hasIPAMClaim := network != nil && network.IPAMClaimReference != ""
+		if hasIPAMClaim && !hasPersistentIPs {
+			klog.Errorf(
+				"Pod %s/%s referencing an IPAMClaim on network %q which does not honor it",
+				pod.GetNamespace(),
+				pod.GetName(),
+				bsnc.NetInfo.GetNetworkName(),
+			)
+			hasIPAMClaim = false
+		}
+		if hasIPAMClaim {
 			ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
-			if err == nil {
-				hasIPAMClaims = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
-			} else if apierrors.IsNotFound(err) {
+			hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+			if apierrors.IsNotFound(err) {
 				klog.Errorf("Failed to retrieve IPAMClaim %q but will release IPs: %v", network.IPAMClaimReference, err)
-				hasIPAMClaims = false
-			} else {
-				return fmt.Errorf(
-					"failed to find IPAMClaim %q",
-					fmt.Sprintf("%s/%s", network.Namespace, network.IPAMClaimReference),
-				)
+			} else if err != nil {
+				return fmt.Errorf("failed to get IPAMClaim %s/%s: %w", network.Namespace, network.IPAMClaimReference, err)
 			}
 		}
-		if hasIPAMClaims {
-			klog.Infof(
-				"will not release IPs for pod %s/%s, ips: %s network %s because it has IPAM claims",
-				pod.Namespace,
-				pod.Name,
-				util.JoinIPNetIPs(pInfo.ips, " "),
-				bsnc.GetNetworkName(),
-			)
+
+		if hasIPAMClaim {
 			continue
 		}
 		// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that

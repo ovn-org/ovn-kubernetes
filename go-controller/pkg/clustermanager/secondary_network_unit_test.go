@@ -402,6 +402,133 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 				})
 			})
+
+			ginkgo.When("IPAMClaims are deleted from the datastore", func() {
+				ginkgo.It("returns the IP addresses to the pool", func() {
+					app.Action = func(ctx *cli.Context) error {
+						ipamClaimsClient := fakeipamclaimclient.NewSimpleClientset(
+							ipamClaimWithIPAddr(claimName, namespace, networkName, subnetIP),
+						)
+						fakeClient := &util.OVNClusterManagerClientset{
+							KubeClient:       fake.NewSimpleClientset(),
+							IPAMClaimsClient: ipamClaimsClient,
+						}
+
+						gomega.Expect(
+							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+								EnableMultiNetwork: true,
+								EnableInterconnect: true},
+							)).To(gomega.Succeed())
+						var err error
+						f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						gomega.Expect(f.Start()).To(gomega.Succeed())
+
+						sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
+						nc := newNetworkClusterController(
+							namedIDAllocator,
+							netInfo,
+							sncm.ovnClient,
+							sncm.watchFactory,
+						)
+						gomega.Expect(nc.init()).To(gomega.Succeed())
+						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
+
+						ips, err := util.ParseIPNets([]string{subnetIP})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						namedSubnetAllocator := nc.subnetAllocator.ForSubnet(netInfo.GetNetworkName())
+						// the IP address is already allocated in t = x
+						gomega.Expect(namedSubnetAllocator.AllocateIPs(ips)).To(gomega.Equal(ip.ErrAllocated))
+
+						gomega.Expect(
+							ipamClaimsClient.K8sV1alpha1().IPAMClaims(namespace).Delete(
+								context.Background(),
+								claimName,
+								metav1.DeleteOptions{},
+							)).To(gomega.Succeed())
+
+						// the IP address is available in t = x + T
+						gomega.Eventually(func() error {
+							return namedSubnetAllocator.AllocateIPs(ips)
+						}).Should(gomega.Succeed())
+
+						return nil
+					}
+
+					gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+				})
+
+				ginkgo.It("ignores IPs on deleted IPAMClaims for networks it does not manage", func() {
+					const (
+						claimName                 = "claim1"
+						namespace                 = "ns"
+						someOtherNetwork          = "othernet"
+						someOtherNetworkClaimName = "claim321"
+					)
+
+					app.Action = func(ctx *cli.Context) error {
+						ipamClaimsClient := fakeipamclaimclient.NewSimpleClientset(
+							ipamClaimWithIPAddr(claimName, namespace, networkName, subnetIP),
+							ipamClaimWithIPAddr(someOtherNetworkClaimName, namespace, someOtherNetwork, subnetIP),
+						)
+						fakeClient := &util.OVNClusterManagerClientset{
+							KubeClient:       fake.NewSimpleClientset(),
+							IPAMClaimsClient: ipamClaimsClient,
+						}
+
+						gomega.Expect(
+							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+								EnableMultiNetwork: true,
+								EnableInterconnect: true},
+							)).To(gomega.Succeed())
+						var err error
+						f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						gomega.Expect(f.Start()).To(gomega.Succeed())
+
+						sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
+						nc := newNetworkClusterController(
+							namedIDAllocator,
+							netInfo,
+							sncm.ovnClient,
+							sncm.watchFactory,
+						)
+						gomega.Expect(nc.init()).To(gomega.Succeed())
+						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
+
+						ips, err := util.ParseIPNets([]string{subnetIP})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						namedSubnetAllocator := nc.subnetAllocator.ForSubnet(netInfo.GetNetworkName())
+						// the IP address is already allocated in t = x
+						gomega.Expect(namedSubnetAllocator.AllocateIPs(ips)).To(gomega.Equal(ip.ErrAllocated))
+
+						// deleting an allocation for a different network
+						gomega.Expect(
+							ipamClaimsClient.K8sV1alpha1().IPAMClaims(namespace).Delete(
+								context.Background(),
+								someOtherNetworkClaimName,
+								metav1.DeleteOptions{},
+							)).To(gomega.Succeed())
+
+						// does not impact the network for which we have the controller
+						gomega.Consistently(func() error {
+							return namedSubnetAllocator.AllocateIPs(ips)
+						}).Should(gomega.Equal(ip.ErrAllocated))
+
+						return nil
+					}
+
+					gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+				})
+			})
 		})
 	})
 })
