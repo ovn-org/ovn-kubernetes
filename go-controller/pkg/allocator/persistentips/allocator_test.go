@@ -70,7 +70,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 		},
 			table.Entry("no objects to sync with"),
 			table.Entry("an IPAMClaim without persisted IPs", emptyDummyIPAMClaim(namespace, claimName)),
-			table.Entry("an IPAMClaim with persisted IPs", ipamClaimWithIPs("192.168.200.2/24", "fd10::1/64")),
+			table.Entry("an IPAMClaim with persisted IPs", ipamClaimWithIPs("192.168.200.2/24", "fd10::1/64", networkName)),
 		)
 
 	})
@@ -83,7 +83,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 			ovnkapiclient = &ovnkclient.KubeOVN{
 				Kube: ovnkclient.Kube{},
 				IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(
-					ipamClaimWithIPs(namespace, claimName, originalIPAMClaimIP),
+					ipamClaimWithIPs(namespace, claimName, networkName, originalIPAMClaimIP),
 				),
 			}
 			Expect(ipAllocator.AddOrUpdateSubnet(subnetName, ovntest.MustParseIPNets("192.168.200.0/24", "fd10::/64"))).To(Succeed())
@@ -92,7 +92,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 
 		It("the IPAMClaim is *not* updated", func() {
 			Expect(persistentIPAllocator.Reconcile(
-				ipamClaimWithIPs(namespace, claimName, originalIPAMClaimIP),
+				ipamClaimWithIPs(namespace, claimName, networkName, originalIPAMClaimIP),
 				[]string{"192.168.200.0/24", "fd10::/64"},
 			)).To(Succeed())
 
@@ -127,8 +127,25 @@ var _ = Describe("Persistent IP allocator operations", func() {
 					[]interface{}{ipamClaimWithIPs(
 						namespace,
 						claimName,
+						networkName,
 						initialIPs...,
 					)}),
+			).To(Succeed())
+		})
+
+		It("successfully de-allocates an IP address from the pool", func() {
+			Expect(
+				persistentIPAllocator.Delete(
+					ipamClaimWithIPs(
+						namespace,
+						claimName,
+						networkName,
+						initialIPs...,
+					))).To(Succeed())
+
+			// we allocate the same IPs again, to ensure they were release with the call above
+			Expect(
+				persistentIPAllocator.ipAllocator.AllocateIPs(ovntest.MustParseIPNets(initialIPs...)),
 			).To(Succeed())
 		})
 	})
@@ -199,42 +216,42 @@ var _ = Describe("Persistent IP allocator operations", func() {
 				"when the claim we're looking for is actually passed in layer2 topology for a network without subnets",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer2Topology},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				nil,
 			),
 			table.Entry(
 				"when the claim we're looking for is actually passed in localnet topology for a network without subnets",
 				&ovncnitypes.NetConf{Topology: ovnktypes.LocalnetTopology},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				nil,
 			),
 			table.Entry(
 				"when the claim we're looking for is actually passed in layer3 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer3Topology, Subnets: "192.10.10.0/16/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				nil,
 			),
 			table.Entry(
 				"when the claim we're looking for is actually passed in layer2 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer2Topology, Subnets: "192.10.10.0/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 			),
 			table.Entry(
 				"when the claim we're looking for is actually passed in localnet topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.LocalnetTopology, Subnets: "192.10.10.0/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 			),
 			table.Entry(
 				"when the claim we're looking for is actually passed in layer3 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer3Topology, Subnets: "192.10.10.0/16/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
-				ipamClaimWithIPs(namespace, claimName, "192.10.10.10/24"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				nil,
 			),
 		)
@@ -251,13 +268,15 @@ func emptyDummyIPAMClaim(namespace string, claimName string) *ipamclaimsapi.IPAM
 	}
 }
 
-func ipamClaimWithIPs(namespace string, claimName string, ips ...string) *ipamclaimsapi.IPAMClaim {
+func ipamClaimWithIPs(namespace string, claimName string, networkName string, ips ...string) *ipamclaimsapi.IPAMClaim {
 	return &ipamclaimsapi.IPAMClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      claimName,
 			Namespace: namespace,
 		},
-		Spec: ipamclaimsapi.IPAMClaimSpec{},
+		Spec: ipamclaimsapi.IPAMClaimSpec{
+			Network: networkName,
+		},
 		Status: ipamclaimsapi.IPAMClaimStatus{
 			IPs: ips,
 		},

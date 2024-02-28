@@ -1,6 +1,7 @@
 package persistentips
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -17,6 +18,8 @@ import (
 	ovnktypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
+
+var ErrIgnoredIPAMClaim = errors.New("ignored IPAMClaim: it belongs to other network")
 
 // Allocator acts on IPAMClaim events handed off by the cluster network
 // controller and allocates or releases IPs for IPAMClaims.
@@ -92,6 +95,22 @@ func (a *Allocator) Sync(objs []interface{}) error {
 			return fmt.Errorf("failed allocating persistent ips: %w", err)
 		}
 	}
+	return nil
+}
+
+// Delete releases persistent IPs previously allocated
+func (a *Allocator) Delete(ipamClaim *ipamclaimsapi.IPAMClaim) error {
+	if ipamClaim.Spec.Network != a.networkName {
+		return ErrIgnoredIPAMClaim
+	}
+	ips, err := util.ParseIPNets(ipamClaim.Status.IPs)
+	if err != nil {
+		return fmt.Errorf("failed parsing ipnets releasing persistent IPs: %v", err)
+	}
+	if err := a.ipAllocator.ReleaseIPs(ips); err != nil {
+		return fmt.Errorf("failed releasing persistent IPs: %v", err)
+	}
+	klog.V(5).Infof("Released IPs: %+v", ips)
 	return nil
 }
 
