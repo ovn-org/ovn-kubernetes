@@ -2,6 +2,7 @@ package persistentips
 
 import (
 	"context"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
@@ -105,6 +106,14 @@ var _ = Describe("Persistent IP allocator operations", func() {
 				ipamClaimWithIPs(namespace, claimName, networkName),
 			),
 		)
+
+		table.DescribeTable("syncing the IP allocator from the IPAMClaims is successful when provided with", func(ipamClaims ...interface{}) {
+			Expect(ipamClaimsReconciler.Sync(ipamClaims, namedAllocator)).To(Succeed())
+		},
+			table.Entry("no objects to sync with"),
+			table.Entry("an IPAMClaim without persisted IPs", emptyDummyIPAMClaim(namespace, claimName, networkName)),
+			table.Entry("an IPAMClaim with persisted IPs", ipamClaimWithIPs(namespace, claimName, networkName, "192.168.200.2/24", "fd10::1/64")),
+		)
 	})
 
 	When("reconciling an IPAMClaim already featuring IPs", func() {
@@ -117,14 +126,8 @@ var _ = Describe("Persistent IP allocator operations", func() {
 		)
 
 		BeforeEach(func() {
-			netConf := &ovncnitypes.NetConf{
-				NetConf:  types.NetConf{Name: networkName},
-				Topology: ovnktypes.Layer2Topology,
-				Subnets:  "192.10.10.0/24",
-			}
-
 			var err error
-			netInfo, err = util.NewNetInfo(netConf)
+			netInfo, err = util.NewNetInfo(dummyNetconf(networkName))
 			Expect(err).NotTo(HaveOccurred())
 
 			originalClaims = []*ipamclaimsapi.IPAMClaim{
@@ -151,6 +154,51 @@ var _ = Describe("Persistent IP allocator operations", func() {
 			)).To(
 				MatchError(
 					"failed to update IPAMClaim \"ns1/claim1\" - overwriting existing IPs [\"192.168.200.2/24\"] with newer IPs [\"192.168.200.2/24\" \"fd10::2/64\"]"))
+		})
+	})
+
+	Context("an IPAllocator having already allocated some addresses", func() {
+		var (
+			namedAllocator subnet.NamedAllocator
+			initialIPs     []string
+		)
+
+		BeforeEach(func() {
+			initialIPs = []string{"192.168.200.2/24", "fd10::1/64"}
+			ipAllocator := subnet.NewAllocator()
+			Expect(ipAllocator.AddOrUpdateSubnet(subnetName, ovntest.MustParseIPNets("192.168.200.0/24", "fd10::/64"))).To(Succeed())
+			Expect(ipAllocator.AllocateIPs(subnetName, ovntest.MustParseIPNets(initialIPs...))).To(Succeed())
+			namedAllocator = ipAllocator.ForSubnet(subnetName)
+
+			netInfo, err := util.NewNetInfo(dummyNetconf(networkName))
+			Expect(err).NotTo(HaveOccurred())
+
+			ipamClaimsReconciler = NewIPAMClaimReconciler(ovnkapiclient, netInfo, nil)
+		})
+
+		It("successfully handles being requested the same IPs again", func() {
+			Expect(
+				ipamClaimsReconciler.Sync(
+					[]interface{}{
+						ipamClaimWithIPs(namespace, claimName, networkName, initialIPs...),
+					},
+					namedAllocator,
+				),
+			).To(Succeed())
+		})
+
+		It("does not sync the IPAllocator for claims on other networks", func() {
+			Expect(
+				ipamClaimsReconciler.Sync(
+					[]interface{}{
+						ipamClaimWithIPs(namespace, claimName, "some-other-network", initialIPs...),
+					},
+					namedAllocator,
+				),
+			).To(Succeed())
+			ips, err := util.ParseIPNets(initialIPs)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(namedAllocator.AllocateIPs(ips)).To(MatchError(ip.ErrAllocated))
 		})
 	})
 
@@ -331,5 +379,13 @@ func generateIPAMClaimsListerAndTeardownFunc(stopChannel <-chan struct{}, ipamCl
 	informerFactory.WaitForCacheSync(stopChannel)
 	return lister, func() {
 		informerFactory.Shutdown()
+	}
+}
+
+func dummyNetconf(networkName string) *ovncnitypes.NetConf {
+	return &ovncnitypes.NetConf{
+		NetConf:  types.NetConf{Name: networkName},
+		Topology: ovnktypes.Layer2Topology,
+		Subnets:  "192.10.10.0/24",
 	}
 }

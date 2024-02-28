@@ -15,8 +15,10 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	fakeipamclaimclient "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovnkconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -26,7 +28,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
+var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 	var (
 		app      *cli.App
 		f        *factory.WatchFactory
@@ -248,7 +250,12 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
-				oc := newNetworkClusterController(namedIDAllocator, netInfo, sncm.ovnClient, sncm.watchFactory)
+				oc := newNetworkClusterController(
+					namedIDAllocator,
+					netInfo,
+					sncm.ovnClient,
+					sncm.watchFactory,
+				)
 				err = oc.init()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -282,6 +289,120 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
+		ginkgo.Context("persistent IP allocations", func() {
+			const (
+				claimName   = "claim1"
+				namespace   = "ns"
+				networkName = "blue"
+				subnetCIDR  = "192.168.200.0/24"
+				subnetIP    = "192.168.200.2/24"
+			)
+
+			var netInfo util.NetInfo
+
+			ginkgo.BeforeEach(func() {
+				var err error
+
+				netInfo, err = util.NewNetInfo(
+					&ovncnitypes.NetConf{
+						NetConf:  types.NetConf{Name: networkName},
+						Topology: ovntypes.Layer2Topology,
+						Subnets:  subnetCIDR,
+					})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			})
+
+			ginkgo.When("the network controller starts", func() {
+				ginkgo.It("reserves IPs for the IPAMClaims for the network it manages", func() {
+					app.Action = func(ctx *cli.Context) error {
+						fakeClient := &util.OVNClusterManagerClientset{
+							KubeClient: fake.NewSimpleClientset(),
+							IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(
+								ipamClaimWithIPAddr(claimName, namespace, networkName, subnetIP),
+							),
+						}
+
+						gomega.Expect(
+							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+								EnableMultiNetwork: true,
+								EnableInterconnect: true},
+							)).To(gomega.Succeed())
+						var err error
+						f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						gomega.Expect(f.Start()).To(gomega.Succeed())
+
+						sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
+						nc := newNetworkClusterController(
+							namedIDAllocator,
+							netInfo,
+							sncm.ovnClient,
+							sncm.watchFactory,
+						)
+						gomega.Expect(nc.init()).To(gomega.Succeed())
+						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
+
+						ips, err := util.ParseIPNets([]string{subnetIP})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), ips)).To(gomega.Equal(ip.ErrAllocated))
+
+						return nil
+					}
+
+					gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+				})
+
+				ginkgo.It("ignores IPs on IPAMClaims for networks it does not manage", func() {
+					app.Action = func(ctx *cli.Context) error {
+						const someOtherNetwork = "othernet"
+
+						fakeClient := &util.OVNClusterManagerClientset{
+							KubeClient: fake.NewSimpleClientset(),
+							IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(
+								ipamClaimWithIPAddr(claimName, namespace, someOtherNetwork, subnetIP),
+							),
+						}
+
+						gomega.Expect(
+							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+								EnableMultiNetwork: true,
+								EnableInterconnect: true},
+							)).To(gomega.Succeed())
+						var err error
+						f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						gomega.Expect(f.Start()).To(gomega.Succeed())
+
+						sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
+						nc := newNetworkClusterController(
+							namedIDAllocator,
+							netInfo,
+							sncm.ovnClient,
+							sncm.watchFactory,
+						)
+						gomega.Expect(nc.init()).To(gomega.Succeed())
+						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
+
+						ips, err := util.ParseIPNets([]string{subnetIP})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), ips)).To(gomega.Succeed())
+
+						return nil
+					}
+
+					gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+				})
+			})
+		})
 	})
 })
 
@@ -313,4 +434,19 @@ func initConfig(ctx *cli.Context, ovkConfig ovnkconfig.OVNKubernetesFeatureConfi
 	config.Kubernetes.HostNetworkNamespace = ""
 	config.OVNKubernetesFeature = ovkConfig
 	return nil
+}
+
+func ipamClaimWithIPAddr(claimName string, namespace string, networkName, ip string) *ipamclaimsapi.IPAMClaim {
+	return &ipamclaimsapi.IPAMClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      claimName,
+			Namespace: namespace,
+		},
+		Spec: ipamclaimsapi.IPAMClaimSpec{
+			Network: networkName,
+		},
+		Status: ipamclaimsapi.IPAMClaimStatus{
+			IPs: []string{ip},
+		},
+	}
 }

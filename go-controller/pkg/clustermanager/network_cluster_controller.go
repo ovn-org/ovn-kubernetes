@@ -3,6 +3,7 @@ package clustermanager
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
 	"sync"
 
@@ -47,10 +48,15 @@ type networkClusterController struct {
 	podHandler *factory.Handler
 	retryPods  *objretry.RetryFramework
 
+	// retry framework for persistent ip allocation
+	ipamClaimHandler *factory.Handler
+	retryIPAMClaims  *objretry.RetryFramework
+
 	podAllocator        *pod.PodAllocator
 	nodeAllocator       *node.NodeAllocator
 	networkIDAllocator  idallocator.NamedAllocator
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
+	subnetAllocator     subnet.Allocator
 
 	util.NetInfo
 }
@@ -141,7 +147,11 @@ func (ncc *networkClusterController) init() error {
 
 	if ncc.hasPodAllocation() {
 		ncc.retryPods = ncc.newRetryFramework(factory.PodType, true)
-		ipAllocator := subnet.NewAllocator()
+		ipAllocator, err := newIPAllocatorForNetwork(ncc.NetInfo)
+		if err != nil {
+			return fmt.Errorf("could not initialize the IP allocator for network %q: %w", ncc.NetInfo.GetNetworkName(), err)
+		}
+		ncc.subnetAllocator = ipAllocator
 
 		var (
 			podAllocationAnnotator *annotationalloc.PodAnnotationAllocator
@@ -149,6 +159,7 @@ func (ncc *networkClusterController) init() error {
 		)
 
 		if util.DoesNetworkRequireIPAM(ncc.NetInfo) {
+			ncc.retryIPAMClaims = ncc.newRetryFramework(factory.IPAMClaimsType, true)
 			ipamClaimsReconciler = persistentips.NewIPAMClaimReconciler(
 				ncc.kube,
 				ncc.NetInfo,
@@ -165,8 +176,7 @@ func (ncc *networkClusterController) init() error {
 		)
 
 		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator, ipamClaimsReconciler)
-		err := ncc.podAllocator.Init()
-		if err != nil {
+		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}
 	}
@@ -177,6 +187,7 @@ func (ncc *networkClusterController) init() error {
 // Start the network cluster controller. Depending on the cluster configuration
 // and type of network, it does the following:
 //   - initializes the node allocator and starts listening to node events
+//   - initializes the persistent ip allocator and starts listening to IPAMClaim events
 //   - initializes the pod ip allocator and starts listening to pod events
 func (ncc *networkClusterController) Start(ctx context.Context) error {
 	err := ncc.init()
@@ -193,6 +204,16 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 	}
 
 	if ncc.hasPodAllocation() {
+		if util.DoesNetworkRequireIPAM(ncc.NetInfo) {
+			// we need to start listening to IPAMClaim events before pod events, to
+			// ensure we don't start processing pod allocations before having the
+			// existing IPAMClaim allocations reserved in the in-memory IP pool.
+			ipamClaimHandler, err := ncc.retryIPAMClaims.WatchResource()
+			if err != nil {
+				return fmt.Errorf("unable to watch IPAMClaims: %w", err)
+			}
+			ncc.ipamClaimHandler = ipamClaimHandler
+		}
 		podHandler, err := ncc.retryPods.WatchResource()
 		if err != nil {
 			return fmt.Errorf("unable to watch pods: %w", err)
@@ -206,6 +227,10 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 func (ncc *networkClusterController) Stop() {
 	close(ncc.stopChan)
 	ncc.wg.Wait()
+
+	if ncc.ipamClaimHandler != nil {
+		ncc.watchFactory.RemoveIPAMClaimsHandler(ncc.ipamClaimHandler)
+	}
 
 	if ncc.nodeHandler != nil {
 		ncc.watchFactory.RemoveNodeHandler(ncc.nodeHandler)
@@ -286,6 +311,8 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 			return err
 		}
 		h.clearInitialNodeNetworkUnavailableCondition(node)
+	case factory.IPAMClaimsType:
+		return nil
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
 	}
@@ -324,6 +351,8 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 			return err
 		}
 		h.clearInitialNodeNetworkUnavailableCondition(node)
+	case factory.IPAMClaimsType:
+		return nil
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
@@ -366,6 +395,13 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = h.ncc.podAllocator.Sync
 		case factory.NodeType:
 			syncFunc = h.ncc.nodeAllocator.Sync
+		case factory.IPAMClaimsType:
+			syncFunc = func(claims []interface{}) error {
+				return h.ncc.ipamClaimReconciler.Sync(
+					claims,
+					h.ncc.subnetAllocator.ForSubnet(h.ncc.NetInfo.GetNetworkName()),
+				)
+			}
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
@@ -397,7 +433,7 @@ func (h *networkClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 inte
 	return false, nil
 }
 
-// getResourceFromInformerCache returns the latest state of the object from the informers cache
+// GetResourceFromInformerCache returns the latest state of the object from the informers cache
 // given an object key and its type
 func (h *networkClusterControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
 	var obj interface{}
@@ -414,6 +450,8 @@ func (h *networkClusterControllerEventHandler) GetResourceFromInformerCache(key 
 		obj, err = h.ncc.watchFactory.GetNode(name)
 	case factory.PodType:
 		obj, err = h.ncc.watchFactory.GetPod(namespace, name)
+	case factory.IPAMClaimsType:
+		obj, err = h.ncc.watchFactory.GetIPAMClaim(namespace, name)
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
 			h.objType)
@@ -467,4 +505,26 @@ func (h *networkClusterControllerEventHandler) clearInitialNodeNetworkUnavailabl
 	} else if cleared {
 		klog.Infof("Cleared node NetworkUnavailable/NoRouteCreated condition for %s", origNode.Name)
 	}
+}
+
+// newIPAllocatorForNetwork returns an initialized subnet allocator for the
+// subnets / excluded subnets provided in `netInfo`
+func newIPAllocatorForNetwork(netInfo util.NetInfo) (subnet.Allocator, error) {
+	ipAllocator := subnet.NewAllocator()
+
+	subnets := netInfo.Subnets()
+	ipNets := make([]*net.IPNet, 0, len(subnets))
+	for _, subnet := range subnets {
+		ipNets = append(ipNets, subnet.CIDR)
+	}
+
+	if err := ipAllocator.AddOrUpdateSubnet(
+		netInfo.GetNetworkName(),
+		ipNets,
+		netInfo.ExcludeSubnets()...,
+	); err != nil {
+		return nil, err
+	}
+
+	return ipAllocator, nil
 }
