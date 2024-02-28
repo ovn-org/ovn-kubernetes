@@ -14,11 +14,14 @@ import (
 	"k8s.io/klog/v2"
 
 	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -30,7 +33,7 @@ import (
 // level to support the necessary configuration for the cluster networks.
 type networkClusterController struct {
 	watchFactory *factory.WatchFactory
-	kube         kube.Interface
+	kube         kube.InterfaceOVN
 	stopChan     chan struct{}
 	wg           *sync.WaitGroup
 
@@ -44,16 +47,20 @@ type networkClusterController struct {
 	podHandler *factory.Handler
 	retryPods  *objretry.RetryFramework
 
-	podAllocator       *pod.PodAllocator
-	nodeAllocator      *node.NodeAllocator
-	networkIDAllocator idallocator.NamedAllocator
+	podAllocator        *pod.PodAllocator
+	nodeAllocator       *node.NodeAllocator
+	networkIDAllocator  idallocator.NamedAllocator
+	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 
 	util.NetInfo
 }
 
 func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
-	kube := &kube.Kube{
-		KClient: ovnClient.KubeClient,
+	kube := &kube.KubeOVN{
+		Kube: kube.Kube{
+			KClient: ovnClient.KubeClient,
+		},
+		IPAMClaimsClient: ovnClient.IPAMClaimsClient,
 	}
 
 	wg := &sync.WaitGroup{}
@@ -134,8 +141,26 @@ func (ncc *networkClusterController) init() error {
 
 	if ncc.hasPodAllocation() {
 		ncc.retryPods = ncc.newRetryFramework(factory.PodType, true)
+		ipAllocator := subnet.NewAllocator()
 
-		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, ncc.watchFactory.PodCoreInformer().Lister(), ncc.kube)
+		var (
+			podAllocationAnnotator *annotationalloc.PodAnnotationAllocator
+			ipamClaimsReconciler   *persistentips.IPAMClaimReconciler
+		)
+
+		if util.DoesNetworkRequireIPAM(ncc.NetInfo) {
+			ipamClaimsReconciler = persistentips.NewIPAMClaimReconciler()
+			ncc.ipamClaimReconciler = ipamClaimsReconciler
+		}
+
+		podAllocationAnnotator = annotationalloc.NewPodAnnotationAllocator(
+			ncc.NetInfo,
+			ncc.watchFactory.PodCoreInformer().Lister(),
+			ncc.kube,
+			ipamClaimsReconciler,
+		)
+
+		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator)
 		err := ncc.podAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)

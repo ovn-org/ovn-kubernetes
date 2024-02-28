@@ -15,6 +15,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 
+	fakeipamclaimclient "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
+
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -74,7 +76,8 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 					Items: nodes,
 				})
 				fakeClient := &util.OVNClusterManagerClientset{
-					KubeClient: kubeFakeClient,
+					KubeClient:       kubeFakeClient,
+					IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(),
 				}
 
 				_, err := config.InitConfig(ctx, nil, nil)
@@ -140,7 +143,8 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 					Items: nodes,
 				})
 				fakeClient := &util.OVNClusterManagerClientset{
-					KubeClient: kubeFakeClient,
+					KubeClient:       kubeFakeClient,
+					IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(),
 				}
 
 				_, err := config.InitConfig(ctx, nil, nil)

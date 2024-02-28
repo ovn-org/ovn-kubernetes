@@ -10,6 +10,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneinterconnect "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -60,11 +61,17 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	}
 
 	if oc.allocatesPodAnnotation() {
-		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
+		var claimsReconciler *persistentips.IPAMClaimReconciler
+		if util.DoesNetworkRequireIPAM(netInfo) {
+			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler()
+			oc.ipamClaimsReconciler = ipamClaimsReconciler
+			claimsReconciler = ipamClaimsReconciler
+		}
+		oc.podAnnotationAllocator = pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
-			cnci.kube)
-		oc.podAnnotationAllocator = podAnnotationAllocator
+			cnci.kube,
+			claimsReconciler)
 	}
 
 	// disable multicast support for secondary networks

@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -15,7 +14,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -42,13 +40,11 @@ type PodAllocator struct {
 }
 
 // NewPodAllocator builds a new PodAllocator
-func NewPodAllocator(netInfo util.NetInfo, podLister listers.PodLister, kube kube.Interface) *PodAllocator {
-	podAnnotationAllocator := pod.NewPodAnnotationAllocator(
-		netInfo,
-		podLister,
-		kube,
-	)
-
+func NewPodAllocator(
+	netInfo util.NetInfo,
+	podAnnotationAllocator *pod.PodAnnotationAllocator,
+	ipAllocator subnet.Allocator,
+) *PodAllocator {
 	podAllocator := &PodAllocator{
 		netInfo:                netInfo,
 		releasedPods:           map[string]sets.Set[string]{},
@@ -58,7 +54,7 @@ func NewPodAllocator(netInfo util.NetInfo, podLister listers.PodLister, kube kub
 
 	// this network might not have IPAM, we will just allocate MAC addresses
 	if util.DoesNetworkRequireIPAM(netInfo) {
-		podAllocator.ipAllocator = subnet.NewAllocator()
+		podAllocator.ipAllocator = ipAllocator
 	}
 
 	return podAllocator
