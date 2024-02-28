@@ -2012,7 +2012,7 @@ func completeClusterManagerConfig() error {
 
 	v6IP, _, err := net.ParseCIDR(ClusterManager.V6TransitSwitchSubnet)
 	if err != nil || !utilnet.IsIPv6(v6IP) {
-		return fmt.Errorf("invalid transit switch v4 join subnet specified, subnet: %s: error: %v", ClusterManager.V6TransitSwitchSubnet, err)
+		return fmt.Errorf("invalid transit switch v6 subnet specified, subnet: %s: error: %v", ClusterManager.V6TransitSwitchSubnet, err)
 	}
 
 	return nil
