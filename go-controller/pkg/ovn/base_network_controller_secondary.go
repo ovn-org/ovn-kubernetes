@@ -1,15 +1,19 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
 	"time"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -184,6 +188,22 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 				mp.Namespace, mp.Name, err)
 			return err
 		}
+
+	case factory.IPAMClaimsType:
+		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
+		if !ok {
+			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
+		}
+		if err := bsnc.persistentIPsAllocator.Delete(ipamClaim); errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			klog.V(5).Infof(
+				"controller %q ignoring IPAMClaim for network: %s",
+				bsnc.NetInfo.GetNetworkName(),
+				ipamClaim.Spec.Network,
+			)
+		} else if err != nil {
+			return fmt.Errorf("error deleting IPAMClaim: %w", err)
+		}
+		return bsnc.persistentIPsAllocator.Delete(ipamClaim)
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
