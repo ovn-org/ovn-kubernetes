@@ -155,6 +155,9 @@ func (h *baseSecondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []inter
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
 
+		case factory.IPAMClaimsType:
+			syncFunc = h.oc.syncIPAMClaims
+
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}
@@ -180,6 +183,9 @@ type BaseSecondaryLayer2NetworkController struct {
 func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
+	if oc.allocatesPodAnnotation() {
+		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
+	}
 
 	// For secondary networks, we don't have to watch namespace events if
 	// multi-network policy support is not enabled. We don't support
@@ -221,6 +227,9 @@ func (oc *BaseSecondaryLayer2NetworkController) stop() {
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 
+	if oc.ipamClaimsHandler != nil {
+		oc.watchFactory.RemoveIPAMClaimsHandler(oc.ipamClaimsHandler)
+	}
 	if oc.policyHandler != nil {
 		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.policyHandler)
 	}
@@ -269,6 +278,17 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 
 	if err := oc.WatchNodes(); err != nil {
 		return err
+	}
+
+	// when on IC, it will be the NetworkController that returns the IPAMClaims
+	// IPs back to the pool
+	if oc.allocatesPodAnnotation() {
+		// WatchIPAMClaims should be started before WatchPods to prevent OVN-K
+		// master assigning IPs to pods without taking into account the persistent
+		// IPs set aside for the IPAMClaims
+		if err := oc.WatchIPAMClaims(); err != nil {
+			return err
+		}
 	}
 
 	if err := oc.WatchPods(); err != nil {
@@ -382,5 +402,12 @@ func (oc *BaseSecondaryLayer2NetworkController) syncNodes(nodes []interface{}) e
 		}
 	}
 
+	return nil
+}
+
+func (oc *BaseSecondaryLayer2NetworkController) syncIPAMClaims(ipamClaims []interface{}) error {
+	if oc.allocatesPodAnnotation() {
+		return oc.persistentIPsAllocator.Sync(ipamClaims)
+	}
 	return nil
 }

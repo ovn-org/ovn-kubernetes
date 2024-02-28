@@ -8,6 +8,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -112,7 +113,7 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
 
 	namedIDAllocator := sncm.networkIDAllocator.ForName(nInfo.GetNetworkName())
-	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory)
+	sncc := newNetworkClusterController(namedIDAllocator, subnet.NewAllocator(), nInfo, sncm.ovnClient, sncm.watchFactory)
 	return sncc, nil
 }
 
@@ -192,7 +193,7 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(allController
 func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) (nad.NetworkController, error) {
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
 	namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
-	nc := newNetworkClusterController(namedIDAllocator, netInfo, sncm.ovnClient, sncm.watchFactory)
+	nc := newNetworkClusterController(namedIDAllocator, subnet.NewAllocator(), netInfo, sncm.ovnClient, sncm.watchFactory)
 	err := nc.init()
 	return nc, err
 }
