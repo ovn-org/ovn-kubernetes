@@ -2,6 +2,7 @@ package pod
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"testing"
 
@@ -9,6 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
+
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -16,6 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -64,6 +68,28 @@ func (a *idAllocatorStub) ReleaseID() {
 	a.releasedID = true
 }
 
+type persistentIPsStub struct {
+	datastore map[string]ipamclaimsapi.IPAMClaim
+}
+
+func (c *persistentIPsStub) Reconcile(_ *ipamclaimsapi.IPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim, _ persistentips.IPReleaser) error {
+	c.datastore[ipamClaimKey(newIPAMClaim.Namespace, newIPAMClaim.Name)] = *newIPAMClaim
+	return nil
+}
+
+func (c *persistentIPsStub) FindIPAMClaim(claimName string, namespace string) (*ipamclaimsapi.IPAMClaim, error) {
+	ipamClaimKey := fmt.Sprintf("%s/%s", namespace, claimName)
+	ipamClaim, wasFound := c.datastore[ipamClaimKey]
+	if !wasFound {
+		return nil, fmt.Errorf("not found")
+	}
+	return &ipamClaim, nil
+}
+
+func ipamClaimKey(namespace string, claimName string) string {
+	return fmt.Sprintf("%s/%s", namespace, claimName)
+}
+
 func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 	randomMac, err := util.GenerateRandMAC()
 	if err != nil {
@@ -80,6 +106,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		ipAllocator subnet.NamedAllocator
 		idAllocator id.NamedAllocator
 		network     *nadapi.NetworkSelectionElement
+		ipamClaim   *ipamclaimsapi.IPAMClaim
 		reallocate  bool
 	}
 	tests := []struct {
@@ -87,6 +114,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		args                      args
 		ipam                      bool
 		idAllocation              bool
+		persistentIPAllocation    bool
 		podAnnotation             *util.PodAnnotation
 		invalidNetworkAnnotation  bool
 		wantUpdatedPod            bool
@@ -403,6 +431,61 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			wantReleasedIPs:          ovntest.MustParseIPNets("192.168.0.3/24"),
 		},
 		{
+			// on networks with IPAM, and persistent IPs, expect to reuse the
+			// already allocated IPAM claim
+			name:                   "IPAM persistent IPs, IP address re-use",
+			ipam:                   true,
+			persistentIPAllocation: true,
+			args: args{
+				network: &nadapi.NetworkSelectionElement{
+					IPAMClaimReference: "my-ipam-claim",
+				},
+				ipamClaim: &ipamclaimsapi.IPAMClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-ipam-claim",
+					},
+					Status: ipamclaimsapi.IPAMClaimStatus{
+						IPs: []string{"192.168.0.200/24"},
+					},
+				},
+				ipAllocator: &ipAllocatorStub{
+					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+				},
+			},
+			wantUpdatedPod: true,
+			wantPodAnnotation: &util.PodAnnotation{
+				IPs: ovntest.MustParseIPNets("192.168.0.200/24"),
+				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.200/24")[0].IP),
+			},
+		},
+		{
+			// on networks with IPAM, and persistent IPs, expect to allocate a
+			// new IP address if the IPAMClaim provided is empty
+			name:                   "IPAM persistent IPs, empty IPAMClaim",
+			ipam:                   true,
+			persistentIPAllocation: true,
+			args: args{
+				network: &nadapi.NetworkSelectionElement{
+					IPAMClaimReference: "my-ipam-claim",
+				},
+				ipamClaim: &ipamclaimsapi.IPAMClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-ipam-claim",
+					},
+					Status: ipamclaimsapi.IPAMClaimStatus{},
+				},
+				ipAllocator: &ipAllocatorStub{
+					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+				},
+			},
+			wantUpdatedPod: true,
+			wantPodAnnotation: &util.PodAnnotation{
+				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+			},
+			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
+		},
+		{
 			// on networks with ID allocation, expect allocated ID
 			name:         "expect ID allocation",
 			idAllocation: true,
@@ -501,14 +584,19 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			var netInfo util.NetInfo
 			netInfo = &util.DefaultNetInfo{}
 			nadName := types.DefaultNetworkName
-			if !tt.ipam || tt.idAllocation {
+			if !tt.ipam || tt.idAllocation || tt.persistentIPAllocation {
 				nadName = util.GetNADName(network.Namespace, network.Name)
+				var subnets string
+				if tt.ipam {
+					subnets = "192.168.0.0/24"
+				}
 				netInfo, err = util.NewNetInfo(&ovncnitypes.NetConf{
 					Topology: types.Layer2Topology,
 					NetConf: cnitypes.NetConf{
 						Name: network.Name,
 					},
 					NADName: nadName,
+					Subnets: subnets,
 				})
 				if err != nil {
 					t.Fatalf("failed to create NetInfo: %v", err)
@@ -536,13 +624,26 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				}
 			}
 
+			var claimsReconciler persistentips.PersistentAllocations
+			if tt.persistentIPAllocation {
+				dummyDatastore := map[string]ipamclaimsapi.IPAMClaim{}
+				if tt.args.ipamClaim != nil {
+					tt.args.ipamClaim.Namespace = network.Namespace
+					dummyDatastore[fmt.Sprintf("%s/%s", tt.args.ipamClaim.Namespace, tt.args.ipamClaim.Name)] = *tt.args.ipamClaim
+				}
+
+				claimsReconciler = &persistentIPsStub{
+					datastore: dummyDatastore,
+				}
+			}
+
 			pod, podAnnotation, rollback, err := allocatePodAnnotationWithRollback(
 				tt.args.ipAllocator,
 				tt.args.idAllocator,
 				netInfo,
 				pod,
 				network,
-				nil,
+				claimsReconciler,
 				tt.args.reallocate,
 			)
 

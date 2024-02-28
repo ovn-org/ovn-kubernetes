@@ -330,6 +330,11 @@ func allocatePodAnnotationWithRollback(
 			if err != nil {
 				return
 			}
+		} else if hasIPAMClaim {
+			tentative.IPs, err = util.ParseIPNets(ipamClaim.Status.IPs)
+			if err != nil {
+				return
+			}
 		}
 	}
 
@@ -346,7 +351,7 @@ func allocatePodAnnotationWithRollback(
 				tentative.IPs = nil
 			}
 
-			if err == nil {
+			if err == nil && !hasIPAMClaim { // if we have persistentIPs, we should *not* release them on rollback
 				// copy the IPs that would need to be released
 				releaseIPs = util.CopyIPNets(tentative.IPs)
 			}
