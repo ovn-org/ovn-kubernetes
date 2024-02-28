@@ -2,7 +2,6 @@ package pod
 
 import (
 	"fmt"
-	"net"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -79,16 +78,6 @@ func (a *PodAllocator) Init() error {
 		if err != nil {
 			return err
 		}
-	}
-
-	if util.DoesNetworkRequireIPAM(a.netInfo) {
-		subnets := a.netInfo.Subnets()
-		ipNets := make([]*net.IPNet, 0, len(subnets))
-		for _, subnet := range subnets {
-			ipNets = append(ipNets, subnet.CIDR)
-		}
-
-		return a.ipAllocator.AddOrUpdateSubnet(a.netInfo.GetNetworkName(), ipNets, a.netInfo.ExcludeSubnets()...)
 	}
 
 	return nil

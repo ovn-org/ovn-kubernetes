@@ -3,6 +3,8 @@ package persistentips
 import (
 	"errors"
 	"fmt"
+	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
+	"k8s.io/klog/v2"
 	"net"
 
 	"github.com/google/go-cmp/cmp"
@@ -22,6 +24,10 @@ var (
 
 type IPReleaser interface {
 	ReleaseIPs(ips []*net.IPNet) error
+}
+
+type IPAllocator interface {
+	AllocateIPs(ips []*net.IPNet) error
 }
 
 type PersistentAllocations interface {
@@ -130,4 +136,37 @@ func (icr *IPAMClaimReconciler) FindIPAMClaim(claimName string, namespace string
 		return nil, fmt.Errorf("failed to get IPAMClaim %q: %w", claimName, err)
 	}
 	return claim, nil
+}
+
+// Sync initializes the IPs allocator with the IPAMClaims already existing on
+// the cluster. For live pods, therse are already allocated, so no error will
+// be thrown (e.g. we ignore the `ipam.IsErrAllocated` error
+func (icr *IPAMClaimReconciler) Sync(objs []interface{}, ipAllocator IPAllocator) error {
+	var ips []*net.IPNet
+	for _, obj := range objs {
+		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
+		if !ok {
+			klog.Errorf("Could not cast %T object to *ipamclaimsapi.IPAMClaim", obj)
+			continue
+		}
+		if ipamClaim.Spec.Network != icr.netInfo.GetNetworkName() {
+			klog.V(5).Infof(
+				"Ignoring IPAMClaim for network %q in controller: %s",
+				ipamClaim.Spec.Network,
+				icr.netInfo.GetNetworkName(),
+			)
+			continue
+		}
+		ipnets, err := util.ParseIPNets(ipamClaim.Status.IPs)
+		if err != nil {
+			return fmt.Errorf("failed at parsing IP when allocating persistent IPs: %w", err)
+		}
+		ips = append(ips, ipnets...)
+	}
+	if len(ips) > 0 {
+		if err := ipAllocator.AllocateIPs(ips); err != nil && !ipam.IsErrAllocated(err) {
+			return fmt.Errorf("failed allocating persistent ips: %w", err)
+		}
+	}
+	return nil
 }
