@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -191,13 +192,13 @@ func (a *PodAllocator) reconcileForNAD(old, new *corev1.Pod, nad string, network
 	podCompleted := util.PodCompleted(pod)
 
 	if podCompleted || podDeleted {
-		return a.releasePodOnNAD(pod, nad, podDeleted, releaseIPsFromAllocator)
+		return a.releasePodOnNAD(pod, nad, network, podDeleted, releaseIPsFromAllocator)
 	}
 
 	return a.allocatePodOnNAD(pod, nad, network)
 }
 
-func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, podDeleted, releaseFromAllocator bool) error {
+func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, network *nettypes.NetworkSelectionElement, podDeleted, releaseFromAllocator bool) error {
 	podAnnotation, _ := util.UnmarshalPodAnnotation(pod.Annotations, nad)
 	if podAnnotation == nil {
 		// track release pods even if they have no annotation in case a user
@@ -209,6 +210,15 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, podDeleted, 
 
 	hasIPAM := util.DoesNetworkRequireIPAM(a.netInfo)
 	hasIDAllocation := util.DoesNetworkRequireTunnelIDs(a.netInfo)
+	hasPersistentIPs := network.IPAMClaimReference != ""
+	if hasPersistentIPs {
+		ipamClaim, err := a.findIPAMClaim(network)
+		if err != nil {
+			hasPersistentIPs = false
+		} else {
+			hasPersistentIPs = hasPersistentIPs && ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+		}
+	}
 
 	if !hasIPAM && !hasIDAllocation {
 		// we only take care of IP and tunnel ID allocation, if neither were
@@ -220,7 +230,7 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, podDeleted, 
 	// were already previosuly released
 	doRelease := releaseFromAllocator && !a.isPodReleased(nad, uid)
 	doReleaseIDs := doRelease && hasIDAllocation
-	doReleaseIPs := doRelease && hasIPAM
+	doReleaseIPs := doRelease && hasIPAM && !hasPersistentIPs
 
 	if doReleaseIDs {
 		name := podIdAllocationName(nad, uid)
@@ -327,4 +337,8 @@ func (a *PodAllocator) isPodReleased(nad, uid string) bool {
 
 func podIdAllocationName(nad, uid string) string {
 	return fmt.Sprintf("%s/%s", nad, uid)
+}
+
+func (a *PodAllocator) findIPAMClaim(network *nettypes.NetworkSelectionElement) (*ipamclaimsapi.IPAMClaim, error) {
+	return a.ipamClaimsFetcher.FindIPAMClaim(network)
 }

@@ -66,13 +66,15 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 				cnci.kube,
 				oc.lsManager.ForSwitch(oc.GetNetworkScopedName(types.OVNLocalnetSwitch)),
 			)
+			fetcher := persistentips.NewIPAMClaimsFetcher(netInfo, cnci.watchFactory.IPAMClaimsInformer().Lister())
 			podAnnotationAllocator = pod.NewPodAnnotationAllocatorWithPersistentIPs(
 				netInfo,
 				cnci.watchFactory.PodCoreInformer().Lister(),
 				cnci.kube,
 				ipamClaimsAllocator,
-				persistentips.NewIPAMClaimsFetcher(netInfo, cnci.watchFactory.IPAMClaimsInformer().Lister()),
+				fetcher,
 			)
+			oc.ipamClaimsFetcher = fetcher
 		}
 		oc.podAnnotationAllocator = podAnnotationAllocator
 	}

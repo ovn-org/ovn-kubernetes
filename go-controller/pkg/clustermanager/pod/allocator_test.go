@@ -439,6 +439,51 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			expectAllocate: true,
 			ipam:           true,
 		},
+		{
+			name: "Pod deleted, persistent IPs, IP not released",
+			args: args{
+				old: &testPod{
+					scheduled: true,
+					network: &nadapi.NetworkSelectionElement{
+						Name:               "nad",
+						IPAMClaimReference: "claim",
+					},
+				},
+				ipamClaim: &ipamclaimsapi.IPAMClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "claim",
+						Namespace: "namespace",
+					},
+					Status: ipamclaimsapi.IPAMClaimStatus{
+						IPs: []string{"192.168.200.80/24"},
+					},
+				},
+				release: true,
+			},
+			ipam: true,
+		},
+		{
+			name: "Pod deleted, persistent IPs requested *but* not found, IP released",
+			args: args{
+				old: &testPod{
+					scheduled: true,
+					network: &nadapi.NetworkSelectionElement{
+						Name:               "nad",
+						IPAMClaimReference: "claim",
+					},
+				},
+				ipamClaim: &ipamclaimsapi.IPAMClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "claim",
+						Namespace: "namespace",
+					},
+					Status: ipamclaimsapi.IPAMClaimStatus{},
+				},
+				release: true,
+			},
+			ipam:            true,
+			expectIPRelease: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
