@@ -149,7 +149,11 @@ func (ncc *networkClusterController) init() error {
 		)
 
 		if util.DoesNetworkRequireIPAM(ncc.NetInfo) {
-			ipamClaimsReconciler = persistentips.NewIPAMClaimReconciler()
+			ipamClaimsReconciler = persistentips.NewIPAMClaimReconciler(
+				ncc.kube,
+				ncc.NetInfo,
+				ncc.watchFactory.IPAMClaimsInformer().Lister(),
+			)
 			ncc.ipamClaimReconciler = ipamClaimsReconciler
 		}
 

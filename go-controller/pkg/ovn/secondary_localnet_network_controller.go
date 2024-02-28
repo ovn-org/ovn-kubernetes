@@ -58,7 +58,11 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 	if oc.allocatesPodAnnotation() {
 		var claimsReconciler *persistentips.IPAMClaimReconciler
 		if util.DoesNetworkRequireIPAM(netInfo) {
-			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler()
+			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
+				oc.kube,
+				oc.NetInfo,
+				oc.watchFactory.IPAMClaimsInformer().Lister(),
+			)
 			oc.ipamClaimsReconciler = ipamClaimsReconciler
 			claimsReconciler = ipamClaimsReconciler
 		}
