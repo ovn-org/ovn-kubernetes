@@ -542,6 +542,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				netInfo,
 				pod,
 				network,
+				nil,
 				tt.args.reallocate,
 			)
 
