@@ -187,6 +187,8 @@ var _ = Describe("Node IP Handler tests", func() {
 			Output: dummyBrInternalIPv4,
 		})
 		Expect(util.SetExec(fexec)).ShouldNot(HaveOccurred())
+		config.IPv4Mode = true
+		config.IPv6Mode = true
 		tc = configureKubeOVNContextWithNs(nodeName)
 		tc.ipManager.syncPeriod = 10 * time.Millisecond
 		tc.doneWg.Add(1)
@@ -307,7 +309,7 @@ func configureKubeOVNContextWithNs(nodeName string) *testCtx {
 		if err = netlink.AddrAdd(link, &netlink.Addr{IPNet: ovntest.MustParseIPNet("10.1.1.10/24")}); err != nil {
 			return err
 		}
-		return nil
+		return netlink.AddrAdd(link, &netlink.Addr{IPNet: ovntest.MustParseIPNet("2001:db8::10/64")})
 	}
 	Expect(testNs.Do(func(netNS ns.NetNS) error {
 		return setupPrimaryInfFn()
@@ -332,7 +334,7 @@ func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
 			},
 		},
 		Status: corev1.NodeStatus{
-			Addresses: []corev1.NodeAddress{{Address: "10.1.1.10", Type: corev1.NodeInternalIP}},
+			Addresses: []corev1.NodeAddress{{Address: "10.1.1.10", Type: corev1.NodeInternalIP}, {Address: "2001:db8::10", Type: corev1.NodeInternalIP}},
 		},
 	}
 
