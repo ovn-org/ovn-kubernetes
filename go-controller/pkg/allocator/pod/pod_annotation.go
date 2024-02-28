@@ -13,24 +13,70 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// PodAnnotationAllocator is an utility to handle allocation of the PodAnnotation to Pods.
+type AnnotationAllocator interface {
+	AllocatePodAnnotation(
+		ipAllocator subnet.NamedAllocator,
+		pod *v1.Pod,
+		network *nadapi.NetworkSelectionElement,
+		reallocateIP bool) (
+		*v1.Pod,
+		*util.PodAnnotation,
+		error)
+
+	AllocatePodAnnotationWithTunnelID(
+		ipAllocator subnet.NamedAllocator,
+		idAllocator id.NamedAllocator,
+		pod *v1.Pod,
+		network *nadapi.NetworkSelectionElement,
+		reallocateIP bool) (
+		*v1.Pod,
+		*util.PodAnnotation,
+		error)
+}
+
+// PodAnnotationAllocator is a utility to handle allocation of the PodAnnotation to Pods.
 type PodAnnotationAllocator struct {
 	podLister listers.PodLister
-	kube      kube.Interface
+	kube      kube.InterfaceOVN
 
 	netInfo util.NetInfo
 }
 
-func NewPodAnnotationAllocator(netInfo util.NetInfo, podLister listers.PodLister, kube kube.Interface) *PodAnnotationAllocator {
+type PersistentIPsPodAnnotationAllocator struct {
+	podLister              listers.PodLister
+	kube                   kube.InterfaceOVN
+	netInfo                util.NetInfo
+	persistentIPsAllocator *persistentips.Allocator
+	ipamClaimsFetcher      *persistentips.IPAMClaimFetcher
+}
+
+func NewPodAnnotationAllocator(netInfo util.NetInfo, podLister listers.PodLister, kube kube.InterfaceOVN) *PodAnnotationAllocator {
 	return &PodAnnotationAllocator{
 		podLister: podLister,
 		kube:      kube,
 		netInfo:   netInfo,
+	}
+}
+
+func NewPodAnnotationAllocatorWithPersistentIPs(
+	netInfo util.NetInfo,
+	podLister listers.PodLister,
+	kube kube.InterfaceOVN,
+	persistentIPsAllocator *persistentips.Allocator,
+	ipamClaimsFetcher *persistentips.IPAMClaimFetcher,
+) *PersistentIPsPodAnnotationAllocator {
+	return &PersistentIPsPodAnnotationAllocator{
+		podLister:              podLister,
+		kube:                   kube,
+		netInfo:                netInfo,
+		persistentIPsAllocator: persistentIPsAllocator,
+		ipamClaimsFetcher:      ipamClaimsFetcher,
 	}
 }
 
@@ -61,7 +107,47 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 		network,
 		reallocateIP,
 	)
+}
 
+func (allocator *PersistentIPsPodAnnotationAllocator) AllocatePodAnnotation(
+	ipAllocator subnet.NamedAllocator,
+	pod *v1.Pod,
+	network *nadapi.NetworkSelectionElement,
+	reallocateIP bool) (
+	*v1.Pod,
+	*util.PodAnnotation,
+	error) {
+
+	ipamClaim, err := allocator.ipamClaimsFetcher.FindIPAMClaim(network)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed retrieving IPAMClaim for pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
+	}
+
+	updatedPod, generatedPodAnnotation, err := allocatePodAnnotation(
+		allocator.podLister,
+		allocator.kube,
+		ipAllocator,
+		allocator.netInfo,
+		pod,
+		network,
+		reallocateIP,
+	)
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to allocate the annotation for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+
+	if ipamClaim != nil && generatedPodAnnotation != nil {
+		if err := allocator.persistentIPsAllocator.Reconcile(ipamClaim, util.StringSlice(generatedPodAnnotation.IPs)); err != nil {
+			return nil, nil, fmt.Errorf(
+				"error persistent pod %q ips into the IPAMClaims: %w",
+				fmt.Sprintf("%s/%s", pod.GetNamespace(), pod.GetName()),
+				err,
+			)
+		}
+	}
+
+	return updatedPod, generatedPodAnnotation, nil
 }
 
 func allocatePodAnnotation(
@@ -134,6 +220,49 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		network,
 		reallocateIP,
 	)
+}
+
+func (allocator *PersistentIPsPodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
+	ipAllocator subnet.NamedAllocator,
+	idAllocator id.NamedAllocator,
+	pod *v1.Pod,
+	network *nadapi.NetworkSelectionElement,
+	reallocateIP bool) (
+	*v1.Pod,
+	*util.PodAnnotation,
+	error) {
+
+	ipamClaim, err := allocator.ipamClaimsFetcher.FindIPAMClaim(network)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error retrieving IPAMClaim for pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
+	}
+
+	updatedPod, generatedPodAnnotation, err := allocatePodAnnotationWithTunnelID(
+		allocator.podLister,
+		allocator.kube,
+		ipAllocator,
+		idAllocator,
+		allocator.netInfo,
+		pod,
+		network,
+		reallocateIP,
+	)
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to allocate the annotation for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+
+	if ipamClaim != nil && generatedPodAnnotation != nil {
+		if err := allocator.persistentIPsAllocator.Reconcile(ipamClaim, util.StringSlice(generatedPodAnnotation.IPs)); err != nil {
+			return nil, nil, fmt.Errorf(
+				"error persistent pod %q ips into the IPAMClaims: %w",
+				fmt.Sprintf("%s/%s", pod.GetNamespace(), pod.GetName()),
+				err,
+			)
+		}
+	}
+
+	return updatedPod, generatedPodAnnotation, nil
 }
 
 func allocatePodAnnotationWithTunnelID(

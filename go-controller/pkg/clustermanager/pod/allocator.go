@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -20,10 +19,14 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+type AllocationOption func(*PodAllocator)
+
 // PodAllocator acts on pods events handed off by the cluster network controller
 // and allocates or releases resources (IPs and tunnel IDs at the time of this
 // writing) to pods on behalf of cluster manager.
 type PodAllocator struct {
+	kube kube.InterfaceOVN
+
 	netInfo util.NetInfo
 
 	// ipAllocator of IPs within subnets
@@ -33,7 +36,7 @@ type PodAllocator struct {
 	idAllocator id.Allocator
 
 	// An utility to allocate the PodAnnotation to pods
-	podAnnotationAllocator *pod.PodAnnotationAllocator
+	podAnnotationAllocator pod.AnnotationAllocator
 
 	// track pods that have been released but not deleted yet so that we don't
 	// release more than once
@@ -42,23 +45,28 @@ type PodAllocator struct {
 }
 
 // NewPodAllocator builds a new PodAllocator
-func NewPodAllocator(netInfo util.NetInfo, podLister listers.PodLister, kube kube.Interface) *PodAllocator {
-	podAnnotationAllocator := pod.NewPodAnnotationAllocator(
-		netInfo,
-		podLister,
-		kube,
-	)
-
+func NewPodAllocator(
+	netInfo util.NetInfo,
+	kube kube.InterfaceOVN,
+	podAnnotationAllocator pod.AnnotationAllocator,
+	ipAllocator subnet.Allocator,
+	opts ...AllocationOption,
+) *PodAllocator {
 	podAllocator := &PodAllocator{
 		netInfo:                netInfo,
 		releasedPods:           map[string]sets.Set[string]{},
 		releasedPodsMutex:      sync.Mutex{},
 		podAnnotationAllocator: podAnnotationAllocator,
+		kube:                   kube,
 	}
 
 	// this network might not have IPAM, we will just allocate MAC addresses
 	if util.DoesNetworkRequireIPAM(netInfo) {
-		podAllocator.ipAllocator = subnet.NewAllocator()
+		podAllocator.ipAllocator = ipAllocator
+	}
+
+	for _, opt := range opts {
+		opt(podAllocator)
 	}
 
 	return podAllocator

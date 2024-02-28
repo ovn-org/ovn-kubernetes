@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -55,10 +56,24 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 	}
 
 	if oc.allocatesPodAnnotation() {
-		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
+		var podAnnotationAllocator pod.AnnotationAllocator = pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube)
+
+		if util.DoesNetworkRequireIPAM(netInfo) {
+			ipamClaimsAllocator := persistentips.NewAllocator(
+				cnci.kube,
+				oc.lsManager.ForSwitch(oc.GetNetworkScopedName(types.OVNLocalnetSwitch)),
+			)
+			podAnnotationAllocator = pod.NewPodAnnotationAllocatorWithPersistentIPs(
+				netInfo,
+				cnci.watchFactory.PodCoreInformer().Lister(),
+				cnci.kube,
+				ipamClaimsAllocator,
+				persistentips.NewIPAMClaimsFetcher(netInfo, cnci.watchFactory.IPAMClaimsInformer().Lister()),
+			)
+		}
 		oc.podAnnotationAllocator = podAnnotationAllocator
 	}
 
