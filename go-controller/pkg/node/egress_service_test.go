@@ -684,13 +684,6 @@ var _ = Describe("Egress Service Operations", func() {
 					return fakeOvnNode.fakeExec.CalledMatchesExpected()
 				}).Should(BeTrue())
 
-				err = fakeOvnNode.fakeClient.EgressServiceClient.K8sV1().EgressServices("namespace1").Delete(context.TODO(), "service1", metav1.DeleteOptions{})
-				Expect(err).ToNot(HaveOccurred())
-
-				Eventually(func() error {
-					return f4.MatchState(expectedTables)
-				}).ShouldNot(HaveOccurred())
-
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ip -4 rule del prio 5000 from 10.129.0.2 table mynetwork",
 					Err: nil,
@@ -699,6 +692,13 @@ var _ = Describe("Egress Service Operations", func() {
 					Cmd: "ip -4 rule del prio 5000 from 10.128.0.3 table mynetwork",
 					Err: nil,
 				})
+
+				err = fakeOvnNode.fakeClient.EgressServiceClient.K8sV1().EgressServices("namespace1").Delete(context.TODO(), "service1", metav1.DeleteOptions{})
+				Expect(err).ToNot(HaveOccurred())
+
+				Eventually(func() error {
+					return f4.MatchState(expectedTables)
+				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
 					return fakeOvnNode.fakeExec.CalledMatchesExpected()
