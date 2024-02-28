@@ -69,6 +69,12 @@ var _ = Describe("Node IP Handler event tests", func() {
 	)
 
 	BeforeEach(func() {
+		fexec := ovntest.NewFakeExec()
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
+			Output: "10.1.1.10",
+		})
+		Expect(util.SetExec(fexec)).ShouldNot(HaveOccurred())
 		useNetlink := false
 		tc = configureKubeOVNContext(nodeName, useNetlink)
 		// We need to wait until the ipManager's goroutine runs the subscribe
@@ -96,6 +102,7 @@ var _ = Describe("Node IP Handler event tests", func() {
 		tc.doneWg.Wait()
 		tc.watchFactory.Shutdown()
 		close(tc.addrChan)
+		util.ResetRunner()
 	})
 
 	Describe("Changing node addresses", func() {
