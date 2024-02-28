@@ -162,10 +162,15 @@ var _ = Describe("Node IP Handler tests", func() {
 	var tc *testCtx
 
 	const (
-		nodeName                = "node1"
-		dummyBrName             = "breth0"
-		dummyBrInternalIPv4     = "10.1.1.10"
-		dummyAdditionalIPv4CIDR = "192.168.2.2/32"
+		nodeName                 = "node1"
+		dummyBrName              = "breth0"
+		dummyBrInternalIPv4      = "10.1.1.10"
+		dummyAdditionalIPv4CIDR  = "192.168.2.2/24"
+		dummyBrUniqLocalIPv6CIDR = "fd53:6043:6000:e0e0:1::6001/80"
+		dummyMasqIPv4            = "169.254.169.2"
+		dummyMasqIPv4CIDR        = dummyMasqIPv4 + "/29"
+		dummyMasqIPv6            = "fd69::2"
+		dummyMasqIPv6CIDR        = dummyMasqIPv6 + "/125"
 	)
 
 	BeforeEach(func() {
@@ -211,6 +216,78 @@ var _ = Describe("Node IP Handler tests", func() {
 			Consistently(func() bool {
 				return nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyAdditionalIPv4CIDR))
 			}, 3).Should(BeTrue())
+		})
+
+		It("allows unique local address", func() {
+			Expect(tc.ns.Do(func(netNS ns.NetNS) error {
+				link, err := netlink.LinkByName(dummyBrName)
+				if err != nil {
+					return err
+				}
+				return netlink.AddrAdd(link, &netlink.Addr{
+					LinkIndex: link.Attrs().Index, Scope: unix.RT_SCOPE_UNIVERSE, IPNet: ovntest.MustParseIPNet(dummyBrUniqLocalIPv6CIDR),
+				})
+			})).ShouldNot(HaveOccurred())
+			Eventually(func() bool {
+				return nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyBrUniqLocalIPv6CIDR))
+			}, 5).Should(BeTrue())
+			// ensure a sync doesnt remove it
+			Consistently(func() bool {
+				return nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyBrUniqLocalIPv6CIDR))
+			}, 3).Should(BeTrue())
+		})
+
+		It("allow secondary IP", func() {
+			primaryIPNet := ovntest.MustParseIPNet(dummyAdditionalIPv4CIDR)
+			// create an additional IP which resides within the primary subnet aka secondary IP
+			secondaryIP := make(net.IP, len(primaryIPNet.IP))
+			copy(secondaryIP, primaryIPNet.IP)
+			secondaryIP[len(secondaryIP)-1]++
+			secondaryIPNet := &net.IPNet{IP: secondaryIP, Mask: primaryIPNet.Mask}
+
+			Expect(tc.ns.Do(func(netNS ns.NetNS) error {
+				link, err := netlink.LinkByName(dummyBrName)
+				if err != nil {
+					return err
+				}
+				err = netlink.AddrAdd(link, &netlink.Addr{
+					LinkIndex: link.Attrs().Index, Scope: unix.RT_SCOPE_UNIVERSE, IPNet: primaryIPNet})
+				if err != nil {
+					return err
+				}
+				return netlink.AddrAdd(link, &netlink.Addr{
+					LinkIndex: link.Attrs().Index, Scope: unix.RT_SCOPE_UNIVERSE, IPNet: secondaryIPNet})
+			})).ShouldNot(HaveOccurred())
+			Eventually(func() bool {
+				return nodeHasAddress(tc.fakeClient, nodeName, primaryIPNet) && nodeHasAddress(tc.fakeClient, nodeName, secondaryIPNet)
+			}, 5).Should(BeTrue())
+			// ensure a sync doesnt remove it
+			Consistently(func() bool {
+				return nodeHasAddress(tc.fakeClient, nodeName, primaryIPNet) && nodeHasAddress(tc.fakeClient, nodeName, secondaryIPNet)
+			}, 3).Should(BeTrue())
+		})
+
+		It("doesn't allow OVN reserved IPs", func() {
+			config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP = ovntest.MustParseIP(dummyMasqIPv4)
+			config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP = ovntest.MustParseIP(dummyMasqIPv6)
+
+			Expect(tc.ns.Do(func(netNS ns.NetNS) error {
+				link, err := netlink.LinkByName(dummyBrName)
+				if err != nil {
+					return err
+				}
+				err = netlink.AddrAdd(link, &netlink.Addr{LinkIndex: link.Attrs().Index, Scope: unix.RT_SCOPE_UNIVERSE, IPNet: ovntest.MustParseIPNet(dummyMasqIPv4CIDR)})
+				if err != nil {
+					return err
+				}
+				return netlink.AddrAdd(link, &netlink.Addr{
+					LinkIndex: link.Attrs().Index, Scope: unix.RT_SCOPE_UNIVERSE, IPNet: ovntest.MustParseIPNet(dummyMasqIPv6CIDR)})
+			})).ShouldNot(HaveOccurred())
+
+			Consistently(func() bool {
+				return nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyMasqIPv4CIDR)) &&
+					nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyMasqIPv6CIDR))
+			}, 3).Should(BeFalse())
 		})
 	})
 })
