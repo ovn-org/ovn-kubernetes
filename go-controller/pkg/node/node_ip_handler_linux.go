@@ -33,7 +33,7 @@ type addressManager struct {
 	// useNetlink indicates the addressManager should use machine
 	// information from netlink. Set to false for testcases.
 	useNetlink bool
-
+	syncPeriod time.Duration
 	// compare node primary IP change
 	nodePrimaryAddr net.IP
 	gatewayBridge   *bridgeConfiguration
@@ -59,9 +59,11 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, config *manage
 		gatewayBridge:  gwBridge,
 		OnChanged:      func() {},
 		useNetlink:     useNetlink,
+		syncPeriod:     30 * time.Second,
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	mgr.sync()
+
 	return mgr
 }
 
@@ -113,14 +115,80 @@ func (c *addressManager) ListAddresses() []net.IP {
 type subscribeFn func() (bool, chan netlink.AddrUpdate, error)
 
 func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
+	c.addHandlerForPrimaryAddrChange()
+	doneWg.Add(1)
+	go func() {
+		c.runInternal(stopChan, c.getNetlinkAddrSubFunc(stopChan))
+		doneWg.Done()
+	}()
+}
+
+// runInternal gathers node IP information and publishes it on the k8 node annotations.
+// The annotations it updates are k8s.ovn.org/host-cidrs, k8s.ovn.org/node-primary-ifaddr and k8s.ovn.org/l3-gateway-config.
+// It waits on 3 events and only the "stop" event may end execution.
+// Event 1: Address change events using a subscription func. In normal execution, this is a netlink addr subscription func that returns a channel that
+// conveys address updates that can be processed upon immediately.
+// Event 2: Ticker events which is used to trigger a sync func. This is required in-case address change events are missed.
+// Event 3: Stop events which stops event watching and returns.
+func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscribeFn) {
+	addressSyncTimer := time.NewTicker(c.syncPeriod)
+	defer addressSyncTimer.Stop()
+
+	subscribed, addrChan, err := subscribe()
+	if err != nil {
+		klog.Errorf("Error during netlink subscribe for IP Manager: %v", err)
+	}
+	klog.Info("Node IP manager is running")
+	for {
+		select {
+		case a, ok := <-addrChan:
+			addressSyncTimer.Reset(c.syncPeriod)
+			if !ok {
+				if subscribed, addrChan, err = subscribe(); err != nil {
+					klog.Errorf("Error during netlink re-subscribe due to channel closing for IP Manager: %v", err)
+				}
+				continue
+			}
+			addrChanged := false
+			if a.NewAddr {
+				addrChanged = c.addAddr(a.LinkAddress)
+			} else {
+				addrChanged = c.delAddr(a.LinkAddress)
+			}
+
+			c.handleNodePrimaryAddrChange()
+			if addrChanged || !c.doNodeHostCIDRsMatch() {
+				klog.Infof("Host CIDRs changed to %v. Updating node address annotations.", c.cidrs)
+				err := c.updateNodeAddressAnnotations()
+				if err != nil {
+					klog.Errorf("Address Manager failed to update node address annotations: %v", err)
+				}
+				c.OnChanged()
+			}
+		case <-addressSyncTimer.C:
+			if subscribed {
+				klog.V(5).Info("Node IP manager calling sync() explicitly")
+				c.sync()
+			} else {
+				if subscribed, addrChan, err = subscribe(); err != nil {
+					klog.Errorf("Error during netlink re-subscribe for IP Manager: %v", err)
+				}
+			}
+		case <-stopChan:
+			klog.Info("Node IP manager is finished")
+			return
+		}
+	}
+}
+
+func (c *addressManager) getNetlinkAddrSubFunc(stopChan <-chan struct{}) func() (bool, chan netlink.AddrUpdate, error) {
 	addrSubscribeOptions := netlink.AddrSubscribeOptions{
 		ErrorCallback: func(err error) {
 			klog.Errorf("Failed during AddrSubscribe callback: %v", err)
 			// Note: Not calling sync() from here: it is redudant and unsafe when stopChan is closed.
 		},
 	}
-
-	subscribe := func() (bool, chan netlink.AddrUpdate, error) {
+	return func() (bool, chan netlink.AddrUpdate, error) {
 		addrChan := make(chan netlink.AddrUpdate)
 		if err := netlink.AddrSubscribeWithOptions(addrChan, stopChan, addrSubscribeOptions); err != nil {
 			return false, nil, err
@@ -129,13 +197,10 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 		c.sync()
 		return true, addrChan, nil
 	}
-
-	c.runInternal(stopChan, doneWg, subscribe)
 }
 
-// runInternal can be used by testcases to provide a fake subscription function
-// rather than using netlink
-func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGroup, subscribe subscribeFn) {
+// addHandlerForPrimaryAddrChange handles reconfiguration of a node primary IP address change
+func (c *addressManager) addHandlerForPrimaryAddrChange() {
 	// Add an event handler to the node informer. This is needed for cases where users first update the node's IP
 	// address but only later update kubelet configuration and restart kubelet (which in turn will update the reported
 	// IP address inside the node's status field).
@@ -148,61 +213,6 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	if err != nil {
 		klog.Fatalf("Could not add node event handler while starting address manager %v", err)
 	}
-
-	doneWg.Add(1)
-	go func() {
-		defer doneWg.Done()
-
-		addressSyncTimer := time.NewTicker(30 * time.Second)
-		defer addressSyncTimer.Stop()
-
-		subscribed, addrChan, err := subscribe()
-		if err != nil {
-			klog.Errorf("Error during netlink subscribe for IP Manager: %v", err)
-		}
-
-		for {
-			select {
-			case a, ok := <-addrChan:
-				addressSyncTimer.Reset(30 * time.Second)
-				if !ok {
-					if subscribed, addrChan, err = subscribe(); err != nil {
-						klog.Errorf("Error during netlink re-subscribe due to channel closing for IP Manager: %v", err)
-					}
-					continue
-				}
-				addrChanged := false
-				if a.NewAddr {
-					addrChanged = c.addAddr(a.LinkAddress)
-				} else {
-					addrChanged = c.delAddr(a.LinkAddress)
-				}
-
-				c.handleNodePrimaryAddrChange()
-				if addrChanged || !c.doNodeHostCIDRsMatch() {
-					klog.Infof("Host CIDRs changed to %v. Updating node address annotations.", c.cidrs)
-					err := c.updateNodeAddressAnnotations()
-					if err != nil {
-						klog.Errorf("Address Manager failed to update node address annotations: %v", err)
-					}
-					c.OnChanged()
-				}
-			case <-addressSyncTimer.C:
-				if subscribed {
-					klog.V(5).Info("Node IP manager calling sync() explicitly")
-					c.sync()
-				} else {
-					if subscribed, addrChan, err = subscribe(); err != nil {
-						klog.Errorf("Error during netlink re-subscribe for IP Manager: %v", err)
-					}
-				}
-			case <-stopChan:
-				return
-			}
-		}
-	}()
-
-	klog.Info("Node IP manager is running")
 }
 
 // updates OVN's EncapIP if the node IP changed
@@ -406,9 +416,9 @@ func (c *addressManager) sync() {
 			return
 		}
 		for _, link := range links {
-			foundAddrs, err := util.GetFilteredInterfaceAddrs(link, config.IPv4Mode, config.IPv6Mode)
+			foundAddrs, err := netlink.AddrList(link, getSupportedIPFamily())
 			if err != nil {
-				klog.Errorf("Unable to retrieve addresses for link %s: %v", link.Attrs().Name, err)
+				klog.Errorf("Failed sync due to being unable to list addresses for %q: %v", link.Attrs().Name, err)
 				return
 			}
 			addrs = append(addrs, foundAddrs...)
@@ -495,4 +505,14 @@ func updateOVNEncapIPAndReconnect(newIP net.IP) {
 		klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
 		return
 	}
+}
+
+func getSupportedIPFamily() int {
+	var ipFamily int // value of 0 means include both IP v4 and v6 addresses
+	if config.IPv4Mode && !config.IPv6Mode {
+		ipFamily = netlink.FAMILY_V4
+	} else if !config.IPv4Mode && config.IPv6Mode {
+		ipFamily = netlink.FAMILY_V6
+	}
+	return ipFamily
 }
