@@ -1,6 +1,11 @@
 package persistentips
 
 import (
+	"fmt"
+	"strings"
+
+	"k8s.io/klog/v2"
+
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -13,17 +18,38 @@ import (
 // Allocator acts on IPAMClaim events handed off by the cluster network
 // controller and allocates or releases IPs for IPAMClaims.
 type Allocator struct {
+	kube kube.InterfaceOVN
+
+	// ipAllocator of IPs within subnets
+	ipAllocator subnet.NamedAllocator
 }
 
 // NewAllocator builds a new PersistentIPsAllocator
 func NewAllocator(kube kube.InterfaceOVN, ipAllocator subnet.NamedAllocator) *Allocator {
-	pipsAllocator := &Allocator{}
-	return pipsAllocator
+	return &Allocator{
+		kube:        kube,
+		ipAllocator: ipAllocator,
+	}
 }
 
 // Reconcile updates an IPAMClaim with the IP addresses allocated to the pod's
 // interface
 func (a *Allocator) Reconcile(ipamClaim *ipamclaimsapi.IPAMClaim, ips []string) error {
+	klog.V(5).Infof("Reconciling IPAMLease %q", ipamClaim.Name)
+	if len(ipamClaim.Status.IPs) > 0 {
+		klog.V(5).Infof("IPAMClaim %q already features IPs - bailing out !", ipamClaim.Name)
+		return nil
+	}
+
+	if err := a.kube.UpdateIPAMLeaseIPs(ipamClaim, ips); err != nil {
+		return fmt.Errorf(
+			"failed to update the allocation %q with allocations %q: %v",
+			ipamClaim.Name,
+			strings.Join(ips, ","),
+			err,
+		)
+	}
+
 	return nil
 }
 
