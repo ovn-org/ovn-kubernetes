@@ -9,10 +9,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
+	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -37,6 +39,8 @@ type PodAllocator struct {
 
 	// An utility to allocate the PodAnnotation to pods
 	podAnnotationAllocator pod.AnnotationAllocator
+
+	ipamClaimsFetcher *persistentips.IPAMClaimFetcher
 
 	// track pods that have been released but not deleted yet so that we don't
 	// release more than once
@@ -70,6 +74,12 @@ func NewPodAllocator(
 	}
 
 	return podAllocator
+}
+
+func WithPersistentIPs(ipamClaimsLister ipamclaimslister.IPAMClaimLister) AllocationOption {
+	return func(allocator *PodAllocator) {
+		allocator.ipamClaimsFetcher = persistentips.NewIPAMClaimsFetcher(allocator.netInfo, ipamClaimsLister)
+	}
 }
 
 // Init initializes the allocator with as configured for the network

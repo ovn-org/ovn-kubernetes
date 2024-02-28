@@ -148,6 +148,7 @@ func (ncc *networkClusterController) init() error {
 				ncc.watchFactory.PodCoreInformer().Lister(),
 				ncc.kube,
 			)
+			allocationOpts []pod.AllocationOption
 		)
 
 		if util.DoesNetworkRequireIPAM(ncc.NetInfo) {
@@ -155,16 +156,19 @@ func (ncc *networkClusterController) init() error {
 				ncc.kube,
 				ipAllocator.ForSubnet(ncc.NetInfo.GetNetworkName()),
 			)
+
+			ipamClaimsLister := ncc.watchFactory.IPAMClaimsInformer().Lister()
 			podAllocationAnnotator = annotationalloc.NewPodAnnotationAllocatorWithPersistentIPs(
 				ncc.NetInfo,
 				ncc.watchFactory.PodCoreInformer().Lister(),
 				ncc.kube,
 				ipamClaimsAllocator,
-				persistentips.NewIPAMClaimsFetcher(ncc.NetInfo, ncc.watchFactory.IPAMClaimsInformer().Lister()),
+				persistentips.NewIPAMClaimsFetcher(ncc.NetInfo, ipamClaimsLister),
 			)
+			allocationOpts = append(allocationOpts, pod.WithPersistentIPs(ipamClaimsLister))
 		}
 
-		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, ncc.kube, podAllocationAnnotator, ipAllocator)
+		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, ncc.kube, podAllocationAnnotator, ipAllocator, allocationOpts...)
 		err := ncc.podAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
