@@ -287,11 +287,27 @@ func StartNodeCertificateManager(ctx context.Context, wg *sync.WaitGroup, nodeNa
 	if err != nil {
 		return fmt.Errorf("failed to initialize the certificate store: %v", err)
 	}
+
+	// The CSR approver only accepts CSRs created by system:ovn-node:nodeName and system:node:nodeName.
+	// If the node name in the existing ovn-node certificate is different from the current node name,
+	// remove the certificate so the CSR will be created using the bootstrap kubeconfig using system:node:nodeName user.
+	certCommonName := fmt.Sprintf("%s:%s", certCommonNamePrefix, nodeName)
+	currentCertFromFile, err := certificateStore.Current()
+	if err == nil && currentCertFromFile.Leaf != nil {
+		if currentCertFromFile.Leaf.Subject.CommonName != certCommonName {
+			klog.Errorf("Unexpected common name found in the certificate, expected: %q, got: %q, removing %s",
+				certCommonName, currentCertFromFile.Leaf.Subject.CommonName, certificateStore.CurrentPath())
+			if err := os.Remove(certificateStore.CurrentPath()); err != nil {
+				return fmt.Errorf("failed to remove the current certificate file: %w", err)
+			}
+		}
+	}
+
 	certManager, err := certificate.NewManager(&certificate.Config{
 		ClientsetFn: newClientsetFn,
 		Template: &x509.CertificateRequest{
 			Subject: pkix.Name{
-				CommonName:   fmt.Sprintf("%s:%s", certCommonNamePrefix, nodeName),
+				CommonName:   certCommonName,
 				Organization: []string{certOrganization},
 			},
 		},
