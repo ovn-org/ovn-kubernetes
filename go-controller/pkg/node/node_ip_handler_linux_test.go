@@ -208,7 +208,7 @@ var _ = Describe("Node IP Handler tests", func() {
 	})
 
 	Context("valid addresses", func() {
-		It("allows keepalived VIP", func() {
+		ovntest.OnSupportedPlatformsIt("allows keepalived VIP", func() {
 			Expect(tc.ns.Do(func(netNS ns.NetNS) error {
 				link, err := netlink.LinkByName(dummyBrName)
 				if err != nil {
@@ -227,7 +227,7 @@ var _ = Describe("Node IP Handler tests", func() {
 			}, 3).Should(BeTrue())
 		})
 
-		It("allows unique local address", func() {
+		ovntest.OnSupportedPlatformsIt("allows unique local address", func() {
 			Expect(tc.ns.Do(func(netNS ns.NetNS) error {
 				link, err := netlink.LinkByName(dummyBrName)
 				if err != nil {
@@ -246,7 +246,7 @@ var _ = Describe("Node IP Handler tests", func() {
 			}, 3).Should(BeTrue())
 		})
 
-		It("allow secondary IP", func() {
+		ovntest.OnSupportedPlatformsIt("allow secondary IP", func() {
 			primaryIPNet := ovntest.MustParseIPNet(dummyAdditionalIPv4CIDR)
 			// create an additional IP which resides within the primary subnet aka secondary IP
 			secondaryIP := make(net.IP, len(primaryIPNet.IP))
@@ -276,7 +276,7 @@ var _ = Describe("Node IP Handler tests", func() {
 			}, 3).Should(BeTrue())
 		})
 
-		It("doesn't allow OVN reserved IPs", func() {
+		ovntest.OnSupportedPlatformsIt("doesn't allow OVN reserved IPs", func() {
 			config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP = ovntest.MustParseIP(dummyMasqIPv4)
 			config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP = ovntest.MustParseIP(dummyMasqIPv6)
 
