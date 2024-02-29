@@ -187,7 +187,7 @@ that do not run ovn-kubernetes.
 [OVN multicast](./docs/multicast.md) enables data to be delivered to multiple IP addresses simultaneously.
 For this to happen, the 'receivers' join a multicast group, and the sender(s) send data to it.
 
-[NetworkPolicy](./docs/network-policy.md) features and examples. By default the network traffic from and
+[NetworkPolicy](./docs/networkpolicies/network-policy.md) features and examples. By default the network traffic from and
 to K8s pods is not restricted in any way. Using NetworkPolicy is a way to enforce network isolation
 of selected pods.
 
