@@ -451,6 +451,22 @@ func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAdd
 	return false, nil
 }
 
+// LinkNeighIPExists checks to see if the IP exists in IP neighbour cache
+func LinkNeighIPExists(link netlink.Link, neighIP net.IP) (bool, error) {
+	neighs, err := netLinkOps.NeighList(link.Attrs().Index, getFamily(neighIP))
+	if err != nil {
+		return false, fmt.Errorf("failed to get the list of neighbour entries for link %s",
+			link.Attrs().Name)
+	}
+
+	for _, neigh := range neighs {
+		if neigh.IP.Equal(neighIP) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType, labels [][]byte) error {
 	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
