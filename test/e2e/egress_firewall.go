@@ -53,6 +53,16 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 		exFWDenyCIDR         string
 	)
 
+	waitForEFApplied := func(namespace string) {
+		gomega.Eventually(func() bool {
+			output, err := e2ekubectl.RunKubectl(namespace, "get", "egressfirewall", "default")
+			if err != nil {
+				framework.Failf("could not get the egressfirewall default in namespace: %s", namespace)
+			}
+			return strings.Contains(output, "EgressFirewall Rules applied")
+		}, 10*time.Second).Should(gomega.BeTrue(), fmt.Sprintf("expected egress firewall in namespace %s to be successfully applied", namespace))
+	}
+
 	f := wrappedTestFramework(svcname)
 	// node2ndaryIPs holds the nodeName as the key and the value is
 	// a map with ipFamily(v4 or v6) as the key and the secondaryIP as the value
@@ -151,6 +161,7 @@ spec:
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		// apply the egress firewall configuration
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		waitForEFApplied(f.Namespace.Name)
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 
@@ -271,6 +282,7 @@ spec:
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		// apply the egress firewall configuration
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		waitForEFApplied(f.Namespace.Name)
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 		// create host networked pod
@@ -333,7 +345,7 @@ spec:
 				// manually add the a secondary IP to each node
 				framework.Logf("Adding IP %s to node %s", ip, nodeName)
 				_, err = runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "add", ip, "dev", "breth0")
-				if err != nil && !strings.Contains(err.Error(),	"Address already assigned") {
+				if err != nil && !strings.Contains(err.Error(), "Address already assigned") {
 					framework.Failf("failed to add new IP address %s to node %s: %v", ip, nodeName, err)
 				}
 				toCurlSecondaryNodeIPAddresses.Insert(ip)
@@ -376,7 +388,7 @@ spec:
 
 		ginkgo.By("Should NOT be able to reach each secondary hostIP via node selector")
 		for _, address := range toCurlSecondaryNodeIPAddresses.List() {
-			if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) ||  IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
+			if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) || IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
 				continue
 			}
 			path := fmt.Sprintf("http://%s:%d/hostname", address, hostNetworkPort)
@@ -411,7 +423,7 @@ spec:
 
 		ginkgo.By("Should be able to reach secondary hostIP via node selector")
 		for _, address := range toCurlSecondaryNodeIPAddresses.List() {
-			if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) ||  IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
+			if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) || IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
 				continue
 			}
 			path := fmt.Sprintf("http://%s:%d/hostname", address, hostNetworkPort)
@@ -499,13 +511,7 @@ spec:
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		// apply the egress firewall configuration
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
-		gomega.Eventually(func() bool {
-			output, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "egressfirewall", "default")
-			if err != nil {
-				framework.Failf("could not get the egressfirewall default in namespace: %s", f.Namespace.Name)
-			}
-			return strings.Contains(output, "EgressFirewall Rules applied")
-		}, 30*time.Second).Should(gomega.BeTrue())
+		waitForEFApplied(f.Namespace.Name)
 	})
 
 	ginkgo.It("Should validate the egress firewall allows inbound connections", func() {
@@ -610,14 +616,7 @@ spec:
 		// 3. Apply deny-all egress firewall and wait for it to be applied
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
-
-		gomega.Eventually(func() bool {
-			output, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "egressfirewall", "default")
-			if err != nil {
-				framework.Failf("could not get the egressfirewall default in namespace: %s", f.Namespace.Name)
-			}
-			return strings.Contains(output, "EgressFirewall Rules applied")
-		}, 10*time.Second).Should(gomega.BeTrue())
+		waitForEFApplied(f.Namespace.Name)
 
 		// 4. Check that only inbound traffic is allowed
 		// pod -> external container should be blocked
