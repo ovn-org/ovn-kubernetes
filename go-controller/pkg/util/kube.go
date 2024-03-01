@@ -906,3 +906,26 @@ func IsHostEndpoint(endpointIPstr string) bool {
 	}
 	return true
 }
+
+func GetPhysNetNameKey() string {
+	if config.Gateway.PhysNetNameKey != "" {
+		return config.Gateway.PhysNetNameKey
+	}
+	return types.PhysicalNetworkName
+}
+
+// GetPhysNetNameKeyForNode returns name of the physical networks for the node name if it was provided
+// Else value from the config will be returned if available, or the default one.
+func GetPhysNetNameKeyForNode(nodeName string, labels map[string]string) string {
+	if config.Gateway.PhysNetNameKey != "" {
+		if nodeName != "" {
+			if value, ok := labels["k8s.ovn.org/physnet-name-key"]; ok {
+				return value
+			}
+		}
+		// Default behaviour
+		return config.Gateway.PhysNetNameKey
+	}
+	klog.Infof("Using default value: %s", types.PhysicalNetworkName)
+	return types.PhysicalNetworkName
+}

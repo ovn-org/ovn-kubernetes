@@ -564,7 +564,7 @@ func getRouterPortMacAddress(coreclient *corev1client.CoreV1Client, restconfig *
 
 // getNodeExternalBridgeName gets the name of the external bridge of this node, e.g. breth0 or br-ex.
 func getNodeExternalBridgeName(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, ovnNamespace string, podInfo *PodInfo) (string, error) {
-	cmd := "ovn-sbctl --no-leader-only " + podInfo.SbCommand + " --bare --no-heading --column=logical_port find Port_Binding options:network_name=" + types.PhysicalNetworkName
+	cmd := "ovn-sbctl --no-leader-only " + podInfo.SbCommand + " --bare --no-heading --column=logical_port find Port_Binding options:network_name=" + util.GetPhysNetNameKey()
 	stdout, stderr, err := execInPod(coreclient, restconfig, ovnNamespace, podInfo.OvnKubePodName, podInfo.OvnKubeContainerName, cmd, "")
 	if err != nil {
 		return "", fmt.Errorf("execInPod() failed with %s stderr %s stdout %s", err, stderr, stdout)

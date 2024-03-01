@@ -263,7 +263,7 @@ func setupUDPAggregationUplink(ifname string) error {
 
 func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
 	*bridgeConfiguration, *bridgeConfiguration, error) {
-	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, gwIPs)
+	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, util.GetPhysNetNameKey(), gwIPs)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "Bridge for interface failed for %s", gwIntf)
 	}
