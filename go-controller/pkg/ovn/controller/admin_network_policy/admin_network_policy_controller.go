@@ -319,15 +319,18 @@ func (c *Controller) onANPUpdate(oldObj, newObj interface{}) {
 		!newANP.GetDeletionTimestamp().IsZero() {
 		return
 	}
-	if reflect.DeepEqual(oldANP.Spec, newANP.Spec) {
+	oldANPACLAnnotation := oldANP.Annotations[util.AclLoggingAnnotation]
+	newANPACLAnnotation := newANP.Annotations[util.AclLoggingAnnotation]
+	if reflect.DeepEqual(oldANP.Spec, newANP.Spec) && oldANPACLAnnotation == newANPACLAnnotation {
 		return
 	}
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
 		// updates to ANP object should be very rare, once put in place they usually stay the same
 		klog.V(4).Infof("Updating Admin Network Policy %s: "+
-			"anpPriority: %v, anpSubject %v, anpIngress %v, anpEgress %v", key,
-			newANP.Spec.Priority, newANP.Spec.Subject, newANP.Spec.Ingress, newANP.Spec.Egress)
+			"anpPriority: %v, anpSubject %v, anpIngress %v, anpEgress %v"+
+			"aclAnnotation: %v", key, newANP.Spec.Priority, newANP.Spec.Subject, newANP.Spec.Ingress,
+			newANP.Spec.Egress, newANPACLAnnotation)
 		c.anpQueue.Add(key)
 	}
 }
@@ -364,16 +367,18 @@ func (c *Controller) onBANPUpdate(oldObj, newObj interface{}) {
 		!newBANP.GetDeletionTimestamp().IsZero() {
 		return
 	}
-
-	if reflect.DeepEqual(oldBANP.Spec, newBANP.Spec) {
+	oldBANPACLAnnotation := oldBANP.Annotations[util.AclLoggingAnnotation]
+	newBANPACLAnnotation := newBANP.Annotations[util.AclLoggingAnnotation]
+	if reflect.DeepEqual(oldBANP.Spec, newBANP.Spec) && oldBANPACLAnnotation == newBANPACLAnnotation {
 		return
 	}
 
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
 		klog.V(4).Infof("Updating Baseline Admin Network Policy %s: "+
-			"anpSubject %v, anpIngress %v, anpEgress %v", key,
-			newBANP.Spec.Subject, newBANP.Spec.Ingress, newBANP.Spec.Egress)
+			"banpSubject %v, banpIngress %v, banpEgress %v"+
+			"aclAnnotation: %v", key, newBANP.Spec.Subject, newBANP.Spec.Ingress,
+			newBANP.Spec.Egress, newBANPACLAnnotation)
 		c.banpQueue.Add(key)
 	}
 }

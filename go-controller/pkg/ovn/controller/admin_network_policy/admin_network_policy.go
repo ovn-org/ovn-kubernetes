@@ -516,6 +516,11 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 		}
 		ops = append(ops, addrOps...)
 	}
+	hasACLLoggingParamsChanged := currentANPState.aclLoggingParams.Allow != desiredANPState.aclLoggingParams.Allow ||
+		currentANPState.aclLoggingParams.Deny != desiredANPState.aclLoggingParams.Deny
+	if !isBanp {
+		hasACLLoggingParamsChanged = hasACLLoggingParamsChanged || currentANPState.aclLoggingParams.Pass != desiredANPState.aclLoggingParams.Pass
+	}
 	// TODO(tssurya): Check if we can be more efficient by narrowing down exactly which ACL needs a change
 	// The rules which didn't change -> those updates will be no-ops thanks to libovsdb
 	// The rules that changed in terms of their `getACLMutableFields`
@@ -525,7 +530,8 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	// (1) fullPeerRecompute=true which means the rules were of different lengths (involved deletion or appending of gress rules)
 	// (2) atLeastOneRuleUpdated=true which means the gress rules were of same lengths but action or ports changed on at least one rule
 	// (3) hasPriorityChanged=true which means we should update acl.Priority for every ACL
-	if fullPeerRecompute || atLeastOneRuleUpdated || hasPriorityChanged {
+	// (4) hasACLLoggingParamsChanged=true which means we should update acl.Severity/acl.Log for every ACL
+	if fullPeerRecompute || atLeastOneRuleUpdated || hasPriorityChanged || hasACLLoggingParamsChanged {
 		klog.V(3).Infof("ANP %s with priority %d was updated", desiredANPState.name, desiredANPState.anpPriority)
 		// now update the acls to the desired ones
 		ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, desiredACLs...)
