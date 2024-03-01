@@ -6,6 +6,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 )
 
@@ -82,6 +83,9 @@ type adminNetworkPolicyState struct {
 	ingressRules []*gressRule
 	// egressRules stores the objects needed to track .Spec.Egress changes
 	egressRules []*gressRule
+	// aclLoggingParams stores the log levels for the ACLs created for this ANP
+	// this is based off the "k8s.ovn.org/acl-logging" annotation set on the ANP's
+	aclLoggingParams *libovsdbutil.ACLLoggingLevels
 }
 
 // newAdminNetworkPolicyState takes the provided ANP API object and creates a new corresponding
@@ -119,7 +123,13 @@ func newAdminNetworkPolicyState(raw *anpapi.AdminNetworkPolicy) (*adminNetworkPo
 		}
 		anp.egressRules = append(anp.egressRules, anpRule)
 	}
-
+	anp.aclLoggingParams, err = getACLLoggingLevelsForANP(raw.Annotations)
+	if err != nil {
+		addErrors = errors.Wrapf(addErrors, "error: cannot parse anp ACL logging annotation, disabling it for ANP %v - %v",
+			raw.Name, err)
+	}
+	klog.V(4).Infof("Logging parameters for ANP %s are Allow=%s/Deny=%s/Pass=%s", raw.Name,
+		anp.aclLoggingParams.Allow, anp.aclLoggingParams.Deny, anp.aclLoggingParams.Pass)
 	if addErrors.Error() == "" {
 		addErrors = nil
 	}
@@ -327,7 +337,13 @@ func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) 
 		}
 		banp.egressRules = append(banp.egressRules, banpRule)
 	}
-
+	banp.aclLoggingParams, err = getACLLoggingLevelsForANP(raw.Annotations)
+	if err != nil {
+		addErrors = errors.Wrapf(addErrors, "error: cannot parse anp ACL logging annotation, disabling it for BANP %v - %v",
+			raw.Name, err)
+	}
+	klog.V(4).Infof("Logging parameters for BANP %s are Allow=%s/Deny=%s", raw.Name,
+		banp.aclLoggingParams.Allow, banp.aclLoggingParams.Deny)
 	if addErrors.Error() == "" {
 		addErrors = nil
 	}
