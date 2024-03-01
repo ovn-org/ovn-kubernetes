@@ -284,7 +284,8 @@ var _ = Describe("ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPol
 			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).NotTo(HaveOccurred(),
 			"traffic should be allowed since we only use an PASS all traffic policy rule")
 
-		By("verify the PASS ACL log level at Tier1")
+		// Re-enable when https://issues.redhat.com/browse/FDP-442 is fixed
+		/*By("verify the PASS ACL log level at Tier1")
 		clientPodScheduledPodName = pods[0].Spec.NodeName
 		// Retry here in the case where OVN acls have not been programmed yet
 		composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:2", anpName)
@@ -295,7 +296,7 @@ var _ = Describe("ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPol
 				composedPolicyNameRegex,
 				allowACLVerdict,
 				initialPassACLSeverity)
-		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())*/
 
 		By("creating a baseline admin network policy")
 		err := makeBaselineAdminNetworkPolicy(fr.Namespace.Name)
@@ -399,7 +400,8 @@ var _ = Describe("ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPol
 			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
 			"traffic should be blocked since we use an PASS traffic policy followed by a deny at lower tier")
 
-		By("verify the PASS ACL log level at Tier1")
+		// Re-enable when https://issues.redhat.com/browse/FDP-442 is fixed
+		/*By("verify the PASS ACL log level at Tier1")
 		clientPodScheduledPodName = pods[0].Spec.NodeName
 		// Retry here in the case where OVN acls have not been programmed yet
 		composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:2", anpName)
@@ -410,7 +412,7 @@ var _ = Describe("ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPol
 				composedPolicyNameRegex,
 				allowACLVerdict,
 				"notice")
-		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())*/
 
 		// BANP Deny will be hit
 		By("verify the DENY ACL log level at Tier3")
@@ -444,10 +446,11 @@ var _ = Describe("ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPol
 			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
 			"traffic should be blocked since we use an PASS traffic policy followed by a deny at lower tier")
 
-		composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:2", anpName)
+		// Re-enable when https://issues.redhat.com/browse/FDP-442 is fixed
+		/*composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:2", anpName)
 		Consistently(func() (bool, error) {
 			return isCountUpdatedAfterPokePod(fr, &clientPod, &pokedPod, composedPolicyNameRegex, denyACLVerdict, "")
-		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())*/
 
 		composedPolicyNameRegex = "BANP:default:Egress:1"
 		Consistently(func() (bool, error) {
@@ -473,10 +476,11 @@ var _ = Describe("ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPol
 			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
 			"traffic should be blocked since we use an PASS traffic policy followed by a deny at lower tier")
 
-		composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:2", anpName)
+		// Re-enable when https://issues.redhat.com/browse/FDP-442 is fixed
+		/*composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:2", anpName)
 		Consistently(func() (bool, error) {
 			return isCountUpdatedAfterPokePod(fr, &clientPod, &pokedPod, composedPolicyNameRegex, denyACLVerdict, "")
-		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())*/
 
 		composedPolicyNameRegex = "BANP:default:Egress:1"
 		Consistently(func() (bool, error) {
