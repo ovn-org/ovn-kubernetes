@@ -312,7 +312,7 @@ func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) 
 	for i, rule := range raw.Spec.Ingress {
 		banpRule, err := newBaselineAdminNetworkPolicyIngressRule(rule, int32(i), BANPFlowPriority-int32(i))
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create banp ingress Rule %d in ANP %s - %v",
+			addErrors = errors.Wrapf(addErrors, "error: cannot create banp ingress Rule %d in BANP %s - %v",
 				i, raw.Name, err)
 			continue
 		}
@@ -321,7 +321,7 @@ func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) 
 	for i, rule := range raw.Spec.Egress {
 		banpRule, err := newBaselineAdminNetworkPolicyEgressRule(rule, int32(i), BANPFlowPriority-int32(i))
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create banp egress Rule %d in ANP %s - %v",
+			addErrors = errors.Wrapf(addErrors, "error: cannot create banp egress Rule %d in BANP %s - %v",
 				i, raw.Name, err)
 			continue
 		}
