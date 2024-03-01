@@ -1,0 +1,125 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: qoses.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: QoS
+    listKind: QoSList
+    plural: qoses
+    singular: qos
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          QoS is a CRD that allows the user to define a DSCP marking and metering
+          for pods ingress/egress traffic on its namespace to specified CIDRs,
+          protocol and port. Traffic belong these pods will be checked against
+          each QoSRule in the namespace's QoS, and if there is a match the traffic
+          is marked with relevant DSCP value and enforcing specified policing/shaping
+          parameters.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Spec defines the desired state of QoS
+            properties:
+              egress:
+                description: a collection of Egress QoS rule objects
+                items:
+                  properties:
+                    classifier:
+                      description: |-
+                        Classifer The classifier on which packets should match
+                        to apply the QoS Rule.
+                      properties:
+                        cidr:
+                          description: |-
+                            CIDR specifies the destination's CIDR. Only traffic heading
+                            to this CIDR will be marked with the DSCP value and policing/shaping
+                            get applies when specified.
+                            This field is optional, and in case it is not set the rule is applied
+                            to all egress traffic regardless of the destination.
+                          format: cidr
+                          type: string
+                        port:
+                          description: port that the traffic must match
+                          format: int32
+                          maximum: 65535
+                          minimum: 1
+                          type: integer
+                        protocol:
+                          description: protocol (tcp, udp, sctp) that the traffic
+                            must match.
+                          pattern: ^TCP|UDP|SCTP$
+                          type: string
+                      type: object
+                    markingDSCP:
+                      description: MarkingDSCP marking value for matching pods' traffic.
+                      maximum: 63
+                      minimum: 0
+                      type: integer
+                    policing:
+                      description: |-
+                        Policing controls the maximum of rate traffic that can be sent
+                        or received on the matching packets.
+                      properties:
+                        rate:
+                          description: |-
+                            Rate The value of rate limit in kbps. Traffic over the limit
+                            will be dropped.
+                          format: int32
+                          maximum: 4294967295
+                          minimum: 1
+                          type: integer
+                        shaping:
+                          description: |-
+                            Shaping helps to control traffic flow by buffering packet bits when packet
+                            rate reaches the max limit and send it in next available slot.
+                          properties:
+                            burst:
+                              description: |-
+                                Burst The value of burst rate limit in kilobits.
+                                This also needs rate to be specified.
+                              format: int32
+                              maximum: 4294967295
+                              minimum: 1
+                              type: integer
+                          type: object
+                      type: object
+                  required:
+                  - markingDSCP
+                  type: object
+                type: array
+            required:
+            - egress
+            type: object
+          status:
+            description: Status defines the observed state of QoS
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
