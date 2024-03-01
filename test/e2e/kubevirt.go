@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
-	"net/http/httptrace"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,8 +25,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
@@ -63,21 +63,25 @@ func newControllerRuntimeClient() (crclient.Client, error) {
 var _ = Describe("Kubevirt Virtual Machines", func() {
 
 	var (
-		fr                         = wrappedTestFramework("kv-live-migration")
-		crClient                   crclient.Client
-		namespace                  string
-		httpServerPort             = int32(9900)
-		isDualStack                = false
-		wg                         sync.WaitGroup
-		selectedNodes              = []corev1.Node{}
-		httpServerTestPods         = []*corev1.Pod{}
-		singleConnectionHTTPClient *http.Client
-		clientSet                  kubernetes.Interface
+		fr                 = wrappedTestFramework("kv-live-migration")
+		crClient           crclient.Client
+		namespace          string
+		tcpServerPort      = int32(9900)
+		isDualStack        = false
+		wg                 sync.WaitGroup
+		selectedNodes      = []corev1.Node{}
+		httpServerTestPods = []*corev1.Pod{}
+		clientSet          kubernetes.Interface
 		// Systemd resolvd prevent resolving kube api service by fqdn, so
 		// we replace it here with NetworkManager
-		butane = `
+		butane = fmt.Sprintf(`
 variant: fcos
 version: 1.4.0
+storage:
+  files:
+    - path: /root/test/server.go
+      contents:
+        local: kubevirt/echoserver/main.go
 systemd:
   units:
     - name: systemd-resolved.service
@@ -95,11 +99,22 @@ systemd:
         Type=oneshot
         [Install]
         WantedBy=multi-user.target
+    - name: echoserver.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Golang echo server
+        Wants=replace-resolved.service
+        After=replace-resolved.service
+        [Service]
+        ExecStart=podman run --name tcpserver --tls-verify=false --privileged --net=host -v /root/test:/test:z registry.access.redhat.com/ubi9/go-toolset:1.20 go run /test/server.go %d
+        [Install]
+        WantedBy=multi-user.target
 passwd:
   users:
   - name: core
     password_hash: $y$j9T$b7RFf2LW7MUOiF4RyLHKA0$T.Ap/uzmg8zrTcUNXyXvBvT26UgkC6zZUVg3UKXeEp5
-`
+`, tcpServerPort)
 		labelNode = func(nodeName, label string) error {
 			patch := fmt.Sprintf(`{"metadata": {"labels": {"%s": ""}}}`, label)
 			_, err := fr.ClientSet.CoreV1().Nodes().Patch(context.Background(), nodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
@@ -185,12 +200,6 @@ passwd:
 			Expect(labelNode(node.Name, namespace)).To(Succeed())
 		}
 
-		singleConnectionHTTPClient = &http.Client{
-			Transport: &http.Transport{
-				MaxConnsPerHost: 1,
-			},
-			Timeout: 2 * time.Second,
-		}
 	})
 
 	AfterEach(func() {
@@ -206,53 +215,78 @@ passwd:
 	}
 
 	var (
-		sendEchoWithConnectionCheck = func(addrs []string, checkConnectionBroken bool) error {
-			for _, addr := range addrs {
-				connectionBroken := true
-				clientTrace := &httptrace.ClientTrace{
-					GotConn: func(info httptrace.GotConnInfo) {
-						connectionBroken = !info.Reused
-					},
-				}
-				traceCtx := httptrace.WithClientTrace(context.Background(), clientTrace)
-				req, err := http.NewRequestWithContext(traceCtx, http.MethodGet, fmt.Sprintf("http://%s/echo?msg=pong", addr), nil)
-				if err != nil {
-					return err
-				}
-				res, err := singleConnectionHTTPClient.Do(req)
-				if err != nil {
-					return err
-				}
-				if checkConnectionBroken && connectionBroken {
-					return fmt.Errorf("http connection to virtual machine was broken")
-				}
-				//TODO: Check pong
-				if _, err := io.Copy(io.Discard, res.Body); err != nil {
-					return err
-				}
-				res.Body.Close()
+		sendEcho = func(conn *net.TCPConn) error {
+			strEcho := "Halo"
 
+			if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+				return fmt.Errorf("failed configuring connection deadline: %w", err)
+			}
+			_, err := conn.Write([]byte(strEcho))
+			if err != nil {
+				return fmt.Errorf("failed Write to server: %w", err)
+			}
+
+			reply := make([]byte, 1024)
+
+			_, err = conn.Read(reply)
+			if err != nil {
+				return fmt.Errorf("failed Read to server: %w", err)
+			}
+
+			if strings.Compare(string(reply), strEcho) == 0 {
+				return fmt.Errorf("unexpected reply '%s'", string(reply))
 			}
 			return nil
 		}
 
-		sendEcho = func(addrs []string) error {
-			return sendEchoWithConnectionCheck(addrs, false)
+		sendEchos = func(conns []*net.TCPConn) error {
+			for _, conn := range conns {
+				if err := sendEcho(conn); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 
-		sendEchoAndCheckConnection = func(addrs []string) error {
-			return sendEchoWithConnectionCheck(addrs, true)
+		dial = func(addr string) (*net.TCPConn, error) {
+			tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+			if err != nil {
+				return nil, fmt.Errorf("failed ResolveTCPAddr: %w", err)
+			}
+			backoff := wait.Backoff{
+				Steps:    4,
+				Duration: 10 * time.Millisecond,
+				Factor:   5.0,
+				Jitter:   0.1,
+			}
+			allErrors := func(error) bool { return true }
+			var conn *net.TCPConn
+			return conn, retry.OnError(backoff, allErrors, func() error {
+				conn, err = net.DialTCP("tcp", nil, tcpAddr)
+				if err != nil {
+					return fmt.Errorf("failed DialTCP: %w", err)
+				}
+				return nil
+			})
 		}
 
-		serviceEndpoints = func(svc *corev1.Service) ([]string, error) {
+		dialServiceNodePort = func(svc *corev1.Service) ([]*net.TCPConn, error) {
 			worker, err := fr.ClientSet.CoreV1().Nodes().Get(context.TODO(), "ovn-worker", metav1.GetOptions{})
 			if err != nil {
 				return nil, err
 			}
-			endpoints := []string{}
+			endpoints := []*net.TCPConn{}
 			for _, address := range worker.Status.Addresses {
 				if address.Type != corev1.NodeHostName {
-					endpoints = append(endpoints, net.JoinHostPort(address.Address, fmt.Sprintf("%d", svc.Spec.Ports[0].NodePort)))
+					addr := net.JoinHostPort(address.Address, fmt.Sprintf("%d", svc.Spec.Ports[0].NodePort))
+					conn, err := dial(addr)
+					if err != nil {
+						return endpoints, err
+					}
+					if err := conn.SetKeepAlive(true); err != nil {
+						return nil, err
+					}
+					endpoints = append(endpoints, conn)
 				}
 			}
 			return endpoints, nil
@@ -299,7 +333,7 @@ passwd:
 			return fr.ClientSet.NetworkingV1().NetworkPolicies(namespace).Create(context.TODO(), policy, metav1.CreateOptions{})
 		}
 
-		checkConnectivity = func(vmName string, endpoints []string, stage string) {
+		checkConnectivity = func(vmName string, endpoints []*net.TCPConn, stage string) {
 			by(vmName, "Check connectivity "+stage)
 			vmi := &kubevirtv1.VirtualMachineInstance{
 				ObjectMeta: metav1.ObjectMeta{
@@ -312,7 +346,7 @@ passwd:
 			polling := 15 * time.Second
 			timeout := time.Minute
 			step := by(vmName, stage+": Check tcp connection is not broken")
-			Eventually(func() error { return sendEchoAndCheckConnection(endpoints) }).
+			Eventually(func() error { return sendEchos(endpoints) }).
 				WithPolling(polling).
 				WithTimeout(timeout).
 				WithOffset(1).
@@ -345,14 +379,14 @@ passwd:
 				Should(Succeed(), func() string { return step + ": " + output })
 		}
 
-		checkConnectivityAndNetworkPolicies = func(vmName string, endpoints []string, stage string) {
+		checkConnectivityAndNetworkPolicies = func(vmName string, endpoints []*net.TCPConn, stage string) {
 			checkConnectivity(vmName, endpoints, stage)
 			step := by(vmName, stage+": Create deny all network policy")
 			policy, err := createDenyAllPolicy(vmName)
 			Expect(err).ToNot(HaveOccurred(), step)
 
 			step = by(vmName, stage+": Check connectivity block after create deny all network policy")
-			Eventually(func() error { return sendEcho(endpoints) }).
+			Eventually(func() error { return sendEchos(endpoints) }).
 				WithPolling(time.Second).
 				WithTimeout(5*time.Second).
 				ShouldNot(Succeed(), step)
@@ -362,8 +396,8 @@ passwd:
 			// Wait some time for network policy removal to take effect
 			time.Sleep(1 * time.Second)
 
-			step = by(vmName, stage+": Check connectivity block after create deny all network policy")
-			Expect(sendEcho(endpoints)).To(Succeed(), step)
+			step = by(vmName, stage+": Check connectivity is restored after delete deny all network policy")
+			Expect(sendEchos(endpoints)).To(Succeed(), step)
 		}
 
 		composeAgnhostPod = func(name, namespace, nodeName string, args ...string) *v1.Pod {
@@ -491,7 +525,15 @@ passwd:
 
 		}
 		fcosVM = func(idx int, labels map[string]string, butane string) (*kubevirtv1.VirtualMachine, error) {
-			ignition, _, err := butaneconfig.TranslateBytes([]byte(butane), butanecommon.TranslateBytesOptions{})
+			workingDirectory, err := os.Getwd()
+			if err != nil {
+				return nil, err
+			}
+			ignition, _, err := butaneconfig.TranslateBytes([]byte(butane), butanecommon.TranslateBytesOptions{
+				TranslateOptions: butanecommon.TranslateOptions{
+					FilesDir: workingDirectory,
+				},
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -593,7 +635,7 @@ passwd:
 			}
 			return vms, nil
 		}
-		liveMigrateAndCheck = func(vmName string, migrationMode kubevirtv1.MigrationMode, endpoints []string, step string) {
+		liveMigrateAndCheck = func(vmName string, migrationMode kubevirtv1.MigrationMode, endpoints []*net.TCPConn, step string) {
 			liveMigrateVirtualMachine(vmName, migrationMode)
 			checkLiveMigrationSucceeded(vmName, migrationMode)
 			checkConnectivityAndNetworkPolicies(vmName, endpoints, step)
@@ -632,22 +674,20 @@ passwd:
 					})
 			}
 
-			step = by(vm.Name, "Start httpServer")
-			httpServerCommand := fmt.Sprintf("podman run -d --tls-verify=false --privileged --net=host %s netexec --http-port %d", agnhostImage, httpServerPort)
-			output, err := kubevirt.RunCommand(vmi, httpServerCommand, time.Minute)
-			Expect(err).ToNot(HaveOccurred(), step+": "+output)
-
-			step = by(vm.Name, "Expose httpServer as a service")
-			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("httpserver", vm.Name, httpServerPort), metav1.CreateOptions{})
+			step = by(vm.Name, "Expose tcpServer as a service")
+			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("tcpserver", vm.Name, tcpServerPort), metav1.CreateOptions{})
 			Expect(err).ToNot(HaveOccurred(), step)
-			endpoints, err := serviceEndpoints(svc)
-			Expect(err).ToNot(HaveOccurred(), step)
+			defer func() {
+				output, err := kubevirt.RunCommand(vmi, "podman logs tcpserver", 10*time.Second)
+				Expect(err).ToNot(HaveOccurred())
+				fmt.Printf("%s tcpserver logs: %s", vmi.Name, output)
+			}()
 
-			step = by(vm.Name, "Send first echo to populate connection pool")
-			Eventually(func() error { return sendEcho(endpoints) }).
-				WithPolling(1*time.Second).
-				WithTimeout(5*time.Second).
-				Should(Succeed(), step)
+			By("Wait some time for service to settle")
+			time.Sleep(2 * time.Second)
+
+			endpoints, err := dialServiceNodePort(svc)
+			Expect(err).ToNot(HaveOccurred(), step)
 
 			checkConnectivityAndNetworkPolicies(vm.Name, endpoints, "before live migration")
 			// Do just one migration that will fail
@@ -786,7 +826,6 @@ passwd:
 				return vm.Status.Ready
 			}).WithPolling(time.Second).WithTimeout(5 * time.Minute).Should(BeTrue())
 		}
-
 		wg.Add(int(td.numberOfVMs))
 		for _, vm := range vms {
 			go runTest(td, vm)
