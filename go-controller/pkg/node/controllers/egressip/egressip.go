@@ -906,7 +906,9 @@ func (c *Controller) repairNode() error {
 	}
 	ipTableV6Rules, err := c.iptablesManager.GetIPv6ChainRuleArgs(utiliptables.TableNAT, chainName)
 	if err != nil {
-		return fmt.Errorf("failed to list IPTable IPv4 rules: %v", err)
+		// IPv6 NAT table may not be available by default on some distributions.
+		ipTableV6Rules = make([]iptables.RuleArg, 0)
+		klog.Warningf("Failed to list IPTable IPv6 rules: %v", err)
 	}
 	for _, rule := range ipTableV6Rules {
 		ruleStr := strings.Join(rule.Args, " ")
@@ -1033,7 +1035,8 @@ func (c *Controller) repairNode() error {
 	}
 	staleIPTableV6Rules := assignedIPTableV6Rules.Difference(expectedIPTableV6Rules)
 	if err := c.removeStaleIPTableV6Rules(staleIPTableV6Rules, assignedIPTablesV6StrToRules); err != nil {
-		return fmt.Errorf("failed to remove stale IPTable V4 rule(s) (%+v): %v", staleIPTableV6Rules, err)
+		// IPv6 NAT table may not be available by default on some distributions.
+		klog.Warningf("Failed to remove stale IPTable V6 rule(s) (%+v): %v", staleIPTableV6Rules, err)
 	}
 	return nil
 }

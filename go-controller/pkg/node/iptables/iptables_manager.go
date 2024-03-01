@@ -211,7 +211,7 @@ func getChainRuleArgs(ipt iptables.Interface, table iptables.Table, chain iptabl
 	buf := bytes.NewBuffer(nil)
 	err := execIPTablesWithRetry(func() error {
 		if err := ipt.SaveInto(table, buf); err != nil {
-			return fmt.Errorf("failed to retrieve iptables table %s: %v", table, err)
+			return fmt.Errorf("failed to retrieve iptables table %s: %v: %s", table, err, buf)
 		}
 		return nil
 	})
