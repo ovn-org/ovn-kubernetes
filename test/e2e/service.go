@@ -681,7 +681,7 @@ var _ = ginkgo.Describe("Services", func() {
 
 		ginkgo.AfterEach(func() {
 			ginkgo.By("Cleaning up external container")
-			deleteClusterExternalContainer(clientContainerName)
+			//deleteClusterExternalContainer(clientContainerName)
 			ginkgo.By("Deleting additional IP addresses from nodes")
 			for nodeName, ipFamilies := range nodeIPs {
 				for _, ip := range ipFamilies {
@@ -836,6 +836,175 @@ var _ = ginkgo.Describe("Services", func() {
 				}
 			}
 		})
+
+		// This tests specific flows required to handle IP fragments towards
+		// node port services to avoid forwarding via host in SGW mode. On one
+		// side, it is undesireable due to performance considerations. On the
+		// other side, it could be problematic if some fragmented packets within
+		// a stream are forwarded via host while other non fragmented packets of
+		// that same stream are forwarded directly to OVN, as the NATing in both
+		// scenarios is different such that OVN could interpret them as
+		// different streams and replace what it thinks to be a conflicting port
+		// with different one, breaking the stream for the involved peers.
+		ginkgo.It("should handle IP fragments", func() {
+			framework.TestContext.DeleteNamespace = false
+			ginkgo.By("Selecting a schedulable node")
+			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 1)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(len(nodes.Items)).To(gomega.BeNumerically(">", 0))
+			nodeName := nodes.Items[0].Name
+			nodeName = "ovn-worker"
+			serverNodeIPv4, _ := getContainerAddressesForNetwork(nodeName, primaryNetworkName)
+
+			ginkgo.By("Creating the backend pod")
+			args := []string{
+				"netexec",
+				fmt.Sprintf("--http-port=%d", endpointHTTPPort),
+				fmt.Sprintf("--udp-port=%d", endpointUDPPort),
+			}
+			endpointsSelector := map[string]string{"servicebackend": "true"}
+
+			serverPodName := nodeName + "-ep"
+			var serverContainerName string
+			_, err := createPod(f, serverPodName, nodeName, f.Namespace.Name, []string{}, endpointsSelector,
+				func(p *v1.Pod) {
+					p.Spec.Containers[0].Args = args
+					serverContainerName = p.Spec.Containers[0].Name
+				},
+			)
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Creating NodePort service")
+			serviceName := "service"
+			service := nodePortServiceSpecFrom(
+				serviceName,
+				v1.IPFamilyPolicyPreferDualStack,
+				endpointHTTPPort,
+				endpointUDPPort,
+				clusterHTTPPort,
+				clusterUDPPort,
+				endpointsSelector,
+				v1.ServiceExternalTrafficPolicyTypeCluster,
+			)
+			service, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), service, metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the endpoints to pop up")
+			err = framework.WaitForServiceEndpointsNum(
+				context.TODO(),
+				f.ClientSet,
+				f.Namespace.Name,
+				serviceName,
+				1,
+				time.Second,
+				wait.ForeverTestTimeout,
+			)
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Creating an external client")
+			//clientIPv4, _ := createClusterExternalContainer(
+			createClusterExternalContainer(
+				clientContainerName,
+				agnhostImage,
+				[]string{"--privileged", "--network", "kind"},
+				[]string{"pause"},
+			)
+
+			const pmtu = "1300"
+			payloads := map[string]string{
+				"non-fragmented": "1220",
+				"fragmented":     "1420",
+			}
+
+			// We set a route MTU towards the server node emulating that PMTUD
+			// has already happened resulting in a plausible low PMTU.
+			// For UDP the system wide default IP_PMTUDISC_WANT will
+			// result in fragmentation for packets bigger than the PMTU.
+			// Note that fragmentation could also happen if a client chooses to
+			// not use PMTUD with IP_PMTUDISC_DONT both for TCP or UDP but the
+			// test setup required to achieve fragmentation without emulating
+			// PMTUD is more complex so we stick to UDP.
+			/*
+				ginkgo.By("Lowering PMTU towards the server")
+				cmd := []string{
+					containerRuntime,
+					"exec",
+					clientContainerName,
+					"ip", "route", "add", serverNodeIPv4, "dev", "eth0", "src", clientIPv4, "mtu", pmtu,
+				}
+				framework.Logf("Running %v", cmd)
+				_, err = runCommand(cmd...)
+				framework.ExpectNoError(err, "lowering MTU in the external kind container failed: %v", err)
+			*/
+
+			// For UDP, the system wide default IP_PMTUDISC_WANT will result in
+			// fragmentation for bigger packets than the PMTU. However, for TCP,
+			// PMTUD won't happen (and DF bit won't be set) since we already set
+			// a route MTU, but disable it anyway
+			ginkgo.By("Disabling PMTUD on the client")
+			cmd := []string{
+				containerRuntime,
+				"exec",
+				clientContainerName,
+				"sysctl", "-w", "net.ipv4.ip_no_pmtu_disc=2",
+			}
+			framework.Logf("Running %v", cmd)
+			_, err = runCommand(cmd...)
+			framework.ExpectNoError(err, "disabling PMTUD in the external kind container failed: %v", err)
+
+			var udpPort int32
+			for _, port := range service.Spec.Ports {
+				if port.Protocol == v1.ProtocolUDP {
+					udpPort = port.NodePort
+				}
+			}
+			gomega.Expect(udpPort).NotTo(gomega.Equal(0))
+
+			// To check that forwarding did not happen via host, we send a
+			// non-fragmented packet first and then a fragmented one on the same
+			// source port. If the server sees the same source port it means
+			// that both packets were forwarded the same. This is because when
+			// forwarding via OVN, DNAT happens directly to the endpoint IP,
+			// whereas forwarding via host, DNAT happens to the service cluster
+			// IP and then forwaded to OVN. Thus, OVN sees both as different
+			// streams and ends up replacing the source port to avoid the
+			// duplicate.
+			sourcePortRegex := `UDP client [\d.]+:(?P<Port>\d{1,5})`
+			var sourcePort string
+			//for _, payload := range []string{"non-fragmented", "fragmented"} {
+			for _, payload := range []string{"non-fragmented"} {
+				ginkgo.By(fmt.Sprintf("Sending a %s UDP payload to the service node port", payload))
+				payload := fmt.Sprintf("%0"+payloads[payload]+"d", 1)
+				containerCmd := fmt.Sprintf("echo 'echo %s' | nc -w2 -u %s %d", payload, serverNodeIPv4, udpPort)
+				if sourcePort != "" {
+					containerCmd = fmt.Sprintf("echo 'echo %s' | nc -w2 -u -p %s %s %d", payload, sourcePort, serverNodeIPv4, udpPort)
+				}
+				cmd = []string{
+					containerRuntime,
+					"exec",
+					clientContainerName,
+					"/bin/sh",
+					"-c",
+					containerCmd,
+				}
+				framework.Logf("Running %v", cmd)
+				stdout, err := runCommand(cmd...)
+				framework.ExpectNoError(err, "sending echo request failed: %v", err)
+
+				ginkgo.By("Checking that the service received the request and replied")
+				framework.Logf("Server replied with %s", stdout)
+				gomega.Expect(stdout).To(gomega.Equal(payload), "server did not reply with the requested payload")
+
+				ginkgo.By("Checking that the request was done on the intended source port")
+				matches, err := CaptureContainerOutput(context.TODO(), f.ClientSet, f.Namespace.Name, serverPodName, serverContainerName, sourcePortRegex)
+				framework.ExpectNoError(err)
+				gomega.Expect(matches).To(gomega.HaveKey("Port"))
+				if sourcePort != "" {
+					gomega.Expect(matches).To(gomega.HaveKeyWithValue("Port", sourcePort), "request did not use the intended source port")
+				}
+				sourcePort = matches["Port"]
+			}
+		})
 	})
 })
 
@@ -978,9 +1147,9 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 	)
 
 	var (
-		backendNodeName string
+		backendNodeName    string
 		nonBackendNodeName string
-		namespaceName   = "default"
+		namespaceName      = "default"
 	)
 	f := wrappedTestFramework(svcName)
 	ginkgo.BeforeEach(func() {
