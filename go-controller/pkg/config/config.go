@@ -216,6 +216,9 @@ type DefaultConfig struct {
 	// that are initiated from the pods so that the reverse connections go back to the pods.
 	// This represents the conntrack zone used for the conntrack flow rules.
 	ConntrackZone int `gcfg:"conntrack-zone"`
+	// DisableRequestedChassis flag to indicate if logical_switch_port requested-chassis
+	// options can be disabled
+	DisableRequestedChassis bool `gcfg:"disable-ovn-requested-chassis"`
 	// EncapType value defines the encapsulation protocol to use to transmit packets between
 	// hypervisors. By default the value is 'geneve'
 	EncapType string `gcfg:"encap-type"`
@@ -739,6 +742,12 @@ var CommonFlags = []cli.Flag{
 		Usage:       "For gateway nodes, the conntrack zone used for conntrack flow rules (default: 64000)",
 		Destination: &cliConfig.Default.ConntrackZone,
 		Value:       Default.ConntrackZone,
+	},
+	&cli.BoolFlag{
+		Name:        "disable-ovn-requested-chassis",
+		Usage:       "Flag to indicate if logical switch port requested-chassis options can be disabled",
+		Destination: &cliConfig.Default.DisableRequestedChassis,
+		Value:       Default.DisableRequestedChassis,
 	},
 	&cli.StringFlag{
 		Name:        "encap-type",

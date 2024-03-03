@@ -70,6 +70,7 @@ var _ = Describe("Node", func() {
 
 			config.Default.MTU = configDefaultMTU
 			config.Default.EncapIP = "10.1.0.40"
+			config.OvnKubeNode.Mode = types.NodeModeFull
 
 		})
 
@@ -252,11 +253,11 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
-						"external_ids:ovn-enable-lflow-cache=true",
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -356,13 +357,13 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=false "+
 						"external_ids:ovn-limit-lflow-cache=1000 "+
-						"external_ids:ovn-memlimit-lflow-cache-kb=100000",
+						"external_ids:ovn-memlimit-lflow-cache-kb=100000 "+
+						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -424,11 +425,11 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
-						"external_ids:ovn-enable-lflow-cache=true",
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 
@@ -498,11 +499,11 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
-						"external_ids:ovn-enable-lflow-cache=true",
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 
@@ -572,11 +573,11 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-is-interconn=false "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
-						"external_ids:ovn-enable-lflow-cache=true",
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 
