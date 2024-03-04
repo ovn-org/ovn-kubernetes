@@ -14,9 +14,8 @@ export KUBECONFIG=${HOME}/ovn.conf
 # still failing v6 lane: https://github.com/ovn-org/ovn-kubernetes/pull/2505,
 # https://github.com/ovn-org/ovn-kubernetes/pull/2524, https://github.com/ovn-org/ovn-kubernetes/pull/2287; so
 # going to skip them again.
-# TODO: Fix metalLB integration with KIND on IPV6 in LGW mode and enable those service tests. EgressServices
-# feature also uses MetalLB for the LB service, so we need to unskip them as well in the future. See
-# https://github.com/ovn-org/ovn-kubernetes/issues/4131 and https://github.com/ovn-org/ovn-kubernetes/issues/4132 for details.
+# TODO: Fix metalLB integration with KIND on IPV6 in LGW mode and enable those service tests.See
+# https://github.com/ovn-org/ovn-kubernetes/issues/4131 for details.
 # TODO: Fix EIP tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4130 for details.
 # TODO: Fix EFW tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4133 for details.
 # TODO: Fix CPU Pinning tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4134 for details.
@@ -38,7 +37,6 @@ Should validate flow data of br-int is sent to an external gateway with netflow 
 can retrieve multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
 Load Balancer Service Tests with MetalLB|\
-Egress Services|\
 egress IP validation|\
 e2e egress firewall policy validation|\
 OVS CPU affinity pinning|\
