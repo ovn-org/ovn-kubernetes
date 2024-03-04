@@ -351,6 +351,12 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		if err != nil {
 			return nil, nil, err
 		}
+
+		err = util.GetNetLinkOps().LinkSetUp(link)
+		if err != nil {
+			return nil, nil, err
+		}
+
 		hostIface.Mac = link.Attrs().HardwareAddr.String()
 
 		// 5. set MTU on the representor
