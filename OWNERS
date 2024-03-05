@@ -1,17 +1,18 @@
 reviewers:
   - aserdean
-  - dcbw
-  - girishmg
-  - trozet
-  - cathy-zhou
-  - npinaeva
-  - jcaamano
-  - tssurya
-  - flavio-fernandes
-  - martinkennelly
-  - kyrtapz
-  - pperiyasamy
   - bpickard22
+  - cathy-zhou
+  - dcbw
+  - flavio-fernandes
+  - girishmg
+  - jcaamano
+  - kyrtapz
+  - martinkennelly
+  - npinaeva
+  - pperiyasamy
+  - ricky-rav
+  - trozet
+  - tssurya
 
 approvers:
   - dcbw
