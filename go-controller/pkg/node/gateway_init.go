@@ -541,6 +541,13 @@ func CleanupClusterNode(name string) error {
 }
 
 func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) error {
+	// TBD-merge for dpu-host mode: if interface mac of the dpu-host interface that connects to the
+	// gateway bridge on the dpu changes, we need to update dpu's gatewayBridge.macAddress L3 gateway
+	// annotation (see bridgeForInterface)
+	if config.OvnKubeNode.Mode != types.NodeModeFull {
+		return nil
+	}
+
 	if nc.gateway.GetGatewayBridgeIface() != link.Attrs().Name {
 		return nil
 	}
