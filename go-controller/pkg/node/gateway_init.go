@@ -447,7 +447,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 	}
 	config.Gateway.Interface = gwIntf
 
-	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+	_, gatewayIntf, err := getGatewayNextHops()
 	if err != nil {
 		return err
 	}
@@ -465,7 +465,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 	}
 
-	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, gatewayNextHops)
+	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, DummyNextHopIPs())
 	if err != nil {
 		return err
 	}
