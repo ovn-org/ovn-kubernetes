@@ -1048,6 +1048,12 @@ install_metallb() {
   pushd "${builddir}"
   git clone https://github.com/metallb/metallb.git
   cd metallb
+  # Use global IP next hops in IPv6
+  if  [ "$KIND_IPV6_SUPPORT" == true ]; then
+    sed -i '/address-family PROTOCOL unicast/a \
+  neighbor NODE0_IP route-map IPV6GLOBAL in\n  neighbor NODE1_IP route-map IPV6GLOBAL in\n  neighbor NODE2_IP route-map IPV6GLOBAL in' dev-env/bgp/frr/bgpd.conf.tmpl
+    printf "route-map IPV6GLOBAL permit 10\n set ipv6 next-hop prefer-global" >> dev-env/bgp/frr/bgpd.conf.tmpl
+  fi
   pip install -r dev-env/requirements.txt
 
   local ip_family ipv6_network
@@ -1066,6 +1072,10 @@ install_metallb() {
 
   docker network create --subnet="${METALLB_CLIENT_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge clientnet
   docker network connect clientnet frr
+  if  [ "$KIND_IPV6_SUPPORT" == true ]; then
+    # Enable IPv6 forwarding in FRR
+    docker exec frr sysctl -w net.ipv6.conf.all.forwarding=1
+  fi
   docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
   popd
   delete_metallb_dir

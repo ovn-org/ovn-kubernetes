@@ -868,14 +868,19 @@ func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPat
 	return nil
 }
 
-// pokeIPTableRules returns the number of iptable rules that match the provided pattern
+// pokeIPTableRules returns the number of iptables (both ipv6 and ipv4) rules that match the provided pattern
 func pokeIPTableRules(clientContainer, pattern string) int {
 	cmd := []string{containerRuntime, "exec", clientContainer}
-	ipTCommand := strings.Split("iptables-save -c", " ")
 
-	cmd = append(cmd, ipTCommand...)
-	iptRules, err := runCommand(cmd...)
-	framework.ExpectNoError(err, "failed to get iptable rules from node %s", clientContainer)
+	ipv4Cmd := append(cmd, strings.Split("iptables-save -c", " ")...)
+	ipt4Rules, err := runCommand(ipv4Cmd...)
+	framework.ExpectNoError(err, "failed to get iptables rules from node %s", clientContainer)
+
+	ipv6Cmd := append(cmd, strings.Split("ip6tables-save -c", " ")...)
+	ipt6Rules, err := runCommand(ipv6Cmd...)
+	framework.ExpectNoError(err, "failed to get ip6tables rules from node %s", clientContainer)
+
+	iptRules := ipt4Rules + ipt6Rules
 	framework.Logf("DEBUG: Dumping IPTRules %v", iptRules)
 	numOfMatchRules := 0
 	for _, iptRule := range strings.Split(iptRules, "\n") {
