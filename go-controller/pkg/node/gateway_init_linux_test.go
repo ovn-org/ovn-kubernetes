@@ -769,7 +769,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 			expRoute := &netlink.Route{
 				Dst:       ovntest.MustParseIPNet(svcCIDR),
 				LinkIndex: link.Attrs().Index,
-				Gw:        ovntest.MustParseIP(gwIP),
+				Gw:        ovntest.MustParseIP(config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP.String()),
 			}
 			Eventually(func() error {
 				r, err := util.LinkRouteGetFilteredRoute(
