@@ -1,235 +1,197 @@
-How to Submit Patches for ovn-kubernetes
-========================================
+# Contributing Guide
 
-Create github pull requests for the repo.  More details are included below.
+* [New Contributor Guide](#contributing-guide)
+  * [Ways to Contribute](#ways-to-contribute)
+  * [Find an Issue](#find-an-issue)
+  * [Ask for Help](#ask-for-help)
+  * [Pull Request Lifecycle](#pull-request-lifecycle)
+  * [Development Environment Setup](#development-environment-setup)
+  * [Sign Your Commits](#sign-your-commits)
+  * [Pull Request Checklist](#pull-request-checklist)
 
-Before You Start
-----------------
+Welcome! We are glad that you want to contribute to our project! 💖
 
-Before you send patches at all, make sure that each patch makes sense.
-In particular:
+As you get started, you are in the best position to give us feedback on areas of
+our project that we need help with including:
 
-  - A given patch should not break anything, even if later
-    patches fix the problems that it causes.  The source tree
-    should still work after each patch is applied.  (This enables
-    `git bisect` to work best.)
+* Problems found during setting up a new developer environment
+* Gaps in our Quickstart Guide or documentation
+* Bugs in our automation scripts
 
-  - A patch should make one logical change.  Don't make
-    multiple, logically unconnected changes to disparate
-    subsystems in a single patch.
+If anything doesn't make sense, or doesn't work when you run it, please open a
+bug report and let us know!
 
-  - A patch that adds or removes user-visible features should
-    also update the appropriate user documentation or manpages.
+## Ways to Contribute
 
-Commit Summary
--------------
+We welcome many different types of contributions including:
 
-The summary line of your commit should be in the following format:
-`<area>: <summary>`
+* New features
+* Builds, CI/CD
+* Bug fixes
+* Documentation
+* Issue Triage
+* Answering questions on Slack/Mailing List
+* Web design
+* Communications / Social Media / Blog Posts
+* Release management
 
-  - `<area>:` indicates the area of the ovn-kubernetes to which the
-    change applies (often the name of a source file or a
-    directory).  You may omit it if the change crosses multiple
-    distinct pieces of code.
+Not everything happens through a GitHub pull request. Please come to our
+[meetings](./MEETINGS.md) or [contact us](https://ovn-org.slack.com/archives/C010SQ5FSNL) and let's discuss how we can work
+together. 
 
-  - `<summary>` briefly describes the change.
+### Come to Meetings
 
-Commit Description
-------------------
+Absolutely everyone is welcome to come to any of our meetings. You never need an
+invite to join us. In fact, we want you to join us, even if you don’t have
+anything you feel like you want to contribute. Just being there is enough!
 
-The body of the commit message should start with a more thorough description of
-the change.  This becomes the body of the commit message, following
-the subject.  There is no need to duplicate the summary given in the
-subject.
+You can find out more about our meetings [here](./MEETINGS.md). You don’t have to turn on
+your video. The first time you come, introducing yourself is more than enough.
+Over time, we hope that you feel comfortable voicing your opinions, giving
+feedback on others’ ideas, and even sharing your own ideas, and experiences.
 
-Please limit lines in the description to 79 characters in width.
+## Find an Issue
 
-The description should include:
+We have good first issues for new contributors and help wanted issues suitable
+for any contributor. [good first issue](https://github.com/ovn-org/ovn-kubernetes/labels/good%20first%20issue) has extra information to
+help you make your first contribution. [help wanted](https://github.com/ovn-org/ovn-kubernetes/labels/help%20wanted) are issues
+suitable for someone who isn't a core maintainer and is good to move onto after
+your first pull request.
 
-  - The rationale for the change.
+Sometimes there won’t be any issues with these labels. That’s ok! There is
+likely still something for you to work on. If you want to contribute but you
+don’t know where to start or can't find a suitable issue, you can you can reach out to us on [Slack](https://ovn-org.slack.com/) and we will be happy to help.
 
-  - Design description and rationale (but this might be better
-    added as code comments).
+Once you see an issue that you'd like to work on, please post a comment saying
+that you want to work on it. Something like "I want to work on this" is fine.
 
-  - Testing that you performed (or testing that should be done
-    but you could not for whatever reason).
+## Ask for Help
 
-  - Tags (see below).
+The best way to reach us with a question when contributing is to ask on:
 
-There is no need to describe what the patch actually changed, if the
-reader can see it for himself.
+* The original github issue
+* The developer mailing list (mailing-list: https://groups.google.com/g/ovn-kubernetes)
+* Our Slack channel (workspace: https://ovn-org.slack.com/, channel: #ovn-kubernetes)
 
-If the patch refers to a commit already in the ovn-kubernetes
-repository, please include both the commit number and the subject of
-the patch, e.g. 'commit 632d136c (ovn-k8s-overlay: Flush the IP address
-of physical interface)
+## Pull Request Lifecycle
 
-Tags
-----
+1. When you open a PR a maintainer will automatically be assigned for review
+2. Make sure that your PR is passing CI - if you need help with failing checks please feel free to ask!
+3. Once it is passing all CI checks, a maintainer will review your PR and you may be asked to make changes.
+4. When you have received at least one approval from a maintainer, that maintainer will merge your PR.
 
-The description ends with a series of tags, written one to a line as
-the last paragraph of the email.  Each tag indicates some property of
-the patch in an easily machine-parseable manner.
+In some cases, other changes may conflict with your PR. If this happens, you will get notified by a comment in the issue that your PR requires a rebase, and the `needs-rebase` label will be applied. Once a rebase has been performed, this label will be automatically removed.
 
-Examples of common tags follow.
+## Development Environment Setup
 
-    Signed-off-by: Author Name <author.name@email.address...>
+You can easily setup a developer environment by following the instructions [here](https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/kind.md).
 
-        Informally, this indicates that Author Name is the author or
-        submitter of a patch and has the authority to submit it under
-        the terms of the license.  The formal meaning is to agree to
-        the Developer's Certificate of Origin (see below).
+## Sign Your Commits
 
-        If the author and submitter are different, each must sign off.
-        If the patch has more than one author, all must sign off.
+### DCO
+Licensing is important to open source projects. It provides some assurances that
+the software will continue to be available based under the terms that the
+author(s) desired. We require that contributors sign off on commits submitted to
+our project's repositories. The [Developer Certificate of Origin
+(DCO)](https://probot.github.io/apps/dco/) is a way to certify that you wrote and
+have the right to contribute the code you are submitting to the project.
 
-        Signed-off-by: Author Name <author.name@email.address...>
-        Signed-off-by: Submitter Name <submitter.name@email.address...>
+You sign-off by adding the following to your commit messages. Your sign-off must
+match the git user and email associated with the commit.
 
-    Co-authored-by: Author Name <author.name@email.address...>
+    This is my commit message
 
-        Git can only record a single person as the author of a given
-        patch.  In the rare event that a patch has multiple authors,
-        one must be given the credit in Git and the others must be
-        credited via Co-authored-by: tags.  (All co-authors must also
-        sign off.)
+    Signed-off-by: Your Name <your.name@example.com>
 
-    Acked-by: Reviewer Name <reviewer.name@email.address...>
+Git has a `-s` command line option to do this automatically:
 
-        Reviewers will often give an Acked-by: tag to code of which
-        they approve.  It is polite for the submitter to add the tag
-        before posting the next version of the patch or applying the
-        patch to the repository.  Quality reviewing is hard work, so
-        this gives a small amount of credit to the reviewer.
+    git commit -s -m 'This is my commit message'
 
-        Not all reviewers give Acked-by: tags when they provide
-        positive reviews.  It's customary only to add tags from
-        reviewers who actually provide them explicitly.
+If you forgot to do this and have not yet pushed your changes to the remote
+repository, you can amend your commit with the sign-off by running 
 
-    Tested-by: Tester Name <reviewer.name@email.address...>
+    git commit --amend -s 
 
-        When someone tests a patch, it is customary to add a
-        Tested-by: tag indicating that.  It's rare for a tester to
-        actually provide the tag; usually the patch submitter makes
-        the tag himself in response to an email indicating successful
-        testing results.
+## Logical Grouping of Commits
 
-    Tested-at: <URL>
+It is a recommended best practice to keep your changes as logically grouped as
+possible within individual commits. If while you're developing you prefer doing
+a number of commits that are "checkpoints" and don't represent a single logical
+change, please squash those together before asking for a review.
+When addressing review comments, please perform an interactive rebase and edit commits directly rather than adding new commits with messages like "Fix review comments".
 
-        When a test report is publicly available, this provides a way
-        to reference it.  Typical <URL>s would be build logs from
-        autobuilders or references to mailing list archives.
+## Commit message guidelines
 
-        Some autobuilders only retain their logs for a limited amount
-        of time.  It is less useful to cite these because they may be
-        dead links for a developer reading the commit message months
-        or years later.
+A good commit message should describe what changed and why.
 
-    Reported-by: Reporter Name <reporter.name@email.address...>
+1. The first line should:
+  
+* contain a short description of the change (preferably 50 characters or less,
+    and no more than 72 characters)
+* be entirely in lowercase with the exception of proper nouns, acronyms, and
+    the words that refer to code, like areas/function/variable names
+* be prefixed with the name of the sub component being changed
 
-        When a patch fixes a bug reported by some person, please
-        credit the reporter in the commit log in this fashion.  Please
-        also add the reporter's name and email address to the list of
-        people who provided helpful bug reports in the AUTHORS file at
-        the top of the source tree.
+  Examples:
 
-        Fairly often, the reporter of a bug also tests the fix.
-        Occasionally one sees a combined "Reported-and-tested-by:" tag
-        used to indicate this.  It is also acceptable, and more
-        common, to include both tags separately.
+  * networkpolicy: validate ipBlock strictly
+  * egressip: fix frequently rebalancing IPs
+  * services: fix etp=local + session-affnity integration
 
-        (If a bug report is received privately, it might not always be
-        appropriate to publicly credit the reporter.  If in doubt,
-        please ask the reporter.)
+2. Keep the second line blank.
+3. Wrap all other lines at 72 columns (except for long URLs).
+4. If your patch fixes an open issue, you can add a reference to it at the end
+   of the log. Use the `Fixes: #` prefix and the issue number. For other
+   references use `Refs: #`. `Refs` may include multiple issues, separated by a
+   comma.
 
-    Requested-by: Requester Name <requester.name@email.address...>
-    Suggested-by: Suggester Name <suggester.name@email.address...>
+   Examples:
 
-        When a patch implements a request or a suggestion made by some
-        person, please credit that person in the commit log in this
-        fashion.  For a helpful suggestion, please also add the
-        person's name and email address to the list of people who
-        provided suggestions in the AUTHORS file at the top of the
-        source tree.
+   * `Fixes: #1337`
+   * `Refs: #1234`
 
-        (If a suggestion or a request is received privately, it might
-        not always be appropriate to publicly give credit.  If in
-        doubt, please ask.)
+Sample complete commit message:
 
-    Reported-at: <URL>
+```txt
+subcomponent: explain the commit in one line
 
-        If a patch fixes or is otherwise related to a bug reported in
-        a public bug tracker, please include a reference to the bug in
-        the form of a URL to the specific bug, e.g.:
+Body of commit message is a few lines of text, explaining things
+in more detail, possibly giving some background about the issue
+being fixed, etc.
 
-        Reported-at: https://bugs.debian.org/743635
+The body of the commit message can be several paragraphs, and
+please do proper word-wrap and keep columns shorter than about
+72 characters or so. That way, `git log` will show things
+nicely even when it is indented.
 
-        This is also an appropriate way to refer to bug report emails
-        in public email archives, e.g.:
+Fixes: #1337
+Refs: #453, #154
+```
 
-        Reported-at: http://openvswitch.org/pipermail/dev/2014-June/040952.html
+## Pull Request Checklist
 
-    VMware-BZ: #1234567
-    ONF-JIRA: EXT-12345
+When you submit your pull request, or you push new commits to it, our automated
+systems will run some checks on your new code. We require that your pull request
+passes these checks, but we also have more criteria than just that before we can
+accept and merge it. We recommend that you check the following things locally
+before you submit your code:
 
-        If a patch fixes or is otherwise related to a bug reported in
-        a private bug tracker, you may include some tracking ID for
-        the bug for your own reference.  Please include some
-        identifier to make the origin clear, e.g. "VMware-BZ" refers
-        to VMware's internal Bugzilla instance and "ONF-JIRA" refers
-        to the Open Networking Foundation's JIRA bug tracker.
+* Verify that Go code has been formatted and linted
 
-    Fixes: 63bc9fb1c69f (“packets: Reorder CS_* flags to remove gap.”)
+```console
+cd ovn-kubernetes/go-controller/
+make lint
+```
 
-        If you would like to record which commit introduced a bug being fixed,
-        you may do that with a “Fixes” header.  This assists in determining
-        which OVS releases have the bug, so the patch can be applied to all
-        affected versions.  The easiest way to generate the header in the
-        proper format is with this git command:
+* If you are introducing new CRDs verify that Yaml files have been formatted (see
+  [codegen generator](https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/developer.md#generating-crd-yamls-using-codegen))
+* Verify that unit tests are passing locally
 
-        git log -1 --pretty=format:"Fixes: %h (\"%s\")" --abbrev=12 COMMIT_REF
+```console
+cd ovn-kubernetes/go-controller/
+make test
+```
 
-    Vulnerability: CVE-2016-2074
+* All modular changes must be accompanied by new unit tests if they don't exist already.
 
-        Specifies that the patch fixes or is otherwise related to a
-        security vulnerability with the given CVE identifier.  Other
-        identifiers in public vulnerability databases are also
-        suitable.
-
-        If the vulnerability was reported publicly, then it is also
-        appropriate to cite the URL to the report in a Reported-at
-        tag.  Use a Reported-by tag to acknowledge the reporters.
-
-Developer's Certificate of Origin
----------------------------------
-
-To help track the author of a patch as well as the submission chain,
-and be clear that the developer has authority to submit a patch for
-inclusion in openvswitch please sign off your work.  The sign off
-certifies the following:
-
-    Developer's Certificate of Origin 1.1
-
-    By making a contribution to this project, I certify that:
-
-    (a) The contribution was created in whole or in part by me and I
-        have the right to submit it under the open source license
-        indicated in the file; or
-
-    (b) The contribution is based upon previous work that, to the best
-        of my knowledge, is covered under an appropriate open source
-        license and I have the right under that license to submit that
-        work with modifications, whether created in whole or in part
-        by me, under the same open source license (unless I am
-        permitted to submit under a different license), as indicated
-        in the file; or
-
-    (c) The contribution was provided directly to me by some other
-        person who certified (a), (b) or (c) and I have not modified
-        it.
-
-    (d) I understand and agree that this project and the contribution
-        are public and that a record of the contribution (including all
-        personal information I submit with it, including my sign-off) is
-        maintained indefinitely and may be redistributed consistent with
-        this project or the open source license(s) involved.
+* All functional changes and new features must be accompanied by extensive end-to-end test coverage
