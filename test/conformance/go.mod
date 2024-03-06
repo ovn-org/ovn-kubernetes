@@ -1,6 +1,8 @@
 module github.com/ovn-org/ovn-kubernetes/test/conformance
 
-go 1.20
+go 1.22
+
+toolchain go1.22.1
 
 require (
 	gopkg.in/yaml.v3 v3.0.1
