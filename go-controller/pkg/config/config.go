@@ -216,6 +216,12 @@ type DefaultConfig struct {
 	// that are initiated from the pods so that the reverse connections go back to the pods.
 	// This represents the conntrack zone used for the conntrack flow rules.
 	ConntrackZone int `gcfg:"conntrack-zone"`
+	// HostMasqConntrackZone is an unexposed config with the value of ConntrackZone+1
+	HostMasqConntrackZone int
+	// OVNMasqConntrackZone is an unexposed config with the value of ConntrackZone+2
+	OVNMasqConntrackZone int
+	// HostNodePortCTZone is an unexposed config with the value of ConntrackZone+3
+	HostNodePortConntrackZone int
 	// EncapType value defines the encapsulation protocol to use to transmit packets between
 	// hypervisors. By default the value is 'geneve'
 	EncapType string `gcfg:"encap-type"`
@@ -2053,6 +2059,9 @@ func completeDefaultConfig(allSubnets *configSubnets) error {
 		allSubnets.append(configSubnetCluster, subnet.CIDR)
 	}
 
+	Default.HostMasqConntrackZone = Default.ConntrackZone + 1
+	Default.OVNMasqConntrackZone = Default.ConntrackZone + 2
+	Default.HostNodePortConntrackZone = Default.ConntrackZone + 3
 	return nil
 }
 
