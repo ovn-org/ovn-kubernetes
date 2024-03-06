@@ -1135,110 +1135,40 @@ metadata:
 		nodeIP, err := getNodeIP(f.ClientSet, *nodeName)
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get endpoint's %s node ip address", endPointIP))
 
-		// The external client configuration done in install_metallb can not be used because routes for external client
-		// installed in K8s node https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh#L1045-L1047
-		// are ignored in shared gateway mode and traffic coming back from pod is put on the docker bridge directly by
-		// br-ex flows which needs to be handled in host(or vm) network.
-		// Hence the following set of ip commands set up two networks called bridge (192.168.222.0/24) and
-		// client 192.168.223.0/24 on the host(or vm) machine. The external client (192.168.223.2) runs on the client
-		// network which tries to connect with load balancer service via bridge network. There would be also a route
-		// created for the load balancer service forwarding packet into the node which hosts one of the endpoint.
-		//                                     +------------------------------------+
-		//                                     |         kind-ovn-cluster           |
-		//                                     |                                    |
-		//                                     |                                    |
-		//                                     +----------------+-------------------+
-		//                                                      |
-		//                                                      |
-		//                                                      |
-		//                                                      |
-		//                                                      |
-		//                   +----------------------------------+-------------------------------------------+
-		//                   |                                  172.18.0.1                                  |
-		//                   |                                                     ip route add 192.168.223.0/24 via 192.168.222.2
-		//                   |                                                     ip route add <svc-ip> via|<endpoint-node-ip>
-		//                   |                                                                              |
-		//                   |  vm                                    192.168.222.1                         |
-		//                   +----------------------------------------+-------------------------------------+
-		//                                                            | change MTU size into 400 bytes on 192.168.222.0/24 interfaces
-		//                                                            | for the test.
-		//                +-----------------------+         +---------+-----------------+
-		//                |                       |         |         192.168.222.2     |
-		//                |                       |         |                           |
-		//                |          192.168.223.2+---------+ 192.168.223.1             |
-		//                |  client               |         |                     bridge|
-		//                +-----------------------+         +---------------------------+
-		err = buildAndRunCommand("sudo ip netns add bridge")
-		framework.ExpectNoError(err, "failed to add brige network namespace")
-		defer func() {
-			err := buildAndRunCommand("sudo ip netns delete bridge")
-			framework.ExpectNoError(err, "failed to remove brige network namespace")
-		}()
-		err = buildAndRunCommand("sudo ip netns add client")
-		framework.ExpectNoError(err, "failed to add client network namespace")
-		defer func() {
-			err = buildAndRunCommand("sudo ip netns delete client")
-			framework.ExpectNoError(err, "failed to remove client network namespace")
-		}()
-		err = buildAndRunCommand("sudo ip link add vmtobridge type veth peer name bridgetovm")
-		framework.ExpectNoError(err, "failed to add veth pair for bridge")
-		err = buildAndRunCommand("sudo ip link add clienttobridge type veth peer name bridgetoclient")
-		framework.ExpectNoError(err, "failed to add veth pair for client")
-		err = buildAndRunCommand("sudo ip link set bridgetovm netns bridge")
-		framework.ExpectNoError(err, "failed to move bridgetovm into bridge netns")
-		err = buildAndRunCommand("sudo ip link set bridgetoclient netns bridge")
-		framework.ExpectNoError(err, "failed to move bridgetoclient into bridge netns")
-		err = buildAndRunCommand("sudo ip link set clienttobridge netns client")
-		framework.ExpectNoError(err, "failed to move clienttobridge into client netns")
-		err = buildAndRunCommand("sudo ip addr add 192.168.222.1/24 dev vmtobridge")
-		framework.ExpectNoError(err, "failed to add ip address on vmtobridge gateway interface")
-		err = buildAndRunCommand("sudo ip link set vmtobridge up")
-		framework.ExpectNoError(err, "failed to get vmtobridge up")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip addr add 192.168.222.2/24 dev bridgetovm")
-		framework.ExpectNoError(err, "failed to add ip address on bridgetovm interface")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetovm up")
-		framework.ExpectNoError(err, "failed to get bridgetovm up")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetoclient up")
-		framework.ExpectNoError(err, "failed to get bridgetoclient up")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip addr add 192.168.223.1/24 dev bridgetoclient")
-		framework.ExpectNoError(err, "failed to add ip address on bridgetoclient gateway interface")
-		err = buildAndRunCommand("sudo ip netns exec client ip link set clienttobridge up")
-		framework.ExpectNoError(err, "failed to get clienttobridge up")
-		err = buildAndRunCommand("sudo ip netns exec client ip addr add 192.168.223.2/24 dev clienttobridge")
-		framework.ExpectNoError(err, "failed to add ip address on clienttobridge interface")
-		err = buildAndRunCommand("sudo ip netns exec client ip route add default via 192.168.223.1")
-		framework.ExpectNoError(err, "failed to add default route on client netns")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip route add default via 192.168.222.1")
-		framework.ExpectNoError(err, "failed to add default route on bridge netns")
-		err = buildAndRunCommand("sudo ip route add 192.168.223.0/24 via 192.168.222.2")
-		framework.ExpectNoError(err, "failed to add route for client to handle reverse service traffic")
+		svcIPforCurl := svcLoadBalancerIP
+		if !utilnet.IsIPv6String(svcLoadBalancerIP) {
+			ginkgo.By("Setting up external IPv4 client with an intermediate node")
+			defer func() {
+				cleanupIPv4NetworkForExternalClient(svcLoadBalancerIP)
+			}()
+			setupIPv4NetworkForExternalClient(svcLoadBalancerIP, nodeIP)
+		} else {
+			ginkgo.By("Setting up external IPv6 client with an intermediate node")
+			defer func() {
+				cleanupIPv6NetworkForExternalClient(svcLoadBalancerIP)
+			}()
+			setupIPv6NetworkForExternalClient(svcLoadBalancerIP, nodeIP)
+			svcIPforCurl = fmt.Sprintf("[%s]", svcLoadBalancerIP)
+		}
 
-		buildAndRunCommand("sudo ip route delete 192.168.223.0/24")
-		err = buildAndRunCommand("sudo ip route add 192.168.223.0/24 via 192.168.222.2")
-		framework.ExpectNoError(err, "failed to add route for client to handle reverse service traffic")
-		defer func() {
-			err = buildAndRunCommand("sudo ip route delete 192.168.223.0/24 via 192.168.222.2")
-			framework.ExpectNoError(err, "failed to remove route for client which handles reverse service traffic")
-		}()
-
-		err = buildAndRunCommand(fmt.Sprintf("sudo ip route add %s via %s", svcLoadBalancerIP, nodeIP))
-		framework.ExpectNoError(err, "failed to add route for external load balancer service")
-		defer func() {
-			err = buildAndRunCommand(fmt.Sprintf("sudo ip route delete %s via %s", svcLoadBalancerIP, nodeIP))
-			framework.ExpectNoError(err, "failed to remove route for external load balancer service")
-		}()
-
+		ginkgo.By("Test sevice connectivity before changing MTU on the intermediate node")
 		// Ensure service connectivity works from external client with default settings.
-		err = buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcLoadBalancerIP, endpointHTTPPort))
-		framework.ExpectNoError(err, "failed to connect with external load balancer service")
+		// Use Eventually because IPv6 takes a while to finish its network configuration
+		// with network namespaces.
+		gomega.Eventually(func() error {
+			return buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcIPforCurl, endpointHTTPPort))
+		}, 5*time.Second).Should(gomega.BeNil(), "failed to connect with external load balancer service")
 
 		// Change MTU size of vmtobridge veth pair and verify service connectivity still works.
-		err = buildAndRunCommand("sudo ip link set vmtobridge mtu 400")
+		// Set the value >=1280 so that it works for IPv6 as well.
+		err = buildAndRunCommand("sudo ip link set vmtobridge mtu 1280")
 		framework.ExpectNoError(err, "failed to change mtu size on vmtobridge gateway interface")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetovm up mtu 400")
+		err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetovm up mtu 1280")
 		framework.ExpectNoError(err, "failed to change mtu size on bridgetovm interface")
-		err = buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcLoadBalancerIP, endpointHTTPPort))
-		framework.ExpectNoError(err, "failed to connect with external load balancer service after changing mtu size")
+		ginkgo.By("Test sevice connectivity after changing MTU on the intermediate node")
+		gomega.Eventually(func() error {
+			return buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcIPforCurl, endpointHTTPPort))
+		}, 5*time.Second).Should(gomega.BeNil(), "failed to connect with external load balancer service after changing mtu size")
 	})
 
 	ginkgo.It("Should ensure load balancer service works with pmtud", func() {
@@ -1629,4 +1559,159 @@ func getServiceLoadBalancerIP(c clientset.Interface, namespace, serviceName stri
 		return "", fmt.Errorf("service %s has no load balancer IPs", serviceName)
 	}
 	return svc.Status.LoadBalancer.Ingress[0].IP, nil
+}
+
+func setupIPv4NetworkForExternalClient(svcLoadBalancerIP, nodeIP string) {
+	// The external client configuration done in install_metallb can not be used because routes for external client
+	// installed in K8s node https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh#L1045-L1047
+	// are ignored in shared gateway mode and traffic coming back from pod is put on the docker bridge directly by
+	// br-ex flows which needs to be handled in host(or vm) network.
+	// Hence the following set of ip commands set up two networks called bridge (192.168.222.0/24) and
+	// client 192.168.223.0/24 on the host(or vm) machine. The external client (192.168.223.2) runs on the client
+	// network which tries to connect with load balancer service via bridge network. There would be also a route
+	// created for the load balancer service forwarding packet into the node which hosts one of the endpoint.
+	//                                     +------------------------------------+
+	//                                     |         kind-ovn-cluster           |
+	//                                     |                                    |
+	//                                     |                                    |
+	//                                     +----------------+-------------------+
+	//                                                      |
+	//                                                      |
+	//                                                      |
+	//                                                      |
+	//                                                      |
+	//                   +----------------------------------+-------------------------------------------+
+	//                   |                                  172.18.0.1                                  |
+	//                   |                                                     ip route add 192.168.223.0/24 via 192.168.222.2
+	//                   |                                                     ip route add <svc-ip> via|<endpoint-node-ip>
+	//                   |                                                                              |
+	//                   |  vm                                    192.168.222.1                         |
+	//                   +----------------------------------------+-------------------------------------+
+	//                                                            |
+	//                                                            |
+	//                +-----------------------+         +---------+-----------------+
+	//                |                       |         |         192.168.222.2     |
+	//                |                       |         |                           |
+	//                |          192.168.223.2+---------+ 192.168.223.1             |
+	//                |  client               |         |                     bridge|
+	//                +-----------------------+         +---------------------------+
+	setupNetNamespaceAndLinks()
+	err := buildAndRunCommand("sudo ip addr add 192.168.222.1/24 dev vmtobridge")
+	framework.ExpectNoError(err, "failed to add ip address on vmtobridge gateway interface")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip addr add 192.168.222.2/24 dev bridgetovm")
+	framework.ExpectNoError(err, "failed to add ip address on bridgetovm interface")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip addr add 192.168.223.1/24 dev bridgetoclient")
+	framework.ExpectNoError(err, "failed to add ip address on bridgetoclient gateway interface")
+	err = buildAndRunCommand("sudo ip netns exec client ip addr add 192.168.223.2/24 dev clienttobridge")
+	framework.ExpectNoError(err, "failed to add ip address on clienttobridge interface")
+
+	err = buildAndRunCommand("sudo ip netns exec client ip route add default via 192.168.223.1")
+	framework.ExpectNoError(err, "failed to add default route on client netns")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip route add default via 192.168.222.1")
+	framework.ExpectNoError(err, "failed to add default route on bridge netns")
+
+	buildAndRunCommand("sudo ip route delete 192.168.223.0/24")
+	err = buildAndRunCommand("sudo ip route add 192.168.223.0/24 via 192.168.222.2")
+	framework.ExpectNoError(err, "failed to add route for client to handle reverse service traffic")
+
+	err = buildAndRunCommand(fmt.Sprintf("sudo ip route add %s via %s", svcLoadBalancerIP, nodeIP))
+	framework.ExpectNoError(err, "failed to add route for external load balancer service")
+}
+
+func cleanupIPv4NetworkForExternalClient(svcLoadBalancerIP string) {
+	cleanupNetNamespace()
+	buildAndRunCommand("sudo ip route delete 192.168.223.0/24 via 192.168.222.2")
+	buildAndRunCommand(fmt.Sprintf("sudo ip route delete %s", svcLoadBalancerIP))
+}
+
+func setupIPv6NetworkForExternalClient(svcLoadBalancerIP, nodeIP string) {
+	// The external client configuration done in install_metallb can not be used because routes for external client
+	// installed in K8s node https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh#L1045-L1047
+	// are ignored in shared gateway mode and traffic coming back from pod is put on the docker bridge directly by
+	// br-ex flows which needs to be handled in host(or vm) network.
+	// Hence the following set of ip -6 commands set up two IPv6 networks called bridge (fc00:f853:ccd:e222::0/64) and
+	// client fc00:f853:ccd:e223::0/64 on the host(or vm) machine. The external client (fc00:f853:ccd:e223::2) runs on the client
+	// network which tries to connect with load balancer service via bridge network. There would be also a route
+	// created for the load balancer service forwarding packet into the node which hosts one of the endpoint.
+	//                                               +------------------------------+
+	//                                               |        kind-ovn-cluster      |
+	//                                               +---------------+--------------+
+	//                                                               |
+	//                                     +-------------------------+----------------------------------------------+
+	//                                     |                      fc00:f853:ccd:e793::1                             |
+	//                                     |                                       ip -6 route add fc00:f853:ccd:e223::2 dev vmtobridge via fc00:f853:ccd:e222::2
+	//                                     |                                       ip -6 route add %s via %s", svcLoadBalancerIP, nodeIP
+	//                                     |        vm                                                              |
+	//                                     +-----------------------------------------------------------+------------+
+	//                                                                                                 | fc00:f853:ccd:e222::1/64
+	//                                                                                                 |
+	//                                                                                                 | fc00:f853:ccd:e222::2/64
+	//              +--------------------------------------------+                              +------+-------------+
+	//              |                                            |                              | ip -6 route add default dev bridgetovm via fc00:f853:ccd:e222::1
+	//              |                             fc00:f853:ccd:e223::2/64----------------fc00:f853:ccd:e223::1/64   |
+	//              |     client                                 |                              |           bridge   |
+	//              |ip -6 route add default dev clienttobridge via fc00:f853:ccd:e223::1       +--------------------+
+	//              +--------------------------------------------+
+	setupNetNamespaceAndLinks()
+	err := buildAndRunCommand("sudo ip -6 addr add fc00:f853:ccd:e222::1/64 dev vmtobridge")
+	framework.ExpectNoError(err, "failed to add ip address on vmtobridge gateway interface")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip -6 addr add fc00:f853:ccd:e222::2/64 dev bridgetovm")
+	framework.ExpectNoError(err, "failed to add ip address on bridgetovm interface")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip -6 addr add fc00:f853:ccd:e223::1/64 dev bridgetoclient")
+	framework.ExpectNoError(err, "failed to add ip address on bridgetoclient gateway interface")
+	err = buildAndRunCommand("sudo ip netns exec client ip -6 addr add fc00:f853:ccd:e223::2/64 dev clienttobridge")
+	framework.ExpectNoError(err, "failed to add ip address on clienttobridge interface")
+
+	err = buildAndRunCommand("sudo ip netns exec bridge sysctl -w net.ipv6.conf.all.forwarding=1")
+	framework.ExpectNoError(err, "failed to enable ipv6 packet forwarding on bridge net namespace")
+
+	err = buildAndRunCommand("sudo ip netns exec client ip -6 route add default dev clienttobridge via fc00:f853:ccd:e223::1")
+	framework.ExpectNoError(err, "failed to add default route on client netns")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip -6 route add default dev bridgetovm via fc00:f853:ccd:e222::1")
+	framework.ExpectNoError(err, "failed to add default route on bridge netns")
+
+	err = buildAndRunCommand("sudo ip -6 route add fc00:f853:ccd:e223::2 dev vmtobridge via fc00:f853:ccd:e222::2")
+	framework.ExpectNoError(err, "failed to add route for client to handle reverse service traffic")
+
+	err = buildAndRunCommand(fmt.Sprintf("sudo ip -6 route add %s via %s", svcLoadBalancerIP, nodeIP))
+	framework.ExpectNoError(err, "failed to add route for external load balancer service")
+}
+
+func cleanupIPv6NetworkForExternalClient(svcLoadBalancerIP string) {
+	cleanupNetNamespace()
+	buildAndRunCommand("sudo ip -6 route delete fc00:f853:ccd:e223::2")
+	buildAndRunCommand(fmt.Sprintf("sudo ip -6 route delete %s", svcLoadBalancerIP))
+}
+
+func setupNetNamespaceAndLinks() {
+	err := buildAndRunCommand("sudo ip netns add bridge")
+	framework.ExpectNoError(err, "failed to add brige network namespace")
+	err = buildAndRunCommand("sudo ip netns add client")
+	framework.ExpectNoError(err, "failed to add client network namespace")
+
+	err = buildAndRunCommand("sudo ip link add vmtobridge type veth peer name bridgetovm")
+	framework.ExpectNoError(err, "failed to add veth pair for bridge")
+	err = buildAndRunCommand("sudo ip link add clienttobridge type veth peer name bridgetoclient")
+	framework.ExpectNoError(err, "failed to add veth pair for client")
+	err = buildAndRunCommand("sudo ip link set bridgetovm netns bridge")
+	framework.ExpectNoError(err, "failed to move bridgetovm into bridge netns")
+	err = buildAndRunCommand("sudo ip link set bridgetoclient netns bridge")
+	framework.ExpectNoError(err, "failed to move bridgetoclient into bridge netns")
+	err = buildAndRunCommand("sudo ip link set clienttobridge netns client")
+	framework.ExpectNoError(err, "failed to move clienttobridge into client netns")
+
+	err = buildAndRunCommand("sudo ip link set vmtobridge up")
+	framework.ExpectNoError(err, "failed to get vmtobridge up")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetovm up")
+	framework.ExpectNoError(err, "failed to get bridgetovm up")
+
+	err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetoclient up")
+	framework.ExpectNoError(err, "failed to get bridgetoclient up")
+	err = buildAndRunCommand("sudo ip netns exec client ip link set clienttobridge up")
+	framework.ExpectNoError(err, "failed to get clienttobridge up")
+}
+
+func cleanupNetNamespace() {
+	buildAndRunCommand("sudo ip netns delete bridge")
+	buildAndRunCommand("sudo ip netns delete client")
 }
