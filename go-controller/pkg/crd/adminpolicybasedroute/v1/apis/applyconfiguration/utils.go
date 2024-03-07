@@ -19,7 +19,7 @@ package applyconfiguration
 
 import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
-	adminpolicybasedroutev1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/applyconfiguration/adminpolicybasedroute/v1"
+	k8sv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/applyconfiguration/k8s/v1"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -29,19 +29,19 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	switch kind {
 	// Group=k8s.ovn.org, Version=v1
 	case v1.SchemeGroupVersion.WithKind("AdminPolicyBasedExternalRoute"):
-		return &adminpolicybasedroutev1.AdminPolicyBasedExternalRouteApplyConfiguration{}
+		return &k8sv1.AdminPolicyBasedExternalRouteApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("AdminPolicyBasedExternalRouteSpec"):
-		return &adminpolicybasedroutev1.AdminPolicyBasedExternalRouteSpecApplyConfiguration{}
+		return &k8sv1.AdminPolicyBasedExternalRouteSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("AdminPolicyBasedRouteStatus"):
-		return &adminpolicybasedroutev1.AdminPolicyBasedRouteStatusApplyConfiguration{}
+		return &k8sv1.AdminPolicyBasedRouteStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("DynamicHop"):
-		return &adminpolicybasedroutev1.DynamicHopApplyConfiguration{}
+		return &k8sv1.DynamicHopApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ExternalNetworkSource"):
-		return &adminpolicybasedroutev1.ExternalNetworkSourceApplyConfiguration{}
+		return &k8sv1.ExternalNetworkSourceApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ExternalNextHops"):
-		return &adminpolicybasedroutev1.ExternalNextHopsApplyConfiguration{}
+		return &k8sv1.ExternalNextHopsApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("StaticHop"):
-		return &adminpolicybasedroutev1.StaticHopApplyConfiguration{}
+		return &k8sv1.StaticHopApplyConfiguration{}
 
 	}
 	return nil

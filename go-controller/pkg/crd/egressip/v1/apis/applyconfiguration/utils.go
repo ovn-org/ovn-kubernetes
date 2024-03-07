@@ -19,7 +19,7 @@ package applyconfiguration
 
 import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/applyconfiguration/egressip/v1"
+	k8sv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/applyconfiguration/k8s/v1"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -29,13 +29,13 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	switch kind {
 	// Group=k8s.ovn.org, Version=v1
 	case v1.SchemeGroupVersion.WithKind("EgressIP"):
-		return &egressipv1.EgressIPApplyConfiguration{}
+		return &k8sv1.EgressIPApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EgressIPSpec"):
-		return &egressipv1.EgressIPSpecApplyConfiguration{}
+		return &k8sv1.EgressIPSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EgressIPStatus"):
-		return &egressipv1.EgressIPStatusApplyConfiguration{}
+		return &k8sv1.EgressIPStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EgressIPStatusItem"):
-		return &egressipv1.EgressIPStatusItemApplyConfiguration{}
+		return &k8sv1.EgressIPStatusItemApplyConfiguration{}
 
 	}
 	return nil
