@@ -34,6 +34,8 @@ global:
   gatewayOpts: ""
   # -- This allows ovnkube-node to run without SYS_ADMIN capability, by performing interface setup in the CNI plugin
   unprivilegedMode: false
+  # -- When set to false, haveControlPlaneNodes removes the requirement for nodes with the node-role.kubernetes.io/control-plane label.
+  haveControlPlaneNodes: true
   # -- The v4 join subnet used for assigning join switch IPv4 addresses
   v4JoinSubnet: ""
   # -- The v4 masquerade subnet used for assigning masquerade IPv4 addresses

@@ -35,20 +35,29 @@ spec:
       {{- if eq (hasKey .Values.global "unprivilegedMode" | ternary .Values.global.unprivilegedMode false) false }}
       hostPID: true
       {{- end }}
-      # required to be scheduled on a linux node with node-role.kubernetes.io/zone-controller label
+      # required to be scheduled on a linux node and only one instance of ovnkube-zone-controller pod per node
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: node-role.kubernetes.io/zone-controller
-                    operator: In
-                    values:
-                      - ""
+{{- if .Values.global.haveControlPlaneNodes }}
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: Exists
+{{- end }}
                   - key: kubernetes.io/os
                     operator: In
                     values:
                       - "linux"
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: name
+                operator: In
+                values:
+                - ovnkube-zone-controller
+            topologyKey: kubernetes.io/hostname
       containers:
       # nb-ovsdb - v3
       - name: nb-ovsdb
