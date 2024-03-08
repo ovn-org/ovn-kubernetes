@@ -94,6 +94,7 @@ fi
 # OVN_METRICS_BIND_PORT - port for the OVN metrics server to serve on (default 9476)
 # OVN_METRICS_EXPORTER_PORT - ovs-metrics exporter port (default 9310)
 # OVN_KUBERNETES_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
+# OVN_NORTHD_BACKOFF_INTERVAL - ovn northd backoff interval in ms (default 300)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -297,6 +298,9 @@ ovn_conntrack_zone=${OVN_KUBERNETES_CONNTRACK_ZONE:-64000}
 ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
 # OVNKUBE_COMPACT_MODE_ENABLE indicate if ovnkube run master and node in one process
 ovnkube_compact_mode_enable=${OVNKUBE_COMPACT_MODE_ENABLE:-false}
+# OVN_NORTHD_BACKOFF_INTERVAL - northd backoff interval in ms
+# defualt is 300; no backoff delay if set to 0
+ovn_northd_backoff_interval=${OVN_NORTHD_BACKOFF_INTERVAL:-"300"}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -826,7 +830,7 @@ nb-ovsdb() {
   }
 
   # Let ovn-northd sleep and not use so much CPU
-  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=300
+  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=${ovn_northd_backoff_interval}
   echo "=============== nb-ovsdb ========== reconfigured for northd backoff"
 
   ovn-nbctl set NB_Global . name=${ovn_zone}
@@ -952,7 +956,7 @@ local-nb-ovsdb() {
   echo "=============== nb-ovsdb (unix sockets only) ========== RUNNING"
 
   # Let ovn-northd sleep and not use so much CPU
-  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=300
+  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=${ovn_northd_backoff_interval}
   echo "=============== nb-ovsdb ========== reconfigured for northd backoff"
 
   ovn-nbctl set NB_Global . name=${K8S_NODE}

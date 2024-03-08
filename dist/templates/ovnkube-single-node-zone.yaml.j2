@@ -76,6 +76,8 @@ spec:
           value: "3"
         - name: OVN_LOGLEVEL_NB
           value: "{{ ovn_loglevel_nb }}"
+        - name: OVN_NORTHD_BACKOFF_INTERVAL
+          value: "{{ ovn_northd_backoff_interval }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:

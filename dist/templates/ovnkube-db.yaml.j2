@@ -126,6 +126,8 @@ spec:
           value: "{{ ovn_nb_port }}"
         - name: ENABLE_IPSEC
           value: "{{ enable_ipsec }}"
+        - name: OVN_NORTHD_BACKOFF_INTERVAL
+          value: "{{ ovn_northd_backoff_interval }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]

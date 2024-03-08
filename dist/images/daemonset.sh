@@ -93,6 +93,8 @@ OVN_ENABLE_OVNKUBE_IDENTITY="true"
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
+# northd-backoff-interval, in ms
+OVN_NORTHD_BACKOFF_INTERVAL=
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -333,6 +335,9 @@ while [ "$1" != "" ]; do
   --enable-ovnkube-identity)
     OVN_ENABLE_OVNKUBE_IDENTITY=$VALUE
     ;;
+  --ovn-northd-backoff-interval)
+    OVN_NORTHD_BACKOFF_INTERVAL=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -508,6 +513,9 @@ echo "ovn_enable_multi_external_gateway: ${ovn_enable_multi_external_gateway}"
 
 ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY}
 echo "ovn_enable_ovnkube_identity: ${ovn_enable_ovnkube_identity}"
+
+ovn_northd_backoff_interval=${OVN_NORTHD_BACKOFF_INTERVAL}
+echo "ovn_northd_backoff_interval: ${ovn_northd_backoff_interval}"
 
 ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
@@ -740,6 +748,7 @@ ovn_image=${image} \
   ovn_nb_port=${ovn_nb_port} \
   ovn_sb_port=${ovn_sb_port} \
   enable_ipsec=${enable_ipsec} \
+  ovn_northd_backoff_interval=${ovn_northd_backoff_interval} \
   jinjanate ../templates/ovnkube-db.yaml.j2 -o ${output_dir}/ovnkube-db.yaml
 
 ovn_image=${image} \
@@ -759,6 +768,7 @@ ovn_image=${image} \
   ovn_nb_raft_port=${ovn_nb_raft_port} \
   ovn_sb_raft_port=${ovn_sb_raft_port} \
   enable_ipsec=${enable_ipsec} \
+  ovn_northd_backoff_interval=${ovn_northd_backoff_interval} \
   jinjanate ../templates/ovnkube-db-raft.yaml.j2 -o ${output_dir}/ovnkube-db-raft.yaml
 
 ovn_image=${ovnkube_image} \
@@ -816,6 +826,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  ovn_northd_backoff_interval=${ovn_northd_backoff_interval} \
   jinjanate ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
 
 ovn_image=${ovnkube_image} \
@@ -872,6 +883,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  ovn_northd_backoff_interval=${ovn_enable_backoff_interval} \
   jinjanate ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
 
 ovn_image=${image} \
