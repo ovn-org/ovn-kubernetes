@@ -12,6 +12,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	ovnktypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -66,5 +67,19 @@ func NewIPAMClaimsFetcher(netInfo util.NetInfo, lister ipamclaimslister.IPAMClai
 }
 
 func (icf *IPAMClaimFetcher) FindIPAMClaim(network *nadapi.NetworkSelectionElement) (*ipamclaimsapi.IPAMClaim, error) {
-	return nil, nil
+	if icf.lister == nil ||
+		!util.DoesNetworkRequireIPAM(icf.netInfo) ||
+		icf.netInfo.TopologyType() == ovnktypes.Layer3Topology ||
+		network.IPAMClaimReference == "" {
+
+		return nil, nil
+	}
+
+	ipamClaimKey := network.IPAMClaimReference
+	klog.V(5).Infof("IPAMClaim key: %s", ipamClaimKey)
+	claim, err := icf.lister.IPAMClaims(network.Namespace).Get(ipamClaimKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get IPAMClaim %q", ipamClaimKey)
+	}
+	return claim, nil
 }
