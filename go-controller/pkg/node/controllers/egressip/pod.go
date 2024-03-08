@@ -211,7 +211,7 @@ func (c *Controller) processNextPodWorkItem(wg *sync.WaitGroup) bool {
 	p := obj.(*corev1.Pod)
 	if err := c.syncPod(p); err != nil {
 		if c.podQueue.NumRequeues(obj) < maxRetries {
-			klog.V(4).Infof("Error found while processing pod %s/%s:%v", p.Namespace, p.Name, err)
+			klog.V(4).Infof("Error found while processing pod %s/%s: %v", p.Namespace, p.Name, err)
 			c.podQueue.AddRateLimited(obj)
 			return true
 		}

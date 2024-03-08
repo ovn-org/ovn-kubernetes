@@ -28,11 +28,12 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/probe"
 	httpprober "k8s.io/kubernetes/pkg/probe/http"
-	utilpointer "k8s.io/utils/pointer"
+	utilpointer "k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -432,13 +433,15 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 
 func runCSRApproverManager(ctx context.Context, leaderID string, restCfg *rest.Config) error {
 	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
-		MetricsBindAddress:            cliCfg.metricsAddress,
+		Metrics: server.Options{
+			BindAddress: cliCfg.metricsAddress,
+		},
 		LeaderElectionNamespace:       cliCfg.leaseNamespace,
 		LeaderElectionID:              leaderID,
 		LeaderElection:                true,
-		LeaseDuration:                 utilpointer.Duration(time.Minute),
-		RenewDeadline:                 utilpointer.Duration(time.Second * 30),
-		RetryPeriod:                   utilpointer.Duration(time.Second * 20),
+		LeaseDuration:                 utilpointer.To(time.Minute),
+		RenewDeadline:                 utilpointer.To(time.Second * 30),
+		RetryPeriod:                   utilpointer.To(time.Second * 20),
 		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
@@ -450,8 +453,8 @@ func runCSRApproverManager(ctx context.Context, leaderID string, restCfg *rest.C
 		For(&certificatesv1.CertificateSigningRequest{}, builder.WithPredicates(csrapprover.Predicate)).
 		WithOptions(controller.Options{
 			// Explicitly enable leader election for CSR approver
-			NeedLeaderElection: utilpointer.Bool(true),
-			RecoverPanic:       utilpointer.Bool(true),
+			NeedLeaderElection: utilpointer.To(true),
+			RecoverPanic:       utilpointer.To(true),
 		}).
 		Complete(csrapprover.NewController(
 			mgr.GetClient(),

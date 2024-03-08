@@ -120,26 +120,81 @@ type PortRange struct {
 	End int32 `json:"end"`
 }
 
-// AdminNetworkPolicyPeer defines an in-cluster peer to allow traffic to/from.
+// AdminNetworkPolicyIngressPeer defines an in-cluster peer to allow traffic from.
 // Exactly one of the selector pointers must be set for a given peer. If a
 // consumer observes none of its fields are set, they must assume an unknown
 // option has been specified and fail closed.
 // +kubebuilder:validation:MaxProperties=1
 // +kubebuilder:validation:MinProperties=1
-type AdminNetworkPolicyPeer struct {
-	// Namespaces defines a way to select a set of Namespaces.
+type AdminNetworkPolicyIngressPeer struct {
+	// Namespaces defines a way to select all pods within a set of Namespaces.
+	// Note that host-networked pods are not included in this type of peer.
 	//
 	// Support: Core
 	//
 	// +optional
 	Namespaces *NamespacedPeer `json:"namespaces,omitempty"`
 	// Pods defines a way to select a set of pods in
-	// in a set of namespaces.
+	// a set of namespaces. Note that host-networked pods
+	// are not included in this type of peer.
 	//
 	// Support: Core
 	//
 	// +optional
 	Pods *NamespacedPodPeer `json:"pods,omitempty"`
+}
+
+// AdminNetworkPolicyEgressPeer defines a peer to allow traffic to.
+// Exactly one of the selector pointers must be set for a given peer. If a
+// consumer observes none of its fields are set, they must assume an unknown
+// option has been specified and fail closed.
+// +kubebuilder:validation:MaxProperties=1
+// +kubebuilder:validation:MinProperties=1
+type AdminNetworkPolicyEgressPeer struct {
+	// Namespaces defines a way to select all pods within a set of Namespaces.
+	// Note that host-networked pods are not included in this type of peer.
+	//
+	// Support: Core
+	//
+	// +optional
+	Namespaces *NamespacedPeer `json:"namespaces,omitempty"`
+	// Pods defines a way to select a set of pods in
+	// a set of namespaces. Note that host-networked pods
+	// are not included in this type of peer.
+	//
+	// Support: Core
+	//
+	// +optional
+	Pods *NamespacedPodPeer `json:"pods,omitempty"`
+	// Nodes defines a way to select a set of nodes in
+	// the cluster. This field follows standard label selector
+	// semantics; if present but empty, it selects all Nodes.
+	//
+	// Support: Extended
+	//
+	// <network-policy-api:experimental>
+	// +optional
+	Nodes *metav1.LabelSelector `json:"nodes,omitempty"`
+	// Networks defines a way to select peers via CIDR blocks.
+	// This is intended for representing entities that live outside the cluster,
+	// which can't be selected by pods, namespaces and nodes peers, but note
+	// that cluster-internal traffic will be checked against the rule as
+	// well. So if you Allow or Deny traffic to `"0.0.0.0/0"`, that will allow
+	// or deny all IPv4 pod-to-pod traffic as well. If you don't want that,
+	// add a rule that Passes all pod traffic before the Networks rule.
+	//
+	// Each item in Networks should be provided in the CIDR format and should be
+	// IPv4 or IPv6, for example "10.0.0.0/8" or "fd00::/8".
+	//
+	// Networks can have upto 25 CIDRs specified.
+	//
+	// Support: Extended
+	//
+	// <network-policy-api:experimental>
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=25
+	Networks []CIDR `json:"networks,omitempty"`
 }
 
 // NamespacedPeer defines a flexible way to select Namespaces in a cluster.
@@ -202,3 +257,10 @@ type NamespacedPodPeer struct {
 	//
 	PodSelector metav1.LabelSelector `json:"podSelector"`
 }
+
+// CIDR is an IP address range in CIDR notation (for example, "10.0.0.0/8" or "fd00::/8").
+// This string must be validated by implementations using net.ParseCIDR
+// TODO: Introduce CEL CIDR validation regex isCIDR() in Kube 1.31 when it is available.
+// +kubebuilder:validation:XValidation:rule="self.contains(':') != self.contains('.')",message="CIDR must be either an IPv4 or IPv6 address. IPv4 address embedded in IPv6 addresses are not supported"
+// +kubebuilder:validation:MaxLength=43
+type CIDR string

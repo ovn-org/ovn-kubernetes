@@ -59,7 +59,7 @@ func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 			if err = c.processNetlinkEvent(newRouteEvent); err != nil {
 				// TODO: make util.GetNetLinkOps().IsLinkNotFoundError(err) smarter to unwrap error
 				// and use it here to log errors that are not IsLinkNotFoundError
-				klog.V(5).Info("Route Manager: failed to process route update event (%s): %v", newRouteEvent.String(), err)
+				klog.V(5).Infof("Route Manager: failed to process route update event (%s): %v", newRouteEvent.String(), err)
 			}
 		case <-ticker.C:
 			if !subscribed {
@@ -166,7 +166,7 @@ func (c *Controller) processNetlinkEvent(ru netlink.RouteUpdate) error {
 				continue
 			}
 			if err = c.applyRoute(link, managedRoute.Gw, managedRoute.Dst, managedRoute.MTU, managedRoute.Src, managedRoute.Table); err != nil {
-				klog.Errorf("Route Manager: failed to apply route (%s): %w", managedRoute.String(), err)
+				klog.Errorf("Route Manager: failed to apply route (%s): %v", managedRoute.String(), err)
 			}
 		}
 	}
@@ -259,7 +259,7 @@ func (c *Controller) sync() {
 			filterRoute, filterMask := filterRouteByDstAndTable(linkIndex, managedRoute.Dst, managedRoute.Table)
 			existingRoutes, err := util.GetNetLinkOps().RouteListFiltered(netlink.FAMILY_ALL, filterRoute, filterMask)
 			if err != nil {
-				klog.Errorf("Route Manager: failed to list routes for link  %w", filterRoute.String(), filterMask, linkIndex, err)
+				klog.Errorf("Route Manager: failed to list routes for link %d with route filter %s and mask filter %d: %v", linkIndex, filterRoute.String(), filterMask, err)
 				continue
 			}
 			var found bool

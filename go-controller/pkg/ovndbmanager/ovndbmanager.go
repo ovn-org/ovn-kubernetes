@@ -136,7 +136,7 @@ func updateDBRetryCounter(retryCounter *int32, db *util.OvsDbProperties) {
 		*retryCounter = 0
 	} else {
 		*retryCounter += 1
-		klog.Infof("Failed to get cluster status for: %s, number of retries: %d", db, *retryCounter)
+		klog.Infof("Failed to get cluster status for %v after %d retries", db, *retryCounter)
 	}
 }
 
@@ -237,7 +237,7 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 		}
 		matchedServer := member[4]
 		if !(utilnet.IsIPv4String(matchedServer) || utilnet.IsIPv6String(matchedServer) || govalidator.IsDNSName(matchedServer)) {
-			klog.Warningf("Unable to parse address portion of member entry in %s: %s",
+			klog.Warningf("Unable to parse address portion of member entry in %v: %s",
 				db, matchedServer)
 			continue
 		}

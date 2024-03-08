@@ -716,7 +716,7 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 	if gk.String() == "" {
 		kinds, _, err := scheme.Scheme.ObjectKinds(obj)
 		if err != nil || len(kinds) == 0 || len(kinds) > 1 {
-			klog.Warningf("BUG: object has no / ambiguous GVK: %#v, err", obj, err)
+			klog.Warningf("Object %v either has no GroupVersionKind or has an ambiguous GroupVersionKind: %#v, err", obj, err)
 		}
 		gk = kinds[0].GroupKind()
 	}

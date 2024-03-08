@@ -426,11 +426,11 @@ func (c *Controller) processNextEIPWorkItem(wg *sync.WaitGroup) bool {
 	klog.V(4).Infof("Processing Egress IP %s", key)
 	if err := c.syncEIP(key.(string)); err != nil {
 		if c.eIPQueue.NumRequeues(key) < maxRetries {
-			klog.V(4).Infof("Error found while processing Egress IP %s: %w", key, err)
+			klog.V(4).Infof("Error found while processing Egress IP %s: %v", key, err)
 			c.eIPQueue.AddRateLimited(key)
 			return true
 		}
-		klog.Errorf("Dropping Egress IP %q out of the queue: %w", key, err)
+		klog.Errorf("Dropping Egress IP %q out of the queue: %v", key, err)
 		utilruntime.HandleError(err)
 	}
 	c.eIPQueue.Forget(key)

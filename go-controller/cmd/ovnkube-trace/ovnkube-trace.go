@@ -404,7 +404,7 @@ func extractSubsetInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.C
 		for _, port := range subset.Ports {
 			podPort = strconv.Itoa(int(port.Port))
 			if podPort == "" {
-				klog.V(5).Infof("==> Could not parse port %d, skipping.", port)
+				klog.V(5).Infof("==> Could not parse port %v, skipping.", port)
 				continue // with the next port
 			}
 		}

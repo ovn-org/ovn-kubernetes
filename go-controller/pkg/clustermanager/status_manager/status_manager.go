@@ -87,7 +87,7 @@ func (m *typedStatusManager[T]) Stop() {
 func (m *typedStatusManager[T]) updateStatus(key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
-		klog.Errorf("StatusManager %s: failed to split meta namespace cache key %s for %s: %v", m.name, key, err)
+		klog.Errorf("StatusManager %s: failed to split meta namespace cache key %s: %v", m.name, key, err)
 		return nil
 	}
 	obj, err := m.resource.get(namespace, name)

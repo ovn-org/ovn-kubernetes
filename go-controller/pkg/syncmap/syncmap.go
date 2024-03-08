@@ -66,7 +66,7 @@ func (c *SyncMapComparableKey[T1, T2]) UnlockKey(lockedKey T1) {
 		// this should never happen, since UnlockKey should only be called when the key is Locked
 		// and when the key is Locked, c.keyLocks[key] will always have its keyLock.
 		// similar to calling Unlock() on unlocked mutex
-		klog.Errorf("Unlocking non-existing key %s", lockedKey)
+		klog.Errorf("Unlocking non-existing key %v", lockedKey)
 		return
 	}
 	kLock.delRef()

@@ -337,7 +337,7 @@ func (c *Controller) repair() error {
 
 		node, found := allNodes[svcHost]
 		if !found {
-			klog.Errorf("Node %s not found", svcHost, err)
+			klog.Errorf("Node %s not found: %v", svcHost, err)
 			continue
 		}
 
@@ -706,7 +706,7 @@ func (c *Controller) syncEgressService(key string) error {
 	}
 
 	if len(svc.Status.LoadBalancer.Ingress) == 0 {
-		klog.Infof("EgressService %s/%s does not have an ingress IP")
+		klog.Infof("EgressService %s does not have an ingress IP", key)
 		if state == nil {
 			// The service object doesn't have an ingress IP, and the egress service was not configured, nothing to do.
 			return nil

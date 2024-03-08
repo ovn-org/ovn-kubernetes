@@ -359,7 +359,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					{
 						Name:   "deny-traffic-from-slytherin-to-gryffindor",
 						Action: anpapi.AdminNetworkPolicyRuleActionDeny,
-						From: []anpapi.AdminNetworkPolicyPeer{
+						From: []anpapi.AdminNetworkPolicyIngressPeer{
 							{
 								Namespaces: &anpapi.NamespacedPeer{
 									NamespaceSelector: &metav1.LabelSelector{
@@ -430,7 +430,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					anpapi.AdminNetworkPolicyIngressRule{
 						Name:   "allow-traffic-from-hufflepuff-to-gryffindor",
 						Action: anpapi.AdminNetworkPolicyRuleActionAllow,
-						From: []anpapi.AdminNetworkPolicyPeer{
+						From: []anpapi.AdminNetworkPolicyIngressPeer{
 							{
 								Pods: &anpapi.NamespacedPodPeer{ // test different kind of peer expression
 									Namespaces: anpapi.NamespacedPeer{
@@ -448,7 +448,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					anpapi.AdminNetworkPolicyIngressRule{
 						Name:   "pass-traffic-from-ravenclaw-to-gryffindor",
 						Action: anpapi.AdminNetworkPolicyRuleActionPass,
-						From: []anpapi.AdminNetworkPolicyPeer{
+						From: []anpapi.AdminNetworkPolicyIngressPeer{
 							{
 								Namespaces: &anpapi.NamespacedPeer{
 									NamespaceSelector: &metav1.LabelSelector{
@@ -512,7 +512,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					{
 						Name:   "deny-traffic-to-slytherin-from-gryffindor",
 						Action: anpapi.AdminNetworkPolicyRuleActionDeny,
-						To: []anpapi.AdminNetworkPolicyPeer{
+						To: []anpapi.AdminNetworkPolicyEgressPeer{
 							{
 								Namespaces: &anpapi.NamespacedPeer{
 									NamespaceSelector: &metav1.LabelSelector{
@@ -525,7 +525,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					{
 						Name:   "allow-traffic-to-hufflepuff-from-gryffindor",
 						Action: anpapi.AdminNetworkPolicyRuleActionAllow,
-						To: []anpapi.AdminNetworkPolicyPeer{
+						To: []anpapi.AdminNetworkPolicyEgressPeer{
 							{
 								Pods: &anpapi.NamespacedPodPeer{ // test different kind of peer expression
 									Namespaces: anpapi.NamespacedPeer{
@@ -549,7 +549,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					{
 						Name:   "pass-traffic-to-ravenclaw-from-gryffindor",
 						Action: anpapi.AdminNetworkPolicyRuleActionPass,
-						To: []anpapi.AdminNetworkPolicyPeer{
+						To: []anpapi.AdminNetworkPolicyEgressPeer{
 							{
 								Namespaces: &anpapi.NamespacedPeer{
 									NamespaceSelector: &metav1.LabelSelector{
