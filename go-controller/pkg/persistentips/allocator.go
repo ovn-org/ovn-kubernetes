@@ -1,6 +1,7 @@
 package persistentips
 
 import (
+	"errors"
 	"fmt"
 	"net"
 
@@ -11,7 +12,12 @@ import (
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	ovnktypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+)
+
+var (
+	ErrPersistentIPsNotAvailableOnNetwork = errors.New("ipam claims not supported on this network")
 )
 
 type IPReleaser interface {
@@ -113,5 +119,15 @@ func (icr *IPAMClaimReconciler) Reconcile(
 }
 
 func (icr *IPAMClaimReconciler) FindIPAMClaim(claimName string, namespace string) (*ipamclaimsapi.IPAMClaim, error) {
-	return nil, nil
+	if icr.lister == nil ||
+		!util.DoesNetworkRequireIPAM(icr.netInfo) ||
+		icr.netInfo.TopologyType() == ovnktypes.Layer3Topology ||
+		claimName == "" {
+		return nil, ErrPersistentIPsNotAvailableOnNetwork
+	}
+	claim, err := icr.lister.IPAMClaims(namespace).Get(claimName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get IPAMClaim %q: %w", claimName, err)
+	}
+	return claim, nil
 }
