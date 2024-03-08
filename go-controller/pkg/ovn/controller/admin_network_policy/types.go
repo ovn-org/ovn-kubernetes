@@ -181,10 +181,10 @@ func newAdminNetworkPolicyPort(raw anpapi.AdminNetworkPolicyPort) *libovsdbutil.
 
 // newAdminNetworkPolicyPeer takes the provided ANP API Peer and creates a new corresponding
 // adminNetworkPolicyPeer cache object for that Peer.
-func newAdminNetworkPolicyPeer(raw anpapi.AdminNetworkPolicyPeer) (*adminNetworkPolicyPeer, error) {
+func newAdminNetworkPolicyPeer(rawNamespaces *anpapi.NamespacedPeer, rawPods *anpapi.NamespacedPodPeer) (*adminNetworkPolicyPeer, error) {
 	var anpPeer *adminNetworkPolicyPeer
-	if raw.Namespaces != nil {
-		peerNamespaceSelector, err := metav1.LabelSelectorAsSelector(raw.Namespaces.NamespaceSelector)
+	if rawNamespaces != nil {
+		peerNamespaceSelector, err := metav1.LabelSelectorAsSelector(rawNamespaces.NamespaceSelector)
 		if err != nil {
 			return nil, err
 		}
@@ -201,15 +201,15 @@ func newAdminNetworkPolicyPeer(raw anpapi.AdminNetworkPolicyPeer) (*adminNetwork
 				podSelector: labels.Everything(), // it means match all pods within the provided namespaces
 			}
 		}
-	} else if raw.Pods != nil {
-		peerNamespaceSelector, err := metav1.LabelSelectorAsSelector(raw.Pods.Namespaces.NamespaceSelector)
+	} else if rawPods != nil {
+		peerNamespaceSelector, err := metav1.LabelSelectorAsSelector(rawPods.Namespaces.NamespaceSelector)
 		if err != nil {
 			return nil, err
 		}
 		if peerNamespaceSelector.Empty() {
 			peerNamespaceSelector = labels.Everything()
 		}
-		peerPodSelector, err := metav1.LabelSelectorAsSelector(&raw.Pods.PodSelector)
+		peerPodSelector, err := metav1.LabelSelectorAsSelector(&rawPods.PodSelector)
 		if err != nil {
 			return nil, err
 		}
@@ -224,7 +224,19 @@ func newAdminNetworkPolicyPeer(raw anpapi.AdminNetworkPolicyPeer) (*adminNetwork
 	return anpPeer, nil
 }
 
-// newAdminNetworkPolicyIngressRule takes the provided ANP API Ingres Rule and creates a new corresponding
+// newAdminNetworkPolicyIngressPeer takes the provided ANP API Peer and creates a new corresponding
+// adminNetworkPolicyPeer cache object for that Peer.
+func newAdminNetworkPolicyIngressPeer(raw anpapi.AdminNetworkPolicyIngressPeer) (*adminNetworkPolicyPeer, error) {
+	return newAdminNetworkPolicyPeer(raw.Namespaces, raw.Pods)
+}
+
+// newAdminNetworkPolicyEgressPeer takes the provided ANP API Peer and creates a new corresponding
+// adminNetworkPolicyPeer cache object for that Peer.
+func newAdminNetworkPolicyEgressPeer(raw anpapi.AdminNetworkPolicyEgressPeer) (*adminNetworkPolicyPeer, error) {
+	return newAdminNetworkPolicyPeer(raw.Namespaces, raw.Pods)
+}
+
+// newAdminNetworkPolicyIngressRule takes the provided ANP API Ingress Rule and creates a new corresponding
 // gressRule cache object for that Rule.
 func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, index, priority int32) (*gressRule, error) {
 	anpRule := &gressRule{
@@ -237,7 +249,7 @@ func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, 
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
 	}
 	for _, peer := range raw.From {
-		anpPeer, err := newAdminNetworkPolicyPeer(peer)
+		anpPeer, err := newAdminNetworkPolicyIngressPeer(peer)
 		if err != nil {
 			return nil, err
 		}
@@ -253,7 +265,7 @@ func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, 
 	return anpRule, nil
 }
 
-// newAdminNetworkPolicyEgressRule takes the provided ANP API Egres Rule and creates a new corresponding
+// newAdminNetworkPolicyEgressRule takes the provided ANP API Egress Rule and creates a new corresponding
 // gressRule cache object for that Rule.
 func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, index, priority int32) (*gressRule, error) {
 	anpRule := &gressRule{
@@ -266,7 +278,7 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
 	}
 	for _, peer := range raw.To {
-		anpPeer, err := newAdminNetworkPolicyPeer(peer)
+		anpPeer, err := newAdminNetworkPolicyEgressPeer(peer)
 		if err != nil {
 			return nil, err
 		}
@@ -335,7 +347,7 @@ func newBaselineAdminNetworkPolicyIngressRule(raw anpapi.BaselineAdminNetworkPol
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
 	}
 	for _, peer := range raw.From {
-		anpPeer, err := newAdminNetworkPolicyPeer(peer)
+		anpPeer, err := newAdminNetworkPolicyIngressPeer(peer)
 		if err != nil {
 			return nil, err
 		}
@@ -364,7 +376,7 @@ func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPoli
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
 	}
 	for _, peer := range raw.To {
-		banpPeer, err := newAdminNetworkPolicyPeer(peer)
+		banpPeer, err := newAdminNetworkPolicyEgressPeer(peer)
 		if err != nil {
 			return nil, err
 		}

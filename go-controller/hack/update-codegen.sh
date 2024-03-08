@@ -96,9 +96,9 @@ echo "Copying egressQoS CRD"
 cp _output/crds/k8s.ovn.org_egressqoses.yaml ../dist/templates/k8s.ovn.org_egressqoses.yaml.j2
 # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
 echo "Copying Admin Network Policy CRD"
-curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.2/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_adminnetworkpolicies.yaml
+curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/5889d651e632/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_adminnetworkpolicies.yaml
 echo "Copying Baseline Admin Network Policy CRD"
-curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.2/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
+curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/5889d651e632/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
 echo "Copying adminpolicybasedexternalroutes CRD"
 cp _output/crds/k8s.ovn.org_adminpolicybasedexternalroutes.yaml ../dist/templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2
 echo "Copying egressService CRD"

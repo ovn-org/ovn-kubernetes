@@ -114,7 +114,7 @@ func (a *PodAllocator) Sync(objs []interface{}) error {
 		}
 		err := a.reconcile(nil, pod, releaseFromAllocator)
 		if err != nil {
-			klog.Errorf("Failed to sync pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			klog.Errorf("Failed to sync pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
 	}
 

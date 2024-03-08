@@ -316,7 +316,7 @@ func (zic *ZoneInterconnectHandler) SyncNodes(objs []interface{}) error {
 
 	for _, staleNodeName := range staleNodeNames {
 		if err := zic.cleanupNode(staleNodeName); err != nil {
-			klog.Errorf("Failed to cleanup the interconnect resources from OVN Northbound db for the stale node %s : %w", err)
+			klog.Errorf("Failed to cleanup the interconnect resources from OVN Northbound db for the stale node %s: %v", staleNodeName, err)
 		}
 	}
 

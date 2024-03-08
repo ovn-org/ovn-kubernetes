@@ -23,7 +23,6 @@ import (
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
-	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	testing "k8s.io/client-go/testing"
@@ -35,9 +34,9 @@ type FakeBaselineAdminNetworkPolicies struct {
 	Fake *FakePolicyV1alpha1
 }
 
-var baselineadminnetworkpoliciesResource = schema.GroupVersionResource{Group: "policy.networking.k8s.io", Version: "v1alpha1", Resource: "baselineadminnetworkpolicies"}
+var baselineadminnetworkpoliciesResource = v1alpha1.SchemeGroupVersion.WithResource("baselineadminnetworkpolicies")
 
-var baselineadminnetworkpoliciesKind = schema.GroupVersionKind{Group: "policy.networking.k8s.io", Version: "v1alpha1", Kind: "BaselineAdminNetworkPolicy"}
+var baselineadminnetworkpoliciesKind = v1alpha1.SchemeGroupVersion.WithKind("BaselineAdminNetworkPolicy")
 
 // Get takes name of the baselineAdminNetworkPolicy, and returns the corresponding baselineAdminNetworkPolicy object, and an error if there is any.
 func (c *FakeBaselineAdminNetworkPolicies) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1alpha1.BaselineAdminNetworkPolicy, err error) {

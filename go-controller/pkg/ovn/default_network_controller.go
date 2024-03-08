@@ -921,7 +921,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 					hoSync,
 					syncZoneIC}
 			} else {
-				klog.Infof("Node %s moved from the remote zone %s to local zone.",
+				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node.  Trigger a full node sync.
 				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect}

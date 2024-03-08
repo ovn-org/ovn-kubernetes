@@ -348,7 +348,7 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 	for _, hostCIDR := range c.cidrs.UnsortedList() {
 		ip, _, err := net.ParseCIDR(hostCIDR)
 		if err != nil {
-			klog.Errorf("Node IP: failed to parse node address %q. Unable to detect if node primary address changed: %w",
+			klog.Errorf("Node IP: failed to parse node address %q. Unable to detect if node primary address changed: %v",
 				hostCIDR, err)
 			continue
 		}
@@ -396,7 +396,7 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 		// IPs assigned to host interfaces to support the egress IP multi NIC feature must be excluded.
 		eipAddresses, err := c.getSecondaryHostEgressIPs()
 		if err != nil {
-			klog.Errorf("Failed to get secondary host assigned Egress IPs and ensure they are excluded: %v %v", err)
+			klog.Errorf("Failed to get secondary host assigned Egress IPs and ensure they are excluded: %v", err)
 		}
 		if eipAddresses.Has(addr.String()) {
 			return false
