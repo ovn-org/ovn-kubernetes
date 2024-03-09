@@ -411,7 +411,8 @@ func (bnc *BaseNetworkController) getAllNamespacePodAddresses(ns string) []net.I
 
 func (bnc *BaseNetworkController) createNamespaceAddrSetAllPods(ns string, ips []net.IP) (addressset.AddressSet, error) {
 	dbIDs := getNamespaceAddrSetDbIDs(ns, bnc.controllerName)
-	return bnc.addressSetFactory.NewAddressSet(dbIDs, ips)
+	ipSet := util.StringSlice(ips)
+	return bnc.addressSetFactory.NewAddressSet(dbIDs, ipSet)
 }
 
 // createNamespacePortGroup should only create a port group if it doesn't exist already,

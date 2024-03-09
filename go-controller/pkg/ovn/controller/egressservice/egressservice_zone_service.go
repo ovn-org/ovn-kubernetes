@@ -2,7 +2,6 @@ package egressservice
 
 import (
 	"fmt"
-	"net"
 
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -192,52 +191,43 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (
 	return
 }
 
-func createIPAddressNetSlice(v4ips, v6ips []string) []net.IP {
-	ipAddrs := make([]net.IP, 0)
-	for _, ip := range v4ips {
-		ipNet := net.ParseIP(ip)
-		ipAddrs = append(ipAddrs, ipNet)
-	}
-	for _, ip := range v6ips {
-		ipNet := net.ParseIP(ip)
-		ipAddrs = append(ipAddrs, ipNet)
-	}
-	return ipAddrs
+func createIPAddressStringSlice(v4ips, v6ips []string) []string {
+	return append(v4ips, v6ips...)
 }
 
-func (c *Controller) addPodIPsToAddressSetOps(addrSetIPs []net.IP) ([]libovsdb.Operation, error) {
+func (c *Controller) addPodIPsToAddressSetOps(addrSetIPs []string) ([]libovsdb.Operation, error) {
 	var ops []libovsdb.Operation
 	dbIDs := GetEgressServiceAddrSetDbIDs(c.controllerName)
 	as, err := c.addressSetFactory.GetAddressSet(dbIDs)
 	if err != nil {
 		return nil, fmt.Errorf("cannot ensure that addressSet %s exists: %v", EgressServiceServedPodsAddrSetName, err)
 	}
-	if ops, err = as.AddIPsReturnOps(addrSetIPs); err != nil {
+	if ops, err = as.AddAddressesReturnOps(addrSetIPs); err != nil {
 		return nil, fmt.Errorf("cannot add egressPodIPs %v from the address set %v: err: %v", addrSetIPs, EgressServiceServedPodsAddrSetName, err)
 	}
 	return ops, nil
 }
 
-func (c *Controller) deletePodIPsFromAddressSetOps(addrSetIPs []net.IP) ([]libovsdb.Operation, error) {
+func (c *Controller) deletePodIPsFromAddressSetOps(addrSetIPs []string) ([]libovsdb.Operation, error) {
 	var ops []libovsdb.Operation
 	dbIDs := GetEgressServiceAddrSetDbIDs(c.controllerName)
 	as, err := c.addressSetFactory.GetAddressSet(dbIDs)
 	if err != nil {
 		return nil, fmt.Errorf("cannot ensure that addressSet %s exists: %v", EgressServiceServedPodsAddrSetName, err)
 	}
-	if ops, err = as.DeleteIPsReturnOps(addrSetIPs); err != nil {
+	if ops, err = as.DeleteAddressesReturnOps(addrSetIPs); err != nil {
 		return nil, fmt.Errorf("cannot delete egressPodIPs %v from the address set %v: err: %v", addrSetIPs, EgressServiceServedPodsAddrSetName, err)
 	}
 	return ops, nil
 }
 
-func (c *Controller) setPodIPsInAddressSet(addrSetIPs []net.IP) error {
+func (c *Controller) setPodIPsInAddressSet(addrSetIPs []string) error {
 	dbIDs := GetEgressServiceAddrSetDbIDs(c.controllerName)
 	as, err := c.addressSetFactory.GetAddressSet(dbIDs)
 	if err != nil {
 		return fmt.Errorf("cannot ensure that addressSet %s exists: %v", EgressServiceServedPodsAddrSetName, err)
 	}
-	return as.SetIPs(addrSetIPs)
+	return as.SetAddresses(addrSetIPs)
 }
 
 // Returns the libovsdb operations to create or updates the logical router policies for the service,

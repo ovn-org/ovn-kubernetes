@@ -117,8 +117,8 @@ func CreateOrUpdateAddressSets(nbClient libovsdbclient.Client, addrSets ...*nbdb
 	return err
 }
 
-// UpdateAddressSetsIPs updates the IPs on the provided address sets
-func UpdateAddressSetsIPs(nbClient libovsdbclient.Client, addrSets ...*nbdb.AddressSet) error {
+// UpdateAddressSetsAddresses updates the Addresses on the provided address sets
+func UpdateAddressSetsAddresses(nbClient libovsdbclient.Client, addrSets ...*nbdb.AddressSet) error {
 	opModels := make([]operationModel, 0, len(addrSets))
 	for i := range addrSets {
 		as := addrSets[i]
@@ -136,11 +136,11 @@ func UpdateAddressSetsIPs(nbClient libovsdbclient.Client, addrSets ...*nbdb.Addr
 	return err
 }
 
-// AddIPsToAddressSetOps adds the provided IPs to the provided address set and
+// AddAddressesToAddressSetOps adds the provided addresses to the provided address set and
 // returns the corresponding ops
-func AddIPsToAddressSetOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, as *nbdb.AddressSet, ips ...string) ([]libovsdb.Operation, error) {
-	originalIPs := as.Addresses
-	as.Addresses = ips
+func AddAddressesToAddressSetOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, as *nbdb.AddressSet, addresses ...string) ([]libovsdb.Operation, error) {
+	originalAddresses := as.Addresses
+	as.Addresses = addresses
 	opModel := operationModel{
 		Model:            as,
 		OnModelMutations: []interface{}{&as.Addresses},
@@ -150,15 +150,15 @@ func AddIPsToAddressSetOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 
 	m := newModelClient(nbClient)
 	ops, err := m.CreateOrUpdateOps(ops, opModel)
-	as.Addresses = originalIPs
+	as.Addresses = originalAddresses
 	return ops, err
 }
 
-// DeleteIPsFromAddressSetOps removes the provided IPs from the provided address
+// DeleteAddressesFromAddressSetOps removes the provided addresses from the provided address
 // set and returns the corresponding ops
-func DeleteIPsFromAddressSetOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, as *nbdb.AddressSet, ips ...string) ([]libovsdb.Operation, error) {
-	originalIPs := as.Addresses
-	as.Addresses = ips
+func DeleteAddressesFromAddressSetOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, as *nbdb.AddressSet, addresses ...string) ([]libovsdb.Operation, error) {
+	originalAddresses := as.Addresses
+	as.Addresses = addresses
 	opModel := operationModel{
 		Model:            as,
 		OnModelMutations: []interface{}{&as.Addresses},
@@ -168,7 +168,7 @@ func DeleteIPsFromAddressSetOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 
 	m := newModelClient(nbClient)
 	ops, err := m.DeleteOps(ops, opModel)
-	as.Addresses = originalIPs
+	as.Addresses = originalAddresses
 	return ops, err
 }
 

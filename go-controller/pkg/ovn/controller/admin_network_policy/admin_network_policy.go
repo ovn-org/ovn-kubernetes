@@ -600,7 +600,7 @@ func (c *Controller) constructOpsForRuleChanges(desiredANPState *adminNetworkPol
 	// Decide this after doing some scale runs.
 	for _, rule := range desiredANPState.ingressRules {
 		asIndex := GetANPPeerAddrSetDbIDs(desiredANPState.name, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), c.controllerName, isBanp)
-		_, addrSetOps, err := c.addressSetFactory.NewAddressSetOps(asIndex, util.StringsToIPs(rule.peerIPs.UnsortedList()))
+		_, addrSetOps, err := c.addressSetFactory.NewAddressSetOps(asIndex, rule.peerIPs.UnsortedList())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address-sets for ANP %s's"+
 				" ingress rule %s/%s/%d: %v", desiredANPState.name, rule.name, rule.gressPrefix, rule.priority, err)
@@ -609,7 +609,7 @@ func (c *Controller) constructOpsForRuleChanges(desiredANPState *adminNetworkPol
 	}
 	for _, rule := range desiredANPState.egressRules {
 		asIndex := GetANPPeerAddrSetDbIDs(desiredANPState.name, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), c.controllerName, isBanp)
-		_, addrSetOps, err := c.addressSetFactory.NewAddressSetOps(asIndex, util.StringsToIPs(rule.peerIPs.UnsortedList()))
+		_, addrSetOps, err := c.addressSetFactory.NewAddressSetOps(asIndex, rule.peerIPs.UnsortedList())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address-sets for ANP %s's"+
 				" egress rule %s/%s/%d: %v", desiredANPState.name, rule.name, rule.gressPrefix, rule.priority, err)
@@ -636,7 +636,7 @@ func (c *Controller) constructOpsForPeerChanges(desiredRules, currentRules []*gr
 				return nil, fmt.Errorf("cannot ensure that addressSet %+v exists: err %v", asIndex.GetExternalIDs(), err)
 			}
 			klog.V(5).Infof("Adding peerIPs %+v to address-set %s for ANP %s", ipsToAdd, as.GetName(), anpName)
-			addrOps, err := as.AddIPsReturnOps(util.StringsToIPs(ipsToAdd.UnsortedList()))
+			addrOps, err := as.AddAddressesReturnOps(ipsToAdd.UnsortedList())
 			if err != nil {
 				return nil, fmt.Errorf("failed to construct address-set %s's IP add ops for anp %s's rule"+
 					" %s/%s/%d: %v", as.GetName(), anpName, desiredRule.name,
@@ -651,7 +651,7 @@ func (c *Controller) constructOpsForPeerChanges(desiredRules, currentRules []*gr
 				return nil, fmt.Errorf("cannot ensure that addressSet %+v exists: err %v", asIndex.GetExternalIDs(), err)
 			}
 			klog.V(5).Infof("Deleting peerIPs %+v from address-set %s for ANP %s", ipsToRemove, as.GetName(), anpName)
-			addrOps, err := as.DeleteIPsReturnOps(util.StringsToIPs(ipsToRemove.UnsortedList()))
+			addrOps, err := as.DeleteAddressesReturnOps(ipsToRemove.UnsortedList())
 			if err != nil {
 				return nil, fmt.Errorf("failed to construct address-set %s's IP delete ops for anp %s's rule"+
 					" %s/%s/%d: %v", as.GetName(), anpName, desiredRule.name,

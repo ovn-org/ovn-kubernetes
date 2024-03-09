@@ -520,7 +520,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 	}
 	if nsInfo.addressSet != nil {
 		// Empty the address set, then delete it after an interval.
-		if err := nsInfo.addressSet.SetIPs(nil); err != nil {
+		if err := nsInfo.addressSet.SetAddresses(nil); err != nil {
 			klog.Errorf("Warning: failed to empty address set for deleted NS %s: %v", ns, err)
 		}
 

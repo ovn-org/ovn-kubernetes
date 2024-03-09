@@ -465,7 +465,7 @@ func (c *ExternalGatewayMasterController) buildOVNHybridCache() (map[string]stri
 			klog.Errorf("CleanHybridPRoutes: unable to find get address set %s: %v", asIndex, err)
 			continue
 		}
-		ipv4Addrs, ipv6Addrs := as.GetIPs()
+		ipv4Addrs, ipv6Addrs := as.GetAddresses()
 		for _, ip := range ipv4Addrs {
 			ovnHybridCache[ip] = nodeName
 		}

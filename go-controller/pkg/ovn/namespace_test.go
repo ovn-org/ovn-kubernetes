@@ -70,7 +70,7 @@ func getNsAddrSetHashNames(ns string) (string, string) {
 	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, DefaultNetworkControllerName))
 }
 
-func buildNamespaceAddressSets(namespace string, ips []net.IP) (*nbdb.AddressSet, *nbdb.AddressSet) {
+func buildNamespaceAddressSets(namespace string, ips []string) (*nbdb.AddressSet, *nbdb.AddressSet) {
 	return addressset.GetTestDbAddrSets(getNamespaceAddrSetDbIDs(namespace, "default-network-controller"), ips)
 }
 
@@ -105,33 +105,33 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			namespace1 := newNamespace(namespaceName)
 			// namespace-owned address set for existing namespace, should stay
 			ns1 := getNamespaceAddrSetDbIDs(namespaceName, DefaultNetworkControllerName)
-			fakeOvn.asf.NewAddressSet(ns1, []net.IP{net.ParseIP("1.1.1.1")})
+			fakeOvn.asf.NewAddressSet(ns1, []string{"1.1.1.1"})
 			// namespace-owned address set for stale namespace, should be deleted
 			ns2 := getNamespaceAddrSetDbIDs("namespace2", DefaultNetworkControllerName)
-			fakeOvn.asf.NewAddressSet(ns2, []net.IP{net.ParseIP("1.1.1.2")})
+			fakeOvn.asf.NewAddressSet(ns2, []string{"1.1.1.2"})
 			// netpol peer address set for existing netpol, should stay
 			netpol := getPodSelectorAddrSetDbIDs("pasName", DefaultNetworkControllerName)
-			fakeOvn.asf.NewAddressSet(netpol, []net.IP{net.ParseIP("1.1.1.3")})
+			fakeOvn.asf.NewAddressSet(netpol, []string{"1.1.1.3"})
 			// egressQoS-owned address set, should stay
 			qos := getEgressQosAddrSetDbIDs("namespace", "0", controllerName)
-			fakeOvn.asf.NewAddressSet(qos, []net.IP{net.ParseIP("1.1.1.4")})
+			fakeOvn.asf.NewAddressSet(qos, []string{"1.1.1.4"})
 			// hybridNode-owned address set, should stay
 			hybridNode := apbroute.GetHybridRouteAddrSetDbIDs("node", DefaultNetworkControllerName)
-			fakeOvn.asf.NewAddressSet(hybridNode, []net.IP{net.ParseIP("1.1.1.5")})
+			fakeOvn.asf.NewAddressSet(hybridNode, []string{"1.1.1.5"})
 			// egress firewall-owned address set, should stay
 			ef := getEgressFirewallDNSAddrSetDbIDs("dnsname", controllerName)
-			fakeOvn.asf.NewAddressSet(ef, []net.IP{net.ParseIP("1.1.1.6")})
+			fakeOvn.asf.NewAddressSet(ef, []string{"1.1.1.6"})
 
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{}})
 			err := fakeOvn.controller.syncNamespaces([]interface{}{namespace1})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			fakeOvn.asf.ExpectAddressSetWithIPs(ns1, []string{"1.1.1.1"})
+			fakeOvn.asf.ExpectAddressSetWithAddresses(ns1, []string{"1.1.1.1"})
 			fakeOvn.asf.EventuallyExpectNoAddressSet(ns2)
-			fakeOvn.asf.ExpectAddressSetWithIPs(netpol, []string{"1.1.1.3"})
-			fakeOvn.asf.ExpectAddressSetWithIPs(qos, []string{"1.1.1.4"})
-			fakeOvn.asf.ExpectAddressSetWithIPs(hybridNode, []string{"1.1.1.5"})
-			fakeOvn.asf.ExpectAddressSetWithIPs(ef, []string{"1.1.1.6"})
+			fakeOvn.asf.ExpectAddressSetWithAddresses(netpol, []string{"1.1.1.3"})
+			fakeOvn.asf.ExpectAddressSetWithAddresses(qos, []string{"1.1.1.4"})
+			fakeOvn.asf.ExpectAddressSetWithAddresses(hybridNode, []string{"1.1.1.5"})
+			fakeOvn.asf.ExpectAddressSetWithAddresses(ef, []string{"1.1.1.6"})
 		})
 
 		ginkgo.It("reconciles an existing namespace with pods", func() {
@@ -176,7 +176,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName, []string{tP.podIP})
+			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(namespaceName, []string{tP.podIP})
 
 			// port group is empty, because it will be filled by pod add logic
 			pgIDs := getNamespacePortGroupDbIDs(namespaceName, DefaultNetworkControllerName)
@@ -337,7 +337,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			for _, lrpIP := range gwLRPIPs {
 				allowIPs = append(allowIPs, lrpIP.IP.String())
 			}
-			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(hostNetworkNamespace, allowIPs)
+			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(hostNetworkNamespace, allowIPs)
 		})
 
 		ginkgo.It("reconciles an existing namespace port group, without updating it", func() {
@@ -365,7 +365,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			err := fakeOvn.controller.WatchNamespaces()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName, []string{})
+			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(namespaceName, []string{})
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(initialData))
 		})
 		ginkgo.It("deletes an existing namespace port group when egress firewall and multicast are disabled", func() {

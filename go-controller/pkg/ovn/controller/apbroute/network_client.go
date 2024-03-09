@@ -307,7 +307,7 @@ func (nb *northBoundClient) addHybridRoutePolicyForPod(podIP net.IP, node string
 		if err != nil {
 			return fmt.Errorf("cannot ensure that addressSet for node %s exists %v", node, err)
 		}
-		err = as.AddIPs([]net.IP{(podIP)})
+		err = as.AddAddresses([]string{podIP.String()})
 		if err != nil {
 			return fmt.Errorf("unable to add PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
 		}
@@ -544,14 +544,14 @@ func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP net.IP, node string
 	if err != nil {
 		return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
 	}
-	err = as.DeleteIPs([]net.IP{podIP})
+	err = as.DeleteAddresses([]string{podIP.String()})
 	if err != nil {
 		return fmt.Errorf("unable to remove PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
 	}
 
 	// delete hybrid policy to bypass lr-policy in GR, only if there are zero pods on this node.
 	ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
-	ipv4PodIPs, ipv6PodIPs := as.GetIPs()
+	ipv4PodIPs, ipv6PodIPs := as.GetAddresses()
 	deletePolicy := false
 	var l3Prefix string
 	var matchSrcAS string

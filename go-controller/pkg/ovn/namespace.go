@@ -68,7 +68,7 @@ func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, ips []*net
 
 	defer nsUnlock()
 
-	if ops, err = nsInfo.addressSet.AddIPsReturnOps(createIPAddressSlice(ips)); err != nil {
+	if ops, err = nsInfo.addressSet.AddAddressesReturnOps(util.IPNetsIPToStringSlice(ips)); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -88,15 +88,7 @@ func (oc *DefaultNetworkController) addRemotePodToNamespace(ns string, ips []*ne
 	}
 
 	defer nsUnlock()
-	return nsInfo.addressSet.AddIPs(createIPAddressSlice(ips))
-}
-
-func createIPAddressSlice(ips []*net.IPNet) []net.IP {
-	ipAddrs := make([]net.IP, 0)
-	for _, ip := range ips {
-		ipAddrs = append(ipAddrs, ip.IP)
-	}
-	return ipAddrs
+	return nsInfo.addressSet.AddAddresses(util.IPNetsIPToStringSlice(ips))
 }
 
 func isNamespaceMulticastEnabled(annotations map[string]string) bool {

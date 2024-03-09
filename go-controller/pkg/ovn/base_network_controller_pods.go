@@ -680,7 +680,7 @@ func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs [
 	var ops []ovsdb.Operation
 	var err error
 	if nsInfo.addressSet != nil {
-		if ops, err = nsInfo.addressSet.DeleteIPsReturnOps(createIPAddressSlice(podIfAddrs)); err != nil {
+		if ops, err = nsInfo.addressSet.DeleteAddressesReturnOps(util.IPNetsIPToStringSlice(podIfAddrs)); err != nil {
 			return nil, err
 		}
 	}

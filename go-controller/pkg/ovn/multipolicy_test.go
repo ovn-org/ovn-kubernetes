@@ -498,7 +498,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
 					Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectAddressSetWithAddresses(namespaceName1, []string{nPodTest.podIP})
 
 				dataParams := newNetpolDataParams(networkPolicy).
 					withLocalPortUUIDs(nPodTest.portUUID).
@@ -525,7 +525,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				ocInfo := fakeOvn.secondaryControllers[secondaryNetworkName]
 				portInfo := nPodTest.getNetworkPortInfo(secondaryNetworkName, nadNamespacedName)
 				gomega.Expect(portInfo).NotTo(gomega.Equal(nil))
-				ocInfo.asf.ExpectAddressSetWithIPs(namespaceName1, []string{portInfo.podIP})
+				ocInfo.asf.ExpectAddressSetWithAddresses(namespaceName1, []string{portInfo.podIP})
 
 				dataParams2 := newNetpolDataParams(networkPolicy).
 					withLocalPortUUIDs(portInfo.portUUID).
@@ -634,7 +634,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					}
 
-					ocInfo.asf.EventuallyExpectAddressSetWithIPs(namespaceName1, []string{"10.1.1.1"})
+					ocInfo.asf.EventuallyExpectAddressSetWithAddresses(namespaceName1, []string{"10.1.1.1"})
 
 					// Delete the pod
 					ginkgo.By("Deleting the pod")
