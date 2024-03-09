@@ -1758,14 +1758,14 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			lrpip, _, _ := net.ParseCIDR(lrpips[0].String())
 			ips = append(ips, lrpip.String())
 
-			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(config.Kubernetes.HostNetworkNamespace, ips)
+			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(config.Kubernetes.HostNetworkNamespace, ips)
 
 			// Delete the node and check whether the address_set is empty or not
 			err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), testNode.Name, metav1.DeleteOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			var emptyAddress []string
-			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(config.Kubernetes.HostNetworkNamespace, emptyAddress)
+			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(config.Kubernetes.HostNetworkNamespace, emptyAddress)
 
 			return nil
 		}

@@ -378,7 +378,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) addPods(pods ...*v1.Pod) error
 		}
 		ips = append(ips, podIPs...)
 	}
-	return handlerInfo.addressSet.AddIPs(ips)
+	return handlerInfo.addressSet.AddAddresses(util.StringSlice(ips))
 }
 
 // must be called with PodSelectorAddrSetHandlerInfo read lock
@@ -390,7 +390,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) deletePod(pod *v1.Pod) error {
 		klog.Warningf("Could not find pod %s/%s IPs to delete from pod selector address set: %v", pod.Namespace, pod.Name, err)
 		return nil
 	}
-	return handlerInfo.addressSet.DeleteIPs(ips)
+	return handlerInfo.addressSet.DeleteAddresses(util.StringSlice(ips))
 }
 
 // handlePodAddUpdate adds the IP address of a pod that has been
@@ -493,7 +493,7 @@ func (bnc *BaseNetworkController) podSelectorPodNeedsDelete(pod *kapi.Pod, podHa
 	}
 	collidingPodName := collidingPod.Namespace + "/" + collidingPod.Name
 
-	v4ips, v6ips := podHandlerInfo.addressSet.GetIPs()
+	v4ips, v6ips := podHandlerInfo.addressSet.GetAddresses()
 	addrSetIPs := sets.NewString(append(v4ips, v6ips...)...)
 	podInAddrSet := false
 	for _, podIP := range ips {

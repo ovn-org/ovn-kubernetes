@@ -3,7 +3,6 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"net"
 	"runtime"
 	"time"
 
@@ -185,7 +184,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// address set should be created and pod ips added
 			peerASIDs := getPodSelectorAddrSetDbIDs(peerASKey, DefaultNetworkControllerName)
-			fakeOvn.asf.ExpectAddressSetWithIPs(peerASIDs, addrSetIPs)
+			fakeOvn.asf.ExpectAddressSetWithAddresses(peerASIDs, addrSetIPs)
 		},
 		table.Entry("all pods from a static namespace", knet.NetworkPolicyPeer{
 			PodSelector:       &metav1.LabelSelector{},
@@ -299,11 +298,11 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		namespaceName := "namespace1"
 		policyName := "networkpolicy1"
 		staleNetpolIDs := getStaleNetpolAddrSetDbIDs(namespaceName, policyName, "ingress", "0", DefaultNetworkControllerName)
-		staleNetpolAS, _ := addressset.GetTestDbAddrSets(staleNetpolIDs, []net.IP{net.ParseIP("1.1.1.1")})
+		staleNetpolAS, _ := addressset.GetTestDbAddrSets(staleNetpolIDs, []string{"1.1.1.1"})
 		unusedPodSelIDs := getPodSelectorAddrSetDbIDs("pasName", DefaultNetworkControllerName)
-		unusedPodSelAS, _ := addressset.GetTestDbAddrSets(unusedPodSelIDs, []net.IP{net.ParseIP("1.1.1.2")})
+		unusedPodSelAS, _ := addressset.GetTestDbAddrSets(unusedPodSelIDs, []string{"1.1.1.2"})
 		refNetpolIDs := getStaleNetpolAddrSetDbIDs(namespaceName, policyName, "egress", "0", DefaultNetworkControllerName)
-		refNetpolAS, _ := addressset.GetTestDbAddrSets(refNetpolIDs, []net.IP{net.ParseIP("1.1.1.3")})
+		refNetpolAS, _ := addressset.GetTestDbAddrSets(refNetpolIDs, []string{"1.1.1.3"})
 		netpolACL := libovsdbops.BuildACL(
 			"netpolACL",
 			nbdb.ACLDirectionFromLport,
@@ -321,7 +320,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		)
 		netpolACL.UUID = "netpolACL-UUID"
 		refPodSelIDs := getPodSelectorAddrSetDbIDs("pasName2", DefaultNetworkControllerName)
-		refPodSelAS, _ := addressset.GetTestDbAddrSets(refPodSelIDs, []net.IP{net.ParseIP("1.1.1.4")})
+		refPodSelAS, _ := addressset.GetTestDbAddrSets(refPodSelIDs, []string{"1.1.1.4"})
 		podSelACL := libovsdbops.BuildACL(
 			"podSelACL",
 			nbdb.ACLDirectionFromLport,

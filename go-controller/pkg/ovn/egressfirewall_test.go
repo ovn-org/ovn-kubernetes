@@ -122,7 +122,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		for _, namespace := range namespaces {
-			namespaceASip4, namespaceASip6 := buildNamespaceAddressSets(namespace.Name, []net.IP{})
+			namespaceASip4, namespaceASip6 := buildNamespaceAddressSets(namespace.Name, []string{})
 			if config.IPv4Mode {
 				initialData = append(initialData, namespaceASip4)
 			}
@@ -212,7 +212,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					purgeACL2.UUID = "purgeACL2-UUID"
 
 					namespace1 := *newNamespace("namespace1")
-					namespace1ASip4, _ := buildNamespaceAddressSets(namespace1.Name, []net.IP{})
+					namespace1ASip4, _ := buildNamespaceAddressSets(namespace1.Name, []string{})
 
 					egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
 						{
@@ -1001,7 +1001,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					// check dns address set was created
 					addrSet, _ := addressset.GetTestDbAddrSets(
 						getEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
-						[]net.IP{net.ParseIP(resolvedIP)})
+						[]string{resolvedIP})
 					expectedDatabaseState := append(initialData, addrSet)
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 

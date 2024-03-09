@@ -2250,7 +2250,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				// check if the address-set was created with the podIP
 				dbIDs := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
-				fakeOvn.asf.ExpectAddressSetWithIPs(dbIDs, []string{"10.128.1.3"})
+				fakeOvn.asf.ExpectAddressSetWithAddresses(dbIDs, []string{"10.128.1.3"})
 				return nil
 			}
 
@@ -2950,7 +2950,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// add address set with one legit IP that exists in a ecmp route, and one that doesn't
-				_, err = fakeOvn.asf.NewAddressSet(asIndex, []net.IP{net.ParseIP("10.128.1.3"), net.ParseIP("1.1.1.1")})
+				_, err = fakeOvn.asf.NewAddressSet(asIndex, []string{"10.128.1.3", "1.1.1.1"})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.LogicalRouter{
