@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
+	"k8s.io/apimachinery/pkg/util/sets"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -317,11 +318,11 @@ func IPsToNetworkIPs(ips ...*net.IPNet) []*net.IPNet {
 	return nets
 }
 
-// StringsToIPs takes a slice of strings and returns a slice of net.IPs
-func StringsToIPs(ips []string) []net.IP {
-	s := make([]net.IP, len(ips))
-	for i := range ips {
-		s[i] = net.ParseIP(ips[i])
+// IPsToStringSet takes a slice of IPs and returns a string set
+func IPsToStringSet(ips []net.IP) sets.Set[string] {
+	s := sets.New[string]()
+	for _, ip := range ips {
+		s.Insert(ip.String())
 	}
 	return s
 }

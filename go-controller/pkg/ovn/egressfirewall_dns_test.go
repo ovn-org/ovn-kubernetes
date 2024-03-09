@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/miekg/dns"
+	"k8s.io/apimachinery/pkg/util/sets"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -143,7 +144,7 @@ func TestAdd(t *testing.T) {
 					Port:    "1234"}, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"*ops.DbObjectIDs", "[]net.IP"}, []interface{}{}, []interface{}{nil, fmt.Errorf("mock error")}, 0, 1},
+				{"NewAddressSet", []string{"*ops.DbObjectIDs", "sets.Set[string]"}, []interface{}{}, []interface{}{nil, fmt.Errorf("mock error")}, 0, 1},
 			},
 		},
 		{
@@ -164,12 +165,12 @@ func TestAdd(t *testing.T) {
 				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "300")}}, 500 * time.Second, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"*ops.DbObjectIDs", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+				{"NewAddressSet", []string{"*ops.DbObjectIDs", "sets.Set[string]"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName: "SetIPs",
-					OnCallMethodArgs: []interface{}{[]net.IP{net.ParseIP(test1IPv4)}},
+					OnCallMethodArgs: []interface{}{sets.New[string](test1IPv4)},
 					RetArgList:       []interface{}{nil},
 				},
 			},
@@ -193,12 +194,12 @@ func TestAdd(t *testing.T) {
 					[]interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, clusterSubnetIP, "300")}}, 500 * time.Second, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"*ops.DbObjectIDs", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+				{"NewAddressSet", []string{"*ops.DbObjectIDs", "sets.Set[string]"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName: "SetIPs",
-					OnCallMethodArgs: []interface{}{[]net.IP{}},
+					OnCallMethodArgs: []interface{}{sets.New[string]()},
 					RetArgList:       []interface{}{nil},
 				},
 			},
@@ -222,12 +223,12 @@ func TestAdd(t *testing.T) {
 					[]interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "300"), generateRR(test1DNSName, clusterSubnetIP, "300")}}, 500 * time.Second, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"*ops.DbObjectIDs", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+				{"NewAddressSet", []string{"*ops.DbObjectIDs", "sets.Set[string]"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName: "SetIPs",
-					OnCallMethodArgs: []interface{}{[]net.IP{net.ParseIP(test1IPv4)}},
+					OnCallMethodArgs: []interface{}{sets.New[string](test1IPv4)},
 					RetArgList:       []interface{}{nil},
 				},
 			},
@@ -253,12 +254,12 @@ func TestAdd(t *testing.T) {
 				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv6, "300")}}, 500 * time.Second, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"*ops.DbObjectIDs", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+				{"NewAddressSet", []string{"*ops.DbObjectIDs", "sets.Set[string]"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName: "SetIPs",
-					OnCallMethodArgs: []interface{}{[]net.IP{net.ParseIP(test1IPv4), net.ParseIP(test1IPv6)}},
+					OnCallMethodArgs: []interface{}{sets.New[string](test1IPv4, net.ParseIP(test1IPv6).String())},
 					RetArgList:       []interface{}{nil},
 				},
 			},
@@ -287,17 +288,17 @@ func TestAdd(t *testing.T) {
 				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4Update, "300")}}, 1 * time.Second, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"*ops.DbObjectIDs", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+				{"NewAddressSet", []string{"*ops.DbObjectIDs", "sets.Set[string]"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName: "SetIPs",
-					OnCallMethodArgs: []interface{}{[]net.IP{net.ParseIP(test1IPv4)}},
+					OnCallMethodArgs: []interface{}{sets.New[string](test1IPv4)},
 					RetArgList:       []interface{}{nil},
 				},
 				{
 					OnCallMethodName: "SetIPs",
-					OnCallMethodArgs: []interface{}{[]net.IP{net.ParseIP(test1IPv4Update)}},
+					OnCallMethodArgs: []interface{}{sets.New[string](test1IPv4Update)},
 					RetArgList:       []interface{}{nil},
 				},
 			},
@@ -436,10 +437,10 @@ func TestDelete(t *testing.T) {
 				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv6, "300")}}, 500 * time.Second, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"*ops.DbObjectIDs", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+				{"NewAddressSet", []string{"*ops.DbObjectIDs", "sets.Set[string]"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
-				{"SetIPs", []string{"[]net.IP"}, []interface{}{}, []interface{}{nil}, 0, 1},
+				{"SetIPs", []string{"sets.Set[string]"}, []interface{}{}, []interface{}{nil}, 0, 1},
 				{"Destroy", []string{}, []interface{}{}, []interface{}{nil}, 0, 1},
 			},
 		},

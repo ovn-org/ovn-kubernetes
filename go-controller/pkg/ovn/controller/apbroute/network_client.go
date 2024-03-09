@@ -284,7 +284,7 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gateway_info.GatewayIn
 					routeInfo.PodExternalRoutes[podIP][gw] = gr
 					routesAdded++
 					if len(routeInfo.PodExternalRoutes[podIP]) == 1 {
-						if err := nb.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
+						if err := nb.addHybridRoutePolicyForPod(podIP, node); err != nil {
 							return err
 						}
 					}
@@ -302,7 +302,7 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gateway_info.GatewayIn
 
 // AddHybridRoutePolicyForPod handles adding a higher priority allow policy to allow traffic to be routed normally
 // by ecmp routes
-func (nb *northBoundClient) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
+func (nb *northBoundClient) addHybridRoutePolicyForPod(podIP string, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Add podIP to the node's address_set.
 		asIndex := GetHybridRouteAddrSetDbIDs(node, nb.controllerName)
@@ -310,16 +310,16 @@ func (nb *northBoundClient) addHybridRoutePolicyForPod(podIP net.IP, node string
 		if err != nil {
 			return fmt.Errorf("cannot ensure that addressSet for node %s exists %v", node, err)
 		}
-		err = as.AddIPs([]net.IP{(podIP)})
+		err = as.AddIPs(sets.New[string](podIP))
 		if err != nil {
-			return fmt.Errorf("unable to add PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
+			return fmt.Errorf("unable to add PodIP %s: to the address set %s, err: %v", podIP, node, err)
 		}
 
 		// add allow policy to bypass lr-policy in GR
 		ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
 		var l3Prefix string
 		var matchSrcAS string
-		isIPv6 := utilnet.IsIPv6(podIP)
+		isIPv6 := utilnet.IsIPv6String(podIP)
 		if isIPv6 {
 			l3Prefix = "ip6"
 			matchSrcAS = ipv6HashedAS
@@ -333,7 +333,7 @@ func (nb *northBoundClient) addHybridRoutePolicyForPod(podIP net.IP, node string
 		if err != nil {
 			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, types.GWRouterToJoinSwitchPrefix, err)
 		}
-		grJoinIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(podIP), grJoinIfAddrs)
+		grJoinIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6String(podIP), grJoinIfAddrs)
 		if err != nil {
 			return fmt.Errorf("failed to match gateway router join interface IPs: %v, err: %v", grJoinIfAddr, err)
 		}
@@ -476,7 +476,7 @@ func (nb *northBoundClient) deletePodGWRoute(routeInfo *RouteInfo, podIP, gw, gr
 	// The gw is deleted from the routes cache after this func is called, length 1
 	// means it is the last gw for the pod and the hybrid route policy should be deleted.
 	if entry := routeInfo.PodExternalRoutes[podIP]; len(entry) <= 1 {
-		if err := nb.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+		if err := nb.delHybridRoutePolicyForPod(podIP, node); err != nil {
 			return fmt.Errorf("unable to delete hybrid route policy for pod %s: err: %v", routeInfo.PodName, err)
 		}
 	}
@@ -536,7 +536,7 @@ func (nb *northBoundClient) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr s
 
 // DelHybridRoutePolicyForPod handles deleting a logical route policy that
 // forces pod egress traffic to be rerouted to a gateway router for local gateway mode.
-func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
+func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP, node string) error {
 	if config.Gateway.Mode != config.GatewayModeLocal {
 		return nil
 	}
@@ -547,9 +547,9 @@ func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP net.IP, node string
 	if err != nil {
 		return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
 	}
-	err = as.DeleteIPs([]net.IP{podIP})
+	err = as.DeleteIPs(sets.New[string](podIP))
 	if err != nil {
-		return fmt.Errorf("unable to remove PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
+		return fmt.Errorf("unable to remove PodIP %s: to the address set %s, err: %v", podIP, node, err)
 	}
 
 	// delete hybrid policy to bypass lr-policy in GR, only if there are zero pods on this node.
@@ -558,7 +558,7 @@ func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP net.IP, node string
 	deletePolicy := false
 	var l3Prefix string
 	var matchSrcAS string
-	if utilnet.IsIPv6(podIP) {
+	if utilnet.IsIPv6String(podIP) {
 		l3Prefix = "ip6"
 		if len(ipv6PodIPs) == 0 {
 			deletePolicy = true

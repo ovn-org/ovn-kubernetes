@@ -157,7 +157,7 @@ func (e *EgressDNS) updateEntryForName(dnsName string) error {
 			ipsNoClusterSubnet = append(ipsNoClusterSubnet, ip)
 		}
 	}
-	if err := e.dnsEntries[dnsName].dnsAddressSet.SetIPs(ipsNoClusterSubnet); err != nil {
+	if err := e.dnsEntries[dnsName].dnsAddressSet.SetIPs(util.IPsToStringSet(ipsNoClusterSubnet)); err != nil {
 		return fmt.Errorf("cannot add IPs from EgressFirewall AddressSet %s: %v", dnsName, err)
 	}
 	return nil

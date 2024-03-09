@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apimachinerytypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -1705,7 +1706,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				hostNamespaceAddrSet, err := fakeOvn.asf.GetAddressSet(dbIDs)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// emulate management IP being added to the hostNetwork address set, but no pods in that namespace
-				err = hostNamespaceAddrSet.SetIPs([]net.IP{net.ParseIP("10.244.0.2")})
+				err = hostNamespaceAddrSet.SetIPs(sets.New[string]("10.244.0.2"))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// create networkPolicy, check db

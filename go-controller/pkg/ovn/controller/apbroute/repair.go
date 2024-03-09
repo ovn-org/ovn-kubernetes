@@ -158,7 +158,7 @@ func (c *ExternalGatewayMasterController) Repair() error {
 		if !podHasAnyECMPRoutes {
 			for _, ovnRoute := range ovnRoutes {
 				node := strings.TrimPrefix(ovnRoute.router, types.GWRouterPrefix)
-				if err := c.nbClient.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+				if err := c.nbClient.delHybridRoutePolicyForPod(podIP, node); err != nil {
 					return fmt.Errorf("error while removing hybrid policy for pod IP: %s, on node: %s, error: %v",
 						podIP, node, err)
 				}
@@ -179,7 +179,7 @@ func (c *ExternalGatewayMasterController) Repair() error {
 			_, okAnnotation := annotatedGWIPsMap[ip]
 			if !okPolicy && !okAnnotation {
 				klog.Infof("CleanHybridPRoutes: Removing IP: %s from hybrid route policy", ip)
-				if err := c.nbClient.delHybridRoutePolicyForPod(net.ParseIP(ip), node); err != nil {
+				if err := c.nbClient.delHybridRoutePolicyForPod(ip, node); err != nil {
 					return fmt.Errorf("CleanHybridPRoutes: error while removing hybrid policy for pod IP: %s, on node: %s, error: %v",
 						ip, node, err)
 				}

@@ -161,12 +161,12 @@ func (c *ExternalGatewayMasterController) GetStaticGatewayIPsForTargetNamespace(
 }
 
 // AddHybridRoutePolicyForPod exposes the function addHybridRoutePolicyForPod
-func (c *ExternalGatewayMasterController) AddHybridRoutePolicyForPod(podIP net.IP, node string) error {
+func (c *ExternalGatewayMasterController) AddHybridRoutePolicyForPod(podIP, node string) error {
 	return c.nbClient.addHybridRoutePolicyForPod(podIP, node)
 }
 
 // DelHybridRoutePolicyForPod exposes the function delHybridRoutePolicyForPod
-func (c *ExternalGatewayMasterController) DelHybridRoutePolicyForPod(podIP net.IP, node string) error {
+func (c *ExternalGatewayMasterController) DelHybridRoutePolicyForPod(podIP, node string) error {
 	return c.nbClient.delHybridRoutePolicyForPod(podIP, node)
 }
 

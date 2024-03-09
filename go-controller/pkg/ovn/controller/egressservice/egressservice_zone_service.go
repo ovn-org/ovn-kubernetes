@@ -2,7 +2,6 @@ package egressservice
 
 import (
 	"fmt"
-	"net"
 
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -192,20 +191,14 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (
 	return
 }
 
-func createIPAddressNetSlice(v4ips, v6ips []string) []net.IP {
-	ipAddrs := make([]net.IP, 0)
-	for _, ip := range v4ips {
-		ipNet := net.ParseIP(ip)
-		ipAddrs = append(ipAddrs, ipNet)
-	}
-	for _, ip := range v6ips {
-		ipNet := net.ParseIP(ip)
-		ipAddrs = append(ipAddrs, ipNet)
-	}
+func createIPAddressSetSlice(v4ips, v6ips []string) sets.Set[string] {
+	ipAddrs := make(sets.Set[string])
+	ipAddrs.Insert(v4ips...)
+	ipAddrs.Insert(v6ips...)
 	return ipAddrs
 }
 
-func (c *Controller) addPodIPsToAddressSetOps(addrSetIPs []net.IP) ([]libovsdb.Operation, error) {
+func (c *Controller) addPodIPsToAddressSetOps(addrSetIPs sets.Set[string]) ([]libovsdb.Operation, error) {
 	var ops []libovsdb.Operation
 	dbIDs := GetEgressServiceAddrSetDbIDs(c.controllerName)
 	as, err := c.addressSetFactory.GetAddressSet(dbIDs)
@@ -218,7 +211,7 @@ func (c *Controller) addPodIPsToAddressSetOps(addrSetIPs []net.IP) ([]libovsdb.O
 	return ops, nil
 }
 
-func (c *Controller) deletePodIPsFromAddressSetOps(addrSetIPs []net.IP) ([]libovsdb.Operation, error) {
+func (c *Controller) deletePodIPsFromAddressSetOps(addrSetIPs sets.Set[string]) ([]libovsdb.Operation, error) {
 	var ops []libovsdb.Operation
 	dbIDs := GetEgressServiceAddrSetDbIDs(c.controllerName)
 	as, err := c.addressSetFactory.GetAddressSet(dbIDs)
@@ -231,7 +224,7 @@ func (c *Controller) deletePodIPsFromAddressSetOps(addrSetIPs []net.IP) ([]libov
 	return ops, nil
 }
 
-func (c *Controller) setPodIPsInAddressSet(addrSetIPs []net.IP) error {
+func (c *Controller) setPodIPsInAddressSet(addrSetIPs sets.Set[string]) error {
 	dbIDs := GetEgressServiceAddrSetDbIDs(c.controllerName)
 	as, err := c.addressSetFactory.GetAddressSet(dbIDs)
 	if err != nil {

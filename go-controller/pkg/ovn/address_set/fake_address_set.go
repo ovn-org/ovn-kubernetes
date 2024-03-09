@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -46,7 +47,7 @@ func (f *FakeAddressSetFactory) ErrOnNextNewASCall() {
 }
 
 // NewAddressSet returns a new address set object
-func (f *FakeAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, error) {
+func (f *FakeAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ips sets.Set[string]) (AddressSet, error) {
 	if f.errOnNextNewAddrSet {
 		f.errOnNextNewAddrSet = false
 		return nil, fmt.Errorf(FakeASFError)
@@ -69,7 +70,7 @@ func (f *FakeAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ip
 }
 
 // NewAddressSetOps returns a new address set object
-func (f *FakeAddressSetFactory) NewAddressSetOps(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, []ovsdb.Operation, error) {
+func (f *FakeAddressSetFactory) NewAddressSetOps(dbIDs *libovsdbops.DbObjectIDs, ips sets.Set[string]) (AddressSet, []ovsdb.Operation, error) {
 	if f.errOnNextNewAddrSet {
 		f.errOnNextNewAddrSet = false
 		return nil, nil, fmt.Errorf(FakeASFError)
@@ -103,7 +104,7 @@ func (f *FakeAddressSetFactory) EnsureAddressSet(dbIDs *libovsdbops.DbObjectIDs)
 	if ok {
 		return set, nil
 	}
-	set, err := f.newFakeAddressSets([]net.IP{}, dbIDs, f.removeAddressSet)
+	set, err := f.newFakeAddressSets(sets.New[string](), dbIDs, f.removeAddressSet)
 	if err != nil {
 		return nil, err
 	}
@@ -206,14 +207,10 @@ func (f *FakeAddressSetFactory) expectAddressSetWithIPs(g gomega.Gomega, dbIDs *
 	if lenAddressSet != len(ips) {
 		var addrs []string
 		if as4 != nil {
-			for _, v := range as4.ips {
-				addrs = append(addrs, v.String())
-			}
+			addrs = append(addrs, as4.ips.UnsortedList()...)
 		}
 		if as6 != nil {
-			for _, v := range as6.ips {
-				addrs = append(addrs, v.String())
-			}
+			addrs = append(addrs, as6.ips.UnsortedList()...)
 		}
 
 		klog.Errorf("IPv4 addresses mismatch in cache: %#v, expected: %#v", addrs, ips)
@@ -298,7 +295,7 @@ type removeFunc func(string)
 type fakeAddressSet struct {
 	name      string
 	hashName  string
-	ips       map[string]net.IP
+	ips       sets.Set[string]
 	destroyed uint32
 }
 
@@ -315,15 +312,15 @@ type fakeAddressSets struct {
 	removeFn removeFunc
 }
 
-func (f *FakeAddressSetFactory) newFakeAddressSets(ips []net.IP, dbIDs *libovsdbops.DbObjectIDs, removeFn removeFunc) (*fakeAddressSets, error) {
+func (f *FakeAddressSetFactory) newFakeAddressSets(ips sets.Set[string], dbIDs *libovsdbops.DbObjectIDs, removeFn removeFunc) (*fakeAddressSets, error) {
 	var v4set, v6set *fakeAddressSet
-	v4Ips := make([]net.IP, 0)
-	v6Ips := make([]net.IP, 0)
-	for _, ip := range ips {
-		if utilnet.IsIPv6(ip) {
-			v6Ips = append(v6Ips, ip)
+	v4Ips := sets.New[string]()
+	v6Ips := sets.New[string]()
+	for _, ip := range ips.UnsortedList() {
+		if utilnet.IsIPv6String(ip) || utilnet.IsIPv6CIDRString(ip) {
+			v6Ips.Insert(ip)
 		} else {
-			v4Ips = append(v4Ips, ip)
+			v4Ips.Insert(ip)
 		}
 	}
 	if config.IPv4Mode {
@@ -336,16 +333,13 @@ func (f *FakeAddressSetFactory) newFakeAddressSets(ips []net.IP, dbIDs *libovsdb
 	return &fakeAddressSets{name: name, ipv4: v4set, ipv6: v6set, dbIDs: dbIDs, removeFn: removeFn}, nil
 }
 
-func (f *FakeAddressSetFactory) newFakeAddressSet(ips []net.IP, dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *fakeAddressSet {
+func (f *FakeAddressSetFactory) newFakeAddressSet(ips sets.Set[string], dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *fakeAddressSet {
 	name := getDbIDsWithIPFamily(dbIDs, ipFamily).String()
 
 	as := &fakeAddressSet{
 		name:     name,
 		hashName: hashedAddressSet(name),
-		ips:      make(map[string]net.IP),
-	}
-	for _, ip := range ips {
-		as.ips[ip.String()] = ip
+		ips:      ips,
 	}
 	return as
 }
@@ -366,20 +360,20 @@ func (as *fakeAddressSets) GetName() string {
 	return as.name
 }
 
-func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
+func (as *fakeAddressSets) AddIPs(ips sets.Set[string]) error {
 	_, err := as.AddIPsReturnOps(ips)
 	return err
 }
 
-func (as *fakeAddressSets) AddIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, error) {
+func (as *fakeAddressSets) AddIPsReturnOps(ips sets.Set[string]) ([]ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
 	as.Lock()
 	defer as.Unlock()
-	for _, ip := range ips {
-		if as.ipv6 != nil && utilnet.IsIPv6(ip) {
+	for _, ip := range ips.UnsortedList() {
+		if as.ipv6 != nil && (utilnet.IsIPv6String(ip) || utilnet.IsIPv6CIDRString(ip)) {
 			ops, err = as.ipv6.addIP(ip)
-		} else if as.ipv4 != nil && !utilnet.IsIPv6(ip) {
+		} else if as.ipv4 != nil && (utilnet.IsIPv4String(ip) || utilnet.IsIPv4CIDRString(ip)) {
 			ops, err = as.ipv4.addIP(ip)
 		}
 		if err != nil {
@@ -406,17 +400,17 @@ func (as *fakeAddressSets) GetIPs() ([]string, []string) {
 	return v4ips, v6ips
 }
 
-func (as *fakeAddressSets) SetIPs(ips []net.IP) error {
-	allIPs := []net.IP{}
+func (as *fakeAddressSets) SetIPs(ips sets.Set[string]) error {
+	allIPs := sets.Set[string]{}
 	if as.ipv4 != nil {
-		for _, ip := range as.ipv4.ips {
-			allIPs = append(allIPs, ip)
+		for _, ip := range as.ipv4.ips.UnsortedList() {
+			allIPs.Insert(ip)
 		}
 	}
 
 	if as.ipv6 != nil {
-		for _, ip := range as.ipv6.ips {
-			allIPs = append(allIPs, ip)
+		for _, ip := range as.ipv6.ips.UnsortedList() {
+			allIPs.Insert(ip)
 		}
 	}
 
@@ -428,21 +422,21 @@ func (as *fakeAddressSets) SetIPs(ips []net.IP) error {
 	return as.AddIPs(ips)
 }
 
-func (as *fakeAddressSets) DeleteIPs(ips []net.IP) error {
+func (as *fakeAddressSets) DeleteIPs(ips sets.Set[string]) error {
 	_, err := as.DeleteIPsReturnOps(ips)
 	return err
 }
 
-func (as *fakeAddressSets) DeleteIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, error) {
+func (as *fakeAddressSets) DeleteIPsReturnOps(ips sets.Set[string]) ([]ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
 	as.Lock()
 	defer as.Unlock()
 
-	for _, ip := range ips {
-		if as.ipv6 != nil && utilnet.IsIPv6(ip) {
+	for _, ip := range ips.UnsortedList() {
+		if as.ipv6 != nil && (utilnet.IsIPv6String(ip) || utilnet.IsIPv6CIDRString(ip)) {
 			ops, err = as.ipv6.deleteIP(ip)
-		} else if as.ipv4 != nil && !utilnet.IsIPv6(ip) {
+		} else if as.ipv4 != nil && (utilnet.IsIPv4String(ip) || utilnet.IsIPv4CIDRString(ip)) {
 			ops, err = as.ipv4.deleteIP(ip)
 		}
 		if err != nil {
@@ -476,27 +470,22 @@ func (as *fakeAddressSet) getHashName() string {
 	return as.hashName
 }
 
-func (as *fakeAddressSet) addIP(ip net.IP) ([]ovsdb.Operation, error) {
+func (as *fakeAddressSet) addIP(ip string) ([]ovsdb.Operation, error) {
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
-	ipStr := ip.String()
-	if _, ok := as.ips[ipStr]; !ok {
-		as.ips[ip.String()] = ip
+	if ok := as.ips.Has(ip); !ok {
+		as.ips.Insert(ip)
 	}
 	return nil, nil
 }
 
 func (as *fakeAddressSet) getIPs() ([]string, error) {
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
-	uniqIPs := make([]string, 0, len(as.ips))
-	for _, ip := range as.ips {
-		uniqIPs = append(uniqIPs, ip.String())
-	}
-	return uniqIPs, nil
+	return as.ips.UnsortedList(), nil
 }
 
-func (as *fakeAddressSet) deleteIP(ip net.IP) ([]ovsdb.Operation, error) {
+func (as *fakeAddressSet) deleteIP(ip string) ([]ovsdb.Operation, error) {
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
-	delete(as.ips, ip.String())
+	delete(as.ips, ip)
 	return nil, nil
 }
 

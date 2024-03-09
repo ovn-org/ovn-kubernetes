@@ -70,7 +70,7 @@ func getNsAddrSetHashNames(ns string) (string, string) {
 	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, DefaultNetworkControllerName))
 }
 
-func buildNamespaceAddressSets(namespace string, ips []net.IP) (*nbdb.AddressSet, *nbdb.AddressSet) {
+func buildNamespaceAddressSets(namespace string, ips sets.Set[string]) (*nbdb.AddressSet, *nbdb.AddressSet) {
 	return addressset.GetTestDbAddrSets(getNamespaceAddrSetDbIDs(namespace, "default-network-controller"), ips)
 }
 
@@ -105,22 +105,22 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			namespace1 := newNamespace(namespaceName)
 			// namespace-owned address set for existing namespace, should stay
 			ns1 := getNamespaceAddrSetDbIDs(namespaceName, DefaultNetworkControllerName)
-			fakeOvn.asf.NewAddressSet(ns1, []net.IP{net.ParseIP("1.1.1.1")})
+			fakeOvn.asf.NewAddressSet(ns1, sets.New[string]("1.1.1.1"))
 			// namespace-owned address set for stale namespace, should be deleted
 			ns2 := getNamespaceAddrSetDbIDs("namespace2", DefaultNetworkControllerName)
-			fakeOvn.asf.NewAddressSet(ns2, []net.IP{net.ParseIP("1.1.1.2")})
+			fakeOvn.asf.NewAddressSet(ns2, sets.New[string]("1.1.1.2"))
 			// netpol peer address set for existing netpol, should stay
 			netpol := getPodSelectorAddrSetDbIDs("pasName", DefaultNetworkControllerName)
-			fakeOvn.asf.NewAddressSet(netpol, []net.IP{net.ParseIP("1.1.1.3")})
+			fakeOvn.asf.NewAddressSet(netpol, sets.New[string]("1.1.1.3"))
 			// egressQoS-owned address set, should stay
 			qos := getEgressQosAddrSetDbIDs("namespace", "0", controllerName)
-			fakeOvn.asf.NewAddressSet(qos, []net.IP{net.ParseIP("1.1.1.4")})
+			fakeOvn.asf.NewAddressSet(qos, sets.New[string]("1.1.1.4"))
 			// hybridNode-owned address set, should stay
 			hybridNode := apbroute.GetHybridRouteAddrSetDbIDs("node", DefaultNetworkControllerName)
-			fakeOvn.asf.NewAddressSet(hybridNode, []net.IP{net.ParseIP("1.1.1.5")})
+			fakeOvn.asf.NewAddressSet(hybridNode, sets.New[string]("1.1.1.5"))
 			// egress firewall-owned address set, should stay
 			ef := getEgressFirewallDNSAddrSetDbIDs("dnsname", controllerName)
-			fakeOvn.asf.NewAddressSet(ef, []net.IP{net.ParseIP("1.1.1.6")})
+			fakeOvn.asf.NewAddressSet(ef, sets.New[string]("1.1.1.6"))
 
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{}})
 			err := fakeOvn.controller.syncNamespaces([]interface{}{namespace1})

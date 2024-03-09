@@ -2245,7 +2245,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				}
 
-				err := fakeOvn.controller.addHybridRoutePolicyForPod(net.ParseIP("10.128.1.3"), "node1")
+				err := fakeOvn.controller.addHybridRoutePolicyForPod("10.128.1.3", "node1")
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				// check if the address-set was created with the podIP
@@ -2632,14 +2632,14 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					go func() {
 						defer wg.Done()
 						<-c
-						fakeOvn.controller.addHybridRoutePolicyForPod(net.ParseIP(fmt.Sprintf("10.128.1.%d", podIndex)), "node1")
+						fakeOvn.controller.addHybridRoutePolicyForPod(fmt.Sprintf("10.128.1.%d", podIndex), "node1")
 					}()
 				}
 				close(c)
 				wg.Wait()
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 
-				err := fakeOvn.controller.addHybridRoutePolicyForPod(net.ParseIP(fmt.Sprintf("10.128.1.%d", 6)), "node1")
+				err := fakeOvn.controller.addHybridRoutePolicyForPod(fmt.Sprintf("10.128.1.%d", 6), "node1")
 				// adding another pod after the initial burst should not trigger an error or change db
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
@@ -2702,7 +2702,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				}
 
 				injectNode(fakeOvn)
-				err := fakeOvn.controller.delHybridRoutePolicyForPod(net.ParseIP("10.128.1.3"), "node1")
+				err := fakeOvn.controller.delHybridRoutePolicyForPod("10.128.1.3", "node1")
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				dbIDs := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
@@ -2950,7 +2950,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// add address set with one legit IP that exists in a ecmp route, and one that doesn't
-				_, err = fakeOvn.asf.NewAddressSet(asIndex, []net.IP{net.ParseIP("10.128.1.3"), net.ParseIP("1.1.1.1")})
+				_, err = fakeOvn.asf.NewAddressSet(asIndex, sets.New[string]("10.128.1.3", "1.1.1.1"))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.LogicalRouter{

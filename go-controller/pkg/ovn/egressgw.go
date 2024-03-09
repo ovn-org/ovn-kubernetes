@@ -387,7 +387,7 @@ func (oc *DefaultNetworkController) deletePodGWRoute(routeInfo *apbroutecontroll
 	// The gw is deleted from the routes cache after this func is called, length 1
 	// means it is the last gw for the pod and the hybrid route policy should be deleted.
 	if entry := routeInfo.PodExternalRoutes[podIP]; len(entry) <= 1 {
-		if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+		if err := oc.delHybridRoutePolicyForPod(podIP, node); err != nil {
 			return fmt.Errorf("unable to delete hybrid route policy for pod %s: err: %v", routeInfo.PodName, err)
 		}
 	}
@@ -610,7 +610,7 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 						routeInfo.PodExternalRoutes[podIP][gw] = gr
 						routesAdded++
 						if len(routeInfo.PodExternalRoutes[podIP]) == 1 {
-							if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
+							if err := oc.addHybridRoutePolicyForPod(podIP, node); err != nil {
 								return err
 							}
 						}
@@ -746,7 +746,7 @@ func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, nodeName string, extI
 // by ecmp routes.
 // WARNING: updates same db entries as apbroutecontroller. Make sure to call only when route is not managed by
 // apbroute controller.
-func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
+func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Add podIP to the node's address_set.
 		asIndex := apbroutecontroller.GetHybridRouteAddrSetDbIDs(node, oc.controllerName)
@@ -754,16 +754,16 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 		if err != nil {
 			return fmt.Errorf("cannot ensure that addressSet for node %s exists %v", node, err)
 		}
-		err = as.AddIPs([]net.IP{(podIP)})
+		err = as.AddIPs(sets.New[string](podIP))
 		if err != nil {
-			return fmt.Errorf("unable to add PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
+			return fmt.Errorf("unable to add PodIP %s: to the address set %s, err: %v", podIP, node, err)
 		}
 
 		// add allow policy to bypass lr-policy in GR
 		ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
 		var l3Prefix string
 		var matchSrcAS string
-		isIPv6 := utilnet.IsIPv6(podIP)
+		isIPv6 := utilnet.IsIPv6String(podIP)
 		if isIPv6 {
 			l3Prefix = "ip6"
 			matchSrcAS = ipv6HashedAS
@@ -777,7 +777,7 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 		if err != nil {
 			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, types.GWRouterToJoinSwitchPrefix, err)
 		}
-		grJoinIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(podIP), grJoinIfAddrs)
+		grJoinIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6String(podIP), grJoinIfAddrs)
 		if err != nil {
 			return fmt.Errorf("failed to match gateway router join interface IPs: %v, err: %v", grJoinIfAddr, err)
 		}
@@ -822,7 +822,7 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 // forces pod egress traffic to be rerouted to a gateway router for local gateway mode.
 // WARNING: updates same db entries as apbroutecontroller. Make sure to call only when route is not managed by
 // apbroute controller.
-func (oc *DefaultNetworkController) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
+func (oc *DefaultNetworkController) delHybridRoutePolicyForPod(podIP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Delete podIP from the node's address_set.
 		asIndex := apbroutecontroller.GetHybridRouteAddrSetDbIDs(node, oc.controllerName)
@@ -830,9 +830,9 @@ func (oc *DefaultNetworkController) delHybridRoutePolicyForPod(podIP net.IP, nod
 		if err != nil {
 			return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
 		}
-		err = as.DeleteIPs([]net.IP{podIP})
+		err = as.DeleteIPs(sets.New[string](podIP))
 		if err != nil {
-			return fmt.Errorf("unable to remove PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
+			return fmt.Errorf("unable to remove PodIP %s: to the address set %s, err: %v", podIP, node, err)
 		}
 
 		// delete hybrid policy to bypass lr-policy in GR, only if there are zero pods on this node.
@@ -841,7 +841,7 @@ func (oc *DefaultNetworkController) delHybridRoutePolicyForPod(podIP net.IP, nod
 		deletePolicy := false
 		var l3Prefix string
 		var matchSrcAS string
-		if utilnet.IsIPv6(podIP) {
+		if utilnet.IsIPv6String(podIP) {
 			l3Prefix = "ip6"
 			if len(ipv6PodIPs) == 0 {
 				deletePolicy = true

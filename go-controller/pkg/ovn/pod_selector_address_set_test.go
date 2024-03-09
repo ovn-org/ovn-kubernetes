@@ -3,7 +3,6 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"net"
 	"runtime"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 func getPolicyKeyWithKind(policy *knet.NetworkPolicy) string {
@@ -299,11 +299,11 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		namespaceName := "namespace1"
 		policyName := "networkpolicy1"
 		staleNetpolIDs := getStaleNetpolAddrSetDbIDs(namespaceName, policyName, "ingress", "0", DefaultNetworkControllerName)
-		staleNetpolAS, _ := addressset.GetTestDbAddrSets(staleNetpolIDs, []net.IP{net.ParseIP("1.1.1.1")})
+		staleNetpolAS, _ := addressset.GetTestDbAddrSets(staleNetpolIDs, sets.New[string]("1.1.1.1"))
 		unusedPodSelIDs := getPodSelectorAddrSetDbIDs("pasName", DefaultNetworkControllerName)
-		unusedPodSelAS, _ := addressset.GetTestDbAddrSets(unusedPodSelIDs, []net.IP{net.ParseIP("1.1.1.2")})
+		unusedPodSelAS, _ := addressset.GetTestDbAddrSets(unusedPodSelIDs, sets.New[string]("1.1.1.2"))
 		refNetpolIDs := getStaleNetpolAddrSetDbIDs(namespaceName, policyName, "egress", "0", DefaultNetworkControllerName)
-		refNetpolAS, _ := addressset.GetTestDbAddrSets(refNetpolIDs, []net.IP{net.ParseIP("1.1.1.3")})
+		refNetpolAS, _ := addressset.GetTestDbAddrSets(refNetpolIDs, sets.New[string]("1.1.1.3"))
 		netpolACL := libovsdbops.BuildACL(
 			"netpolACL",
 			nbdb.ACLDirectionFromLport,
@@ -321,7 +321,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		)
 		netpolACL.UUID = "netpolACL-UUID"
 		refPodSelIDs := getPodSelectorAddrSetDbIDs("pasName2", DefaultNetworkControllerName)
-		refPodSelAS, _ := addressset.GetTestDbAddrSets(refPodSelIDs, []net.IP{net.ParseIP("1.1.1.4")})
+		refPodSelAS, _ := addressset.GetTestDbAddrSets(refPodSelIDs, sets.New[string]("1.1.1.4"))
 		podSelACL := libovsdbops.BuildACL(
 			"podSelACL",
 			nbdb.ACLDirectionFromLport,

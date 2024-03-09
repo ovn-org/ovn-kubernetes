@@ -3,7 +3,6 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/onsi/ginkgo"
@@ -13,13 +12,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	anpovn "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/klog/v2"
 	utilpointer "k8s.io/utils/pointer"
@@ -62,7 +61,7 @@ func getACLsForBANPRules(banp *anpapi.BaselineAdminNetworkPolicy) []*nbdb.ACL {
 	return aclResults
 }
 
-func buildBANPAddressSets(banp *anpapi.BaselineAdminNetworkPolicy, index int32, ips []net.IP, gressPrefix libovsdbutil.ACLDirection) (*nbdb.AddressSet, *nbdb.AddressSet) {
+func buildBANPAddressSets(banp *anpapi.BaselineAdminNetworkPolicy, index int32, ips sets.Set[string], gressPrefix libovsdbutil.ACLDirection) (*nbdb.AddressSet, *nbdb.AddressSet) {
 	asIndex := anpovn.GetANPPeerAddrSetDbIDs(banp.Name, string(gressPrefix),
 		fmt.Sprintf("%d", index), DefaultNetworkControllerName, true)
 	return addressset.GetTestDbAddrSets(asIndex, ips)
@@ -130,8 +129,8 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					Name: node1Name,
 					UUID: node1Name + "-UUID",
 				}
-				subjectNSASIPv4, subjectNSASIPv6 := buildNamespaceAddressSets(banpSubjectNamespaceName, []net.IP{})
-				peerNSASIPv4, peerNSASIPv6 := buildNamespaceAddressSets(banpPeerNamespaceName, []net.IP{})
+				subjectNSASIPv4, subjectNSASIPv6 := buildNamespaceAddressSets(banpSubjectNamespaceName, sets.New[string]())
+				peerNSASIPv4, peerNSASIPv6 := buildNamespaceAddressSets(banpPeerNamespaceName, sets.New[string]())
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						node1Switch,
@@ -218,7 +217,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				banpSubjectPod.Labels["rv"] = "resourceVersionUTHack"
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(banpSubjectPod.Namespace).Update(context.TODO(), &banpSubjectPod, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(banpSubjectNamespaceName, []net.IP{testing.MustParseIP(t.podIP)})
+				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(banpSubjectNamespaceName, sets.New[string](t.podIP))
 				pg = getDefaultPGForANPSubject(banp.Name, []string{t.portUUID}, nil, true)
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t}, []string{node1Name})...)
@@ -251,7 +250,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					acl := acl
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
-				peerASIngressRule0v4, peerASIngressRule0v6 := buildBANPAddressSets(banp, 0, []net.IP{}, libovsdbutil.ACLIngress)
+				peerASIngressRule0v4, peerASIngressRule0v6 := buildBANPAddressSets(banp, 0, sets.New[string](), libovsdbutil.ACLIngress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -282,14 +281,14 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				banpPeerPod.Labels["rv"] = "resourceVersionUTHack"
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(banpPeerPod.Namespace).Update(context.TODO(), &banpPeerPod, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(banpPeerNamespaceName, []net.IP{testing.MustParseIP(t2.podIP)})
+				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(banpPeerNamespaceName, sets.New[string](t2.podIP))
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
 				for _, acl := range acls {
 					acl := acl
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
-				peerASIngressRule0v4, peerASIngressRule0v6 = buildBANPAddressSets(banp, 0, []net.IP{testing.MustParseIP(t2.podIP)}, libovsdbutil.ACLIngress) // podIP should be added to v4 address-set
+				peerASIngressRule0v4, peerASIngressRule0v6 = buildBANPAddressSets(banp, 0, sets.New[string](t2.podIP), libovsdbutil.ACLIngress) // podIP should be added to v4 address-set
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -361,15 +360,15 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
 				// podIP should be added to v4 address-set
-				peerASIngressRule0v4, peerASIngressRule0v6 = buildBANPAddressSets(banp, 0, []net.IP{net.ParseIP(t2.podIP)}, libovsdbutil.ACLIngress)
+				peerASIngressRule0v4, peerASIngressRule0v6 = buildBANPAddressSets(banp, 0, sets.New[string](t2.podIP), libovsdbutil.ACLIngress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
 				// address-set will be empty since no pods match it yet
-				peerASIngressRule1v4, peerASIngressRule1v6 := buildBANPAddressSets(banp, 1, []net.IP{}, libovsdbutil.ACLIngress)
+				peerASIngressRule1v4, peerASIngressRule1v6 := buildBANPAddressSets(banp, 1, sets.New[string](), libovsdbutil.ACLIngress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule1v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule1v6)
 				// address-set will be empty since no pods match it yet
-				peerASIngressRule2v4, peerASIngressRule2v6 := buildBANPAddressSets(banp, 2, []net.IP{}, libovsdbutil.ACLIngress)
+				peerASIngressRule2v4, peerASIngressRule2v6 := buildBANPAddressSets(banp, 2, sets.New[string](), libovsdbutil.ACLIngress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule2v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule2v6)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -471,15 +470,15 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				// egressRule AddressSets
 				// address-set will be empty since no pods match it yet
 				// podIP should be added to v4 address-set
-				peerASEgressRule0v4, peerASEgressRule0v6 := buildBANPAddressSets(banp, 0, []net.IP{net.ParseIP(t2.podIP)}, libovsdbutil.ACLEgress)
+				peerASEgressRule0v4, peerASEgressRule0v6 := buildBANPAddressSets(banp, 0, sets.New[string](t2.podIP), libovsdbutil.ACLEgress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
 				// address-set will be empty since no pods match it yet
-				peerASEgressRule1v4, peerASEgressRule1v6 := buildBANPAddressSets(banp, 1, []net.IP{}, libovsdbutil.ACLEgress)
+				peerASEgressRule1v4, peerASEgressRule1v6 := buildBANPAddressSets(banp, 1, sets.New[string](), libovsdbutil.ACLEgress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v6)
 				// address-set will be empty since no pods match it yet
-				peerASEgressRule2v4, peerASEgressRule2v6 := buildBANPAddressSets(banp, 2, []net.IP{}, libovsdbutil.ACLEgress)
+				peerASEgressRule2v4, peerASEgressRule2v6 := buildBANPAddressSets(banp, 2, sets.New[string](), libovsdbutil.ACLEgress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule2v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule2v6)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -581,19 +580,19 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				// ensure address-sets for the rules that were deleted are also gone (index 2 in the list)
 				// ensure new address-sets have expected IPs
 				// address-set will be empty since no pods match it yet
-				peerASIngressRule0v4, peerASIngressRule0v6 = buildBANPAddressSets(banp, 0, []net.IP{}, libovsdbutil.ACLIngress)
+				peerASIngressRule0v4, peerASIngressRule0v6 = buildBANPAddressSets(banp, 0, sets.New[string](), libovsdbutil.ACLIngress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
 				// podIP should be added to v4 Pass address-set
-				peerASIngressRule1v4, peerASIngressRule1v6 = buildBANPAddressSets(banp, 1, []net.IP{net.ParseIP(t2.podIP)}, libovsdbutil.ACLIngress)
+				peerASIngressRule1v4, peerASIngressRule1v6 = buildBANPAddressSets(banp, 1, sets.New[string](t2.podIP), libovsdbutil.ACLIngress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule1v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule1v6)
 				// address-set will be empty since no pods match it yet
-				peerASEgressRule0v4, peerASEgressRule0v6 = buildBANPAddressSets(banp, 0, []net.IP{}, libovsdbutil.ACLEgress)
+				peerASEgressRule0v4, peerASEgressRule0v6 = buildBANPAddressSets(banp, 0, sets.New[string](), libovsdbutil.ACLEgress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
 				// podIP should be added to v4 Pass address-set
-				peerASEgressRule1v4, peerASEgressRule1v6 = buildBANPAddressSets(banp, 1, []net.IP{net.ParseIP(t2.podIP)}, libovsdbutil.ACLEgress)
+				peerASEgressRule1v4, peerASEgressRule1v6 = buildBANPAddressSets(banp, 1, sets.New[string](t2.podIP), libovsdbutil.ACLEgress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v6)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -602,8 +601,8 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				banpPeerPod.ResourceVersion = "3"
 				err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(banpPeerPod.Namespace).Delete(context.TODO(), banpPeerPod.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				pg = getDefaultPGForANPSubject(banp.Name, []string{t.portUUID}, newACLs, true)            // only newACLs are hosted
-				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(banpPeerNamespaceName, []net.IP{}) // pod is gone from peer namespace address-set
+				pg = getDefaultPGForANPSubject(banp.Name, []string{t.portUUID}, newACLs, true)                    // only newACLs are hosted
+				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(banpPeerNamespaceName, sets.New[string]()) // pod is gone from peer namespace address-set
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
 				for _, acl := range newACLs {
 					acl := acl
@@ -611,9 +610,9 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t}, []string{node1Name})...)
 				// address-set will be empty since no pods match it yet
-				peerASIngressRule1v4, peerASIngressRule1v6 = buildBANPAddressSets(banp, 1, []net.IP{}, libovsdbutil.ACLIngress)
+				peerASIngressRule1v4, peerASIngressRule1v6 = buildBANPAddressSets(banp, 1, sets.New[string](), libovsdbutil.ACLIngress)
 				// address-set will be empty since no pods match it yet
-				peerASEgressRule1v4, peerASEgressRule1v6 = buildBANPAddressSets(banp, 1, []net.IP{}, libovsdbutil.ACLEgress)
+				peerASEgressRule1v4, peerASEgressRule1v6 = buildBANPAddressSets(banp, 1, sets.New[string](), libovsdbutil.ACLEgress)
 				expectedDatabaseState = append(expectedDatabaseState, []libovsdbtest.TestData{peerASIngressRule0v4, peerASIngressRule0v6,
 					peerASIngressRule1v4, peerASIngressRule1v6, peerASEgressRule0v4, peerASEgressRule0v6, peerASEgressRule1v4, peerASEgressRule1v6}...)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -624,7 +623,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(banpSubjectPod.Namespace).Update(context.TODO(), &banpSubjectPod, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				pg = getDefaultPGForANPSubject(banp.Name, nil, newACLs, true) // no ports in PG
-				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(banpSubjectNamespaceName, []net.IP{})
+				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(banpSubjectNamespaceName, sets.New[string]())
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
 				for _, acl := range newACLs {
 					acl := acl
@@ -656,7 +655,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				t.podIP = "10.128.1.5"
 				t.podMAC = "0a:58:0a:80:01:05"
 				pg = getDefaultPGForANPSubject(banp.Name, []string{t.portUUID}, newACLs, true)
-				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(banpSubjectNamespaceName, []net.IP{testing.MustParseIP(t.podIP)})
+				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(banpSubjectNamespaceName, sets.New[string](t.podIP))
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
 				for _, acl := range newACLs {
 					acl := acl
@@ -681,15 +680,15 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				t2.podIP = "10.128.1.6"
 				t2.podMAC = "0a:58:0a:80:01:06"
-				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(banpPeerNamespaceName, []net.IP{testing.MustParseIP(t2.podIP)})
+				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(banpPeerNamespaceName, sets.New[string](t2.podIP))
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
 				for _, acl := range newACLs {
 					acl := acl
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
-				peerASIngressRule1v4, peerASIngressRule1v6 = buildBANPAddressSets(banp, 1, []net.IP{net.ParseIP(t2.podIP)}, libovsdbutil.ACLIngress)
-				peerASEgressRule1v4, peerASEgressRule1v6 = buildBANPAddressSets(banp, 1, []net.IP{net.ParseIP(t2.podIP)}, libovsdbutil.ACLEgress)
+				peerASIngressRule1v4, peerASIngressRule1v6 = buildBANPAddressSets(banp, 1, sets.New[string](t2.podIP), libovsdbutil.ACLIngress)
+				peerASEgressRule1v4, peerASEgressRule1v6 = buildBANPAddressSets(banp, 1, sets.New[string](t2.podIP), libovsdbutil.ACLEgress)
 				expectedDatabaseState = append(expectedDatabaseState, []libovsdbtest.TestData{peerASIngressRule0v4, peerASIngressRule0v6, peerASIngressRule1v4,
 					peerASIngressRule1v6, peerASEgressRule0v4, peerASEgressRule0v6, peerASEgressRule1v4, peerASEgressRule1v6}...)
 				gomega.Eventually(fakeOVN.nbClient, "3s").Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -709,8 +708,8 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				}
 				// delete namespace in unit testing doesn't delete pods; we just need to check port groups and address-sets are updated
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
-				peerASIngressRule1v4, peerASIngressRule1v6 = buildBANPAddressSets(banp, 1, []net.IP{}, libovsdbutil.ACLIngress) // address-set will be empty since no pods match it yet
-				peerASEgressRule1v4, peerASEgressRule1v6 = buildBANPAddressSets(banp, 1, []net.IP{}, libovsdbutil.ACLEgress)    // address-set will be empty since no pods match it yet
+				peerASIngressRule1v4, peerASIngressRule1v6 = buildBANPAddressSets(banp, 1, sets.New[string](), libovsdbutil.ACLIngress) // address-set will be empty since no pods match it yet
+				peerASEgressRule1v4, peerASEgressRule1v6 = buildBANPAddressSets(banp, 1, sets.New[string](), libovsdbutil.ACLEgress)    // address-set will be empty since no pods match it yet
 				expectedDatabaseState = append(expectedDatabaseState, []libovsdbtest.TestData{peerASIngressRule0v4, peerASIngressRule0v6, peerASIngressRule1v4,
 					peerASIngressRule1v6, peerASEgressRule0v4, peerASEgressRule0v6, peerASEgressRule1v4, peerASEgressRule1v6}...)
 				// NOTE: Address set deletion is deferred for 20 seconds...
@@ -830,10 +829,10 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					}
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
-				peerASIngressRule0v4, peerASIngressRule0v6 := buildBANPAddressSets(banp, 0, []net.IP{}, libovsdbutil.ACLIngress) // address-set will be empty since no pods match it yet
+				peerASIngressRule0v4, peerASIngressRule0v6 := buildBANPAddressSets(banp, 0, sets.New[string](), libovsdbutil.ACLIngress) // address-set will be empty since no pods match it yet
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
-				peerASEgressRule0v4, peerASEgressRule0v6 := buildBANPAddressSets(banp, 0, []net.IP{}, libovsdbutil.ACLEgress)
+				peerASEgressRule0v4, peerASEgressRule0v6 := buildBANPAddressSets(banp, 0, sets.New[string](), libovsdbutil.ACLEgress)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
@@ -1053,10 +1052,8 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 
 				acls := getACLsForBANPRules(banp)
 				pg := getDefaultPGForANPSubject(banp.Name, []string{t.portUUID}, acls, true)
-				subjectNSASIPv4, subjectNSASIPv6 := buildNamespaceAddressSets(banpSubjectNamespaceName,
-					[]net.IP{testing.MustParseIP(banpPodV4IP), testing.MustParseIP(banpPodV6IP)})
-				peerNSASIPv4, peerNSASIPv6 := buildNamespaceAddressSets(banpPeerNamespaceName,
-					[]net.IP{testing.MustParseIP(banpPodV4IP2), testing.MustParseIP(banpPodV6IP2)})
+				subjectNSASIPv4, subjectNSASIPv6 := buildNamespaceAddressSets(banpSubjectNamespaceName, sets.New(banpPodV4IP, banpPodV6IP))
+				peerNSASIPv4, peerNSASIPv6 := buildNamespaceAddressSets(banpPeerNamespaceName, sets.New(banpPodV4IP2, banpPodV6IP2))
 				expectedDatabaseState := []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
 				for _, acl := range acls {
@@ -1065,11 +1062,11 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				}
 				// egressRule AddressSets
 				peerASEgressRule0v4, peerASEgressRule0v6 := buildBANPAddressSets(banp,
-					0, []net.IP{testing.MustParseIP(banpPodV4IP2), testing.MustParseIP(banpPodV6IP2)}, libovsdbutil.ACLEgress) // address-set will contain matching peer nodes, kubernetes.io/hostname doesn't match node1 so no node peers here
+					0, sets.New(banpPodV4IP2, banpPodV6IP2), libovsdbutil.ACLEgress) // address-set will contain matching peer nodes, kubernetes.io/hostname doesn't match node1 so no node peers here
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
 				peerASEgressRule1v4, peerASEgressRule1v6 := buildBANPAddressSets(banp,
-					1, []net.IP{testing.MustParseIP(node1IPv4), testing.MustParseIP(node1IPv6)}, libovsdbutil.ACLEgress) // address-set will contain all nodeIPs (empty selector match)
+					1, sets.New(node1IPv4, node1IPv6), libovsdbutil.ACLEgress) // address-set will contain all nodeIPs (empty selector match)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v6)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))

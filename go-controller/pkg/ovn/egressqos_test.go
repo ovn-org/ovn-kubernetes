@@ -22,6 +22,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/pointer"
 )
@@ -89,7 +90,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				}
 				staleAddrSet, _ := addressset.GetTestDbAddrSets(
 					getEgressQosAddrSetDbIDs("staleNS", "1000", controllerName),
-					[]net.IP{net.ParseIP("1.2.3.4")})
+					sets.New[string]("1.2.3.4"))
 
 				node1Switch := &nbdb.LogicalSwitch{
 					UUID:     "node1-UUID",
@@ -260,7 +261,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				}
 				staleAddrSet, _ := addressset.GetTestDbAddrSets(
 					getEgressQosAddrSetDbIDs("staleNS", "1000", controllerName),
-					[]net.IP{net.ParseIP("1.2.3.4")})
+					sets.New[string]("1.2.3.4"))
 
 				podT := newPodWithLabels(
 					namespaceT.Name,
