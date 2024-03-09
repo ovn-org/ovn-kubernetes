@@ -200,7 +200,7 @@ func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adm
 		if isAtLeastOneRuleUpdatedCheckRequired &&
 			!*atLeastOneRuleUpdated &&
 			(egressRule.action != currentANPState.egressRules[i].action || !reflect.DeepEqual(egressRule.ports, currentANPState.egressRules[i].ports)) {
-			klog.V(3).Infof("ANP %s's ingress rule %s at priority %d was updated", desiredANPState.name, egressRule.name, egressRule.priority)
+			klog.V(3).Infof("ANP %s's egress rule %s at priority %d was updated", desiredANPState.name, egressRule.name, egressRule.priority)
 			*atLeastOneRuleUpdated = true
 		}
 	}
