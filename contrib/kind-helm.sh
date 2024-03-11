@@ -71,7 +71,7 @@ docker_disable_ipv6() {
   # bridge interface it creates. This breaks on KIND with IPv4 only deployments, because the new
   # internal bridge has IPv6 disable and can't move the IPv6 from the eth0 interface.
   # We can enable IPv6 always in the container, since the docker setup with IPv4 only
-  # is not very common.
+  # is not very common. 
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
     docker exec "$n" sysctl --ignore net.ipv6.conf.all.disable_ipv6=0
@@ -80,11 +80,20 @@ docker_disable_ipv6() {
 }
 
 build_ovn_image() {
-    pushd ${SCRIPT_DIR}/../dist/images && \
-    make ubuntu && \
+    OVN_IMAGE="ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u:helm"
+
+    # Build ovn image
+    pushd ${SCRIPT_DIR}/../go-controller
+    make
     popd
 
-    docker tag ovn-kube-u:latest ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u:helm
+    # Build ovn kube image
+    pushd ${SCRIPT_DIR}/../dist/images
+    # Find all built executables, but ignore the 'windows' directory if it exists
+    find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
+    echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
+    docker build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
+    popd
 }
 
 coredns_patch() {
@@ -129,6 +138,7 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
+- role: worker
 - role: worker
 - role: worker
 networking:
