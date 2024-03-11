@@ -1,0 +1,34 @@
+.TH OVN-KUBE-UTIL "1" "Jan 2018" "ovn-kubernetes" "OVN-KUBERNETES User Commands"
+.SH NAME
+ovn-kube-util \- Utils for ovn-kubernetes
+.SH SYNOPSIS
+.B ovn-kube-util
+[\fI\,GLOBAL OPTION\/\fR]... \fI\,COMMAND\/\fR [\fI\,COMMAND OPTIONS\/\fR] [\fI\,ARGUMENTS\/\fR...]
+.SH DESCRIPTION
+Utils for ovn-kubernetes
+
+.SS COMMANDS
+.PP
+\fBnics-to-bridge <list-of-NIC-interfaces>\fR
+Create ovs bridge for nic interfaces
+.PP
+\fBbridges-to-nic <list-of-bridges>\fR
+Delete ovs bridge and move IP/routes to underlying NIC
+.PP
+\fBhelp\fR, \fBh\fR
+Shows a list of commands or help for one command.
+
+.SH GLOBAL OPTIONS
+.TP
+\fB\--help\fR, \fB\-h\fR
+Show help.
+.TP
+\fB\--version\fR, \fB\-v\fR
+Print the version.
+
+.SH "SEE ALSO"
+.BR ovnkube (1),
+.BR ovn_k8s (5).
+
+.PP
+https://github.com/ovn-org/ovn-kubernetes

@@ -1,0 +1,78 @@
+site_name: OVN Kubernetes
+repo_url: https://github.com/ovn-org/ovn-kubernetes
+repo_name: ovn-org/ovn-kubernetes
+site_dir: site
+docs_dir: site-src
+#hooks:
+#- hack/mkdocs-copy-docs.py
+#watch:
+#- docs
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/git-alt
+  logo: images/ovn-inside-k8s.png
+  favicon: images/ovn-inside-k8s.png
+  features:
+    - search.highlight
+    - navigation.tabs
+    - navigation.top
+edit_uri: edit/master/site-src/
+plugins:
+  - search
+  - awesome-pages
+  - macros:
+      #include_dir: examples
+      j2_line_comment_prefix: "#$"
+  - blog:
+      # NOTE: configuration options can be found at
+      # https://squidfunk.github.io/mkdocs-material/setup/setting-up-a-blog/
+      blog_dir: blog
+      blog_toc: true
+      #post_excerpt: required
+      post_excerpt_max_authors: 2
+markdown_extensions:
+  - admonition
+  - meta
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: site-src
+      check_paths: true
+  - toc:
+      permalink: true
+nav:
+  - Introduction: index.md
+  - Overview:
+  #  - User Stories: user-stories.md
+    - Resources: docs/developer/developer.md
+  #  - Versioning: versioning.md
+  #  - Conformance: conformance.md
+  #  - Implementations: implementations.md
+  #- Guides:
+  #  - Getting started: getting-started.md
+  - Features:
+    - EgressIP: docs/egress-ip.md
+    - EgressFirewall: docs/egress-firewall.md
+    - EgressQoS: docs/egress-qos.md
+    - NetworkSecurity:
+      - NetworkPoliciy: docs/networkpolicies/network-policy.md
+      - AdminNetworkPolicy: docs/networkpolicies/admin-network-policy.md
+  #- Blog:
+  #  - blog/index.md
+
+plugins:
+  - blog:
+      # NOTE: configuration options can be found at
+      # https://squidfunk.github.io/mkdocs-material/setup/setting-up-a-blog/
+      blog_dir: blog
+      blog_toc: true
+      post_excerpt: required
+      post_excerpt_max_authors: 2
+  - search
+  - mike
