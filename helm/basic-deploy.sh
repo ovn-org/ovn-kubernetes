@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
- 
+
 # check docker
 docker info >/dev/null 2>&1
 if [ "$?" -eq 127 ]; then
