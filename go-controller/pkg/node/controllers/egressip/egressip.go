@@ -264,6 +264,17 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptSaveMarkRule); err != nil {
 				return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
 			}
+
+			// If dst is a node IP, use main routing table and skip EIP routing tables
+			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V4)); err != nil {
+				return fmt.Errorf("failed to create IPv4 rule for node IPs: %v", err)
+			}
+			// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
+			// used for routing traffic in both directions.
+			stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
+			if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
+				return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
+			}
 		}
 	}
 	if c.v6 {
@@ -281,18 +292,12 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptSaveMarkRule); err != nil {
 				return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
 			}
-		}
-	}
-	if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
-		// If dst is a node IP, use main routing table and skip EIP routing tables
-		if err = c.ruleManager.Add(getNodeIPFwMarkIPRule()); err != nil {
-			return fmt.Errorf("failed to create IP rule for node IPs: %v", err)
-		}
-		// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
-		// used for routing traffic in both directions.
-		stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
-		if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
-			return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
+
+			// If dst is a node IP, use main routing table and skip EIP routing tables
+			// src_valid_mark is not applicable to ipv6
+			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V6)); err != nil {
+				return fmt.Errorf("failed to create IPv6 rule for node IPs: %v", err)
+			}
 		}
 	}
 
@@ -1501,10 +1506,11 @@ func isValidIP(ipStr string) bool {
 	return len(ip) > 0
 }
 
-func getNodeIPFwMarkIPRule() netlink.Rule {
+func getNodeIPFwMarkIPRule(ipFamily int) netlink.Rule {
 	r := netlink.NewRule()
 	r.Priority = ruleFwMarkPriority
 	r.Mark = 1008 // pkt marked with 1008 is a node IP
 	r.Table = 254 // main
+	r.Family = ipFamily
 	return *r
 }
