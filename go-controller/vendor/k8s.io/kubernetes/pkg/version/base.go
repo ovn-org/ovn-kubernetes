@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The Kubernetes Authors.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ package version
 // build/mark_new_version.sh to reflect the new version, and then a
 // git annotated tag (using format vX.Y where X == Major version and Y
 // == Minor version) is created to point to the commit that updates
-// component-base/version/base.go
+// pkg/version/base.go
 var (
 	// TODO: Deprecate gitMajor and gitMinor, use only gitVersion
 	// instead. First step in deprecation, keep the fields but make
@@ -55,7 +55,7 @@ var (
 	// NOTE: The $Format strings are replaced during 'git archive' thanks to the
 	// companion .gitattributes file containing 'export-subst' in this same
 	// directory.  See also https://git-scm.com/docs/gitattributes
-	gitVersion   = "v0.0.0-master+$Format:%H$"
+	gitVersion   = "v0.0.0-master+$Format:%h$"
 	gitCommit    = "$Format:%H$" // sha1 from git, output of $(git rev-parse HEAD)
 	gitTreeState = ""            // state of git tree, either "clean" or "dirty"
 

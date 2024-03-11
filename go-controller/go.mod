@@ -41,7 +41,7 @@ require (
 	golang.org/x/exp v0.0.0-20230811145659-89c5cff77bcb
 	golang.org/x/net v0.17.0
 	golang.org/x/sync v0.2.0
-	golang.org/x/sys v0.13.0
+	golang.org/x/sys v0.15.0
 	golang.org/x/time v0.3.0
 	google.golang.org/grpc v1.56.3
 	google.golang.org/protobuf v1.30.0
@@ -53,7 +53,7 @@ require (
 	k8s.io/client-go v0.28.3
 	k8s.io/component-helpers v0.26.0
 	k8s.io/klog/v2 v2.100.1
-	k8s.io/kubernetes v1.28.3
+	k8s.io/kubernetes v1.15.0-alpha.0
 	k8s.io/utils v0.0.0-20230505201702-9f6742963106
 	kubevirt.io/api v1.0.0-alpha.0
 	sigs.k8s.io/controller-runtime v0.15.1
@@ -76,6 +76,7 @@ require (
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.22.3 // indirect
+	github.com/godbus/dbus v0.0.0-20180201030542-885f9cc04c9c // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
@@ -105,11 +106,11 @@ require (
 	github.com/stretchr/objx v0.5.0 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	golang.org/x/crypto v0.14.0 // indirect
+	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/mod v0.11.0 // indirect
 	golang.org/x/oauth2 v0.8.0 // indirect
-	golang.org/x/term v0.13.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
+	golang.org/x/term v0.15.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.9.1 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.3.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
@@ -121,6 +122,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.27.4 // indirect
 	k8s.io/component-base v0.27.4 // indirect
+	k8s.io/klog v1.0.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20230717233707-2695361300d9 // indirect
 	kubevirt.io/containerized-data-importer-api v1.55.0 // indirect
 	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect

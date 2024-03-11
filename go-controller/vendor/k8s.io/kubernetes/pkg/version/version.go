@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The Kubernetes Authors.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import (
 // what code a binary was built from.
 func Get() apimachineryversion.Info {
 	// These variables typically come from -ldflags settings and in
-	// their absence fallback to the settings in ./base.go
+	// their absence fallback to the settings in pkg/version/base.go
 	return apimachineryversion.Info{
 		Major:        gitMajor,
 		Minor:        gitMinor,
