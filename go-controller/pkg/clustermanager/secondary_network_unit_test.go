@@ -55,26 +55,7 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 	ginkgo.Context("Secondary networks", func() {
 		ginkgo.It("Attach secondary layer3 network", func() {
 			app.Action = func(ctx *cli.Context) error {
-				nodes := []v1.Node{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node1",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node2",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node3",
-						},
-					},
-				}
-				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
-					Items: nodes,
-				})
+				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{Items: nodes()})
 				fakeClient := &util.OVNClusterManagerClientset{
 					KubeClient:       kubeFakeClient,
 					IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(),
@@ -100,7 +81,7 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 				defer nc.Stop()
 
 				// Check that network controller for "blue" network has set the subnet annotation for each node.
-				for _, n := range nodes {
+				for _, n := range nodes() {
 					gomega.Eventually(func() ([]*net.IPNet, error) {
 						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
 						if err != nil {
@@ -122,28 +103,8 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 
 		ginkgo.It("Attach secondary layer2 network", func() {
 			app.Action = func(ctx *cli.Context) error {
-				nodes := []v1.Node{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node1",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node2",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node3",
-						},
-					},
-				}
-				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
-					Items: nodes,
-				})
 				fakeClient := &util.OVNClusterManagerClientset{
-					KubeClient:       kubeFakeClient,
+					KubeClient:       fake.NewSimpleClientset(&v1.NodeList{Items: nodes()}),
 					IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(),
 				}
 
@@ -326,3 +287,23 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 		})
 	})
 })
+
+func nodes() []v1.Node {
+	return []v1.Node{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node2",
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node3",
+			},
+		},
+	}
+}
