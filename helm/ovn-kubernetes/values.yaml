@@ -63,7 +63,7 @@ global:
   # -- Configure to use EgressQoS CRD feature with ovn-kubernetes
   enableEgressQos: true
   # -- Enables multicast support between the pods within the same namespace
-  enableMulticast: true
+  enableMulticast: ""
   # -- Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes
   enableMultiNetwork: false
   # -- Configure to enable IPsec
@@ -101,7 +101,7 @@ global:
   # @default 20
   aclLoggingRateLimit: 20
   # -- If set, then load balancers do not get deleted when all backends are removed
-  emptyLbEvents: true
+  emptyLbEvents: ""
   # -- Port of north bound ovsdb
   nbPort: 6641
   # -- Port of south bound ovsdb
