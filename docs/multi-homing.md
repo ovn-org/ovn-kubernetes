@@ -301,4 +301,3 @@ OVN-K currently does **not** support:
 - the same attachment configured multiple times in the same pod - i.e.
   `k8s.v1.cni.cncf.io/networks: l3-network,l3-network` is invalid.
 - updates to the network selection elements lists - i.e. `k8s.v1.cni.cncf.io/networks` annotation
-- layer2 and localnet secondary networks when Interconnect feature is enabled with multiple zones.
