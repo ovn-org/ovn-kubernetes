@@ -19,6 +19,7 @@ import (
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovnkconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -61,10 +62,8 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 					IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(),
 				}
 
-				_, err := config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
-
+				gomega.Expect(initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{})).To(gomega.Succeed())
+				var err error
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = f.Start()
@@ -108,12 +107,12 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 					IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(),
 				}
 
-				_, err := config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
-
-				config.OVNKubernetesFeature.EnableMultiNetwork = true
-				config.OVNKubernetesFeature.EnableInterconnect = true
+				gomega.Expect(
+					initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+						EnableMultiNetwork: true,
+						EnableInterconnect: true},
+					)).To(gomega.Succeed())
+				var err error
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = f.Start()
@@ -184,10 +183,8 @@ var _ = ginkgo.Describe("Secondary Layer3 Cluster Controller Manager", func() {
 					KubeClient: kubeFakeClient,
 				}
 
-				_, err := config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
-
+				gomega.Expect(initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{})).To(gomega.Succeed())
+				var err error
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = f.Start()
@@ -306,4 +303,14 @@ func nodes() []v1.Node {
 			},
 		},
 	}
+}
+
+func initConfig(ctx *cli.Context, ovkConfig ovnkconfig.OVNKubernetesFeatureConfig) error {
+	_, err := config.InitConfig(ctx, nil, nil)
+	if err != nil {
+		return err
+	}
+	config.Kubernetes.HostNetworkNamespace = ""
+	config.OVNKubernetesFeature = ovkConfig
+	return nil
 }
