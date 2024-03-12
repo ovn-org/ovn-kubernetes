@@ -155,77 +155,28 @@ jobs:
         name: test-image-pr
         path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}
 
-  e2e:
-    name: e2e
+  helm:
+    name: helm
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
-    timeout-minutes: 220
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         # Valid options are:
-        # target: ["shard-conformance", "control-plane", "multi-homing", "multi-node-zones", "node-ip-mac-migration", "compact-mode", "skip"]
-        #         shard-conformance: hybrid-overlay = multicast-enable = emptylb-enable = false
-        #         control-plane: hybrid-overlay = multicast-enable = emptylb-enable = true
         # ha: ["HA", "noHA"]
-        # gateway-mode: ["local", "shared"]
-        # ipfamily: ["ipv4", "ipv6", "dualstack"]
-        # disable-snat-multiple-gws: ["noSnatGW", "snatGW"]
-        # second-bridge: ["2br", "1br"]
         # ic: ["ic-disabled", "ic-single-node-zones", "ic-multi-node-zones"]
         # num-workers : "<integer value>"
-        # num-nodes-per-zone : "<integer value>"
-        # forwarding : ["", "disable-forwarding"]
-        # helm : ["", "enable-helm"]
         include:
-          # - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "local",  "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
-          # - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
-          # - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          # - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          # - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          # - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-disabled"}
-          # - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
-          # - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          # - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          # - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
-          # - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
-          # - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
-          # - {"target": "node-ip-mac-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
-          # - {"target": "node-ip-mac-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          # - {"target": "compact-mode",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
-          # - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          # - {"target": "multi-node-zones",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-multi-node-zones", "num-workers": "3", "num-nodes-per-zone": "2"}
-          # - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
-          # - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          # - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
-          # - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          # - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled", "num-workers": "3"}
-          # - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3"}
-          # - {"target": "skip", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "forwarding": "disable-forwarding"}
-          - {"target": "control-plane", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled", "helm": "enable-helm"}
+          - {"ha": "noHA", "ic": "ic-disabled", "num-workers": "3"}
+          - {"ha": "HA", "ic": "ic-disabled", "num-workers": "2"}
     needs: [ build-pr ]
     env:
-      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
-      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' }}"
-      OVN_MULTICAST_ENABLE:  "${{ matrix.target == 'control-plane' }}"
-      OVN_EMPTY_LB_EVENTS: "${{ matrix.target == 'control-plane' }}"
+      USE_HELM: true
+      JOB_NAME: "helm-${{ matrix.ha }}-${{ matrix.ic }}-${{ matrix.num-workers }}workers"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
-      OVN_DISABLE_SNAT_MULTIPLE_GWS: "${{ matrix.disable-snat-multiple-gws == 'noSnatGW' }}"
-      KIND_INSTALL_METALLB: "${{ matrix.target == 'control-plane' }}"
-      OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
-      OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
-      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
-      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
-      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' }}"
-      KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
-      OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
-      OVN_DUMMY_GATEWAY_BRIDGE: "${{ matrix.target == 'compact-mode' }}"
       OVN_ENABLE_INTERCONNECT: "${{ matrix.ic == 'ic-single-node-zones' ||  matrix.ic == 'ic-multi-node-zones'}}"
       KIND_NUM_WORKER: "${{ matrix.num-workers }}"
-      KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
-      OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
-      USE_HELM: "${{ matrix.helm == 'enable-helm' }}"
     steps:
 
     - name: Free up disk space
@@ -254,10 +205,6 @@ jobs:
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
-        if [ $OVN_SECOND_BRIDGE == "true" ]; then
-          echo OVN_TEST_EX_GW_NETWORK=kindexgw >> $GITHUB_ENV
-          echo OVN_ENABLE_EX_GW_NETWORK_BRIDGE=true >> $GITHUB_ENV
-        fi
 
     - name: Disable ufw
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
@@ -274,37 +221,17 @@ jobs:
       run: |
         docker load --input ${CI_IMAGE_PR_TAR} && rm -rf ${CI_IMAGE_PR_TAR}
 
-    - name: kind setup
+    - name: kind setup and OVN deployment via Helm
       timeout-minutes: 30
       run: |
         export OVN_IMAGE="ovn-daemonset-f:pr"
+        export SKIP_OVN_IMAGE_REBUILD=true
         make -C test install-kind
 
     - name: Run Tests
-      # e2e tests take ~60 minutes normally, 120 should be more than enough
-      # set 3 hours for control-plane tests as these might take a while
-      timeout-minutes: ${{ matrix.target == 'control-plane' && 180 || matrix.target == 'external-gateway' && 180 || 120 }}
+      timeout-minutes: 120
       run: |
-        if [ "${{ matrix.target }}" == "multi-homing" ]; then
-          make -C test control-plane WHAT="Multi Homing"
-        elif [ "${{ matrix.target }}" == "node-ip-mac-migration" ]; then
-          make -C test control-plane WHAT="Node IP and MAC address migration"
-        elif [ "${{ matrix.target }}" == "compact-mode" ]; then
-          SINGLE_NODE_CLUSTER="true" make -C test shard-network
-        elif [ "${{ matrix.target }}" == "multi-node-zones" ]; then
-          make -C test control-plane WHAT="Multi node zones interconnect"
-        elif [ "${{ matrix.target }}" == "external-gateway" ]; then
-          make -C test control-plane WHAT="External Gateway"
-        elif [ "${{ matrix.target }}" == "kv-live-migration" ]; then
-          make -C test control-plane WHAT="Kubevirt Virtual Machines"
-        elif [ "${{ matrix.target }}" == "skip" ]; then
-          make -C test control-plane WHAT="skip"
-        else
-          make -C test ${{ matrix.target }}
-          if [ "${{ matrix.ipfamily }}" != "ipv6" ]; then
-            make -C test conformance
-          fi
-        fi
+        make -C test control-plane WHAT="test e2e inter-node connectivity between worker nodes"
 
     - name: Export kind logs
       if: always()
