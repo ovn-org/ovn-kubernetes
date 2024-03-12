@@ -211,7 +211,7 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		// uses the current context in kubeconfig
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
-		if (conf.Token == "" && conf.CertDir == "") || len(conf.CAData) == 0 {
+		if (conf.Token == "" && conf.TokenFile == "" && conf.CertDir == "") || len(conf.CAData) == 0 {
 			return nil, fmt.Errorf("TLS-secured apiservers require token/cert and CA certificate")
 		}
 		if _, err := cert.NewPoolFromBytes(conf.CAData); err != nil {
