@@ -997,7 +997,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						time.Sleep(3 * time.Second)
 
 						for _, gwContainer := range gwContainers {
-							framework.ExpectEqual(isBFDPaired(gwContainer, addresses.nodeIP), true, "Bfd not paired")
+							gomega.Expect(isBFDPaired(gwContainer, addresses.nodeIP)).To(gomega.Equal(true), "Bfd not paired")
 						}
 
 						tcpDumpSync := sync.WaitGroup{}
@@ -1070,7 +1070,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						}
 
 						for _, gwContainer := range gwContainers {
-							framework.ExpectEqual(isBFDPaired(gwContainer, addresses.nodeIP), true, "Bfd not paired")
+							gomega.Expect(isBFDPaired(gwContainer, addresses.nodeIP)).To(gomega.Equal(true), "Bfd not paired")
 						}
 
 						expectedHostNames := hostNamesForContainers(gwContainers)
@@ -1108,7 +1108,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 							ginkgo.By("Checking hostname multiple times")
 							for i := 0; i < 20; i++ {
 								hostname := pokeHostnameViaNC(srcPingPodName, f.Namespace.Name, protocol, target, destPort)
-								framework.ExpectEqual(expectedHostName, hostname, "Hostname returned by nc not as expected")
+								gomega.Expect(expectedHostName).To(gomega.Equal(hostname), "Hostname returned by nc not as expected")
 							}
 						}
 					},
@@ -1190,7 +1190,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					time.Sleep(3 * time.Second)
 
 					for _, gwContainer := range gwContainers {
-						framework.ExpectEqual(isBFDPaired(gwContainer, addresses.nodeIP), true, "Bfd not paired")
+						gomega.Expect(isBFDPaired(gwContainer, addresses.nodeIP)).To(gomega.Equal(true), "Bfd not paired")
 					}
 
 					// Verify the gateways and remote loopback addresses are reachable from the pod.
@@ -1280,7 +1280,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					time.Sleep(3 * time.Second)
 
 					for _, gwContainer := range gwContainers {
-						framework.ExpectEqual(isBFDPaired(gwContainer, addresses.nodeIP), true, "Bfd not paired")
+						gomega.Expect(isBFDPaired(gwContainer, addresses.nodeIP)).To(gomega.Equal(true), "Bfd not paired")
 					}
 
 					expectedHostNames := hostNamesForContainers(gwContainers)
@@ -1319,7 +1319,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					ginkgo.By("Checking hostname multiple times")
 					for i := 0; i < 20; i++ {
 						hostname := pokeHostnameViaNC(srcPodName, f.Namespace.Name, protocol, target, destPort)
-						framework.ExpectEqual(expectedHostName, hostname, "Hostname returned by nc not as expected")
+						gomega.Expect(expectedHostName).To(gomega.Equal(hostname), "Hostname returned by nc not as expected")
 					}
 				}, ginkgo.Entry("IPV4 udp", &addressesv4, "udp", externalUDPPort),
 					ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp", externalTCPPort),
@@ -2163,7 +2163,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 							ginkgo.By("Checking hostname multiple times")
 							for i := 0; i < 20; i++ {
 								hostname := pokeHostnameViaNC(srcPingPodName, f.Namespace.Name, protocol, target, destPort)
-								framework.ExpectEqual(expectedHostName, hostname, "Hostname returned by nc not as expected")
+								gomega.Expect(expectedHostName).To(gomega.Equal(hostname), "Hostname returned by nc not as expected")
 							}
 						}
 						checkAPBExternalRouteStatus(defaultPolicyName)
@@ -2333,7 +2333,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					time.Sleep(3 * time.Second)
 
 					for _, gwContainer := range gwContainers {
-						framework.ExpectEqual(isBFDPaired(gwContainer, addresses.nodeIP), true, "Bfd not paired")
+						gomega.Expect(isBFDPaired(gwContainer, addresses.nodeIP)).To(gomega.Equal(true), "Bfd not paired")
 					}
 
 					expectedHostNames := hostNamesForContainers(gwContainers)
@@ -2372,7 +2372,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					ginkgo.By("Checking hostname multiple times")
 					for i := 0; i < 20; i++ {
 						hostname := pokeHostnameViaNC(srcPodName, f.Namespace.Name, protocol, target, destPort)
-						framework.ExpectEqual(expectedHostName, hostname, "Hostname returned by nc not as expected")
+						gomega.Expect(expectedHostName).To(gomega.Equal(hostname), "Hostname returned by nc not as expected")
 					}
 				}, ginkgo.Entry("IPV4 udp", &addressesv4, "udp", externalUDPPort),
 					ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp", externalTCPPort),
@@ -3062,7 +3062,7 @@ func reachPodFromGateway(targetAddress, targetPort, targetPodName, srcContainer,
 
 	res, err := runCommand(dockerCmd...)
 	framework.ExpectNoError(err, "Failed to reach pod %s (%s) from external container %s", targetAddress, protocol, srcContainer)
-	framework.ExpectEqual(strings.Trim(res, "\n"), targetPodName)
+	gomega.Expect(strings.Trim(res, "\n")).To(gomega.Equal(targetPodName))
 }
 
 func annotatePodForGateway(podName, podNS, namespace, networkIPs string, bfd bool) {
