@@ -171,9 +171,9 @@ spec:
 
       # end of container
 
-      nodeSelector:
-        node-role.kubernetes.io/control-plane: ""
-        kubernetes.io/os: "linux"
+      {{- if .Values.affinity }}
+      affinity: {{ toYaml .Values.affinity | nindent 8 }}
+      {{- end }}
       volumes:
       - name: host-var-lib-ovs
         hostPath:

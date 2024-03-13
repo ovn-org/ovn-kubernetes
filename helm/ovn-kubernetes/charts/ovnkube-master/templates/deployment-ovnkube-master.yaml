@@ -40,31 +40,9 @@ spec:
       {{- if and (hasKey .Values.global "enableCompactMode" | ternary .Values.global.enableCompactMode false) (hasKey .Values.global "unprivilegedMode" | ternary .Values.global.unprivilegedMode false) }}
       hostPID: true
       {{- end }}
-      # required to be scheduled on a linux node with node-role.kubernetes.io/control-plane label and
-      # only one instance of ovnkube-master pod per node
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: node-role.kubernetes.io/control-plane
-                    operator: In
-                    values:
-                      - ""
-                  - key: kubernetes.io/os
-                    operator: In
-                    values:
-                      - "linux"
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions:
-                  - key: name
-                    operator: In
-                    values:
-                      - ovnkube-master
-              topologyKey: kubernetes.io/hostname
-
+      {{- if .Values.affinity }}
+      affinity: {{ toYaml .Values.affinity | nindent 8 }}
+      {{- end }}
       containers:
       # ovn-northd - v3
       - name: ovn-northd
