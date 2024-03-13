@@ -171,29 +171,9 @@ spec:
 
       # end of container
 
-      # required to be scheduled on a linux node and only one instance of ovnkube-db pod per node
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-{{- if .Values.global.haveControlPlaneNodes }}
-                  - key: node-role.kubernetes.io/control-plane
-                    operator: Exists
-{{- end }}
-                  - key: kubernetes.io/os
-                    operator: In
-                    values:
-                      - "linux"
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-              - key: name
-                operator: In
-                values:
-                - ovnkube-db
-            topologyKey: kubernetes.io/hostname
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+        kubernetes.io/os: "linux"
       volumes:
       - name: host-var-lib-ovs
         hostPath:
