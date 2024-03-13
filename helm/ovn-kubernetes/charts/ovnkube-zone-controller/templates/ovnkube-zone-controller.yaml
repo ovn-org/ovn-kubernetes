@@ -35,20 +35,9 @@ spec:
       {{- if eq (hasKey .Values.global "unprivilegedMode" | ternary .Values.global.unprivilegedMode false) false }}
       hostPID: true
       {{- end }}
-      # required to be scheduled on a linux node with node-role.kubernetes.io/zone-controller label
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: node-role.kubernetes.io/zone-controller
-                    operator: In
-                    values:
-                      - ""
-                  - key: kubernetes.io/os
-                    operator: In
-                    values:
-                      - "linux"
+      {{- if .Values.affinity }}
+      affinity: {{ toYaml .Values.affinity | nindent 8 }}
+      {{- end }}
       containers:
       # nb-ovsdb - v3
       - name: nb-ovsdb
