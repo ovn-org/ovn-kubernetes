@@ -1,2 +1,26 @@
 nbLogLevel: -vconsole:info -vfile:info
 sbLogLevel: -vconsole:info -vfile:info
+
+## Affinity for pod assignment
+## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
+## Required to be scheduled on a linux node and only one instance of ovnkube-db pod per node
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+            - key: kubernetes.io/os
+              operator: In
+              values:
+                - "linux"
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: name
+          operator: In
+          values:
+          - ovnkube-db
+      topologyKey: kubernetes.io/hostname

@@ -5,3 +5,27 @@ northdLogLevel: "-vconsole:info -vfile:info"
 logFileMaxSize: 100
 logFileMaxBackups: 5
 logFileMaxAge: 5
+
+## Affinity for pod assignment
+## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
+## Required to be scheduled on a linux node and only one instance of ovnkube-master pod per node
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+            - key: kubernetes.io/os
+              operator: In
+              values:
+                - "linux"
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: name
+              operator: In
+              values:
+                - ovnkube-master
+        topologyKey: kubernetes.io/hostname
