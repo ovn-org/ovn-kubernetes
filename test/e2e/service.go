@@ -972,15 +972,14 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 		loadBalancerYaml = "loadbalancer.yaml"
 		bgpAddYaml       = "bgpAdd.yaml"
 		bgpEmptyYaml     = "bgpEmptyAdd.yaml"
-		svcIP            = "192.168.10.0"
 		clientContainer  = "lbclient"
 		routerContainer  = "frr"
 	)
 
 	var (
-		backendNodeName string
+		backendNodeName    string
 		nonBackendNodeName string
-		namespaceName   = "default"
+		namespaceName      = "default"
 	)
 	f := wrappedTestFramework(svcName)
 	ginkgo.BeforeEach(func() {
@@ -1123,6 +1122,9 @@ metadata:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
+		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
+
 		endpoints, err := getEndpointsForService(f.ClientSet, namespaceName, svcName)
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get endpoints for service %s", svcName))
 		gomega.Expect(endpoints).NotTo(gomega.BeNil())
@@ -1219,15 +1221,15 @@ metadata:
 			framework.ExpectNoError(err, "failed to remove route for client which handles reverse service traffic")
 		}()
 
-		err = buildAndRunCommand(fmt.Sprintf("sudo ip route add %s via %s", svcIP, nodeIP))
+		err = buildAndRunCommand(fmt.Sprintf("sudo ip route add %s via %s", svcLoadBalancerIP, nodeIP))
 		framework.ExpectNoError(err, "failed to add route for external load balancer service")
 		defer func() {
-			err = buildAndRunCommand(fmt.Sprintf("sudo ip route delete %s via %s", svcIP, nodeIP))
+			err = buildAndRunCommand(fmt.Sprintf("sudo ip route delete %s via %s", svcLoadBalancerIP, nodeIP))
 			framework.ExpectNoError(err, "failed to remove route for external load balancer service")
 		}()
 
 		// Ensure service connectivity works from external client with default settings.
-		err = buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcIP, endpointHTTPPort))
+		err = buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcLoadBalancerIP, endpointHTTPPort))
 		framework.ExpectNoError(err, "failed to connect with external load balancer service")
 
 		// Change MTU size of vmtobridge veth pair and verify service connectivity still works.
@@ -1235,7 +1237,7 @@ metadata:
 		framework.ExpectNoError(err, "failed to change mtu size on vmtobridge gateway interface")
 		err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetovm up mtu 400")
 		framework.ExpectNoError(err, "failed to change mtu size on bridgetovm interface")
-		err = buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcIP, endpointHTTPPort))
+		err = buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcLoadBalancerIP, endpointHTTPPort))
 		framework.ExpectNoError(err, "failed to connect with external load balancer service after changing mtu size")
 	})
 
@@ -1267,13 +1269,16 @@ metadata:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
+		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
+
 		numberOfETPRules := pokeIPTableRules(backendNodeName, "OVN-KUBE-EXTERNALIP")
 		framework.ExpectEqual(numberOfETPRules, 5)
 
 		// curl the LB service from the client container to trigger BGP route advertisement
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		ginkgo.By("all 3 nodeIP routes are advertised correctly by metalb BGP routes")
@@ -1283,7 +1288,11 @@ metadata:
 		//	nexthop via 172.19.0.4 dev eth0 weight 1
 		//	nexthop via 172.19.0.2 dev eth0 weight 1
 		cmd := []string{containerRuntime, "exec", routerContainer}
-		bgpRouteCommand := strings.Split("ip route show 192.168.10.0", " ")
+		ipVer := ""
+		if utilnet.IsIPv6String(svcLoadBalancerIP) {
+			ipVer = " -6"
+		}
+		bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, svcLoadBalancerIP), " ")
 		cmd = append(cmd, bgpRouteCommand...)
 
 		backendNodeIP, err := getNodeIP(f.ClientSet, backendNodeName)
@@ -1337,7 +1346,7 @@ spec:
 			framework.ExpectNoError(err, fmt.Sprintf("failed to get nodes's %s node ip address", node))
 			framework.Logf("NodeIP of node %s is %s", node, nodeIP)
 			cmd := []string{containerRuntime, "exec", routerContainer}
-			bgpRouteCommand := strings.Split("ip route show 192.168.10.0", " ")
+
 			cmd = append(cmd, bgpRouteCommand...)
 			gomega.Eventually(func() bool {
 				routes, err := runCommand(cmd...)
@@ -1360,12 +1369,12 @@ spec:
 
 			ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName + " via node " + node)
 
-			_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+			_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 			framework.ExpectNoError(err, "failed to curl load balancer service")
 
 			ginkgo.By("change MTU on intermediary router to force icmp related packets")
 			cmd = []string{containerRuntime, "exec", routerContainer}
-			mtuCommand := strings.Split("ip link set mtu 1200 dev eth1", " ")
+			mtuCommand := strings.Split("ip link set mtu 1280 dev eth1", " ")
 
 			cmd = append(cmd, mtuCommand...)
 			_, err = runCommand(cmd...)
@@ -1375,7 +1384,7 @@ spec:
 
 			ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName + " via node " + node)
 
-			_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+			_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 			framework.ExpectNoError(err, "failed to curl load balancer service")
 
 			ginkgo.By("reset MTU on intermediary router to allow large packets")
@@ -1391,6 +1400,9 @@ spec:
 
 		err := framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*120)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an enpoint, err: %v", svcName, err))
+
+		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
@@ -1409,7 +1421,7 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		ginkgo.By("patching service " + svcName + " to allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
@@ -1435,12 +1447,16 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-ETP"))
+		pktSize := 60
+		if utilnet.IsIPv6String(svcLoadBalancerIP) {
+			pktSize = 80
+		}
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-SNAT-MGMTPORT"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-SNAT-MGMTPORT", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
 		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
@@ -1457,12 +1473,12 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-ETP"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-SNAT-MGMTPORT"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-SNAT-MGMTPORT", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
 	})
@@ -1471,6 +1487,9 @@ spec:
 
 		err := framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*120)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an enpoint, err: %v", svcName, err))
+
+		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
 
 		ginkgo.By("patching service " + svcName + " to externalTrafficPolicy=local")
 		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/externalTrafficPolicy", "Local")
@@ -1487,8 +1506,14 @@ spec:
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get nodes's %s node ip address", backendNodeName))
 		framework.Logf("NodeIP of node %s is %s", backendNodeName, nodeIP)
 		cmd := []string{containerRuntime, "exec", routerContainer}
-		bgpRouteCommand := strings.Split("ip route show 192.168.10.0", " ")
+
+		ipVer := ""
+		if utilnet.IsIPv6String(svcLoadBalancerIP) {
+			ipVer = " -6"
+		}
+		bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, svcLoadBalancerIP), " ")
 		cmd = append(cmd, bgpRouteCommand...)
+
 		gomega.Eventually(func() bool {
 			routes, err := runCommand(cmd...)
 			framework.ExpectNoError(err, "failed to get BGP routes from intermediary router")
@@ -1510,7 +1535,7 @@ spec:
 
 		ginkgo.By("by sending a UDP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 		netcatCmd := fmt.Sprintf("echo hostname | nc -uv -w2 %s %d",
-			svcIP,
+			svcLoadBalancerIP,
 			endpointUDPPort,
 		)
 		cmd = []string{containerRuntime, "exec", clientContainer, "bash", "-x", "-c", netcatCmd}
@@ -1524,10 +1549,12 @@ spec:
 		targetPodLogs, err := e2ekubectl.RunKubectl("default", "logs", "-l", "app=nginx", "--container", "udp-server")
 		framework.ExpectNoError(err, "failed to inspect logs in backend pods")
 		framework.Logf("%v", targetPodLogs)
-		lbClientIPv4, _ := getContainerAddressesForNetwork(clientContainer, "clientnet")
+		lbClientIPv4, lbClientIPv6 := getContainerAddressesForNetwork(clientContainer, "clientnet")
 		framework.Logf("%v", lbClientIPv4)
 		if strings.Contains(targetPodLogs, lbClientIPv4) {
 			framework.Logf("found the expected srcIP %s!", lbClientIPv4)
+		} else if strings.Contains(targetPodLogs, lbClientIPv6) {
+			framework.Logf("found the expected srcIP %s!", lbClientIPv6)
 		} else {
 			framework.Failf("could not get expected srcIP!")
 		}
@@ -1561,6 +1588,8 @@ spec:
 		framework.Logf("%v", targetPodLogs)
 		if strings.Count(targetPodLogs, lbClientIPv4) >= 2 {
 			framework.Logf("found the expected srcIP %s!", lbClientIPv4)
+		} else if strings.Count(targetPodLogs, lbClientIPv6) >= 2 {
+			framework.Logf("found the expected srcIP %s!", lbClientIPv6)
 		} else {
 			framework.Failf("could not get expected srcIP!")
 		}
@@ -1589,4 +1618,15 @@ func buildAndRunCommand(command string) error {
 	cmd := strings.Split(command, " ")
 	_, err := runCommand(cmd...)
 	return err
+}
+
+func getServiceLoadBalancerIP(c clientset.Interface, namespace, serviceName string) (string, error) {
+	svc, err := c.CoreV1().Services(namespace).Get(context.TODO(), serviceName, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	if len(svc.Status.LoadBalancer.Ingress) != 1 {
+		return "", fmt.Errorf("service %s has no load balancer IPs", serviceName)
+	}
+	return svc.Status.LoadBalancer.Ingress[0].IP, nil
 }
