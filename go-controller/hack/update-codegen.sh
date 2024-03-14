@@ -9,9 +9,10 @@ if [ -z "${crds}" ]; then
   exit
 fi
 
-SCRIPT_ROOT=$(dirname ${BASH_SOURCE})/..
 olddir="${PWD}"
+echo "olddir=${olddir}"
 builddir="$(mktemp -d)"
+echo "builddir=${builddir}"
 cd "${builddir}"
 GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
 cd "${olddir}"
@@ -62,13 +63,6 @@ for crd in ${crds}; do
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/informers \
     --plural-exceptions="EgressQoS:EgressQoSes" \
     "$@"
-
-  echo "Copying apis for $crd"
-  rm -rf $SCRIPT_ROOT/pkg/crd/$crd/v1/apis
-  cp -r github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis $SCRIPT_ROOT/pkg/crd/$crd/v1
-
-  echo "Copying zz_generated for $crd"
-  cp github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/zz_generated.deepcopy.go $SCRIPT_ROOT/pkg/crd/$crd/v1
 
 done
 

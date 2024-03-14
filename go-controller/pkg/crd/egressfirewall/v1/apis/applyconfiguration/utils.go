@@ -19,7 +19,7 @@ package applyconfiguration
 
 import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/applyconfiguration/egressfirewall/v1"
+	k8sv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/applyconfiguration/k8s/v1"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -29,17 +29,17 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	switch kind {
 	// Group=k8s.ovn.org, Version=v1
 	case v1.SchemeGroupVersion.WithKind("EgressFirewall"):
-		return &egressfirewallv1.EgressFirewallApplyConfiguration{}
+		return &k8sv1.EgressFirewallApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EgressFirewallDestination"):
-		return &egressfirewallv1.EgressFirewallDestinationApplyConfiguration{}
+		return &k8sv1.EgressFirewallDestinationApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EgressFirewallPort"):
-		return &egressfirewallv1.EgressFirewallPortApplyConfiguration{}
+		return &k8sv1.EgressFirewallPortApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EgressFirewallRule"):
-		return &egressfirewallv1.EgressFirewallRuleApplyConfiguration{}
+		return &k8sv1.EgressFirewallRuleApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EgressFirewallSpec"):
-		return &egressfirewallv1.EgressFirewallSpecApplyConfiguration{}
+		return &k8sv1.EgressFirewallSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EgressFirewallStatus"):
-		return &egressfirewallv1.EgressFirewallStatusApplyConfiguration{}
+		return &k8sv1.EgressFirewallStatusApplyConfiguration{}
 
 	}
 	return nil
