@@ -48,7 +48,7 @@ jobs:
       id: go
 
     - name: Verify
-      uses: golangci/golangci-lint-action@v3
+      uses: golangci/golangci-lint-action@v4
       with:
         version: v1.52
         working-directory: go-controller
