@@ -773,30 +773,26 @@ passwd:
 
 		By("Creating a test pod at all worker nodes")
 		for _, selectedNode := range selectedNodes {
-			httpServerWorkerNode := composeAgnhostPod(
+			httpServerTestPod := composeAgnhostPod(
 				"testpod-"+selectedNode.Name,
 				namespace,
 				selectedNode.Name,
 				"netexec", "--http-port", "8000")
-			_ = e2epod.NewPodClient(fr).CreateSync(context.TODO(), httpServerWorkerNode)
+			httpServerTestPod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), httpServerTestPod)
 		}
 
 		By("Waiting until both pods have an IP address")
 		for _, httpServerTestPod := range httpServerTestPods {
-			Eventually(func() error {
+			Eventually(func(g Gomega) {
 				var err error
 				httpServerTestPod, err = fr.ClientSet.CoreV1().Pods(fr.Namespace.Name).Get(context.TODO(), httpServerTestPod.Name, metav1.GetOptions{})
-				if err != nil {
-					return err
-				}
-				if httpServerTestPod.Status.PodIP == "" {
-					return fmt.Errorf("pod %s has no valid IP address yet", httpServerTestPod.Name)
-				}
-				return nil
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(httpServerTestPod.Status.PodIP).ToNot(BeEmpty(), "pod %s has no valid IP address yet", httpServerTestPod.Name)
 			}).
 				WithTimeout(time.Minute).
 				WithPolling(time.Second).
 				Should(Succeed())
+			httpServerTestPods = append(httpServerTestPods, httpServerTestPod)
 		}
 
 		vmLabels := map[string]string{}
