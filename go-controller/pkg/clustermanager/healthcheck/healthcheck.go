@@ -8,25 +8,26 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog/v2"
 )
 
 // IsReachable checks the reachability of a node through the health check
 // service if its port is provided (!=0) or through the well-known discard
 // service. A 0 timeout inhibits the check.
-func IsReachable(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient, port, timeout int) bool {
+func IsReachable(ctx context.Context, nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient, port, timeout int) bool {
 	// Check if we need to do node reachability check
 	if timeout == 0 {
 		return true
 	}
 	if port == 0 {
-		return isReachableLegacy(nodeName, mgmtIPs, timeout)
+		return isReachableLegacy(ctx, nodeName, mgmtIPs, timeout)
 	}
-	return isReachableViaGRPC(mgmtIPs, healthClient, port, timeout)
+	return isReachableViaGRPC(ctx, mgmtIPs, healthClient, port, timeout)
 }
 
-func isReachableViaGRPC(mgmtIPs []net.IP, client healthcheck.EgressIPHealthClient, port, timeout int) bool {
-	dialCtx, dialCancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+func isReachableViaGRPC(ctx context.Context, mgmtIPs []net.IP, client healthcheck.EgressIPHealthClient, port, timeout int) bool {
+	dialCtx, dialCancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer dialCancel()
 
 	if !client.IsConnected() {
@@ -38,7 +39,7 @@ func isReachableViaGRPC(mgmtIPs []net.IP, client healthcheck.EgressIPHealthClien
 	return client.Probe(dialCtx)
 }
 
-func isReachableLegacy(node string, mgmtIPs []net.IP, totalTimeout int) bool {
+func isReachableLegacy(ctx context.Context, node string, mgmtIPs []net.IP, totalTimeout int) bool {
 	var retryTimeOut, initialRetryTimeOut time.Duration
 
 	numMgmtIPs := len(mgmtIPs)
@@ -66,11 +67,11 @@ func isReachableLegacy(node string, mgmtIPs []net.IP, totalTimeout int) bool {
 	endTime := time.Now().Add(time.Second * time.Duration(totalTimeout))
 	for time.Now().Before(endTime) {
 		for _, ip := range mgmtIPs {
-			if dialDiscardService(ip, timeout) {
+			if dialDiscardService(ctx, ip, timeout) {
 				return true
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		util.SleepWithContext(ctx, time.Duration(100)*time.Millisecond)
 		timeout = retryTimeOut
 	}
 	klog.Errorf("Failed reachability check for %s", node)
@@ -84,8 +85,11 @@ func isReachableLegacy(node string, mgmtIPs []net.IP, totalTimeout int) bool {
 // we will return false). If the node is online then we presumably will get a "connection
 // refused" error; but the code below assumes that anything other than timeout or "no
 // route" indicates that the node is online.
-func dialDiscardService(ip net.IP, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip.String(), "9"), timeout)
+func dialDiscardService(ctx context.Context, ip net.IP, timeout time.Duration) bool {
+	dialCtx, dialCancel := context.WithTimeout(ctx, timeout)
+	defer dialCancel()
+	var d net.Dialer
+	conn, err := d.DialContext(dialCtx, "tcp", net.JoinHostPort(ip.String(), "9"))
 	if conn != nil {
 		conn.Close()
 	}
