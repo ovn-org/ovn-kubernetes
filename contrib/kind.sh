@@ -1399,7 +1399,14 @@ function install_kubevirt() {
 
     echo "Deploy latest nighly build Kubevirt"
     if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
-      kubectl apply -f "${kubevirt_release_url}/kubevirt-operator.yaml"
+      local virt_controller_image=quay.io/ellorent/virt-controller:persistentips
+      local virt_handler_image=quay.io/ellorent/virt-handler:persistentips
+      local virt_operator_image=quay.io/ellorent/virt-operator:persistentips
+      curl -L "https://gist.githubusercontent.com/qinqon/865a4c0f3a99299b4a0f8efc591fa84c/raw/dcbea4ddb043d86195c1ad5399f4ac86488592cb/kubevirt-operator.yaml" | \
+          sed "s#env:#env:\n        - name: VIRT_CONTROLLER_IMAGE\n          value: $virt_controller_image#" | \
+          sed "s#env:#env:\n        - name: VIRT_HANDLER_IMAGE\n          value: $virt_handler_image#" | \
+          sed "s#quay.io/kubevirt/virt-operator:$kubevirt_version#$virt_operator_image#g" | \
+          kubectl apply -f -
       kubectl apply -f "${kubevirt_release_url}/kubevirt-cr.yaml"
       if ! is_nested_virt_enabled; then
         kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
