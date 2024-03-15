@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	egressqosapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/applyconfiguration/egressqos/v1"
 	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -20,6 +23,7 @@ import (
 	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -32,10 +36,15 @@ import (
 )
 
 const (
-	maxEgressQoSRetries        = 10
 	defaultEgressQoSName       = "default"
 	EgressQoSFlowStartPriority = 1000
+	egressQoSAppliedCorrectly  = "EgressQoS Rules applied"
+	egressQoSReadyStatusType   = "Ready-In-Zone-"
+	egressQoSReadyReason       = "SetupSucceeded"
+	egressQoSNotReadyReason    = "SetupFailed"
 )
+
+var maxEgressQoSRetries = 10
 
 type egressQoS struct {
 	sync.RWMutex
@@ -344,9 +353,20 @@ func (oc *DefaultNetworkController) processNextEgressQoSWorkItem(wg *sync.WaitGr
 
 	defer oc.egressQoSQueue.Done(key)
 
-	err := oc.syncEgressQoS(key.(string))
+	eqKey := key.(string)
+	eq, err := oc.getEgressQoS(eqKey)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("failed to retrieve %s qos object: %v", eqKey, err))
+		oc.egressQoSQueue.Forget(key)
+		return true
+	}
+
+	err = oc.syncEgressQoS(eqKey, eq)
 	if err == nil {
 		oc.egressQoSQueue.Forget(key)
+		if err = oc.updateEgressQoSZoneStatusToReady(eq); err != nil {
+			utilruntime.HandleError(fmt.Errorf("failed to update EgressQoS object %s with status: %v", eqKey, err))
+		}
 		return true
 	}
 
@@ -355,6 +375,10 @@ func (oc *DefaultNetworkController) processNextEgressQoSWorkItem(wg *sync.WaitGr
 	if oc.egressQoSQueue.NumRequeues(key) < maxEgressQoSRetries {
 		oc.egressQoSQueue.AddRateLimited(key)
 		return true
+	}
+
+	if err = oc.updateEgressQoSZoneStatusToNotReady(eq, err); err != nil {
+		utilruntime.HandleError(fmt.Errorf("failed to update EgressQoS object %s with status: %v", eqKey, err))
 	}
 
 	oc.egressQoSQueue.Forget(key)
@@ -427,7 +451,7 @@ func (oc *DefaultNetworkController) repairEgressQoSes() error {
 	return nil
 }
 
-func (oc *DefaultNetworkController) syncEgressQoS(key string) error {
+func (oc *DefaultNetworkController) syncEgressQoS(key string, eq *v1.EgressQoS) error {
 	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -438,11 +462,6 @@ func (oc *DefaultNetworkController) syncEgressQoS(key string) error {
 	defer func() {
 		klog.V(4).Infof("Finished syncing EgressQoS %s on namespace %s : %v", name, namespace, time.Since(startTime))
 	}()
-
-	eq, err := oc.egressQoSLister.EgressQoSes(namespace).Get(name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
 
 	if name != defaultEgressQoSName {
 		klog.Errorf("EgressQoS name %s is invalid, must be %s", name, defaultEgressQoSName)
@@ -463,6 +482,19 @@ func (oc *DefaultNetworkController) syncEgressQoS(key string) error {
 	klog.V(5).Infof("EgressQoS %s retrieved from lister: %v", eq.Name, eq)
 
 	return oc.addEgressQoS(eq)
+}
+
+func (oc *DefaultNetworkController) getEgressQoS(key string) (*v1.EgressQoS, error) {
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return nil, err
+	}
+	var eq *v1.EgressQoS
+	eq, err = oc.egressQoSLister.EgressQoSes(namespace).Get(name)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+	return eq, nil
 }
 
 func (oc *DefaultNetworkController) cleanEgressQoSNS(namespace string) error {
@@ -1020,4 +1052,62 @@ func (oc *DefaultNetworkController) syncEgressQoSNode(key string) error {
 	}
 
 	return nil
+}
+
+// updateEgressQoSZoneStatusToReady updates the status of the EgressQoS to reflect that it is ready
+// Each zone's ovnkube-controller will call this, hence let's update status using server side apply.
+func (oc *DefaultNetworkController) updateEgressQoSZoneStatusToReady(egressQoS *egressqosapi.EgressQoS) error {
+	if egressQoS == nil {
+		return nil
+	}
+	readyCondition := metav1.Condition{
+		Type:               egressQoSReadyStatusType + oc.zone,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.NewTime(time.Now()),
+		Reason:             egressQoSReadyReason,
+		Message:            egressQoSAppliedCorrectly,
+	}
+	return oc.updateEgressQoSZoneStatusCondition(readyCondition, egressQoS.Namespace, egressQoS.Name)
+}
+
+// updateEgressQoSZoneStatusToNotReady updates the status of the EgressQoS to reflect that it is not ready
+// Each zone's ovnkube-controller will call this, hence let's update status using server side apply.
+func (oc *DefaultNetworkController) updateEgressQoSZoneStatusToNotReady(egressQoS *egressqosapi.EgressQoS,
+	handlerErr error) error {
+	if egressQoS == nil {
+		return nil
+	}
+	notReadyCondition := metav1.Condition{
+		Type:               egressQoSReadyStatusType + oc.zone,
+		Status:             metav1.ConditionFalse,
+		LastTransitionTime: metav1.NewTime(time.Now()),
+		Reason:             egressQoSNotReadyReason,
+		Message:            types.EgressQoSErrorMsg + ": " + handlerErr.Error(),
+	}
+	return oc.updateEgressQoSZoneStatusCondition(notReadyCondition, egressQoS.Namespace, egressQoS.Name)
+}
+
+func (oc *DefaultNetworkController) updateEgressQoSZoneStatusCondition(newCondition metav1.Condition,
+	namespace, name string) error {
+	eq, err := oc.egressQoSLister.EgressQoSes(namespace).Get(name)
+	if err != nil {
+		return err
+	}
+	existingCondition := meta.FindStatusCondition(eq.Status.Conditions, newCondition.Type)
+	if existingCondition == nil {
+		newCondition.LastTransitionTime = metav1.NewTime(time.Now())
+	} else {
+		if existingCondition.Status != newCondition.Status {
+			existingCondition.Status = newCondition.Status
+			existingCondition.LastTransitionTime = metav1.NewTime(time.Now())
+		}
+		existingCondition.Reason = newCondition.Reason
+		existingCondition.Message = newCondition.Message
+		newCondition = *existingCondition
+	}
+	applyObj := egressqosapply.EgressQoS(name, namespace).
+		WithStatus(egressqosapply.EgressQoSStatus().WithConditions(newCondition))
+	_, err = oc.kube.EgressQoSClient.K8sV1().EgressQoSes(namespace).ApplyStatus(context.TODO(),
+		applyObj, metav1.ApplyOptions{FieldManager: oc.zone})
+	return err
 }

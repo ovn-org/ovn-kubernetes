@@ -282,6 +282,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			EgressServiceClient:  ovnClient.EgressServiceClient,
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
+			EgressQoSClient:      ovnClient.EgressQoSClient,
 		},
 		wf,
 		recorder,
