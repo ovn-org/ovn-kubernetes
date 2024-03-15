@@ -511,7 +511,8 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			).Return(nil)
 
 			netConf := &ovncnitypes.NetConf{
-				Topology: types.Layer2Topology,
+				Topology:           types.Layer2Topology,
+				AllowPersistentIPs: tt.ipam && tt.args.ipamClaim != nil,
 			}
 			if tt.ipam {
 				netConf.Subnets = "10.1.130.0/24"

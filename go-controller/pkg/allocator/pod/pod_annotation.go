@@ -290,7 +290,7 @@ func allocatePodAnnotationWithRollback(
 	hasStaticIPRequest := hasIPRequest && !reallocateIP
 
 	var ipamClaim *ipamclaimsapi.IPAMClaim
-	hasPersistentIPs := hasIPAM && claimsReconciler != nil
+	hasPersistentIPs := netInfo.AllowsPersistentIPs() && hasIPAM && claimsReconciler != nil
 	hasIPAMClaim := network != nil && network.IPAMClaimReference != ""
 	if hasIPAMClaim && !hasPersistentIPs {
 		klog.Errorf(
@@ -309,7 +309,6 @@ func allocatePodAnnotationWithRollback(
 		}
 		hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
 	}
-
 	if hasIPAM && hasStaticIPRequest {
 		// for now we can't tell apart already allocated IPs from IPs excluded
 		// from allocation so we can't really honor static IP requests when

@@ -281,6 +281,62 @@ func TestParseNetconf(t *testing.T) {
 				NetConf:  cnitypes.NetConf{Name: "tenantred", CNIVersion: "1.0.0", Type: "ovn-k8s-cni-overlay"},
 			},
 		},
+		{
+			desc: "valid attachment definition for a localnet topology with persistent IPs and a subnet",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+			"subnets": "192.168.200.0/16",
+			"allowPersistentIPs": true,
+            "netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology:           "localnet",
+				NADName:            "ns1/nad1",
+				MTU:                1400,
+				NetConf:            cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
+				AllowPersistentIPs: true,
+				Subnets:            "192.168.200.0/16",
+			},
+		},
+		{
+			desc: "valid attachment definition for a layer2 topology with persistent IPs and a subnet",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer2",
+			"subnets": "192.168.200.0/16",
+			"allowPersistentIPs": true,
+            "netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology:           "layer2",
+				NADName:            "ns1/nad1",
+				MTU:                1400,
+				AllowPersistentIPs: true,
+				Subnets:            "192.168.200.0/16",
+				NetConf:            cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
+		{
+			desc: "invalid attachment definition for a layer3 topology with persistent IPs",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+			"subnets": "192.168.200.0/16",
+			"allowPersistentIPs": true,
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedError: fmt.Errorf("layer3 topology does not allow persistent IPs"),
+		},
 	}
 
 	for _, test := range tests {

@@ -132,6 +132,12 @@ func (ncc *networkClusterController) hasNodeAllocation() bool {
 	}
 }
 
+func (ncc *networkClusterController) allowPersistentIPs() bool {
+	return ncc.NetInfo.AllowsPersistentIPs() &&
+		util.DoesNetworkRequireIPAM(ncc.NetInfo) &&
+		(ncc.NetInfo.TopologyType() == types.Layer2Topology || ncc.NetInfo.TopologyType() == types.LocalnetTopology)
+}
+
 func (ncc *networkClusterController) init() error {
 	networkID, err := ncc.networkIDAllocator.AllocateID()
 	if err != nil {
@@ -161,7 +167,7 @@ func (ncc *networkClusterController) init() error {
 			ipamClaimsReconciler   *persistentips.IPAMClaimReconciler
 		)
 
-		if util.DoesNetworkRequireIPAM(ncc.NetInfo) {
+		if ncc.allowPersistentIPs() {
 			ncc.retryIPAMClaims = ncc.newRetryFramework(factory.IPAMClaimsType, true)
 			ipamClaimsReconciler = persistentips.NewIPAMClaimReconciler(
 				ncc.kube,
@@ -207,7 +213,7 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 	}
 
 	if ncc.hasPodAllocation() {
-		if util.DoesNetworkRequireIPAM(ncc.NetInfo) {
+		if ncc.allowPersistentIPs() {
 			// we need to start listening to IPAMClaim events before pod events, to
 			// ensure we don't start processing pod allocations before having the
 			// existing IPAMClaim allocations reserved in the in-memory IP pool.

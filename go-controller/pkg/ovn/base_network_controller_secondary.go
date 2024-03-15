@@ -672,3 +672,9 @@ func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
 	}
 	return err
 }
+
+func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
+	return oc.NetInfo.AllowsPersistentIPs() &&
+		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
+		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
+}
