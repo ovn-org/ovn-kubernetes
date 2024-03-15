@@ -36,7 +36,6 @@ Should validate conntrack entry deletion for TCP/UDP traffic via multiple extern
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
 can retrieve multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
-Should ensure connectivity works on an external service when mtu changes in intermediate node|\
 egress IP validation|\
 e2e egress firewall policy validation|\
 OVS CPU affinity pinning|\
