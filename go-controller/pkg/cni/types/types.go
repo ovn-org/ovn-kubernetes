@@ -27,6 +27,11 @@ type NetConf struct {
 	ExcludeSubnets string `json:"excludeSubnets,omitempty"`
 	// VLANID, valid in localnet topology network only
 	VLANID int `json:"vlanID,omitempty"`
+	// AllowPersistentIPs is valid on both localnet / layer topologies.
+	// It allows for having IP allocations that outlive the pod for which
+	// they are originally created - e.g. a KubeVirt VM's migration, or
+	// restart.
+	AllowPersistentIPs bool `json:"allowPersistentIPs,omitempty"`
 
 	// PciAddrs in case of using sriov or Auxiliry device name in case of SF
 	DeviceID string `json:"deviceID,omitempty"`

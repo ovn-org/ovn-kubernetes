@@ -132,6 +132,10 @@ func (ncc *networkClusterController) hasNodeAllocation() bool {
 	}
 }
 
+func (ncc *networkClusterController) hasPersistentIPs() bool {
+	return ncc.NetInfo.AllowsPersistentIPs()
+}
+
 func (ncc *networkClusterController) init() error {
 	networkID, err := ncc.networkIDAllocator.AllocateID()
 	if err != nil {
@@ -150,7 +154,9 @@ func (ncc *networkClusterController) init() error {
 
 	if ncc.hasPodAllocation() {
 		ncc.retryPods = ncc.newRetryFramework(factory.PodType, true)
-		ncc.retryIPAMClaims = ncc.newRetryFramework(factory.IPAMClaimsType, true)
+		if ncc.hasPersistentIPs() {
+			ncc.retryIPAMClaims = ncc.newRetryFramework(factory.IPAMClaimsType, true)
+		}
 
 		var (
 			podAllocationAnnotator annotationalloc.AnnotationAllocator = annotationalloc.NewPodAnnotationAllocator(
@@ -161,7 +167,7 @@ func (ncc *networkClusterController) init() error {
 			allocationOpts []pod.AllocationOption
 		)
 
-		if util.DoesNetworkRequireIPAM(ncc.NetInfo) {
+		if ncc.hasPersistentIPs() && util.DoesNetworkRequireIPAM(ncc.NetInfo) {
 			ipamClaimsAllocator := persistentips.NewPersistentIPsAllocator(
 				ncc.kube,
 				ncc.subnetAllocator.ForSubnet(ncc.NetInfo.GetNetworkName()),
@@ -210,15 +216,16 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 	}
 
 	if ncc.hasPodAllocation() {
-		// we need to start listening to IPAMClaim events before pod events, to
-		// ensure we don't start processing pod allocations before having the
-		// existing IPAMClaim allocations reserved in the in-memory IP pool.
-		ipamClaimHandler, err := ncc.retryIPAMClaims.WatchResource()
-		if err != nil {
-			return fmt.Errorf("unable to watch IPAMClaims: %w", err)
+		if ncc.hasPersistentIPs() {
+			// we need to start listening to IPAMClaim events before pod events, to
+			// ensure we don't start processing pod allocations before having the
+			// existing IPAMClaim allocations reserved in the in-memory IP pool.
+			ipamClaimHandler, err := ncc.retryIPAMClaims.WatchResource()
+			if err != nil {
+				return fmt.Errorf("unable to watch IPAMClaims: %w", err)
+			}
+			ncc.ipamClaimHandler = ipamClaimHandler
 		}
-		ncc.ipamClaimHandler = ipamClaimHandler
-
 		podHandler, err := ncc.retryPods.WatchResource()
 		if err != nil {
 			return fmt.Errorf("unable to watch pods: %w", err)

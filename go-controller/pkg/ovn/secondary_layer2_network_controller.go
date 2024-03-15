@@ -65,7 +65,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube)
-		if util.DoesNetworkRequireIPAM(netInfo) {
+		if netInfo.AllowsPersistentIPs() && util.DoesNetworkRequireIPAM(netInfo) {
 			ipamClaimsAllocator := persistentips.NewPersistentIPsAllocator(
 				cnci.kube,
 				oc.lsManager.ForSwitch(oc.GetNetworkScopedName(types.OVNLayer2Switch)),
