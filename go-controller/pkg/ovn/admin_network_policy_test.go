@@ -214,15 +214,30 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 	)
 
 	const (
-		anpSubjectNamespaceName = "anp-subject-namespace"
-		anpPeerNamespaceName    = "anp-peer-namespace"
-		anpSubjectPodName       = "anp-subject-pod"
-		anpPodV4IP              = "10.128.1.3"
-		anpPodMAC               = "0a:58:0a:80:01:03"
-		anpPodV4IP2             = "10.128.1.4"
-		anpPodMAC2              = "0a:58:0a:80:01:04"
-		anpPeerPodName          = "anp-peer-pod"
-		node1Name               = "node1"
+		anpSubjectNamespaceName        = "anp-subject-namespace"
+		anpPeerNamespaceName           = "anp-peer-namespace"
+		anpSubjectPodName              = "anp-subject-pod"
+		anpPodV4IP                     = "10.128.1.3"
+		anpPodV6IP                     = "fe00:10:128:1::3"
+		anpPodMAC                      = "0a:58:0a:80:01:03"
+		anpPodV4IP2                    = "10.128.1.4"
+		anpPodV6IP2                    = "fe00:10:128:1::4"
+		anpPodMAC2                     = "0a:58:0a:80:01:04"
+		anpPeerPodName                 = "anp-peer-pod"
+		node1Name               string = "node1"
+		node1IPv4               string = "100.100.100.0"
+		node1IPv6               string = "fc00:f853:ccd:e793::1"
+		node1IPv4Subnet         string = "10.128.1.0/24"
+		node1IPv6Subnet         string = "fe00:10:128:1::/64"
+		node1transitIPv4        string = "100.88.0.2"
+		node1transitIPv6        string = "fd97::2"
+		node2Name               string = "node2"
+		node2IPv4               string = "200.200.200.0"
+		node2IPv6               string = "fc00:f853:ccd:e793::2"
+		node2IPv4Subnet         string = "10.128.2.0/24"
+		node2IPv6Subnet         string = "fe00:10:128:2::/64"
+		node2transitIPv4        string = "100.88.0.3"
+		node2transitIPv6        string = "fd97::3"
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -1277,6 +1292,304 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					acl.Severity = nil
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+		ginkgo.It("egress node peers: should create/update/delete address-sets, acls, port-groups correctly", func() {
+			app.Action = func(ctx *cli.Context) error {
+				anpNamespaceSubject := *newNamespaceWithLabels(anpSubjectNamespaceName, anpLabel)
+				anpNamespacePeer := *newNamespaceWithLabels(anpPeerNamespaceName, peerDenyLabel)
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet, node1transitIPv4, node1transitIPv6)
+				node1Switch := &nbdb.LogicalSwitch{
+					Name: node1Name,
+					UUID: node1Name + "-UUID",
+				}
+				t := newTPod(
+					node1Name,
+					node1IPv4Subnet+" "+node1IPv6Subnet,
+					"10.128.1.2",
+					"10.128.1.1"+" "+"fe00:10:128:1::1",
+					anpSubjectPodName,
+					anpPodV4IP+" "+anpPodV6IP,
+					anpPodMAC,
+					anpSubjectNamespaceName,
+				)
+				anpSubjectPod := *newPod(anpSubjectNamespaceName, anpSubjectPodName, node1Name, t.podIP)
+				// pinning annotations because between subject and peer pods IPAM isunpredictable
+				anpSubjectPod.Annotations = map[string]string{}
+				anpSubjectPod.Annotations["k8s.ovn.org/pod-networks"] = `{"default":{"ip_addresses":["10.128.1.3/24","fe00:10:128:1::3/64"],` +
+					`"mac_address":"0a:58:0a:80:01:03","gateway_ips":["10.128.1.1","fe00:10:128:1::1"],"routes":[{"dest":"10.128.1.0/24","nextHop":"10.128.1.1"}],` +
+					`"ip_address":"10.128.1.3/24","gateway_ip":"10.128.1.1"}}`
+				t2 := newTPod(
+					node1Name,
+					node1IPv4Subnet+" "+node1IPv6Subnet,
+					"10.128.1.2",
+					"10.128.1.1"+" "+"fe00:10:128:1::1",
+					anpPeerPodName,
+					anpPodV4IP2+" "+anpPodV6IP2,
+					anpPodMAC2,
+					anpPeerNamespaceName,
+				)
+				anpPeerPod := *newPod(anpPeerNamespaceName, anpPeerPodName, node1Name, t2.podIP)
+				// pinning annotations because between subject and peer pods IPAM isunpredictable
+				anpPeerPod.Annotations = map[string]string{}
+				anpPeerPod.Annotations["k8s.ovn.org/pod-networks"] = `{"default":{"ip_addresses":["10.128.1.4/24","fe00:10:128:1::4/64"],` +
+					`"mac_address":"0a:58:0a:80:01:04","gateway_ips":["10.128.1.1","fe00:10:128:1::1"],"routes":[{"dest":"10.128.1.0/24","nextHop":"10.128.1.1"}],` +
+					`"ip_address":"10.128.1.4/24","gateway_ip":"10.128.1.1"}}`
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						node1Switch,
+					},
+				}
+				fakeOVN.startWithDBSetup(dbSetup,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							anpNamespaceSubject,
+							anpNamespacePeer,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*node1,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							anpSubjectPod, // subject pod ("house": "gryffindor")
+							anpPeerPod,    // peer pod ("house": "slytherin")
+						},
+					},
+				)
+
+				fakeOVN.controller.zone = node1Name // ensure we set the controller's zone as the node's zone
+				t.portName = util.GetLogicalPortName(t.namespace, t.podName)
+				t.populateLogicalSwitchCache(fakeOVN)
+				t2.portName = util.GetLogicalPortName(t2.namespace, t2.podName)
+				t2.populateLogicalSwitchCache(fakeOVN)
+				err := fakeOVN.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOVN.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOVN.InitAndRunANPController()
+
+				fakeOVN.fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("update", "adminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+					update := action.(clienttesting.UpdateAction)
+					// Since fake client (NewSimpleClientset) does not differentiate between
+					// an update and updatestatus, updatestatus in tests updates the spec as
+					// well causing race conditions. Thus adding a hack here to ensure update
+					// status is caught and processed by the reactor while update spec is
+					// delegated to the main code for handling
+					if action.GetSubresource() == "status" {
+						klog.Infof("Got an update status action for %v", update.GetObject())
+						return true, update.GetObject(), nil
+					}
+					klog.Infof("Got an update spec action for %v", update.GetObject())
+					return false, update.GetObject(), nil
+				})
+
+				ginkgo.By("1. creating an admin network policy with 3 egress rules that have node peers")
+				anpSubject := newANPSubjectObject(
+					&metav1.LabelSelector{
+						MatchLabels: anpLabel,
+					},
+					nil,
+				)
+				// NOTE: Logically speaking the rules don't make sense because we match on the same node, but goal here is to verify the match
+				egressRules := []anpapi.AdminNetworkPolicyEgressRule{
+					{
+						Name:   "deny-traffic-to-slytherin-and-linux-nodes-from-gryffindor",
+						Action: anpapi.AdminNetworkPolicyRuleActionDeny,
+						To: []anpapi.AdminNetworkPolicyEgressPeer{
+							{
+								Namespaces: &anpapi.NamespacedPeer{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: peerDenyLabel,
+									},
+								},
+							},
+							{
+								Nodes: &metav1.LabelSelector{
+									MatchLabels: map[string]string{"kubernetes.io/os": "linux"},
+								},
+							},
+						},
+					},
+					{
+						Name:   "allow-traffic-to-hufflepuff-and--all-nodes-from-gryffindor",
+						Action: anpapi.AdminNetworkPolicyRuleActionAllow,
+						To: []anpapi.AdminNetworkPolicyEgressPeer{
+							{
+								Pods: &anpapi.NamespacedPodPeer{ // test different kind of peer expression
+									Namespaces: anpapi.NamespacedPeer{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchExpressions: []metav1.LabelSelectorRequirement{
+												{
+													Key:      "house",
+													Operator: metav1.LabelSelectorOpIn,
+													Values:   []string{"slytherin", "hufflepuff"},
+												},
+											},
+										},
+									},
+									PodSelector: metav1.LabelSelector{
+										MatchLabels: peerAllowLabel,
+									},
+								},
+							},
+							{
+								Nodes: &metav1.LabelSelector{
+									MatchLabels: map[string]string{}, // empty selector, all nodes
+								},
+							},
+						},
+					},
+					{
+						Name:   "pass-traffic-to-ravenclaw-and-node1-from-gryffindor",
+						Action: anpapi.AdminNetworkPolicyRuleActionPass,
+						To: []anpapi.AdminNetworkPolicyEgressPeer{
+							{
+								Namespaces: &anpapi.NamespacedPeer{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: peerPassLabel,
+									},
+								},
+							},
+							{
+								Nodes: &metav1.LabelSelector{
+									MatchLabels: map[string]string{"kubernetes.io/hostname": "node1"},
+								},
+							},
+						},
+						Ports: &[]anpapi.AdminNetworkPolicyPort{ // test different ports combination
+							{
+								PortNumber: &anpapi.Port{
+									Protocol: v1.ProtocolTCP,
+									Port:     int32(12345),
+								},
+							},
+							{
+								PortRange: &anpapi.PortRange{
+									Protocol: v1.ProtocolUDP,
+									Start:    int32(12345),
+									End:      int32(65000),
+								},
+							},
+							{
+								PortNumber: &anpapi.Port{
+									Protocol: v1.ProtocolSCTP,
+									Port:     int32(12345),
+								},
+							},
+						},
+					},
+				}
+				anp := newANPObject("harry-potter", 5, anpSubject, []anpapi.AdminNetworkPolicyIngressRule{}, egressRules)
+				anp.ResourceVersion = "1"
+				anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Create(context.TODO(), anp, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				acls := getACLsForANPRules(anp)
+				pg := getDefaultPGForANPSubject(anp.Name, []string{t.portUUID}, acls, false)
+				subjectNSASIPv4, subjectNSASIPv6 := buildNamespaceAddressSets(anpSubjectNamespaceName,
+					[]net.IP{testing.MustParseIP(anpPodV4IP), testing.MustParseIP(anpPodV6IP)})
+				peerNSASIPv4, peerNSASIPv6 := buildNamespaceAddressSets(anpPeerNamespaceName,
+					[]net.IP{testing.MustParseIP(anpPodV4IP2), testing.MustParseIP(anpPodV6IP2)})
+				expectedDatabaseState := []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// egressRule AddressSets
+				peerASEgressRule0v4, peerASEgressRule0v6 := buildANPAddressSets(anp,
+					0, []net.IP{testing.MustParseIP(anpPodV4IP2), testing.MustParseIP(anpPodV6IP2)}, libovsdbutil.ACLEgress) // address-set will contain matching peer nodes, kubernetes.io/hostname doesn't match node1 so no node peers here
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
+				peerASEgressRule1v4, peerASEgressRule1v6 := buildANPAddressSets(anp,
+					1, []net.IP{testing.MustParseIP(node1IPv4), testing.MustParseIP(node1IPv6)}, libovsdbutil.ACLEgress) // address-set will contain all nodeIPs (empty selector match)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v6)
+				peerASEgressRule2v4, peerASEgressRule2v6 := buildANPAddressSets(anp,
+					2, []net.IP{testing.MustParseIP(node1IPv4), testing.MustParseIP(node1IPv6)}, libovsdbutil.ACLEgress) // address-set will contain the matching node peer
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule2v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule2v6)
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("2. creating another node2 that will act as peer of admin network policy; check if IP is added to address-set")
+				node2 := nodeFor(node2Name, node2IPv4, node2IPv6, node2IPv4Subnet, node2IPv6Subnet, node2transitIPv4, node2transitIPv6)
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), node2, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState[len(expectedDatabaseState)-3].(*nbdb.AddressSet).Addresses = []string{node2IPv6, node1IPv6} // nodeIP should be added to v6 allow address-set
+				expectedDatabaseState[len(expectedDatabaseState)-4].(*nbdb.AddressSet).Addresses = []string{node2IPv4, node1IPv4} // nodeIP should be added to v4 allow address-set
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("3. update the labels of node2 such that it starts to match the DENY RULE peer selector; check if IPs are updated in address-sets")
+				node2.ResourceVersion = "2"
+				node2.Labels["kubernetes.io/os"] = "linux" // node should not match the 1st anp deny rule peer
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState[len(expectedDatabaseState)-5].(*nbdb.AddressSet).Addresses = []string{
+					anpPodV6IP2, node2IPv6} // nodeIP should be added to v6 deny address-set
+				expectedDatabaseState[len(expectedDatabaseState)-6].(*nbdb.AddressSet).Addresses = []string{
+					anpPodV4IP2, node2IPv4} // nodeIP should be added to v4 deny address-set
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("4. update the hostCIDR annotation of node2; check if IPs are updated in address-sets")
+				node2.ResourceVersion = "3"
+				node2.Annotations[util.OVNNodeHostCIDRs] = fmt.Sprintf("[\"%s\",\"%s\"]", "200.100.100.0/24", "fc00:f853:ccd:e793::2/64")
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState[len(expectedDatabaseState)-4].(*nbdb.AddressSet).Addresses = []string{
+					"200.100.100.0", node1IPv4} // nodeIP should be updated in v4 allow address-set
+				expectedDatabaseState[len(expectedDatabaseState)-6].(*nbdb.AddressSet).Addresses = []string{
+					anpPodV4IP2, "200.100.100.0"} // nodeIP should be updated in v4 deny address-set
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("5. update the peer selector of rule3 in admin network policy so that node1 stops matching; check if address-set is updated")
+				egressRules[2].To[1].Nodes = &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/hostname": "node100"},
+				}
+				anp.ResourceVersion = "5"
+				anp.Spec.Egress = egressRules
+				_, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState[len(expectedDatabaseState)-1].(*nbdb.AddressSet).Addresses = []string{} // node1IP should be removed from v6 pass address-set
+				expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.AddressSet).Addresses = []string{} // node1IP should be removed from v4 pass address-set
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("6. delete node matching peer selector; check if IPs are updated in address-sets")
+				err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node2Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState[len(expectedDatabaseState)-5].(*nbdb.AddressSet).Addresses = []string{anpPodV6IP2} // node2IP should be removed from v6 deny address-set
+				expectedDatabaseState[len(expectedDatabaseState)-6].(*nbdb.AddressSet).Addresses = []string{anpPodV4IP2} // node2IP should be removed to v4 deny address-set
+				expectedDatabaseState[len(expectedDatabaseState)-3].(*nbdb.AddressSet).Addresses = []string{node1IPv6}   // node2IP should be removed from v6 allow address-set
+				expectedDatabaseState[len(expectedDatabaseState)-4].(*nbdb.AddressSet).Addresses = []string{node1IPv4}   // node2IP should be removed to v4 allow address-set
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("7. update the ANP by deleting all rules; check if all objects are deleted correctly")
+				anp.Spec.Egress = []anpapi.AdminNetworkPolicyEgressRule{}
+				anp.ResourceVersion = "7"
+				anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				pg = getDefaultPGForANPSubject(anp.Name, []string{t.portUUID}, nil, false)
+				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("8. delete the ANP; check if all objects are deleted correctly")
+				anp.ResourceVersion = "8"
+				err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Delete(context.TODO(), anp.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState = []libovsdbtest.TestData{subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6} // port group should be deleted
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
