@@ -35,6 +35,7 @@ type BasicNetInfo interface {
 	Subnets() []config.CIDRNetworkEntry
 	ExcludeSubnets() []*net.IPNet
 	Vlan() uint
+	AllowsPersistentIPs() bool
 
 	// utility methods
 	CompareNetInfo(BasicNetInfo) bool
@@ -127,12 +128,18 @@ func (nInfo *DefaultNetInfo) Vlan() uint {
 	return config.Gateway.VLANID
 }
 
+// AllowsPersistentIPs returns the defaultNetConfInfo's AllowPersistentIPs value
+func (nInfo *DefaultNetInfo) AllowsPersistentIPs() bool {
+	return false
+}
+
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
 type secondaryNetInfo struct {
-	netName  string
-	topology string
-	mtu      int
-	vlan     uint
+	netName            string
+	topology           string
+	mtu                int
+	vlan               uint
+	allowPersistentIPs bool
 
 	ipv4mode, ipv6mode bool
 	subnets            []config.CIDRNetworkEntry
@@ -203,6 +210,11 @@ func (nInfo *secondaryNetInfo) Vlan() uint {
 	return nInfo.vlan
 }
 
+// AllowsPersistentIPs returns the defaultNetConfInfo's AllowPersistentIPs value
+func (nInfo *secondaryNetInfo) AllowsPersistentIPs() bool {
+	return nInfo.allowPersistentIPs
+}
+
 // IPMode returns the ipv4/ipv6 mode
 func (nInfo *secondaryNetInfo) IPMode() (bool, bool) {
 	return nInfo.ipv4mode, nInfo.ipv6mode
@@ -230,6 +242,9 @@ func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
 		return false
 	}
 	if nInfo.vlan != other.Vlan() {
+		return false
+	}
+	if nInfo.allowPersistentIPs != other.AllowsPersistentIPs() {
 		return false
 	}
 
@@ -265,11 +280,12 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	}
 
 	ni := &secondaryNetInfo{
-		netName:        netconf.Name,
-		topology:       types.Layer2Topology,
-		subnets:        subnets,
-		excludeSubnets: excludes,
-		mtu:            netconf.MTU,
+		netName:            netconf.Name,
+		topology:           types.Layer2Topology,
+		subnets:            subnets,
+		excludeSubnets:     excludes,
+		mtu:                netconf.MTU,
+		allowPersistentIPs: netconf.AllowPersistentIPs,
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -282,12 +298,13 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	}
 
 	ni := &secondaryNetInfo{
-		netName:        netconf.Name,
-		topology:       types.LocalnetTopology,
-		subnets:        subnets,
-		excludeSubnets: excludes,
-		mtu:            netconf.MTU,
-		vlan:           uint(netconf.VLANID),
+		netName:            netconf.Name,
+		topology:           types.LocalnetTopology,
+		subnets:            subnets,
+		excludeSubnets:     excludes,
+		mtu:                netconf.MTU,
+		vlan:               uint(netconf.VLANID),
+		allowPersistentIPs: netconf.AllowPersistentIPs,
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -416,6 +433,10 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 		if netconf.NADName != nadName {
 			return nil, fmt.Errorf("net-attach-def name (%s) is inconsistent with config (%s)", nadName, netconf.NADName)
 		}
+	}
+
+	if netconf.AllowPersistentIPs && netconf.Topology == types.Layer3Topology {
+		return nil, fmt.Errorf("layer3 topology does not allow persistent IPs")
 	}
 
 	if netconf.IPAM.Type != "" {

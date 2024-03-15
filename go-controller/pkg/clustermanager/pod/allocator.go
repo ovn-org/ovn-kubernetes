@@ -59,7 +59,9 @@ func NewPodAllocator(
 	// this network might not have IPAM, we will just allocate MAC addresses
 	if util.DoesNetworkRequireIPAM(netInfo) {
 		podAllocator.ipAllocator = ipAllocator
-		podAllocator.ipamClaimsReconciler = claimsReconciler
+		if netInfo.AllowsPersistentIPs() {
+			podAllocator.ipamClaimsReconciler = claimsReconciler
+		}
 	}
 
 	return podAllocator
@@ -78,6 +80,13 @@ func (a *PodAllocator) Init() error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if a.netInfo.AllowsPersistentIPs() && a.ipamClaimsReconciler == nil {
+		return fmt.Errorf(
+			"network %q allows persistent IPs but missing the claims reconciler",
+			a.netInfo.GetNetworkName(),
+		)
 	}
 
 	return nil
@@ -183,7 +192,17 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, network *net
 	hasIPAM := util.DoesNetworkRequireIPAM(a.netInfo)
 	hasIDAllocation := util.DoesNetworkRequireTunnelIDs(a.netInfo)
 
+	hasPersistentIPs := a.netInfo.AllowsPersistentIPs() && hasIPAM
 	hasIPAMClaim := network != nil && network.IPAMClaimReference != ""
+	if hasIPAMClaim && !hasPersistentIPs {
+		klog.Errorf(
+			"Pod %s/%s referencing an IPAMClaim on network %q which does not honor it",
+			pod.GetNamespace(),
+			pod.GetName(),
+			a.netInfo.GetNetworkName(),
+		)
+		hasIPAMClaim = false
+	}
 	if hasIPAMClaim {
 		ipamClaim, err := a.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
 		hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0

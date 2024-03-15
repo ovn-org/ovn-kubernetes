@@ -306,9 +306,10 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 				netInfo, err = util.NewNetInfo(
 					&ovncnitypes.NetConf{
-						NetConf:  types.NetConf{Name: networkName},
-						Topology: ovntypes.Layer2Topology,
-						Subnets:  subnetCIDR,
+						NetConf:            types.NetConf{Name: networkName},
+						Topology:           ovntypes.Layer2Topology,
+						Subnets:            subnetCIDR,
+						AllowPersistentIPs: true,
 					})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			})
@@ -522,6 +523,61 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Consistently(func() error {
 							return namedSubnetAllocator.AllocateIPs(ips)
 						}).Should(gomega.Equal(ip.ErrAllocated))
+
+						return nil
+					}
+
+					gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+				})
+			})
+
+			ginkgo.When("the persistent IPs feature is disabled on the network", func() {
+				ginkgo.It("does not sync the IP pool with existing persistent IP allocations", func() {
+					app.Action = func(ctx *cli.Context) error {
+						var err error
+						netInfo, err = util.NewNetInfo(
+							&ovncnitypes.NetConf{
+								NetConf:  types.NetConf{Name: networkName},
+								Topology: ovntypes.Layer2Topology,
+								Subnets:  subnetCIDR,
+							})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						fakeClient := &util.OVNClusterManagerClientset{
+							KubeClient: fake.NewSimpleClientset(),
+							IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(
+								ipamClaimWithIPAddr(claimName, namespace, networkName, subnetIP),
+							),
+						}
+
+						gomega.Expect(
+							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+								EnableMultiNetwork: true,
+								EnableInterconnect: true},
+							)).To(gomega.Succeed())
+
+						f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						gomega.Expect(f.Start()).To(gomega.Succeed())
+
+						sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, record.NewFakeRecorder(0))
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
+						nc := newNetworkClusterController(
+							namedIDAllocator,
+							netInfo,
+							sncm.ovnClient,
+							sncm.watchFactory,
+						)
+						gomega.Expect(nc.init()).To(gomega.Succeed())
+						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
+
+						ips, err := util.ParseIPNets([]string{subnetIP})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						namedSubnetAllocator := nc.subnetAllocator.ForSubnet(netInfo.GetNetworkName())
+						gomega.Expect(namedSubnetAllocator.AllocateIPs(ips)).To(gomega.Succeed())
 
 						return nil
 					}

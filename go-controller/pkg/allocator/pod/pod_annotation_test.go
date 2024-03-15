@@ -459,6 +459,35 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 		},
 		{
+			// on networks with IPAM, with persistent IPs *not* allowed, but
+			// the pod requests a claim, new IPs are allocated, and rolled back
+			// on failures.
+			name: "IPAM, persistent IPs *not* allowed, requested by pod; new IP address allocated, and rolled back on failures",
+			ipam: true,
+			args: args{
+				network: &nadapi.NetworkSelectionElement{
+					IPAMClaimReference: "my-ipam-claim",
+				},
+				ipamClaim: &ipamclaimsapi.IPAMClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-ipam-claim",
+					},
+					Status: ipamclaimsapi.IPAMClaimStatus{
+						IPs: []string{"192.168.0.200/24"},
+					},
+				},
+				ipAllocator: &ipAllocatorStub{
+					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+				},
+			},
+			wantUpdatedPod:            true,
+			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
+			wantPodAnnotation: &util.PodAnnotation{
+				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+			},
+		},
+		{
 			// on networks with IPAM, and persistent IPs, expect to allocate a
 			// new IP address if the IPAMClaim provided is empty
 			name:                   "IPAM persistent IPs, empty IPAMClaim",
@@ -584,7 +613,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			var netInfo util.NetInfo
 			netInfo = &util.DefaultNetInfo{}
 			nadName := types.DefaultNetworkName
-			if !tt.ipam || tt.idAllocation || tt.persistentIPAllocation {
+			if !tt.ipam || tt.idAllocation || tt.persistentIPAllocation || tt.args.ipamClaim != nil {
 				nadName = util.GetNADName(network.Namespace, network.Name)
 				var subnets string
 				if tt.ipam {
@@ -595,8 +624,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					NetConf: cnitypes.NetConf{
 						Name: network.Name,
 					},
-					NADName: nadName,
-					Subnets: subnets,
+					NADName:            nadName,
+					Subnets:            subnets,
+					AllowPersistentIPs: tt.persistentIPAllocation,
 				})
 				if err != nil {
 					t.Fatalf("failed to create NetInfo: %v", err)
@@ -625,16 +655,14 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			}
 
 			var claimsReconciler persistentips.PersistentAllocations
-			if tt.persistentIPAllocation {
-				dummyDatastore := map[string]ipamclaimsapi.IPAMClaim{}
-				if tt.args.ipamClaim != nil {
-					tt.args.ipamClaim.Namespace = network.Namespace
-					dummyDatastore[fmt.Sprintf("%s/%s", tt.args.ipamClaim.Namespace, tt.args.ipamClaim.Name)] = *tt.args.ipamClaim
-				}
+			dummyDatastore := map[string]ipamclaimsapi.IPAMClaim{}
+			if tt.args.ipamClaim != nil {
+				tt.args.ipamClaim.Namespace = network.Namespace
+				dummyDatastore[fmt.Sprintf("%s/%s", tt.args.ipamClaim.Namespace, tt.args.ipamClaim.Name)] = *tt.args.ipamClaim
+			}
 
-				claimsReconciler = &persistentIPsStub{
-					datastore: dummyDatastore,
-				}
+			claimsReconciler = &persistentIPsStub{
+				datastore: dummyDatastore,
 			}
 
 			pod, podAnnotation, rollback, err := allocatePodAnnotationWithRollback(

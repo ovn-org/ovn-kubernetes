@@ -183,7 +183,7 @@ type BaseSecondaryLayer2NetworkController struct {
 func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.allocatesPodAnnotation() {
+	if oc.allocatesPodAnnotation() && oc.NetInfo.AllowsPersistentIPs() {
 		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
 	}
 
@@ -283,7 +283,7 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 
 	// when on IC, it will be the NetworkController that returns the IPAMClaims
 	// IPs back to the pool
-	if oc.allocatesPodAnnotation() {
+	if oc.allocatesPodAnnotation() && oc.NetInfo.AllowsPersistentIPs() {
 		// WatchIPAMClaims should be started before WatchPods to prevent OVN-K
 		// master assigning IPs to pods without taking into account the persistent
 		// IPs set aside for the IPAMClaims
