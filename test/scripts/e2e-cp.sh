@@ -114,7 +114,6 @@ if [ "$OVN_GATEWAY_MODE" == "local" ]; then
     fi
     SKIPPED_TESTS+="Should be allowed to node local host-networked endpoints by nodeport services|\
 EgressQoS validation|\
-e2e br-int flow monitoring export validation|\
 Should be allowed by nodeport services|\
 Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|\
 Should successfully create then remove a static pod|\
