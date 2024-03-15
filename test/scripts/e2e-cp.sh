@@ -108,11 +108,11 @@ if [ "$OVN_GATEWAY_MODE" == "shared" ]; then
 fi
 
 if [ "$OVN_GATEWAY_MODE" == "local" ]; then
-  if [ "$SKIPPED_TESTS" != "" ]; then
-    SKIPPED_TESTS+="|"
-  fi
   # See https://github.com/ovn-org/ovn-kubernetes/labels/ci-ipv6 for details:
   if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    if [ "$SKIPPED_TESTS" != "" ]; then
+        SKIPPED_TESTS+="|"
+    fi
     SKIPPED_TESTS+="Should be allowed to node local host-networked endpoints by nodeport services|\
 EgressQoS validation|\
 e2e br-int flow monitoring export validation|\
