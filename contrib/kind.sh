@@ -1182,6 +1182,12 @@ install_mpolicy_crd() {
   run_kubectl apply -f "$mpolicy_manifest"
 }
 
+install_ipamclaim_crd() {
+  echo "Installing IPAMClaim CRD ..."
+  ipamclaims_manifest="https://raw.githubusercontent.com/maiqueb/persistentips/main/artifacts/k8s.cni.cncf.io_ipamclaims.yaml"
+  run_kubectl apply -f "$ipamclaims_manifest"
+}
+
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
 # DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
 # Next, it iterates over all pods with name=ovnkube-db and ovnkube-master and waits for them to post "Ready".
@@ -1393,11 +1399,19 @@ function install_kubevirt() {
 
     echo "Deploy latest nighly build Kubevirt"
     if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
-      kubectl apply -f "${kubevirt_release_url}/kubevirt-operator.yaml"
+      local virt_controller_image=quay.io/ellorent/virt-controller:persistentips
+      local virt_handler_image=quay.io/ellorent/virt-handler:persistentips
+      local virt_operator_image=quay.io/ellorent/virt-operator:persistentips
+      curl -L "https://gist.githubusercontent.com/qinqon/865a4c0f3a99299b4a0f8efc591fa84c/raw/dcbea4ddb043d86195c1ad5399f4ac86488592cb/kubevirt-operator.yaml" | \
+          sed "s#env:#env:\n        - name: VIRT_CONTROLLER_IMAGE\n          value: $virt_controller_image#" | \
+          sed "s#env:#env:\n        - name: VIRT_HANDLER_IMAGE\n          value: $virt_handler_image#" | \
+          sed "s#quay.io/kubevirt/virt-operator:$kubevirt_version#$virt_operator_image#g" | \
+          kubectl apply -f -
       kubectl apply -f "${kubevirt_release_url}/kubevirt-cr.yaml"
       if ! is_nested_virt_enabled; then
         kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
       fi
+      kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"featureGates":["PersistentIPs"]}}}}'
       kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"virtualMachineOptions":{"disableSerialConsoleLog":{}}}}}'
     fi
     if ! kubectl wait -n kubevirt kv kubevirt --for condition=Available --timeout 15m; then
@@ -1479,6 +1493,7 @@ fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
   install_multus
   install_mpolicy_crd
+  install_ipamclaim_crd
   docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
 fi
 kubectl_wait_pods

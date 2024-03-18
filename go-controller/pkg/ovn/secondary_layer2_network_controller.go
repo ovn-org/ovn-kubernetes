@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -60,10 +61,27 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	}
 
 	if oc.allocatesPodAnnotation() {
-		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
+		var podAnnotationAllocator pod.AnnotationAllocator = pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube)
+		if netInfo.AllowsPersistentIPs() && util.DoesNetworkRequireIPAM(netInfo) {
+			ipamClaimsAllocator := persistentips.NewPersistentIPsAllocator(
+				cnci.kube,
+				oc.lsManager.ForSwitch(oc.GetNetworkScopedName(types.OVNLayer2Switch)),
+				netInfo.GetNetworkName(),
+			)
+			fetcher := persistentips.NewIPAMClaimsFetcher(netInfo, cnci.watchFactory.IPAMClaimsInformer().Lister())
+			podAnnotationAllocator = pod.NewPodAnnotationAllocatorWithPersistentIPs(
+				netInfo,
+				cnci.watchFactory.PodCoreInformer().Lister(),
+				cnci.kube,
+				ipamClaimsAllocator,
+				fetcher,
+			)
+			oc.ipamClaimsFetcher = fetcher
+			oc.persistentIPsAllocator = ipamClaimsAllocator
+		}
 		oc.podAnnotationAllocator = podAnnotationAllocator
 	}
 
