@@ -169,7 +169,7 @@ func getANPGressACL(action, anpName, direction string, rulePriority int32,
 				l4PortMatch = fmt.Sprintf("%s && %s.dst==%d", protocol, protocol, port.PortNumber.Port)
 			} else if port.PortRange != nil && port.PortRange.End != 0 && port.PortRange.Start != port.PortRange.End {
 				protocol = strings.ToLower(string(port.PortRange.Protocol))
-				l4PortMatch = fmt.Sprintf("%s && %d<=%s.dst<=%d", protocol, port.PortRange.Start, protocol, port.PortRange.Start)
+				l4PortMatch = fmt.Sprintf("%s && %d<=%s.dst<=%d", protocol, port.PortRange.Start, protocol, port.PortRange.End)
 			}
 			aclCopy.Match = fmt.Sprintf("%s && %s", acl.Match, l4PortMatch)
 			aclCopy.UUID = fmt.Sprintf("%s_%s_%d.%d-%f-UUID", anpName, direction, ruleIndex, i, rand.Float64())
@@ -884,6 +884,139 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+		ginkgo.It("PortNumber and PortRange Rules for ANP", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+				fakeOVN.start()
+				fakeOVN.InitAndRunANPController()
+				fakeOVN.fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("update", "adminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+					update := action.(clienttesting.UpdateAction)
+					// Since fake client (NewSimpleClientset) does not differentiate between
+					// an update and updatestatus, updatestatus in tests updates the spec as
+					// well causing race conditions. Thus adding a hack here to ensure update
+					// status is caught and processed by the reactor while update spec is
+					// delegated to the main code for handling
+					if action.GetSubresource() == "status" {
+						klog.Infof("Got an update status action for %v", update.GetObject())
+						return true, update.GetObject(), nil
+					}
+					klog.Infof("Got an update spec action for %v", update.GetObject())
+					return false, update.GetObject(), nil
+				})
+				ginkgo.By("1. Create ANP with 1 ingress rule and 2 egress rule with multiple Ports combinations")
+				anpSubject := newANPSubjectObject(
+					&metav1.LabelSelector{
+						MatchLabels: anpLabel,
+					},
+					nil,
+				)
+				anpPortMangle := []anpapi.AdminNetworkPolicyPort{
+					{
+						PortNumber: &anpapi.Port{
+							Port:     36363,
+							Protocol: v1.ProtocolTCP,
+						},
+					},
+					{
+						PortRange: &anpapi.PortRange{
+							Start:    36330,
+							End:      36550,
+							Protocol: v1.ProtocolSCTP,
+						},
+					},
+					{
+						PortRange: &anpapi.PortRange{
+							Start:    36330,
+							End:      36550,
+							Protocol: v1.ProtocolUDP,
+						},
+					},
+				}
+				anp := newANPObject("harry-potter", 75, anpSubject,
+					[]anpapi.AdminNetworkPolicyIngressRule{
+						{
+							Name:   "deny-traffic-from-slytherin-to-gryffindor",
+							Action: anpapi.AdminNetworkPolicyRuleActionDeny,
+							From: []anpapi.AdminNetworkPolicyIngressPeer{
+								{
+									Namespaces: &anpapi.NamespacedPeer{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchLabels: peerDenyLabel,
+										},
+									},
+								},
+							},
+							Ports: &anpPortMangle,
+						},
+					},
+					[]anpapi.AdminNetworkPolicyEgressRule{
+						{
+							Name:   "pass-traffic-to-slytherin-from-gryffindor",
+							Action: anpapi.AdminNetworkPolicyRuleActionPass,
+							To: []anpapi.AdminNetworkPolicyEgressPeer{
+								{
+									Namespaces: &anpapi.NamespacedPeer{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchLabels: peerPassLabel,
+										},
+									},
+								},
+							},
+							Ports: &anpPortMangle,
+						},
+						{
+							Name:   "allow-traffic-to-hufflepuff-from-gryffindor",
+							Action: anpapi.AdminNetworkPolicyRuleActionAllow,
+							To: []anpapi.AdminNetworkPolicyEgressPeer{
+								{
+									Namespaces: &anpapi.NamespacedPeer{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchLabels: peerAllowLabel,
+										},
+									},
+								},
+							},
+							Ports: &anpPortMangle,
+						},
+					},
+				)
+				anp.ResourceVersion = "1"
+				anp, err := fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Create(context.TODO(), anp, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				acls := getACLsForANPRules(anp)
+				pg := getDefaultPGForANPSubject(anp.Name, []string{}, acls, false)
+				expectedDatabaseState := []libovsdbtest.TestData{pg}
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				peerASIngressRule0v4, peerASIngressRule0v6 := buildANPAddressSets(anp, 0, []net.IP{}, libovsdbutil.ACLIngress) // address-set will be empty since no pods match it yet
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
+				peerASEgressRule0v4, peerASEgressRule0v6 := buildANPAddressSets(anp, 0, []net.IP{}, libovsdbutil.ACLEgress)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
+				peerASEgressRule1v4, peerASEgressRule1v6 := buildANPAddressSets(anp, 1, []net.IP{}, libovsdbutil.ACLEgress)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v6)
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("2. Update ANP by changing port range in ingress rule and ensure its honoured")
+				anp.ResourceVersion = "2"
+				anpPortMangle[1].PortRange.End = 60000
+				anp.Spec.Ingress[0].Ports = &anpPortMangle
+				_, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				ingressACL := expectedDatabaseState[2] // ingress SCTP ACL
+				acl := ingressACL.(*nbdb.ACL)
+				_ = strings.Replace(acl.Match, "36550", "60000", 1)
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 				return nil
 			}
 			err := app.Run([]string{app.Name})

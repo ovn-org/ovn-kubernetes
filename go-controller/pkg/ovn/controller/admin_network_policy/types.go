@@ -174,7 +174,7 @@ func newAdminNetworkPolicyPort(raw anpapi.AdminNetworkPolicyPort) *libovsdbutil.
 	} else if raw.NamedPort != nil {
 		// TODO: Add support for this
 	} else {
-		anpPort = libovsdbutil.GetNetworkPolicyPort(raw.PortNumber.Protocol, raw.PortRange.Start, raw.PortRange.End)
+		anpPort = libovsdbutil.GetNetworkPolicyPort(raw.PortRange.Protocol, raw.PortRange.Start, raw.PortRange.End)
 	}
 	return anpPort
 }
