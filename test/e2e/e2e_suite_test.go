@@ -11,6 +11,7 @@ import (
 	"github.com/onsi/ginkgo/v2/config"
 	"github.com/onsi/ginkgo/v2/reporters"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/diagnostics"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -25,6 +26,7 @@ import (
 func handleFlags() {
 	e2econfig.CopyFlags(e2econfig.Flags, flag.CommandLine)
 	framework.RegisterCommonFlags(flag.CommandLine)
+	diagnostics.RegisterFlags(flag.CommandLine)
 	/*
 		Using framework.RegisterClusterFlags(flag.CommandLine) results in a panic:
 		"flag redefined: kubeconfig".
