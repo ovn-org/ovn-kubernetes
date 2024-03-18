@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/diagnostics"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/kubevirt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -63,6 +64,7 @@ func newControllerRuntimeClient() (crclient.Client, error) {
 var _ = Describe("Kubevirt Virtual Machines", func() {
 	var (
 		fr                 = wrappedTestFramework("kv-live-migration")
+		d                  = diagnostics.New(fr)
 		crClient           crclient.Client
 		namespace          string
 		tcpServerPort      = int32(9900)
@@ -281,9 +283,13 @@ passwd:
 				return nil, err
 			}
 			endpoints := []*net.TCPConn{}
+			nodePort := fmt.Sprintf("%d", svc.Spec.Ports[0].NodePort)
+			port := fmt.Sprintf("%d", svc.Spec.Ports[0].Port)
+
+			d.TCPDumpDaemonSet([]string{"any", "eth0", "breth0"}, fmt.Sprintf("port %s or port %s", port, nodePort))
 			for _, address := range worker.Status.Addresses {
 				if address.Type != corev1.NodeHostName {
-					addr := net.JoinHostPort(address.Address, fmt.Sprintf("%d", svc.Spec.Ports[0].NodePort))
+					addr := net.JoinHostPort(address.Address, nodePort)
 					conn, err := dial(addr)
 					if err != nil {
 						return endpoints, err
@@ -746,6 +752,10 @@ passwd:
 		)
 
 		Expect(err).ToNot(HaveOccurred())
+
+		d.ConntrackDumpingDaemonSet()
+		d.OVSFlowsDumpingDaemonSet("breth0")
+		d.IPTablesDumpingDaemonSet()
 
 		bandwidthPerMigration := resource.MustParse("40Mi")
 		forcePostCopyMigrationPolicy := &kvmigrationsv1alpha1.MigrationPolicy{
