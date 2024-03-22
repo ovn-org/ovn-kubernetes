@@ -1,6 +1,7 @@
 package adminnetworkpolicy
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -10,6 +11,8 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 )
 
@@ -105,4 +108,57 @@ func constructMatchFromAddressSet(gressPrefix string, addrSetIndex *libovsdbops.
 	}
 
 	return fmt.Sprintf("(%s)", match)
+}
+
+// getACLLoggingLevelsForANP takes the ANP's annotations:
+// if the "k8s.ovn.org/acl-logging" is set, it parses it
+// if parsed values are correct, then it returns those aclLogLevels
+// if annotation is not set or parsed values are incorrect/invalid, then it returns empty aclLogLevels which implies logging is disabled
+func getACLLoggingLevelsForANP(annotations map[string]string) (*libovsdbutil.ACLLoggingLevels, error) {
+	aclLogLevels := &libovsdbutil.ACLLoggingLevels{
+		Allow: "", Deny: "", Pass: "",
+	}
+	annotation, ok := annotations[util.AclLoggingAnnotation]
+	if !ok {
+		return aclLogLevels, nil
+	}
+	// If the annotation is "" or "{}", use empty strings. Otherwise, parse the annotation.
+	if annotation != "" && annotation != "{}" {
+		err := json.Unmarshal([]byte(annotation), aclLogLevels)
+		if err != nil {
+			// Disable Allow, Deny, Pass logging to ensure idempotency.
+			aclLogLevels.Allow = ""
+			aclLogLevels.Deny = ""
+			aclLogLevels.Pass = ""
+			return aclLogLevels, fmt.Errorf("could not unmarshal ANP ACL annotation '%s', disabling logging, err: %q",
+				annotation, err)
+		}
+	}
+
+	// Valid log levels are the various preestablished levels or the empty string.
+	validLogLevels := sets.NewString(nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
+		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug, "")
+	var errors []error
+	// Ensure value parsed is valid
+	// Set Deny logging.
+	if !validLogLevels.Has(aclLogLevels.Deny) {
+		errors = append(errors, fmt.Errorf("disabling deny logging due to an invalid deny annotation. "+
+			"%q is not a valid log severity", aclLogLevels.Deny))
+		aclLogLevels.Deny = ""
+	}
+
+	// Set Allow logging.
+	if !validLogLevels.Has(aclLogLevels.Allow) {
+		errors = append(errors, fmt.Errorf("disabling allow logging due to an invalid allow annotation. "+
+			"%q is not a valid log severity", aclLogLevels.Allow))
+		aclLogLevels.Allow = ""
+	}
+
+	// Set Pass logging.
+	if !validLogLevels.Has(aclLogLevels.Pass) {
+		errors = append(errors, fmt.Errorf("disabling pass logging due to an invalid pass annotation. "+
+			"%q is not a valid log severity", aclLogLevels.Pass))
+		aclLogLevels.Pass = ""
+	}
+	return aclLogLevels, apierrors.NewAggregate(errors)
 }

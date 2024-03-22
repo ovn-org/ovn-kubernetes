@@ -127,9 +127,8 @@ func BuildACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string
 	return ACL
 }
 
-func BuildANPACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string, aclT ACLPipelineType) *nbdb.ACL {
-	// TODO(tssurya): Logging related parameters are nil for now, will fix this in future PRs when I add support for ANP-Logging
-	anpACL := BuildACL(dbIDs, priority, match, action, nil, aclT)
+func BuildANPACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string, aclT ACLPipelineType, logLevels *ACLLoggingLevels) *nbdb.ACL {
+	anpACL := BuildACL(dbIDs, priority, match, action, logLevels, aclT)
 	anpACL.Tier = GetACLTier(dbIDs)
 	return anpACL
 }
@@ -166,6 +165,7 @@ func GetACLMatch(portGroupName, match string, aclDir ACLDirection) string {
 type ACLLoggingLevels struct {
 	Allow string `json:"allow,omitempty"`
 	Deny  string `json:"deny,omitempty"`
+	Pass  string `json:"pass,omitempty"`
 }
 
 func getLogSeverity(action string, aclLogging *ACLLoggingLevels) (log bool, severity string) {
@@ -175,6 +175,8 @@ func getLogSeverity(action string, aclLogging *ACLLoggingLevels) (log bool, seve
 			severity = aclLogging.Allow
 		} else if action == nbdb.ACLActionDrop || action == nbdb.ACLActionReject {
 			severity = aclLogging.Deny
+		} else if action == nbdb.ACLActionPass {
+			severity = aclLogging.Pass
 		}
 	}
 	log = severity != ""

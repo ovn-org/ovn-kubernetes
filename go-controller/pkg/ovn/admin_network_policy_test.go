@@ -100,8 +100,6 @@ func getANPGressACL(action, anpName, direction string, rulePriority int32,
 	// we are not using BuildACL and instead manually building it on purpose so that the code path for BuildACL is also tested
 	acl := nbdb.ACL{}
 	acl.Action = action
-	// TODO(tssurya): Hardcoding logging related parameters for now.
-	// Will fix this in future PRs when I add support for ANP-Logging
 	acl.Severity = nil
 	acl.Log = false
 	acl.Meter = utilpointer.String(types.OvnACLLoggingMeter)
@@ -1136,6 +1134,149 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					"priority 100 because, OVNK only supports priority ranges 0-99"))
 				gomega.Expect(anp.Status.Conditions[0].Reason).To(gomega.Equal("SetupFailed"))
 				gomega.Expect(anp.Status.Conditions[0].Status).To(gomega.Equal(metav1.ConditionFalse))
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+		ginkgo.It("ACL Logging for ANP", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+				fakeOVN.start()
+				fakeOVN.InitAndRunANPController()
+				fakeOVN.fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("update", "adminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+					update := action.(clienttesting.UpdateAction)
+					// Since fake client (NewSimpleClientset) does not differentiate between
+					// an update and updatestatus, updatestatus in tests updates the spec as
+					// well causing race conditions. Thus adding a hack here to ensure update
+					// status is caught and processed by the reactor while update spec is
+					// delegated to the main code for handling
+					if action.GetSubresource() == "status" {
+						klog.Infof("Got an update status action for %v", update.GetObject())
+						return true, update.GetObject(), nil
+					}
+					klog.Infof("Got an update spec action for %v", update.GetObject())
+					return false, update.GetObject(), nil
+				})
+				ginkgo.By("1. Create ANP with 1 ingress rule and 2 egress rules with the ACL logging annotation and ensure its honoured")
+				anpSubject := newANPSubjectObject(
+					&metav1.LabelSelector{
+						MatchLabels: anpLabel,
+					},
+					nil,
+				)
+				anp := newANPObject("harry-potter", 75, anpSubject,
+					[]anpapi.AdminNetworkPolicyIngressRule{
+						{
+							Name:   "deny-traffic-from-slytherin-to-gryffindor",
+							Action: anpapi.AdminNetworkPolicyRuleActionDeny,
+							From: []anpapi.AdminNetworkPolicyIngressPeer{
+								{
+									Namespaces: &anpapi.NamespacedPeer{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchLabels: peerDenyLabel,
+										},
+									},
+								},
+							},
+						},
+					},
+					[]anpapi.AdminNetworkPolicyEgressRule{
+						{
+							Name:   "pass-traffic-to-slytherin-from-gryffindor",
+							Action: anpapi.AdminNetworkPolicyRuleActionPass,
+							To: []anpapi.AdminNetworkPolicyEgressPeer{
+								{
+									Namespaces: &anpapi.NamespacedPeer{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchLabels: peerPassLabel,
+										},
+									},
+								},
+							},
+						},
+						{
+							Name:   "allow-traffic-to-hufflepuff-from-gryffindor",
+							Action: anpapi.AdminNetworkPolicyRuleActionAllow,
+							To: []anpapi.AdminNetworkPolicyEgressPeer{
+								{
+									Namespaces: &anpapi.NamespacedPeer{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchLabels: peerAllowLabel,
+										},
+									},
+								},
+							},
+						},
+					},
+				)
+				anp.ResourceVersion = "1"
+				anp.Annotations = map[string]string{
+					util.AclLoggingAnnotation: fmt.Sprintf(`{ "deny": "%s", "allow": "%s", "pass": "%s" }`, nbdb.ACLSeverityAlert, nbdb.ACLSeverityInfo, nbdb.ACLSeverityNotice),
+				}
+				anp, err := fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Create(context.TODO(), anp, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				acls := getACLsForANPRules(anp)
+				pg := getDefaultPGForANPSubject(anp.Name, []string{}, acls, false)
+				expectedDatabaseState := []libovsdbtest.TestData{pg}
+				for _, acl := range acls {
+					acl := acl
+					// update ACL logging information
+					acl.Log = true
+					if acl.Action == nbdb.ACLActionPass {
+						acl.Severity = utilpointer.String(nbdb.ACLSeverityNotice)
+					} else if acl.Action == nbdb.ACLActionDrop {
+						acl.Severity = utilpointer.String(nbdb.ACLSeverityAlert)
+					} else if acl.Action == nbdb.ACLActionAllowRelated {
+						acl.Severity = utilpointer.String(nbdb.ACLSeverityInfo)
+					}
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				peerASIngressRule0v4, peerASIngressRule0v6 := buildANPAddressSets(anp, 0, []net.IP{}, libovsdbutil.ACLIngress) // address-set will be empty since no pods match it yet
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
+				peerASEgressRule0v4, peerASEgressRule0v6 := buildANPAddressSets(anp, 0, []net.IP{}, libovsdbutil.ACLEgress)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
+				peerASEgressRule1v4, peerASEgressRule1v6 := buildANPAddressSets(anp, 1, []net.IP{}, libovsdbutil.ACLEgress)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v6)
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("2. Update ANP by changing severity on the ACL logging annotation and ensure its honoured")
+				anp.ResourceVersion = "2"
+				anp.Annotations = map[string]string{
+					util.AclLoggingAnnotation: fmt.Sprintf(`{ "deny": "%s", "allow": "%s", "pass": "%s" }`, nbdb.ACLSeverityWarning, nbdb.ACLSeverityDebug, nbdb.ACLSeverityInfo),
+				}
+				anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				for _, acl := range expectedDatabaseState[1:4] {
+					acl := acl.(*nbdb.ACL)
+					// update ACL logging information
+					acl.Log = true
+					if acl.Action == nbdb.ACLActionPass {
+						acl.Severity = utilpointer.String(nbdb.ACLSeverityInfo)
+					} else if acl.Action == nbdb.ACLActionDrop {
+						acl.Severity = utilpointer.String(nbdb.ACLSeverityWarning)
+					} else if acl.Action == nbdb.ACLActionAllowRelated {
+						acl.Severity = utilpointer.String(nbdb.ACLSeverityDebug)
+					}
+				}
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("3. Update ANP by deleting the ACL logging annotation and ensure its honoured")
+				anp.ResourceVersion = "3"
+				anp.Annotations = map[string]string{}
+				anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				for _, acl := range expectedDatabaseState[1:4] {
+					acl := acl.(*nbdb.ACL)
+					// update ACL logging information
+					acl.Log = false
+					acl.Severity = nil
+				}
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 				return nil
 			}
 			err := app.Run([]string{app.Name})

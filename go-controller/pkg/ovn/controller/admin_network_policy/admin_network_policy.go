@@ -181,7 +181,7 @@ func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adm
 		len(currentANPState.ingressRules) == len(desiredANPState.ingressRules) &&
 		len(currentANPState.egressRules) == len(desiredANPState.egressRules))
 	for i, ingressRule := range desiredANPState.ingressRules {
-		acl := c.convertANPRuleToACL(ingressRule, pgName, desiredANPState.name, isBanp)
+		acl := c.convertANPRuleToACL(ingressRule, pgName, desiredANPState.name, desiredANPState.aclLoggingParams, isBanp)
 		acls = append(acls, acl...)
 		if isAtLeastOneRuleUpdatedCheckRequired &&
 			!*atLeastOneRuleUpdated &&
@@ -191,7 +191,7 @@ func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adm
 		}
 	}
 	for i, egressRule := range desiredANPState.egressRules {
-		acl := c.convertANPRuleToACL(egressRule, pgName, desiredANPState.name, isBanp)
+		acl := c.convertANPRuleToACL(egressRule, pgName, desiredANPState.name, desiredANPState.aclLoggingParams, isBanp)
 		acls = append(acls, acl...)
 		if isAtLeastOneRuleUpdatedCheckRequired &&
 			!*atLeastOneRuleUpdated &&
@@ -206,7 +206,7 @@ func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adm
 
 // convertANPRuleToACL takes the given gressRule and converts it into an ACL(0 ports rule) or
 // multiple ACLs(ports are set) and returns those ACLs for a given gressRule
-func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string, isBanp bool) []*nbdb.ACL {
+func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string, aclLoggingParams *libovsdbutil.ACLLoggingLevels, isBanp bool) []*nbdb.ACL {
 	// create address-set
 	// TODO (tssurya): Revisit this logic to see if its better to do one address-set per peer
 	// and join them with OR if that is more perf efficient. Had briefly discussed this OVN team
@@ -234,6 +234,7 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 			match,
 			rule.action,
 			libovsdbutil.ACLDirectionToACLPipeline(libovsdbutil.ACLDirection(rule.gressPrefix)),
+			aclLoggingParams,
 		)
 		acls = append(acls, acl)
 	}
@@ -515,6 +516,11 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 		}
 		ops = append(ops, addrOps...)
 	}
+	hasACLLoggingParamsChanged := currentANPState.aclLoggingParams.Allow != desiredANPState.aclLoggingParams.Allow ||
+		currentANPState.aclLoggingParams.Deny != desiredANPState.aclLoggingParams.Deny
+	if !isBanp {
+		hasACLLoggingParamsChanged = hasACLLoggingParamsChanged || currentANPState.aclLoggingParams.Pass != desiredANPState.aclLoggingParams.Pass
+	}
 	// TODO(tssurya): Check if we can be more efficient by narrowing down exactly which ACL needs a change
 	// The rules which didn't change -> those updates will be no-ops thanks to libovsdb
 	// The rules that changed in terms of their `getACLMutableFields`
@@ -524,7 +530,8 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	// (1) fullPeerRecompute=true which means the rules were of different lengths (involved deletion or appending of gress rules)
 	// (2) atLeastOneRuleUpdated=true which means the gress rules were of same lengths but action or ports changed on at least one rule
 	// (3) hasPriorityChanged=true which means we should update acl.Priority for every ACL
-	if fullPeerRecompute || atLeastOneRuleUpdated || hasPriorityChanged {
+	// (4) hasACLLoggingParamsChanged=true which means we should update acl.Severity/acl.Log for every ACL
+	if fullPeerRecompute || atLeastOneRuleUpdated || hasPriorityChanged || hasACLLoggingParamsChanged {
 		klog.V(3).Infof("ANP %s with priority %d was updated", desiredANPState.name, desiredANPState.anpPriority)
 		// now update the acls to the desired ones
 		ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, desiredACLs...)

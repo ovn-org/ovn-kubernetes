@@ -19,10 +19,10 @@ import (
 )
 
 const (
-	logSeverityNamespaceAnnotation = "k8s.ovn.org/acl-logging"
-	maxPokeRetries                 = 15
-	ovnControllerLogPath           = "/var/log/openvswitch/ovn-controller.log"
-	pokeInterval                   = 1 * time.Second
+	logSeverityAnnotation = "k8s.ovn.org/acl-logging"
+	maxPokeRetries        = 15
+	ovnControllerLogPath  = "/var/log/openvswitch/ovn-controller.log"
+	pokeInterval          = 1 * time.Second
 )
 
 var _ = Describe("ACL Logging for NetworkPolicy", func() {
@@ -163,6 +163,332 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 	})
 })
 
+var _ = Describe("ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPolicy", func() {
+	const (
+		initialDenyACLSeverity  = "alert"
+		initialAllowACLSeverity = "notice"
+		initialPassACLSeverity  = "warning"
+		denyACLVerdict          = "drop"
+		allowACLVerdict         = "allow"
+		anpName                 = "harry-potter"
+	)
+	fr := wrappedTestFramework("anp-subject")
+	var (
+		pods    []v1.Pod
+		nsNames [4]string
+	)
+	BeforeEach(func() {
+		By("creating an admin network policy")
+		err := makeAdminNetworkPolicy(anpName, "10", fr.Namespace.Name)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("configuring the ACL logging level for the ANP")
+		Expect(setANPACLLogSeverity(anpName, initialDenyACLSeverity, initialAllowACLSeverity, initialPassACLSeverity)).To(Succeed())
+
+		By("creating peer namespaces that are selected by the admin network policy")
+		nsNames[0] = fr.Namespace.Name
+		nsNames[1] = "anp-peer-restricted"
+		nsNames[2] = "anp-peer-open"
+		nsNames[3] = "anp-peer-unknown"
+		for _, ns := range nsNames[1:] {
+			_, err = e2ekubectl.RunKubectl("default", "create", "ns", ns)
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		By("creating pods in subject and peer namespaces")
+		cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
+		for _, ns := range nsNames {
+			pod := newAgnhostPod(ns, fmt.Sprintf("pod-%s", ns), cmd...)
+			pod = e2epod.PodClientNS(fr, ns).CreateSync(context.TODO(), pod)
+			Expect(waitForACLLoggingPod(fr, ns, pod.GetName())).To(Succeed())
+			pods = append(pods, *pod)
+			framework.Logf("Created %s in namespace %s", pod.Name, pod.Namespace)
+		}
+	})
+	AfterEach(func() {
+		By("deleting the admin network policy")
+		_, err := e2ekubectl.RunKubectl("default", "delete", "anp", anpName, "--ignore-not-found=true")
+		Expect(err).NotTo(HaveOccurred())
+		By("deleting the baseline admin network policy")
+		_, err = e2ekubectl.RunKubectl("default", "delete", "banp", "default", "--ignore-not-found=true")
+		Expect(err).NotTo(HaveOccurred())
+		By("deleting subject and peer namespaces that are selected by the admin network policy")
+		for _, ns := range nsNames {
+			_, err := e2ekubectl.RunKubectl("default", "delete", "ns", ns, "--ignore-not-found=true")
+			Expect(err).NotTo(HaveOccurred())
+		}
+	})
+
+	It("the ANP ACL logs have the expected log level", func() {
+
+		By("sending traffic between acl-logging test pods we trigger ALLOW ACL logging")
+		clientPod := pods[0] // subject pod
+		pokedPod := pods[1]  // peer pod
+		framework.Logf(
+			"Poke pod %s (on node %s) from pod %s (on node %s)",
+			pokedPod.GetName(),
+			pokedPod.Spec.NodeName,
+			clientPod.GetName(),
+			clientPod.Spec.NodeName)
+		Expect(
+			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).NotTo(HaveOccurred(),
+			"traffic should be allowed since we use an ALLOW all traffic policy rule")
+
+		By("verify the ALLOW ACL log level at Tier1")
+		clientPodScheduledPodName := pods[0].Spec.NodeName
+		// Retry here in the case where OVN acls have not been programmed yet
+		composedPolicyNameRegex := fmt.Sprintf("ANP:%s:Egress:0", anpName)
+		Eventually(func() (bool, error) {
+			return assertACLLogs(
+				clientPodScheduledPodName,
+				composedPolicyNameRegex,
+				allowACLVerdict,
+				initialAllowACLSeverity)
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+
+		By("sending traffic between acl-logging test pods we trigger DENY ACL logging")
+		clientPod = pods[0] // subject pod
+		pokedPod = pods[2]  // peer pod
+		framework.Logf(
+			"Poke pod %s (on node %s) from pod %s (on node %s)",
+			pokedPod.GetName(),
+			pokedPod.Spec.NodeName,
+			clientPod.GetName(),
+			clientPod.Spec.NodeName)
+		Expect(
+			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
+			"traffic should be denied since we use an DENY all traffic policy rule")
+
+		By("verify the DENY ACL log level at Tier1")
+		clientPodScheduledPodName = pods[0].Spec.NodeName
+		// Retry here in the case where OVN acls have not been programmed yet
+		composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:1", anpName)
+		Eventually(func() (bool, error) {
+			return assertACLLogs(
+				clientPodScheduledPodName,
+				composedPolicyNameRegex,
+				denyACLVerdict,
+				initialDenyACLSeverity)
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+
+		By("sending traffic between acl-logging test pods we trigger PASS ACL logging")
+		clientPod = pods[0] // subject pod
+		pokedPod = pods[3]  // peer pod
+		framework.Logf(
+			"Poke pod %s (on node %s) from pod %s (on node %s)",
+			pokedPod.GetName(),
+			pokedPod.Spec.NodeName,
+			clientPod.GetName(),
+			clientPod.Spec.NodeName)
+		Expect(
+			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).NotTo(HaveOccurred(),
+			"traffic should be allowed since we only use an PASS all traffic policy rule")
+
+		// Re-enable when https://issues.redhat.com/browse/FDP-442 is fixed
+		/*By("verify the PASS ACL log level at Tier1")
+		clientPodScheduledPodName = pods[0].Spec.NodeName
+		// Retry here in the case where OVN acls have not been programmed yet
+		composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:2", anpName)
+		time.Sleep(time.Hour)
+		Eventually(func() (bool, error) {
+			return assertACLLogs(
+				clientPodScheduledPodName,
+				composedPolicyNameRegex,
+				allowACLVerdict,
+				initialPassACLSeverity)
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())*/
+
+		By("creating a baseline admin network policy")
+		err := makeBaselineAdminNetworkPolicy(fr.Namespace.Name)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("configuring the ACL logging level for the BANP")
+		Expect(setBANPACLLogSeverity(initialDenyACLSeverity, initialAllowACLSeverity)).To(Succeed())
+
+		// BANP Deny will be hit
+		By("sending traffic between acl-logging test pods we trigger PASS ACL logging followed by DENY ACL logging(BANP)")
+		clientPod = pods[0] // subject pod
+		pokedPod = pods[3]  // peer pod
+		framework.Logf(
+			"Poke pod %s (on node %s) from pod %s (on node %s)",
+			pokedPod.GetName(),
+			pokedPod.Spec.NodeName,
+			clientPod.GetName(),
+			clientPod.Spec.NodeName)
+		Expect(
+			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
+			"traffic should be blocked since we use an PASS traffic policy followed by a deny at lower tier")
+
+		By("verify the DENY ACL log level at Tier3")
+		clientPodScheduledPodName = pods[0].Spec.NodeName
+		composedPolicyNameRegex = "BANP:default:Egress:1"
+		// Retry here in the case where OVN acls have not been programmed yet
+		Eventually(func() (bool, error) {
+			return assertACLLogs(
+				clientPodScheduledPodName,
+				composedPolicyNameRegex,
+				denyACLVerdict,
+				initialDenyACLSeverity)
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+
+		By("updating the ACL logging level for the ANP")
+		Expect(setANPACLLogSeverity(anpName, "warning", "info", "notice")).To(Succeed())
+
+		By("updating the ACL logging level for the BANP")
+		Expect(setBANPACLLogSeverity("warning", "info")).To(Succeed())
+
+		By("sending traffic between acl-logging test pods we trigger ALLOW ACL logging")
+		clientPod = pods[0] // subject pod
+		pokedPod = pods[1]  // peer pod
+		framework.Logf(
+			"Poke pod %s (on node %s) from pod %s (on node %s)",
+			pokedPod.GetName(),
+			pokedPod.Spec.NodeName,
+			clientPod.GetName(),
+			clientPod.Spec.NodeName)
+		Expect(
+			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).NotTo(HaveOccurred(),
+			"traffic should be allowed since we use an ALLOW all traffic policy rule")
+
+		By("verify the ALLOW ACL log level at Tier1")
+		clientPodScheduledPodName = pods[0].Spec.NodeName
+		// Retry here in the case where OVN acls have not been programmed yet
+		composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:0", anpName)
+		Eventually(func() (bool, error) {
+			return assertACLLogs(
+				clientPodScheduledPodName,
+				composedPolicyNameRegex,
+				allowACLVerdict,
+				"info")
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+
+		By("sending traffic between acl-logging test pods we trigger DENY ACL logging")
+		clientPod = pods[0] // subject pod
+		pokedPod = pods[2]  // peer pod
+		framework.Logf(
+			"Poke pod %s (on node %s) from pod %s (on node %s)",
+			pokedPod.GetName(),
+			pokedPod.Spec.NodeName,
+			clientPod.GetName(),
+			clientPod.Spec.NodeName)
+		Expect(
+			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
+			"traffic should be denied since we use an DENY all traffic policy rule")
+
+		By("verify the DENY ACL log level at Tier1")
+		clientPodScheduledPodName = pods[0].Spec.NodeName
+		// Retry here in the case where OVN acls have not been programmed yet
+		composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:1", anpName)
+		Eventually(func() (bool, error) {
+			return assertACLLogs(
+				clientPodScheduledPodName,
+				composedPolicyNameRegex,
+				denyACLVerdict,
+				"warning")
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+
+		By("sending traffic between acl-logging test pods we trigger PASS ACL logging")
+		clientPod = pods[0] // subject pod
+		pokedPod = pods[3]  // peer pod
+		framework.Logf(
+			"Poke pod %s (on node %s) from pod %s (on node %s)",
+			pokedPod.GetName(),
+			pokedPod.Spec.NodeName,
+			clientPod.GetName(),
+			clientPod.Spec.NodeName)
+		Expect(
+			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
+			"traffic should be blocked since we use an PASS traffic policy followed by a deny at lower tier")
+
+		// Re-enable when https://issues.redhat.com/browse/FDP-442 is fixed
+		/*By("verify the PASS ACL log level at Tier1")
+		clientPodScheduledPodName = pods[0].Spec.NodeName
+		// Retry here in the case where OVN acls have not been programmed yet
+		composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:2", anpName)
+		time.Sleep(time.Hour)
+		Eventually(func() (bool, error) {
+			return assertACLLogs(
+				clientPodScheduledPodName,
+				composedPolicyNameRegex,
+				allowACLVerdict,
+				"notice")
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())*/
+
+		// BANP Deny will be hit
+		By("verify the DENY ACL log level at Tier3")
+		clientPodScheduledPodName = pods[0].Spec.NodeName
+		composedPolicyNameRegex = "BANP:default:Egress:1"
+		// Retry here in the case where OVN acls have not been programmed yet
+		Eventually(func() (bool, error) {
+			return assertACLLogs(
+				clientPodScheduledPodName,
+				composedPolicyNameRegex,
+				denyACLVerdict,
+				"warning")
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+
+		By("disabling the ACL logging for the ANP")
+		Expect(setANPACLLogSeverity(anpName, "", "", "")).To(Succeed())
+
+		By("disabling the ACL logging for the BANP")
+		Expect(setBANPACLLogSeverity("", "")).To(Succeed())
+
+		By("sending traffic between acl-logging test pods we trigger NO ACL logging")
+		clientPod = pods[0] // subject pod
+		pokedPod = pods[3]  // peer pod
+		framework.Logf(
+			"Poke pod %s (on node %s) from pod %s (on node %s)",
+			pokedPod.GetName(),
+			pokedPod.Spec.NodeName,
+			clientPod.GetName(),
+			clientPod.Spec.NodeName)
+		Expect(
+			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
+			"traffic should be blocked since we use an PASS traffic policy followed by a deny at lower tier")
+
+		// Re-enable when https://issues.redhat.com/browse/FDP-442 is fixed
+		/*composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:2", anpName)
+		Consistently(func() (bool, error) {
+			return isCountUpdatedAfterPokePod(fr, &clientPod, &pokedPod, composedPolicyNameRegex, denyACLVerdict, "")
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())*/
+
+		composedPolicyNameRegex = "BANP:default:Egress:1"
+		Consistently(func() (bool, error) {
+			return isCountUpdatedAfterPokePod(fr, &clientPod, &pokedPod, composedPolicyNameRegex, denyACLVerdict, "")
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+		By("invalid ACL logging for the ANP")
+		Expect(setANPACLLogSeverity(anpName, "pooh", "poop", "peep")).To(Succeed())
+
+		By("invalid ACL logging for the BANP")
+		Expect(setBANPACLLogSeverity("boop", "beep")).To(Succeed())
+
+		By("sending traffic between acl-logging test pods we trigger NO ACL logging")
+		clientPod = pods[0] // subject pod
+		pokedPod = pods[3]  // peer pod
+		framework.Logf(
+			"Poke pod %s (on node %s) from pod %s (on node %s)",
+			pokedPod.GetName(),
+			pokedPod.Spec.NodeName,
+			clientPod.GetName(),
+			clientPod.Spec.NodeName)
+		Expect(
+			pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
+			"traffic should be blocked since we use an PASS traffic policy followed by a deny at lower tier")
+
+		// Re-enable when https://issues.redhat.com/browse/FDP-442 is fixed
+		/*composedPolicyNameRegex = fmt.Sprintf("ANP:%s:Egress:2", anpName)
+		Consistently(func() (bool, error) {
+			return isCountUpdatedAfterPokePod(fr, &clientPod, &pokedPod, composedPolicyNameRegex, denyACLVerdict, "")
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())*/
+
+		composedPolicyNameRegex = "BANP:default:Egress:1"
+		Consistently(func() (bool, error) {
+			return isCountUpdatedAfterPokePod(fr, &clientPod, &pokedPod, composedPolicyNameRegex, denyACLVerdict, "")
+		}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+	})
+})
+
 var _ = Describe("ACL Logging for EgressFirewall", func() {
 	const (
 		denyAllPolicyName        = "default-deny-all"
@@ -195,14 +521,14 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 		// your OpenShift Container Platform cluster."
 		// Because the egress firewall feature only affects traffic leaving the cluster, we will not log for on-cluster targets.
 		allowedDstIP = "172.18.0.1"
-		deniedDstIP  = "172.19.0.10"
-		mask         := "32"
-		denyCIDR     := "0.0.0.0/0"
+		deniedDstIP = "172.19.0.10"
+		mask := "32"
+		denyCIDR := "0.0.0.0/0"
 		if IsIPv6Cluster(fr.ClientSet) {
 			allowedDstIP = "2001:4860:4860::8888"
-			deniedDstIP  = "2001:4860:4860::8844"
-			mask         = "128"
-			denyCIDR     = "::/0"
+			deniedDstIP = "2001:4860:4860::8844"
+			mask = "128"
+			denyCIDR = "::/0"
 		}
 		By("configuring the ACL logging level within the namespace")
 		nsName = fr.Namespace.Name
@@ -575,7 +901,7 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 					namespaceToUpdate.ObjectMeta.Annotations = map[string]string{}
 				}
 
-				namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = "cannot-be-parsed"
+				namespaceToUpdate.Annotations[logSeverityAnnotation] = "cannot-be-parsed"
 				_, err = fr.ClientSet.CoreV1().Namespaces().Update(context.TODO(), namespaceToUpdate, metav1.UpdateOptions{})
 				return err
 			})).To(Succeed())
@@ -630,13 +956,105 @@ func makeDenyAllPolicy(f *framework.Framework, ns string, policyName string) (*k
 	return f.ClientSet.NetworkingV1().NetworkPolicies(ns).Create(context.TODO(), policy, metav1.CreateOptions{})
 }
 
+func makeAdminNetworkPolicy(anpName, priority, anpSubjectNS string) error {
+	anpYaml := "anp.yaml"
+	var anpConfig = fmt.Sprintf(`apiVersion: policy.networking.k8s.io/v1alpha1
+kind: AdminNetworkPolicy
+metadata:
+  name: %s
+spec:
+  priority: %s
+  subject:
+    namespaces:
+      matchLabels:
+        kubernetes.io/metadata.name: %s
+  egress:
+  - name: "allow-to-restricted"
+    action: "Allow"
+    to:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: anp-peer-restricted
+  - name: "deny-to-open"
+    action: "Deny"
+    to:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: anp-peer-open
+  - name: "pass-to-unknown"
+    action: "Pass"
+    to:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: anp-peer-unknown
+`, anpName, priority, anpSubjectNS)
+
+	if err := os.WriteFile(anpYaml, []byte(anpConfig), 0644); err != nil {
+		framework.Failf("Unable to write CRD config to disk: %v", err)
+	}
+
+	defer func() {
+		if err := os.Remove(anpYaml); err != nil {
+			framework.Logf("Unable to remove the CRD config from disk: %v", err)
+		}
+	}()
+
+	_, err := e2ekubectl.RunKubectl("default", "create", "-f", anpYaml)
+	return err
+}
+
+func makeBaselineAdminNetworkPolicy(banpSubjectNS string) error {
+	banpYaml := "banp.yaml"
+	var banpConfig = fmt.Sprintf(`apiVersion: policy.networking.k8s.io/v1alpha1
+kind: BaselineAdminNetworkPolicy
+metadata:
+  name: default
+spec:
+  subject:
+    namespaces:
+      matchLabels:
+        kubernetes.io/metadata.name: %s
+  egress:
+  - name: "allow-to-restricted"
+    action: "Allow"
+    to:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: anp-peer-restricted
+  - name: "deny-to-unknown"
+    action: "Deny"
+    to:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: anp-peer-unknown
+`, banpSubjectNS)
+
+	if err := os.WriteFile(banpYaml, []byte(banpConfig), 0644); err != nil {
+		framework.Failf("Unable to write CRD config to disk: %v", err)
+	}
+
+	defer func() {
+		if err := os.Remove(banpYaml); err != nil {
+			framework.Logf("Unable to remove the CRD config from disk: %v", err)
+		}
+	}()
+
+	_, err := e2ekubectl.RunKubectl("default", "create", "-f", banpYaml)
+	return err
+}
+
 func makeEgressFirewall(ns, allowedDstIP, mask, denyCIDR string) error {
 	egressFirewallYaml := "egressfirewall.yaml"
 	var egressFirewallConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressFirewall
 metadata:
   name: default
-  namespace: ` + ns + `
+  namespace: `+ns+`
 spec:
   egress:
   - type: Allow
@@ -749,27 +1167,49 @@ func setNamespaceACLLogSeverity(fr *framework.Framework, nsName string, desiredD
 		if removeOption == aclRemoveOptionEmptyString || desiredDenyLogLevel != "" && desiredAllowLogLevel != "" {
 			aclLogSeverity = fmt.Sprintf(`{ "deny": "%s", "allow": "%s" }`, desiredDenyLogLevel, desiredAllowLogLevel)
 			By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
-			namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
+			namespaceToUpdate.Annotations[logSeverityAnnotation] = aclLogSeverity
 		} else if removeOption == aclRemoveOptionEmptyMap && desiredDenyLogLevel == "" && desiredAllowLogLevel == "" {
 			aclLogSeverity = "{}"
 			By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
-			namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
+			namespaceToUpdate.Annotations[logSeverityAnnotation] = aclLogSeverity
 		} else {
 			if desiredDenyLogLevel != "" {
 				aclLogSeverity = fmt.Sprintf(`{ "deny": "%s" }`, desiredDenyLogLevel)
 				By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
-				namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
+				namespaceToUpdate.Annotations[logSeverityAnnotation] = aclLogSeverity
 			} else if desiredAllowLogLevel != "" {
 				aclLogSeverity = fmt.Sprintf(`{ "allow": "%s" }`, desiredAllowLogLevel)
 				By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
-				namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
+				namespaceToUpdate.Annotations[logSeverityAnnotation] = aclLogSeverity
 			} else {
 				By("removing the namespace's ACL logging severity annotation if it exists")
-				delete(namespaceToUpdate.Annotations, logSeverityNamespaceAnnotation)
+				delete(namespaceToUpdate.Annotations, logSeverityAnnotation)
 			}
 		}
 
 		_, err = fr.ClientSet.CoreV1().Namespaces().Update(context.TODO(), namespaceToUpdate, metav1.UpdateOptions{})
 		return err
 	})
+}
+
+// setANPACLLogSeverity updates ANP with the deny, pass and allow annotations, e.g. k8s.ovn.org/acl-logging={ "deny": "%s", "allow": "%s", "pass": "%s" }.
+func setANPACLLogSeverity(anpName, desiredDenyLogLevel, desiredAllowLogLevel, desiredPassLogLevel string) error {
+	_, err := e2ekubectl.RunKubectl("default", "annotate", "anp", anpName,
+		fmt.Sprintf(`%s={ "deny": "%s", "allow": "%s", "pass": "%s" }`, logSeverityAnnotation, desiredDenyLogLevel, desiredAllowLogLevel, desiredPassLogLevel),
+		"--overwrite=true")
+	if err != nil {
+		return fmt.Errorf("unable to annotate admin network policy %s: err %v", anpName, err)
+	}
+	return nil
+}
+
+// setBANPACLLogSeverity updates BANP with the deny and allow annotations, e.g. k8s.ovn.org/acl-logging={ "deny": "%s", "allow": "%s" }.
+func setBANPACLLogSeverity(desiredDenyLogLevel, desiredAllowLogLevel string) error {
+	_, err := e2ekubectl.RunKubectl("default", "annotate", "banp", "default",
+		fmt.Sprintf(`%s={ "deny": "%s", "allow": "%s" }`, logSeverityAnnotation, desiredDenyLogLevel, desiredAllowLogLevel),
+		"--overwrite=true")
+	if err != nil {
+		return fmt.Errorf("unable to annotate baseline admin network policy default: err %v", err)
+	}
+	return nil
 }
