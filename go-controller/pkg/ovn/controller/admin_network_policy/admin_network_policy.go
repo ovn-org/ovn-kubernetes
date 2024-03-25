@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
@@ -145,6 +146,7 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 		c.anpPriorityMap[desiredANPState.anpPriority] = anp.Name
 		// since transact was successful we can finally populate the cache
 		c.anpCache[anp.Name] = desiredANPState
+		metrics.IncrementANPCount()
 		return nil
 	}
 	// ANP state existed in the cache, which means its either an ANP update or pod/namespace add/update/delete
@@ -402,6 +404,7 @@ func (c *Controller) clearAdminNetworkPolicy(anpName string) error {
 	// we can delete the object from the cache now.
 	delete(c.anpPriorityMap, anp.anpPriority)
 	delete(c.anpCache, anpName)
+	metrics.DecrementANPCount()
 
 	return nil
 }

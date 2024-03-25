@@ -6,6 +6,7 @@ import (
 	"time"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -108,6 +109,7 @@ func (c *Controller) clearBaselineAdminNetworkPolicy(banpName string) error {
 	}
 	// we can delete the object from the cache now (set the cache back to empty value).
 	c.banpCache = &adminNetworkPolicyState{}
+	metrics.DecrementBANPCount()
 
 	return nil
 }
@@ -151,6 +153,7 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 		}
 		// since transact was successful we can finally populate the cache
 		c.banpCache = desiredBANPState
+		metrics.IncrementBANPCount()
 		return nil
 	}
 	// BANP state existed in the cache, which means its either a BANP update or pod/namespace add/update/delete
