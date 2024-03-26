@@ -438,15 +438,15 @@ type bridgeConfiguration struct {
 func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*net.IPNet, error) {
 	b.Lock()
 	defer b.Unlock()
-	ifAddrs, err := getNetworkInterfaceIPAddresses(b.bridgeName)
-	if err != nil {
-		return nil, err
-	}
-
-	// For DPU, here we need to use the DPU host's IP address which is the tenant cluster's
-	// host internal IP address instead of the DPU's external bridge IP address.
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		nodeAddrStr, err := util.GetNodePrimaryIP(node)
+	var err error
+	var ifAddrs []*net.IPNet
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
+		ifAddrs, err = getNetworkInterfaceIPAddresses(b.bridgeName)
+	} else {
+		// For DPU, here we need to use the DPU host's IP address which is the tenant cluster's
+		// host internal IP address instead of the DPU's external bridge IP address.
+		var nodeAddrStr string
+		nodeAddrStr, err = util.GetNodePrimaryIP(node)
 		if err != nil {
 			return nil, err
 		}
@@ -455,9 +455,9 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 			return nil, fmt.Errorf("failed to parse node IP address. %v", nodeAddrStr)
 		}
 		ifAddrs, err = getDPUHostPrimaryIPAddresses(nodeAddr, ifAddrs)
-		if err != nil {
-			return nil, err
-		}
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	b.ips = ifAddrs
@@ -467,8 +467,19 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
 	res := bridgeConfiguration{}
 	gwIntf := intfName
+	uplinkName := config.Gateway.UplinkPort
 
-	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
+	if uplinkName != "" {
+		// Uplink name is explicitly set
+		bridgeName, _, err := util.RunOVSVsctl("port-to-br", uplinkName)
+		if err != nil {
+			return nil, errors.Wrapf(err, "Failed to find bridge that has port %s", uplinkName)
+		}
+		if intfName == bridgeName {
+			res.bridgeName = intfName
+			res.uplinkName = uplinkName
+		}
+	} else if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
 		// This is an OVS bridge's internal port
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {
