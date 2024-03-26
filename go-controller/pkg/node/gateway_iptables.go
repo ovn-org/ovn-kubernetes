@@ -58,6 +58,12 @@ func insertIptRules(rules []nodeipt.Rule) error {
 	return nodeipt.AddRules(rules, false)
 }
 
+// insertIptRulesFiltered adds the provided rules in an insert fashion with a filter for table/chain
+// i.e each rule gets added at the first position in the chain
+func insertIptRulesFiltered(rules []nodeipt.Rule, filter map[string]map[string]bool) error {
+	return nodeipt.AddRulesFiltered(rules, false, filter)
+}
+
 // appendIptRules adds the provided rules in an append fashion
 // i.e each rule gets added at the last position in the chain
 func appendIptRules(rules []nodeipt.Rule) error {
@@ -532,7 +538,8 @@ func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 			errors = append(errors, fmt.Errorf("error clearing Chain: %s in Table: %s, err: %v", chain, table, err))
 		}
 	}
-	if err = insertIptRules(keepIPTRules); err != nil {
+	filter := map[string]map[string]bool{table: {chain: false}}
+	if err = insertIptRulesFiltered(keepIPTRules, filter); err != nil {
 		errors = append(errors, err)
 	}
 	return apierrors.NewAggregate(errors)
