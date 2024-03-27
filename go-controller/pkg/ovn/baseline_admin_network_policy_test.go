@@ -873,7 +873,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
-		ginkgo.It("egress node peers: should create/update/delete address-sets, acls, port-groups correctly", func() {
+		ginkgo.It("egress node+network peers: should create/update/delete address-sets, acls, port-groups correctly", func() {
 			app.Action = func(ctx *cli.Context) error {
 				banpNamespaceSubject := *newNamespaceWithLabels(banpSubjectNamespaceName, anpLabel)
 				banpNamespacePeer := *newNamespaceWithLabels(banpPeerNamespaceName, peerDenyLabel)
@@ -967,7 +967,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					return false, update.GetObject(), nil
 				})
 
-				ginkgo.By("1. creating a baseline admin network policy with 2 egress rules that have node peers")
+				ginkgo.By("1. creating a baseline admin network policy with 2 egress rules that have node+network peers")
 				banpSubject := newANPSubjectObject(
 					&metav1.LabelSelector{
 						MatchLabels: anpLabel,
@@ -991,6 +991,9 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 								Nodes: &metav1.LabelSelector{
 									MatchLabels: map[string]string{"kubernetes.io/os": "linux"},
 								},
+							},
+							{
+								Networks: []anpapi.CIDR{"0.0.0.0/0", "::/0"},
 							},
 						},
 					},
@@ -1020,6 +1023,9 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 								Nodes: &metav1.LabelSelector{
 									MatchLabels: map[string]string{}, // empty selector, all nodes
 								},
+							},
+							{
+								Networks: []anpapi.CIDR{"135.10.0.5/32", "188.198.40.0/28", "2001:db8:abcd:1234:c000::/66"},
 							},
 						},
 						Ports: &[]anpapi.AdminNetworkPolicyPort{ // test different ports combination
@@ -1062,11 +1068,11 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				}
 				// egressRule AddressSets
 				peerASEgressRule0v4, peerASEgressRule0v6 := buildBANPAddressSets(banp,
-					0, sets.New(banpPodV4IP2, banpPodV6IP2), libovsdbutil.ACLEgress) // address-set will contain matching peer nodes, kubernetes.io/hostname doesn't match node1 so no node peers here
+					0, sets.New(banpPodV4IP2, banpPodV6IP2, "0.0.0.0/0", "::/0"), libovsdbutil.ACLEgress) // address-set will contain matching peer nodes, kubernetes.io/hostname doesn't match node1 so no node peers here
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
 				peerASEgressRule1v4, peerASEgressRule1v6 := buildBANPAddressSets(banp,
-					1, sets.New(node1IPv4, node1IPv6), libovsdbutil.ACLEgress) // address-set will contain all nodeIPs (empty selector match)
+					1, sets.New(node1IPv4, node1IPv6, "135.10.0.5/32", "188.198.40.0/28", "2001:db8:abcd:1234:c000::/66"), libovsdbutil.ACLEgress) // address-set will contain all nodeIPs (empty selector match)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v6)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
@@ -1075,8 +1081,8 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				node2 := nodeFor(node2Name, node2IPv4, node2IPv6, node2IPv4Subnet, node2IPv6Subnet, node2transitIPv4, node2transitIPv6)
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), node2, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState[len(expectedDatabaseState)-1].(*nbdb.AddressSet).Addresses = []string{node2IPv6, node1IPv6} // nodeIP should be added to v6 allow address-set
-				expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.AddressSet).Addresses = []string{node2IPv4, node1IPv4} // nodeIP should be added to v4 allow address-set
+				expectedDatabaseState[len(expectedDatabaseState)-1].(*nbdb.AddressSet).Addresses = []string{node2IPv6, node1IPv6, "2001:db8:abcd:1234:c000::/66"}     // nodeIP should be added to v6 allow address-set
+				expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.AddressSet).Addresses = []string{node2IPv4, node1IPv4, "135.10.0.5/32", "188.198.40.0/28"} // nodeIP should be added to v4 allow address-set
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				ginkgo.By("3. update the labels of node2 such that it starts to match the DENY RULE peer selector; check if IPs are updated in address-sets")
@@ -1085,12 +1091,32 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				expectedDatabaseState[len(expectedDatabaseState)-3].(*nbdb.AddressSet).Addresses = []string{
-					banpPodV6IP2, node2IPv6} // nodeIP should be added to v6 deny address-set
+					banpPodV6IP2, node2IPv6, "::/0"} // nodeIP should be added to v6 deny address-set
 				expectedDatabaseState[len(expectedDatabaseState)-4].(*nbdb.AddressSet).Addresses = []string{
-					banpPodV4IP2, node2IPv4} // nodeIP should be added to v4 deny address-set
+					banpPodV4IP2, node2IPv4, "0.0.0.0/0"} // nodeIP should be added to v4 deny address-set
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				ginkgo.By("4. update the hostCIDR annotation of node2; check if IPs are updated in address-sets")
+				ginkgo.By("4. update the peer selector of rule1 in baseline admin network policy so that v6 networks-peer is deleted; check if address-set is updated")
+				egressRules[1].To[2].Networks = []anpapi.CIDR{"135.10.0.5/32", "188.198.40.0/28"} // delete v6 network CIDR
+				banp.ResourceVersion = "3"
+				banp.Spec.Egress = egressRules
+				_, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Update(context.TODO(), banp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState[len(expectedDatabaseState)-1].(*nbdb.AddressSet).Addresses = []string{node2IPv6, node1IPv6} // network should be removed from v6 allow address-set
+				expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.AddressSet).Addresses = []string{node2IPv4, node1IPv4, "135.10.0.5/32", "188.198.40.0/28"}
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("5. update the peer selector of rule2 in baseline admin network policy so that networks-peer is deleted; check if address-set is updated")
+				egressRules[1].To = egressRules[1].To[:2]
+				banp.ResourceVersion = "5"
+				banp.Spec.Egress = egressRules
+				_, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Update(context.TODO(), banp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState[len(expectedDatabaseState)-1].(*nbdb.AddressSet).Addresses = []string{node2IPv6, node1IPv6} // network should be removed from v6 allow address-set
+				expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.AddressSet).Addresses = []string{node2IPv4, node1IPv4} // network should be removed from v4 allow address-set
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("6. update the hostCIDR annotation of node2; check if IPs are updated in address-sets")
 				node2.ResourceVersion = "3"
 				node2.Annotations[util.OVNNodeHostCIDRs] = fmt.Sprintf("[\"%s\",\"%s\"]", "200.100.100.0/24", "fc00:f853:ccd:e793::2/64")
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
@@ -1098,14 +1124,14 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.AddressSet).Addresses = []string{
 					"200.100.100.0", node1IPv4} // nodeIP should be updated in v4 allow address-set
 				expectedDatabaseState[len(expectedDatabaseState)-4].(*nbdb.AddressSet).Addresses = []string{
-					banpPodV4IP2, "200.100.100.0"} // nodeIP should be updated in v4 deny address-set
+					banpPodV4IP2, "200.100.100.0", "0.0.0.0/0"} // nodeIP should be updated in v4 deny address-set
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				ginkgo.By("5. update the peer selector of rule1 in admin network policy so that node1 stops matching; check if address-set is updated")
+				ginkgo.By("7. update the peer selector of rule1 in baseline admin network policy so that node1 stops matching; check if address-set is updated")
 				egressRules[1].To[1].Nodes = &metav1.LabelSelector{
 					MatchLabels: map[string]string{"kubernetes.io/hostname": "node2"},
 				}
-				banp.ResourceVersion = "5"
+				banp.ResourceVersion = "10"
 				banp.Spec.Egress = egressRules
 				_, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Update(context.TODO(), banp, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1113,18 +1139,18 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.AddressSet).Addresses = []string{"200.100.100.0"} // node1IP should be removed from v4 allow address-set
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				ginkgo.By("6. delete node matching peer selector; check if IPs are updated in address-sets")
+				ginkgo.By("8. delete node matching peer selector; check if IPs are updated in address-sets")
 				err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node2Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState[len(expectedDatabaseState)-3].(*nbdb.AddressSet).Addresses = []string{banpPodV6IP2} // node2IP should be removed from v6 deny address-set
-				expectedDatabaseState[len(expectedDatabaseState)-4].(*nbdb.AddressSet).Addresses = []string{banpPodV4IP2} // node2IP should be removed to v4 deny address-set
-				expectedDatabaseState[len(expectedDatabaseState)-1].(*nbdb.AddressSet).Addresses = []string{}             // node2IP should be removed from v6 allow address-set
-				expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.AddressSet).Addresses = []string{}             // node2IP should be removed to v4 allow address-set
+				expectedDatabaseState[len(expectedDatabaseState)-3].(*nbdb.AddressSet).Addresses = []string{banpPodV6IP2, "::/0"}      // node2IP should be removed from v6 deny address-set
+				expectedDatabaseState[len(expectedDatabaseState)-4].(*nbdb.AddressSet).Addresses = []string{banpPodV4IP2, "0.0.0.0/0"} // node2IP should be removed to v4 deny address-set
+				expectedDatabaseState[len(expectedDatabaseState)-1].(*nbdb.AddressSet).Addresses = []string{}                          // node2IP should be removed from v6 allow address-set
+				expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.AddressSet).Addresses = []string{}                          // node2IP should be removed to v4 allow address-set
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				ginkgo.By("7. update the BANP by deleting all rules; check if all objects are deleted correctly")
+				ginkgo.By("9. update the BANP by deleting all rules; check if all objects are deleted correctly")
 				banp.Spec.Egress = []anpapi.BaselineAdminNetworkPolicyEgressRule{}
-				banp.ResourceVersion = "7"
+				banp.ResourceVersion = "15"
 				banp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Update(context.TODO(), banp, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				pg = getDefaultPGForANPSubject(banp.Name, []string{t.portUUID}, nil, true)
@@ -1133,7 +1159,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				ginkgo.By("8. delete the BANP; check if all objects are deleted correctly")
+				ginkgo.By("10. delete the BANP; check if all objects are deleted correctly")
 				banp.ResourceVersion = "8"
 				err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Delete(context.TODO(), banp.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
