@@ -43,7 +43,6 @@ func (c *Controller) processNextANPPodWorkItem(wg *sync.WaitGroup) bool {
 // syncAdminNetworkPolicyPod decides the main logic everytime
 // we dequeue a key from the anpPodQueue cache
 func (c *Controller) syncAdminNetworkPolicyPod(key string) error {
-	// TODO(tssurya): This global lock will be inefficient, we will do perf runs and improve if needed
 	c.Lock()
 	defer c.Unlock()
 	startTime := time.Now()

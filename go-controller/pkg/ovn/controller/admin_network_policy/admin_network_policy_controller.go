@@ -56,7 +56,6 @@ type Controller struct {
 	// we consider it remote - this is ok for this controller as this variable is only used to
 	// determine if we need to add pod's port to port group or not - future updates should
 	// take care of reconciling the state of the cluster
-	// TODO(tssurya): Revisit this in future uniformly across the code base if needed.
 	isPodScheduledinLocalZone func(*v1.Pod) bool
 	// store's the name of the zone that this controller belongs to
 	zone string
