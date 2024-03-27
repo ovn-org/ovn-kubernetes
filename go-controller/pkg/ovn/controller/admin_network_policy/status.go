@@ -65,7 +65,7 @@ func (c *Controller) updateANPStatusToReady(anp *anpapi.AdminNetworkPolicy, zone
 	if err != nil {
 		return fmt.Errorf("unable to update the status of ANP %s, err: %v", anp.Name, err)
 	}
-	klog.Infof("Patched the status of ANP %v with condition type %v/%v",
+	klog.V(5).Infof("Patched the status of ANP %v with condition type %v/%v",
 		anp.Name, policyReadyStatusType+zone, metav1.ConditionTrue)
 	return nil
 }
@@ -94,7 +94,7 @@ func (c *Controller) updateANPStatusToNotReady(anp *anpapi.AdminNetworkPolicy, z
 	if err != nil {
 		return fmt.Errorf("unable update the status of ANP %s, err: %v", anp.Name, err)
 	}
-	klog.Infof("Patched the status of ANP %v with condition type %v/%v and reason %s/%s",
+	klog.V(3).Infof("Patched the status of ANP %v with condition type %v/%v and reason %s/%s",
 		anp.Name, policyReadyStatusType+zone, metav1.ConditionFalse, policyNotReadyReason, message)
 	return nil
 }
@@ -120,7 +120,7 @@ func (c *Controller) updateBANPStatusToReady(banp *anpapi.BaselineAdminNetworkPo
 	if err != nil {
 		return fmt.Errorf("unable to update the status of BANP %s, err: %v", banp.Name, err)
 	}
-	klog.Infof("Patched the status of BANP %v with condition type %v/%v",
+	klog.V(5).Infof("Patched the status of BANP %v with condition type %v/%v",
 		banp.Name, policyReadyStatusType+zone, metav1.ConditionTrue)
 	return nil
 }
@@ -149,7 +149,7 @@ func (c *Controller) updateBANPStatusToNotReady(banp *anpapi.BaselineAdminNetwor
 	if err != nil {
 		return fmt.Errorf("unable update the status of BANP %s, err: %v", banp.Name, err)
 	}
-	klog.Infof("Patched the status of BANP %v with condition type %v/%v and reason %s",
+	klog.V(3).Infof("Patched the status of BANP %v with condition type %v/%v and reason %s",
 		banp.Name, policyReadyStatusType+zone, metav1.ConditionFalse, policyNotReadyReason)
 	return nil
 }
