@@ -269,6 +269,23 @@ var metricEgressFirewallCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The number of egress firewall policies",
 })
 
+/** AdminNetworkPolicyMetrics Begin**/
+var metricANPCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_custom_resource_total",
+	Help:      "The total number of admin network policies in the cluster",
+})
+
+var metricBANPCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "baseline_admin_network_policy_custom_resource_total",
+	Help:      "The total number of baseline admin network policies (0 or 1) in the cluster",
+})
+
+/** AdminNetworkPolicyMetrics End**/
+
 // metricFirstSeenLSPLatency is the time between a pod first seen in OVN-Kubernetes and its Logical Switch Port is created
 var metricFirstSeenLSPLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
@@ -406,6 +423,8 @@ func RegisterOVNKubeControllerFunctional() {
 	prometheus.MustRegister(metricEgressFirewallRuleCount)
 	prometheus.MustRegister(metricEgressFirewallCount)
 	prometheus.MustRegister(metricEgressRoutingViaHost)
+	prometheus.MustRegister(metricANPCount)
+	prometheus.MustRegister(metricBANPCount)
 	if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
 		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 			panic(err)
@@ -577,6 +596,26 @@ func IncrementEgressFirewallCount() {
 // DecrementEgressFirewallCount decrements the number of Egress firewalls
 func DecrementEgressFirewallCount() {
 	metricEgressFirewallCount.Dec()
+}
+
+// IncrementANPCount increments the number of Admin Network Policies
+func IncrementANPCount() {
+	metricANPCount.Inc()
+}
+
+// DecrementANPCount decrements the number of Admin Network Policies
+func DecrementANPCount() {
+	metricANPCount.Dec()
+}
+
+// IncrementBANPCount increments the number of Baseline Admin Network Policies
+func IncrementBANPCount() {
+	metricBANPCount.Inc()
+}
+
+// DecrementBANPCount decrements the number of Baseline Admin Network Policies
+func DecrementBANPCount() {
+	metricBANPCount.Dec()
 }
 
 type (
