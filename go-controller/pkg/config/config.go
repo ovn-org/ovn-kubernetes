@@ -222,6 +222,8 @@ type DefaultConfig struct {
 	OVNMasqConntrackZone int
 	// HostNodePortCTZone is an unexposed config with the value of ConntrackZone+3
 	HostNodePortConntrackZone int
+	// ReassemblyConntrackZone is an unexposed config with the value of ConntrackZone+4
+	ReassemblyConntrackZone int
 	// EncapType value defines the encapsulation protocol to use to transmit packets between
 	// hypervisors. By default the value is 'geneve'
 	EncapType string `gcfg:"encap-type"`
@@ -2062,6 +2064,7 @@ func completeDefaultConfig(allSubnets *configSubnets) error {
 	Default.HostMasqConntrackZone = Default.ConntrackZone + 1
 	Default.OVNMasqConntrackZone = Default.ConntrackZone + 2
 	Default.HostNodePortConntrackZone = Default.ConntrackZone + 3
+	Default.ReassemblyConntrackZone = Default.ConntrackZone + 4
 	return nil
 }
 

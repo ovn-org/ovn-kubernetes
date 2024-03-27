@@ -1223,6 +1223,13 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				"actions=drop", defaultOpenFlowCookie, ofPortPatch, protoPrefix, protoPrefix, svcCIDR))
 	}
 
+	// table 0, add IP fragment reassembly flows, only needed in SGW mode with
+	// physical interface attached to bridge
+	if config.Gateway.Mode == config.GatewayModeShared && ofPortPhys != "" {
+		reassemblyFlows := generateIPFragmentReassemblyFlow(ofPortPhys)
+		dftFlows = append(dftFlows, reassemblyFlows...)
+	}
+
 	var actions string
 	if config.Gateway.Mode != config.GatewayModeLocal || config.Gateway.DisablePacketMTUCheck {
 		actions = fmt.Sprintf("output:%s", ofPortPatch)
@@ -2098,4 +2105,34 @@ func addHostMACBindings(bridgeName string) error {
 		}
 	}
 	return nil
+}
+
+// generateIPFragmentReassemblyFlow adds flows in table 0 that send packets to a
+// specific conntrack zone for reassembly with the same priority as node port
+// flows that match on L4 fields. After reassembly packets are reinjected to
+// table 0 again. This requires a conntrack immplementation that reassembles
+// fragments. This reqreuiment is met for the kernel datapath with the netfilter
+// module loaded. This reqreuiment is not met for the userspace datapath.
+func generateIPFragmentReassemblyFlow(ofPortPhys string) []string {
+	flows := make([]string, 0, 2)
+	if config.IPv4Mode {
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=110, table=0, in_port=%s, ip, nw_frag=yes, actions=ct(table=0,zone=%d)",
+				defaultOpenFlowCookie,
+				ofPortPhys,
+				config.Default.ReassemblyConntrackZone,
+			),
+		)
+	}
+	if config.IPv6Mode {
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=110, table=0, in_port=%s, ipv6, nw_frag=yes, actions=ct(table=0,zone=%d)",
+				defaultOpenFlowCookie,
+				ofPortPhys,
+				config.Default.ReassemblyConntrackZone,
+			),
+		)
+	}
+
+	return flows
 }

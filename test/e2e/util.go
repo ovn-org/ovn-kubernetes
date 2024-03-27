@@ -1164,3 +1164,40 @@ func routeToNode(nodeName string, ips []string, mtu int, add bool) error {
 	}
 	return nil
 }
+
+// CaptureContainerOutput captures output of a container according to the
+// right-most match of the provided regex. Returns a map of subexpression name
+// to subexpression capture. A zero string name `""` maps to the full expression
+// capture.
+func CaptureContainerOutput(ctx context.Context, c clientset.Interface, namespace, pod, container, regexpr string) (map[string]string, error) {
+	regex, err := regexp.Compile(regexpr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile regexp %q: %w", regexpr, err)
+	}
+
+	output, err := e2epod.GetPodLogs(ctx, c, namespace, pod, container)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get output for container %q of pod %q in namespace %q", container, pod, namespace)
+	}
+
+	matches := regex.FindAllStringSubmatch(output, -1)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("failed to match regexp %q in output %q", regexpr, output)
+	}
+	match := matches[len(matches)-1]
+
+	numSubExp := regex.NumSubexp()
+	matchMap := make(map[string]string, numSubExp+1)
+	matchMap[""] = match[0]
+	if numSubExp == 0 {
+		return matchMap, nil
+	}
+
+	subExpNames := regex.SubexpNames()
+	for _, name := range subExpNames[1:] {
+		index := regex.SubexpIndex(name)
+		matchMap[name] = match[index]
+	}
+
+	return matchMap, nil
+}
