@@ -128,7 +128,7 @@ func newAdminNetworkPolicyState(raw *anpapi.AdminNetworkPolicy) (*adminNetworkPo
 		addErrors = errors.Wrapf(addErrors, "error: cannot parse ANP ACL logging annotation, disabling it for ANP %v - %v",
 			raw.Name, err)
 	}
-	klog.V(4).Infof("Logging parameters for ANP %s are Allow=%s/Deny=%s/Pass=%s", raw.Name,
+	klog.V(5).Infof("Logging parameters for ANP %s are Allow=%s/Deny=%s/Pass=%s", raw.Name,
 		anp.aclLoggingParams.Allow, anp.aclLoggingParams.Deny, anp.aclLoggingParams.Pass)
 	if addErrors.Error() == "" {
 		addErrors = nil
@@ -363,7 +363,7 @@ func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) 
 		addErrors = errors.Wrapf(addErrors, "error: cannot parse BANP ACL logging annotation, disabling it for BANP %v - %v",
 			raw.Name, err)
 	}
-	klog.V(4).Infof("Logging parameters for BANP %s are Allow=%s/Deny=%s", raw.Name,
+	klog.V(5).Infof("Logging parameters for BANP %s are Allow=%s/Deny=%s", raw.Name,
 		banp.aclLoggingParams.Allow, banp.aclLoggingParams.Deny)
 	if addErrors.Error() == "" {
 		addErrors = nil

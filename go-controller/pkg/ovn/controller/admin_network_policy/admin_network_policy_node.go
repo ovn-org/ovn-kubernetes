@@ -52,10 +52,10 @@ func (c *Controller) syncAdminNetworkPolicyNode(key string) error {
 	if err != nil {
 		return err
 	}
-	klog.V(4).Infof("Processing sync for Node %s in Admin Network Policy controller", name)
+	klog.V(5).Infof("Processing sync for Node %s in Admin Network Policy controller", name)
 
 	defer func() {
-		klog.V(4).Infof("Finished syncing Node %s Admin Network Policy controller: took %v", name, time.Since(startTime))
+		klog.V(5).Infof("Finished syncing Node %s Admin Network Policy controller: took %v", name, time.Since(startTime))
 	}()
 	node, err := c.anpNodeLister.Get(name)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -134,7 +134,7 @@ func (c *Controller) setNodeForANP(node *v1.Node, anpCache *adminNetworkPolicySt
 		for _, peer := range rule.peers {
 			// case(i)
 			if peer.nodes.Has(node.Name) {
-				klog.V(4).Infof("Node %s used to match ANP %s egress rule %d peer, requeuing...", node.Name, anpCache.name, rule.priority)
+				klog.V(5).Infof("Node %s used to match ANP %s egress rule %d peer, requeuing...", node.Name, anpCache.name, rule.priority)
 				queue.Add(anpCache.name)
 				return
 			}

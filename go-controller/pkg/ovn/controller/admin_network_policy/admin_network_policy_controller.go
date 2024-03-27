@@ -438,7 +438,7 @@ func (c *Controller) onANPNamespaceAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Adding Namespace in Admin Network Policy controller %s", key)
+	klog.V(5).Infof("Adding Namespace in Admin Network Policy controller %s", key)
 	c.anpNamespaceQueue.Add(key)
 }
 
@@ -460,7 +460,7 @@ func (c *Controller) onANPNamespaceUpdate(oldObj, newObj interface{}) {
 	}
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
-		klog.V(4).Infof("Updating Namespace in Admin Network Policy controller %s: "+
+		klog.V(5).Infof("Updating Namespace in Admin Network Policy controller %s: "+
 			"namespaceLabels: %v", key, newNamespaceLabels)
 		c.anpNamespaceQueue.Add(key)
 	}
@@ -473,7 +473,7 @@ func (c *Controller) onANPNamespaceDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Deleting Namespace in Admin Network Policy %s", key)
+	klog.V(5).Infof("Deleting Namespace in Admin Network Policy %s", key)
 	c.anpNamespaceQueue.Add(key)
 }
 
@@ -484,7 +484,7 @@ func (c *Controller) onANPPodAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Adding Pod in Admin Network Policy controller %s", key)
+	klog.V(5).Infof("Adding Pod in Admin Network Policy controller %s", key)
 	c.anpPodQueue.Add(key)
 }
 
@@ -519,7 +519,7 @@ func (c *Controller) onANPPodUpdate(oldObj, newObj interface{}) {
 	}
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
-		klog.V(4).Infof("Updating Pod in Admin Network Policy controller %s: "+
+		klog.V(5).Infof("Updating Pod in Admin Network Policy controller %s: "+
 			"podLabels %v, podIPs: %v, PodStatus: %v, PodCompleted?: %v", key, newPodLabels,
 			newPodIPs, newPodRunning, newPodCompleted)
 		c.anpPodQueue.Add(key)
@@ -533,7 +533,7 @@ func (c *Controller) onANPPodDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Deleting Pod Admin Network Policy %s", key)
+	klog.V(5).Infof("Deleting Pod Admin Network Policy %s", key)
 	c.anpPodQueue.Add(key)
 }
 
@@ -544,7 +544,7 @@ func (c *Controller) onANPNodeAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Adding Node in Admin Network Policy controller %s", key)
+	klog.V(5).Infof("Adding Node in Admin Network Policy controller %s", key)
 	c.anpNodeQueue.Add(key)
 }
 
@@ -568,7 +568,7 @@ func (c *Controller) onANPNodeUpdate(oldObj, newObj interface{}) {
 	}
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
-		klog.V(4).Infof("Updating Node in Admin Network Policy controller %s: "+
+		klog.V(5).Infof("Updating Node in Admin Network Policy controller %s: "+
 			"nodeLabels %v, isHostCIDRsAltered?: %v", key, newNodeLabels, isHostCIDRsAltered)
 		c.anpNodeQueue.Add(key)
 	}
@@ -581,6 +581,6 @@ func (c *Controller) onANPNodeDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Deleting Node Admin Network Policy %s", key)
+	klog.V(5).Infof("Deleting Node Admin Network Policy %s", key)
 	c.anpNodeQueue.Add(key)
 }

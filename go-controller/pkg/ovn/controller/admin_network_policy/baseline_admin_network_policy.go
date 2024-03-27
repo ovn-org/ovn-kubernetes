@@ -49,10 +49,10 @@ func (c *Controller) syncBaselineAdminNetworkPolicy(key string) error {
 	if err != nil {
 		return err
 	}
-	klog.V(4).Infof("Processing sync for Baseline Admin Network Policy %s", banpName)
+	klog.V(5).Infof("Processing sync for Baseline Admin Network Policy %s", banpName)
 
 	defer func() {
-		klog.V(4).Infof("Finished syncing Baseline Admin Network Policy %s : %v", banpName, time.Since(startTime))
+		klog.V(5).Infof("Finished syncing Baseline Admin Network Policy %s : %v", banpName, time.Since(startTime))
 	}()
 
 	banp, err := c.banpLister.Get(banpName)
@@ -153,7 +153,7 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 		return nil
 	}
 	// BANP state existed in the cache, which means its either a BANP update or pod/namespace add/update/delete
-	klog.V(3).Infof("Baseline Admin network policy %s was found in cache...Syncing it", currentBANPState.name)
+	klog.V(5).Infof("Baseline Admin network policy %s was found in cache...Syncing it", currentBANPState.name)
 	err = c.updateExistingANP(currentBANPState, desiredBANPState, atLeastOneRuleUpdated, false, true, desiredACLs)
 	if err != nil {
 		return fmt.Errorf("failed to update ANP %s: %v", desiredBANPState.name, err)
