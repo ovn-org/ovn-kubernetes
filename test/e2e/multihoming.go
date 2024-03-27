@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/kubernetes/test/e2e/framework"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	mnpclient "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1"
@@ -941,20 +942,6 @@ var _ = Describe("Multi Homing", func() {
 				func(netConfigParams networkAttachmentConfigParams, allowedClientPodConfig podConfiguration, blockedClientPodConfig podConfiguration, serverPodConfig podConfiguration, policy *mnpapi.MultiNetworkPolicy) {
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
 
-					blockedClientPodNamespace := f.Namespace.Name
-					if blockedClientPodConfig.requiresExtraNamespace {
-						blockedClientPodNamespace = extraNamespace.Name
-					}
-					blockedClientPodConfig.namespace = blockedClientPodNamespace
-
-					allowedClientPodNamespace := f.Namespace.Name
-					if allowedClientPodConfig.requiresExtraNamespace {
-						allowedClientPodNamespace = extraNamespace.Name
-					}
-					allowedClientPodConfig.namespace = allowedClientPodNamespace
-
-					serverPodConfig.namespace = f.Namespace.Name
-
 					if netConfig.topology == "localnet" {
 						By("setting up the localnet underlay")
 						nodes := ovsPods(cs)
@@ -968,34 +955,16 @@ var _ = Describe("Multi Homing", func() {
 						Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
 					}
 
-					for _, ns := range []v1.Namespace{*f.Namespace, *extraNamespace} {
-						stepInfo := fmt.Sprintf("creating the attachment configuration for namespace %q", ns.Name)
-						By(stepInfo)
-						netConfig.namespace = ns.Name
-						_, err := nadClient.NetworkAttachmentDefinitions(ns.Name).Create(
-							context.Background(),
-							generateNAD(netConfig),
-							metav1.CreateOptions{},
-						)
-						Expect(err).NotTo(HaveOccurred())
-					}
+					Expect(createNads(f, nadClient, extraNamespace, netConfig)).NotTo(HaveOccurred())
 
-					By("sitting on our hands for a couple secs we give the controller time to sync all NADs before provisioning policies and pods")
-					// TODO: this is temporary. We hope to eventually sync pods & multi-net policies on NAD C/U/D ops
-					time.Sleep(3 * time.Second)
+					kickstartPodInNamespace(cs, &allowedClientPodConfig, f.Namespace.Name, extraNamespace.Name)
+					kickstartPodInNamespace(cs, &blockedClientPodConfig, f.Namespace.Name, extraNamespace.Name)
+					kickstartPodInNamespace(cs, &serverPodConfig, f.Namespace.Name, extraNamespace.Name)
 
-					kickstartPod(cs, serverPodConfig)
-					kickstartPod(cs, allowedClientPodConfig)
-					kickstartPod(cs, blockedClientPodConfig)
-
-					By("asserting the server pod has an IP from the configured range")
 					serverIP, err := podIPForAttachment(cs, serverPodConfig.namespace, serverPodConfig.name, netConfig.name, 0)
 					Expect(err).NotTo(HaveOccurred())
 					if netConfig.cidr != "" {
-						By(fmt.Sprintf("asserting the server pod IP %v is from the configured range %v/%v", serverIP, netConfig.cidr, netPrefixLengthPerNode))
-						subnet, err := getNetCIDRSubnet(netConfig.cidr)
-						Expect(err).NotTo(HaveOccurred())
-						Expect(inRange(subnet, serverIP)).To(Succeed())
+						assertServerPodIPInRange(netConfig.cidr, serverIP, netPrefixLengthPerNode)
 					}
 
 					if doesPolicyFeatAnIPBlock(policy) {
@@ -1004,13 +973,7 @@ var _ = Describe("Multi Homing", func() {
 						setBlockedClientIPInPolicyIPBlockExcludedRanges(policy, blockedIP)
 					}
 
-					By("provisioning the multi-network policy")
-					_, err = mnpClient.MultiNetworkPolicies(f.Namespace.Name).Create(
-						context.Background(),
-						policy,
-						metav1.CreateOptions{},
-					)
-					Expect(err).To(Succeed())
+					Expect(createMultiNetworkPolicy(mnpClient, f.Namespace.Name, policy)).To(Succeed())
 
 					By("asserting the *allowed-client* pod can contact the server pod exposed endpoint")
 					Eventually(func() error {
@@ -1457,4 +1420,52 @@ func kickstartPod(cs clientset.Interface, configuration podConfiguration) *v1.Po
 		return updatedPod.Status.Phase
 	}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 	return createdPod
+}
+
+func createNads(f *framework.Framework, nadClient nadclient.K8sCniCncfIoV1Interface, extraNamespace *v1.Namespace, netConfig networkAttachmentConfig) error {
+	for _, ns := range []*v1.Namespace{f.Namespace, extraNamespace} {
+		By(fmt.Sprintf("creating the nad for namespace %q", ns.Name))
+		netConfig.namespace = ns.Name
+		_, err := nadClient.NetworkAttachmentDefinitions(ns.Name).Create(
+			context.Background(),
+			generateNAD(netConfig),
+			metav1.CreateOptions{},
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	By("sitting on our hands for a couple secs we give the controller time to sync all NADs before provisioning policies and pods")
+	// TODO: this is temporary. We hope to eventually sync pods & multi-net policies on NAD C/U/D ops
+	time.Sleep(3 * time.Second)
+
+	return nil
+}
+
+func kickstartPodInNamespace(cs clientset.Interface, podConfig *podConfiguration, defaultNamespace string, extraNamespace string) *v1.Pod {
+	if podConfig.requiresExtraNamespace {
+		podConfig.namespace = extraNamespace
+	} else {
+		podConfig.namespace = defaultNamespace
+	}
+
+	return kickstartPod(cs, *podConfig)
+}
+
+func assertServerPodIPInRange(cidr string, serverIP string, netPrefixLengthPerNode int) {
+	By(fmt.Sprintf("asserting the server pod IP %v is from the configured range %v/%v", serverIP, cidr, netPrefixLengthPerNode))
+	subnet, err := getNetCIDRSubnet(cidr)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	ExpectWithOffset(1, inRange(subnet, serverIP)).To(Succeed())
+}
+
+func createMultiNetworkPolicy(mnpClient mnpclient.K8sCniCncfIoV1beta1Interface, namespace string, policy *mnpapi.MultiNetworkPolicy) error {
+	By("provisioning the multi-network policy")
+	_, err := mnpClient.MultiNetworkPolicies(namespace).Create(
+		context.Background(),
+		policy,
+		metav1.CreateOptions{},
+	)
+	return err
 }
