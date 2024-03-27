@@ -43,7 +43,6 @@ func (c *Controller) processNextANPNamespaceWorkItem(wg *sync.WaitGroup) bool {
 // syncAdminNetworkPolicyNamespace decides the main logic everytime
 // we dequeue a key from the anpNamespaceQueue cache
 func (c *Controller) syncAdminNetworkPolicyNamespace(key string) error {
-	// TODO(tssurya): This global lock will be inefficient, we will do perf runs and improve if needed
 	c.Lock()
 	defer c.Unlock()
 	startTime := time.Now()

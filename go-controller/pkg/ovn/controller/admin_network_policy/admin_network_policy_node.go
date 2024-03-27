@@ -42,7 +42,6 @@ func (c *Controller) processNextANPNodeWorkItem(wg *sync.WaitGroup) bool {
 // syncAdminNetworkPolicyNode decides the main logic everytime
 // we dequeue a key from the anpNodeQueue cache
 func (c *Controller) syncAdminNetworkPolicyNode(key string) error {
-	// TODO(tssurya): This global lock will be inefficient, we will do perf runs and improve if needed
 	c.Lock()
 	defer c.Unlock()
 	startTime := time.Now()

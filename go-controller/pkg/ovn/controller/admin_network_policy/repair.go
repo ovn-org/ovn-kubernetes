@@ -23,10 +23,6 @@ import (
 // We fetch PGs and AddressSets that are owned by ANP objectIDs based on
 // externalIDs match from the NBDB. Using predicate search we check if
 // the relevant ANP still exists for these objects and if not we delete them
-// TODO (tssurya): Handle cleaning up stale IPs in the address-sets by fetching all the relevant
-// peer pods that are being served by ANPs - pods could stop matching when ovnkube-controller is down
-// TODO2 (tssurya): Handle cleaning up stale ports from PGs by fetching all the relevant
-// subject pods that are being served by ANPs - pods could stop matching when ovnkube-controller is down
 func (c *Controller) repairAdminNetworkPolicies() error {
 	start := time.Now()
 	defer func() {
@@ -104,10 +100,6 @@ func (c *Controller) repairAdminNetworkPolicies() error {
 // We fetch PGs and AddressSets that are owned by BANP objectIDs based on
 // externalIDs match from the NBDB. Using predicate search we check if
 // the relevant BANP still exists for these objects and if not we delete them
-// TODO (tssurya): Handle cleaning up stale IPs in the address-sets by fetching all the relevant
-// peer pods that are being served by BANP - pods could stop matching when ovnkube-controller is down
-// TODO2 (tssurya): Handle cleaning up stale ports from PGs by fetching all the relevant
-// pods that are being served by BANP - pods could stop matching when ovnkube-controller is down
 func (c *Controller) repairBaselineAdminNetworkPolicy() error {
 	start := time.Now()
 	defer func() {
