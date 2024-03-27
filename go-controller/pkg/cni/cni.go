@@ -170,6 +170,11 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 		return nil, fmt.Errorf("required CNI variable missing")
 	}
 
+	if pr.Netns == "" {
+		klog.Infof("The cmdDel request for pod %s/%s Netns is nil. Ignoring this request.", namespace, podName)
+		return response, nil
+	}
+
 	netdevName := ""
 	if pr.CNIConf.DeviceID != "" {
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
