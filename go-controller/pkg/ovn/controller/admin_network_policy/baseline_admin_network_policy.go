@@ -42,7 +42,6 @@ func (c *Controller) processNextBANPWorkItem(wg *sync.WaitGroup) bool {
 // syncBaselineAdminNetworkPolicy decides the main logic everytime
 // we dequeue a key from the banpQueue cache
 func (c *Controller) syncBaselineAdminNetworkPolicy(key string) error {
-	// TODO(tssurya): This global lock will be inefficient, we will do perf runs and improve if needed
 	c.Lock()
 	defer c.Unlock()
 	startTime := time.Now()
@@ -143,7 +142,7 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 	if currentBANPState.name == "" { // empty struct, no BANP exists
 		// this is a fresh BANP create
 		klog.Infof("Creating baseline admin network policy %s", banp.Name)
-		// 4) Create the PG/ACL/AS in same transact (TODO: See if batching is more efficient after scale runs)
+		// 4) Create the PG/ACL/AS in same transact
 		// 6) Update the ANP caches to store all the created things if transact was successful
 		err = c.createNewANP(desiredBANPState, desiredACLs, desiredPorts, true)
 		if err != nil {

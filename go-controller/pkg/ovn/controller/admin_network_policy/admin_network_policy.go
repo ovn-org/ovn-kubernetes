@@ -50,7 +50,9 @@ func (c *Controller) processNextANPWorkItem(wg *sync.WaitGroup) bool {
 // syncAdminNetworkPolicy decides the main logic everytime
 // we dequeue a key from the anpQueue cache
 func (c *Controller) syncAdminNetworkPolicy(key string) error {
-	// TODO(tssurya): This global lock will be inefficient, we will do perf runs and improve if needed
+	// TODO(tssurya): A global lock is currently used from syncAdminNetworkPolicy, syncAdminNetworkPolicyPod,
+	// syncAdminNetworkPolicyNamespace and syncAdminNetworkPolicyNode. Planning to do perf/scale runs first
+	// and will remove this TODO if there are no concerns with the lock.
 	c.Lock()
 	defer c.Unlock()
 	startTime := time.Now()
@@ -135,7 +137,7 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	if !loaded {
 		// this is a fresh ANP create
 		klog.Infof("Creating admin network policy %s/%d", anp.Name, anp.Spec.Priority)
-		// 4) Create the PG/ACL/AS in same transact (TODO: See if batching is more efficient after scale runs)
+		// 4) Create the PG/ACL/AS in same transact
 		// 5) Update the ANP caches to store all the created things if transact was successful
 		err = c.createNewANP(desiredANPState, desiredACLs, desiredPorts, false)
 		if err != nil {
@@ -165,7 +167,6 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 		c.anpPriorityMap[desiredANPState.anpPriority] = anp.Name
 	}
 	// since transact was successful we can finally replace the currentANPState in the cache with the latest desired one
-	// TODO(tssurya); check if c.Lock is enough to protect the c.anpCache or we can be more efficient here
 	c.anpCache[anp.Name] = desiredANPState
 	return nil
 }
@@ -207,12 +208,6 @@ func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adm
 // convertANPRuleToACL takes the given gressRule and converts it into an ACL(0 ports rule) or
 // multiple ACLs(ports are set) and returns those ACLs for a given gressRule
 func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string, aclLoggingParams *libovsdbutil.ACLLoggingLevels, isBanp bool) []*nbdb.ACL {
-	// create address-set
-	// TODO (tssurya): Revisit this logic to see if its better to do one address-set per peer
-	// and join them with OR if that is more perf efficient. Had briefly discussed this OVN team
-	// We are not yet clear which is better since both have advantages and disadvantages.
-	// Decide this after doing some scale runs.
-	// TODO(tssurya): Use address-sets of namespaces whereever it makes sense; specially if namespace is already created
 	klog.V(3).Infof("Creating ACL for rule %d/%s belonging to ANP %s", rule.priority, rule.gressPrefix, anpName)
 	// create match based on direction and address-set name
 	asIndex := GetANPPeerAddrSetDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), c.controllerName, isBanp)
@@ -245,11 +240,6 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 // convertANPPeersToIPs takes all the peers belonging to each of the ANP rule and initiates the conversion
 // of rule.peer->set of ips. These set of ips are then used to create the address-sets
 func (c *Controller) convertANPPeersToIPs(anp *adminNetworkPolicyState) error {
-	// TODO (tssurya): Revisit this logic to see if its better to do one address-set per peer
-	// and join them with OR if that is more perf efficient. Had briefly discussed this OVN team
-	// We are not yet clear which is better since both have advantages and disadvantages.
-	// Decide this after doing some scale runs.
-	// TODO(tssurya): Use address-sets of namespaces whereever it makes sense; specially if namespace is already created
 	var err error
 	for _, ingressRule := range anp.ingressRules {
 		ingressRule.peerIPs, err = c.convertANPPeersToIPSet(ingressRule.peers)
@@ -276,7 +266,6 @@ func (c *Controller) convertANPPeersToIPs(anp *adminNetworkPolicyState) error {
 func (c *Controller) convertANPPeersToIPSet(peers []*adminNetworkPolicyPeer) (sets.Set[string], error) {
 	peerIPs := sets.Set[string]{}
 	for _, peer := range peers {
-		// TODO: Double check how empty selector means all labels match works
 		namespaces, err := c.anpNamespaceLister.List(peer.namespaceSelector)
 		if err != nil {
 			return nil, err
@@ -363,7 +352,7 @@ func (c *Controller) convertANPSubjectToLSPs(anpSubject *adminNetworkPolicySubje
 			lsp, err = libovsdbops.GetLogicalSwitchPort(c.nbClient, lsp)
 			if err != nil {
 				if errors.Is(err, libovsdbclient.ErrNotFound) {
-					// TODO(tssurya): Danger of doing this is if there is time gap between pod being annotated wit chosen IP
+					// NOTE(tssurya): Danger of doing this is if there is time gap between pod being annotated with chosen IP
 					// and pod's LSP being created, then we might setup the policies only after pod goes into running state
 					// thus causing little bit of outage
 					// we ignore ErrNotFound error here because onANPPodUpdate (pod.status.Running)
@@ -475,7 +464,6 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	// If yes we need to fully recompute the acls present in our ANP's port group; Let's do a full recompute and return.
 	// Reason behind a full recompute: Each rule has precedence based on its position and priority of ANP; if any of that changes
 	// better to delete and recreate ACLs rather than figure out from caches
-	// TODO(tssurya): Investigate if we can be smarter about which ACLs to delete and which to add
 	// rather than always cleaning up everything and recreating them. But this is tricky since rules have precedence
 	// from their ordering.
 	// NOTE: Changes to admin policies should be a rare action (can be improved post user feedback) - usually churn would be around namespaces and pods
@@ -537,7 +525,6 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	if !isBanp {
 		hasACLLoggingParamsChanged = hasACLLoggingParamsChanged || currentANPState.aclLoggingParams.Pass != desiredANPState.aclLoggingParams.Pass
 	}
-	// TODO(tssurya): Check if we can be more efficient by narrowing down exactly which ACL needs a change
 	// The rules which didn't change -> those updates will be no-ops thanks to libovsdb
 	// The rules that changed in terms of their `getACLMutableFields`
 	// will be simply updated since externalIDs will remain the same for these ACLs
@@ -608,6 +595,9 @@ func (c *Controller) constructOpsForRuleChanges(desiredANPState *adminNetworkPol
 	if err != nil {
 		return nil, fmt.Errorf("failed to create address-set destroy ops for ANP %s, err: %v", desiredANPState.name, err)
 	}
+	// TODO (tssurya): Revisit this logic to see if its better to do one address-set per peer instead of one address-set for all peers
+	// Had briefly discussed this OVN team. We are not yet clear which is better since both have advantages and disadvantages.
+	// Decide this after doing some scale runs.
 	for _, rule := range desiredANPState.ingressRules {
 		asIndex := GetANPPeerAddrSetDbIDs(desiredANPState.name, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), c.controllerName, isBanp)
 		_, addrSetOps, err := c.addressSetFactory.NewAddressSetOps(asIndex, util.StringsToIPs(rule.peerIPs.UnsortedList()))

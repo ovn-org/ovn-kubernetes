@@ -24,7 +24,6 @@ const (
 	BANPExternalIDKey               = "BaselineAdminNetworkPolicy" // key set on port-groups to identify which BANP it belongs to
 )
 
-// TODO: Double check how empty selector means all labels match works
 type adminNetworkPolicySubject struct {
 	namespaceSelector labels.Selector
 	podSelector       labels.Selector
@@ -37,12 +36,10 @@ type adminNetworkPolicySubject struct {
 	// current set of UUIDs and desired set of UUIDs and do one set of
 	// transact ops calculation. If not, for every pod/namespace update
 	// we would need to do a lookup in the libovsdb cache for the ns_name
-	// LSP index. TODO(tssurya): Do performance runs to see if there is
-	// effect on MEM footprint for storing this information.
+	// LSP index.
 	podPorts sets.Set[string]
 }
 
-// TODO: Implement sameLabels & notSameLabels
 type adminNetworkPolicyPeer struct {
 	namespaceSelector labels.Selector
 	podSelector       labels.Selector
@@ -204,14 +201,12 @@ func newAdminNetworkPolicyPeer(rawNamespaces *anpapi.NamespacedPeer, rawPods *an
 		if !peerNamespaceSelector.Empty() {
 			anpPeer = &adminNetworkPolicyPeer{
 				namespaceSelector: peerNamespaceSelector,
-				// TODO: See if it makes sense to just use the namespace address-sets we have in case the podselector is empty meaning all pods.
-				podSelector: labels.Everything(), // it means match all pods within the provided namespaces
+				podSelector:       labels.Everything(), // it means match all pods within the provided namespaces
 			}
 		} else {
 			anpPeer = &adminNetworkPolicyPeer{
 				namespaceSelector: labels.Everything(), // it means match all namespaces in the cluster
-				// TODO: See if it makes sense to just use the namespace address-sets we have in case the podselector is empty meaning all pods.
-				podSelector: labels.Everything(), // it means match all pods within the provided namespaces
+				podSelector:       labels.Everything(), // it means match all pods within the provided namespaces
 			}
 		}
 	} else if rawPods != nil {
