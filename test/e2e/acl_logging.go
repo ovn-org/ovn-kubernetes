@@ -217,6 +217,9 @@ var _ = Describe("ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPol
 			_, err := e2ekubectl.RunKubectl("default", "delete", "ns", ns, "--ignore-not-found=true")
 			Expect(err).NotTo(HaveOccurred())
 		}
+		// reset caches
+		pods = nil
+		nsNames = [4]string{}
 	})
 
 	It("the ANP ACL logs have the expected log level", func() {
