@@ -1,0 +1,141 @@
+# define ServiceMontior and Service resources for ovnkube-cluster-manager,
+# ovnkube-master (or ovnkube-controller), ovnkube-node and ovnkube-db (required for prometheus monitoring)
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    k8s-app: ovnkube-master
+  name: monitor-ovnkube-master
+  namespace: ovn-kubernetes
+spec:
+  endpoints:
+  - interval: 30s
+    port: http-metrics
+    scheme: http
+    path: /metrics
+  jobLabel: k8s-app
+  namespaceSelector:
+    matchNames:
+    - ovn-kubernetes
+  selector:
+    matchLabels:
+      k8s-app: ovnkube-master
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: ovnkube-master
+  name: ovnkube-master-prometheus-discovery
+  namespace: ovn-kubernetes
+spec:
+  selector:
+    name: ovnkube-master
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: http-metrics
+    port: 9409
+    protocol: TCP
+    targetPort: 9409
+---
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    k8s-app: ovnkube-node
+  name: monitor-ovnkube-node
+  namespace: ovn-kubernetes
+spec:
+  endpoints:
+  - interval: 30s
+    port: ovnkube-node-metrics
+    path: /metrics
+    scheme: http
+  - interval: 30s
+    port: ovs-metrics
+    path: /metrics
+    scheme: http
+  - interval: 30s
+    port: ovn-metrics
+    path: /metrics
+    scheme: http
+  jobLabel: k8s-app
+  namespaceSelector:
+    matchNames:
+    - ovn-kubernetes
+  selector:
+    matchLabels:
+      k8s-app: ovnkube-node
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: ovnkube-node
+  name: ovnkube-node-prometheus-discovery
+  namespace: ovn-kubernetes
+spec:
+  selector:
+    name: ovnkube-node
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: ovnkube-node-metrics
+    port: 9410
+    protocol: TCP
+    targetPort: 9410
+  - name: ovn-metrics
+    port: 9476
+    protocol: TCP
+    targetPort: 9476
+  - name: ovs-metrics
+    port: 9310
+    protocol: TCP
+    targetPort: 9310
+---
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    k8s-app: ovnkube-cluster-manager
+  name: monitor-ovnkube-cluster-manager
+  namespace: ovn-kubernetes
+spec:
+  endpoints:
+  - interval: 30s
+    port: http-metrics
+    scheme: http
+    path: /metrics
+  jobLabel: k8s-app
+  namespaceSelector:
+    matchNames:
+    - ovn-kubernetes
+  selector:
+    matchLabels:
+      k8s-app: ovnkube-cluster-manager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: ovnkube-cluster-manager
+  name: ovnkube-cluster-manager-prometheus-discovery
+  namespace: ovn-kubernetes
+spec:
+  selector:
+    name: ovnkube-cluster-manager
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: http-metrics
+    port: 9411
+    protocol: TCP
+    targetPort: 9411
+---

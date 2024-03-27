@@ -1,0 +1,297 @@
+# ovnkube-node-dpu
+# daemonset version 3
+# starts node daemons for ovn, each in a separate container
+# it is run on all nodes
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: ovnkube-node-dpu
+  # namespace set up by install
+  namespace: ovn-kubernetes
+  annotations:
+    kubernetes.io/description: |
+      This DaemonSet launches the ovn-kubernetes networking components for worker nodes.
+spec:
+  selector:
+    matchLabels:
+      app: ovnkube-node-dpu
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: ovnkube-node-dpu
+        name: ovnkube-node-dpu
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+    spec:
+      priorityClassName: "system-cluster-critical"
+      serviceAccountName: ovnkube-node
+      hostNetwork: true
+      dnsPolicy: Default
+      {{- if eq (hasKey .Values.global "unprivilegedMode" | ternary .Values.global.unprivilegedMode false) false }}
+      hostPID: true
+      {{- end }}
+      containers:
+      {{- if eq (hasKey .Values.global "enableCompactMode" | ternary .Values.global.enableCompactMode false) false }}
+      - name: ovnkube-node
+        image: {{ include "getImage" . }}
+        imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
+        {{- if eq (hasKey .Values.global "dummyGatewayBridge" | ternary .Values.global.dummyGatewayBridge false) true }}
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - |
+                #!/bin/bash
+                ovs-vsctl --may-exist add-br br-ex
+                ip a a dev br-ex 10.44.0.1/32 || /bin/true
+        {{- end }}
+        command: ["/root/ovnkube.sh", "ovn-node"]
+        securityContext:
+          runAsUser: 0
+          {{- if eq (hasKey .Values.global "unprivilegedMode" | ternary .Values.global.unprivilegedMode false) false }}
+          privileged: true
+          {{- else }}
+          capabilities:
+            add:
+            - NET_ADMIN
+          {{- end }}
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # Common mounts
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
+        - mountPath: /var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        - mountPath: /var/lib/kubelet
+          name: host-kubelet
+          readOnly: true
+        - mountPath: /var/log/ovn-kubernetes/
+          name: host-var-log-ovnkube
+          # We mount our socket here
+        - mountPath: /var/run/ovn-kubernetes
+          name: host-var-run-ovn-kubernetes
+        # CNI related mounts which we take over
+        - mountPath: /opt/cni/bin
+          name: host-opt-cni-bin
+        - mountPath: /etc/cni/net.d
+          name: host-etc-cni-netd
+        - mountPath: /var/run/netns
+          name: host-netns
+          mountPropagation: Bidirectional
+        # ovnkube-node only mounts (non dpu related)
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+        - mountPath: /etc/openvswitch/
+          name: host-etc-ovs
+          readOnly: true
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+          readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVNKUBE_LOGLEVEL
+          value: {{ default 4 .Values.logLevel | quote }}
+        - name: OVNKUBE_LOGFILE_MAXSIZE
+          value: {{ default 100 .Values.logFileMaxSize | quote }}
+        - name: OVNKUBE_LOGFILE_MAXBACKUPS
+          value: {{ default 5 .Values.logFileMaxBackups | quote }}
+        - name: OVNKUBE_LOGFILE_MAXAGE
+          value: {{ default 5 .Values.logFileMaxAge | quote }}
+        - name: OVN_NET_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: net_cidr
+        - name: OVN_SVC_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: OVN_MTU
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: mtu
+        - name: OVN_ROUTABLE_MTU
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: routable_mtu
+              optional: true
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_GATEWAY_MODE
+          value: {{ default "shared" .Values.global.gatewayMode }}
+        - name: OVN_GATEWAY_OPTS
+          value: {{ default "" .Values.global.gatewayOps | quote }}
+        - name: OVN_HYBRID_OVERLAY_ENABLE
+          value: {{ default "" .Values.global.enableHybridOverlay | quote }}
+        - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
+          value: {{ default "" .Values.global.enableAdminNetworkPolicy | quote }}
+        - name: OVN_EGRESSIP_ENABLE
+          value: {{ default "" .Values.global.enableEgressIp | quote }}
+        - name: OVN_EGRESSIP_HEALTHCHECK_PORT
+          value: {{ default "" .Values.global.enableEgressIp | quote }}
+        - name: OVN_EGRESSSERVICE_ENABLE
+          value: {{ default "" .Values.global.enableEgressService | quote }}
+        - name: OVN_HYBRID_OVERLAY_NET_CIDR
+          value: {{ default "" .Values.global.hybridOverlayNetCidr | quote }}
+        - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
+          value: {{ default "" .Values.global.disableSnatMultipleGws | quote }}
+        - name: OVN_DISABLE_FORWARDING
+          value: {{ default "" .Values.global.disableForwarding | quote }}
+        - name: OVN_ENCAP_PORT
+          value: {{ default 6081 .Values.global.encapPort | quote }}
+        - name: OVN_DISABLE_PKT_MTU_CHECK
+          value: {{ default "" .Values.global.disablePacketMtuCheck | quote }}
+        - name: OVN_NETFLOW_TARGETS
+          value: {{ default "" .Values.global.netFlowTargets | quote }}
+        - name: OVN_SFLOW_TARGETS
+          value: {{ default "" .Values.global.sflowTargets | quote }}
+        - name: OVN_IPFIX_TARGETS
+          value: {{ default "" .Values.global.ipfixTargets | quote }}
+        - name: OVN_IPFIX_SAMPLING
+          value: {{ default "" .Values.global.ipfixSampling | quote }}
+        - name: OVN_IPFIX_CACHE_MAX_FLOWS
+          value: {{ default "" .Values.global.ipfixCacheMaxFlows | quote }}
+        - name: OVN_IPFIX_CACHE_ACTIVE_TIMEOUT
+          value: {{ default "" .Values.global.ipfixCacheActiveTimeout | quote }}
+        - name: OVN_V4_JOIN_SUBNET
+          value: {{ default "" .Values.global.v4JoinSubnet | quote }}
+        - name: OVN_V6_JOIN_SUBNET
+          value: {{ default "" .Values.global.v6JoinSubnet | quote }}
+        - name: OVN_V4_MASQUERADE_SUBNET
+          value: {{ default "" .Values.global.v4MasqueradeSubnet | quote }}
+        - name: OVN_V6_MASQUERADE_SUBNET
+          value: {{ default "" .Values.global.v6MasqueradeSubnet | quote }}
+        - name: OVN_MULTICAST_ENABLE
+          value: {{ default "" .Values.global.enableMulticast | quote }}
+        - name: OVN_UNPRIVILEGED_MODE
+          value: {{ include "isUnprivilegedMode" . | quote }}
+        - name: OVN_EX_GW_NETWORK_INTERFACE
+          value: {{ default "" .Values.global.extGatewayNetworkInterface | quote }}
+        - name: OVN_ENABLE_OVNKUBE_IDENTITY
+          value: {{ hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true | quote }}
+        - name: OVN_SSL_ENABLE
+          value: {{ include "isSslEnabled" . | quote }}
+        - name: OVN_DISABLE_OVN_IFACE_ID_VER
+          value: {{ hasKey .Values.global "disableIfaceIdVer" | ternary .Values.global.disableIfaceIdVer false | quote }}
+        - name: OVN_REMOTE_PROBE_INTERVAL
+          value: {{ default 100000 .Values.global.remoteProbeInterval | quote }}
+        - name: OVN_MONITOR_ALL
+          value: {{ default "" .Values.global.monitorAll | quote }}
+        - name: OVN_OFCTRL_WAIT_BEFORE_CLEAR
+          value: {{ default "" .Values.global.ofctrlWaitBeforeClear | quote }}
+        - name: OVN_ENABLE_LFLOW_CACHE
+          value: {{ hasKey .Values.global "enableLFlowCache" | ternary .Values.global.enableLFlowCache true | quote }}
+        - name: OVN_LFLOW_CACHE_LIMIT
+          value: {{ default "" .Values.global.lFlowCacheLimit | quote }}
+        - name: OVN_LFLOW_CACHE_LIMIT_KB
+          value: {{ default "" .Values.global.lFlowCacheLimitKb | quote }}
+        - name: OVN_MULTI_NETWORK_ENABLE
+          value: {{ hasKey .Values.global "enableMultiNetwork" | ternary .Values.global.enableMultiNetwork false | quote }}
+        - name: OVN_ENABLE_INTERCONNECT
+          value: {{ hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false | quote }}
+        - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
+          value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
+        - name: OVNKUBE_NODE_MODE
+          value: "dpu"
+        - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
+          value: {{ default "" .Values.global.nodeMgmtPortNetdev | quote }}
+        - name: OVN_HOST_NETWORK_NAMESPACE
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: host_network_namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+      {{- end }}
+      nodeSelector:
+        kubernetes.io/os: "linux"
+        k8s.ovn.org/dpu: ""
+      volumes:
+      # Common volumes
+      - name: host-var-run-dbus
+        hostPath:
+          path: /var/run/dbus
+      - name: host-kubelet
+        hostPath:
+          path: /var/lib/kubelet
+      - name: host-var-log-ovnkube
+        hostPath:
+          path: /var/log/ovn-kubernetes
+      - name: host-var-run-ovn-kubernetes
+        hostPath:
+          path: /var/run/ovn-kubernetes
+      - name: host-opt-cni-bin
+        hostPath:
+          path: /opt/cni/bin
+      - name: host-etc-cni-netd
+        hostPath:
+          path: /etc/cni/net.d
+      - name: host-slash
+        hostPath:
+          path: /
+      - name: host-netns
+        hostPath:
+          path: /var/run/netns
+      # non DPU related volumes
+      - name: host-var-log-ovs
+        hostPath:
+          path: /var/log/openvswitch
+      - name: host-run-ovs
+        hostPath:
+          path: /run/openvswitch
+      - name: host-var-run-ovs
+        hostPath:
+          path: /var/run/openvswitch
+      - name: host-ovn-cert
+        hostPath:
+          path: /etc/ovn
+          type: DirectoryOrCreate
+      - name: host-var-lib-ovs
+        hostPath:
+          path: /var/lib/openvswitch
+      - name: host-etc-ovs
+        hostPath:
+          path: /etc/openvswitch
+      tolerations:
+      - operator: "Exists"

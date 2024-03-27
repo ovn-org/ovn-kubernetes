@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+    name: ovnkube-cluster-manager
+    namespace: ovn-kubernetes
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+    name: ovnkube-cluster-manager
+roleRef:
+    name: ovnkube-cluster-manager
+    kind: ClusterRole
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    - kind: ServiceAccount
+      name: ovnkube-cluster-manager
+      namespace: ovn-kubernetes
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+    name: ovnkube-cluster-manager-configmaps
+    namespace: ovn-kubernetes
+roleRef:
+    name: ovn-k8s-configmap
+    kind: Role
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    - kind: ServiceAccount
+      name: ovnkube-cluster-manager
+      namespace: ovn-kubernetes
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+    name: ovnkube-cluster-manager
+rules:
+    - apiGroups: [""]
+      resources:
+          - namespaces
+          - nodes
+          - pods
+          - services
+          - endpoints
+      verbs: [ "get", "list", "watch" ]
+    - apiGroups: ["discovery.k8s.io"]
+      resources:
+          - endpointslices
+      verbs: [ "get", "list", "watch" ]
+    - apiGroups: ["k8s.cni.cncf.io"]
+      resources:
+          - network-attachment-definitions
+          - multi-networkpolicies
+      verbs: ["list", "get", "watch"]
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+          - egressips
+          - egressservices
+          - adminpolicybasedexternalroutes
+          - egressfirewalls
+      verbs: [ "get", "list", "watch" ]
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+          - egressips
+          - egressservices/status
+      verbs: [ "patch", "update" ]
+    - apiGroups: [""]
+      resources:
+          - events
+      verbs: ["create", "patch", "update"]
+    - apiGroups: [""]
+      resources:
+          - pods/status # used in multi-homing: https://github.com/ovn-org/ovn-kubernetes/blob/a9beb6fd4f8ea32b264999a8ebec25cd6bdc2281/go-controller/pkg/util/pod.go#L49
+          - nodes/status
+          - services/status
+      verbs: [ "patch", "update" ]
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+        - adminpolicybasedexternalroutes/status
+        - egressfirewalls/status
+      verbs: [ "patch", "update" ]

@@ -1,0 +1,65 @@
+{{- if or .Values.skipCallToK8s (eq (include "needNamespace" "ovn-kubernetes") "true") }}
+---
+# ovn-namespace.yaml
+#
+# Setup for Kubernetes to support the ovn-kubernetes plugin
+#
+# Create the namespace for ovn-kubernetes.
+#
+# This provisioning is done as part of installation after the cluster is
+# up and before the ovn daemonsets are created.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ovn-kubernetes
+{{- end }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: ovn-kubernetes
+  name: ovn-k8s-configmap
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "watch", "list"]
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - list
+  - update
+---
+
+{{- $hostNetworkNamespace := .Values.hostNetworkNamespace | default "ovn-host-network"}}
+# The network cidr and service cidr are set in the ovn-config configmap
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ovn-config
+  namespace: ovn-kubernetes
+data:
+  net_cidr:      {{ .Values.podNetwork }}
+  svc_cidr:      {{ .Values.serviceNetwork }}
+  k8s_apiserver: {{ .Values.k8sAPIServer }}
+  mtu:           {{ .Values.mtu | default 1500 | quote }}
+  host_network_namespace: {{ $hostNetworkNamespace }}
+
+{{- if or .Values.global.skipCallToK8s (eq (include "needNamespace" $hostNetworkNamespace) "true") }}
+---
+# ovn-host-network-namespace.yaml
+#
+# Create the namespace for classifying host network traffic.
+#
+# This provisioning is done as part of installation after the cluster is
+# up and before the ovn daemonsets are created.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $hostNetworkNamespace }}
+{{- end }}

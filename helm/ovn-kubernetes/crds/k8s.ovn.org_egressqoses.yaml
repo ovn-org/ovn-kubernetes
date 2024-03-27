@@ -1,0 +1,122 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: egressqoses.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: EgressQoS
+    listKind: EgressQoSList
+    plural: egressqoses
+    singular: egressqos
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: EgressQoS is a CRD that allows the user to define a DSCP value
+          for pods egress traffic on its namespace to specified CIDRs. Traffic from
+          these pods will be checked against each EgressQoSRule in the namespace's
+          EgressQoS, and if there is a match the traffic is marked with the relevant
+          DSCP value.
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+            properties:
+              name:
+                type: string
+                pattern: ^default$
+          spec:
+            description: EgressQoSSpec defines the desired state of EgressQoS
+            properties:
+              egress:
+                description: a collection of Egress QoS rule objects
+                items:
+                  properties:
+                    dscp:
+                      description: DSCP marking value for matching pods' traffic.
+                      maximum: 63
+                      minimum: 0
+                      type: integer
+                    dstCIDR:
+                      description: DstCIDR specifies the destination's CIDR. Only
+                        traffic heading to this CIDR will be marked with the DSCP
+                        value. This field is optional, and in case it is not set the
+                        rule is applied to all egress traffic regardless of the destination.
+                      format: cidr
+                      type: string
+                    podSelector:
+                      description: PodSelector applies the QoS rule only to the pods
+                        in the namespace whose label matches this definition. This
+                        field is optional, and in case it is not set results in the
+                        rule being applied to all pods in the namespace.
+                      properties:
+                        matchExpressions:
+                          description: matchExpressions is a list of label selector
+                            requirements. The requirements are ANDed.
+                          items:
+                            description: A label selector requirement is a selector
+                              that contains values, a key, and an operator that relates
+                              the key and values.
+                            properties:
+                              key:
+                                description: key is the label key that the selector
+                                  applies to.
+                                type: string
+                              operator:
+                                description: operator represents a key's relationship
+                                  to a set of values. Valid operators are In, NotIn,
+                                  Exists and DoesNotExist.
+                                type: string
+                              values:
+                                description: values is an array of string values.
+                                  If the operator is In or NotIn, the values array
+                                  must be non-empty. If the operator is Exists or
+                                  DoesNotExist, the values array must be empty. This
+                                  array is replaced during a strategic merge patch.
+                                items:
+                                  type: string
+                                type: array
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                        matchLabels:
+                          additionalProperties:
+                            type: string
+                          description: matchLabels is a map of {key,value} pairs.
+                            A single {key,value} in the matchLabels map is equivalent
+                            to an element of matchExpressions, whose key field is
+                            "key", the operator is "In", and the values array contains
+                            only "value". The requirements are ANDed.
+                          type: object
+                      type: object
+                      x-kubernetes-map-type: atomic
+                  required:
+                  - dscp
+                  type: object
+                type: array
+            required:
+            - egress
+            type: object
+          status:
+            description: EgressQoSStatus defines the observed state of EgressQoS
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

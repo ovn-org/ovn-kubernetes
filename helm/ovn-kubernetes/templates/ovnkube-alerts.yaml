@@ -1,0 +1,369 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+  name: ovnkube-rules
+  namespace: ovn-kubernetes
+spec:
+  groups:
+  - name: general.rules
+    rules:
+    - alert: OvnKubeNoRunningManager
+      expr: absent(up{job="ovnkube-master", namespace="ovn-kubernetes"} == 1)
+      for: 4m
+      labels:
+       severity: critical
+      annotations:
+       description: There is no running ovnkube-manager
+
+    - alert: OvnKubeManagerMultipleLeaders
+      expr: sum(ovnkube_controller_leader) > 1
+      for: 4m
+      labels:
+       severity: critical
+      annotations:
+       description: There are multiple ovnkube-manager leaders
+
+    - alert: OvnKubeManagerNoLeader
+      expr: max(ovnkube_controller_leader) == 0
+      for: 4m
+      labels:
+        severity: critical
+      annotations:
+       description: There is no running ovnkube-manager leader
+
+    - alert: OvnKubePodRestarts
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container=~"ovnkube.*"}[15m]) * 60 * 5 > 0
+      for: 30m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.container}} is restarting 
+         {{ printf "%.2f" $value }} times / 5 minutes.`}}        
+                
+    - alert: K8sNodeWithoutOvnKubeAgentRunning
+      expr: |
+        kube_node_info unless on(node)
+        (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node.*"}) > 0
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         {{`All K8s nodes should be running OVN K8s Agent pods, 
+         but OVN K8s Agent pod is not running on {{ $labels.node }} node.`}}  
+
+    - alert: OvnKubeHighPodCreationLatency99thPercentile
+      expr: |
+        histogram_quantile(0.99,
+         sum by (le) (
+           rate(ovnkube_controller_pod_creation_latency_seconds_bucket[15m])
+         ) 
+        ) > 5
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         {{`The pod creation latency value {{ $value }} aggregated across 
+         all masters for the last 15minutes is more than 5 seconds.`}}
+
+    - alert: OvnKubeIncreaseInPodCreationLatency99thPercentile
+      expr: |
+        histogram_quantile(0.99,
+         sum by (le) ( 
+          rate(ovnkube_controller_pod_creation_latency_seconds_bucket[15m] 
+          offset 15m)
+         )
+        )
+        -
+        histogram_quantile(0.99,
+         sum by (le) (
+          rate(ovnkube_controller_pod_creation_latency_seconds_bucket[15m])
+         )
+        ) > 5 
+     
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         The pod creation latency aggregated across all masters for the last 
+         15minutes is more than 5 seconds as compared to 15 minutes before last 15 minutes.
+
+    - alert: OvnKubeHighNBCliLatency99thPercentile
+      expr: |
+        histogram_quantile(0.99,
+          sum by (le) (
+            rate(ovnkube_controller_ovn_cli_latency_seconds_bucket{
+              command="ovn-nbctl"}[15m])
+          )
+        ) > 3 
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         {{`The ovn-nbctl 99th percentile CLI latency {{ value }} aggregated 
+         across all masters for the last 15minutes is more than 3 seconds.`}}
+
+    - alert: OvnKubeHighSBCliLatency99thPercentile
+      expr: |
+        histogram_quantile(0.99,
+          sum by (le) (
+            rate(ovnkube_controller_ovn_cli_latency_seconds_bucket{
+              command="ovn-sbctl"}[15m])
+          )
+        ) > 3
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         {{`The ovn-sbctl 99th percentile CLI latency {{ value }} aggregated
+         across all masters for the last 15minutes is more than 3 seconds.`}}
+
+    - alert: OvnKubeHighK8sNetworkPolicyUpdateLatency99thPercentile
+      expr: |
+        histogram_quantile(0.99,
+          sum by (le) (
+            rate(ovnkube_controller_resource_update_latency_seconds_bucket{
+              name="NetworkPolicy"}[15m])
+          )
+        ) > 1
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         {{`The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
+         across all masters for the last 15minutes is more than 1 seconds.`}}
+
+    - alert: OvnKubeHighK8sNamespaceUpdateLatency99thPercentile
+      expr: |
+        histogram_quantile(0.99,
+          sum by (le) (
+            rate(ovnkube_controller_resource_update_latency_seconds_bucket{
+              name="Namespace"}[15m])
+          )
+        ) > 1
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         {{`The 99th percentile {{ $labels.name }} update latency {{ value }} 
+         aggregated across all masters for the last 15minutes is more than 1 seconds.`}}
+
+    - alert: OvnKubeHighK8sServiceUpdateLatency99thPercentile
+      expr: |
+        histogram_quantile(0.99,
+          sum by (le) (
+            rate(ovnkube_controller_resource_update_latency_seconds_bucket{
+              name="Service"}[15m])
+          )
+        ) > 1
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         {{`The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
+         across all masters for the last 15minutes is more than 1 seconds.`}}
+
+    - alert: OvnKubeHighK8sEndpointUpdateLatency99thPercentile
+      expr: |
+        histogram_quantile(0.99,
+          sum by (le) (
+            rate(ovnkube_controller_resource_update_latency_seconds_bucket{
+              name="Endpoint"}[15m])
+          )
+        ) > 1
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         {{`The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated
+         across all masters for the last 15minutes is more than 1 seconds.`}}
+
+    - alert: OvnNBDBStale
+      expr: time() - max(ovnkube_controller_nb_e2e_timestamp) > 120
+      for: 4m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         ovn-kubernetes has not written anything to the northbound database for too long
+
+    - alert: OvnSBDBStale
+      expr: max(ovnkube_controller_nb_e2e_timestamp) - max(ovnkube_controller_sb_e2e_timestamp) > 120
+      for: 4m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         ovn-northd has not successfully synced changes from northbound DB 
+         to the southbound DB for too long
+
+    - alert: OvnNBDBContainerRestarts
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="nb-ovsdb"}[15m]) * 60 * 5 > 0
+      for: 30m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} nbdb container is 
+         restarting {{ printf "%.2f" $value }} times / 5 minutes`}}
+
+    - alert: OvnSBDBContainerRestarts
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="sb-ovsdb"}[15m]) * 60 * 5 > 0
+      for: 30m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} sbdb container is 
+         restarting {{ printf "%.2f" $value }} times / 5 minutes.`}}
+
+    - alert: OvnNBDBMultipleLeaders
+      expr: sum(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) > 1
+      for: 4m
+      labels:
+       severity: critical
+      annotations:
+       description: There are multiple ovn-nbdb leaders
+
+    - alert: OvnNBDBNoLeader
+      expr: max(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) == 0
+      for: 4m
+      labels:
+        severity: critical
+      annotations:
+       description: There is no running ovn-nbdb leader
+
+    - alert: OvnSBDBMultipleLeaders
+      expr: sum(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) > 1
+      for: 4m
+      labels:
+       severity: critical
+      annotations:
+       description: There are multiple ovn-sbdb leaders
+
+    - alert: OvnSBDBNoLeader
+      expr: max(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) == 0
+      for: 4m
+      labels:
+        severity: critical
+      annotations:
+       description: There is no running ovn-sbdb leader
+
+    - alert: OvnNorthdContainerRestarts
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="ovn-northd"}[15m]) * 60 * 5 > 0
+      for: 30m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd container is 
+         restarting {{ printf "%.2f" $value }} times / 5 minutes`}}
+
+    - alert: OvnNorthdNotActive
+      expr: sum(ovn_northd_status) != 1
+      for: 4m
+      labels:
+       severity: critical
+      annotations:
+       description: There is no running ovn-northd.
+
+    - alert: OvnNorthdTxnError
+      expr: |
+        rate(ovn_northd_txn_error{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 0
+      for: 10m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd containers
+         transaction error is {{ printf "%.2f" $value }} per second`}}
+
+    - alert: OvnNorthdTxnIncomplete
+      expr: |
+        rate(ovn_northd_txn_incomplete{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1
+      for: 30m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd containers
+         transaction incomplete is {{ printf "%.2f" $value }} per second.`}}
+
+    - alert: OvnControllerContainerRestarts
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", 
+        container="ovn-controller"}[15m]) * 60 * 5 > 0
+      for: 30m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container 
+         is restarting {{ printf "%.2f" $value }} times / 5 minutes`}}
+
+    - alert: OvnControllerTxnError
+      expr: |
+        rate(ovn_controller_txn_error{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 0
+      for: 10m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
+         transaction error is {{ printf "%.2f" $value }} per second.`}}
+
+    - alert: OvnControllerTxnIncomplete
+      expr: |
+        rate(ovn_controller_txn_incomplete{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1
+      for: 30m
+      labels:
+       severity: critical
+      annotations:
+       description: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
+         transaction incomplete is {{ printf "%.2f" $value }} per second`}}
+
+    - alert: OvnControllerLflowRun
+      expr: |
+        rate(ovn_controller_lflow_run{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 0
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
+         logical flow table translation is {{ printf "%.2f" $value }} per second.`}}
+       
+    - alert: OvnControllerLowerGenevePortCount
+      expr: |
+        ovn_controller_integration_bridge_geneve_ports_total and 
+        (ovn_controller_integration_bridge_geneve_ports_total{job="ovnkube-node", namespace="ovn-kubernetes"} 
+        != scalar(count(kube_node_info)) - 1)
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       description: |
+         {{`The list of nodes that have a lower number of Geneve Ports
+         and counts they have 
+         {{ range query "ovn_controller_integration_bridge_geneve_ports_total{job='ovnkube-node', namespace='ovn-kubernetes'} !=  scalar(count(kube_node_info)) - 1" }}
+         {{ .Labels.instance }}: {{ .Value }}
+         {{ end }}.`}}
+ 
+
