@@ -170,7 +170,7 @@ func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.
 			podsIps = append(podsIps, podIPs...)
 		}
 	}
-	err = addrSet.SetIPs(podsIps)
+	err = addrSet.SetIPs(util.IPsToStringSet(podsIps))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -730,7 +730,7 @@ func (oc *DefaultNetworkController) syncEgressQoSPod(key string) error {
 				continue
 			}
 			ips := obj.([]net.IP)
-			ops, err := rule.addrSet.DeleteIPsReturnOps(ips)
+			ops, err := rule.addrSet.DeleteIPsReturnOps(util.IPsToStringSet(ips))
 			if err != nil {
 				return err
 			}
@@ -776,14 +776,14 @@ func (oc *DefaultNetworkController) syncEgressQoSPod(key string) error {
 
 		_, loaded := r.pods.Load(pod.Name)
 		if selector.Matches(podLabels) && !loaded {
-			ops, err := r.addrSet.AddIPsReturnOps(podIPs)
+			ops, err := r.addrSet.AddIPsReturnOps(util.IPsToStringSet(podIPs))
 			if err != nil {
 				return err
 			}
 			allOps = append(allOps, ops...)
 			podMapOps = append(podMapOps, mapAndOp{r.pods, mapInsert})
 		} else if !selector.Matches(podLabels) && loaded {
-			ops, err := r.addrSet.DeleteIPsReturnOps(podIPs)
+			ops, err := r.addrSet.DeleteIPsReturnOps(util.IPsToStringSet(podIPs))
 			if err != nil {
 				return err
 			}

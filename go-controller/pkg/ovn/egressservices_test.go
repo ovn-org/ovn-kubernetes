@@ -23,6 +23,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -293,7 +294,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				// Create the global EgressService address set containing a stale IP: 1.2.3.4
-				_, err := fakeOVN.asf.NewAddressSet(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []net.IP{net.ParseIP("1.2.3.4"), net.ParseIP("10.128.1.5"), net.ParseIP("10.128.2.5")})
+				_, err := fakeOVN.asf.NewAddressSet(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName),
+					sets.New[string]("1.2.3.4", "10.128.1.5", "10.128.2.5"))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				fakeOVN.startWithDBSetup(dbSetup,

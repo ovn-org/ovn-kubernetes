@@ -1,6 +1,8 @@
 package adminnetworkpolicy
 
 import (
+	"net"
+
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,7 +26,6 @@ const (
 	BANPExternalIDKey               = "BaselineAdminNetworkPolicy" // key set on port-groups to identify which BANP it belongs to
 )
 
-// TODO: Double check how empty selector means all labels match works
 type adminNetworkPolicySubject struct {
 	namespaceSelector labels.Selector
 	podSelector       labels.Selector
@@ -37,18 +38,21 @@ type adminNetworkPolicySubject struct {
 	// current set of UUIDs and desired set of UUIDs and do one set of
 	// transact ops calculation. If not, for every pod/namespace update
 	// we would need to do a lookup in the libovsdb cache for the ns_name
-	// LSP index. TODO(tssurya): Do performance runs to see if there is
-	// effect on MEM footprint for storing this information.
+	// LSP index.
 	podPorts sets.Set[string]
 }
 
-// TODO: Implement sameLabels & notSameLabels
 type adminNetworkPolicyPeer struct {
 	namespaceSelector labels.Selector
 	podSelector       labels.Selector
+	nodeSelector      labels.Selector
+	// NOTE: We store the pods and nodes info since on a namespace, pod, node
+	// delete event we don't get the object/labels and only have the key
 	// map of namespaces matching the provided namespaceSelector
 	// {K: namespace name; V: {set of pods matching the provided podSelector}}
 	namespaces map[string]sets.Set[string]
+	// set of nodes matching the provided nodeSelector
+	nodes sets.Set[string]
 }
 
 type gressRule struct {
@@ -63,8 +67,8 @@ type gressRule struct {
 	action string
 	peers  []*adminNetworkPolicyPeer
 	ports  []*libovsdbutil.NetworkPolicyPort
-	// all the podIPs of the peer pods selected by this ANP Rule
-	podIPs sets.Set[string]
+	// all the peerIPs of the peer entities (pods, nodes, cidrs) selected by this ANP Rule
+	peerIPs sets.Set[string]
 }
 
 // adminNetworkPolicyState is the cache that keeps the state of a single
@@ -128,7 +132,7 @@ func newAdminNetworkPolicyState(raw *anpapi.AdminNetworkPolicy) (*adminNetworkPo
 		addErrors = errors.Wrapf(addErrors, "error: cannot parse ANP ACL logging annotation, disabling it for ANP %v - %v",
 			raw.Name, err)
 	}
-	klog.V(4).Infof("Logging parameters for ANP %s are Allow=%s/Deny=%s/Pass=%s", raw.Name,
+	klog.V(5).Infof("Logging parameters for ANP %s are Allow=%s/Deny=%s/Pass=%s", raw.Name,
 		anp.aclLoggingParams.Allow, anp.aclLoggingParams.Deny, anp.aclLoggingParams.Pass)
 	if addErrors.Error() == "" {
 		addErrors = nil
@@ -201,14 +205,12 @@ func newAdminNetworkPolicyPeer(rawNamespaces *anpapi.NamespacedPeer, rawPods *an
 		if !peerNamespaceSelector.Empty() {
 			anpPeer = &adminNetworkPolicyPeer{
 				namespaceSelector: peerNamespaceSelector,
-				// TODO: See if it makes sense to just use the namespace address-sets we have in case the podselector is empty meaning all pods.
-				podSelector: labels.Everything(), // it means match all pods within the provided namespaces
+				podSelector:       labels.Everything(), // it means match all pods within the provided namespaces
 			}
 		} else {
 			anpPeer = &adminNetworkPolicyPeer{
 				namespaceSelector: labels.Everything(), // it means match all namespaces in the cluster
-				// TODO: See if it makes sense to just use the namespace address-sets we have in case the podselector is empty meaning all pods.
-				podSelector: labels.Everything(), // it means match all pods within the provided namespaces
+				podSelector:       labels.Everything(), // it means match all pods within the provided namespaces
 			}
 		}
 	} else if rawPods != nil {
@@ -231,6 +233,7 @@ func newAdminNetworkPolicyPeer(rawNamespaces *anpapi.NamespacedPeer, rawPods *an
 			podSelector:       peerPodSelector,
 		}
 	}
+	anpPeer.nodeSelector = labels.Nothing() // Nodes are not supported as ingress peers and for egress peers this will get overwritten
 	return anpPeer, nil
 }
 
@@ -243,7 +246,35 @@ func newAdminNetworkPolicyIngressPeer(raw anpapi.AdminNetworkPolicyIngressPeer) 
 // newAdminNetworkPolicyEgressPeer takes the provided ANP API Peer and creates a new corresponding
 // adminNetworkPolicyPeer cache object for that Peer.
 func newAdminNetworkPolicyEgressPeer(raw anpapi.AdminNetworkPolicyEgressPeer) (*adminNetworkPolicyPeer, error) {
-	return newAdminNetworkPolicyPeer(raw.Namespaces, raw.Pods)
+	var anpPeer *adminNetworkPolicyPeer
+	if raw.Namespaces != nil || raw.Pods != nil {
+		return newAdminNetworkPolicyPeer(raw.Namespaces, raw.Pods)
+	} else if raw.Nodes != nil {
+		peerNodeSelector, err := metav1.LabelSelectorAsSelector(raw.Nodes)
+		if err != nil {
+			return nil, err
+		}
+		if !peerNodeSelector.Empty() {
+			anpPeer = &adminNetworkPolicyPeer{
+				namespaceSelector: labels.Nothing(), // doesn't match any namespaces
+				podSelector:       labels.Nothing(), // doesn't match any pods
+				nodeSelector:      peerNodeSelector,
+			}
+		} else {
+			anpPeer = &adminNetworkPolicyPeer{
+				namespaceSelector: labels.Nothing(),    // doesn't match any namespaces
+				podSelector:       labels.Nothing(),    // doesn't match any pods
+				nodeSelector:      labels.Everything(), // matches all nodes
+			}
+		}
+	} else if len(raw.Networks) > 0 {
+		anpPeer = &adminNetworkPolicyPeer{
+			namespaceSelector: labels.Nothing(), // doesn't match any namespaces
+			podSelector:       labels.Nothing(), // doesn't match any pods
+			nodeSelector:      labels.Nothing(), // doesn't match any nodes
+		}
+	}
+	return anpPeer, nil
 }
 
 // newAdminNetworkPolicyIngressRule takes the provided ANP API Ingress Rule and creates a new corresponding
@@ -257,6 +288,7 @@ func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, 
 		gressPrefix: string(libovsdbutil.ACLIngress),
 		peers:       make([]*adminNetworkPolicyPeer, 0),
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		peerIPs:     make(sets.Set[string]),
 	}
 	for _, peer := range raw.From {
 		anpPeer, err := newAdminNetworkPolicyIngressPeer(peer)
@@ -286,6 +318,7 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 		gressPrefix: string(libovsdbutil.ACLEgress),
 		peers:       make([]*adminNetworkPolicyPeer, 0),
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		peerIPs:     make(sets.Set[string]),
 	}
 	for _, peer := range raw.To {
 		anpPeer, err := newAdminNetworkPolicyEgressPeer(peer)
@@ -293,6 +326,15 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 			return nil, err
 		}
 		anpRule.peers = append(anpRule.peers, anpPeer)
+		if len(peer.Networks) > 0 {
+			for _, cidr := range peer.Networks {
+				_, ipNet, err := net.ParseCIDR(string(cidr))
+				if err != nil {
+					return nil, err
+				}
+				anpRule.peerIPs.Insert(ipNet.String())
+			}
+		}
 	}
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
@@ -342,7 +384,7 @@ func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) 
 		addErrors = errors.Wrapf(addErrors, "error: cannot parse BANP ACL logging annotation, disabling it for BANP %v - %v",
 			raw.Name, err)
 	}
-	klog.V(4).Infof("Logging parameters for BANP %s are Allow=%s/Deny=%s", raw.Name,
+	klog.V(5).Infof("Logging parameters for BANP %s are Allow=%s/Deny=%s", raw.Name,
 		banp.aclLoggingParams.Allow, banp.aclLoggingParams.Deny)
 	if addErrors.Error() == "" {
 		addErrors = nil
@@ -361,6 +403,7 @@ func newBaselineAdminNetworkPolicyIngressRule(raw anpapi.BaselineAdminNetworkPol
 		gressPrefix: string(libovsdbutil.ACLIngress),
 		peers:       make([]*adminNetworkPolicyPeer, 0),
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		peerIPs:     make(sets.Set[string]),
 	}
 	for _, peer := range raw.From {
 		anpPeer, err := newAdminNetworkPolicyIngressPeer(peer)
@@ -390,6 +433,7 @@ func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPoli
 		gressPrefix: string(libovsdbutil.ACLEgress),
 		peers:       make([]*adminNetworkPolicyPeer, 0),
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		peerIPs:     make(sets.Set[string]),
 	}
 	for _, peer := range raw.To {
 		banpPeer, err := newAdminNetworkPolicyEgressPeer(peer)
@@ -397,6 +441,15 @@ func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPoli
 			return nil, err
 		}
 		banpRule.peers = append(banpRule.peers, banpPeer)
+		if len(peer.Networks) > 0 {
+			for _, cidr := range peer.Networks {
+				_, ipNet, err := net.ParseCIDR(string(cidr))
+				if err != nil {
+					return nil, err
+				}
+				banpRule.peerIPs.Insert(ipNet.String())
+			}
+		}
 	}
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {

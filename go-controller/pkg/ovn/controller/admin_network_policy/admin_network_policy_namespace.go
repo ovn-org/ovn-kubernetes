@@ -43,7 +43,6 @@ func (c *Controller) processNextANPNamespaceWorkItem(wg *sync.WaitGroup) bool {
 // syncAdminNetworkPolicyNamespace decides the main logic everytime
 // we dequeue a key from the anpNamespaceQueue cache
 func (c *Controller) syncAdminNetworkPolicyNamespace(key string) error {
-	// TODO(tssurya): This global lock will be inefficient, we will do perf runs and improve if needed
 	c.Lock()
 	defer c.Unlock()
 	startTime := time.Now()
@@ -51,10 +50,10 @@ func (c *Controller) syncAdminNetworkPolicyNamespace(key string) error {
 	if err != nil {
 		return err
 	}
-	klog.V(4).Infof("Processing sync for Namespace %s in Admin Network Policy controller", name)
+	klog.V(5).Infof("Processing sync for Namespace %s in Admin Network Policy controller", name)
 
 	defer func() {
-		klog.V(4).Infof("Finished syncing Namespace %s Admin Network Policy controller: took %v", name, time.Since(startTime))
+		klog.V(5).Infof("Finished syncing Namespace %s Admin Network Policy controller: took %v", name, time.Since(startTime))
 	}()
 	namespace, err := c.anpNamespaceLister.Get(name)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -148,7 +147,7 @@ func (c *Controller) setNamespaceForANP(namespace *v1.Namespace, anpCache *admin
 	// namespace matches the last rule's peer in egress in which we case we go through everything (max: 20,000 gress rules).
 	// case(i)
 	if _, ok := anpCache.subject.namespaces[namespace.Name]; ok {
-		klog.V(4).Infof("Namespace %s used to match ANP %s subject, requeuing...", namespace.Name, anpCache.name)
+		klog.V(5).Infof("Namespace %s used to match ANP %s subject, requeuing...", namespace.Name, anpCache.name)
 		queue.Add(anpCache.name)
 		return
 	}
@@ -164,7 +163,7 @@ func (c *Controller) setNamespaceForANP(namespace *v1.Namespace, anpCache *admin
 		for _, peer := range rule.peers {
 			// case(iii)
 			if _, ok := peer.namespaces[namespace.Name]; ok {
-				klog.V(4).Infof("Namespace %s used to match ANP %s ingress rule %d peer, requeuing...", namespace.Name, anpCache.name, rule.priority)
+				klog.V(5).Infof("Namespace %s used to match ANP %s ingress rule %d peer, requeuing...", namespace.Name, anpCache.name, rule.priority)
 				queue.Add(anpCache.name)
 				return
 			}
@@ -181,7 +180,7 @@ func (c *Controller) setNamespaceForANP(namespace *v1.Namespace, anpCache *admin
 		for _, peer := range rule.peers {
 			// case(v)
 			if _, ok := peer.namespaces[namespace.Name]; ok {
-				klog.V(4).Infof("Namespace %s used to match ANP %s egress rule %d peer, requeuing...", namespace.Name, anpCache.name, rule.priority)
+				klog.V(5).Infof("Namespace %s used to match ANP %s egress rule %d peer, requeuing...", namespace.Name, anpCache.name, rule.priority)
 				queue.Add(anpCache.name)
 				return
 			}

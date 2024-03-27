@@ -91,10 +91,10 @@ func (oc *DefaultNetworkController) addRemotePodToNamespace(ns string, ips []*ne
 	return nsInfo.addressSet.AddIPs(createIPAddressSlice(ips))
 }
 
-func createIPAddressSlice(ips []*net.IPNet) []net.IP {
-	ipAddrs := make([]net.IP, 0)
+func createIPAddressSlice(ips []*net.IPNet) sets.Set[string] {
+	ipAddrs := sets.New[string]()
 	for _, ip := range ips {
-		ipAddrs = append(ipAddrs, ip.IP)
+		ipAddrs.Insert(ip.IP.String())
 	}
 	return ipAddrs
 }

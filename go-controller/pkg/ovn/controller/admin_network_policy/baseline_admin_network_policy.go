@@ -42,7 +42,6 @@ func (c *Controller) processNextBANPWorkItem(wg *sync.WaitGroup) bool {
 // syncBaselineAdminNetworkPolicy decides the main logic everytime
 // we dequeue a key from the banpQueue cache
 func (c *Controller) syncBaselineAdminNetworkPolicy(key string) error {
-	// TODO(tssurya): This global lock will be inefficient, we will do perf runs and improve if needed
 	c.Lock()
 	defer c.Unlock()
 	startTime := time.Now()
@@ -50,10 +49,10 @@ func (c *Controller) syncBaselineAdminNetworkPolicy(key string) error {
 	if err != nil {
 		return err
 	}
-	klog.V(4).Infof("Processing sync for Baseline Admin Network Policy %s", banpName)
+	klog.V(5).Infof("Processing sync for Baseline Admin Network Policy %s", banpName)
 
 	defer func() {
-		klog.V(4).Infof("Finished syncing Baseline Admin Network Policy %s : %v", banpName, time.Since(startTime))
+		klog.V(5).Infof("Finished syncing Baseline Admin Network Policy %s : %v", banpName, time.Since(startTime))
 	}()
 
 	banp, err := c.banpLister.Get(banpName)
@@ -143,7 +142,7 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 	if currentBANPState.name == "" { // empty struct, no BANP exists
 		// this is a fresh BANP create
 		klog.Infof("Creating baseline admin network policy %s", banp.Name)
-		// 4) Create the PG/ACL/AS in same transact (TODO: See if batching is more efficient after scale runs)
+		// 4) Create the PG/ACL/AS in same transact
 		// 6) Update the ANP caches to store all the created things if transact was successful
 		err = c.createNewANP(desiredBANPState, desiredACLs, desiredPorts, true)
 		if err != nil {
@@ -154,7 +153,7 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 		return nil
 	}
 	// BANP state existed in the cache, which means its either a BANP update or pod/namespace add/update/delete
-	klog.V(3).Infof("Baseline Admin network policy %s was found in cache...Syncing it", currentBANPState.name)
+	klog.V(5).Infof("Baseline Admin network policy %s was found in cache...Syncing it", currentBANPState.name)
 	err = c.updateExistingANP(currentBANPState, desiredBANPState, atLeastOneRuleUpdated, false, true, desiredACLs)
 	if err != nil {
 		return fmt.Errorf("failed to update ANP %s: %v", desiredBANPState.name, err)
