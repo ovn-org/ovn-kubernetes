@@ -43,21 +43,20 @@ func (c *Controller) processNextANPPodWorkItem(wg *sync.WaitGroup) bool {
 // syncAdminNetworkPolicyPod decides the main logic everytime
 // we dequeue a key from the anpPodQueue cache
 func (c *Controller) syncAdminNetworkPolicyPod(key string) error {
-	// TODO(tssurya): This global lock will be inefficient, we will do perf runs and improve if needed
 	c.Lock()
 	defer c.Unlock()
 	startTime := time.Now()
 	// Iterate all ANPs and check if this namespace start/stops matching
-	// any and add/remove the setup accordingly. Namespaces can match multiple
+	// any ANP and add/remove the setup accordingly. Namespaces can match multiple
 	// ANPs objects, so continue iterating all ANP objects before finishing.
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
 	}
-	klog.V(4).Infof("Processing sync for Pod %s/%s in Admin Network Policy controller", namespace, name)
+	klog.V(5).Infof("Processing sync for Pod %s/%s in Admin Network Policy controller", namespace, name)
 
 	defer func() {
-		klog.V(4).Infof("Finished syncing Pod %s/%s Admin Network Policy controller: took %v", namespace, name, time.Since(startTime))
+		klog.V(5).Infof("Finished syncing Pod %s/%s Admin Network Policy controller: took %v", namespace, name, time.Since(startTime))
 	}()
 	ns, err := c.anpNamespaceLister.Get(namespace)
 	if err != nil {
@@ -176,7 +175,7 @@ func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState
 	// case(i)
 	if podCache, ok := anpCache.subject.namespaces[pod.Namespace]; ok {
 		if podCache.Has(pod.Name) {
-			klog.V(4).Infof("Pod %s/%s used to match ANP %s subject, requeuing...", pod.Namespace, pod.Name, anpCache.name)
+			klog.V(5).Infof("Pod %s/%s used to match ANP %s subject, requeuing...", pod.Namespace, pod.Name, anpCache.name)
 			queue.Add(anpCache.name)
 			return
 		}
@@ -194,7 +193,7 @@ func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState
 			// case(iii)
 			if podCache, ok := peer.namespaces[pod.Namespace]; ok {
 				if podCache.Has(pod.Name) {
-					klog.V(4).Infof("Pod %s/%s used to match ANP %s ingress rule %d peer, requeuing...", pod.Namespace, pod.Name, anpCache.name, rule.priority)
+					klog.V(5).Infof("Pod %s/%s used to match ANP %s ingress rule %d peer, requeuing...", pod.Namespace, pod.Name, anpCache.name, rule.priority)
 					queue.Add(anpCache.name)
 					return
 				}
@@ -213,7 +212,7 @@ func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState
 			// case(v)
 			if podCache, ok := peer.namespaces[pod.Namespace]; ok {
 				if podCache.Has(pod.Name) {
-					klog.V(4).Infof("Pod %s/%s used to match ANP %s egress rule %d peer, requeuing...", pod.Namespace, pod.Name, anpCache.name, rule.priority)
+					klog.V(5).Infof("Pod %s/%s used to match ANP %s egress rule %d peer, requeuing...", pod.Namespace, pod.Name, anpCache.name, rule.priority)
 					queue.Add(anpCache.name)
 					return
 				}

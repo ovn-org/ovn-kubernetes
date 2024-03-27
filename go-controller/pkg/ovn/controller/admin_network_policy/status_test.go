@@ -122,6 +122,7 @@ func newANPControllerWithDBSetup(dbSetup libovsdbtest.TestSetup, initANPs anpapi
 		watcher.BANPInformer(),
 		watcher.NamespaceCoreInformer(),
 		watcher.PodCoreInformer(),
+		watcher.NodeCoreInformer(),
 		addressSetFactory,
 		nil, // we don't care about pods in this test
 		"global",

@@ -56,7 +56,6 @@ type Controller struct {
 	// we consider it remote - this is ok for this controller as this variable is only used to
 	// determine if we need to add pod's port to port group or not - future updates should
 	// take care of reconciling the state of the cluster
-	// TODO(tssurya): Revisit this in future uniformly across the code base if needed.
 	isPodScheduledinLocalZone func(*v1.Pod) bool
 	// store's the name of the zone that this controller belongs to
 	zone string
@@ -89,6 +88,10 @@ type Controller struct {
 	anpPodLister corev1listers.PodLister
 	anpPodSynced cache.InformerSynced
 	anpPodQueue  workqueue.RateLimitingInterface
+	// node queue, cache, lister
+	anpNodeLister corev1listers.NodeLister
+	anpNodeSynced cache.InformerSynced
+	anpNodeQueue  workqueue.RateLimitingInterface
 }
 
 // NewController returns a new *Controller.
@@ -100,6 +103,7 @@ func NewController(
 	banpInformer anpinformer.BaselineAdminNetworkPolicyInformer,
 	namespaceInformer corev1informers.NamespaceInformer,
 	podInformer corev1informers.PodInformer,
+	nodeInformer corev1informers.NodeInformer,
 	addressSetFactory addressset.AddressSetFactory,
 	isPodScheduledinLocalZone func(*v1.Pod) bool,
 	zone string,
@@ -135,7 +139,7 @@ func NewController(
 
 	}
 
-	klog.Info("Setting up event handlers for Baseline Admin Network Policy")
+	klog.V(5).Info("Setting up event handlers for Baseline Admin Network Policy")
 	// setup banp informers, listers, queue
 	c.banpLister = banpInformer.Lister()
 	c.banpCacheSynced = banpInformer.Informer().HasSynced
@@ -152,7 +156,7 @@ func NewController(
 		return nil, fmt.Errorf("could not add Event Handler for banpInformer during admin network policy controller initialization, %w", err)
 	}
 
-	klog.Info("Setting up event handlers for Namespaces in Admin Network Policy controller")
+	klog.V(5).Info("Setting up event handlers for Namespaces in Admin Network Policy controller")
 	c.anpNamespaceLister = namespaceInformer.Lister()
 	c.anpNamespaceSynced = namespaceInformer.Informer().HasSynced
 	c.anpNamespaceQueue = workqueue.NewNamedRateLimitingQueue(
@@ -168,7 +172,7 @@ func NewController(
 		return nil, fmt.Errorf("could not add Event Handler for namespace Informer during admin network policy controller initialization, %w", err)
 	}
 
-	klog.Info("Setting up event handlers for Pods in Admin Network Policy controller")
+	klog.V(5).Info("Setting up event handlers for Pods in Admin Network Policy controller")
 	c.anpPodLister = podInformer.Lister()
 	c.anpPodSynced = podInformer.Informer().HasSynced
 	c.anpPodQueue = workqueue.NewNamedRateLimitingQueue(
@@ -182,6 +186,22 @@ func NewController(
 	}))
 	if err != nil {
 		return nil, fmt.Errorf("could not add Event Handler for pod Informer during admin network policy controller initialization, %w", err)
+	}
+
+	klog.V(5).Info("Setting up event handlers for Nodes in Admin Network Policy controller")
+	c.anpNodeLister = nodeInformer.Lister()
+	c.anpNodeSynced = podInformer.Informer().HasSynced
+	c.anpNodeQueue = workqueue.NewNamedRateLimitingQueue(
+		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
+		"anpNodes",
+	)
+	_, err = nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+		AddFunc:    c.onANPNodeAdd,
+		UpdateFunc: c.onANPNodeUpdate,
+		DeleteFunc: c.onANPNodeDelete,
+	}))
+	if err != nil {
+		return nil, fmt.Errorf("could not add Event Handler for node Informer during admin network policy controller initialization, %w", err)
 	}
 
 	// TODO(tssurya): We don't use recorder now but will add events in future iterations
@@ -198,7 +218,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 	klog.Infof("Starting controller %s", c.controllerName)
 
 	// Wait for the caches to be synced
-	klog.Info("Waiting for informer caches to sync")
+	klog.V(5).Info("Waiting for informer caches to sync")
 	if !util.WaitForInformerCacheSyncWithTimeout(c.controllerName, stopCh, c.anpCacheSynced, c.banpCacheSynced, c.anpNamespaceSynced, c.anpPodSynced) {
 		utilruntime.HandleError(fmt.Errorf("timed out waiting for admin network policy caches to sync"))
 		klog.Errorf("Error syncing caches for admin network policy and baseline admin network policy")
@@ -218,7 +238,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 
 	wg := &sync.WaitGroup{}
 	// Start the workers after the repair loop to avoid races
-	klog.Info("Starting Admin Network Policy workers")
+	klog.V(5).Info("Starting Admin Network Policy workers")
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
@@ -229,7 +249,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 		}()
 	}
 
-	klog.Info("Starting Baseline Admin Network Policy workers")
+	klog.V(5).Info("Starting Baseline Admin Network Policy workers")
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
@@ -240,7 +260,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 		}()
 	}
 
-	klog.Info("Starting Namespace Admin Network Policy workers")
+	klog.V(5).Info("Starting Namespace Admin Network Policy workers")
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
@@ -251,13 +271,24 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 		}()
 	}
 
-	klog.Info("Starting Pod Admin Network Policy workers")
+	klog.V(5).Info("Starting Pod Admin Network Policy workers")
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			wait.Until(func() {
 				c.runANPPodWorker(wg)
+			}, time.Second, stopCh)
+		}()
+	}
+
+	klog.V(5).Info("Starting Node Admin Network Policy workers")
+	for i := 0; i < threadiness; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			wait.Until(func() {
+				c.runANPNodeWorker(wg)
 			}, time.Second, stopCh)
 		}()
 	}
@@ -269,6 +300,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 	c.banpQueue.ShutDown()
 	c.anpNamespaceQueue.ShutDown()
 	c.anpPodQueue.ShutDown()
+	c.anpNodeQueue.ShutDown()
 	wg.Wait()
 }
 
@@ -293,6 +325,11 @@ func (c *Controller) runANPNamespaceWorker(wg *sync.WaitGroup) {
 
 func (c *Controller) runANPPodWorker(wg *sync.WaitGroup) {
 	for c.processNextANPPodWorkItem(wg) {
+	}
+}
+
+func (c *Controller) runANPNodeWorker(wg *sync.WaitGroup) {
+	for c.processNextANPNodeWorkItem(wg) {
 	}
 }
 
@@ -401,7 +438,7 @@ func (c *Controller) onANPNamespaceAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Adding Namespace in Admin Network Policy controller %s", key)
+	klog.V(5).Infof("Adding Namespace in Admin Network Policy controller %s", key)
 	c.anpNamespaceQueue.Add(key)
 }
 
@@ -423,7 +460,7 @@ func (c *Controller) onANPNamespaceUpdate(oldObj, newObj interface{}) {
 	}
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
-		klog.V(4).Infof("Updating Namespace in Admin Network Policy controller %s: "+
+		klog.V(5).Infof("Updating Namespace in Admin Network Policy controller %s: "+
 			"namespaceLabels: %v", key, newNamespaceLabels)
 		c.anpNamespaceQueue.Add(key)
 	}
@@ -436,7 +473,7 @@ func (c *Controller) onANPNamespaceDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Deleting Namespace in Admin Network Policy %s", key)
+	klog.V(5).Infof("Deleting Namespace in Admin Network Policy %s", key)
 	c.anpNamespaceQueue.Add(key)
 }
 
@@ -447,7 +484,7 @@ func (c *Controller) onANPPodAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Adding Pod in Admin Network Policy controller %s", key)
+	klog.V(5).Infof("Adding Pod in Admin Network Policy controller %s", key)
 	c.anpPodQueue.Add(key)
 }
 
@@ -482,20 +519,68 @@ func (c *Controller) onANPPodUpdate(oldObj, newObj interface{}) {
 	}
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
-		klog.V(4).Infof("Updating Pod in Admin Network Policy controller %s: "+
+		klog.V(5).Infof("Updating Pod in Admin Network Policy controller %s: "+
 			"podLabels %v, podIPs: %v, PodStatus: %v, PodCompleted?: %v", key, newPodLabels,
 			newPodIPs, newPodRunning, newPodCompleted)
 		c.anpPodQueue.Add(key)
 	}
 }
 
-// onANPPodDelete queues the namespace for processing.
+// onANPPodDelete queues the pod for processing.
 func (c *Controller) onANPPodDelete(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Deleting Pod Admin Network Policy %s", key)
+	klog.V(5).Infof("Deleting Pod Admin Network Policy %s", key)
 	c.anpPodQueue.Add(key)
+}
+
+// onANPNodeAdd queues the node for processing.
+func (c *Controller) onANPNodeAdd(obj interface{}) {
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		return
+	}
+	klog.V(5).Infof("Adding Node in Admin Network Policy controller %s", key)
+	c.anpNodeQueue.Add(key)
+}
+
+// onANPNodeUpdate queues the node for processing.
+func (c *Controller) onANPNodeUpdate(oldObj, newObj interface{}) {
+	oldNode := oldObj.(*v1.Node)
+	newNode := newObj.(*v1.Node)
+
+	// don't process resync or objects that are marked for deletion
+	if oldNode.ResourceVersion == newNode.ResourceVersion ||
+		!newNode.GetDeletionTimestamp().IsZero() {
+		return
+	}
+	// We only care about node's label changes, node's IP changes (hostCIDR annotation)
+	// Rest of the cases we may return
+	oldNodeLabels := labels.Set(oldNode.Labels)
+	newNodeLabels := labels.Set(newNode.Labels)
+	isHostCIDRsAltered := util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
+	if labels.Equals(oldNodeLabels, newNodeLabels) && !isHostCIDRsAltered {
+		return
+	}
+	key, err := cache.MetaNamespaceKeyFunc(newObj)
+	if err == nil {
+		klog.V(5).Infof("Updating Node in Admin Network Policy controller %s: "+
+			"nodeLabels %v, isHostCIDRsAltered?: %v", key, newNodeLabels, isHostCIDRsAltered)
+		c.anpNodeQueue.Add(key)
+	}
+}
+
+// onANPNodeDelete queues the node for processing.
+func (c *Controller) onANPNodeDelete(obj interface{}) {
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		return
+	}
+	klog.V(5).Infof("Deleting Node Admin Network Policy %s", key)
+	c.anpNodeQueue.Add(key)
 }
