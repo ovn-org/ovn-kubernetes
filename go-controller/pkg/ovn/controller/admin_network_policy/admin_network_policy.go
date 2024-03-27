@@ -60,10 +60,10 @@ func (c *Controller) syncAdminNetworkPolicy(key string) error {
 	if err != nil {
 		return err
 	}
-	klog.V(4).Infof("Processing sync for Admin Network Policy %s", anpName)
+	klog.V(5).Infof("Processing sync for Admin Network Policy %s", anpName)
 
 	defer func() {
-		klog.V(4).Infof("Finished syncing Admin Network Policy %s : %v", anpName, time.Since(startTime))
+		klog.V(5).Infof("Finished syncing Admin Network Policy %s : %v", anpName, time.Since(startTime))
 	}()
 
 	anp, err := c.anpLister.Get(anpName)
@@ -150,7 +150,7 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 		return nil
 	}
 	// ANP state existed in the cache, which means its either an ANP update or pod/namespace add/update/delete
-	klog.V(3).Infof("Admin network policy %s/%d was found in cache...Syncing it", currentANPState.name, currentANPState.anpPriority)
+	klog.V(5).Infof("Admin network policy %s/%d was found in cache...Syncing it", currentANPState.name, currentANPState.anpPriority)
 	hasPriorityChanged := (currentANPState.anpPriority != desiredANPState.anpPriority)
 	err = c.updateExistingANP(currentANPState, desiredANPState, atLeastOneRuleUpdated, hasPriorityChanged, false, desiredACLs)
 	if err != nil {
@@ -208,7 +208,7 @@ func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adm
 // convertANPRuleToACL takes the given gressRule and converts it into an ACL(0 ports rule) or
 // multiple ACLs(ports are set) and returns those ACLs for a given gressRule
 func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string, aclLoggingParams *libovsdbutil.ACLLoggingLevels, isBanp bool) []*nbdb.ACL {
-	klog.V(3).Infof("Creating ACL for rule %d/%s belonging to ANP %s", rule.priority, rule.gressPrefix, anpName)
+	klog.V(5).Infof("Creating ACL for rule %d/%s belonging to ANP %s", rule.priority, rule.gressPrefix, anpName)
 	// create match based on direction and address-set name
 	asIndex := GetANPPeerAddrSetDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), c.controllerName, isBanp)
 	l3Match := constructMatchFromAddressSet(rule.gressPrefix, asIndex)
@@ -635,7 +635,7 @@ func (c *Controller) constructOpsForPeerChanges(desiredRules, currentRules []*gr
 			if err != nil {
 				return nil, fmt.Errorf("cannot ensure that addressSet %+v exists: err %v", asIndex.GetExternalIDs(), err)
 			}
-			klog.Infof("Adding peerIPs %+v to address-set %s for ANP %s", ipsToAdd, as.GetName(), anpName)
+			klog.V(5).Infof("Adding peerIPs %+v to address-set %s for ANP %s", ipsToAdd, as.GetName(), anpName)
 			addrOps, err := as.AddIPsReturnOps(util.StringsToIPs(ipsToAdd.UnsortedList()))
 			if err != nil {
 				return nil, fmt.Errorf("failed to construct address-set %s's IP add ops for anp %s's rule"+
@@ -650,7 +650,7 @@ func (c *Controller) constructOpsForPeerChanges(desiredRules, currentRules []*gr
 			if err != nil {
 				return nil, fmt.Errorf("cannot ensure that addressSet %+v exists: err %v", asIndex.GetExternalIDs(), err)
 			}
-			klog.Infof("Deleting peerIPs %+v from address-set %s for ANP %s", ipsToRemove, as.GetName(), anpName)
+			klog.V(5).Infof("Deleting peerIPs %+v from address-set %s for ANP %s", ipsToRemove, as.GetName(), anpName)
 			addrOps, err := as.DeleteIPsReturnOps(util.StringsToIPs(ipsToRemove.UnsortedList()))
 			if err != nil {
 				return nil, fmt.Errorf("failed to construct address-set %s's IP delete ops for anp %s's rule"+
@@ -671,14 +671,14 @@ func (c *Controller) constructOpsForSubjectChanges(currentANPState, desiredANPSt
 	portsToAdd := desiredANPState.subject.podPorts.Difference(currentANPState.subject.podPorts).UnsortedList()
 	portsToDelete := currentANPState.subject.podPorts.Difference(desiredANPState.subject.podPorts).UnsortedList()
 	if len(portsToAdd) > 0 {
-		klog.Infof("Adding ports %+v to port-group %s for ANP %s", portsToAdd, portGroupName, desiredANPState.name)
+		klog.V(5).Infof("Adding ports %+v to port-group %s for ANP %s", portsToAdd, portGroupName, desiredANPState.name)
 		ops, err = libovsdbops.AddPortsToPortGroupOps(c.nbClient, ops, portGroupName, portsToAdd...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Port-to-PG add ops for anp %s: %v", desiredANPState.name, err)
 		}
 	}
 	if len(portsToDelete) > 0 {
-		klog.Infof("Deleting ports %+v from port-group %s for ANP %s", portsToDelete, portGroupName, desiredANPState.name)
+		klog.V(5).Infof("Deleting ports %+v from port-group %s for ANP %s", portsToDelete, portGroupName, desiredANPState.name)
 		ops, err = libovsdbops.DeletePortsFromPortGroupOps(c.nbClient, ops, portGroupName, portsToDelete...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Port-from-PG delete ops for anp %s: %v", desiredANPState.name, err)
