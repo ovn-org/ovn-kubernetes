@@ -1,6 +1,8 @@
 package adminnetworkpolicy
 
 import (
+	"net"
+
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,6 +46,8 @@ type adminNetworkPolicyPeer struct {
 	namespaceSelector labels.Selector
 	podSelector       labels.Selector
 	nodeSelector      labels.Selector
+	// NOTE: We store the pods and nodes info since on a namespace, pod, node
+	// delete event we don't get the object/labels and only have the key
 	// map of namespaces matching the provided namespaceSelector
 	// {K: namespace name; V: {set of pods matching the provided podSelector}}
 	namespaces map[string]sets.Set[string]
@@ -63,7 +67,7 @@ type gressRule struct {
 	action string
 	peers  []*adminNetworkPolicyPeer
 	ports  []*libovsdbutil.NetworkPolicyPort
-	// all the peerIPs of the peer entities (pods, nodes) selected by this ANP Rule
+	// all the peerIPs of the peer entities (pods, nodes, cidrs) selected by this ANP Rule
 	peerIPs sets.Set[string]
 }
 
@@ -263,6 +267,12 @@ func newAdminNetworkPolicyEgressPeer(raw anpapi.AdminNetworkPolicyEgressPeer) (*
 				nodeSelector:      labels.Everything(), // matches all nodes
 			}
 		}
+	} else if len(raw.Networks) > 0 {
+		anpPeer = &adminNetworkPolicyPeer{
+			namespaceSelector: labels.Nothing(), // doesn't match any namespaces
+			podSelector:       labels.Nothing(), // doesn't match any pods
+			nodeSelector:      labels.Nothing(), // doesn't match any nodes
+		}
 	}
 	return anpPeer, nil
 }
@@ -278,6 +288,7 @@ func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, 
 		gressPrefix: string(libovsdbutil.ACLIngress),
 		peers:       make([]*adminNetworkPolicyPeer, 0),
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		peerIPs:     make(sets.Set[string]),
 	}
 	for _, peer := range raw.From {
 		anpPeer, err := newAdminNetworkPolicyIngressPeer(peer)
@@ -307,6 +318,7 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 		gressPrefix: string(libovsdbutil.ACLEgress),
 		peers:       make([]*adminNetworkPolicyPeer, 0),
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		peerIPs:     make(sets.Set[string]),
 	}
 	for _, peer := range raw.To {
 		anpPeer, err := newAdminNetworkPolicyEgressPeer(peer)
@@ -314,6 +326,15 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 			return nil, err
 		}
 		anpRule.peers = append(anpRule.peers, anpPeer)
+		if len(peer.Networks) > 0 {
+			for _, cidr := range peer.Networks {
+				_, ipNet, err := net.ParseCIDR(string(cidr))
+				if err != nil {
+					return nil, err
+				}
+				anpRule.peerIPs.Insert(ipNet.String())
+			}
+		}
 	}
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
@@ -382,6 +403,7 @@ func newBaselineAdminNetworkPolicyIngressRule(raw anpapi.BaselineAdminNetworkPol
 		gressPrefix: string(libovsdbutil.ACLIngress),
 		peers:       make([]*adminNetworkPolicyPeer, 0),
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		peerIPs:     make(sets.Set[string]),
 	}
 	for _, peer := range raw.From {
 		anpPeer, err := newAdminNetworkPolicyIngressPeer(peer)
@@ -411,6 +433,7 @@ func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPoli
 		gressPrefix: string(libovsdbutil.ACLEgress),
 		peers:       make([]*adminNetworkPolicyPeer, 0),
 		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		peerIPs:     make(sets.Set[string]),
 	}
 	for _, peer := range raw.To {
 		banpPeer, err := newAdminNetworkPolicyEgressPeer(peer)
@@ -418,6 +441,15 @@ func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPoli
 			return nil, err
 		}
 		banpRule.peers = append(banpRule.peers, banpPeer)
+		if len(peer.Networks) > 0 {
+			for _, cidr := range peer.Networks {
+				_, ipNet, err := net.ParseCIDR(string(cidr))
+				if err != nil {
+					return nil, err
+				}
+				banpRule.peerIPs.Insert(ipNet.String())
+			}
+		}
 	}
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {

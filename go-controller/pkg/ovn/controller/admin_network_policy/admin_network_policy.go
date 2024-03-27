@@ -242,14 +242,14 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 func (c *Controller) convertANPPeersToIPs(anp *adminNetworkPolicyState) error {
 	var err error
 	for _, ingressRule := range anp.ingressRules {
-		ingressRule.peerIPs, err = c.convertANPPeersToIPSet(ingressRule.peers)
+		err = c.convertANPPeersToIPSet(ingressRule.peers, ingressRule.peerIPs)
 		if err != nil {
 			return fmt.Errorf("unable to create address set for "+
 				" rule %s with priority %d: %w", ingressRule.name, ingressRule.priority, err)
 		}
 	}
 	for _, egressRule := range anp.egressRules {
-		egressRule.peerIPs, err = c.convertANPPeersToIPSet(egressRule.peers)
+		err = c.convertANPPeersToIPSet(egressRule.peers, egressRule.peerIPs)
 		if err != nil {
 			return fmt.Errorf("unable to create address set for "+
 				" rule %s with priority %d: %w", egressRule.name, egressRule.priority, err)
@@ -263,12 +263,11 @@ func (c *Controller) convertANPPeersToIPs(anp *adminNetworkPolicyState) error {
 // This function also takes care of populating the adminNetworkPolicyPeer.namespaces cache
 // It also adds up all the peerIPs that are supposed to be present in the created AS and returns them on
 // a per-rule basis so that the actual ops to transact these into the AS can be constructed using that
-func (c *Controller) convertANPPeersToIPSet(peers []*adminNetworkPolicyPeer) (sets.Set[string], error) {
-	peerIPs := sets.Set[string]{}
+func (c *Controller) convertANPPeersToIPSet(peers []*adminNetworkPolicyPeer, peerIPs sets.Set[string]) error {
 	for _, peer := range peers {
 		namespaces, err := c.anpNamespaceLister.List(peer.namespaceSelector)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		namespaceCache := make(map[string]sets.Set[string])
 		// NOTE: Multiple peers may match on same podIP which is fine, we use sets to store them to avoid duplication
@@ -281,7 +280,7 @@ func (c *Controller) convertANPPeersToIPSet(peers []*adminNetworkPolicyPeer) (se
 			podNamespaceLister := c.anpPodLister.Pods(namespace.Name)
 			pods, err := podNamespaceLister.List(peer.podSelector)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			for _, pod := range pods {
 				// we don't handle HostNetworked or completed pods; unscheduled pods shall be handled via pod update path
@@ -296,7 +295,7 @@ func (c *Controller) convertANPPeersToIPSet(peers []*adminNetworkPolicyPeer) (se
 						// move on to next item in the loop
 						continue
 					}
-					return nil, err
+					return err
 				}
 				peerIPs.Insert(util.StringSlice(podIPs)...)
 				podCache.Insert(pod.Name)
@@ -305,20 +304,20 @@ func (c *Controller) convertANPPeersToIPSet(peers []*adminNetworkPolicyPeer) (se
 		peer.namespaces = namespaceCache
 		nodes, err := c.anpNodeLister.List(peer.nodeSelector)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		nodeCache := make(sets.Set[string])
 		for _, node := range nodes {
 			nodeIPs, err := util.GetNodeHostAddrs(node)
 			if err != nil { // Annotation not found errors are ignored, they will come as node updates
-				return nil, err
+				return err
 			}
 			peerIPs.Insert(nodeIPs...)
 			nodeCache.Insert(node.Name)
 		}
 		peer.nodes = nodeCache
 	}
-	return peerIPs, nil
+	return nil
 }
 
 // convertANPSubjectToLSPs calculates all the LSP's that match for the provided anp's subject and returns them
@@ -482,8 +481,10 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	// Did ANP.Spec.Ingress rules get updated?
 	// (at this stage the length of ANP.Spec.Ingress hasn't changed, so individual rules either got updated at their values or positions are switched)
 	// The fields that we care about for rebuilding ACLs are
-	// (i) `ports` (ii) `actions` (iii) priority for a given rule
-	// The changes to peer labels, peer pod label updates, namespace label updates etc can be inferred
+	// (i) `ports` (ii) `actions` (iii) precedence(ACL priority) for a given rule
+	// If (i)||&& (ii), atLeastOneRuleUpdated=true already
+	// Next let's check for a peer update:
+	// The changes to peer labels, peer pod label updates, namespace label updates, CIDR peer updates etc can be inferred
 	// from the peerIPs cache we store.
 	// Did the ANP.Spec.Ingress.Peers Change?
 	// 1) ANP.Spec.Ingress.Peers.Namespaces changed && ||
@@ -503,7 +504,11 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	// Did ANP.Spec.Egress rules get updated?
 	// (at this stage the length of ANP.Spec.Egress hasn't changed, so individual rules either got updated at their values or positions are switched)
 	// The fields that we care about for rebuilding ACLs are
-	// (i) `ports` (ii) `actions` (iii) priority for a given rule
+	// (i) `ports` (ii) `actions` (iii) precedence(ACL priority) for a given rule
+	// If (i)||&& (ii), atLeastOneRuleUpdated=true already
+	// Next let's check for a peer update:
+	// The changes to peer labels, peer pod label updates, namespace label updates, CIDR peer updates etc can be inferred
+	// from the peerIPs cache we store.
 	// Did the ANP.Spec.Egress.Peers Change?
 	// 1) ANP.Spec.Egress.Peers.Namespaces changed && ||
 	// 2) ANP.Spec.Egress.Peers.Pods changed && ||
