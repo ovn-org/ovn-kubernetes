@@ -738,6 +738,7 @@ func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error 
 	if err == nil && stdout == "HTTP/1.1 200 OK" {
 		return nil
 	}
+	framework.Logf("HTTP request failed; stdout: %s, err: %v", stdout+stderr, err)
 	return fmt.Errorf("http request failed; stdout: %s, err: %v", stdout+stderr, err)
 }
 
