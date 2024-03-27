@@ -61,7 +61,7 @@ func insertIptRules(rules []nodeipt.Rule) error {
 // insertIptRulesFiltered adds the provided rules in an insert fashion with a filter for table/chain
 // i.e each rule gets added at the first position in the chain
 func insertIptRulesFiltered(rules []nodeipt.Rule, filter map[string]map[string]bool) error {
-	return nodeipt.AddRulesFiltered(rules, false, filter)
+	return nodeipt.AddRulesFiltered(rules, filter)
 }
 
 // appendIptRules adds the provided rules in an append fashion
