@@ -132,9 +132,9 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 	if err != nil {
 		return fmt.Errorf("unable to fetch ports for banp %s: %v", desiredBANPState.name, err)
 	}
-	err = c.convertANPPeersToIPs(desiredBANPState)
+	err = c.expandANPRulePeers(desiredBANPState)
 	if err != nil {
-		return fmt.Errorf("unable to build IPsets for banp %s: %v", desiredBANPState.name, err)
+		return fmt.Errorf("unable to convert peers to addresses for banp %s: %v", desiredBANPState.name, err)
 	}
 	atLeastOneRuleUpdated := false
 	desiredACLs := c.convertANPRulesToACLs(desiredBANPState, currentBANPState, portGroupName, &atLeastOneRuleUpdated, true)
