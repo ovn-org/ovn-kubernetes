@@ -1273,7 +1273,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				}
 				network, err := util.GetSecondaryHostNetworkContainingIP(node, eIP)
 				if err != nil {
-					klog.Warningf("Failed to determine if egress IP is hosted by a secondary host network for node %s: %v",
+					klog.Warningf("Failed to determine if egress IP %s is hosted by a secondary host network for node %s: %v",
 						eIP.String(), node.Name, err)
 					continue
 				}

@@ -788,6 +788,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkSetNsFd", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil}},
 				// The below mock call is needed for the LinkByName() invocation right after the renameLink() method
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockLink, nil}},
+				// The below mock call is self-explanatory and is for the LinkSetUp() method
+				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 				// The below mock call is self-explanatory and is for the LinkSetMTU() method
 				{OnCallMethodName: "LinkSetMTU", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},

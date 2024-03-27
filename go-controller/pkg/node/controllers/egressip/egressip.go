@@ -264,6 +264,17 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptSaveMarkRule); err != nil {
 				return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
 			}
+
+			// If dst is a node IP, use main routing table and skip EIP routing tables
+			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V4)); err != nil {
+				return fmt.Errorf("failed to create IPv4 rule for node IPs: %v", err)
+			}
+			// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
+			// used for routing traffic in both directions.
+			stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
+			if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
+				return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
+			}
 		}
 	}
 	if c.v6 {
@@ -281,18 +292,12 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptSaveMarkRule); err != nil {
 				return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
 			}
-		}
-	}
-	if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
-		// If dst is a node IP, use main routing table and skip EIP routing tables
-		if err = c.ruleManager.Add(getNodeIPFwMarkIPRule()); err != nil {
-			return fmt.Errorf("failed to create IP rule for node IPs: %v", err)
-		}
-		// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
-		// used for routing traffic in both directions.
-		stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
-		if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
-			return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
+
+			// If dst is a node IP, use main routing table and skip EIP routing tables
+			// src_valid_mark is not applicable to ipv6
+			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V6)); err != nil {
+				return fmt.Errorf("failed to create IPv6 rule for node IPs: %v", err)
+			}
 		}
 	}
 
@@ -426,11 +431,11 @@ func (c *Controller) processNextEIPWorkItem(wg *sync.WaitGroup) bool {
 	klog.V(4).Infof("Processing Egress IP %s", key)
 	if err := c.syncEIP(key.(string)); err != nil {
 		if c.eIPQueue.NumRequeues(key) < maxRetries {
-			klog.V(4).Infof("Error found while processing Egress IP %s: %w", key, err)
+			klog.V(4).Infof("Error found while processing Egress IP %s: %v", key, err)
 			c.eIPQueue.AddRateLimited(key)
 			return true
 		}
-		klog.Errorf("Dropping Egress IP %q out of the queue: %w", key, err)
+		klog.Errorf("Dropping Egress IP %q out of the queue: %v", key, err)
 		utilruntime.HandleError(err)
 	}
 	c.eIPQueue.Forget(key)
@@ -906,7 +911,9 @@ func (c *Controller) repairNode() error {
 	}
 	ipTableV6Rules, err := c.iptablesManager.GetIPv6ChainRuleArgs(utiliptables.TableNAT, chainName)
 	if err != nil {
-		return fmt.Errorf("failed to list IPTable IPv4 rules: %v", err)
+		// IPv6 NAT table may not be available by default on some distributions.
+		ipTableV6Rules = make([]iptables.RuleArg, 0)
+		klog.Warningf("Failed to list IPTable IPv6 rules: %v", err)
 	}
 	for _, rule := range ipTableV6Rules {
 		ruleStr := strings.Join(rule.Args, " ")
@@ -1033,7 +1040,8 @@ func (c *Controller) repairNode() error {
 	}
 	staleIPTableV6Rules := assignedIPTableV6Rules.Difference(expectedIPTableV6Rules)
 	if err := c.removeStaleIPTableV6Rules(staleIPTableV6Rules, assignedIPTablesV6StrToRules); err != nil {
-		return fmt.Errorf("failed to remove stale IPTable V4 rule(s) (%+v): %v", staleIPTableV6Rules, err)
+		// IPv6 NAT table may not be available by default on some distributions.
+		klog.Warningf("Failed to remove stale IPTable V6 rule(s) (%+v): %v", staleIPTableV6Rules, err)
 	}
 	return nil
 }
@@ -1498,10 +1506,11 @@ func isValidIP(ipStr string) bool {
 	return len(ip) > 0
 }
 
-func getNodeIPFwMarkIPRule() netlink.Rule {
+func getNodeIPFwMarkIPRule(ipFamily int) netlink.Rule {
 	r := netlink.NewRule()
 	r.Priority = ruleFwMarkPriority
 	r.Mark = 1008 // pkt marked with 1008 is a node IP
 	r.Table = 254 // main
+	r.Family = ipFamily
 	return *r
 }

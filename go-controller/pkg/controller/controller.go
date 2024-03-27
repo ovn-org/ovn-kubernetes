@@ -117,7 +117,7 @@ func (c *controller[T]) cleanup() {
 	c.queue.ShutDown()
 	if c.eventHandler != nil {
 		if err := c.config.Informer.RemoveEventHandler(c.eventHandler); err != nil {
-			klog.Errorf("Failed to remove event handler for controller %s: %w", c.name, err)
+			klog.Errorf("Failed to remove event handler for controller %s: %v", c.name, err)
 		}
 	}
 }

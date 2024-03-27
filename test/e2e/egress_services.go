@@ -22,7 +22,7 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-var _ = ginkgo.Describe("Egress Services", func() {
+var _ = ginkgo.Describe("EgressService", func() {
 	const (
 		egressServiceYAML         = "egress_service.yaml"
 		externalKindContainerName = "kind-external-container-for-egress-service"
@@ -1160,7 +1160,9 @@ spec:
 				gomega.Consistently(func() error {
 					for _, pod := range append(net1.createdPods, net2.createdPods...) {
 						err := curlAgnHostClientIPFromPod(f.Namespace.Name, pod, "", dst, podHTTPPort)
-						if err != nil && strings.Contains(err.Error(), "exit code 28") {
+						if err != nil && (strings.Contains(err.Error(), fmt.Sprintf("exit code 28")) ||
+							// github runners don't have any routes for IPv6, so we get CURLE_COULDNT_CONNECT
+							(protocol == v1.IPv6Protocol && strings.Contains(err.Error(), fmt.Sprintf("exit code 7")))) {
 							return nil
 						}
 

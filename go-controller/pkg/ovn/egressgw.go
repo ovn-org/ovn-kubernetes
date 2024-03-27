@@ -207,7 +207,7 @@ func (oc *DefaultNetworkController) checkAndDeleteStaleConntrackEntries() {
 		// flush here since we know we have added an egressgw pod and we also know the full list of existing gatewayIPs
 		existingGWs, err := oc.apbExternalRouteController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespace.Name)
 		if err != nil {
-			klog.Errorf("Unable to retrieve gateway IPs for Admin Policy Based External Route objects for ns %s: %w", namespace.Name, err)
+			klog.Errorf("Unable to retrieve gateway IPs for Admin Policy Based External Route objects for ns %s: %v", namespace.Name, err)
 			return
 		}
 		// by now the nsInfo cache must be repaired for this feature fully;

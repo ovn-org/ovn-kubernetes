@@ -112,7 +112,7 @@ type BaselineAdminNetworkPolicyIngressRule struct {
 	Action BaselineAdminNetworkPolicyRuleAction `json:"action"`
 
 	// From is the list of sources whose traffic this rule applies to.
-	// If any AdminNetworkPolicyPeer matches the source of incoming
+	// If any AdminNetworkPolicyIngressPeer matches the source of incoming
 	// traffic then the specified action is applied.
 	// This field must be defined and contain at least one item.
 	//
@@ -120,7 +120,7 @@ type BaselineAdminNetworkPolicyIngressRule struct {
 	//
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=100
-	From []AdminNetworkPolicyPeer `json:"from"`
+	From []AdminNetworkPolicyIngressPeer `json:"from"`
 
 	// Ports allows for matching traffic based on port and protocols.
 	// This field is a list of ports which should be matched on
@@ -160,7 +160,7 @@ type BaselineAdminNetworkPolicyEgressRule struct {
 	Action BaselineAdminNetworkPolicyRuleAction `json:"action"`
 
 	// To is the list of destinations whose traffic this rule applies to.
-	// If any AdminNetworkPolicyPeer matches the destination of outgoing
+	// If any AdminNetworkPolicyEgressPeer matches the destination of outgoing
 	// traffic then the specified action is applied.
 	// This field must be defined and contain at least one item.
 	// +kubebuilder:validation:MinItems=1
@@ -168,7 +168,7 @@ type BaselineAdminNetworkPolicyEgressRule struct {
 	//
 	// Support: Core
 	//
-	To []AdminNetworkPolicyPeer `json:"to"`
+	To []AdminNetworkPolicyEgressPeer `json:"to"`
 
 	// Ports allows for matching traffic based on port and protocols.
 	// This field is a list of destination ports for the outging egress traffic.

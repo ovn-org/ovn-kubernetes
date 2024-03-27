@@ -3,14 +3,16 @@ package status_manager
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager/zone_tracker"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -19,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/pointer"
 )
 
 func getNodeWithZone(nodeName, zoneName string) *v1.Node {
@@ -121,6 +124,52 @@ func checkEmptyAPBRouteStatusConsistently(apbRoute *adminpolicybasedrouteapi.Adm
 	Consistently(func() bool {
 		ef, err := fakeClient.AdminPolicyRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().
 			Get(context.TODO(), apbRoute.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		return ef.Status.Status == ""
+	}).Should(BeTrue(), "expected Status to be consistently empty")
+}
+
+func newEgressQoS(namespace string) *egressqosapi.EgressQoS {
+	return &egressqosapi.EgressQoS{
+		ObjectMeta: util.NewObjectMeta("default", namespace),
+		Spec: egressqosapi.EgressQoSSpec{
+			Egress: []egressqosapi.EgressQoSRule{
+				{
+					DSCP:    60,
+					DstCIDR: pointer.String("1.2.3.4/32"),
+				},
+			},
+		},
+	}
+}
+
+func updateEgressQoSStatus(egressQoS *egressqosapi.EgressQoS, status *egressqosapi.EgressQoSStatus,
+	fakeClient *util.OVNClusterManagerClientset) {
+	egressQoS.Status = *status
+	_, err := fakeClient.EgressQoSClient.K8sV1().EgressQoSes(egressQoS.Namespace).
+		Update(context.TODO(), egressQoS, metav1.UpdateOptions{})
+	Expect(err).ToNot(HaveOccurred())
+}
+
+func checkEQStatusEventually(egressQoS *egressqosapi.EgressQoS, expectFailure bool, expectEmpty bool, fakeClient *util.OVNClusterManagerClientset) {
+	Eventually(func() bool {
+		eq, err := fakeClient.EgressQoSClient.K8sV1().EgressQoSes(egressQoS.Namespace).
+			Get(context.TODO(), egressQoS.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		if expectFailure {
+			return strings.Contains(eq.Status.Status, types.EgressQoSErrorMsg)
+		} else if expectEmpty {
+			return eq.Status.Status == ""
+		} else {
+			return strings.Contains(eq.Status.Status, "applied")
+		}
+	}).Should(BeTrue(), fmt.Sprintf("expected egress QoS status with expectFailure=%v expectEmpty=%v", expectFailure, expectEmpty))
+}
+
+func checkEmptyEQStatusConsistently(egressQoS *egressqosapi.EgressQoS, fakeClient *util.OVNClusterManagerClientset) {
+	Consistently(func() bool {
+		ef, err := fakeClient.EgressQoSClient.K8sV1().EgressQoSes(egressQoS.Namespace).
+			Get(context.TODO(), egressQoS.Name, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		return ef.Status.Status == ""
 	}).Should(BeTrue(), "expected Status to be consistently empty")
@@ -277,6 +326,97 @@ var _ = Describe("Cluster Manager Status Manager", func() {
 			Messages: []string{types.GetZoneStatus("zone1", "OK"), types.GetZoneStatus("zone2", "OK")},
 		}, fakeClient)
 		checkAPBRouteStatusEventually(apbRoute, false, false, fakeClient)
+	})
+
+	It("updates EgressQoS status with 1 zone", func() {
+		config.OVNKubernetesFeature.EnableEgressQoS = true
+		zones := sets.New[string]("zone1")
+		namespace1 := util.NewNamespace(namespace1Name)
+		egressQoS := newEgressQoS(namespace1.Name)
+		start(zones, namespace1, egressQoS)
+		updateEgressQoSStatus(egressQoS, &egressqosapi.EgressQoSStatus{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "EgressQoS Rules applied",
+			}},
+		}, fakeClient)
+
+		checkEQStatusEventually(egressQoS, false, false, fakeClient)
+	})
+
+	It("updates EgressQoS status with 2 zones", func() {
+		config.OVNKubernetesFeature.EnableEgressQoS = true
+		zones := sets.New[string]("zone1", "zone2")
+		namespace1 := util.NewNamespace(namespace1Name)
+		egressQoS := newEgressQoS(namespace1.Name)
+		start(zones, namespace1, egressQoS)
+
+		updateEgressQoSStatus(egressQoS, &egressqosapi.EgressQoSStatus{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "EgressQoS Rules applied",
+			}},
+		}, fakeClient)
+
+		checkEmptyEQStatusConsistently(egressQoS, fakeClient)
+
+		updateEgressQoSStatus(egressQoS, &egressqosapi.EgressQoSStatus{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "EgressQoS Rules applied",
+			}, {
+				Type:    "Ready-In-Zone-zone2",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "EgressQoS Rules applied",
+			}},
+		}, fakeClient)
+		checkEQStatusEventually(egressQoS, false, false, fakeClient)
+
+	})
+
+	It("updates EgressQoS status with UnknownZone", func() {
+		config.OVNKubernetesFeature.EnableEgressQoS = true
+		zones := sets.New[string]("zone1", zone_tracker.UnknownZone)
+		namespace1 := util.NewNamespace(namespace1Name)
+		egressQoS := newEgressQoS(namespace1.Name)
+		start(zones, namespace1, egressQoS)
+
+		// no matter how many messages are in the status, it won't be updated while UnknownZone is present
+		updateEgressQoSStatus(egressQoS, &egressqosapi.EgressQoSStatus{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "EgressQoS Rules applied",
+			}},
+		}, fakeClient)
+		checkEmptyEQStatusConsistently(egressQoS, fakeClient)
+
+		// when UnknownZone is removed, updates will be handled, but status from the new zone is not reported yet
+		statusManager.onZoneUpdate(sets.New[string]("zone1", "zone2"))
+		checkEmptyEQStatusConsistently(egressQoS, fakeClient)
+		// when new zone status is reported, status will be set
+		updateEgressQoSStatus(egressQoS, &egressqosapi.EgressQoSStatus{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "EgressQoS Rules applied",
+			}, {
+				Type:    "Ready-In-Zone-zone2",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "EgressQoS Rules applied",
+			}},
+		}, fakeClient)
+		checkEQStatusEventually(egressQoS, false, false, fakeClient)
 	})
 	// cleanup can't be tested by unit test apiserver, since it relies on SSA logic with FieldManagers
 })

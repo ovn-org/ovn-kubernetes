@@ -521,7 +521,7 @@ func (m *externalPolicyManager) processNextNamespaceWorkItem(wg *sync.WaitGroup)
 	err := m.syncNamespace(obj.(*v1.Namespace), m.routeQueue)
 	if err != nil {
 		if m.namespaceQueue.NumRequeues(obj) < maxRetries {
-			klog.V(4).Infof("Error found while processing namespace %s:%w", obj.(*v1.Namespace), err)
+			klog.V(4).Infof("Error found while processing namespace %s:%v", obj.(*v1.Namespace), err)
 			m.namespaceQueue.AddRateLimited(obj)
 			return true
 		}

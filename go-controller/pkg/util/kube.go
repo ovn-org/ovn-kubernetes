@@ -104,6 +104,7 @@ type OVNClusterManagerClientset struct {
 	EgressServiceClient    egressserviceclientset.Interface
 	AdminPolicyRouteClient adminpolicybasedrouteclientset.Interface
 	EgressFirewallClient   egressfirewallclientset.Interface
+	EgressQoSClient        egressqosclientset.Interface
 }
 
 const (
@@ -165,6 +166,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		EgressServiceClient:    cs.EgressServiceClient,
 		AdminPolicyRouteClient: cs.AdminPolicyRouteClient,
 		EgressFirewallClient:   cs.EgressFirewallClient,
+		EgressQoSClient:        cs.EgressQoSClient,
 	}
 }
 
@@ -211,7 +213,7 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		// uses the current context in kubeconfig
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
-		if (conf.Token == "" && conf.CertDir == "") || len(conf.CAData) == 0 {
+		if (conf.Token == "" && conf.TokenFile == "" && conf.CertDir == "") || len(conf.CAData) == 0 {
 			return nil, fmt.Errorf("TLS-secured apiservers require token/cert and CA certificate")
 		}
 		if _, err := cert.NewPoolFromBytes(conf.CAData); err != nil {
@@ -287,11 +289,27 @@ func StartNodeCertificateManager(ctx context.Context, wg *sync.WaitGroup, nodeNa
 	if err != nil {
 		return fmt.Errorf("failed to initialize the certificate store: %v", err)
 	}
+
+	// The CSR approver only accepts CSRs created by system:ovn-node:nodeName and system:node:nodeName.
+	// If the node name in the existing ovn-node certificate is different from the current node name,
+	// remove the certificate so the CSR will be created using the bootstrap kubeconfig using system:node:nodeName user.
+	certCommonName := fmt.Sprintf("%s:%s", certCommonNamePrefix, nodeName)
+	currentCertFromFile, err := certificateStore.Current()
+	if err == nil && currentCertFromFile.Leaf != nil {
+		if currentCertFromFile.Leaf.Subject.CommonName != certCommonName {
+			klog.Errorf("Unexpected common name found in the certificate, expected: %q, got: %q, removing %s",
+				certCommonName, currentCertFromFile.Leaf.Subject.CommonName, certificateStore.CurrentPath())
+			if err := os.Remove(certificateStore.CurrentPath()); err != nil {
+				return fmt.Errorf("failed to remove the current certificate file: %w", err)
+			}
+		}
+	}
+
 	certManager, err := certificate.NewManager(&certificate.Config{
 		ClientsetFn: newClientsetFn,
 		Template: &x509.CertificateRequest{
 			Subject: pkix.Name{
-				CommonName:   fmt.Sprintf("%s:%s", certCommonNamePrefix, nodeName),
+				CommonName:   certCommonName,
 				Organization: []string{certOrganization},
 			},
 		},
@@ -700,7 +718,7 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 	if gk.String() == "" {
 		kinds, _, err := scheme.Scheme.ObjectKinds(obj)
 		if err != nil || len(kinds) == 0 || len(kinds) > 1 {
-			klog.Warningf("BUG: object has no / ambiguous GVK: %#v, err", obj, err)
+			klog.Warningf("Object %v either has no GroupVersionKind or has an ambiguous GroupVersionKind: %#v, err", obj, err)
 		}
 		gk = kinds[0].GroupKind()
 	}
@@ -889,4 +907,8 @@ func IsHostEndpoint(endpointIPstr string) bool {
 		}
 	}
 	return true
+}
+
+func GetConntrackZone() int {
+	return config.Default.ConntrackZone
 }

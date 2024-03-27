@@ -346,11 +346,6 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 		return err
 	}
 	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes))
-	err = oc.upgradeOVNTopology(existingNodes)
-	if err != nil {
-		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
-		return err
-	}
 
 	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
 	// use IsTableSupported(nbdb.LoadBalancerGroup).
@@ -565,12 +560,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 			defer oc.wg.Done()
 			unidlingController.Run(oc.stopChan)
 		}()
-	}
-
-	// Master is fully running and resource handlers have synced, update Topology version in OVN and the ConfigMap
-	if err := oc.reportTopologyVersion(ctx); err != nil {
-		klog.Errorf("Failed to report topology version: %v", err)
-		return err
 	}
 
 	return nil
@@ -932,7 +921,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 					hoSync,
 					syncZoneIC}
 			} else {
-				klog.Infof("Node %s moved from the remote zone %s to local zone.",
+				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node.  Trigger a full node sync.
 				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect}

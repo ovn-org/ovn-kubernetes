@@ -367,7 +367,7 @@ func GenerateId(length int) string {
 	b := make([]byte, length)
 	_, err := rand.Read(b) // generates len(b) random bytes
 	if err != nil {
-		klog.Errorf("can't generate a random ID: ", err)
+		klog.Errorf("Failed when generating a random ID: %v", err)
 		return ""
 	}
 

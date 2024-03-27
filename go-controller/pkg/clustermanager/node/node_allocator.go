@@ -134,7 +134,7 @@ func (na *NodeAllocator) hybridOverlayNodeEnsureSubnet(node *corev1.Node, annota
 
 	if err := annotator.Set(hotypes.HybridOverlayNodeSubnet, hostSubnets[0].String()); err != nil {
 		if e := na.hybridOverlaySubnetAllocator.ReleaseNetworks(node.Name, allocatedSubnets...); e != nil {
-			klog.Warningf("Failed to release hybrid over subnet for the node %s from the allocator : %w", node.Name, e)
+			klog.Warningf("Failed to release hybrid over subnet for the node %s from the allocator: %v", node.Name, e)
 		}
 		return nil, fmt.Errorf("error setting hybrid overlay host subnet: %w", err)
 	}
@@ -262,7 +262,7 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 				// this is a hybrid overlay node so mark as allocated from the hybrid overlay subnet allocator
 				hostSubnet, err := houtil.ParseHybridOverlayHostSubnet(node)
 				if err != nil {
-					klog.Errorf("Failed to parse hybrid overlay for node %s: %w", node.Name, err)
+					klog.Errorf("Failed to parse hybrid overlay for node %s: %v", node.Name, err)
 				} else if hostSubnet != nil {
 					klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnet)
 					if err := na.hybridOverlaySubnetAllocator.ReleaseNetworks(node.Name, hostSubnet); err != nil {

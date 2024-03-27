@@ -62,6 +62,7 @@ rules:
           - egressservices
           - adminpolicybasedexternalroutes
           - egressfirewalls
+          - egressqoses
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.ovn.org"]
       resources:
@@ -82,4 +83,5 @@ rules:
       resources:
         - adminpolicybasedexternalroutes/status
         - egressfirewalls/status
+        - egressqoses/status
       verbs: [ "patch", "update" ]

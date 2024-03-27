@@ -116,14 +116,6 @@ const (
 	PacketsPerSecond     = "pktps"
 	MeterAction          = "drop"
 
-	// OVN-K8S Topology Versions
-	OvnSingleJoinSwitchTopoVersion = 1
-	OvnNamespacedDenyPGTopoVersion = 2
-	OvnHostToSvcOFTopoVersion      = 3
-	OvnPortBindingTopoVersion      = 4
-	OvnRoutingViaHostTopoVersion   = 5
-	OvnCurrentTopologyVersion      = OvnRoutingViaHostTopoVersion
-
 	// OVN-K8S annotation & taint constants
 	OvnK8sPrefix = "k8s.ovn.org"
 	// Deprecated: we used to set topology version as an annotation on the node. We don't do this anymore.
@@ -163,8 +155,6 @@ const (
 	NADExternalID = OvnK8sPrefix + "/" + "nad"
 	// key for topology type external-id, only used for secondary network logical entities
 	TopologyExternalID = OvnK8sPrefix + "/" + "topology"
-	// key for topology version external-id
-	TopologyVersionExternalID = "k8s-ovn-topo-version"
 	// key for load_balancer kind external-id
 	LoadBalancerKindExternalID = OvnK8sPrefix + "/" + "kind"
 	// key for load_balancer service external-id

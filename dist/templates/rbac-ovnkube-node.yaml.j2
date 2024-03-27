@@ -153,6 +153,7 @@ rules:
       resources:
           - egressfirewalls/status
           - adminpolicybasedexternalroutes/status
+          - egressqoses/status
       verbs: [ "patch", "update" ]
     - apiGroups: ["policy.networking.k8s.io"]
       resources:

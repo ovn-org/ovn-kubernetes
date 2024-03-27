@@ -53,6 +53,16 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 		exFWDenyCIDR         string
 	)
 
+	waitForEFApplied := func(namespace string) {
+		gomega.Eventually(func() bool {
+			output, err := e2ekubectl.RunKubectl(namespace, "get", "egressfirewall", "default")
+			if err != nil {
+				framework.Failf("could not get the egressfirewall default in namespace: %s", namespace)
+			}
+			return strings.Contains(output, "EgressFirewall Rules applied")
+		}, 10*time.Second).Should(gomega.BeTrue(), fmt.Sprintf("expected egress firewall in namespace %s to be successfully applied", namespace))
+	}
+
 	f := wrappedTestFramework(svcname)
 	// node2ndaryIPs holds the nodeName as the key and the value is
 	// a map with ipFamily(v4 or v6) as the key and the secondaryIP as the value
@@ -151,6 +161,7 @@ spec:
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		// apply the egress firewall configuration
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		waitForEFApplied(f.Namespace.Name)
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 
@@ -271,6 +282,7 @@ spec:
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		// apply the egress firewall configuration
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		waitForEFApplied(f.Namespace.Name)
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 		// create host networked pod
@@ -333,7 +345,7 @@ spec:
 				// manually add the a secondary IP to each node
 				framework.Logf("Adding IP %s to node %s", ip, nodeName)
 				_, err = runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "add", ip, "dev", "breth0")
-				if err != nil && !strings.Contains(err.Error(),	"Address already assigned") {
+				if err != nil && !strings.Contains(err.Error(), "Address already assigned") {
 					framework.Failf("failed to add new IP address %s to node %s: %v", ip, nodeName, err)
 				}
 				toCurlSecondaryNodeIPAddresses.Insert(ip)
@@ -344,7 +356,7 @@ spec:
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
 		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
 		if err != nil {
-			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, ovnContainer, serverNodeInfo.name, err)
+			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, srcPodName, serverNodeInfo.name, err)
 		}
 		// Verify the remote host/port as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied host %s is not permitted as defined by the external firewall policy", exFWDenyTcpDnsDest))
@@ -376,7 +388,7 @@ spec:
 
 		ginkgo.By("Should NOT be able to reach each secondary hostIP via node selector")
 		for _, address := range toCurlSecondaryNodeIPAddresses.List() {
-			if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) ||  IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
+			if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) || IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
 				continue
 			}
 			path := fmt.Sprintf("http://%s:%d/hostname", address, hostNetworkPort)
@@ -411,7 +423,7 @@ spec:
 
 		ginkgo.By("Should be able to reach secondary hostIP via node selector")
 		for _, address := range toCurlSecondaryNodeIPAddresses.List() {
-			if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) ||  IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
+			if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) || IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
 				continue
 			}
 			path := fmt.Sprintf("http://%s:%d/hostname", address, hostNetworkPort)
@@ -499,13 +511,7 @@ spec:
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		// apply the egress firewall configuration
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
-		gomega.Eventually(func() bool {
-			output, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "egressfirewall", "default")
-			if err != nil {
-				framework.Failf("could not get the egressfirewall default in namespace: %s", f.Namespace.Name)
-			}
-			return strings.Contains(output, "EgressFirewall Rules applied")
-		}, 30*time.Second).Should(gomega.BeTrue())
+		waitForEFApplied(f.Namespace.Name)
 	})
 
 	ginkgo.It("Should validate the egress firewall allows inbound connections", func() {
@@ -524,6 +530,10 @@ spec:
 		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
 		testContainer := fmt.Sprintf("%s-container", efPodName)
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
+		denyCIDR := "0.0.0.0/0"
+		if IsIPv6Cluster(f.ClientSet) {
+			denyCIDR = "::/0"
+		}
 		// egress firewall crd yaml configuration
 		var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
 apiVersion: k8s.ovn.org/v1
@@ -534,8 +544,8 @@ spec:
   egress:
   - type: Deny
     to:
-      cidrSelector: 0.0.0.0/0
-`, f.Namespace.Name)
+      cidrSelector: %s
+`, f.Namespace.Name, denyCIDR)
 		// write the config to a file for application and defer the removal
 		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
@@ -571,13 +581,17 @@ spec:
 		framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 		nodeIP := serverNodeInfo.nodeIP
-		externalContainerIP, _ := createClusterExternalContainer(externalContainerName, agnhostImage,
+		externalContainerIPV4, externalContainerIPV6 := createClusterExternalContainer(externalContainerName, agnhostImage,
 			[]string{"--network", ciNetworkName, "-p", fmt.Sprintf("%d:%d", externalContainerPort, externalContainerPort)},
 			[]string{"netexec", fmt.Sprintf("--http-port=%d", externalContainerPort)})
 		defer deleteClusterExternalContainer(externalContainerName)
 
 		// 2. Check connectivity works both ways
 		// pod -> external container should work
+		externalContainerIP := externalContainerIPV4
+		if IsIPv6Cluster(f.ClientSet) {
+			externalContainerIP = externalContainerIPV6
+		}
 		ginkgo.By(fmt.Sprintf("Verifying connectivity from pod %s to external container [%s]:%d",
 			efPodName, externalContainerIP, externalContainerPort))
 		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", efPodName, testContainerFlag,
@@ -602,14 +616,7 @@ spec:
 		// 3. Apply deny-all egress firewall and wait for it to be applied
 		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
-
-		gomega.Eventually(func() bool {
-			output, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "egressfirewall", "default")
-			if err != nil {
-				framework.Failf("could not get the egressfirewall default in namespace: %s", f.Namespace.Name)
-			}
-			return strings.Contains(output, "EgressFirewall Rules applied")
-		}, 10*time.Second).Should(gomega.BeTrue())
+		waitForEFApplied(f.Namespace.Name)
 
 		// 4. Check that only inbound traffic is allowed
 		// pod -> external container should be blocked

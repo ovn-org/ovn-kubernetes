@@ -184,10 +184,19 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 			}
 			gatewayIntf = defaultGatewayIntf
 		} else {
+			if gatewayIntf != defaultGatewayIntf {
+				// Mismatch between configured interface and actual default gateway interface detected
+				klog.Warningf("Found default gateway interface: %q does not match provided interface from config: %q", defaultGatewayIntf, gatewayIntf)
+			} else if len(defaultGatewayNextHops) == 0 {
+				// Gateway interface found, but no next hops identified in a default route
+				klog.Warning("No default route identified in the host. Egress features may not function correctly! " +
+					"Egress Pod traffic in shared gateway mode may not function correctly!")
+			}
+
 			if gatewayIntf != defaultGatewayIntf || len(defaultGatewayNextHops) == 0 {
-				if config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.AllowNoUplink {
-					// For local gw, if not default gateway is available or the provide gateway interface is not the host gateway interface
-					// use nexthop masquerade IP as GR default gw to steer traffic to the gateway bridge
+				if config.Gateway.Mode == config.GatewayModeLocal {
+					// For local gw, if there is no valid gateway interface found, or no valid nexthops, then
+					// use nexthop masquerade IP as GR default gw to steer traffic to the gateway bridge, and then the host for routing
 					if needIPv4NextHop {
 						nexthop := config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP
 						gatewayNextHops = append(gatewayNextHops, nexthop)

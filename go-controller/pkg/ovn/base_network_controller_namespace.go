@@ -480,7 +480,7 @@ func (bsnc *BaseNetworkController) removeRemoteZonePodFromNamespaceAddressSet(po
 
 	if !shouldRelease {
 		klog.Infof("Cannot release IP address: %s for %s/%s from namespace address set. Detected another pod"+
-			" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), pod.Namespace, pod.Name)
+			" using this IP", util.JoinIPNetIPs(podIfAddrs, " "), pod.Namespace, pod.Name)
 		return nil
 	}
 

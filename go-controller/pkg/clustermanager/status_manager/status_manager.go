@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -87,7 +88,7 @@ func (m *typedStatusManager[T]) Stop() {
 func (m *typedStatusManager[T]) updateStatus(key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
-		klog.Errorf("StatusManager %s: failed to split meta namespace cache key %s for %s: %v", m.name, key, err)
+		klog.Errorf("StatusManager %s: failed to split meta namespace cache key %s: %v", m.name, key, err)
 		return nil
 	}
 	obj, err := m.resource.get(namespace, name)
@@ -188,6 +189,16 @@ func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManage
 			sm.withZonesRLock,
 		)
 		sm.typedManagers["egressfirewalls"] = egressFirewallManager
+	}
+	if config.OVNKubernetesFeature.EnableEgressQoS {
+		egressQoSManager := newStatusManager[egressqosapi.EgressQoS](
+			"egressqoses_statusmanager",
+			wf.EgressQoSInformer().Informer(),
+			wf.EgressQoSInformer().Lister().List,
+			newEgressQoSManager(wf.EgressQoSInformer().Lister(), ovnClient.EgressQoSClient),
+			sm.withZonesRLock,
+		)
+		sm.typedManagers["egressqoses"] = egressQoSManager
 	}
 	return sm
 }

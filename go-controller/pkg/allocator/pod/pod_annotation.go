@@ -227,7 +227,7 @@ func allocatePodAnnotationWithRollback(
 		}
 		err := ipAllocator.ReleaseIPs(releaseIPs)
 		if err != nil {
-			klog.Errorf("Error when releasing IPs %v: %w", util.StringSlice(releaseIPs), err)
+			klog.Errorf("Error when releasing IPs %v: %v", util.StringSlice(releaseIPs), err)
 			releaseIPs = nil
 			return
 		}

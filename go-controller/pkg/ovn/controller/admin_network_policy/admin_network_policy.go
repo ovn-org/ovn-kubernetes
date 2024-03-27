@@ -121,16 +121,16 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	// 2) Construct Address-sets with IPs of the peers in the rules
 	// 3) Construct ACLs using AS-es and PGs
 	portGroupName, _ := getAdminNetworkPolicyPGName(desiredANPState.name, false)
-	desiredPorts, err := c.getPortsOfSubject(desiredANPState.subject)
+	desiredPorts, err := c.convertANPSubjectToLSPs(desiredANPState.subject)
 	if err != nil {
 		return fmt.Errorf("unable to fetch ports for anp %s: %v", desiredANPState.name, err)
 	}
-	err = c.constructIPSetOfPeers(desiredANPState)
+	err = c.convertANPPeersToIPs(desiredANPState)
 	if err != nil {
 		return fmt.Errorf("unable to construct IPsets for anp %s: %v", desiredANPState.name, err)
 	}
 	atLeastOneRuleUpdated := false
-	desiredACLs := c.getACLsOfRules(desiredANPState, currentANPState, portGroupName, &atLeastOneRuleUpdated, false)
+	desiredACLs := c.convertANPRulesToACLs(desiredANPState, currentANPState, portGroupName, &atLeastOneRuleUpdated, false)
 
 	if !loaded {
 		// this is a fresh ANP create
@@ -147,107 +147,12 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 		c.anpCache[anp.Name] = desiredANPState
 		return nil
 	}
-	var ops []ovsdb.Operation
 	// ANP state existed in the cache, which means its either an ANP update or pod/namespace add/update/delete
 	klog.V(3).Infof("Admin network policy %s/%d was found in cache...Syncing it", currentANPState.name, currentANPState.anpPriority)
 	hasPriorityChanged := (currentANPState.anpPriority != desiredANPState.anpPriority)
-	// Did ANP.Spec.Ingress Change (rule inserts/deletes)? && || Did ANP.Spec.Egress Change (rule inserts/deletes)? && ||
-	// If yes we need to fully recompute the acls present in our ANP's port group; Let's do a full recompute and return.
-	// Reason behind a full recompute: Each rule has precendence based on its position and priority of ANP; if any of that changes
-	// better to delete and recreate ACLs rather than figure out from caches
-	// TODO(tssurya): Investigate if we can be smarter about which ACLs to delete and which to add
-	// rather than always cleaning up everything and recreating them. But this is tricky since rules have precendence
-	// from their ordering.
-	// NOTE: Changes to admin policies should be a rare action (can be improved post user feedback) - usually churn would be around namespaces and pods
-	fullPeerRecompute := (len(currentANPState.egressRules) != len(desiredANPState.egressRules) ||
-		len(currentANPState.ingressRules) != len(desiredANPState.ingressRules))
-	if fullPeerRecompute {
-		// full recompute
-		// which means update all ACLs and address-sets
-		klog.V(3).Infof("ANP %s with priority (old %d, new %d) was updated", desiredANPState.name, currentANPState.anpPriority, desiredANPState.anpPriority)
-		ops, err = c.constructOpsForRuleChanges(desiredANPState, false)
-		if err != nil {
-			return fmt.Errorf("failed to create update ANP ops %s: %v", desiredANPState.name, err)
-		}
-	}
-
-	// Did ANP.Spec.Ingress rules get updated?
-	// (at this stage the length of ANP.Spec.Ingress hasn't changed, so individual rules either got updated at their values or positions are switched)
-	// The fields that we care about for rebuilding ACLs are
-	// (i) `ports` (ii) `actions` (iii) priority for a given rule
-	// The changes to peer labels, peer pod label updates, namespace label updates etc can be inferred
-	// from the podIPs cache we store.
-	// Did the ANP.Spec.Ingress.Peers Change?
-	// 1) ANP.Spec.Ingress.Peers.Namespaces changed && ||
-	// 2) ANP.Spec.Ingress.Peers.Pods changed && ||
-	// 3) A namespace started or stopped matching the peer && ||
-	// 4) A pod started or stopped matching the peer
-	// If yes we need to recompute the IPs present in our ANP's peer's address-sets
-	if !fullPeerRecompute && !reflect.DeepEqual(desiredANPState.ingressRules, currentANPState.ingressRules) {
-		addrOps, err := c.constructOpsForPeerChanges(desiredANPState.ingressRules,
-			currentANPState.ingressRules, desiredANPState.name, false)
-		if err != nil {
-			return fmt.Errorf("failed to create ops for changes to ANP ingress peers: %v", err)
-		}
-		ops = append(ops, addrOps...)
-	}
-
-	// Did ANP.Spec.Egress rules get updated?
-	// (at this stage the length of ANP.Spec.Egress hasn't changed, so individual rules either got updated at their values or positions are switched)
-	// The fields that we care about for rebuilding ACLs are
-	// (i) `ports` (ii) `actions` (iii) priority for a given rule
-	// Did the ANP.Spec.Egress.Peers Change?
-	// 1) ANP.Spec.Egress.Peers.Namespaces changed && ||
-	// 2) ANP.Spec.Egress.Peers.Pods changed && ||
-	// 3) A namespace started or stopped matching the peer && ||
-	// 4) A pod started or stopped matching the peer
-	// If yes we need to recompute the IPs present in our ANP's peer's address-sets
-	if !fullPeerRecompute && !reflect.DeepEqual(desiredANPState.egressRules, currentANPState.egressRules) {
-		addrOps, err := c.constructOpsForPeerChanges(desiredANPState.egressRules,
-			currentANPState.egressRules, desiredANPState.name, false)
-		if err != nil {
-			return fmt.Errorf("failed to create ops for changes to ANP egress peers: %v", err)
-		}
-		ops = append(ops, addrOps...)
-	}
-	// TODO(tssurya): Check if we can be more efficient by narrowing down exactly which ACL needs a change
-	// The rules which didn't change -> those updates will be no-ops thanks to libovsdb
-	// The rules that changed in terms of their `getACLMutableFields`
-	// will be simply updated since externalIDs will remain the same for these ACLs
-	// No delete ACLs action is required for this scenario
-	// the stale ACLs will automatically be taken care of if they are not references by the port group
-	// (1) fullPeerRecompute=true which means the rules were of different lengths (involved deletion or appending of gress rules)
-	// (2) atLeastOneRuleUpdated=true which means the gress rules were of same lengths but action or ports changed on at least one rule
-	// (3) hasPriorityChanged=true which means we should update acl.Priority for every ACL
-	if fullPeerRecompute || atLeastOneRuleUpdated || hasPriorityChanged {
-		klog.V(3).Infof("ANP %s with priority %d was updated", desiredANPState.name, desiredANPState.anpPriority)
-		// now update the acls to the desired ones
-		ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, desiredACLs...)
-		if err != nil {
-			return fmt.Errorf("failed to create new ACL ops for anp %s: %v", desiredANPState.name, err)
-		}
-		// since we update the portgroup with the new set of ACLs, any unreferenced set of ACLs
-		// will be automatically removed
-		ops, err = libovsdbops.UpdatePortGroupSetACLsOps(c.nbClient, ops, portGroupName, desiredACLs)
-		if err != nil {
-			return fmt.Errorf("failed to create ACL-on-PG update ops for anp %s: %v", desiredANPState.name, err)
-		}
-	}
-
-	// Did the ANP.Spec.Subject Change?
-	// 1) ANP.Spec.Namespaces changed && ||
-	// 2) ANP.Spec.Pods changed && ||
-	// 3) A namespace started or stopped matching the subject && ||
-	// 4) A pod started or stopped matching the subject
-	// If yes we need to recompute the ports present in our ANP's port group
-	subjectOps, err := c.constructOpsForSubjectChanges(currentANPState, desiredANPState, portGroupName)
+	err = c.updateExistingANP(currentANPState, desiredANPState, atLeastOneRuleUpdated, hasPriorityChanged, false, desiredACLs)
 	if err != nil {
-		return fmt.Errorf("failed to create ops for changes to ANP %s subject: %v", desiredANPState.name, err)
-	}
-	ops = append(ops, subjectOps...)
-	_, err = libovsdbops.TransactAndCheck(c.nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("failed to run ovsdb txn to update ANP %s: %v", desiredANPState.name, err)
+		return fmt.Errorf("failed to update ANP %s: %v", desiredANPState.name, err)
 	}
 	// We also need to update c.anpPriorityMap cache
 	if hasPriorityChanged {
@@ -265,10 +170,10 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	return nil
 }
 
-// getACLsOfRules takes all the rules belonging to the ANP and initiates the conversion of rule->acl
+// convertANPRulesToACLs takes all the rules belonging to the ANP and initiates the conversion of rule->acl
 // if currentANPState exists; then we also see if any of the current v/s desired ACLs had a state change
 // and if so, we return atLeastOneRuleUpdated=true
-func (c *Controller) getACLsOfRules(desiredANPState, currentANPState *adminNetworkPolicyState, pgName string, atLeastOneRuleUpdated *bool, isBanp bool) []*nbdb.ACL {
+func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adminNetworkPolicyState, pgName string, atLeastOneRuleUpdated *bool, isBanp bool) []*nbdb.ACL {
 	acls := []*nbdb.ACL{}
 	// isAtLeastOneRuleUpdatedCheckRequired is set to true, if we had an anp already in cache (update) AND the rule lengths are the same
 	// if the rule lengths are different we do a full peer recompute in ensureAdminNetworkPolicy anyways
@@ -276,7 +181,7 @@ func (c *Controller) getACLsOfRules(desiredANPState, currentANPState *adminNetwo
 		len(currentANPState.ingressRules) == len(desiredANPState.ingressRules) &&
 		len(currentANPState.egressRules) == len(desiredANPState.egressRules))
 	for i, ingressRule := range desiredANPState.ingressRules {
-		acl := c.convertANPRuleToACL(ingressRule, pgName, desiredANPState.name, isBanp)
+		acl := c.convertANPRuleToACL(ingressRule, pgName, desiredANPState.name, desiredANPState.aclLoggingParams, isBanp)
 		acls = append(acls, acl...)
 		if isAtLeastOneRuleUpdatedCheckRequired &&
 			!*atLeastOneRuleUpdated &&
@@ -286,7 +191,7 @@ func (c *Controller) getACLsOfRules(desiredANPState, currentANPState *adminNetwo
 		}
 	}
 	for i, egressRule := range desiredANPState.egressRules {
-		acl := c.convertANPRuleToACL(egressRule, pgName, desiredANPState.name, isBanp)
+		acl := c.convertANPRuleToACL(egressRule, pgName, desiredANPState.name, desiredANPState.aclLoggingParams, isBanp)
 		acls = append(acls, acl...)
 		if isAtLeastOneRuleUpdatedCheckRequired &&
 			!*atLeastOneRuleUpdated &&
@@ -301,7 +206,7 @@ func (c *Controller) getACLsOfRules(desiredANPState, currentANPState *adminNetwo
 
 // convertANPRuleToACL takes the given gressRule and converts it into an ACL(0 ports rule) or
 // multiple ACLs(ports are set) and returns those ACLs for a given gressRule
-func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string, isBanp bool) []*nbdb.ACL {
+func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string, aclLoggingParams *libovsdbutil.ACLLoggingLevels, isBanp bool) []*nbdb.ACL {
 	// create address-set
 	// TODO (tssurya): Revisit this logic to see if its better to do one address-set per peer
 	// and join them with OR if that is more perf efficient. Had briefly discussed this OVN team
@@ -316,35 +221,20 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 	lportMatch := libovsdbutil.GetACLMatch(pgName, "", libovsdbutil.ACLDirection(rule.gressPrefix))
 	var match string
 	acls := []*nbdb.ACL{}
-	// no ports in this rule; so its a single ACL
-	if len(rule.ports) == 0 {
-		match = fmt.Sprintf("%s && %s", l3Match, lportMatch)
-		acl := libovsdbutil.BuildANPACL(
-			getANPRuleACLDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), emptyProtocol, c.controllerName, isBanp),
-			int(rule.priority),
-			match,
-			rule.action,
-			libovsdbutil.ACLDirectionToACLPipeline(libovsdbutil.ACLDirection(rule.gressPrefix)),
-		)
-		acls = append(acls, acl)
-		return acls
-	}
-
-	// TODO(tssurya): https://github.com/ovn-org/ovn-kubernetes/pull/3582 merged and we should port
-	// some of the common functions to the libovsdbutil package and leverage that.
-	// For now blatantly copying it so that we can leverage the new indices for ports and merge ANP
-	// without having to do yet another refactor PR
-	// We will have one ACL per protocol
-	protocolPortsMap := getProtocolPortsMap(rule.ports)
-	for protocol, ports := range protocolPortsMap {
-		l4Match := constructMatchFromProtocolPorts(protocol, ports)
-		match = fmt.Sprintf("%s && %s && %s", l3Match, lportMatch, l4Match)
+	// We will have one ACL per protocol if len(rule.ports) > 0 and one single ACL if len(rule.ports) == 0
+	for protocol, l4Match := range libovsdbutil.GetL4MatchesFromNetworkPolicyPorts(rule.ports) {
+		if l4Match == libovsdbutil.UnspecifiedL4Match {
+			match = fmt.Sprintf("%s && %s", l3Match, lportMatch)
+		} else {
+			match = fmt.Sprintf("%s && %s && %s", l3Match, lportMatch, l4Match)
+		}
 		acl := libovsdbutil.BuildANPACL(
 			getANPRuleACLDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), protocol, c.controllerName, isBanp),
 			int(rule.priority),
 			match,
 			rule.action,
 			libovsdbutil.ACLDirectionToACLPipeline(libovsdbutil.ACLDirection(rule.gressPrefix)),
+			aclLoggingParams,
 		)
 		acls = append(acls, acl)
 	}
@@ -352,10 +242,9 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 	return acls
 }
 
-// constructIPSetOfPeers takes all the peers belonging to each of the ANP rule and initiates the conversion
+// convertANPPeersToIPs takes all the peers belonging to each of the ANP rule and initiates the conversion
 // of rule.peer->set of ips. These set of ips are then used to create the address-sets
-func (c *Controller) constructIPSetOfPeers(anp *adminNetworkPolicyState) error {
-	// create address-set
+func (c *Controller) convertANPPeersToIPs(anp *adminNetworkPolicyState) error {
 	// TODO (tssurya): Revisit this logic to see if its better to do one address-set per peer
 	// and join them with OR if that is more perf efficient. Had briefly discussed this OVN team
 	// We are not yet clear which is better since both have advantages and disadvantages.
@@ -429,10 +318,10 @@ func (c *Controller) convertANPPeersToIPSet(peers []*adminNetworkPolicyPeer) (se
 	return peerPodIPs, nil
 }
 
-// getPortsOfSubject calculates all the LSP's that match for the provided anp's subject and returns them
+// convertANPSubjectToLSPs calculates all the LSP's that match for the provided anp's subject and returns them
 // It also populates the adminNetworkPolicySubject.namespaces and adminNetworkPolicySubject.podPorts
 // pieces of the cache
-func (c *Controller) getPortsOfSubject(anpSubject *adminNetworkPolicySubject) ([]*nbdb.LogicalSwitchPort, error) {
+func (c *Controller) convertANPSubjectToLSPs(anpSubject *adminNetworkPolicySubject) ([]*nbdb.LogicalSwitchPort, error) {
 	ports := []*nbdb.LogicalSwitchPort{}
 	anpSubject.podPorts = sets.Set[string]{}
 	namespaces, err := c.anpNamespaceLister.List(anpSubject.namespaceSelector)
@@ -559,6 +448,118 @@ func (c *Controller) createNewANP(desiredANPState *adminNetworkPolicyState, desi
 	_, err = libovsdbops.TransactAndCheck(c.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to run ovsdb txn to add ports to port group: %v", err)
+	}
+	return nil
+}
+
+func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNetworkPolicyState, atLeastOneRuleUpdated,
+	hasPriorityChanged, isBanp bool, desiredACLs []*nbdb.ACL) error {
+	var ops []ovsdb.Operation
+	var err error
+	portGroupName, _ := getAdminNetworkPolicyPGName(desiredANPState.name, isBanp)
+	// Did ANP.Spec.Ingress Change (rule inserts/deletes)? && || Did ANP.Spec.Egress Change (rule inserts/deletes)? && ||
+	// If yes we need to fully recompute the acls present in our ANP's port group; Let's do a full recompute and return.
+	// Reason behind a full recompute: Each rule has precedence based on its position and priority of ANP; if any of that changes
+	// better to delete and recreate ACLs rather than figure out from caches
+	// TODO(tssurya): Investigate if we can be smarter about which ACLs to delete and which to add
+	// rather than always cleaning up everything and recreating them. But this is tricky since rules have precedence
+	// from their ordering.
+	// NOTE: Changes to admin policies should be a rare action (can be improved post user feedback) - usually churn would be around namespaces and pods
+	fullPeerRecompute := (len(currentANPState.egressRules) != len(desiredANPState.egressRules) ||
+		len(currentANPState.ingressRules) != len(desiredANPState.ingressRules))
+	if fullPeerRecompute {
+		// full recompute
+		// which means update all ACLs and address-sets
+		klog.V(3).Infof("ANP %s with priority (old %d, new %d) was updated", desiredANPState.name, currentANPState.anpPriority, desiredANPState.anpPriority)
+		ops, err = c.constructOpsForRuleChanges(desiredANPState, isBanp)
+		if err != nil {
+			return fmt.Errorf("failed to create update ANP ops %s: %v", desiredANPState.name, err)
+		}
+	}
+
+	// Did ANP.Spec.Ingress rules get updated?
+	// (at this stage the length of ANP.Spec.Ingress hasn't changed, so individual rules either got updated at their values or positions are switched)
+	// The fields that we care about for rebuilding ACLs are
+	// (i) `ports` (ii) `actions` (iii) priority for a given rule
+	// The changes to peer labels, peer pod label updates, namespace label updates etc can be inferred
+	// from the podIPs cache we store.
+	// Did the ANP.Spec.Ingress.Peers Change?
+	// 1) ANP.Spec.Ingress.Peers.Namespaces changed && ||
+	// 2) ANP.Spec.Ingress.Peers.Pods changed && ||
+	// 3) A namespace started or stopped matching the peer && ||
+	// 4) A pod started or stopped matching the peer
+	// If yes we need to recompute the IPs present in our ANP's peer's address-sets
+	if !fullPeerRecompute && !reflect.DeepEqual(desiredANPState.ingressRules, currentANPState.ingressRules) {
+		addrOps, err := c.constructOpsForPeerChanges(desiredANPState.ingressRules,
+			currentANPState.ingressRules, desiredANPState.name, isBanp)
+		if err != nil {
+			return fmt.Errorf("failed to create ops for changes to ANP ingress peers: %v", err)
+		}
+		ops = append(ops, addrOps...)
+	}
+
+	// Did ANP.Spec.Egress rules get updated?
+	// (at this stage the length of ANP.Spec.Egress hasn't changed, so individual rules either got updated at their values or positions are switched)
+	// The fields that we care about for rebuilding ACLs are
+	// (i) `ports` (ii) `actions` (iii) priority for a given rule
+	// Did the ANP.Spec.Egress.Peers Change?
+	// 1) ANP.Spec.Egress.Peers.Namespaces changed && ||
+	// 2) ANP.Spec.Egress.Peers.Pods changed && ||
+	// 3) A namespace started or stopped matching the peer && ||
+	// 4) A pod started or stopped matching the peer
+	// If yes we need to recompute the IPs present in our ANP's peer's address-sets
+	if !fullPeerRecompute && !reflect.DeepEqual(desiredANPState.egressRules, currentANPState.egressRules) {
+		addrOps, err := c.constructOpsForPeerChanges(desiredANPState.egressRules,
+			currentANPState.egressRules, desiredANPState.name, isBanp)
+		if err != nil {
+			return fmt.Errorf("failed to create ops for changes to ANP egress peers: %v", err)
+		}
+		ops = append(ops, addrOps...)
+	}
+	hasACLLoggingParamsChanged := currentANPState.aclLoggingParams.Allow != desiredANPState.aclLoggingParams.Allow ||
+		currentANPState.aclLoggingParams.Deny != desiredANPState.aclLoggingParams.Deny
+	if !isBanp {
+		hasACLLoggingParamsChanged = hasACLLoggingParamsChanged || currentANPState.aclLoggingParams.Pass != desiredANPState.aclLoggingParams.Pass
+	}
+	// TODO(tssurya): Check if we can be more efficient by narrowing down exactly which ACL needs a change
+	// The rules which didn't change -> those updates will be no-ops thanks to libovsdb
+	// The rules that changed in terms of their `getACLMutableFields`
+	// will be simply updated since externalIDs will remain the same for these ACLs
+	// No delete ACLs action is required for this scenario
+	// the stale ACLs will automatically be taken care of if they are not references by the port group
+	// (1) fullPeerRecompute=true which means the rules were of different lengths (involved deletion or appending of gress rules)
+	// (2) atLeastOneRuleUpdated=true which means the gress rules were of same lengths but action or ports changed on at least one rule
+	// (3) hasPriorityChanged=true which means we should update acl.Priority for every ACL
+	// (4) hasACLLoggingParamsChanged=true which means we should update acl.Severity/acl.Log for every ACL
+	if fullPeerRecompute || atLeastOneRuleUpdated || hasPriorityChanged || hasACLLoggingParamsChanged {
+		klog.V(3).Infof("ANP %s with priority %d was updated", desiredANPState.name, desiredANPState.anpPriority)
+		// now update the acls to the desired ones
+		ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, desiredACLs...)
+		if err != nil {
+			return fmt.Errorf("failed to create new ACL ops for anp %s: %v", desiredANPState.name, err)
+		}
+		// since we update the portgroup with the new set of ACLs, any unreferenced set of ACLs
+		// will be automatically removed
+		ops, err = libovsdbops.UpdatePortGroupSetACLsOps(c.nbClient, ops, portGroupName, desiredACLs)
+		if err != nil {
+			return fmt.Errorf("failed to create ACL-on-PG update ops for anp %s: %v", desiredANPState.name, err)
+		}
+	}
+
+	// Did the ANP.Spec.Subject Change?
+	// 1) ANP.Spec.Namespaces changed && ||
+	// 2) ANP.Spec.Pods changed && ||
+	// 3) A namespace started or stopped matching the subject && ||
+	// 4) A pod started or stopped matching the subject
+	// If yes we need to recompute the ports present in our ANP's port group
+	subjectOps, err := c.constructOpsForSubjectChanges(currentANPState, desiredANPState, portGroupName)
+	if err != nil {
+		return fmt.Errorf("failed to create ops for changes to ANP %s subject: %v", desiredANPState.name, err)
+	}
+	ops = append(ops, subjectOps...)
+	_, err = libovsdbops.TransactAndCheck(c.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("failed to run ovsdb txn to update ANP %s: %v", desiredANPState.name, err)
 	}
 	return nil
 }

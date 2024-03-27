@@ -25,6 +25,7 @@ import (
 // +kubebuilder:resource:path=egressqoses
 // +kubebuilder::singular=egressqos
 // +kubebuilder:object:root=true
+// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status"
 // +kubebuilder:subresource:status
 // EgressQoS is a CRD that allows the user to define a DSCP value
 // for pods egress traffic on its namespace to specified CIDRs.
@@ -71,8 +72,17 @@ type EgressQoSRule struct {
 
 // EgressQoSStatus defines the observed state of EgressQoS
 type EgressQoSStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// A concise indication of whether the EgressQoS resource is applied with success.
+	// +optional
+	Status string `json:"status,omitempty"`
+
+	// An array of condition objects indicating details about status of EgressQoS object.
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

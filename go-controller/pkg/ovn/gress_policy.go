@@ -15,17 +15,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	knet "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
 const (
-	noneMatch = "None"
 	// emptyIdx is used to create ACL for gressPolicy that doesn't have ipBlocks
 	emptyIdx = -1
-	// emptyProtocol is used to create ACL for gressPolicy that doesn't have port policies hence no protocols
-	emptyProtocol = "None"
 )
 
 type gressPolicy struct {
@@ -49,7 +44,7 @@ type gressPolicy struct {
 
 	// portPolicies represents all the ports to which traffic is allowed for
 	// the rule in question.
-	portPolicies []*portPolicy
+	portPolicies []*libovsdbutil.NetworkPolicyPort
 
 	ipBlocks []*knet.IPBlock
 
@@ -59,66 +54,6 @@ type gressPolicy struct {
 	// supported IP mode
 	ipv4Mode bool
 	ipv6Mode bool
-}
-
-type portPolicy struct {
-	protocol string
-	port     int32
-	endPort  int32
-}
-
-// for a given ingress/egress rule, captures all the provided port ranges and
-// individual ports
-type gressPolicyPorts struct {
-	portList  []string // list of provided ports as string
-	portRange []string // list of provided port ranges in OVN ACL format
-}
-
-var supportedProtocols = sets.NewString(TCP, UDP, SCTP)
-
-func (gp *gressPolicy) getProtocolPortsMap() map[string]*gressPolicyPorts {
-	gressProtoPortsMap := make(map[string]*gressPolicyPorts)
-	for _, pp := range gp.portPolicies {
-		if found := supportedProtocols.Has(pp.protocol); !found {
-			klog.Warningf("Unknown protocol %v, while processing network policy %s/%s",
-				pp.protocol, gp.policyNamespace, gp.policyName)
-			continue
-		}
-		protocol := strings.ToLower(pp.protocol)
-		gpp, ok := gressProtoPortsMap[protocol]
-		if !ok {
-			gpp = &gressPolicyPorts{portList: []string{}, portRange: []string{}}
-			gressProtoPortsMap[protocol] = gpp
-		}
-		if pp.endPort != 0 && pp.endPort != pp.port {
-			gpp.portRange = append(gpp.portRange, fmt.Sprintf("%d<=%s.dst<=%d", pp.port, protocol, pp.endPort))
-		} else if pp.port != 0 {
-			gpp.portList = append(gpp.portList, fmt.Sprintf("%d", pp.port))
-		}
-	}
-	return gressProtoPortsMap
-}
-
-func getL4Match(protocol string, ports *gressPolicyPorts) string {
-	allL4Matches := []string{}
-	if len(ports.portList) > 0 {
-		// if there is just one port, then don't use `{}`
-		template := "%s.dst==%s"
-		if len(ports.portList) > 1 {
-			template = "%s.dst=={%s}"
-		}
-		allL4Matches = append(allL4Matches, fmt.Sprintf(template, protocol, strings.Join(ports.portList, ",")))
-	}
-	allL4Matches = append(allL4Matches, ports.portRange...)
-	l4Match := protocol
-	if len(allL4Matches) > 0 {
-		template := "%s && %s"
-		if len(allL4Matches) > 1 {
-			template = "%s && (%s)"
-		}
-		l4Match = fmt.Sprintf(template, protocol, strings.Join(allL4Matches, " || "))
-	}
-	return l4Match
 }
 
 func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string, isNetPolStateless bool, netInfo util.BasicNetInfo) *gressPolicy {
@@ -132,7 +67,7 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, contro
 		idx:               idx,
 		peerV4AddressSets: &sync.Map{},
 		peerV6AddressSets: &sync.Map{},
-		portPolicies:      make([]*portPolicy, 0),
+		portPolicies:      make([]*libovsdbutil.NetworkPolicyPort, 0),
 		isNetPolStateless: isNetPolStateless,
 		ipv4Mode:          ipv4Mode,
 		ipv6Mode:          ipv6Mode,
@@ -166,15 +101,13 @@ func (gp *gressPolicy) addPeerAddressSets(asHashNameV4, asHashNameV6 string) {
 
 // If the port is not specified, it implies all ports for that protocol
 func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
-	pp := &portPolicy{protocol: string(*portJSON.Protocol),
-		port:    0,
-		endPort: 0,
-	}
-	if portJSON.Port != nil {
-		pp.port = portJSON.Port.IntVal
-	}
-	if portJSON.EndPort != nil {
-		pp.endPort = *portJSON.EndPort
+	var pp *libovsdbutil.NetworkPolicyPort
+	if portJSON.Port != nil && portJSON.EndPort != nil {
+		pp = libovsdbutil.GetNetworkPolicyPort(*portJSON.Protocol, portJSON.Port.IntVal, *portJSON.EndPort)
+	} else if portJSON.Port != nil {
+		pp = libovsdbutil.GetNetworkPolicyPort(*portJSON.Protocol, portJSON.Port.IntVal, 0)
+	} else {
+		pp = libovsdbutil.GetNetworkPolicyPort(*portJSON.Protocol, 0, 0)
 	}
 	gp.portPolicies = append(gp.portPolicies, pp)
 }
@@ -250,7 +183,7 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string 
 			matchStr = fmt.Sprintf("%s.%s == %s && %s.%s != {%s}", ipVersion, direction, ipBlock.CIDR,
 				ipVersion, direction, strings.Join(ipBlock.Except, ", "))
 		}
-		if l4Match == noneMatch {
+		if l4Match == libovsdbutil.UnspecifiedL4Match {
 			matchStr = fmt.Sprintf("%s && %s", matchStr, lportMatch)
 		} else {
 			matchStr = fmt.Sprintf("%s && %s && %s", matchStr, l4Match, lportMatch)
@@ -333,21 +266,11 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libov
 	} else {
 		lportMatch = fmt.Sprintf("inport == @%s", portGroupName)
 	}
-	var l4Match string
 	action := nbdb.ACLActionAllowRelated
 	if gp.isNetPolStateless {
 		action = nbdb.ACLActionAllowStateless
 	}
-	protocolPortsMap := gp.getProtocolPortsMap()
-	if len(protocolPortsMap) == 0 {
-		protocolPortsMap[emptyProtocol] = nil
-	}
-	for protocol, ports := range protocolPortsMap {
-		l4Match = noneMatch
-		if ports != nil {
-			l4Match = getL4Match(protocol, ports)
-		}
-
+	for protocol, l4Match := range libovsdbutil.GetL4MatchesFromNetworkPolicyPorts(gp.portPolicies) {
 		if len(gp.ipBlocks) > 0 {
 			// Add ACL allow rule for IPBlock CIDR
 			ipBlockMatches := gp.getMatchFromIPBlock(lportMatch, l4Match)
@@ -368,7 +291,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libov
 				l3Match = gp.getL3MatchFromAddressSet()
 			}
 
-			if l4Match == noneMatch {
+			if l4Match == libovsdbutil.UnspecifiedL4Match {
 				addrSetMatch = fmt.Sprintf("%s && %s", l3Match, lportMatch)
 			} else {
 				addrSetMatch = fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)

@@ -83,7 +83,7 @@ func (c *Controller) processNextNamespaceWorkItem(wg *sync.WaitGroup) bool {
 	ns := obj.(*corev1.Namespace)
 	if err := c.syncNamespace(ns); err != nil {
 		if c.namespaceQueue.NumRequeues(obj) < maxRetries {
-			klog.V(4).Infof("Error found while processing namespace %s:%w", obj.(*corev1.Namespace), err)
+			klog.V(4).Infof("Error found while processing namespace %s: %v", obj.(*corev1.Namespace), err)
 			c.namespaceQueue.AddRateLimited(obj)
 			return true
 		}

@@ -313,10 +313,14 @@ var _ = ginkgo.Describe("Services", func() {
 				ginkgo.It("queries to the nodePort service shall work for TCP", func() {
 					for _, size := range []string{"small", "large"} {
 						for _, serviceNodeIP := range serviceNodeInternalIPs {
+							targetIP := serviceNodeIP
+							if IsIPv6Cluster(f.ClientSet) {
+								targetIP = fmt.Sprintf("[%s]", targetIP)
+							}
 							ginkgo.By(fmt.Sprintf("Sending TCP %s payload to service IP %s "+
 								"and expecting to receive the same payload", size, serviceNodeIP))
 							cmd := fmt.Sprintf("curl --max-time 10 -g -q -s http://%s:%d/echo?msg=%s",
-								serviceNodeIP,
+								targetIP,
 								servicePort,
 								echoPayloads[size],
 							)
@@ -406,6 +410,11 @@ var _ = ginkgo.Describe("Services", func() {
 								// Compare received payload vs sent payload.
 								if stdout != echoPayloads[size] {
 									return fmt.Errorf("stdout does not match payloads[%s], %s != %s", size, stdout, echoPayloads[size])
+								}
+								// fc00:f853:ccd:e793::3 from :: dev breth0 src fc00:f853:ccd:e793::4 metric 256 expires 537sec mtu 1400 pref medium
+								// for IPV6 the regex changes a bit
+								if IsIPv6Cluster(f.ClientSet) {
+									echoMtuRegex = regexp.MustCompile(`expires.*mtu.*`)
 								}
 
 								if size == "large" {
@@ -963,15 +972,14 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
 		loadBalancerYaml = "loadbalancer.yaml"
 		bgpAddYaml       = "bgpAdd.yaml"
 		bgpEmptyYaml     = "bgpEmptyAdd.yaml"
-		svcIP            = "192.168.10.0"
 		clientContainer  = "lbclient"
 		routerContainer  = "frr"
 	)
 
 	var (
-		backendNodeName string
+		backendNodeName    string
 		nonBackendNodeName string
-		namespaceName   = "default"
+		namespaceName      = "default"
 	)
 	f := wrappedTestFramework(svcName)
 	ginkgo.BeforeEach(func() {
@@ -1114,6 +1122,9 @@ metadata:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
+		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
+
 		endpoints, err := getEndpointsForService(f.ClientSet, namespaceName, svcName)
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get endpoints for service %s", svcName))
 		gomega.Expect(endpoints).NotTo(gomega.BeNil())
@@ -1124,110 +1135,40 @@ metadata:
 		nodeIP, err := getNodeIP(f.ClientSet, *nodeName)
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get endpoint's %s node ip address", endPointIP))
 
-		// The external client configuration done in install_metallb can not be used because routes for external client
-		// installed in K8s node https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh#L1045-L1047
-		// are ignored in shared gateway mode and traffic coming back from pod is put on the docker bridge directly by
-		// br-ex flows which needs to be handled in host(or vm) network.
-		// Hence the following set of ip commands set up two networks called bridge (192.168.222.0/24) and
-		// client 192.168.223.0/24 on the host(or vm) machine. The external client (192.168.223.2) runs on the client
-		// network which tries to connect with load balancer service via bridge network. There would be also a route
-		// created for the load balancer service forwarding packet into the node which hosts one of the endpoint.
-		//                                     +------------------------------------+
-		//                                     |         kind-ovn-cluster           |
-		//                                     |                                    |
-		//                                     |                                    |
-		//                                     +----------------+-------------------+
-		//                                                      |
-		//                                                      |
-		//                                                      |
-		//                                                      |
-		//                                                      |
-		//                   +----------------------------------+-------------------------------------------+
-		//                   |                                  172.18.0.1                                  |
-		//                   |                                                     ip route add 192.168.223.0/24 via 192.168.222.2
-		//                   |                                                     ip route add <svc-ip> via|<endpoint-node-ip>
-		//                   |                                                                              |
-		//                   |  vm                                    192.168.222.1                         |
-		//                   +----------------------------------------+-------------------------------------+
-		//                                                            | change MTU size into 400 bytes on 192.168.222.0/24 interfaces
-		//                                                            | for the test.
-		//                +-----------------------+         +---------+-----------------+
-		//                |                       |         |         192.168.222.2     |
-		//                |                       |         |                           |
-		//                |          192.168.223.2+---------+ 192.168.223.1             |
-		//                |  client               |         |                     bridge|
-		//                +-----------------------+         +---------------------------+
-		err = buildAndRunCommand("sudo ip netns add bridge")
-		framework.ExpectNoError(err, "failed to add brige network namespace")
-		defer func() {
-			err := buildAndRunCommand("sudo ip netns delete bridge")
-			framework.ExpectNoError(err, "failed to remove brige network namespace")
-		}()
-		err = buildAndRunCommand("sudo ip netns add client")
-		framework.ExpectNoError(err, "failed to add client network namespace")
-		defer func() {
-			err = buildAndRunCommand("sudo ip netns delete client")
-			framework.ExpectNoError(err, "failed to remove client network namespace")
-		}()
-		err = buildAndRunCommand("sudo ip link add vmtobridge type veth peer name bridgetovm")
-		framework.ExpectNoError(err, "failed to add veth pair for bridge")
-		err = buildAndRunCommand("sudo ip link add clienttobridge type veth peer name bridgetoclient")
-		framework.ExpectNoError(err, "failed to add veth pair for client")
-		err = buildAndRunCommand("sudo ip link set bridgetovm netns bridge")
-		framework.ExpectNoError(err, "failed to move bridgetovm into bridge netns")
-		err = buildAndRunCommand("sudo ip link set bridgetoclient netns bridge")
-		framework.ExpectNoError(err, "failed to move bridgetoclient into bridge netns")
-		err = buildAndRunCommand("sudo ip link set clienttobridge netns client")
-		framework.ExpectNoError(err, "failed to move clienttobridge into client netns")
-		err = buildAndRunCommand("sudo ip addr add 192.168.222.1/24 dev vmtobridge")
-		framework.ExpectNoError(err, "failed to add ip address on vmtobridge gateway interface")
-		err = buildAndRunCommand("sudo ip link set vmtobridge up")
-		framework.ExpectNoError(err, "failed to get vmtobridge up")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip addr add 192.168.222.2/24 dev bridgetovm")
-		framework.ExpectNoError(err, "failed to add ip address on bridgetovm interface")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetovm up")
-		framework.ExpectNoError(err, "failed to get bridgetovm up")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetoclient up")
-		framework.ExpectNoError(err, "failed to get bridgetoclient up")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip addr add 192.168.223.1/24 dev bridgetoclient")
-		framework.ExpectNoError(err, "failed to add ip address on bridgetoclient gateway interface")
-		err = buildAndRunCommand("sudo ip netns exec client ip link set clienttobridge up")
-		framework.ExpectNoError(err, "failed to get clienttobridge up")
-		err = buildAndRunCommand("sudo ip netns exec client ip addr add 192.168.223.2/24 dev clienttobridge")
-		framework.ExpectNoError(err, "failed to add ip address on clienttobridge interface")
-		err = buildAndRunCommand("sudo ip netns exec client ip route add default via 192.168.223.1")
-		framework.ExpectNoError(err, "failed to add default route on client netns")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip route add default via 192.168.222.1")
-		framework.ExpectNoError(err, "failed to add default route on bridge netns")
-		err = buildAndRunCommand("sudo ip route add 192.168.223.0/24 via 192.168.222.2")
-		framework.ExpectNoError(err, "failed to add route for client to handle reverse service traffic")
+		svcIPforCurl := svcLoadBalancerIP
+		if !utilnet.IsIPv6String(svcLoadBalancerIP) {
+			ginkgo.By("Setting up external IPv4 client with an intermediate node")
+			defer func() {
+				cleanupIPv4NetworkForExternalClient(svcLoadBalancerIP)
+			}()
+			setupIPv4NetworkForExternalClient(svcLoadBalancerIP, nodeIP)
+		} else {
+			ginkgo.By("Setting up external IPv6 client with an intermediate node")
+			defer func() {
+				cleanupIPv6NetworkForExternalClient(svcLoadBalancerIP)
+			}()
+			setupIPv6NetworkForExternalClient(svcLoadBalancerIP, nodeIP)
+			svcIPforCurl = fmt.Sprintf("[%s]", svcLoadBalancerIP)
+		}
 
-		buildAndRunCommand("sudo ip route delete 192.168.223.0/24")
-		err = buildAndRunCommand("sudo ip route add 192.168.223.0/24 via 192.168.222.2")
-		framework.ExpectNoError(err, "failed to add route for client to handle reverse service traffic")
-		defer func() {
-			err = buildAndRunCommand("sudo ip route delete 192.168.223.0/24 via 192.168.222.2")
-			framework.ExpectNoError(err, "failed to remove route for client which handles reverse service traffic")
-		}()
-
-		err = buildAndRunCommand(fmt.Sprintf("sudo ip route add %s via %s", svcIP, nodeIP))
-		framework.ExpectNoError(err, "failed to add route for external load balancer service")
-		defer func() {
-			err = buildAndRunCommand(fmt.Sprintf("sudo ip route delete %s via %s", svcIP, nodeIP))
-			framework.ExpectNoError(err, "failed to remove route for external load balancer service")
-		}()
-
+		ginkgo.By("Test sevice connectivity before changing MTU on the intermediate node")
 		// Ensure service connectivity works from external client with default settings.
-		err = buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcIP, endpointHTTPPort))
-		framework.ExpectNoError(err, "failed to connect with external load balancer service")
+		// Use Eventually because IPv6 takes a while to finish its network configuration
+		// with network namespaces.
+		gomega.Eventually(func() error {
+			return buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcIPforCurl, endpointHTTPPort))
+		}, 5*time.Second).Should(gomega.BeNil(), "failed to connect with external load balancer service")
 
 		// Change MTU size of vmtobridge veth pair and verify service connectivity still works.
-		err = buildAndRunCommand("sudo ip link set vmtobridge mtu 400")
+		// Set the value >=1280 so that it works for IPv6 as well.
+		err = buildAndRunCommand("sudo ip link set vmtobridge mtu 1280")
 		framework.ExpectNoError(err, "failed to change mtu size on vmtobridge gateway interface")
-		err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetovm up mtu 400")
+		err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetovm up mtu 1280")
 		framework.ExpectNoError(err, "failed to change mtu size on bridgetovm interface")
-		err = buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcIP, endpointHTTPPort))
-		framework.ExpectNoError(err, "failed to connect with external load balancer service after changing mtu size")
+		ginkgo.By("Test sevice connectivity after changing MTU on the intermediate node")
+		gomega.Eventually(func() error {
+			return buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcIPforCurl, endpointHTTPPort))
+		}, 5*time.Second).Should(gomega.BeNil(), "failed to connect with external load balancer service after changing mtu size")
 	})
 
 	ginkgo.It("Should ensure load balancer service works with pmtud", func() {
@@ -1258,13 +1199,16 @@ metadata:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
+		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
+
 		numberOfETPRules := pokeIPTableRules(backendNodeName, "OVN-KUBE-EXTERNALIP")
 		framework.ExpectEqual(numberOfETPRules, 5)
 
 		// curl the LB service from the client container to trigger BGP route advertisement
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		ginkgo.By("all 3 nodeIP routes are advertised correctly by metalb BGP routes")
@@ -1274,7 +1218,11 @@ metadata:
 		//	nexthop via 172.19.0.4 dev eth0 weight 1
 		//	nexthop via 172.19.0.2 dev eth0 weight 1
 		cmd := []string{containerRuntime, "exec", routerContainer}
-		bgpRouteCommand := strings.Split("ip route show 192.168.10.0", " ")
+		ipVer := ""
+		if utilnet.IsIPv6String(svcLoadBalancerIP) {
+			ipVer = " -6"
+		}
+		bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, svcLoadBalancerIP), " ")
 		cmd = append(cmd, bgpRouteCommand...)
 
 		backendNodeIP, err := getNodeIP(f.ClientSet, backendNodeName)
@@ -1328,7 +1276,7 @@ spec:
 			framework.ExpectNoError(err, fmt.Sprintf("failed to get nodes's %s node ip address", node))
 			framework.Logf("NodeIP of node %s is %s", node, nodeIP)
 			cmd := []string{containerRuntime, "exec", routerContainer}
-			bgpRouteCommand := strings.Split("ip route show 192.168.10.0", " ")
+
 			cmd = append(cmd, bgpRouteCommand...)
 			gomega.Eventually(func() bool {
 				routes, err := runCommand(cmd...)
@@ -1351,12 +1299,12 @@ spec:
 
 			ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName + " via node " + node)
 
-			_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+			_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 			framework.ExpectNoError(err, "failed to curl load balancer service")
 
 			ginkgo.By("change MTU on intermediary router to force icmp related packets")
 			cmd = []string{containerRuntime, "exec", routerContainer}
-			mtuCommand := strings.Split("ip link set mtu 1200 dev eth1", " ")
+			mtuCommand := strings.Split("ip link set mtu 1280 dev eth1", " ")
 
 			cmd = append(cmd, mtuCommand...)
 			_, err = runCommand(cmd...)
@@ -1366,7 +1314,7 @@ spec:
 
 			ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName + " via node " + node)
 
-			_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+			_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 			framework.ExpectNoError(err, "failed to curl load balancer service")
 
 			ginkgo.By("reset MTU on intermediary router to allow large packets")
@@ -1382,6 +1330,9 @@ spec:
 
 		err := framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*120)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an enpoint, err: %v", svcName, err))
+
+		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
@@ -1400,7 +1351,7 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		ginkgo.By("patching service " + svcName + " to allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
@@ -1426,12 +1377,16 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-ETP"))
+		pktSize := 60
+		if utilnet.IsIPv6String(svcLoadBalancerIP) {
+			pktSize = 80
+		}
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-SNAT-MGMTPORT"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-SNAT-MGMTPORT", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
 		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
@@ -1448,12 +1403,12 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = curlInContainer(clientContainer, svcIP, endpointHTTPPort, "big.iso -o big.iso", 120)
+		_, err = curlInContainer(clientContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso -o big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-ETP"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, "[1:60] -A OVN-KUBE-SNAT-MGMTPORT"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-SNAT-MGMTPORT", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
 	})
@@ -1462,6 +1417,9 @@ spec:
 
 		err := framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*120)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an enpoint, err: %v", svcName, err))
+
+		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
 
 		ginkgo.By("patching service " + svcName + " to externalTrafficPolicy=local")
 		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/externalTrafficPolicy", "Local")
@@ -1478,8 +1436,14 @@ spec:
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get nodes's %s node ip address", backendNodeName))
 		framework.Logf("NodeIP of node %s is %s", backendNodeName, nodeIP)
 		cmd := []string{containerRuntime, "exec", routerContainer}
-		bgpRouteCommand := strings.Split("ip route show 192.168.10.0", " ")
+
+		ipVer := ""
+		if utilnet.IsIPv6String(svcLoadBalancerIP) {
+			ipVer = " -6"
+		}
+		bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, svcLoadBalancerIP), " ")
 		cmd = append(cmd, bgpRouteCommand...)
+
 		gomega.Eventually(func() bool {
 			routes, err := runCommand(cmd...)
 			framework.ExpectNoError(err, "failed to get BGP routes from intermediary router")
@@ -1501,7 +1465,7 @@ spec:
 
 		ginkgo.By("by sending a UDP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 		netcatCmd := fmt.Sprintf("echo hostname | nc -uv -w2 %s %d",
-			svcIP,
+			svcLoadBalancerIP,
 			endpointUDPPort,
 		)
 		cmd = []string{containerRuntime, "exec", clientContainer, "bash", "-x", "-c", netcatCmd}
@@ -1515,10 +1479,12 @@ spec:
 		targetPodLogs, err := e2ekubectl.RunKubectl("default", "logs", "-l", "app=nginx", "--container", "udp-server")
 		framework.ExpectNoError(err, "failed to inspect logs in backend pods")
 		framework.Logf("%v", targetPodLogs)
-		lbClientIPv4, _ := getContainerAddressesForNetwork(clientContainer, "clientnet")
+		lbClientIPv4, lbClientIPv6 := getContainerAddressesForNetwork(clientContainer, "clientnet")
 		framework.Logf("%v", lbClientIPv4)
 		if strings.Contains(targetPodLogs, lbClientIPv4) {
 			framework.Logf("found the expected srcIP %s!", lbClientIPv4)
+		} else if strings.Contains(targetPodLogs, lbClientIPv6) {
+			framework.Logf("found the expected srcIP %s!", lbClientIPv6)
 		} else {
 			framework.Failf("could not get expected srcIP!")
 		}
@@ -1552,6 +1518,8 @@ spec:
 		framework.Logf("%v", targetPodLogs)
 		if strings.Count(targetPodLogs, lbClientIPv4) >= 2 {
 			framework.Logf("found the expected srcIP %s!", lbClientIPv4)
+		} else if strings.Count(targetPodLogs, lbClientIPv6) >= 2 {
+			framework.Logf("found the expected srcIP %s!", lbClientIPv6)
 		} else {
 			framework.Failf("could not get expected srcIP!")
 		}
@@ -1580,4 +1548,170 @@ func buildAndRunCommand(command string) error {
 	cmd := strings.Split(command, " ")
 	_, err := runCommand(cmd...)
 	return err
+}
+
+func getServiceLoadBalancerIP(c clientset.Interface, namespace, serviceName string) (string, error) {
+	svc, err := c.CoreV1().Services(namespace).Get(context.TODO(), serviceName, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	if len(svc.Status.LoadBalancer.Ingress) != 1 {
+		return "", fmt.Errorf("service %s has no load balancer IPs", serviceName)
+	}
+	return svc.Status.LoadBalancer.Ingress[0].IP, nil
+}
+
+func setupIPv4NetworkForExternalClient(svcLoadBalancerIP, nodeIP string) {
+	// The external client configuration done in install_metallb can not be used because routes for external client
+	// installed in K8s node https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh#L1045-L1047
+	// are ignored in shared gateway mode and traffic coming back from pod is put on the docker bridge directly by
+	// br-ex flows which needs to be handled in host(or vm) network.
+	// Hence the following set of ip commands set up two networks called bridge (192.168.222.0/24) and
+	// client 192.168.223.0/24 on the host(or vm) machine. The external client (192.168.223.2) runs on the client
+	// network which tries to connect with load balancer service via bridge network. There would be also a route
+	// created for the load balancer service forwarding packet into the node which hosts one of the endpoint.
+	//                                     +------------------------------------+
+	//                                     |         kind-ovn-cluster           |
+	//                                     |                                    |
+	//                                     |                                    |
+	//                                     +----------------+-------------------+
+	//                                                      |
+	//                                                      |
+	//                                                      |
+	//                                                      |
+	//                                                      |
+	//                   +----------------------------------+-------------------------------------------+
+	//                   |                                  172.18.0.1                                  |
+	//                   |                                                     ip route add 192.168.223.0/24 via 192.168.222.2
+	//                   |                                                     ip route add <svc-ip> via|<endpoint-node-ip>
+	//                   |                                                                              |
+	//                   |  vm                                    192.168.222.1                         |
+	//                   +----------------------------------------+-------------------------------------+
+	//                                                            |
+	//                                                            |
+	//                +-----------------------+         +---------+-----------------+
+	//                |                       |         |         192.168.222.2     |
+	//                |                       |         |                           |
+	//                |          192.168.223.2+---------+ 192.168.223.1             |
+	//                |  client               |         |                     bridge|
+	//                +-----------------------+         +---------------------------+
+	setupNetNamespaceAndLinks()
+	err := buildAndRunCommand("sudo ip addr add 192.168.222.1/24 dev vmtobridge")
+	framework.ExpectNoError(err, "failed to add ip address on vmtobridge gateway interface")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip addr add 192.168.222.2/24 dev bridgetovm")
+	framework.ExpectNoError(err, "failed to add ip address on bridgetovm interface")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip addr add 192.168.223.1/24 dev bridgetoclient")
+	framework.ExpectNoError(err, "failed to add ip address on bridgetoclient gateway interface")
+	err = buildAndRunCommand("sudo ip netns exec client ip addr add 192.168.223.2/24 dev clienttobridge")
+	framework.ExpectNoError(err, "failed to add ip address on clienttobridge interface")
+
+	err = buildAndRunCommand("sudo ip netns exec client ip route add default via 192.168.223.1")
+	framework.ExpectNoError(err, "failed to add default route on client netns")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip route add default via 192.168.222.1")
+	framework.ExpectNoError(err, "failed to add default route on bridge netns")
+
+	buildAndRunCommand("sudo ip route delete 192.168.223.0/24")
+	err = buildAndRunCommand("sudo ip route add 192.168.223.0/24 via 192.168.222.2")
+	framework.ExpectNoError(err, "failed to add route for client to handle reverse service traffic")
+
+	err = buildAndRunCommand(fmt.Sprintf("sudo ip route add %s via %s", svcLoadBalancerIP, nodeIP))
+	framework.ExpectNoError(err, "failed to add route for external load balancer service")
+}
+
+func cleanupIPv4NetworkForExternalClient(svcLoadBalancerIP string) {
+	cleanupNetNamespace()
+	buildAndRunCommand("sudo ip route delete 192.168.223.0/24 via 192.168.222.2")
+	buildAndRunCommand(fmt.Sprintf("sudo ip route delete %s", svcLoadBalancerIP))
+}
+
+func setupIPv6NetworkForExternalClient(svcLoadBalancerIP, nodeIP string) {
+	// The external client configuration done in install_metallb can not be used because routes for external client
+	// installed in K8s node https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh#L1045-L1047
+	// are ignored in shared gateway mode and traffic coming back from pod is put on the docker bridge directly by
+	// br-ex flows which needs to be handled in host(or vm) network.
+	// Hence the following set of ip -6 commands set up two IPv6 networks called bridge (fc00:f853:ccd:e222::0/64) and
+	// client fc00:f853:ccd:e223::0/64 on the host(or vm) machine. The external client (fc00:f853:ccd:e223::2) runs on the client
+	// network which tries to connect with load balancer service via bridge network. There would be also a route
+	// created for the load balancer service forwarding packet into the node which hosts one of the endpoint.
+	//                                               +------------------------------+
+	//                                               |        kind-ovn-cluster      |
+	//                                               +---------------+--------------+
+	//                                                               |
+	//                                     +-------------------------+----------------------------------------------+
+	//                                     |                      fc00:f853:ccd:e793::1                             |
+	//                                     |                                       ip -6 route add fc00:f853:ccd:e223::2 dev vmtobridge via fc00:f853:ccd:e222::2
+	//                                     |                                       ip -6 route add %s via %s", svcLoadBalancerIP, nodeIP
+	//                                     |        vm                                                              |
+	//                                     +-----------------------------------------------------------+------------+
+	//                                                                                                 | fc00:f853:ccd:e222::1/64
+	//                                                                                                 |
+	//                                                                                                 | fc00:f853:ccd:e222::2/64
+	//              +--------------------------------------------+                              +------+-------------+
+	//              |                                            |                              | ip -6 route add default dev bridgetovm via fc00:f853:ccd:e222::1
+	//              |                             fc00:f853:ccd:e223::2/64----------------fc00:f853:ccd:e223::1/64   |
+	//              |     client                                 |                              |           bridge   |
+	//              |ip -6 route add default dev clienttobridge via fc00:f853:ccd:e223::1       +--------------------+
+	//              +--------------------------------------------+
+	setupNetNamespaceAndLinks()
+	err := buildAndRunCommand("sudo ip -6 addr add fc00:f853:ccd:e222::1/64 dev vmtobridge")
+	framework.ExpectNoError(err, "failed to add ip address on vmtobridge gateway interface")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip -6 addr add fc00:f853:ccd:e222::2/64 dev bridgetovm")
+	framework.ExpectNoError(err, "failed to add ip address on bridgetovm interface")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip -6 addr add fc00:f853:ccd:e223::1/64 dev bridgetoclient")
+	framework.ExpectNoError(err, "failed to add ip address on bridgetoclient gateway interface")
+	err = buildAndRunCommand("sudo ip netns exec client ip -6 addr add fc00:f853:ccd:e223::2/64 dev clienttobridge")
+	framework.ExpectNoError(err, "failed to add ip address on clienttobridge interface")
+
+	err = buildAndRunCommand("sudo ip netns exec bridge sysctl -w net.ipv6.conf.all.forwarding=1")
+	framework.ExpectNoError(err, "failed to enable ipv6 packet forwarding on bridge net namespace")
+
+	err = buildAndRunCommand("sudo ip netns exec client ip -6 route add default dev clienttobridge via fc00:f853:ccd:e223::1")
+	framework.ExpectNoError(err, "failed to add default route on client netns")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip -6 route add default dev bridgetovm via fc00:f853:ccd:e222::1")
+	framework.ExpectNoError(err, "failed to add default route on bridge netns")
+
+	err = buildAndRunCommand("sudo ip -6 route add fc00:f853:ccd:e223::2 dev vmtobridge via fc00:f853:ccd:e222::2")
+	framework.ExpectNoError(err, "failed to add route for client to handle reverse service traffic")
+
+	err = buildAndRunCommand(fmt.Sprintf("sudo ip -6 route add %s via %s", svcLoadBalancerIP, nodeIP))
+	framework.ExpectNoError(err, "failed to add route for external load balancer service")
+}
+
+func cleanupIPv6NetworkForExternalClient(svcLoadBalancerIP string) {
+	cleanupNetNamespace()
+	buildAndRunCommand("sudo ip -6 route delete fc00:f853:ccd:e223::2")
+	buildAndRunCommand(fmt.Sprintf("sudo ip -6 route delete %s", svcLoadBalancerIP))
+}
+
+func setupNetNamespaceAndLinks() {
+	err := buildAndRunCommand("sudo ip netns add bridge")
+	framework.ExpectNoError(err, "failed to add brige network namespace")
+	err = buildAndRunCommand("sudo ip netns add client")
+	framework.ExpectNoError(err, "failed to add client network namespace")
+
+	err = buildAndRunCommand("sudo ip link add vmtobridge type veth peer name bridgetovm")
+	framework.ExpectNoError(err, "failed to add veth pair for bridge")
+	err = buildAndRunCommand("sudo ip link add clienttobridge type veth peer name bridgetoclient")
+	framework.ExpectNoError(err, "failed to add veth pair for client")
+	err = buildAndRunCommand("sudo ip link set bridgetovm netns bridge")
+	framework.ExpectNoError(err, "failed to move bridgetovm into bridge netns")
+	err = buildAndRunCommand("sudo ip link set bridgetoclient netns bridge")
+	framework.ExpectNoError(err, "failed to move bridgetoclient into bridge netns")
+	err = buildAndRunCommand("sudo ip link set clienttobridge netns client")
+	framework.ExpectNoError(err, "failed to move clienttobridge into client netns")
+
+	err = buildAndRunCommand("sudo ip link set vmtobridge up")
+	framework.ExpectNoError(err, "failed to get vmtobridge up")
+	err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetovm up")
+	framework.ExpectNoError(err, "failed to get bridgetovm up")
+
+	err = buildAndRunCommand("sudo ip netns exec bridge ip link set bridgetoclient up")
+	framework.ExpectNoError(err, "failed to get bridgetoclient up")
+	err = buildAndRunCommand("sudo ip netns exec client ip link set clienttobridge up")
+	framework.ExpectNoError(err, "failed to get clienttobridge up")
+}
+
+func cleanupNetNamespace() {
+	buildAndRunCommand("sudo ip netns delete bridge")
+	buildAndRunCommand("sudo ip netns delete client")
 }

@@ -568,7 +568,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					ginkgo.By("Updating a node to not match nodeSelector on Egress Firewall")
-					patch.Metadata = map[string]interface{}{"labels": map[string]string{labelKey: noneMatch}}
+					patch.Metadata = map[string]interface{}{"labels": map[string]string{labelKey: libovsdbutil.UnspecifiedL4Match}}
 					patchData, err = json.Marshal(&patch)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					// trigger update event

@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/klog/v2"
+	utilpointer "k8s.io/utils/pointer"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 )
@@ -213,7 +214,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					{
 						Name:   "gryffindor-don't-talk-to-slytherin",
 						Action: anpapi.BaselineAdminNetworkPolicyRuleActionDeny,
-						From: []anpapi.AdminNetworkPolicyPeer{
+						From: []anpapi.AdminNetworkPolicyIngressPeer{
 							{
 								Namespaces: &anpapi.NamespacedPeer{
 									NamespaceSelector: &metav1.LabelSelector{
@@ -273,7 +274,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
-				peerASIngressRule0v4, peerASIngressRule0v6 = buildBANPAddressSets(banp, 0, []net.IP{testing.MustParseIP(t2.podIP)}, libovsdbutil.ACLIngress) // address-set will be empty since no pods match it
+				peerASIngressRule0v4, peerASIngressRule0v6 = buildBANPAddressSets(banp, 0, []net.IP{testing.MustParseIP(t2.podIP)}, libovsdbutil.ACLIngress) // podIP should be added to v4 address-set
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
 				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -283,7 +284,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					anpapi.BaselineAdminNetworkPolicyIngressRule{
 						Name:   "gryffindor-talk-to-hufflepuff",
 						Action: anpapi.BaselineAdminNetworkPolicyRuleActionAllow,
-						From: []anpapi.AdminNetworkPolicyPeer{
+						From: []anpapi.AdminNetworkPolicyIngressPeer{
 							{
 								Pods: &anpapi.NamespacedPodPeer{ // test different kind of peer expression
 									Namespaces: anpapi.NamespacedPeer{
@@ -301,7 +302,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					anpapi.BaselineAdminNetworkPolicyIngressRule{
 						Name:   "gryffindor-deny-to-ravenclaw",
 						Action: anpapi.BaselineAdminNetworkPolicyRuleActionDeny,
-						From: []anpapi.AdminNetworkPolicyPeer{
+						From: []anpapi.AdminNetworkPolicyIngressPeer{
 							{
 								Namespaces: &anpapi.NamespacedPeer{
 									NamespaceSelector: &metav1.LabelSelector{
@@ -363,7 +364,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					{
 						Name:   "slytherin-don't-talk-to-gryffindor",
 						Action: anpapi.BaselineAdminNetworkPolicyRuleActionDeny,
-						To: []anpapi.AdminNetworkPolicyPeer{
+						To: []anpapi.AdminNetworkPolicyEgressPeer{
 							{
 								Namespaces: &anpapi.NamespacedPeer{
 									NamespaceSelector: &metav1.LabelSelector{
@@ -376,7 +377,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					{
 						Name:   "hufflepuff-talk-to-gryffindor",
 						Action: anpapi.BaselineAdminNetworkPolicyRuleActionAllow,
-						To: []anpapi.AdminNetworkPolicyPeer{
+						To: []anpapi.AdminNetworkPolicyEgressPeer{
 							{
 								Pods: &anpapi.NamespacedPodPeer{ // test different kind of peer expression
 									Namespaces: anpapi.NamespacedPeer{
@@ -400,7 +401,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					{
 						Name:   "ravenclaw-deny-to-gryffindor",
 						Action: anpapi.BaselineAdminNetworkPolicyRuleActionDeny,
-						To: []anpapi.AdminNetworkPolicyPeer{
+						To: []anpapi.AdminNetworkPolicyEgressPeer{
 							{
 								Namespaces: &anpapi.NamespacedPeer{
 									NamespaceSelector: &metav1.LabelSelector{
@@ -730,6 +731,129 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+		ginkgo.It("ACL Logging for BANP", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+				fakeOVN.start()
+				fakeOVN.InitAndRunANPController()
+				fakeOVN.fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("update", "baselineadminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+					update := action.(clienttesting.UpdateAction)
+					// Since fake client (NewSimpleClientset) does not differentiate between
+					// an update and updatestatus, updatestatus in tests updates the spec as
+					// well causing race conditions. Thus adding a hack here to ensure update
+					// status is caught and processed by the reactor while update spec is
+					// delegated to the main code for handling
+					if action.GetSubresource() == "status" {
+						klog.Infof("Got an update status action for %v", update.GetObject())
+						return true, update.GetObject(), nil
+					}
+					klog.Infof("Got an update spec action for %v", update.GetObject())
+					return false, update.GetObject(), nil
+				})
+				ginkgo.By("1. Create BANP with 1 ingress rule and 1 egress rule with the ACL logging annotation and ensure its honoured")
+				anpSubject := newANPSubjectObject(
+					&metav1.LabelSelector{
+						MatchLabels: anpLabel,
+					},
+					nil,
+				)
+				banp := newBANPObject("default", anpSubject,
+					[]anpapi.BaselineAdminNetworkPolicyIngressRule{
+						{
+							Name:   "deny-traffic-from-slytherin-to-gryffindor",
+							Action: anpapi.BaselineAdminNetworkPolicyRuleActionDeny,
+							From: []anpapi.AdminNetworkPolicyIngressPeer{
+								{
+									Namespaces: &anpapi.NamespacedPeer{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchLabels: peerDenyLabel,
+										},
+									},
+								},
+							},
+						},
+					},
+					[]anpapi.BaselineAdminNetworkPolicyEgressRule{
+						{
+							Name:   "allow-traffic-to-hufflepuff-from-gryffindor",
+							Action: anpapi.BaselineAdminNetworkPolicyRuleActionAllow,
+							To: []anpapi.AdminNetworkPolicyEgressPeer{
+								{
+									Namespaces: &anpapi.NamespacedPeer{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchLabels: peerAllowLabel,
+										},
+									},
+								},
+							},
+						},
+					},
+				)
+				banp.ResourceVersion = "1"
+				banp.Annotations = map[string]string{
+					util.AclLoggingAnnotation: fmt.Sprintf(`{ "deny": "%s", "allow": "%s"}`, nbdb.ACLSeverityAlert, nbdb.ACLSeverityInfo),
+				}
+				banp, err := fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Create(context.TODO(), banp, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				acls := getACLsForBANPRules(banp)
+				pg := getDefaultPGForANPSubject(banp.Name, []string{}, acls, true)
+				expectedDatabaseState := []libovsdbtest.TestData{pg}
+				for _, acl := range acls {
+					acl := acl
+					// update ACL logging information
+					acl.Log = true
+					if acl.Action == nbdb.ACLActionDrop {
+						acl.Severity = utilpointer.String(nbdb.ACLSeverityAlert)
+					} else if acl.Action == nbdb.ACLActionAllowRelated {
+						acl.Severity = utilpointer.String(nbdb.ACLSeverityInfo)
+					}
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				peerASIngressRule0v4, peerASIngressRule0v6 := buildBANPAddressSets(banp, 0, []net.IP{}, libovsdbutil.ACLIngress) // address-set will be empty since no pods match it yet
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
+				peerASEgressRule0v4, peerASEgressRule0v6 := buildBANPAddressSets(banp, 0, []net.IP{}, libovsdbutil.ACLEgress)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("2. Update BANP by changing severity on the ACL logging annotation and ensure its honoured")
+				banp.ResourceVersion = "2"
+				banp.Annotations = map[string]string{
+					util.AclLoggingAnnotation: fmt.Sprintf(`{"deny": "%s", "allow": "%s"}`, nbdb.ACLSeverityWarning, nbdb.ACLSeverityDebug),
+				}
+				banp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Update(context.TODO(), banp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				for _, acl := range expectedDatabaseState[1:3] {
+					acl := acl.(*nbdb.ACL)
+					// update ACL logging information
+					acl.Log = true
+					if acl.Action == nbdb.ACLActionDrop {
+						acl.Severity = utilpointer.String(nbdb.ACLSeverityWarning)
+					} else if acl.Action == nbdb.ACLActionAllowRelated {
+						acl.Severity = utilpointer.String(nbdb.ACLSeverityDebug)
+					}
+				}
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("3. Update BANP by deleting the ACL logging annotation and ensure its honoured")
+				banp.ResourceVersion = "3"
+				banp.Annotations = map[string]string{}
+				banp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Update(context.TODO(), banp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				for _, acl := range expectedDatabaseState[1:3] {
+					acl := acl.(*nbdb.ACL)
+					// update ACL logging information
+					acl.Log = false
+					acl.Severity = nil
+				}
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 				return nil
 			}
 			err := app.Run([]string{app.Name})

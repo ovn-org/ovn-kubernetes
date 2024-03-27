@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -38,6 +39,16 @@ var _ = ginkgo.Describe("e2e EgressQoS validation", func() {
 	)
 
 	f := wrappedTestFramework("egressqos")
+
+	waitForEgressQoSApplied := func(namespace string) {
+		gomega.Eventually(func() bool {
+			output, err := e2ekubectl.RunKubectl(namespace, "get", "egressqos", "default")
+			if err != nil {
+				framework.Failf("could not get the egressqos default in namespace: %s", namespace)
+			}
+			return strings.Contains(output, "EgressQoS Rules applied")
+		}, 10*time.Second).Should(gomega.BeTrue(), fmt.Sprintf("expected egressqos in namespace %s to be successfully applied", namespace))
+	}
 
 	ginkgo.BeforeEach(func() {
 		clientSet := f.ClientSet
@@ -115,6 +126,8 @@ spec:
 			framework.Logf("Create the EgressQoS configuration")
 			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressQoSYaml)
 
+			waitForEgressQoSApplied(f.Namespace.Name)
+
 			if !podBeforeQoS {
 				_, err := createPod(f, srcPodName, srcNode, f.Namespace.Name, []string{}, map[string]string{"app": "test"})
 				framework.ExpectNoError(err)
@@ -143,6 +156,8 @@ spec:
 			}
 			framework.Logf("Update the EgressQoS configuration")
 			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "apply", "-f", egressQoSYaml)
+
+			waitForEgressQoSApplied(f.Namespace.Name)
 
 			pingAndCheckDSCP(f, srcPodName, dstPod1Name, *dst1IP, dstPod2Name, *dst2IP, tcpDumpTpl, dscpValue-10, dscpValue-20)
 
@@ -195,6 +210,8 @@ spec:
 
 			framework.Logf("Create the EgressQoS configuration")
 			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressQoSYaml)
+
+			waitForEgressQoSApplied(f.Namespace.Name)
 
 			pingAndCheckDSCP(f, srcPodName, dstPod1Name, *dst1IP, dstPod2Name, *dst2IP, tcpDumpTpl, 0, 0)
 
@@ -321,5 +338,4 @@ func pingAndCheckDSCP(f *framework.Framework, srcPod, dstPod1, dstPod1IP, dstPod
 	framework.ExpectNoError(err, "Failed to ping dst pod")
 	err = tcpDumpSync.Wait()
 	framework.ExpectNoError(err, "Failed to detect ping with correct DSCP on pod")
-
 }

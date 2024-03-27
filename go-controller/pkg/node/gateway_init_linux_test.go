@@ -1857,7 +1857,6 @@ var _ = Describe("Gateway unit tests", func() {
 				gwIPs := []net.IP{config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP}
 				config.Gateway.Interface = dummyBridgeName
 				config.Gateway.Mode = config.GatewayModeLocal
-				config.Gateway.AllowNoUplink = true
 
 				gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 				Expect(err).NotTo(HaveOccurred())
