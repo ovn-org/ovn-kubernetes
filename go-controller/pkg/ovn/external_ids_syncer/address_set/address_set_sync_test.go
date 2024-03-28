@@ -27,8 +27,7 @@ type asSync struct {
 // of other types to the initial db state, and finalDbState may be used to set the expected state of objects
 // passed in initialDbState. If finalDbState is nil, final state will be updated automatically by changing address set
 // references for initial objects from initialDbState.
-func testSyncerWithData(data []asSync, initialDbState, finalDbState []libovsdbtest.TestData, controllerName string,
-	disableBatching bool) {
+func testSyncerWithData(data []asSync, initialDbState, finalDbState []libovsdbtest.TestData, controllerName string) {
 	// create initial db setup
 	dbSetup := libovsdbtest.TestSetup{NBData: initialDbState}
 	for _, asSync := range data {
@@ -73,9 +72,6 @@ func testSyncerWithData(data []asSync, initialDbState, finalDbState []libovsdbte
 	syncer := NewAddressSetSyncer(libovsdbOvnNBClient, controllerName)
 	// to make sure batching works, set it to 2 to cover number of batches = 0,1,>1
 	syncer.txnBatchSize = 2
-	if disableBatching {
-		syncer.txnBatchSize = 0
-	}
 	err = syncer.SyncAddressSets()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	// check results
@@ -125,7 +121,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 		anotherControllerName = "another-controller"
 		qosPriority           = 1000
 	)
-	var syncerToBuildData = addressSetsSyncer{
+	var syncerToBuildData = AddressSetsSyncer{
 		controllerName: controllerName,
 	}
 
@@ -149,7 +145,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				addressSetFactoryIPID: ipv6AddressSetFactoryID,
 			},
 		}
-		testSyncerWithData(testData, nil, nil, controllerName, false)
+		testSyncerWithData(testData, nil, nil, controllerName)
 	})
 	ginkgo.It("skips address sets owned by another controller", func() {
 		testData := []asSync{
@@ -174,7 +170,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				leave: true,
 			},
 		}
-		testSyncerWithData(testData, nil, nil, controllerName, false)
+		testSyncerWithData(testData, nil, nil, controllerName)
 	})
 	ginkgo.It("ignores stale address set with reference, no ipFamily", func() {
 		// no ip family
@@ -200,7 +196,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				Policies: []string{"lrp1"},
 			},
 		}
-		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
 	ginkgo.It("ignores stale address set with reference, no ExternalIDs[name]", func() {
 		hashedASName := hashedAddressSet("as1")
@@ -229,7 +225,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				Policies: []string{"lrp1"},
 			},
 		}
-		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
 	ginkgo.It("preserves unknown ExternalIDs", func() {
 		initialAS := createInitialAS(hybridRoutePolicyPrefix+"node1_v4", []string{testIPv4})
@@ -244,7 +240,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				},
 			},
 		}
-		testSyncerWithData(testData, nil, nil, controllerName, false)
+		testSyncerWithData(testData, nil, nil, controllerName)
 	})
 	// verify different address set owners
 	ginkgo.It("updates address set owned by HybridNodeRouteOwnerType and its references", func() {
@@ -271,7 +267,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				Policies: []string{"lrp1"},
 			},
 		}
-		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
 	ginkgo.It("updates address set owned by EgressQoSOwnerType and its references", func() {
 		asName := egressQoSRulePrefix + "namespace-123_v4"
@@ -298,100 +294,95 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				UUID:        "qos1-UUID",
 			},
 		}
-		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
-	for _, disableBatching := range []bool{false, true} {
-		disableBatching := disableBatching
-		ginkgo.It(fmt.Sprintf("updates address set owned by EgressQoSOwnerType and its references, batching is %v", !disableBatching), func() {
-			// this test checks the batching works for number of address sets = 5, which is 2.5 test batch sizes.
-			// it also checks disabled batching.
-			asName1 := egressQoSRulePrefix + "namespace-1_v4"
-			hashedASName1 := hashedAddressSet(asName1)
-			asName2 := egressQoSRulePrefix + "namespace-2_v4"
-			hashedASName2 := hashedAddressSet(asName2)
-			asName3 := egressQoSRulePrefix + "namespace-3_v4"
-			hashedASName3 := hashedAddressSet(asName3)
-			asName4 := egressQoSRulePrefix + "namespace-4_v4"
-			hashedASName4 := hashedAddressSet(asName4)
-			asName5 := egressQoSRulePrefix + "namespace-5_v4"
-			hashedASName5 := hashedAddressSet(asName5)
-			testData := []asSync{
-				{
-					before:                createInitialAS(asName1, []string{testIPv4}),
-					after:                 syncerToBuildData.getEgressQosAddrSetDbIDs("namespace", "1"),
-					addressSetFactoryIPID: ipv4AddressSetFactoryID,
-				},
-				{
-					before:                createInitialAS(asName2, []string{testIPv4}),
-					after:                 syncerToBuildData.getEgressQosAddrSetDbIDs("namespace", "2"),
-					addressSetFactoryIPID: ipv4AddressSetFactoryID,
-				},
-				{
-					before:                createInitialAS(asName3, []string{testIPv4}),
-					after:                 syncerToBuildData.getEgressQosAddrSetDbIDs("namespace", "3"),
-					addressSetFactoryIPID: ipv4AddressSetFactoryID,
-				},
-				{
-					before:                createInitialAS(asName4, []string{testIPv4}),
-					after:                 syncerToBuildData.getEgressQosAddrSetDbIDs("namespace", "4"),
-					addressSetFactoryIPID: ipv4AddressSetFactoryID,
-				},
-				{
-					before:                createInitialAS(asName5, []string{testIPv4}),
-					after:                 syncerToBuildData.getEgressQosAddrSetDbIDs("namespace", "5"),
-					addressSetFactoryIPID: ipv4AddressSetFactoryID,
-				},
-			}
-			initialDb := []libovsdbtest.TestData{
-				&nbdb.QoS{
-					Direction:   nbdb.QoSDirectionToLport,
-					Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName1,
-					Priority:    qosPriority,
-					Action:      map[string]int{nbdb.QoSActionDSCP: 40},
-					ExternalIDs: map[string]string{"EgressQoS": "namespace"},
-					UUID:        "qos1-UUID",
-				},
-				&nbdb.QoS{
-					Direction:   nbdb.QoSDirectionToLport,
-					Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName2,
-					Priority:    qosPriority,
-					Action:      map[string]int{nbdb.QoSActionDSCP: 40},
-					ExternalIDs: map[string]string{"EgressQoS": "namespace"},
-					UUID:        "qos2-UUID",
-				},
-				&nbdb.QoS{
-					Direction:   nbdb.QoSDirectionToLport,
-					Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName3,
-					Priority:    qosPriority,
-					Action:      map[string]int{nbdb.QoSActionDSCP: 40},
-					ExternalIDs: map[string]string{"EgressQoS": "namespace"},
-					UUID:        "qos3-UUID",
-				},
-				&nbdb.QoS{
-					Direction:   nbdb.QoSDirectionToLport,
-					Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName4,
-					Priority:    qosPriority,
-					Action:      map[string]int{nbdb.QoSActionDSCP: 40},
-					ExternalIDs: map[string]string{"EgressQoS": "namespace"},
-					UUID:        "qos4-UUID",
-				},
-				&nbdb.QoS{
-					Direction:   nbdb.QoSDirectionToLport,
-					Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName5,
-					Priority:    qosPriority,
-					Action:      map[string]int{nbdb.QoSActionDSCP: 40},
-					ExternalIDs: map[string]string{"EgressQoS": "namespace"},
-					UUID:        "qos5-UUID",
-				},
-				&nbdb.LogicalSwitch{
-					UUID:     "node1-UUID",
-					Name:     "node1",
-					QOSRules: []string{"qos1-UUID", "qos2-UUID", "qos3-UUID", "qos4-UUID", "qos5-UUID"},
-				},
-			}
-			testSyncerWithData(testData, initialDb, nil, controllerName, disableBatching)
-		})
-	}
+	ginkgo.It("updates address set owned by EgressQoSOwnerType and its references", func() {
+		// this test checks the batching works for number of address sets = 5, which is 2.5 test batch sizes.
+		asName1 := egressQoSRulePrefix + "namespace-1_v4"
+		hashedASName1 := hashedAddressSet(asName1)
+		asName2 := egressQoSRulePrefix + "namespace-2_v4"
+		hashedASName2 := hashedAddressSet(asName2)
+		asName3 := egressQoSRulePrefix + "namespace-3_v4"
+		hashedASName3 := hashedAddressSet(asName3)
+		asName4 := egressQoSRulePrefix + "namespace-4_v4"
+		hashedASName4 := hashedAddressSet(asName4)
+		asName5 := egressQoSRulePrefix + "namespace-5_v4"
+		hashedASName5 := hashedAddressSet(asName5)
+		testData := []asSync{
+			{
+				before:                createInitialAS(asName1, []string{testIPv4}),
+				after:                 syncerToBuildData.getEgressQosAddrSetDbIDs("namespace", "1"),
+				addressSetFactoryIPID: ipv4AddressSetFactoryID,
+			},
+			{
+				before:                createInitialAS(asName2, []string{testIPv4}),
+				after:                 syncerToBuildData.getEgressQosAddrSetDbIDs("namespace", "2"),
+				addressSetFactoryIPID: ipv4AddressSetFactoryID,
+			},
+			{
+				before:                createInitialAS(asName3, []string{testIPv4}),
+				after:                 syncerToBuildData.getEgressQosAddrSetDbIDs("namespace", "3"),
+				addressSetFactoryIPID: ipv4AddressSetFactoryID,
+			},
+			{
+				before:                createInitialAS(asName4, []string{testIPv4}),
+				after:                 syncerToBuildData.getEgressQosAddrSetDbIDs("namespace", "4"),
+				addressSetFactoryIPID: ipv4AddressSetFactoryID,
+			},
+			{
+				before:                createInitialAS(asName5, []string{testIPv4}),
+				after:                 syncerToBuildData.getEgressQosAddrSetDbIDs("namespace", "5"),
+				addressSetFactoryIPID: ipv4AddressSetFactoryID,
+			},
+		}
+		initialDb := []libovsdbtest.TestData{
+			&nbdb.QoS{
+				Direction:   nbdb.QoSDirectionToLport,
+				Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName1,
+				Priority:    qosPriority,
+				Action:      map[string]int{nbdb.QoSActionDSCP: 40},
+				ExternalIDs: map[string]string{"EgressQoS": "namespace"},
+				UUID:        "qos1-UUID",
+			},
+			&nbdb.QoS{
+				Direction:   nbdb.QoSDirectionToLport,
+				Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName2,
+				Priority:    qosPriority,
+				Action:      map[string]int{nbdb.QoSActionDSCP: 40},
+				ExternalIDs: map[string]string{"EgressQoS": "namespace"},
+				UUID:        "qos2-UUID",
+			},
+			&nbdb.QoS{
+				Direction:   nbdb.QoSDirectionToLport,
+				Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName3,
+				Priority:    qosPriority,
+				Action:      map[string]int{nbdb.QoSActionDSCP: 40},
+				ExternalIDs: map[string]string{"EgressQoS": "namespace"},
+				UUID:        "qos3-UUID",
+			},
+			&nbdb.QoS{
+				Direction:   nbdb.QoSDirectionToLport,
+				Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName4,
+				Priority:    qosPriority,
+				Action:      map[string]int{nbdb.QoSActionDSCP: 40},
+				ExternalIDs: map[string]string{"EgressQoS": "namespace"},
+				UUID:        "qos4-UUID",
+			},
+			&nbdb.QoS{
+				Direction:   nbdb.QoSDirectionToLport,
+				Match:       "(ip4.dst == 1.2.3.4/32) && ip4.src == $" + hashedASName5,
+				Priority:    qosPriority,
+				Action:      map[string]int{nbdb.QoSActionDSCP: 40},
+				ExternalIDs: map[string]string{"EgressQoS": "namespace"},
+				UUID:        "qos5-UUID",
+			},
+			&nbdb.LogicalSwitch{
+				UUID:     "node1-UUID",
+				Name:     "node1",
+				QOSRules: []string{"qos1-UUID", "qos2-UUID", "qos3-UUID", "qos4-UUID", "qos5-UUID"},
+			}}
+		testSyncerWithData(testData, initialDb, nil, controllerName)
+	})
 	ginkgo.It("updates address set owned by EgressFirewallDNSOwnerType and its references", func() {
 		asName := "dns.name_v4"
 		hashedASName := hashedAddressSet(asName)
@@ -424,7 +415,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				ACLs: []string{acl.UUID},
 			},
 		}
-		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
 	ginkgo.It("updates address set owned by NetworkPolicyOwnerType and its references", func() {
 		asNameEgress := "namespace.netpol.egress.0_v4"
@@ -482,7 +473,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				ACLs: []string{acl1.UUID, acl2.UUID},
 			},
 		}
-		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
 	ginkgo.It("updates address set owned by NamespaceOwnerType and its references", func() {
 		asName := "namespace_v4"
@@ -539,7 +530,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				QOSRules: []string{"qos1-UUID"},
 			},
 		}
-		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
 	ginkgo.It("updates address set owned by EgressIP and EgressSVC and its references", func() {
 		asName1 := egressIPServedPods + legacyIPv4AddressSetSuffix
@@ -580,7 +571,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				Policies: []string{"default-no-reroute-node-UUID"},
 			},
 		}
-		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
 	ginkgo.It("updates address set and its references for both ip families", func() {
 		// the difference from "updates address sets owned by HybridNodeRouteOwnerType and its references" test
@@ -622,7 +613,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				Policies: []string{"lrp1", "lrp2"},
 			},
 		}
-		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
 	ginkgo.It("updates address set and its references for new dualstack format, and ignores a stale one", func() {
 		// the difference from "updates address sets owned by HybridNodeRouteOwnerType and its references" test
@@ -685,7 +676,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				Name:     types.OVNClusterRouter,
 				Policies: []string{"lrp1", "lrp2"},
 			},
-		}, controllerName, false)
+		}, controllerName)
 	})
 
 	ginkgo.It("updates referencing object if at least one address set was updated", func() {
@@ -727,6 +718,6 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 				Policies: []string{"default-no-reroute-node-UUID"},
 			},
 		}
-		testSyncerWithData(testData, initialDb, nil, controllerName, false)
+		testSyncerWithData(testData, initialDb, nil, controllerName)
 	})
 })

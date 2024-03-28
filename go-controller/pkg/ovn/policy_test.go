@@ -86,7 +86,7 @@ func getDefaultDenyDataHelper(policyTypeIngress, policyTypeEgress bool, params *
 	namespace := params.networkPolicy.Namespace
 	denyLogSeverity := params.denyLogSeverity
 	fakeController := getFakeBaseController(params.netInfo)
-	egressPGName := fakeController.defaultDenyPortGroupName(namespace, egressDefaultDenySuffix)
+	egressPGName := fakeController.defaultDenyPortGroupName(namespace, libovsdbutil.ACLEgress)
 	shouldBeLogged := denyLogSeverity != ""
 	aclIDs := fakeController.getDefaultDenyPolicyACLIDs(namespace, libovsdbutil.ACLEgress, defaultDenyACL)
 	egressDenyACL := libovsdbops.BuildACL(
@@ -124,7 +124,7 @@ func getDefaultDenyDataHelper(policyTypeIngress, policyTypeEgress bool, params *
 	)
 	egressAllowACL.UUID = aclIDs.String() + "-UUID"
 
-	ingressPGName := fakeController.defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix)
+	ingressPGName := fakeController.defaultDenyPortGroupName(namespace, libovsdbutil.ACLIngress)
 	aclIDs = fakeController.getDefaultDenyPolicyACLIDs(namespace, libovsdbutil.ACLIngress, defaultDenyACL)
 	ingressDenyACL := libovsdbops.BuildACL(
 		libovsdbutil.GetACLName(aclIDs),
@@ -166,9 +166,8 @@ func getDefaultDenyDataHelper(policyTypeIngress, policyTypeEgress bool, params *
 	if policyTypeEgress {
 		egressDenyPorts = lsps
 	}
-	egressDenyPG := fakeController.buildPortGroup(
-		egressPGName,
-		egressPGName,
+	egressDenyPG := libovsdbutil.BuildPortGroup(
+		fakeController.getDefaultDenyPolicyPortGroupIDs(namespace, libovsdbutil.ACLEgress),
 		egressDenyPorts,
 		[]*nbdb.ACL{egressDenyACL, egressAllowACL},
 	)
@@ -178,9 +177,8 @@ func getDefaultDenyDataHelper(policyTypeIngress, policyTypeEgress bool, params *
 	if policyTypeIngress {
 		ingressDenyPorts = lsps
 	}
-	ingressDenyPG := fakeController.buildPortGroup(
-		ingressPGName,
-		ingressPGName,
+	ingressDenyPG := libovsdbutil.BuildPortGroup(
+		fakeController.getDefaultDenyPolicyPortGroupIDs(namespace, libovsdbutil.ACLIngress),
 		ingressDenyPorts,
 		[]*nbdb.ACL{ingressDenyACL, ingressAllowACL},
 	)
@@ -223,7 +221,7 @@ func getGressACLs(gressIdx int, peers []knet.NetworkPolicyPeer, policyType knet.
 	params *netpolDataParams) []*nbdb.ACL {
 	namespace := params.networkPolicy.Namespace
 	fakeController := getFakeBaseController(params.netInfo)
-	pgName, _ := fakeController.getNetworkPolicyPGName(namespace, params.networkPolicy.Name)
+	pgName := fakeController.getNetworkPolicyPGName(namespace, params.networkPolicy.Name)
 	controllerName := params.netInfo.GetNetworkName() + "-network-controller"
 	shouldBeLogged := params.allowLogSeverity != ""
 	var options map[string]string
@@ -363,10 +361,9 @@ func getPolicyData(params *netpolDataParams) []libovsdbtest.TestData {
 	}
 
 	fakeController := getFakeBaseController(params.netInfo)
-	pgName, readableName := fakeController.getNetworkPolicyPGName(params.networkPolicy.Namespace, params.networkPolicy.Name)
-	pg := fakeController.buildPortGroup(
-		pgName,
-		readableName,
+	pgDbIDs := fakeController.getNetworkPolicyPortGroupDbIDs(params.networkPolicy.Namespace, params.networkPolicy.Name)
+	pg := libovsdbutil.BuildPortGroup(
+		pgDbIDs,
 		lsps,
 		acls,
 	)

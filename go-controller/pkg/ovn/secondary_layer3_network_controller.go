@@ -389,7 +389,8 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 		return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
 	}
 
-	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, netName)
+	controllerName := netName + "-network-controller"
+	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, controllerName)
 	if err != nil {
 		return err
 	}

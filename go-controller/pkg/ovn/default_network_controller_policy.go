@@ -47,7 +47,8 @@ func (oc *DefaultNetworkController) addHairpinAllowACL() error {
 		return fmt.Errorf("failed to create or update hairpin allow ACL %v", err)
 	}
 
-	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, types.ClusterPortGroupNameBase, ingressACL, egressACL)
+	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, oc.getClusterPortGroupName(types.ClusterPortGroupNameBase),
+		ingressACL, egressACL)
 	if err != nil {
 		return fmt.Errorf("failed to add ACL hairpin allow acl to port group: %v", err)
 	}

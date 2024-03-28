@@ -21,30 +21,6 @@ func FindPortGroupsWithPredicate(nbClient libovsdbclient.Client, p portGroupPred
 	return found, err
 }
 
-// BuildPortGroup builds a port group referencing the provided ports and ACLs
-func BuildPortGroup(hashName string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL, externalIds map[string]string) *nbdb.PortGroup {
-	pg := nbdb.PortGroup{
-		Name:        hashName,
-		ExternalIDs: externalIds,
-	}
-
-	if len(acls) > 0 {
-		pg.ACLs = make([]string, 0, len(acls))
-		for _, acl := range acls {
-			pg.ACLs = append(pg.ACLs, acl.UUID)
-		}
-	}
-
-	if len(ports) > 0 {
-		pg.Ports = make([]string, 0, len(ports))
-		for _, port := range ports {
-			pg.Ports = append(pg.Ports, port.UUID)
-		}
-	}
-
-	return &pg
-}
-
 // CreateOrUpdatePortGroupsOps creates or updates the provided port groups
 // returning the corresponding ops
 func CreateOrUpdatePortGroupsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, pgs ...*nbdb.PortGroup) ([]libovsdb.Operation, error) {

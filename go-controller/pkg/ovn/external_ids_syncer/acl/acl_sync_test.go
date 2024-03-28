@@ -83,7 +83,25 @@ func joinACLName(substrings ...string) string {
 
 func buildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL) *nbdb.PortGroup {
 	externalIds := map[string]string{"name": name}
-	return libovsdbops.BuildPortGroup(hashName, ports, acls, externalIds)
+	pg := nbdb.PortGroup{
+		Name:        hashName,
+		ExternalIDs: externalIds,
+	}
+
+	if len(acls) > 0 {
+		pg.ACLs = make([]string, 0, len(acls))
+		for _, acl := range acls {
+			pg.ACLs = append(pg.ACLs, acl.UUID)
+		}
+	}
+
+	if len(ports) > 0 {
+		pg.Ports = make([]string, 0, len(ports))
+		for _, port := range ports {
+			pg.Ports = append(pg.Ports, port.UUID)
+		}
+	}
+	return &pg
 }
 
 var _ = ginkgo.Describe("OVN ACL Syncer", func() {
@@ -91,7 +109,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 		controllerName = "fake-controller"
 		namespace1     = "namespace1"
 	)
-	var syncerToBuildData = aclSyncer{
+	var syncerToBuildData = ACLSyncer{
 		controllerName: controllerName,
 	}
 

@@ -9,30 +9,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/urfave/cli/v2"
-
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	utilnet "k8s.io/utils/net"
-
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-
-	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/urfave/cli/v2"
 )
 
 func getPodAnnotations(fakeClient kubernetes.Interface, namespace, name string) string {
@@ -423,13 +419,8 @@ func getExpectedDataPodsSwitchesPortGroup(pods []testPod, nodes []string, namesp
 	}
 	if namespacedPortGroup != "" {
 		// namespace port group is created
-		fakeController := getFakeController(DefaultNetworkControllerName)
-		pg := fakeController.buildPortGroup(
-			libovsdbutil.HashedPortGroup(namespacedPortGroup),
-			namespacedPortGroup,
-			logicalSwitchPorts,
-			nil,
-		)
+		pgIDs := getNamespacePortGroupDbIDs(namespacedPortGroup, DefaultNetworkControllerName)
+		pg := libovsdbutil.BuildPortGroup(pgIDs, logicalSwitchPorts, nil)
 		pg.UUID = pg.Name + "-UUID"
 		data = append(data, pg)
 	}

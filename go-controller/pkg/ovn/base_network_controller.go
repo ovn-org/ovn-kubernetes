@@ -590,14 +590,6 @@ func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 	return util.DoesNetworkRequireIPAM(bnc.NetInfo)
 }
 
-func (bnc *BaseNetworkController) buildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL) *nbdb.PortGroup {
-	externalIds := map[string]string{"name": name}
-	if bnc.IsSecondary() {
-		externalIds[types.NetworkExternalID] = bnc.GetNetworkName()
-	}
-	return libovsdbops.BuildPortGroup(hashName, ports, acls, externalIds)
-}
-
 func (bnc *BaseNetworkController) getPodNADNames(pod *kapi.Pod) []string {
 	if !bnc.IsSecondary() {
 		return []string{types.DefaultNetworkName}
@@ -606,13 +598,17 @@ func (bnc *BaseNetworkController) getPodNADNames(pod *kapi.Pod) []string {
 	return podNadNames
 }
 
+func (bnc *BaseNetworkController) getClusterPortGroupDbIDs(base string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupCluster, bnc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: base,
+		})
+}
+
 // getClusterPortGroupName gets network scoped port group hash name; base is either
 // ClusterPortGroupNameBase or ClusterRtrPortGroupNameBase.
 func (bnc *BaseNetworkController) getClusterPortGroupName(base string) string {
-	if bnc.IsSecondary() {
-		return libovsdbutil.HashedPortGroup(bnc.GetNetworkName()) + "_" + base
-	}
-	return base
+	return libovsdbutil.GetPortGroupName(bnc.getClusterPortGroupDbIDs(base))
 }
 
 // GetLocalZoneNodes returns the list of local zone nodes

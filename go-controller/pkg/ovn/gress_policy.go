@@ -312,24 +312,11 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libov
 	return
 }
 
-func getACLPolicyKey(policyNamespace, policyName string) string {
-	return policyNamespace + ":" + policyName
-}
-
-func parseACLPolicyKey(aclPolicyKey string) (string, string, error) {
-	s := strings.Split(aclPolicyKey, ":")
-	if len(s) != 2 {
-		return "", "", fmt.Errorf("failed to parse network policy acl key %s, "+
-			"expected format <policyNamespace>:<policyName>", aclPolicyKey)
-	}
-	return s[0], s[1], nil
-}
-
 func (gp *gressPolicy) getNetpolACLDbIDs(ipBlockIdx int, protocol string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, gp.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			// policy namespace+name
-			libovsdbops.ObjectNameKey: getACLPolicyKey(gp.policyNamespace, gp.policyName),
+			libovsdbops.ObjectNameKey: libovsdbops.BuildNamespaceNameKey(gp.policyNamespace, gp.policyName),
 			// egress or ingress
 			libovsdbops.PolicyDirectionKey: string(gp.policyType),
 			// gress rule index

@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -280,9 +281,10 @@ func (oc *DefaultNetworkController) newRetryFramework(
 	return r
 }
 
-func (oc *DefaultNetworkController) syncAddressSetsAndAcls() error {
-	// sync address sets, only required for network controller, since any old objects in the db without
+func (oc *DefaultNetworkController) syncDb() error {
+	// sync address sets and ACLs, only required for network controller, since any old objects in the db without
 	// Owner set are owned by the default network controller.
+	// The order of syncs is important, since the next syncer may rely on the data updated by the previous one.
 	addrSetSyncer := addrsetsyncer.NewAddressSetSyncer(oc.nbClient, oc.controllerName)
 	err := addrSetSyncer.SyncAddressSets()
 	if err != nil {
@@ -299,6 +301,16 @@ func (oc *DefaultNetworkController) syncAddressSetsAndAcls() error {
 		return fmt.Errorf("failed to sync acls on controller init: %v", err)
 	}
 
+	// port groups should be synced only once across all controllers (as port groups were used by secondary network
+	// controllers before dbIDs, but SyncPortGroups knows how to get this info from the old ExternalIDs, that is also
+	// why it doesn't have controllerName as an argument).
+	// Do it here since DefaultNetworkController is always created, and this sync has dependencies with the other syncs
+	// in this function. It uses acl.ExternalIDs[libovsdbops.ObjectNameKey.String()] to fetch namespace name for a
+	// referenced port group (thus, SyncACLs should be called before).
+	portGroupSyncer := port_group.NewPortGroupSyncer(oc.nbClient)
+	if err = portGroupSyncer.SyncPortGroups(); err != nil {
+		return fmt.Errorf("failed to sync port groups on controller init: %v", err)
+	}
 	// sync shared resources
 	// pod selector address sets
 	err = oc.cleanupPodSelectorAddressSets()
@@ -312,7 +324,7 @@ func (oc *DefaultNetworkController) syncAddressSetsAndAcls() error {
 func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting the default network controller")
 
-	err := oc.syncAddressSetsAndAcls()
+	err := oc.syncDb()
 	if err != nil {
 		return err
 	}

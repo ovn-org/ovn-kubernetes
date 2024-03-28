@@ -105,10 +105,6 @@ func getNamespaceMcastACLDbIDs(ns string, aclDir libovsdbutil.ACLDirection, cont
 		})
 }
 
-func (bnc *BaseNetworkController) getNamespacePortGroupName(namespace string) string {
-	return libovsdbutil.HashedPortGroup(bnc.GetNetworkScopedName(namespace))
-}
-
 // Creates a policy to allow multicast traffic within 'ns':
 //   - a port group containing all logical ports associated with 'ns'
 //   - one "from-lport" ACL allowing egress multicast traffic from the pods
@@ -164,7 +160,7 @@ func (bnc *BaseNetworkController) deleteMulticastAllowPolicy(ns string) error {
 	if err != nil {
 		return fmt.Errorf("unable to find default multicast ACLs: %v", err)
 	}
-	// ACLs referenced by the port group wil be deleted by db if there are no other references
+	// ACLs referenced by the port group will be deleted by db if there are no other references
 	err = libovsdbops.DeleteACLsFromPortGroups(bnc.nbClient, []string{portGroupName},
 		mcastACLs...)
 	if err != nil {
@@ -227,8 +223,9 @@ func (bnc *BaseNetworkController) createDefaultDenyMulticastPolicy() error {
 func (bnc *BaseNetworkController) createDefaultAllowMulticastPolicy() error {
 	mcastMatch := getMulticastACLMatch()
 	acls := make([]*nbdb.ACL, 0, 2)
+	rtrPGName := bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase)
 	for _, aclDir := range []libovsdbutil.ACLDirection{libovsdbutil.ACLEgress, libovsdbutil.ACLIngress} {
-		match := libovsdbutil.GetACLMatch(bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase), mcastMatch, aclDir)
+		match := libovsdbutil.GetACLMatch(rtrPGName, mcastMatch, aclDir)
 		dbIDs := getDefaultMcastACLDbIDs(mcastAllowInterNodeID, aclDir, bnc.controllerName)
 		aclPipeline := libovsdbutil.ACLDirectionToACLPipeline(aclDir)
 		acl := libovsdbutil.BuildACL(dbIDs, types.DefaultMcastAllowPriority, match, nbdb.ACLActionAllow, nil, aclPipeline)
@@ -261,7 +258,9 @@ func (bnc *BaseNetworkController) disableMulticast() error {
 	if err != nil {
 		return fmt.Errorf("unable to find default multicast ACLs: %v", err)
 	}
-	err = libovsdbops.DeleteACLsFromPortGroups(bnc.nbClient, []string{bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase), bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase)},
+	err = libovsdbops.DeleteACLsFromPortGroups(bnc.nbClient, []string{
+		bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase),
+		bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase)},
 		mcastACLs...)
 	if err != nil {
 		return fmt.Errorf("unable to delete default multicast acls: %v", err)
@@ -277,9 +276,7 @@ func (bnc *BaseNetworkController) disableMulticast() error {
 // syncNsMulticast finds and deletes stale multicast db entries for namespaces that don't exist anymore
 // or have multicast disabled
 func (bnc *BaseNetworkController) syncNsMulticast(k8sNamespaces map[string]bool) error {
-	// to find namespaces that have multicast enabled, we need to find corresponding port groups.
-	// since we can't filter multicast port groups specifically, find multicast ACLs, and then find
-	// port groups they are referenced from.
+	// to find namespaces that have multicast enabled, we need to find namespace-owned port groups with multicast acls.
 	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLMulticastNamespace, bnc.controllerName, nil)
 	mcastAclPred := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
 	mcastACLs, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, mcastAclPred)
@@ -296,18 +293,21 @@ func (bnc *BaseNetworkController) syncNsMulticast(k8sNamespaces map[string]bool)
 	}
 	staleNamespaces := []string{}
 
-	// pg.ExternalIDs["name"] contains namespace (and pg.Name has hashed namespace)
-	pgPred := func(item *nbdb.PortGroup) bool {
+	pgPredIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNamespace, bnc.controllerName, nil)
+	pgPred := libovsdbops.GetPredicate[*nbdb.PortGroup](pgPredIDs, func(item *nbdb.PortGroup) bool {
 		for _, aclUUID := range item.ACLs {
 			if mcastAclUUIDs.Has(aclUUID) {
-				// add namespace to the stale list
-				if !k8sNamespaces[item.ExternalIDs["name"]] {
-					staleNamespaces = append(staleNamespaces, item.ExternalIDs["name"])
+				// multicast is enabled on this port group.
+				// add namespace to the stale list if namespace is not present in k8sNamespaces
+				namespaceName := item.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+				if !k8sNamespaces[namespaceName] {
+					staleNamespaces = append(staleNamespaces, namespaceName)
 				}
 			}
 		}
 		return false
-	}
+	})
+
 	_, err = libovsdbops.FindPortGroupsWithPredicate(bnc.nbClient, pgPred)
 	if err != nil {
 		return fmt.Errorf("unable to find multicast port groups: %v", err)
