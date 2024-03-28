@@ -8,6 +8,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -86,6 +87,8 @@ type BaseNetworkController struct {
 	retryNamespaces *ovnretry.RetryFramework
 	// retry framework for network policies
 	retryNetworkPolicies *ovnretry.RetryFramework
+	// retry framework for IPAMClaims
+	retryIPAMClaims *ovnretry.RetryFramework
 
 	// pod events factory handler
 	podHandler *factory.Handler
@@ -93,12 +96,19 @@ type BaseNetworkController struct {
 	nodeHandler *factory.Handler
 	// namespace events factory Handler
 	namespaceHandler *factory.Handler
+	// ipam claims events factory Handler
+	ipamClaimsHandler *factory.Handler
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager
 
 	// An utility to allocate the PodAnnotation to pods
-	podAnnotationAllocator *pod.PodAnnotationAllocator
+	podAnnotationAllocator pod.AnnotationAllocator
+
+	// A utility to fish for IPAMClaims
+	ipamClaimsFetcher *persistentips.IPAMClaimFetcher
+
+	persistentIPsAllocator *persistentips.Allocator
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache

@@ -7,23 +7,29 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+type AllocationOption func(*PodAllocator)
+
 // PodAllocator acts on pods events handed off by the cluster network controller
 // and allocates or releases resources (IPs and tunnel IDs at the time of this
 // writing) to pods on behalf of cluster manager.
 type PodAllocator struct {
+	kube kube.InterfaceOVN
+
 	netInfo util.NetInfo
 
 	// ipAllocator of IPs within subnets
@@ -33,7 +39,9 @@ type PodAllocator struct {
 	idAllocator id.Allocator
 
 	// An utility to allocate the PodAnnotation to pods
-	podAnnotationAllocator *pod.PodAnnotationAllocator
+	podAnnotationAllocator pod.AnnotationAllocator
+
+	ipamClaimsFetcher *persistentips.IPAMClaimFetcher
 
 	// track pods that have been released but not deleted yet so that we don't
 	// release more than once
@@ -42,26 +50,37 @@ type PodAllocator struct {
 }
 
 // NewPodAllocator builds a new PodAllocator
-func NewPodAllocator(netInfo util.NetInfo, podLister listers.PodLister, kube kube.Interface) *PodAllocator {
-	podAnnotationAllocator := pod.NewPodAnnotationAllocator(
-		netInfo,
-		podLister,
-		kube,
-	)
-
+func NewPodAllocator(
+	netInfo util.NetInfo,
+	kube kube.InterfaceOVN,
+	podAnnotationAllocator pod.AnnotationAllocator,
+	ipAllocator subnet.Allocator,
+	opts ...AllocationOption,
+) *PodAllocator {
 	podAllocator := &PodAllocator{
 		netInfo:                netInfo,
 		releasedPods:           map[string]sets.Set[string]{},
 		releasedPodsMutex:      sync.Mutex{},
 		podAnnotationAllocator: podAnnotationAllocator,
+		kube:                   kube,
 	}
 
 	// this network might not have IPAM, we will just allocate MAC addresses
 	if util.DoesNetworkRequireIPAM(netInfo) {
-		podAllocator.ipAllocator = subnet.NewAllocator()
+		podAllocator.ipAllocator = ipAllocator
+	}
+
+	for _, opt := range opts {
+		opt(podAllocator)
 	}
 
 	return podAllocator
+}
+
+func WithPersistentIPs(ipamClaimsLister ipamclaimslister.IPAMClaimLister) AllocationOption {
+	return func(allocator *PodAllocator) {
+		allocator.ipamClaimsFetcher = persistentips.NewIPAMClaimsFetcher(allocator.netInfo, ipamClaimsLister)
+	}
 }
 
 // Init initializes the allocator with as configured for the network
@@ -173,13 +192,13 @@ func (a *PodAllocator) reconcileForNAD(old, new *corev1.Pod, nad string, network
 	podCompleted := util.PodCompleted(pod)
 
 	if podCompleted || podDeleted {
-		return a.releasePodOnNAD(pod, nad, podDeleted, releaseIPsFromAllocator)
+		return a.releasePodOnNAD(pod, nad, network, podDeleted, releaseIPsFromAllocator)
 	}
 
 	return a.allocatePodOnNAD(pod, nad, network)
 }
 
-func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, podDeleted, releaseFromAllocator bool) error {
+func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, network *nettypes.NetworkSelectionElement, podDeleted, releaseFromAllocator bool) error {
 	podAnnotation, _ := util.UnmarshalPodAnnotation(pod.Annotations, nad)
 	if podAnnotation == nil {
 		// track release pods even if they have no annotation in case a user
@@ -191,6 +210,15 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, podDeleted, 
 
 	hasIPAM := util.DoesNetworkRequireIPAM(a.netInfo)
 	hasIDAllocation := util.DoesNetworkRequireTunnelIDs(a.netInfo)
+	hasPersistentIPs := network.IPAMClaimReference != ""
+	if hasPersistentIPs {
+		ipamClaim, err := a.findIPAMClaim(network)
+		if err != nil {
+			hasPersistentIPs = false
+		} else {
+			hasPersistentIPs = hasPersistentIPs && ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+		}
+	}
 
 	if !hasIPAM && !hasIDAllocation {
 		// we only take care of IP and tunnel ID allocation, if neither were
@@ -202,7 +230,7 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, podDeleted, 
 	// were already previosuly released
 	doRelease := releaseFromAllocator && !a.isPodReleased(nad, uid)
 	doReleaseIDs := doRelease && hasIDAllocation
-	doReleaseIPs := doRelease && hasIPAM
+	doReleaseIPs := doRelease && hasIPAM && !hasPersistentIPs
 
 	if doReleaseIDs {
 		name := podIdAllocationName(nad, uid)
@@ -309,4 +337,8 @@ func (a *PodAllocator) isPodReleased(nad, uid string) bool {
 
 func podIdAllocationName(nad, uid string) string {
 	return fmt.Sprintf("%s/%s", nad, uid)
+}
+
+func (a *PodAllocator) findIPAMClaim(network *nettypes.NetworkSelectionElement) (*ipamclaimsapi.IPAMClaim, error) {
+	return a.ipamClaimsFetcher.FindIPAMClaim(network)
 }

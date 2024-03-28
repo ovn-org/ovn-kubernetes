@@ -86,9 +86,14 @@ rules:
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.cni.cncf.io"]
       resources:
+          - ipamclaims
           - network-attachment-definitions
           - multi-networkpolicies
       verbs: ["list", "get", "watch"]
+    - apiGroups: [ "k8s.cni.cncf.io" ]
+      resources:
+          - ipamclaims/status
+      verbs: [ "patch", "update" ]
     - apiGroups: ["policy.networking.k8s.io"]
       resources:
           - adminnetworkpolicies/status

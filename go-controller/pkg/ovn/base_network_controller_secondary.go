@@ -1,15 +1,19 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
 	"time"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -79,6 +83,8 @@ func (bsnc *BaseSecondaryNetworkController) AddSecondaryNetworkResourceCommon(ob
 				mp.Namespace, mp.Name, err)
 			return err
 		}
+	case factory.IPAMClaimsType:
+		return nil
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
@@ -139,6 +145,8 @@ func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon
 				return err
 			}
 		}
+	case factory.IPAMClaimsType:
+		return nil
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
@@ -179,6 +187,21 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 			klog.Infof("MultiNetworkPolicy delete failed for %s/%s, will try again later: %v",
 				mp.Namespace, mp.Name, err)
 			return err
+		}
+
+	case factory.IPAMClaimsType:
+		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
+		if !ok {
+			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
+		}
+		if err := bsnc.persistentIPsAllocator.Delete(ipamClaim); errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			klog.V(5).Infof(
+				"controller %q ignoring IPAMClaim for network: %s",
+				bsnc.NetInfo.GetNetworkName(),
+				ipamClaim.Spec.Network,
+			)
+		} else if err != nil {
+			return fmt.Errorf("error deleting IPAMClaim: %w", err)
 		}
 
 	default:
@@ -385,6 +408,11 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			continue
 		}
 
+		_, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
+		if err != nil {
+			return err
+		}
+
 		bsnc.logicalPortCache.remove(pod, nadName)
 		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfoMap[nadName], nadName)
 		if err != nil {
@@ -402,6 +430,26 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			continue
 		}
 
+		network := networkMap[nadName]
+		hasIPAMClaims := network.IPAMClaimReference != ""
+		if hasIPAMClaims {
+			ipamClaim, err := bsnc.ipamClaimsFetcher.FindIPAMClaim(network)
+			if err == nil {
+				hasIPAMClaims = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+			} else {
+				hasIPAMClaims = false // TODO: probably should log something
+			}
+		}
+		if hasIPAMClaims {
+			klog.Infof(
+				"will not release IPs for pod %s/%s, ips: %s network %s because it has IPAM claims",
+				pod.Namespace,
+				pod.Name,
+				util.JoinIPNetIPs(pInfo.ips, " "),
+				bsnc.GetNetworkName(),
+			)
+			continue
+		}
 		// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
 		// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
 		// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
@@ -411,6 +459,9 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		if err = bsnc.releasePodIPs(pInfo); err != nil {
 			return err
 		}
+
+		klog.Infof("Released IPs for pod: %s/%s, ips: %s network %s", pod.Namespace, pod.Name,
+			util.JoinIPNetIPs(pInfo.ips, " "), bsnc.GetNetworkName())
 
 		bsnc.forgetPodReleasedBeforeStartup(string(pod.UID), nadName)
 	}
@@ -576,6 +627,19 @@ func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
 	handler, err := bsnc.retryNetworkPolicies.WatchResource()
 	if err != nil {
 		bsnc.policyHandler = handler
+	}
+	return err
+}
+
+// WatchIPAMClaims starts the watching of IPAMClaim resources and calls
+// back the appropriate handler logic
+func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
+	if bsnc.ipamClaimsHandler != nil {
+		return nil
+	}
+	handler, err := bsnc.retryIPAMClaims.WatchResource()
+	if err != nil {
+		bsnc.ipamClaimsHandler = handler
 	}
 	return err
 }
