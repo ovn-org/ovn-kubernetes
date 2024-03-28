@@ -782,19 +782,9 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 				podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
-				if protocol == "udp" {
-					// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
-					if utilnet.IsIPv4String(addresses.gatewayIPs[0]) {
-						gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
-						gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
-					} else {
-						gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0))
-						gomega.Expect(totalPodConnEntries).To(gomega.Equal(4)) // 6-2
-					}
-				} else {
-					gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
-					gomega.Expect(totalPodConnEntries).To(gomega.Equal(6))
-				}
+
+				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
 
 				ginkgo.By("Remove first external gateway IP from the app namespace annotation")
 				annotateNamespaceForGateway(f.Namespace.Name, false, "")
@@ -802,13 +792,9 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 				podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
-				if protocol == "udp" {
-					gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0)) // we don't have any remaining gateways left
-					gomega.Expect(totalPodConnEntries).To(gomega.Equal(4))            // 6-2
-				} else {
-					gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
-					gomega.Expect(totalPodConnEntries).To(gomega.Equal(6))
-				}
+
+				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0)) // we don't have any remaining gateways left
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4))            // 6-2
 
 			},
 				ginkgo.Entry("IPV4 udp", &addressesv4, "udp"),
@@ -879,19 +865,9 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 				podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
-				if protocol == "udp" {
-					// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
-					if utilnet.IsIPv4String(addresses.gatewayIPs[0]) {
-						gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
-						gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
-					} else {
-						gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0))
-						gomega.Expect(totalPodConnEntries).To(gomega.Equal(4)) // 6-2
-					}
-				} else {
-					gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
-					gomega.Expect(totalPodConnEntries).To(gomega.Equal(6))
-				}
+
+				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
 
 				ginkgo.By("Remove first external gateway pod's routing-namespace annotation")
 				annotatePodForGateway(gatewayPodName1, servingNamespace, "", addresses.gatewayIPs[0], false)
@@ -909,14 +885,9 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 				podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
-				if protocol == "udp" {
-					gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0)) // we don't have any remaining gateways left
-					gomega.Expect(totalPodConnEntries).To(gomega.Equal(4))            // 6-2
-				} else {
-					gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
-					gomega.Expect(totalPodConnEntries).To(gomega.Equal(6))
-				}
 
+				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0)) // we don't have any remaining gateways left
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4))            // 6-2
 			},
 				ginkgo.Entry("IPV4 udp", &addressesv4, "udp"),
 				ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp"),
@@ -1837,16 +1808,9 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 				updateAPBExternalRouteCRWithStaticHop(defaultPolicyName, f.Namespace.Name, false, addresses.gatewayIPs[0])
-				if protocol == "udp" {
-					// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
-					if utilnet.IsIPv4String(addresses.gatewayIPs[0]) {
-						podConnEntriesWithMACLabelsSet = 1 // we still have the conntrack entry for the remaining gateway
-						totalPodConnEntries = 5            // 6-1
-					} else {
-						podConnEntriesWithMACLabelsSet = 0
-						totalPodConnEntries = 4 // 6-2
-					}
-				}
+
+				podConnEntriesWithMACLabelsSet = 1 // we still have the conntrack entry for the remaining gateway
+				totalPodConnEntries = 5            // 6-1
 
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -1860,12 +1824,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				deleteAPBExternalRouteCR(defaultPolicyName)
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 
-				podConnEntriesWithMACLabelsSet = 2
-				totalPodConnEntries = 6
-				if protocol == "udp" {
-					podConnEntriesWithMACLabelsSet = 0 // we don't have any remaining gateways left
-					totalPodConnEntries = 4            // 6-2
-				}
+				podConnEntriesWithMACLabelsSet = 0 // we don't have any remaining gateways left
+				totalPodConnEntries = 4            // 6-2
 
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -1927,16 +1887,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				updatePod(f, p)
 
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
-				if protocol == "udp" {
-					// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
-					if utilnet.IsIPv4String(addresses.gatewayIPs[0]) {
-						podConnEntriesWithMACLabelsSet = 1
-						totalPodConnEntries = 5
-					} else {
-						podConnEntriesWithMACLabelsSet = 0
-						totalPodConnEntries = 4
-					}
-				}
+
+				podConnEntriesWithMACLabelsSet = 1 // we still have the conntrack entry for the remaining gateway
+				totalPodConnEntries = 5            // 6-1
+
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 					klog.Infof("Number of entries with macAddressGW %s:%d", macAddressGW, n)
@@ -1950,12 +1904,9 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				updatePod(f, p)
 
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
-				podConnEntriesWithMACLabelsSet = 2 // TCP
-				totalPodConnEntries = 6            // TCP
-				if protocol == "udp" {
-					podConnEntriesWithMACLabelsSet = 0 //we don't have any remaining gateways left
-					totalPodConnEntries = 4
-				}
+
+				podConnEntriesWithMACLabelsSet = 0 //we don't have any remaining gateways left
+				totalPodConnEntries = 4
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 					klog.Infof("Number of entries with macAddressGW %s:%d", macAddressGW, n)
@@ -2641,14 +2592,6 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				annotateNamespaceForGateway(f.Namespace.Name, false, "")
 
 				ginkgo.By("Check if conntrack entries for ECMP routes still exist for the 2 external gateways")
-				if protocol == "udp" {
-					// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
-					if utilnet.IsIPv6String(addresses.gatewayIPs[0]) {
-						expectedTotalEntries = 4
-						expectedMACEntries = 0
-					}
-				}
-
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 					klog.Infof("Number of entries with macAddressGW %s:%d", macAddressGW, n)
