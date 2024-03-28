@@ -30,12 +30,12 @@ type AdminNetworkPolicySubject struct {
 	Namespaces *metav1.LabelSelector `json:"namespaces,omitempty"`
 	// Pods is used to select pods via namespace AND pod selectors.
 	// +optional
-	Pods *NamespacedPodSubject `json:"pods,omitempty"`
+	Pods *NamespacedPod `json:"pods,omitempty"`
 }
 
-// NamespacedPodSubject allows the user to select a given set of pod(s) in
+// NamespacedPod allows the user to select a given set of pod(s) in
 // selected namespace(s).
-type NamespacedPodSubject struct {
+type NamespacedPod struct {
 	// NamespaceSelector follows standard label selector semantics; if empty,
 	// it selects all Namespaces.
 	NamespaceSelector metav1.LabelSelector `json:"namespaceSelector"`
@@ -133,7 +133,7 @@ type AdminNetworkPolicyIngressPeer struct {
 	// Support: Core
 	//
 	// +optional
-	Namespaces *NamespacedPeer `json:"namespaces,omitempty"`
+	Namespaces *metav1.LabelSelector `json:"namespaces,omitempty"`
 	// Pods defines a way to select a set of pods in
 	// a set of namespaces. Note that host-networked pods
 	// are not included in this type of peer.
@@ -141,7 +141,7 @@ type AdminNetworkPolicyIngressPeer struct {
 	// Support: Core
 	//
 	// +optional
-	Pods *NamespacedPodPeer `json:"pods,omitempty"`
+	Pods *NamespacedPod `json:"pods,omitempty"`
 }
 
 // AdminNetworkPolicyEgressPeer defines a peer to allow traffic to.
@@ -157,7 +157,7 @@ type AdminNetworkPolicyEgressPeer struct {
 	// Support: Core
 	//
 	// +optional
-	Namespaces *NamespacedPeer `json:"namespaces,omitempty"`
+	Namespaces *metav1.LabelSelector `json:"namespaces,omitempty"`
 	// Pods defines a way to select a set of pods in
 	// a set of namespaces. Note that host-networked pods
 	// are not included in this type of peer.
@@ -165,7 +165,7 @@ type AdminNetworkPolicyEgressPeer struct {
 	// Support: Core
 	//
 	// +optional
-	Pods *NamespacedPodPeer `json:"pods,omitempty"`
+	Pods *NamespacedPod `json:"pods,omitempty"`
 	// Nodes defines a way to select a set of nodes in
 	// the cluster. This field follows standard label selector
 	// semantics; if present but empty, it selects all Nodes.
@@ -192,70 +192,10 @@ type AdminNetworkPolicyEgressPeer struct {
 	//
 	// <network-policy-api:experimental>
 	// +optional
+	// +listType=set
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=25
 	Networks []CIDR `json:"networks,omitempty"`
-}
-
-// NamespacedPeer defines a flexible way to select Namespaces in a cluster.
-// Exactly one of the selectors must be set.  If a consumer observes none of
-// its fields are set, they must assume an unknown option has been specified
-// and fail closed.
-// +kubebuilder:validation:MaxProperties=1
-// +kubebuilder:validation:MinProperties=1
-type NamespacedPeer struct {
-	// NamespaceSelector is a labelSelector used to select Namespaces, This field
-	// follows standard label selector semantics; if present but empty, it selects
-	// all Namespaces.
-	//
-	// Support: Core
-	//
-	// +optional
-	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
-
-	// SameLabels is used to select a set of Namespaces that share the same values
-	// for a set of labels.
-	// To be selected a Namespace must have all of the labels defined in SameLabels,
-	// AND they must all have the same value as the subject of this policy.
-	// If Samelabels is Empty then nothing is selected.
-	//
-	// Support: Extended
-	//
-	// <network-policy-api:experimental>
-	// +optional
-	// +kubebuilder:validation:MaxItems=100
-	SameLabels []string `json:"sameLabels,omitempty"`
-
-	// NotSameLabels is used to select a set of Namespaces that do not have certain
-	// values for a set of label(s).
-	// To be selected a Namespace must have all of the labels defined in NotSameLabels,
-	// AND at least one of them must have different values than the subject of this policy.
-	// If NotSameLabels is empty then nothing is selected.
-	//
-	// Support: Extended
-	//
-	// <network-policy-api:experimental>
-	// +optional
-	// +kubebuilder:validation:MaxItems=100
-	NotSameLabels []string `json:"notSameLabels,omitempty"`
-}
-
-// NamespacedPodPeer defines a flexible way to select Namespaces and pods in a
-// cluster. The `Namespaces` and `PodSelector` fields are required.
-type NamespacedPodPeer struct {
-	// Namespaces is used to select a set of Namespaces.
-	//
-	// Support: Core
-	//
-	Namespaces NamespacedPeer `json:"namespaces"`
-
-	// PodSelector is a labelSelector used to select Pods, This field is NOT optional,
-	// follows standard label selector semantics and if present but empty, it selects
-	// all Pods.
-	//
-	// Support: Core
-	//
-	PodSelector metav1.LabelSelector `json:"podSelector"`
 }
 
 // CIDR is an IP address range in CIDR notation (for example, "10.0.0.0/8" or "fd00::/8").

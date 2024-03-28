@@ -47,7 +47,11 @@ type AdminNetworkPolicy struct {
 
 // AdminNetworkPolicyStatus defines the observed state of AdminNetworkPolicy.
 type AdminNetworkPolicyStatus struct {
-	Conditions []metav1.Condition `json:"conditions"`
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 // AdminNetworkPolicySpec defines the desired state of AdminNetworkPolicy.
@@ -154,6 +158,8 @@ type AdminNetworkPolicyIngressRule struct {
 // AdminNetworkPolicyEgressRule describes an action to take on a particular
 // set of traffic originating from pods selected by a AdminNetworkPolicy's
 // Subject field.
+// <network-policy-api:experimental:validation>
+// +kubebuilder:validation:XValidation:rule="!(self.to.exists(peer, has(peer.networks) || has(peer.nodes)) && has(self.ports) && self.ports.exists(port, has(port.namedPort)))",message="networks/nodes peer cannot be set with namedPorts since there are no namedPorts for networks/nodes"
 type AdminNetworkPolicyEgressRule struct {
 	// Name is an identifier for this rule, that may be no more than 100 characters
 	// in length. This field should be used by the implementation to help
@@ -206,6 +212,7 @@ type AdminNetworkPolicyEgressRule struct {
 // Support: Core
 //
 // +enum
+// +kubebuilder:validation:Enum={"Allow", "Deny", "Pass"}
 type AdminNetworkPolicyRuleAction string
 
 const (
