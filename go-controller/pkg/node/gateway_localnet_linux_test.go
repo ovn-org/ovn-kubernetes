@@ -633,7 +633,7 @@ var _ = Describe("Node Operations", func() {
 		It("inits iptables rules with LoadBalancer", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
-				for i := 0; i < 6; i++ {
+				for i := 0; i < 3; i++ {
 					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 						Cmd: "ovs-ofctl show ",
 					})
@@ -1313,7 +1313,7 @@ var _ = Describe("Node Operations", func() {
 				clusterIPv4 := "10.129.0.2"
 				clusterIPv6 := "fd00:10:96::10"
 				fNPW.gatewayIPv6 = v6localnetGatewayIP
-				for i := 0; i < 6; i++ {
+				for i := 0; i < 3; i++ {
 					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 						Cmd: "ovs-ofctl show ",
 					})
@@ -1768,7 +1768,6 @@ var _ = Describe("Node Operations", func() {
 				key, err := retry.GetResourceKey(&service)
 				Expect(err).NotTo(HaveOccurred())
 				retry.CheckRetryObjectEventually(key, true, nodePortWatcherRetry)
-
 				// check iptables
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables)
