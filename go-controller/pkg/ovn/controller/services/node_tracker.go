@@ -74,27 +74,6 @@ func (ni *nodeInfo) l3gatewayAddressesStr() []string {
 	return out
 }
 
-// returns a list of all ip blocks "assigned" to this node
-// includes node IPs, still as a mask-1 net
-func (ni *nodeInfo) nodeSubnets() []net.IPNet {
-	out := append([]net.IPNet{}, ni.podSubnets...)
-	for _, ip := range ni.hostAddresses {
-		if ipv4 := ip.To4(); ipv4 != nil {
-			out = append(out, net.IPNet{
-				IP:   ip,
-				Mask: net.CIDRMask(32, 32),
-			})
-		} else {
-			out = append(out, net.IPNet{
-				IP:   ip,
-				Mask: net.CIDRMask(128, 128),
-			})
-		}
-	}
-
-	return out
-}
-
 func newNodeTracker(zone string, resyncFn func(nodes []nodeInfo)) *nodeTracker {
 	return &nodeTracker{
 		nodes:    map[string]nodeInfo{},
