@@ -1460,6 +1460,71 @@ var _ = Describe("Multi Homing", func() {
 					),
 				),
 			)
+
+			ginkgo.DescribeTable(
+				"multi-network ingress deny all policies",
+				func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration, serverPodConfig podConfiguration, policy *mnpapi.MultiNetworkPolicy) {
+					netConfig := newNetworkAttachmentConfig(netConfigParams)
+
+					By("setting up the localnet underlay")
+					nodes := ovsPods(cs)
+					Expect(nodes).NotTo(BeEmpty())
+					defer func() {
+						By("tearing down the localnet underlay")
+						Expect(teardownUnderlay(nodes)).To(Succeed())
+					}()
+					const secondaryInterfaceName = "eth1"
+					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+
+					Expect(createNads(f, nadClient, extraNamespace, netConfig)).NotTo(HaveOccurred())
+
+					kickstartPodInNamespace(cs, &clientPodConfig, f.Namespace.Name, extraNamespace.Name)
+					kickstartPodInNamespace(cs, &serverPodConfig, f.Namespace.Name, extraNamespace.Name)
+
+					serverIP, err := podIPForAttachment(cs, serverPodConfig.namespace, serverPodConfig.name, netConfig.name, 0)
+					Expect(err).NotTo(HaveOccurred())
+					assertServerPodIPInRange(netConfig.cidr, serverIP, netPrefixLengthPerNode)
+
+					Expect(createMultiNetworkPolicy(mnpClient, f.Namespace.Name, policy)).To(Succeed())
+
+					By("asserting the *client* pod can't contact the server pod exposed endpoint when using ingress deny-all")
+					Eventually(func() error {
+						return reachToServerPodFromClient(cs, serverPodConfig, clientPodConfig, serverIP, port)
+					}, 2*time.Minute, 6*time.Second).Should(Not(Succeed()))
+				},
+				ginkgo.Entry(
+					"for a localnet topology when the multi-net policy is ingress deny-all",
+					networkAttachmentConfigParams{
+						name:     secondaryNetworkName,
+						topology: "localnet",
+						cidr:     secondaryLocalnetNetworkCIDR,
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        allowedClient(clientPodName),
+						labels: map[string]string{
+							"app":  "client",
+							"role": "trusted",
+						},
+					},
+					podConfiguration{
+						attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:         podName,
+						containerCmd: httpServerContainerCmd(port),
+						labels:       map[string]string{"app": "stuff-doer"},
+					},
+					multiNetPolicy(
+						"deny-all-ingress",
+						secondaryNetworkName,
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "stuff-doer"},
+						},
+						[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
+						nil,
+						nil,
+					),
+				),
+			)
 		})
 	})
 
