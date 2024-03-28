@@ -401,6 +401,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
 	EnableInterconnect              bool `gcfg:"enable-interconnect"`
 	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
+	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1038,6 +1039,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiExternalGateway,
 		Value:       OVNKubernetesFeature.EnableMultiExternalGateway,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-dns-name-resolver",
+		Usage:       "Configure to use DNSNameResolver CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableDNSNameResolver,
+		Value:       OVNKubernetesFeature.EnableDNSNameResolver,
 	},
 }
 

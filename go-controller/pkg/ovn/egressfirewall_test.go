@@ -5,28 +5,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
+	"github.com/miekg/dns"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns-name-resolver"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	t "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	utilnet "k8s.io/utils/net"
 )
 
 func newObjectMeta(name, namespace string) metav1.ObjectMeta {
@@ -43,6 +51,19 @@ func newEgressFirewallObject(name, namespace string, egressRules []egressfirewal
 		Spec: egressfirewallapi.EgressFirewallSpec{
 			Egress: egressRules,
 		},
+	}
+}
+
+func newDNSNameResolverObject(name, namespace, dnsName string, status ocpnetworkapiv1alpha1.DNSNameResolverStatus) *ocpnetworkapiv1alpha1.DNSNameResolver {
+	return &ocpnetworkapiv1alpha1.DNSNameResolver{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: ocpnetworkapiv1alpha1.DNSNameResolverSpec{
+			Name: ocpnetworkapiv1alpha1.DNSName(dnsName),
+		},
+		Status: status,
 	}
 }
 
@@ -79,6 +100,39 @@ func getEFExpectedDbAfterDelete(prevExpectedData []libovsdbtest.TestData) []libo
 	pg := prevExpectedData[len(prevExpectedData)-1].(*nbdb.PortGroup)
 	pg.ACLs = nil
 	return append(prevExpectedData[:len(prevExpectedData)-2], pg)
+}
+
+func generateRR(dnsName, ip, nextQueryTime string) dns.RR {
+	var rr dns.RR
+	if utilnet.IsIPv6(net.ParseIP(ip)) {
+		rr, _ = dns.NewRR(dnsName + ".        " + nextQueryTime + "     IN      AAAA       " + ip)
+	} else {
+		rr, _ = dns.NewRR(dnsName + ".        " + nextQueryTime + "     IN      A       " + ip)
+	}
+	return rr
+}
+
+func setDNSOpsMock(dnsName, retIP string) {
+	mockDnsOps := new(util_mocks.DNSOps)
+	util.SetDNSLibOpsMockInst(mockDnsOps)
+	methods := []ovntest.TestifyMockHelper{
+		{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
+			Servers: []string{"1.1.1.1"},
+			Port:    "1234"}, nil}, 0, 1},
+		{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{dnsName}, 0, 1},
+		{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+		{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(dnsName, retIP, "300")}}, 500 * time.Second, nil}, 0, 1},
+	}
+	for _, item := range methods {
+		call := mockDnsOps.On(item.OnCallMethodName)
+		for _, arg := range item.OnCallMethodArgType {
+			call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+		}
+		for _, ret := range item.RetArgList {
+			call.ReturnArguments = append(call.ReturnArguments, ret)
+		}
+		call.Once()
+	}
 }
 
 var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
@@ -119,6 +173,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = fakeOVN.controller.WatchEgressFwNodes()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		if config.OVNKubernetesFeature.EnableDNSNameResolver {
+			err = fakeOVN.controller.dnsNameResolverController.Start(1)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		}
 
 		for _, namespace := range namespaces {
 			namespaceASip4, namespaceASip6 := buildNamespaceAddressSets(namespace.Name, []net.IP{})
@@ -984,7 +1043,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					var err error
 					setDNSOpsMock(dnsName, resolvedIP)
-					fakeOVN.controller.egressFirewallDNS, err = NewEgressDNS(fakeOVN.controller.addressSetFactory,
+					fakeOVN.controller.dnsNameResolver, err = dnsnameresolver.NewEgressDNS(fakeOVN.controller.addressSetFactory,
 						fakeOVN.controller.controllerName, fakeOVN.controller.stopChan)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -999,7 +1058,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					// check dns address set was created
 					addrSet, _ := addressset.GetTestDbAddrSets(
-						getEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
+						dnsnameresolver.GetEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
 						[]net.IP{net.ParseIP(resolvedIP)})
 					expectedDatabaseState := append(initialData, addrSet)
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -1020,6 +1079,154 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			})
+			ginkgo.It(fmt.Sprintf("correctly creates egress firewall using dns name resolver with IPv4 address, gateway mode %s", gwMode), func() {
+				// enable the dns name resolver flag.
+				config.OVNKubernetesFeature.EnableDNSNameResolver = true
+				config.Gateway.Mode = gwMode
+				app.Action = func(ctx *cli.Context) error {
+					namespace1 := *newNamespace("namespace1")
+					dnsName := dns.Fqdn("a.b.c")
+					resolvedIP := "2.2.2.2"
+					egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+						{
+							Type: "Allow",
+							To: egressfirewallapi.EgressFirewallDestination{
+								DNSName: dnsName,
+							},
+						},
+					})
+					dnsNameResolver := newDNSNameResolverObject("dns-default", config.Kubernetes.OVNConfigNamespace, dnsName,
+						ocpnetworkapiv1alpha1.DNSNameResolverStatus{
+							ResolvedNames: []ocpnetworkapiv1alpha1.DNSNameResolverResolvedName{
+								{
+									DNSName: ocpnetworkapiv1alpha1.DNSName(dnsName),
+									ResolvedAddresses: []ocpnetworkapiv1alpha1.DNSNameResolverResolvedAddress{
+										{
+											IP: resolvedIP,
+										},
+									},
+								},
+							},
+						})
+					startOvn(dbSetup, []v1.Namespace{namespace1}, nil)
+
+					var err error
+					// Initialize the dnsNameResolver.
+					fakeOVN.controller.dnsNameResolver = dnsnameresolver.NewExternalEgressDNS(fakeOVN.controller.addressSetFactory,
+						fakeOVN.controller.controllerName)
+
+					// Create the egress firewall object.
+					_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
+						Create(context.TODO(), egressFirewall, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					// Create the dns name resolver object.
+					_, err = fakeOVN.fakeClient.OCPNetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
+						Create(context.TODO(), dnsNameResolver, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					// check dns address set was created along with the acl and pg.
+					addrSet, _ := addressset.GetTestDbAddrSets(
+						dnsnameresolver.GetEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
+						[]net.IP{net.ParseIP(resolvedIP)})
+					addrSetUUID := strings.TrimSuffix(addrSet.UUID, "-UUID")
+					dbWithACLAndPG := getEFExpectedDb(initialData, fakeOVN, namespace1.Name,
+						"(ip4.dst == $"+addrSetUUID+")", "", nbdb.ACLActionAllow)
+					addrSetDbState := append(dbWithACLAndPG, addrSet)
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(addrSetDbState))
+
+					// delete the egress firewall object.
+					err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
+						Delete(context.TODO(), egressFirewall.Name, metav1.DeleteOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					// delete the dns name resolver object.
+					err = fakeOVN.fakeClient.OCPNetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
+						Delete(context.TODO(), dnsNameResolver.Name, metav1.DeleteOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					// check dns address set is cleaned up on delete.
+					expectedDatabaseState := getEFExpectedDbAfterDelete(dbWithACLAndPG)
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+					return nil
+				}
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			})
+		})
+		ginkgo.It(fmt.Sprintf("correctly creates egress firewall using dns name resolver with IPv6 address, gateway mode %s", gwMode), func() {
+			// enable the dns name resolver flag.
+			config.OVNKubernetesFeature.EnableDNSNameResolver = true
+			config.Gateway.Mode = gwMode
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace("namespace1")
+				dnsName := dns.Fqdn("a.b.c")
+				resolvedIP := "2002::1234:abcd:ffff:c0a8:101"
+				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Allow",
+						To: egressfirewallapi.EgressFirewallDestination{
+							DNSName: dnsName,
+						},
+					},
+				})
+				dnsNameResolver := newDNSNameResolverObject("dns-default", config.Kubernetes.OVNConfigNamespace, dnsName,
+					ocpnetworkapiv1alpha1.DNSNameResolverStatus{
+						ResolvedNames: []ocpnetworkapiv1alpha1.DNSNameResolverResolvedName{
+							{
+								DNSName: ocpnetworkapiv1alpha1.DNSName(dnsName),
+								ResolvedAddresses: []ocpnetworkapiv1alpha1.DNSNameResolverResolvedAddress{
+									{
+										IP: resolvedIP,
+									},
+								},
+							},
+						},
+					})
+				startOvn(dbSetup, []v1.Namespace{namespace1}, nil)
+
+				var err error
+				// Initialize the dnsNameResolver.
+				fakeOVN.controller.dnsNameResolver = dnsnameresolver.NewExternalEgressDNS(fakeOVN.controller.addressSetFactory,
+					fakeOVN.controller.controllerName)
+
+				// Create the egress firewall object.
+				_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
+					Create(context.TODO(), egressFirewall, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Create the dns name resolver object.
+				_, err = fakeOVN.fakeClient.OCPNetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
+					Create(context.TODO(), dnsNameResolver, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// check dns address set was created along with the acl and pg.
+				addrSet, _ := addressset.GetTestDbAddrSets(
+					dnsnameresolver.GetEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
+					[]net.IP{net.ParseIP(resolvedIP)})
+				addrSetUUID := strings.TrimSuffix(addrSet.UUID, "-UUID")
+				dbWithACLAndPG := getEFExpectedDb(initialData, fakeOVN, namespace1.Name,
+					"(ip4.dst == $"+addrSetUUID+")", "", nbdb.ACLActionAllow)
+				addrSetDbState := append(dbWithACLAndPG, addrSet)
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(addrSetDbState))
+
+				// delete the egress firewall object.
+				err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
+					Delete(context.TODO(), egressFirewall.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// delete the dns name resolver object.
+				err = fakeOVN.fakeClient.OCPNetworkClient.NetworkV1alpha1().DNSNameResolvers(dnsNameResolver.Namespace).
+					Delete(context.TODO(), dnsNameResolver.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// check dns address set is cleaned up on delete.
+				expectedDatabaseState := getEFExpectedDbAfterDelete(dbWithACLAndPG)
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	}
 })

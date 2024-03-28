@@ -1,4 +1,4 @@
-package ovn
+package dnsnameresolver
 
 import (
 	"fmt"
@@ -20,6 +20,8 @@ import (
 	"github.com/miekg/dns"
 	utilnet "k8s.io/utils/net"
 )
+
+const DefaultNetworkControllerName = "default-network-controller"
 
 func TestNewEgressDNS(t *testing.T) {
 	testCh := make(chan struct{})
@@ -83,29 +85,6 @@ func generateRR(dnsName, ip, nextQueryTime string) dns.RR {
 		rr, _ = dns.NewRR(dnsName + ".        " + nextQueryTime + "     IN      A       " + ip)
 	}
 	return rr
-}
-
-func setDNSOpsMock(dnsName, retIP string) {
-	mockDnsOps := new(util_mocks.DNSOps)
-	util.SetDNSLibOpsMockInst(mockDnsOps)
-	methods := []ovntest.TestifyMockHelper{
-		{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
-			Servers: []string{"1.1.1.1"},
-			Port:    "1234"}, nil}, 0, 1},
-		{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{dnsName}, 0, 1},
-		{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
-		{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(dnsName, retIP, "300")}}, 500 * time.Second, nil}, 0, 1},
-	}
-	for _, item := range methods {
-		call := mockDnsOps.On(item.OnCallMethodName)
-		for _, arg := range item.OnCallMethodArgType {
-			call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-		}
-		for _, ret := range item.RetArgList {
-			call.ReturnArguments = append(call.ReturnArguments, ret)
-		}
-		call.Once()
-	}
 }
 
 func TestAdd(t *testing.T) {
@@ -342,13 +321,13 @@ func TestAdd(t *testing.T) {
 			res, err := NewEgressDNS(mockAddressSetFactoryOps, DefaultNetworkControllerName, testCh)
 			assert.NoError(t, err)
 
-			res.Run(tc.syncTime)
+			res.Run(RunRequest{DefaultInterval: tc.syncTime})
 
-			_, err = res.Add("addNamespace", test1DNSName)
+			addResp := res.Add(AddRequest{Namespace: "addNamespace", DNSName: test1DNSName})
 			if tc.errExp {
-				assert.Error(t, err)
+				assert.Error(t, addResp.Err)
 			} else {
-				assert.Nil(t, err)
+				assert.Nil(t, addResp.Err)
 				for stay, timeout := true, time.After(10*time.Second); stay; {
 					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
 					if dnsResolves != nil {
@@ -483,14 +462,14 @@ func TestDelete(t *testing.T) {
 			res, err := NewEgressDNS(mockAddressSetFactoryOps, DefaultNetworkControllerName, testCh)
 			assert.NoError(t, err)
 
-			res.Run(tc.syncTime)
+			res.Run(RunRequest{DefaultInterval: tc.syncTime})
 
-			_, err = res.Add("addNamespace", test1DNSName)
+			addResp := res.Add(AddRequest{Namespace: "addNamespace", DNSName: test1DNSName})
 			if tc.errExp {
-				assert.Error(t, err)
+				assert.Error(t, addResp.Err)
 			} else {
 
-				assert.Nil(t, err)
+				assert.Nil(t, addResp.Err)
 				for stay, timeout := true, time.After(10*time.Second); stay; {
 					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
 					if dnsResolves != nil {
@@ -506,7 +485,7 @@ func TestDelete(t *testing.T) {
 				}
 			}
 			_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
-			res.Delete("addNamespace")
+			res.Delete(DeleteRequest{Namespace: "addNamespace"})
 			for stay, timeout := true, time.After(10*time.Second); stay; {
 				_, dnsResolves, _ = res.getDNSEntry(tc.dnsName)
 				if dnsResolves == nil {

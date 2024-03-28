@@ -8,7 +8,10 @@ import (
 	"sync"
 	"time"
 
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	ocpnetworklisterv1alpha1 "github.com/openshift/client-go/network/listers/network/v1alpha1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
@@ -22,6 +25,7 @@ import (
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns-name-resolver"
 	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -99,7 +103,18 @@ type DefaultNetworkController struct {
 	// Controller used to handle the admin policy based external route resources
 	apbExternalRouteController *apbroutecontroller.ExternalGatewayMasterController
 
-	egressFirewallDNS *EgressDNS
+	// Controller used to handle dns name resolver resoures
+	dnsNameResolverController controller.Controller
+	// Lister for dns name resolver
+	dnsLister ocpnetworklisterv1alpha1.DNSNameResolverLister
+	// maps to hold the details of the DNS names and the corresponding
+	// DNSNameResolver object names
+	dnsNameToResolver map[string]string
+	resolverToDNSName map[string]string
+
+	// dnsNameResolver is used for resolving the IP addresses of DNS names
+	// used in egress firewall rules
+	dnsNameResolver dnsnameresolver.DNSNameResolver
 
 	// retry framework for egress firewall
 	retryEgressFirewalls *retry.RetryFramework
@@ -221,6 +236,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		svcController:                svcController,
 		zoneChassisHandler:           zoneChassisHandler,
 		apbExternalRouteController:   apbExternalRouteController,
+		dnsNameToResolver:            make(map[string]string),
+		resolverToDNSName:            make(map[string]string),
 	}
 
 	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
@@ -233,6 +250,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
 
 	oc.initRetryFramework()
+	oc.initControllers()
 	return oc, nil
 }
 
@@ -249,6 +267,20 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 	oc.retryEgressFwNodes = oc.newRetryFramework(factory.EgressFwNodeType)
 	oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
 	oc.retryNetworkPolicies = oc.newRetryFramework(factory.PolicyType)
+}
+
+// initControllers initializes the controllers for the different resources
+func (oc *DefaultNetworkController) initControllers() {
+	dnsSharedIndexInformer := oc.watchFactory.DNSNameResolverInformer().Informer()
+	oc.dnsLister = ocpnetworklisterv1alpha1.NewDNSNameResolverLister(dnsSharedIndexInformer.GetIndexer())
+	dnsConfig := &controller.Config[ocpnetworkapiv1alpha1.DNSNameResolver]{
+		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		Informer:       dnsSharedIndexInformer,
+		Lister:         oc.dnsLister.List,
+		ObjNeedsUpdate: dnsNeedsUpdate,
+		Reconcile:      oc.reconcileDNSNameResolver,
+	}
+	oc.dnsNameResolverController = controller.NewController[ocpnetworkapiv1alpha1.DNSNameResolver]("dnc-dns-controller", dnsConfig)
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource
@@ -325,6 +357,9 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
+	if util.IsDNSNameResolverEnabled() {
+		oc.dnsNameResolverController.Stop()
+	}
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
@@ -484,12 +519,22 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		var err error
-		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan)
-		if err != nil {
-			return err
+		// If DNSNameResolver is enabled, then initialize dnsNameResolver to ExternalEgressDNS
+		// for maintaining the address sets corresponding to the DNS names and start watching
+		// DNSNameResolver resources. Otherwise initialize dnsNameResolver to EgressDNS.
+		if config.OVNKubernetesFeature.EnableDNSNameResolver {
+			oc.dnsNameResolver = dnsnameresolver.NewExternalEgressDNS(oc.addressSetFactory, oc.controllerName)
+			if err = oc.dnsNameResolverController.Start(1); err != nil {
+				return err
+			}
+		} else {
+			var err error
+			oc.dnsNameResolver, err = dnsnameresolver.NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan)
+			if err != nil {
+				return err
+			}
+			oc.dnsNameResolver.Run(dnsnameresolver.RunRequest{DefaultInterval: egressFirewallDNSDefaultDuration})
 		}
-		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 		err = WithSyncDurationMetric("egress firewall", oc.WatchEgressFirewall)
 		if err != nil {
 			return err
@@ -997,6 +1042,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
 		return h.oc.updateNamespace(oldNs, newNs)
+
 	}
 	return fmt.Errorf("no update function for object type %s", h.objType)
 }

@@ -246,3 +246,34 @@ func TestGenerateId(t *testing.T) {
 	matchesPattern, _ := regexp.MatchString("([a-zA-Z0-9-]*)", id)
 	assert.True(t, matchesPattern)
 }
+
+func TestIsWildcard(t *testing.T) {
+	tests := []struct {
+		dnsName        string
+		expectedOutput bool
+	}{
+		// success
+		{
+			dnsName:        "*.example.com",
+			expectedOutput: true,
+		},
+		{
+			dnsName:        "*.sub1.example.com",
+			expectedOutput: true,
+		},
+		// negative
+		{
+			dnsName:        "www.example.com",
+			expectedOutput: false,
+		},
+		{
+			dnsName:        "sub2.sub1.example.com",
+			expectedOutput: false,
+		},
+	}
+
+	for _, tc := range tests {
+		actualOutput := IsWildcard(tc.dnsName)
+		assert.Equal(t, tc.expectedOutput, actualOutput)
+	}
+}

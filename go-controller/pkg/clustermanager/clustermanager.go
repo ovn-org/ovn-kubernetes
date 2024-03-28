@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/dnsnameresolver"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -38,6 +39,8 @@ type ClusterManager struct {
 	// The OVN DB setup is handled by egressIPZoneController that runs in ovnkube-controller
 	eIPC                    *egressIPClusterController
 	egressServiceController *egressservice.Controller
+	// Controller used for maintaining dns name resolver objects
+	dnsNameResolverController *dnsnameresolver.Controller
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
@@ -109,6 +112,9 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 			return nil, err
 		}
 	}
+	if util.IsDNSNameResolverEnabled() {
+		cm.dnsNameResolverController = dnsnameresolver.NewController(ovnClient, wf)
+	}
 	return cm, nil
 }
 
@@ -151,6 +157,11 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		return err
 	}
 
+	if util.IsDNSNameResolverEnabled() {
+		if err := cm.dnsNameResolverController.Start(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -169,4 +180,7 @@ func (cm *ClusterManager) Stop() {
 		cm.egressServiceController.Stop()
 	}
 	cm.statusManager.Stop()
+	if util.IsDNSNameResolverEnabled() {
+		cm.dnsNameResolverController.Stop()
+	}
 }
