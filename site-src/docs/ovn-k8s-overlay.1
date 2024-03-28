@@ -1,0 +1,64 @@
+.TH OVN-K8S-OVERLAY "1" "Jan 2018" "ovn-kubernetes" "OVN-KUBERNETES User Commands"
+.SH NAME
+ovn-k8s-overlay \- initialize gateway
+.SH SYNOPSIS
+.B ovn-k8s-overlay
+[\fI\,GLOBAL OPTION\/\fR]... \fI\,COMMAND\/\fR [\fI\,COMMAND OPTIONS\/\fR] [\fI\,ARGUMENTS\/\fR...]
+.SH DESCRIPTION
+.PP
+ovn-k8s-overlay to init gateway
+
+.SH COMMANDS
+.PP
+\fBgateway-init\fR
+Initialize k8s gateway node
+
+.PP
+.SH COMMAND OPTIONS
+.TP
+\fB\--cluster-ip-subnet\fR  value
+The cluster wide larger subnet of private ip addresses.
+.TP
+\fB\--physical-interface\fR  value
+The physical interface via which external connectivity is provided.
+.TP
+\fB\--bridge-interface\fR  value
+The OVS bridge interface via which external connectivity is provided.
+.TP
+\fB\--physical-ip\fR  value
+The ip address of the physical interface or bridge interface via which external connectivity is provided. This should be of the form IP/MASK.
+.TP
+\fB\--node-name\fR  value
+A unique node name.
+.TP
+\fB\--default-gw\fR  value
+The next hop IP address for your physical interface.
+.TP
+\fB\--rampout-ip-subnets\fR  value
+Uses this gateway to rampout traffic originating from the specified comma separated ip subnets.  Used to distribute outgoing traffic via multiple gateways.
+.TP
+\fB\--nb-privkey\fR  value
+The private key used for northbound API SSL connections.
+.TP
+\fB\--nb-cert\fR  value
+The certificate used for northbound API SSL connections.
+.TP
+\fB\--nb-cacert\fR  value
+The CA certificate used for northbound API SSL connections.
+
+.SH GLOBAL OPTIONS
+.TP
+\fB\--help\fR, \fB\-h\fR
+show help
+.TP
+\fB\--version\fR, \fB\-v
+print the version
+
+
+.SH "SEE ALSO"
+.BR ovnkube (1),
+.BR ovn-kube-util (1),
+.BR ovn_k8s (5).
+
+.PP
+https://github.com/ovn-org/ovn-kubernetes

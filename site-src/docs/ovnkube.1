@@ -1,0 +1,169 @@
+.TH OVNKUBE "1" "Jan 2018" "ovn-kubernetes" "OVN-KUBERNETES User Commands"
+.SH NAME
+ovnkube \- ovn utility
+.SH SYNOPSIS
+.B ovnkube
+[\fI\,OPTION\/\fR]... [\fI\,FILE\/\fR]...
+.SH DESCRIPTION
+.PP
+The ovn utility used to confiugre ovn-kubernetes
+.SH GLOBAL OPTIONS
+.TP
+\fB\--cluster-subnets\fR string
+A comma separated set of IP subnets and the associated hostsubnet prefix lengths to use for
+the cluster (eg, "10.128.0.0/14/23,10.0.0.0/14/23").  Each entry is given in the form
+[IP address/prefix-length/hostsubnet-prefix-length] and cannot overlap with other entries.
+The hostsubnet-prefix-length is optional and if unspecified defaults to 24. The
+hostsubnet-prefix-length defines how many IP addresses are dedicated to each node
+and may be different for each entry. (default "10.128.0.0/14/23")
+.TP
+\fB\--k8s-service-cidr\fR value
+A CIDR notation IP range from which k8s assigns service cluster IPs.
+This should be the same as the one provided for kube-apiserver's
+\fB\--service-cluster-ip-range\fR option.
+.TP
+\fB\--init-master\fR string
+Initialize master that acts as a controller that watches pods/services/policies. Requires the hostname as argument.
+.TP
+\fB\--init-node\fR string
+Initialize node, requires the name that node is registered with in kubernetes cluster.
+.TP
+\fB\--remove-node\fR string
+Remove a node from the OVN cluster, requires the name that node is registered
+with in kubernetes cluster.
+.TP
+\fB\--gateway-mode\fR string
+On nodes, creates a gateway for traffic to exit the cluster. Set to one of
+"shared" or "local". Shared mode shares the gateway interface with
+the OVN logical network. Local mode creates a NAT-ed interface for use
+with the OVN logical network.
+.TP
+\fB\--init-gateways\fR
+DEPRECATED; use \fB\--gateway-mode\fR instead.
+.TP
+\fB\--gateway-interface\fR string
+The interface in nodes that will be the gateway interface.  If none
+specified, then the node's interface on which the default gateway is
+configured will be used as the gateway interface. Only useful with
+\fB--init-gateways\fR.
+.TP
+\fB\--gateway-nexthop\fR string
+The external default gateway which is used as a next hop by
+OVN gateway. This is many times just the default gateway
+of the node in question. If not specified, the default gateway
+configured in the node is used. Only useful with \fB--init-gateways\fR.
+.TP
+\fB\--gateway-local\fR
+DEPRECATED; use \fB\--gateway-mode\fR instead.
+.TP
+\fB\--nodeport\fR
+Setup nodeport based entries in OVN gateways for ingress into the k8s cluster.
+By default, it is disabled.
+.TP
+\fB\--gateway-v4-join-subnet\fR string
+The v4 join subnet to use for assigning join switch IPv4 addresses\fR.
+.TP
+\fB\--gateway-v6-join-subnet\fR string
+The v6 join subnet to use for assigning join switch IPv6 addresses\fR.
+.TP
+\fB\--gateway-v4-masquerade-subnet\fR string
+The v4 masquerade subnet to use for assigning masquerade IPv4 addresses\fR.
+.TP
+\fB\--gateway-v6-masquerade-subnet\fR string
+The v6 masquerade subnet to use for assigning masquerade IPv6 addresses\fR.
+.TP
+\fB\--gateway-router-subnet\fR string
+The Subnet to be used for the gateway router external port (shared mode only). auto-detected if not given.
+Must match the the kube node IP address. Currently valid for DPUs only.\fR.
+.TP
+\fB\--config-file\fR string
+Configuration file path.
+.TP
+\fB\--mtu\fR value
+MTU value used for the overlay networks. (default: 0).
+.TP
+\fB\--conntrack-zone\fR value
+For gateway nodes, the conntrack zone used for conntrack flow rules (default: 0).
+.TP
+\fB\--loglevel\fR int
+Log verbosity and level: 5=debug, 4=info, 3=warn, 2=error, 1=fatal (default: 0).
+.TP
+\fB\--logfile\fR string
+Logfile name (with path) for ovnkube to write to.
+.TP
+\fB\--pidfile\fR string
+(Optional) file name that will contain the pid.
+.TP
+\fB\--cni-conf-dir\fR string
+The CNI config directory in which to write the overlay CNI config file.
+.TP
+\fB\--cni-plugin\fR string
+The name of the CNI plugin.
+.TP
+\fB\--k8s-kubeconfig\fR string
+Absolute path to the kubeconfig file (not required if the --k8s-apiserver, --k8s-cacert, and --k8s-token are given).
+.TP
+\fB\--k8s-apiserver\fR string
+URL to the Kubernetes apiserver (default "https://localhost:8443") (not required if --k8s-kubeconfig is given).
+.TP
+\fB\--k8s-cacert\fR string
+The absolute path to the Kubernetes API CA certificate (not required if --k8s-kubeconfig is given).
+.TP
+\fB\--k8s-token\fR string
+The Kubernetes API authentication token (not required if --k8s-kubeconfig is given).
+.TP
+\fB\--metrics-bind-address\fR string
+The IP address and port for the metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces).
+.TP
+\fB\--nb-address\fR string
+IP address and port of the OVN northbound API (eg, ssl:1.2.3.4:6641). Leave empty to use a local unix socket.
+.TP
+\fB\--nb-client-privkey\fR string
+Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
+.TP
+\fB\--nb-client-cert\fR string
+Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
+.TP
+\fB\--nb-client-cacert\fR string
+CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
+.TP
+\fB\--nb-cert-common-name\fR string
+The Common Name of the certificate used for TLS server certificate verification.
+.TP
+\fB\--sb-address\fR string
+IP address and port of the OVN southbound database (eg, ssl:1.2.3.4:6642).  Leave empty to use a local unix socket.
+.TP
+\fB\--sb-client-privkey\fR string
+Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
+.TP
+\fB\--sb-client-cert\fR string
+Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
+.TP
+\fB\--sb-client-cacert\fR string
+CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
+.TP
+\fB\--sb-cert-common-name\fR string
+The Common Name of the certificate used for TLS server certificate verification.
+.TP
+\fB\--ovnkube-node-mode\fR string
+ovnkube-node operating mode full(default), dpu, dpu-host (default: "full")
+.TP
+\fB\--help\fR, \fB\-h\fR
+Show help.
+.TP
+\fB\--version\fR, \fB\-v\fR
+Print the version.
+.TP
+\fB\--cluster-manager-v4-transit-switch-subnet\fR string
+The v4 transit switch subnet to use for assigning transit switch IPv4 addresses\fR.
+.TP
+\fB\--cluster-manager-v6-transit-switch-subnet\fR string
+The v6 transit switch subnet to use for assigning transit switch IPv6 addresses\fR.
+
+.SH "SEE ALSO"
+.BR ovn-k8s-overlay (1),
+.BR ovn-kube-util (1),
+.BR ovn_k8s (5).
+
+.PP
+https://github.com/ovn-org/ovn-kubernetes
