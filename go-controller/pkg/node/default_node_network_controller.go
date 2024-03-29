@@ -1255,67 +1255,10 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
 	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")...)
 	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
-	var wg sync.WaitGroup
-	wg.Add(len(gatewayIPs))
-	validMACs := sync.Map{}
-	for gwIP := range gatewayIPs {
-		go func(gwIP string) {
-			defer wg.Done()
-			if len(gwIP) > 0 && !utilnet.IsIPv6String(gwIP) {
-				// TODO: Add support for IPv6 external gateways
-				if hwAddr, err := util.GetMACAddressFromARP(net.ParseIP(gwIP)); err != nil {
-					klog.Errorf("Failed to lookup hardware address for gatewayIP %s: %v", gwIP, err)
-				} else if len(hwAddr) > 0 {
-					// we need to reverse the mac before passing it to the conntrack filter since OVN saves the MAC in the following format
-					// +------------------------------------------------------------ +
-					// | 128 ...  112 ... 96 ... 80 ... 64 ... 48 ... 32 ... 16 ... 0|
-					// +------------------+-------+--------------------+-------------|
-					// |                  | UNUSED|    MAC ADDRESS     |   UNUSED    |
-					// +------------------+-------+--------------------+-------------+
-					for i, j := 0, len(hwAddr)-1; i < j; i, j = i+1, j-1 {
-						hwAddr[i], hwAddr[j] = hwAddr[j], hwAddr[i]
-					}
-					validMACs.Store(gwIP, []byte(hwAddr))
-				}
-			}
-		}(gwIP)
-	}
-	wg.Wait()
 
-	validNextHopMACs := [][]byte{}
-	validMACs.Range(func(key interface{}, value interface{}) bool {
-		validNextHopMACs = append(validNextHopMACs, value.([]byte))
-		return true
+	return util.SyncConntrackForExternalGateways(gatewayIPs, nil, func() ([]*kapi.Pod, error) {
+		return nc.watchFactory.GetPods(newNs.Name)
 	})
-	// Handle corner case where there are 0 IPs on the annotations OR none of the ARPs were successful; i.e allowMACList={empty}.
-	// This means we *need to* pass a label > 128 bits that will not match on any conntrack entry labels for these pods.
-	// That way any remaining entries with labels having MACs set will get purged.
-	if len(validNextHopMACs) == 0 {
-		validNextHopMACs = append(validNextHopMACs, []byte("does-not-contain-anything"))
-	}
-
-	pods, err := nc.watchFactory.GetPods(newNs.Name)
-	if err != nil {
-		return fmt.Errorf("unable to get pods from informer: %v", err)
-	}
-
-	var errs []error
-	for _, pod := range pods {
-		pod := pod
-		podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
-		if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
-			errs = append(errs, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
-		}
-		for _, podIP := range podIPs { // flush conntrack only for UDP
-			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
-			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
-			err := util.DeleteConntrack(podIP.String(), 0, kapi.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP.String(), err))
-			}
-		}
-	}
-	return apierrors.NewAggregate(errs)
 }
 
 func (nc *DefaultNodeNetworkController) WatchNamespaces() error {

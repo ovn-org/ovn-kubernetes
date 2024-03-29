@@ -5,14 +5,11 @@ import (
 	"net"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/pkg/errors"
-	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
@@ -675,66 +672,10 @@ func GetHybridRouteAddrSetDbIDs(nodeName, controller string) *libovsdbops.DbObje
 
 func (c *conntrackClient) deleteGatewayIPs(podNsName ktypes.NamespacedName, _, toBeKept sets.Set[string]) error {
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
-	var wg sync.WaitGroup
-	wg.Add(len(toBeKept))
-	validMACs := sync.Map{}
-	klog.V(4).Infof("Keeping conntrack entries for pod %s with gateway IPs %s", podNsName, strings.Join(sets.List(toBeKept), ","))
-	for gwIP := range toBeKept {
-		go func(gwIP string) {
-			defer wg.Done()
-			if len(gwIP) > 0 && !utilnet.IsIPv6String(gwIP) {
-				// TODO: Add support for IPv6 external gateways
-				if hwAddr, err := util.GetMACAddressFromARP(net.ParseIP(gwIP)); err != nil {
-					klog.Errorf("Failed to lookup hardware address for gatewayIP %s: %v", gwIP, err)
-				} else if len(hwAddr) > 0 {
-					// we need to reverse the mac before passing it to the conntrack filter since OVN saves the MAC in the following format
-					// +------------------------------------------------------------ +
-					// | 128 ...  112 ... 96 ... 80 ... 64 ... 48 ... 32 ... 16 ... 0|
-					// +------------------+-------+--------------------+-------------|
-					// |                  | UNUSED|    MAC ADDRESS     |   UNUSED    |
-					// +------------------+-------+--------------------+-------------+
-					for i, j := 0, len(hwAddr)-1; i < j; i, j = i+1, j-1 {
-						hwAddr[i], hwAddr[j] = hwAddr[j], hwAddr[i]
-					}
-					validMACs.Store(gwIP, []byte(hwAddr))
-				}
-			}
-		}(gwIP)
-	}
-	wg.Wait()
-
-	validNextHopMACs := [][]byte{}
-	validMACs.Range(func(key interface{}, value interface{}) bool {
-		validNextHopMACs = append(validNextHopMACs, value.([]byte))
-		return true
+	return util.SyncConntrackForExternalGateways(toBeKept, nil, func() ([]*v1.Pod, error) {
+		pod, err := c.podLister.Pods(podNsName.Namespace).Get(podNsName.Name)
+		return []*v1.Pod{pod}, err
 	})
-	// Handle corner case where there are 0 IPs on the annotations OR none of the ARPs were successful; i.e allowMACList={empty}.
-	// This means we *need to* pass a label > 128 bits that will not match on any conntrack entry labels for these pods.
-	// That way any remaining entries with labels having MACs set will get purged.
-	if len(validNextHopMACs) == 0 {
-		validNextHopMACs = append(validNextHopMACs, []byte("does-not-contain-anything"))
-	}
-
-	pod, err := c.podLister.Pods(podNsName.Namespace).Get(podNsName.Name)
-	if err != nil {
-		return fmt.Errorf("unable to get pods from informer: %v", err)
-	}
-
-	var errs []error
-	podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
-	if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
-		errs = append(errs, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
-	}
-	for _, podIP := range podIPs { // flush conntrack only for UDP
-		// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
-		// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
-		err := util.DeleteConntrack(podIP.String(), 0, v1.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod with IP %s: %v", podIP.String(), err))
-			continue
-		}
-	}
-	return kerrors.NewAggregate(errs)
 }
 
 // addGatewayIPs is a NOP (no operation) in the conntrack client as it does not add any entry to the conntrack table.
