@@ -33,7 +33,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/client_model v0.5.0
-	github.com/safchain/ethtool v0.3.0
+	github.com/safchain/ethtool v0.3.1-0.20231027162144-83e5e0097c91
 	github.com/spf13/afero v1.9.5
 	github.com/stretchr/testify v1.8.4
 	github.com/urfave/cli/v2 v2.2.0
