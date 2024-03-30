@@ -1,0 +1,110 @@
+# utility file to collect common actions as composable actions to deduplicate the same work in different workflows
+
+name: 'Setup, Push to Testspace, and Handle KIND Logs'
+description: 'Setup Testspace, push results, export and upload KIND cluster logs'
+inputs:
+  domain:
+    description: 'Testspace domain'
+    required: true
+  results_path:
+    description: 'Path to test results'
+    required: true
+  kind_cluster_name:
+    description: 'Name of the KIND cluster'
+    required: true
+  job_name:
+    description: 'Name of the job, used for naming artifacts'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Export kind logs
+      run: |
+        mkdir -p /tmp/kind/logs
+        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
+        if [ -n "${TRAFFIC_FLOW_TESTS}" ]; then
+            mv -v /tmp/{,kind/logs/}traffic_flow_test_result.json ||:
+        fi
+      shell: bash
+      if: always()
+
+    - name: Install XMLStarlet
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y xmlstarlet
+
+    - name: Post Process JUnit Files
+      shell: bash
+      run: |
+        set -x
+        ls -altr /home/runner/work/ovn-kubernetes/ovn-kubernetes/test/_artifacts/
+        
+        # remove framework or skipped test cases
+        xmlstarlet ed --inplace                                         \
+            -d "//testcase[contains(@name, '[SynchronizedBeforeSuite]') \
+                or contains(@name, '[SynchronizedAfterSuite]')          \
+                or contains(@name, '[ReportBeforeSuite]')               \
+                or contains(@name, '[ReportAfterSuite]')                \
+                or @status='skipped']"                                  \
+            /home/runner/work/ovn-kubernetes/ovn-kubernetes/test/_artifacts/*.xml
+
+        for file in /home/runner/work/ovn-kubernetes/ovn-kubernetes/test/_artifacts/*.xml; do
+        
+            # make sure junit suite name reflects the test matrix
+            current_suite_name=$(xmlstarlet sel -t -m "//testsuite" -v "@name" -n "$file")
+            conformance=""
+            if [[ "$current_suite_name" == *"conformance"* ]]; then
+                conformance="-conformance"
+            fi
+            descriptive_suitename="${MATRIX_TARGET}-${MATRIX_HA}-${MATRIX_GATEWAY_MODE}-${MATRIX_IPFAMILY}-${MATRIX_DISABLE_SNAT_MULTIPLE_GWS}-${MATRIX_SECOND_BRIDGE}-${MATRIX_IC}${conformance}"
+            xmlstarlet ed --inplace -u "//testsuite/@name" -v "$descriptive_suitename" "$file"
+            # testspace seems to organize by classname and not name
+            xmlstarlet ed --inplace -u "//testcase/@classname" -v "$descriptive_suitename" "$file"
+        
+            # summary junit files are useless to report to testspace
+            if grep -q '<testsuite tests="1" failures="0"' "$file" && grep -q '<testcase classname="e2e" name="TestE2E"' "$file"; then
+                echo "Detected summary report file. Renaming to prevent upload to Testspace."
+                mv "$file" "${file%.xml}.summary"
+                continue
+            fi
+        
+            testcase_count=$(xmlstarlet sel -t -v "count(//testcase)" "$file")
+            if [[ $testcase_count -eq 0 ]]; then
+                echo "No test cases left after framework cases. Renaming file to indicate it should not be uploaded."
+                mv "$file" "${file%.xml}.no_tests_left"
+            fi
+        done
+        ls -altr /home/runner/work/ovn-kubernetes/ovn-kubernetes/test/_artifacts/
+        find /home/runner/work/ovn-kubernetes/ovn-kubernetes/test/_artifacts/ -type f -exec cat {} +
+
+    - name: Setup Testspace
+      uses: testspace-com/setup-testspace@v1
+      with:
+        domain: ovn-kubernetes
+      if: always()
+
+    - name: Configure Testspace Project and Space
+      run: |
+        ./testspace config url "ovn-kubernetes.testspace.com/ovn-org:ovn-kubernetes"
+        ./testspace config space master
+      shell: bash
+      if: always()
+
+    - name: Push result to Testspace server
+      run: testspace ${{ inputs.results_path }}/*.xml
+      shell: bash
+      if: always()
+
+    - name: Upload kind logs
+      uses: actions/upload-artifact@v4
+      with:
+        name: kind-logs-${{ inputs.job_name }}-${{ github.run_id }}
+        path: /tmp/kind/logs
+      if: always()
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ inputs.job_name }}-${{ github.run_id }}
+        path: /home/runner/work/ovn-kubernetes/ovn-kubernetes/test/_artifacts
+      if: always()
