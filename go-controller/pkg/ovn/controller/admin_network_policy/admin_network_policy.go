@@ -148,6 +148,8 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 		c.anpPriorityMap[desiredANPState.anpPriority] = anp.Name
 		// since transact was successful we can finally populate the cache
 		c.anpCache[anp.Name] = desiredANPState
+		metrics.UpdateAdminNetworkPolicyEgressRuleCount(float64(len(anp.Spec.Egress)))
+		metrics.UpdateAdminNetworkPolicyIngressRuleCount(float64(len(anp.Spec.Ingress)))
 		metrics.IncrementANPCount()
 		return nil
 	}
@@ -168,8 +170,10 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 		// Let us update the anpPriorityMap cache by adding this new priority to it
 		c.anpPriorityMap[desiredANPState.anpPriority] = anp.Name
 	}
-	// since transact was successful we can finally replace the currentANPState in the cache with the latest desired one
+	// since transact was successful we can finally replace the currentANPState in the cache with the latest desired one and update metrics
 	c.anpCache[anp.Name] = desiredANPState
+	metrics.UpdateAdminNetworkPolicyEgressRuleCount(float64(-len(currentANPState.egressRules) + len(desiredANPState.egressRules)))
+	metrics.UpdateAdminNetworkPolicyIngressRuleCount(float64(-len(currentANPState.ingressRules) + len(desiredANPState.ingressRules)))
 	return nil
 }
 
@@ -404,6 +408,8 @@ func (c *Controller) clearAdminNetworkPolicy(anpName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete address-sets for ANP %s/%d: %w", anp.name, anp.anpPriority, err)
 	}
+	metrics.UpdateAdminNetworkPolicyEgressRuleCount(float64(-len(anp.egressRules)))
+	metrics.UpdateAdminNetworkPolicyIngressRuleCount(float64(-len(anp.ingressRules)))
 	// we can delete the object from the cache now.
 	delete(c.anpPriorityMap, anp.anpPriority)
 	delete(c.anpCache, anpName)

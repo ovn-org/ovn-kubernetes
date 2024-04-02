@@ -284,6 +284,34 @@ var metricBANPCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The total number of baseline admin network policies (0 or 1) in the cluster",
 })
 
+var metricANPEgressRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_custom_resource_total_egress_rules",
+	Help:      "The total number of admin network policy egress rules defined in the cluster (across all ANPs)"},
+)
+
+var metricANPIngressRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_custom_resource_total_ingress_rules",
+	Help:      "The total number of admin network policy ingress rules defined in the cluster (across all ANPs)"},
+)
+
+var metricBANPEgressRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "baseline_admin_network_policy_custom_resource_total_egress_rules",
+	Help:      "The total number of baseline admin network policy egress rules defined in the cluster in the singleton BANP"},
+)
+
+var metricBANPIngressRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "baseline_admin_network_policy_custom_resource_total_ingress_rules",
+	Help:      "The total number of baseline admin network policy ingress rules defined in the cluster in the singleton BANP"},
+)
+
 /** AdminNetworkPolicyMetrics End**/
 
 // metricFirstSeenLSPLatency is the time between a pod first seen in OVN-Kubernetes and its Logical Switch Port is created
@@ -616,6 +644,26 @@ func IncrementBANPCount() {
 // DecrementBANPCount decrements the number of Baseline Admin Network Policies
 func DecrementBANPCount() {
 	metricBANPCount.Dec()
+}
+
+// UpdateAdminNetworkPolicyEgressRuleCount records the number of Admin Network Policy Egress rules.
+func UpdateAdminNetworkPolicyEgressRuleCount(count float64) {
+	metricANPEgressRuleCount.Add(count)
+}
+
+// UpdateAdminNetworkPolicyEgressRuleCount records the number of Admin Network Policy Ingress rules.
+func UpdateAdminNetworkPolicyIngressRuleCount(count float64) {
+	metricANPIngressRuleCount.Add(count)
+}
+
+// UpdateBaselineAdminNetworkPolicyEgressRuleCount records the number of Baseline Admin Network Policy Egress rules.
+func UpdateBaselineAdminNetworkPolicyEgressRuleCount(count float64) {
+	metricBANPEgressRuleCount.Add(count)
+}
+
+// UpdateBaselineAdminNetworkPolicyIngressRuleCount records the number of Baseline Admin Network Policy Ingress rules.
+func UpdateBaselineAdminNetworkPolicyIngressRuleCount(count float64) {
+	metricBANPIngressRuleCount.Add(count)
 }
 
 type (

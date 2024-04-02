@@ -106,6 +106,8 @@ func (c *Controller) clearBaselineAdminNetworkPolicy(banpName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete address-sets for BANP %s: %w", banp.name, err)
 	}
+	metrics.UpdateBaselineAdminNetworkPolicyEgressRuleCount(float64(-len(banp.egressRules)))
+	metrics.UpdateBaselineAdminNetworkPolicyIngressRuleCount(float64(-len(banp.ingressRules)))
 	// we can delete the object from the cache now (set the cache back to empty value).
 	c.banpCache = &adminNetworkPolicyState{}
 	metrics.DecrementBANPCount()
@@ -152,6 +154,8 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 		}
 		// since transact was successful we can finally populate the cache
 		c.banpCache = desiredBANPState
+		metrics.UpdateBaselineAdminNetworkPolicyEgressRuleCount(float64(len(desiredBANPState.egressRules)))
+		metrics.UpdateBaselineAdminNetworkPolicyIngressRuleCount(float64(len(desiredBANPState.ingressRules)))
 		metrics.IncrementBANPCount()
 		return nil
 	}
@@ -161,7 +165,9 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 	if err != nil {
 		return fmt.Errorf("failed to update ANP %s: %v", desiredBANPState.name, err)
 	}
-	// since transact was successful we can finally replace the currentBANPState in the cache with the latest desired one
+	// since transact was successful we can finally replace the currentBANPState in the cache with the latest desired one and update metrics
 	c.banpCache = desiredBANPState
+	metrics.UpdateBaselineAdminNetworkPolicyEgressRuleCount(float64(-len(currentBANPState.egressRules) + len(desiredBANPState.egressRules)))
+	metrics.UpdateBaselineAdminNetworkPolicyIngressRuleCount(float64(-len(currentBANPState.ingressRules) + len(desiredBANPState.ingressRules)))
 	return nil
 }
