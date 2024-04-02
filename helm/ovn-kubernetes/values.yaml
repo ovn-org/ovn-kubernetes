@@ -51,19 +51,19 @@ global:
   # -- A comma separated set of IP subnets and the associated hostsubnetlengths (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\") to use with the extended hybrid network
   hybridOverlayNetCidr: ""
   # -- Whether or not to use Admin Network Policy CRD feature with ovn-kubernetes
-  enableAdminNetworkPolicy: ""
+  enableAdminNetworkPolicy: true
   # -- Configure to use EgressIP CRD feature with ovn-kubernetes
-  enableEgressIp: ""
+  enableEgressIp: true
   # -- Configure EgressIP node reachability using gRPC on this TCP port
-  egressIpHealthCheckPort: ""
+  egressIpHealthCheckPort: 9107
   # -- Configure to use EgressService CRD feature with ovn-kubernetes
-  enableEgressService: ""
+  enableEgressService: true
   # -- Configure to use EgressFirewall CRD feature with ovn-kubernetes
-  enableEgressFirewall: ""
+  enableEgressFirewall: true
   # -- Configure to use EgressQoS CRD feature with ovn-kubernetes
-  enableEgressQos: ""
+  enableEgressQos: true
   # -- Enables multicast support between the pods within the same namespace
-  enableMulticast: ""
+  enableMulticast: true
   # -- Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes
   enableMultiNetwork: false
   # -- Configure to enable IPsec
@@ -73,7 +73,7 @@ global:
   # -- Configure to enable interconnecting multiple zones
   enableInterConnect: false
   # -- Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes
-  enableMultiExternalGateway: false
+  enableMultiExternalGateway: true
   # -- Configure to use stateless network policy feature with ovn-kubernetes
   enableStatelessNetworkPolicy: false
   # -- Enables metrics related to scaling
@@ -101,7 +101,7 @@ global:
   # @default 20
   aclLoggingRateLimit: 20
   # -- If set, then load balancers do not get deleted when all backends are removed
-  emptyLbEvents: ""
+  emptyLbEvents: true
   # -- Port of north bound ovsdb
   nbPort: 6641
   # -- Port of south bound ovsdb
