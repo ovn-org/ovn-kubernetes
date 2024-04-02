@@ -58,7 +58,12 @@ should prevent Ingress creation if more than 1 IngressClass marked as default
 
 # TODO: Figure out why the below test is failing and if we need to add support in OVN-K for them
 validates that there is no conflict between pods with same hostPort but different hostIP and protocol
+
+# Skip ServiceCidr tests as we dont currenly support this v1alpha feature
+should create Services and servce on different Service CIDRs
 "
+
+
 
 IPV4_ONLY_TESTS="
 # Limit the IPv4 related test to IPv4 only deployments
