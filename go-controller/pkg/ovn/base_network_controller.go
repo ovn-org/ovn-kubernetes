@@ -163,6 +163,10 @@ type BaseSecondaryNetworkController struct {
 	policyHandler *factory.Handler
 }
 
+func getNetworkControllerName(netName string) string {
+	return netName + "-network-controller"
+}
+
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,

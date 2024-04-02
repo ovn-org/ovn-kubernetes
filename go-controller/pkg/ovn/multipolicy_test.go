@@ -379,7 +379,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		gomega.Expect(ok).To(gomega.BeTrue())
 		asf := ocInfo.asf
 		gomega.Expect(asf).NotTo(gomega.Equal(nil))
-		gomega.Expect(asf.ControllerName).To(gomega.Equal(secondaryNetworkName + "-network-controller"))
+		gomega.Expect(asf.ControllerName).To(gomega.Equal(getNetworkControllerName(secondaryNetworkName)))
 
 		for _, ocInfo := range fakeOvn.secondaryControllers {
 			// localnet topology can't watch for nodes
