@@ -35,7 +35,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
-					controllerName:              netInfo.GetNetworkName() + "-network-controller",
+					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 					NetInfo:                     netInfo,
 					lsManager:                   lsm.NewL2SwitchManager(),
 					logicalPortCache:            newPortCache(stopChan),

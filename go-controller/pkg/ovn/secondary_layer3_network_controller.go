@@ -256,7 +256,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 			BaseNetworkController: BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
-				controllerName:              netInfo.GetNetworkName() + "-network-controller",
+				controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 				NetInfo:                     netInfo,
 				lsManager:                   lsm.NewLogicalSwitchManager(),
 				logicalPortCache:            newPortCache(stopChan),
@@ -389,7 +389,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 		return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
 	}
 
-	controllerName := netName + "-network-controller"
+	controllerName := getNetworkControllerName(netName)
 	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, controllerName)
 	if err != nil {
 		return err

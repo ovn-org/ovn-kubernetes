@@ -75,7 +75,7 @@ func newNetworkPolicy(name, namespace string, podSelector metav1.LabelSelector, 
 
 func getFakeBaseController(netInfo util.NetInfo) *BaseNetworkController {
 	return &BaseNetworkController{
-		controllerName: netInfo.GetNetworkName() + "-network-controller",
+		controllerName: getNetworkControllerName(netInfo.GetNetworkName()),
 		NetInfo:        netInfo,
 	}
 }
@@ -222,7 +222,7 @@ func getGressACLs(gressIdx int, peers []knet.NetworkPolicyPeer, policyType knet.
 	namespace := params.networkPolicy.Namespace
 	fakeController := getFakeBaseController(params.netInfo)
 	pgName := fakeController.getNetworkPolicyPGName(namespace, params.networkPolicy.Name)
-	controllerName := params.netInfo.GetNetworkName() + "-network-controller"
+	controllerName := getNetworkControllerName(params.netInfo.GetNetworkName())
 	shouldBeLogged := params.allowLogSeverity != ""
 	var options map[string]string
 	var direction string

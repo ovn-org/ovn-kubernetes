@@ -411,7 +411,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 		if err != nil {
 			return err
 		}
-		asf := addressset.NewFakeAddressSetFactory(netName + "-network-controller")
+		asf := addressset.NewFakeAddressSetFactory(getNetworkControllerName(netName))
 
 		switch topoType {
 		case types.Layer3Topology:
