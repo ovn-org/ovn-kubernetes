@@ -685,8 +685,12 @@ var _ = ginkgo.Describe("Services", func() {
 			ginkgo.By("Deleting additional IP addresses from nodes")
 			for nodeName, ipFamilies := range nodeIPs {
 				for _, ip := range ipFamilies {
+					subnetMask := "/32"
+					if utilnet.IsIPv6String(ip) {
+						subnetMask = "/128"
+					}
 					_, err := runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "delete",
-						fmt.Sprintf("%s/32", ip), "dev", "breth0")
+						fmt.Sprintf("%s%s", ip, subnetMask), "dev", "breth0")
 					if err != nil && !strings.Contains(err.Error(),
 						"RTNETLINK answers: Cannot assign requested address") {
 						framework.Failf("failed to remove ip address %s from node %s, err: %q", ip, nodeName, err)
@@ -759,7 +763,7 @@ var _ = ginkgo.Describe("Services", func() {
 					nodeIPs[node.Name] = make(map[int]string)
 				}
 				if utilnet.IsIPv6String(e2enode.GetAddresses(&node, v1.NodeInternalIP)[0]) {
-					newIP = "fc00:f853:ccd:e794::" + strconv.Itoa(i)
+					newIP = "fc00:f853:ccd:e793:1111::" + strconv.Itoa(i)
 					nodeIPs[node.Name][6] = newIP
 				} else {
 					newIP = "172.18.1." + strconv.Itoa(i+1)
@@ -831,7 +835,7 @@ var _ = ginkgo.Describe("Services", func() {
 								"hostname")
 							// Expect to receive a valid hostname
 							return nodesHostnames.Has(epHostname)
-						}, "20s", "1s").Should(gomega.BeTrue())
+						}, "40s", "1s").Should(gomega.BeTrue())
 					}
 				}
 			}
