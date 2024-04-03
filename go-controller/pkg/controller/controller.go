@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -18,9 +19,10 @@ const maxRetries = 15
 
 // Controller is a level-driven controller that is shut down after Stop() call.
 type Controller interface {
-	Start(threadiness int) error
-	Stop()
 	ReconcileAll()
+	addHandler() error
+	startWorkers() error
+	stop()
 }
 
 type Config[T any] struct {
@@ -31,10 +33,8 @@ type Config[T any] struct {
 	// May be called with oldObj = nil on Add, won't be called on Delete.
 	ObjNeedsUpdate func(oldObj, newObj *T) bool
 	Reconcile      func(key string) error
-	// InitialSync will be called on controller start after the event handlers were added, but before queue handler is started.
-	// It ensures no events will be missed.
-	// If initial sync is not required, leave this function nil.
-	InitialSync func() error
+	// How many workers should be started for this controller.
+	Threadiness int
 }
 
 // controller has the basic functionality, and may have some wrappers to provide different Start() method options.
@@ -48,6 +48,8 @@ type controller[T any] struct {
 	wg       *sync.WaitGroup
 }
 
+// NewController creates a new level-driven controller.
+// It should be started and stopped using StartControllers and StopControllers functions.
 func NewController[T any](name string, config *Config[T]) Controller {
 	return &controller[T]{
 		name:   name,
@@ -63,12 +65,9 @@ func NewController[T any](name string, config *Config[T]) Controller {
 	}
 }
 
-func (c *controller[T]) Start(threadiness int) error {
-	if threadiness < 1 {
-		return fmt.Errorf("failed to start controller %s: threadiness should be > 0", c.name)
-	}
+func (c *controller[T]) addHandler() error {
+	klog.Infof("Adding controller %v event handlers", c.name)
 
-	klog.Infof("Starting controller %v with %v workers", c.name, threadiness)
 	var err error
 	c.eventHandler, err = c.config.Informer.AddEventHandler(
 		factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -83,19 +82,17 @@ func (c *controller[T]) Start(threadiness int) error {
 	if !util.WaitForInformerCacheSyncWithTimeout(c.name, c.stopChan, c.config.Informer.HasSynced) {
 		return fmt.Errorf("timed out waiting for %s informer cache to sync", c.name)
 	}
+	return nil
+}
 
-	// now we have already started receiving events and putting keys in the queue.
-	// If initial sync is needed, we can do it now, by listing all existing objects.
-	// Since we are receiving all events already, we know every change that happens after the following
-	// List call, will be handled.
-	if c.config.InitialSync != nil {
-		if err := c.config.InitialSync(); err != nil {
-			return fmt.Errorf("failed to start controller %s: initial sync failed: %w", c.name, err)
-		}
-		klog.Infof("Controller %s finished initial sync", c.name)
+func (c *controller[T]) startWorkers() error {
+	if c.config.Threadiness < 1 {
+		return fmt.Errorf("failed to start controller %s: threadiness should be > 0", c.name)
 	}
 
-	for i := 0; i < threadiness; i++ {
+	klog.Infof("Starting controller %v with %v workers", c.name, c.config.Threadiness)
+
+	for i := 0; i < c.config.Threadiness; i++ {
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
@@ -107,7 +104,7 @@ func (c *controller[T]) Start(threadiness int) error {
 	return nil
 }
 
-func (c *controller[T]) Stop() {
+func (c *controller[T]) stop() {
 	close(c.stopChan)
 	c.cleanup()
 	c.wg.Wait()
@@ -212,5 +209,58 @@ func (c *controller[T]) ReconcileAll() {
 			return
 		}
 		c.queue.Add(key)
+	}
+}
+
+// StartControllers starts one or multiple controllers. If initial sync is required, use StartControllersWithInitialSync
+func StartControllers(controllers ...Controller) (err error) {
+	return StartControllersWithInitialSync(nil, controllers...)
+}
+
+// StartControllersWithInitialSync starts one or multiple controllers that share initialSync function.
+// initialSync will be called after all event handlers for given controllers were added, but before queue handlers are started.
+// It ensures no events will be missed.
+// A user of this package that manages multiple controllers would most likely do a single call to this function
+// if it needs to use this sync to take an initial action (i.e. building up its own cache) correlating the information
+// from all the initialized informers.
+// If initial sync is not required, use StartControllers.
+func StartControllersWithInitialSync(initialSync func() error, controllers ...Controller) (err error) {
+	defer func() {
+		if err != nil {
+			StopControllers(controllers...)
+		}
+	}()
+
+	g := new(errgroup.Group)
+	for _, controller := range controllers {
+		controller := controller
+		g.Go(func() error {
+			return controller.addHandler()
+		})
+	}
+	if err = g.Wait(); err != nil {
+		return err
+	}
+
+	// now we have already started receiving events and putting keys in the queue.
+	// If initial sync is needed, we can do it now, by listing all existing objects.
+	// Since we are receiving all events already, we know every change that happens after the following
+	// List call, will be handled.
+	if initialSync != nil {
+		if err = initialSync(); err != nil {
+			return fmt.Errorf("initial sync failed: %w", err)
+		}
+	}
+	for _, controller := range controllers {
+		if err = controller.startWorkers(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func StopControllers(controllers ...Controller) {
+	for _, subcontroller := range controllers {
+		subcontroller.stop()
 	}
 }

@@ -21,6 +21,22 @@ import (
 	"k8s.io/client-go/util/workqueue"
 )
 
+func getDefaultConfig[T any](reconcileCounter *atomic.Uint64) *Config[T] {
+	return &Config[T]{
+		ObjNeedsUpdate: func(oldObj, newObj *T) bool {
+			if oldObj == nil || newObj == nil {
+				return true
+			}
+			return !reflect.DeepEqual(oldObj, newObj)
+		},
+		Reconcile: func(key string) error {
+			reconcileCounter.Add(1)
+			return nil
+		},
+		Threadiness: 1,
+	}
+}
+
 var _ = Describe("Level-driven controller", func() {
 	var (
 		fakeClient       *util.OVNClusterManagerClientset
@@ -33,7 +49,7 @@ var _ = Describe("Level-driven controller", func() {
 		namespace1Name = "namespace1"
 	)
 
-	startController := func(config *Config[v1.Pod], objects ...runtime.Object) {
+	startController := func(config *Config[v1.Pod], initialSync func() error, objects ...runtime.Object) {
 		fakeClient = util.GetOVNClientset(objects...).GetClusterManagerClientset()
 		coreFactory := informerfactory.NewSharedInformerFactory(fakeClient.KubeClient, time.Second)
 
@@ -46,23 +62,12 @@ var _ = Describe("Level-driven controller", func() {
 
 		coreFactory.Start(stopChan)
 
-		err := controller.Start(1)
+		err := StartControllersWithInitialSync(initialSync, controller)
 		Expect(err).NotTo(HaveOccurred())
 	}
 
 	getDefaultConfig := func() *Config[v1.Pod] {
-		return &Config[v1.Pod]{
-			ObjNeedsUpdate: func(oldObj, newObj *v1.Pod) bool {
-				if oldObj == nil || newObj == nil {
-					return true
-				}
-				return !reflect.DeepEqual(oldObj, newObj)
-			},
-			Reconcile: func(key string) error {
-				reconcileCounter.Add(1)
-				return nil
-			},
-		}
+		return getDefaultConfig[v1.Pod](&reconcileCounter)
 	}
 
 	checkReconcileCounter := func(expected int) {
@@ -82,7 +87,7 @@ var _ = Describe("Level-driven controller", func() {
 
 	AfterEach(func() {
 		close(stopChan)
-		controller.Stop()
+		StopControllers(controller)
 	})
 
 	It("handles initial objects once", func() {
@@ -93,7 +98,7 @@ var _ = Describe("Level-driven controller", func() {
 		pod2 := &v1.Pod{
 			ObjectMeta: util.NewObjectMeta("pod2", namespace.Name),
 		}
-		startController(getDefaultConfig(), namespace, pod1, pod2)
+		startController(getDefaultConfig(), nil, namespace, pod1, pod2)
 		checkReconcileCounterConsistently(2)
 	})
 	It("retries on failure", func() {
@@ -110,7 +115,7 @@ var _ = Describe("Level-driven controller", func() {
 			}
 			return nil
 		}
-		startController(config, namespace, pod)
+		startController(config, nil, namespace, pod)
 		Eventually(failureCounter.Load, 2).Should(BeEquivalentTo(3))
 		time.Sleep(time.Second)
 		Expect(failureCounter.Load()).To(BeEquivalentTo(3))
@@ -127,7 +132,7 @@ var _ = Describe("Level-driven controller", func() {
 			return fmt.Errorf("failure")
 		}
 		config.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, maxRetries)
-		startController(config, namespace, pod)
+		startController(config, nil, namespace, pod)
 
 		Eventually(failureCounter.Load, (maxRetries+1)*100*time.Millisecond).Should(BeEquivalentTo(maxRetries))
 		time.Sleep(1 * time.Second)
@@ -150,7 +155,7 @@ var _ = Describe("Level-driven controller", func() {
 			// only return true on add
 			return oldObj == nil
 		}
-		startController(config, namespace, pod)
+		startController(config, nil, namespace, pod)
 		// only add event will be handled
 		checkReconcileCounter(1)
 
@@ -160,21 +165,21 @@ var _ = Describe("Level-driven controller", func() {
 		// check update is ignored
 		checkReconcileCounterConsistently(1)
 	})
-	It("runs InitialSync", func() {
+	It("runs initialSync", func() {
 		namespace := util.NewNamespace(namespace1Name)
 		pod := &v1.Pod{
 			ObjectMeta: util.NewObjectMeta("pod1", namespace.Name),
 		}
 		config := getDefaultConfig()
 		synced := atomic.Bool{}
-		config.InitialSync = func() error {
+		initialSync := func() error {
 			// ensure reconcile is not called until initial sync is finished
 			checkReconcileCounterConsistently(0)
 
 			synced.Store(true)
 			return nil
 		}
-		startController(config, namespace, pod)
+		startController(config, initialSync, namespace, pod)
 		// start only returns after initial sync is finished, we can check synced value immediately
 		Expect(synced.Load()).To(BeEquivalentTo(true))
 		checkReconcileCounter(1)
@@ -194,7 +199,7 @@ var _ = Describe("Level-driven controller", func() {
 			updatedPods.LoadOrStore(key, true)
 			return nil
 		}
-		config.InitialSync = func() error {
+		initialSync := func() error {
 			// trigger events after initial objects were listed
 			err := fakeClient.KubeClient.CoreV1().Pods(namespace.Name).Delete(context.TODO(), pod1.Name, metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -202,7 +207,7 @@ var _ = Describe("Level-driven controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			return nil
 		}
-		startController(config, namespace, pod1)
+		startController(config, initialSync, namespace, pod1)
 		// check that both pod1 and pod2 triggered a reconcile
 		pod1Key, _ := cache.MetaNamespaceKeyFunc(pod1)
 		pod2Key, _ := cache.MetaNamespaceKeyFunc(pod2)
@@ -214,5 +219,151 @@ var _ = Describe("Level-driven controller", func() {
 			})
 			return keys
 		}).Should(BeEquivalentTo(sets.New[string](pod1Key, pod2Key)))
+	})
+})
+
+var _ = Describe("Level-driven controllers with shared initialSync", func() {
+	var (
+		fakeClient          *util.OVNClusterManagerClientset
+		stopChan            chan struct{}
+		reconcilePodCounter atomic.Uint64
+		reconcileNsCounter  atomic.Uint64
+
+		podController       Controller
+		namespaceController Controller
+	)
+
+	const (
+		namespace1Name = "namespace1"
+	)
+
+	startController := func(podConfig *Config[v1.Pod], nsConfig *Config[v1.Namespace], initialSync func() error, objects ...runtime.Object) {
+		fakeClient = util.GetOVNClientset(objects...).GetClusterManagerClientset()
+		coreFactory := informerfactory.NewSharedInformerFactory(fakeClient.KubeClient, time.Second)
+
+		podConfig.Informer = coreFactory.Core().V1().Pods().Informer()
+		podConfig.Lister = coreFactory.Core().V1().Pods().Lister().List
+		if podConfig.RateLimiter == nil {
+			podConfig.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, 5)
+		}
+		podController = NewController[v1.Pod]("podController", podConfig)
+
+		nsConfig.Informer = coreFactory.Core().V1().Namespaces().Informer()
+		nsConfig.Lister = coreFactory.Core().V1().Namespaces().Lister().List
+		if nsConfig.RateLimiter == nil {
+			nsConfig.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, 5)
+		}
+		namespaceController = NewController[v1.Namespace]("namespaceController", nsConfig)
+
+		coreFactory.Start(stopChan)
+
+		err := StartControllersWithInitialSync(initialSync, podController, namespaceController)
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	checkReconcileCounters := func(expectedPod, expectedNs int) {
+		Eventually(reconcilePodCounter.Load).Should(BeEquivalentTo(expectedPod), fmt.Sprintf("expected %v pod reconcile calls", expectedPod))
+		Eventually(reconcileNsCounter.Load).Should(BeEquivalentTo(expectedNs), fmt.Sprintf("expected %v namespace reconcile calls", expectedNs))
+	}
+
+	checkReconcileCountersConsistently := func(expectedPod, expectedNs int) {
+		checkReconcileCounters(expectedPod, expectedNs)
+		time.Sleep(500 * time.Millisecond)
+		Expect(reconcilePodCounter.Load()).To(BeEquivalentTo(expectedPod), fmt.Sprintf("expected %v consistent pod reconcile calls", expectedPod))
+		Expect(reconcileNsCounter.Load()).To(BeEquivalentTo(expectedNs), fmt.Sprintf("expected %v consistent namespace reconcile calls", expectedNs))
+	}
+
+	BeforeEach(func() {
+		reconcilePodCounter.Store(0)
+		reconcileNsCounter.Store(0)
+		stopChan = make(chan struct{})
+	})
+
+	AfterEach(func() {
+		close(stopChan)
+		StopControllers(podController, namespaceController)
+	})
+
+	It("handle initial objects once", func() {
+		namespace := util.NewNamespace(namespace1Name)
+		pod1 := &v1.Pod{
+			ObjectMeta: util.NewObjectMeta("pod1", namespace.Name),
+		}
+		pod2 := &v1.Pod{
+			ObjectMeta: util.NewObjectMeta("pod2", namespace.Name),
+		}
+		startController(getDefaultConfig[v1.Pod](&reconcilePodCounter), getDefaultConfig[v1.Namespace](&reconcileNsCounter),
+			nil, namespace, pod1, pod2)
+		checkReconcileCountersConsistently(2, 1)
+	})
+	It("run InitialSync", func() {
+		namespace := util.NewNamespace(namespace1Name)
+		pod := &v1.Pod{
+			ObjectMeta: util.NewObjectMeta("pod1", namespace.Name),
+		}
+		synced := atomic.Bool{}
+		initialSync := func() error {
+			// ensure reconcile is not called until initial sync is finished
+			checkReconcileCountersConsistently(0, 0)
+
+			synced.Store(true)
+			return nil
+		}
+		startController(getDefaultConfig[v1.Pod](&reconcilePodCounter), getDefaultConfig[v1.Namespace](&reconcileNsCounter),
+			initialSync, namespace, pod)
+		// start only returns after initial sync is finished, we can check synced value immediately
+		Expect(synced.Load()).To(BeEquivalentTo(true))
+		checkReconcileCounters(1, 1)
+	})
+	It("handle events after initialSync", func() {
+		namespace := util.NewNamespace(namespace1Name)
+		pod1 := &v1.Pod{
+			ObjectMeta: util.NewObjectMeta("pod1", namespace.Name),
+		}
+		pod2 := &v1.Pod{
+			ObjectMeta: util.NewObjectMeta("pod2", namespace.Name),
+		}
+		podConfig := getDefaultConfig[v1.Pod](&reconcilePodCounter)
+		updatedObjs := sync.Map{}
+		podConfig.Reconcile = func(key string) error {
+			reconcilePodCounter.Add(1)
+			// add keys that were reconciled
+			updatedObjs.LoadOrStore(key, true)
+			return nil
+		}
+		nsConfig := getDefaultConfig[v1.Namespace](&reconcileNsCounter)
+		nsConfig.Reconcile = func(key string) error {
+			reconcileNsCounter.Add(1)
+			// add keys that were reconciled
+			updatedObjs.LoadOrStore(key, true)
+			return nil
+		}
+		initialSync := func() error {
+			// trigger events after initial objects were listed
+			err := fakeClient.KubeClient.CoreV1().Pods(namespace.Name).Delete(context.TODO(), pod1.Name, metav1.DeleteOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = fakeClient.KubeClient.CoreV1().Pods(namespace.Name).Create(context.TODO(), pod2, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			namespaceUpd := util.NewNamespace(namespace1Name)
+			namespace.Labels = map[string]string{"key": "value"}
+			_, err = fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpd, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			checkReconcileCounters(0, 0)
+			return nil
+		}
+		startController(podConfig, nsConfig, initialSync, namespace, pod1)
+		// check that pod1, pod2, and namespace triggered a reconcile
+		pod1Key, _ := cache.MetaNamespaceKeyFunc(pod1)
+		pod2Key, _ := cache.MetaNamespaceKeyFunc(pod2)
+		Eventually(func() sets.Set[string] {
+			keys := sets.New[string]()
+			updatedObjs.Range(func(key, value any) bool {
+				keys.Insert(key.(string))
+				return true
+			})
+			return keys
+		}).Should(BeEquivalentTo(sets.New[string](pod1Key, pod2Key, namespace.Name)))
+		fmt.Println(reconcilePodCounter.Load())
+		fmt.Println(reconcileNsCounter.Load())
 	})
 })
