@@ -108,6 +108,11 @@ func (c *Controller) clearBaselineAdminNetworkPolicy(banpName string) error {
 	}
 	metrics.UpdateBaselineAdminNetworkPolicyEgressRuleCount(float64(-len(banp.egressRules)))
 	metrics.UpdateBaselineAdminNetworkPolicyIngressRuleCount(float64(-len(banp.ingressRules)))
+	var ePeerCount, iPeerCount int
+	for _, rule := range banp.egressRules { ePeerCount = ePeerCount+len(rule.peers) }
+	for _, rule := range banp.ingressRules { iPeerCount = iPeerCount+len(rule.peers) }
+	metrics.UpdateBaselineAdminNetworkPolicyEgressPeerCount(float64(-ePeerCount))
+	metrics.UpdateBaselineAdminNetworkPolicyIngressPeerCount(float64(-iPeerCount))
 	// we can delete the object from the cache now (set the cache back to empty value).
 	c.banpCache = &adminNetworkPolicyState{}
 	metrics.DecrementBANPCount()
@@ -156,6 +161,11 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 		c.banpCache = desiredBANPState
 		metrics.UpdateBaselineAdminNetworkPolicyEgressRuleCount(float64(len(desiredBANPState.egressRules)))
 		metrics.UpdateBaselineAdminNetworkPolicyIngressRuleCount(float64(len(desiredBANPState.ingressRules)))
+		var ePeerCount, iPeerCount int
+		for _, rule := range desiredBANPState.egressRules { ePeerCount = ePeerCount+len(rule.peers) }
+		for _, rule := range desiredBANPState.ingressRules { iPeerCount = iPeerCount+len(rule.peers) }
+		metrics.UpdateBaselineAdminNetworkPolicyEgressPeerCount(float64(ePeerCount))
+		metrics.UpdateBaselineAdminNetworkPolicyIngressPeerCount(float64(iPeerCount))
 		metrics.IncrementBANPCount()
 		return nil
 	}
@@ -169,5 +179,12 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 	c.banpCache = desiredBANPState
 	metrics.UpdateBaselineAdminNetworkPolicyEgressRuleCount(float64(-len(currentBANPState.egressRules) + len(desiredBANPState.egressRules)))
 	metrics.UpdateBaselineAdminNetworkPolicyIngressRuleCount(float64(-len(currentBANPState.ingressRules) + len(desiredBANPState.ingressRules)))
+	var oldEPeerCount, newEPeerCount, oldIPeerCount, newIPeerCount int
+	for _, rule := range currentBANPState.egressRules { oldEPeerCount = oldEPeerCount+len(rule.peers) }
+	for _, rule := range currentBANPState.ingressRules { oldIPeerCount = oldIPeerCount+len(rule.peers) }
+	for _, rule := range desiredBANPState.egressRules { newEPeerCount = newEPeerCount+len(rule.peers) }
+	for _, rule := range desiredBANPState.ingressRules { newIPeerCount = newIPeerCount+len(rule.peers) }
+	metrics.UpdateBaselineAdminNetworkPolicyEgressPeerCount(float64(oldEPeerCount-newEPeerCount))
+	metrics.UpdateBaselineAdminNetworkPolicyIngressPeerCount(float64(oldIPeerCount-newIPeerCount))
 	return nil
 }

@@ -150,6 +150,11 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 		c.anpCache[anp.Name] = desiredANPState
 		metrics.UpdateAdminNetworkPolicyEgressRuleCount(float64(len(anp.Spec.Egress)))
 		metrics.UpdateAdminNetworkPolicyIngressRuleCount(float64(len(anp.Spec.Ingress)))
+		var ePeerCount, iPeerCount int
+		for _, rule := range anp.Spec.Egress { ePeerCount = ePeerCount+len(rule.To) }
+		for _, rule := range anp.Spec.Ingress { iPeerCount = iPeerCount+len(rule.From) }
+		metrics.UpdateAdminNetworkPolicyEgressPeerCount(float64(ePeerCount))
+		metrics.UpdateAdminNetworkPolicyIngressPeerCount(float64(iPeerCount))
 		metrics.IncrementANPCount()
 		return nil
 	}
@@ -174,6 +179,13 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	c.anpCache[anp.Name] = desiredANPState
 	metrics.UpdateAdminNetworkPolicyEgressRuleCount(float64(-len(currentANPState.egressRules) + len(desiredANPState.egressRules)))
 	metrics.UpdateAdminNetworkPolicyIngressRuleCount(float64(-len(currentANPState.ingressRules) + len(desiredANPState.ingressRules)))
+	var oldEPeerCount, newEPeerCount, oldIPeerCount, newIPeerCount int
+	for _, rule := range currentANPState.egressRules { oldEPeerCount = oldEPeerCount+len(rule.peers) }
+	for _, rule := range currentANPState.ingressRules { oldIPeerCount = oldIPeerCount+len(rule.peers) }
+	for _, rule := range desiredANPState.egressRules { newEPeerCount = newEPeerCount+len(rule.peers) }
+	for _, rule := range desiredANPState.ingressRules { newIPeerCount = newIPeerCount+len(rule.peers) }
+	metrics.UpdateAdminNetworkPolicyEgressPeerCount(float64(oldEPeerCount-newEPeerCount))
+	metrics.UpdateAdminNetworkPolicyIngressPeerCount(float64(oldIPeerCount-newIPeerCount))
 	return nil
 }
 
@@ -385,7 +397,6 @@ func (c *Controller) convertANPSubjectToLSPs(anpSubject *adminNetworkPolicySubje
 // to the provided anp which got deleted.
 // uses externalIDs to figure out ownership
 func (c *Controller) clearAdminNetworkPolicy(anpName string) error {
-	// See if we need to handle this: https://github.com/ovn-org/ovn-kubernetes/pull/3659#discussion_r1284645817
 	anp, loaded := c.anpCache[anpName]
 	if !loaded {
 		// there is no existing ANP configured with this name, nothing to clean
@@ -410,6 +421,11 @@ func (c *Controller) clearAdminNetworkPolicy(anpName string) error {
 	}
 	metrics.UpdateAdminNetworkPolicyEgressRuleCount(float64(-len(anp.egressRules)))
 	metrics.UpdateAdminNetworkPolicyIngressRuleCount(float64(-len(anp.ingressRules)))
+	var ePeerCount, iPeerCount int
+	for _, rule := range anp.egressRules { ePeerCount = ePeerCount+len(rule.peers) }
+	for _, rule := range anp.ingressRules { iPeerCount = iPeerCount+len(rule.peers) }
+	metrics.UpdateAdminNetworkPolicyEgressPeerCount(float64(-ePeerCount))
+	metrics.UpdateAdminNetworkPolicyIngressPeerCount(float64(-iPeerCount))
 	// we can delete the object from the cache now.
 	delete(c.anpPriorityMap, anp.anpPriority)
 	delete(c.anpCache, anpName)

@@ -312,6 +312,55 @@ var metricBANPIngressRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The total number of baseline admin network policy ingress rules defined in the cluster in the singleton BANP"},
 )
 
+var metricANPEgressNamespacePeerCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_custom_resource_total_egress_namespace_peers",
+	Help:      "The total number of admin network policy egress namespace peers defined in the cluster (across all ANPs)"},
+)
+
+var metricANPEgressPodPeerCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_custom_resource_total_egress_pod_peers",
+	Help:      "The total number of admin network policy egress pod peers defined in the cluster (across all ANPs)"},
+)
+
+var metricANPEgressNodePeerCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_custom_resource_total_egress_node_peers",
+	Help:      "The total number of admin network policy egress node peers defined in the cluster (across all ANPs)"},
+)
+
+var metricANPIngressNamespacePeerCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_custom_resource_total_ingress_namespace_peers",
+	Help:      "The total number of admin network policy ingress namespace peers defined in the cluster (across all ANPs)"},
+)
+
+var metricANPIngressPodPeerCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_custom_resource_total_ingress_pod_peers",
+	Help:      "The total number of admin network policy ingress pod peers defined in the cluster (across all ANPs)"},
+)
+
+var metricBANPEgressPeerCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "baseline_admin_network_policy_custom_resource_total_egress_peers",
+	Help:      "The total number of baseline admin network policy egress peers defined in the cluster in the singleton BANP"},
+)
+
+var metricBANPIngressPeerCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "baseline_admin_network_policy_custom_resource_total_ingress_peers",
+	Help:      "The total number of baseline admin network policy ingress peers defined in the cluster in the singleton BANP"},
+)
+
 /** AdminNetworkPolicyMetrics End**/
 
 // metricFirstSeenLSPLatency is the time between a pod first seen in OVN-Kubernetes and its Logical Switch Port is created
@@ -664,6 +713,26 @@ func UpdateBaselineAdminNetworkPolicyEgressRuleCount(count float64) {
 // UpdateBaselineAdminNetworkPolicyIngressRuleCount records the number of Baseline Admin Network Policy Ingress rules.
 func UpdateBaselineAdminNetworkPolicyIngressRuleCount(count float64) {
 	metricBANPIngressRuleCount.Add(count)
+}
+
+// UpdateAdminNetworkPolicyEgressNamespacePeerCount records the number of Admin Network Policy Egress namespace peers.
+func UpdateAdminNetworkPolicyEgressNamespacePeerCount(count float64) {
+	metricANPEgressNamespacePeerCount.Add(count)
+}
+
+// UpdateAdminNetworkPolicyIngressNamespacePeerCount records the number of Admin Network Policy Ingress namespace peers.
+func UpdateAdminNetworkPolicyIngressNamespacePeerCount(count float64) {
+	metricANPIngressNamespacePeerCount.Add(count)
+}
+
+// UpdateBaselineAdminNetworkPolicyEgressPeerCount records the number of Baseline Admin Network Policy Egress peers.
+func UpdateBaselineAdminNetworkPolicyEgressPeerCount(count float64) {
+	metricBANPEgressPeerCount.Add(count)
+}
+
+// UpdateBaselineAdminNetworkPolicyIngressRuleCount records the number of Baseline Admin Network Policy Ingress peers.
+func UpdateBaselineAdminNetworkPolicyIngressPeerCount(count float64) {
+	metricBANPIngressPeerCount.Add(count)
 }
 
 type (
