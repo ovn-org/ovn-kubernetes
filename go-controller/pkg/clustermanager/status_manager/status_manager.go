@@ -65,6 +65,7 @@ func newStatusManager[T any](name string, informer cache.SharedIndexInformer,
 		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 		ObjNeedsUpdate: m.needsUpdate,
 		Reconcile:      m.updateStatus,
+		Threadiness:    1,
 	}
 	m.objController = controller.NewController[T](name, controllerConfig)
 	return m
@@ -78,11 +79,11 @@ func (m *typedStatusManager[T]) needsUpdate(oldObj, newObj *T) bool {
 }
 
 func (m *typedStatusManager[T]) Start() error {
-	return m.objController.Start(1)
+	return controller.StartControllers(m.objController)
 }
 
 func (m *typedStatusManager[T]) Stop() {
-	m.objController.Stop()
+	controller.StopControllers(m.objController)
 }
 
 func (m *typedStatusManager[T]) updateStatus(key string) error {

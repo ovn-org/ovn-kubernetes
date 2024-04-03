@@ -73,14 +73,14 @@ func NewZoneTracker(nodeInformer coreinformers.NodeInformer, onZonesUpdate func(
 		Lister:         nodeInformer.Lister().List,
 		ObjNeedsUpdate: zt.needsUpdate,
 		Reconcile:      zt.reconcileNode,
-		InitialSync:    zt.initialSync,
+		Threadiness:    1,
 	}
 	zt.nodeController = controller.NewController[corev1.Node]("zone_tracker", controllerConfig)
 	return zt
 }
 
 func (zt *ZoneTracker) Start() error {
-	if err := zt.nodeController.Start(1); err != nil {
+	if err := controller.StartControllersWithInitialSync(zt.initialSync, zt.nodeController); err != nil {
 		return fmt.Errorf("failed to start zone tracker: %w", err)
 	}
 	return nil
@@ -88,7 +88,7 @@ func (zt *ZoneTracker) Start() error {
 
 func (zt *ZoneTracker) Stop() {
 	close(zt.stopChan)
-	zt.nodeController.Stop()
+	controller.StopControllers(zt.nodeController)
 }
 
 func (zt *ZoneTracker) needsUpdate(oldNode, newNode *corev1.Node) bool {
