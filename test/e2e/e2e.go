@@ -468,6 +468,11 @@ func createPod(f *framework.Framework, podName, nodeSelector, namespace string, 
 	err = e2epod.WaitForPodRunningInNamespace(context.TODO(), f.ClientSet, res)
 
 	if err != nil {
+		res, err = podClient.Get(context.Background(), pod.Name, metav1.GetOptions{})
+		if err != nil {
+			return nil, errors.Wrapf(err, "Failed to get pod %s %s", pod.Name, namespace)
+		}
+		framework.Logf("Warning: Failed to get pod running %v: %v", *res, err)
 		logs, logErr := e2epod.GetPodLogs(context.TODO(), f.ClientSet, namespace, pod.Name, contName)
 		if logErr != nil {
 			framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, logErr)
