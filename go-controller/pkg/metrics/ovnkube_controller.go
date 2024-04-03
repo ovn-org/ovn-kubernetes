@@ -361,6 +361,34 @@ var metricBANPIngressPeerCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The total number of baseline admin network policy ingress peers defined in the cluster in the singleton BANP"},
 )
 
+var metricANPEgressPortCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_custom_resource_total_egress_ports",
+	Help:      "The total number of admin network policy egress ports defined in the cluster (across all ANPs)"},
+)
+
+var metricANPIngressPortCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_custom_resource_total_ingress_ports",
+	Help:      "The total number of admin network policy ingress ports defined in the cluster (across all ANPs)"},
+)
+
+var metricBANPEgressPortCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "baseline_admin_network_policy_custom_resource_total_egress_ports",
+	Help:      "The total number of baseline admin network policy egress ports defined in the cluster in the singleton BANP"},
+)
+
+var metricBANPIngressPortCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "baseline_admin_network_policy_custom_resource_total_ingress_ports",
+	Help:      "The total number of baseline admin network policy ingress ports defined in the cluster in the singleton BANP"},
+)
+
 /** AdminNetworkPolicyMetrics End**/
 
 // metricFirstSeenLSPLatency is the time between a pod first seen in OVN-Kubernetes and its Logical Switch Port is created
