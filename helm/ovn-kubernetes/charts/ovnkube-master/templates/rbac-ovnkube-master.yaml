@@ -101,6 +101,7 @@ rules:
           - egressqoses
           - egressservices/status
           - adminpolicybasedexternalroutes/status
+          - egressqoses/status
       verbs: [ "patch", "update" ]
     - apiGroups: [""]
       resources:
