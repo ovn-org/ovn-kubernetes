@@ -852,6 +852,10 @@ var _ = Describe("Node Operations", func() {
 					Cmd: "ovs-ofctl show ",
 					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
 				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
 				service := *newServiceWithoutNodePortAllocation("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
