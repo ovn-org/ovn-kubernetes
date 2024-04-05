@@ -125,9 +125,6 @@ if [ "$DUALSTACK_CONVERSION" == true ]; then
 fi
 
 if [ "$OVN_GATEWAY_MODE" == "local" ]; then
-  if [ "$SKIPPED_TESTS" != "" ]; then
-    SKIPPED_TESTS+="|"
-  fi
   SKIPPED_TESTS+="should fallback to local terminating endpoints when there are no ready endpoints with externalTrafficPolicy=Local"
 fi
 
