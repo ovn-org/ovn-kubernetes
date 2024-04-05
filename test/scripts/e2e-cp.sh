@@ -99,10 +99,6 @@ if [ "$OVN_GATEWAY_MODE" == "shared" ]; then
   fi
   SKIPPED_TESTS+="Should ensure load balancer service|LGW"
   # See https://github.com/ovn-org/ovn-kubernetes/issues/4138 for details
-  if [ "$KIND_IPV6_SUPPORT" == true ]; then
-    SKIPPED_TESTS+="|"
-    SKIPPED_TESTS+="queries to the nodePort service shall work for UDP"
-  fi
 fi
 
 if [ "$OVN_GATEWAY_MODE" == "local" ]; then
