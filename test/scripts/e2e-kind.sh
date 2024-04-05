@@ -127,10 +127,6 @@ if [ "$DUALSTACK_CONVERSION" == true ]; then
   SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_CONVERSION_TESTS
 fi
 
-if [ "$OVN_GATEWAY_MODE" == "local" ]; then
-  SKIPPED_TESTS+="should fallback to local terminating endpoints when there are no ready endpoints with externalTrafficPolicy=Local"
-fi
-
 SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
 
 # if we set PARALLEL=true, skip serial test
