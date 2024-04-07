@@ -35,7 +35,7 @@ func TestConvertK8sProtocolToOVNProtocol(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		protocol := convertK8sProtocolToOVNProtocol(v1.Protocol(tc.protocol))
+		protocol := ConvertK8sProtocolToOVNProtocol(v1.Protocol(tc.protocol))
 		if tc.expected == "" {
 			assert.Equal(t, len(protocol), 0)
 			continue

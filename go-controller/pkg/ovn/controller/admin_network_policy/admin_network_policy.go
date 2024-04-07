@@ -125,7 +125,7 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	// 3) Construct ACLs using AS-es and PGs
 	portGroupName := c.getANPPortGroupName(desiredANPState.name, false)
 
-	desiredPorts, err := c.convertANPSubjectToLSPs(desiredANPState.subject)
+	desiredPorts, err := c.convertANPSubjectToLSPs(desiredANPState)
 	if err != nil {
 		return fmt.Errorf("unable to fetch ports for anp %s: %v", desiredANPState.name, err)
 	}
@@ -177,7 +177,8 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 // convertANPRulesToACLs takes all the rules belonging to the ANP and initiates the conversion of rule->acl
 // if currentANPState exists; then we also see if any of the current v/s desired ACLs had a state change
 // and if so, we return atLeastOneRuleUpdated=true
-func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adminNetworkPolicyState, pgName string, atLeastOneRuleUpdated *bool, isBanp bool) []*nbdb.ACL {
+func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adminNetworkPolicyState, pgName string,
+	atLeastOneRuleUpdated *bool, isBanp bool) []*nbdb.ACL {
 	acls := []*nbdb.ACL{}
 	// isAtLeastOneRuleUpdatedCheckRequired is set to true, if we had an anp already in cache (update) AND the rule lengths are the same
 	// if the rule lengths are different we do a full peer recompute in ensureAdminNetworkPolicy anyways
@@ -189,8 +190,10 @@ func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adm
 		acls = append(acls, acl...)
 		if isAtLeastOneRuleUpdatedCheckRequired &&
 			!*atLeastOneRuleUpdated &&
-			(ingressRule.action != currentANPState.ingressRules[i].action || !reflect.DeepEqual(ingressRule.ports, currentANPState.ingressRules[i].ports)) {
-			klog.V(3).Infof("ANP %s's ingress rule %s at priority %d was updated", desiredANPState.name, ingressRule.name, ingressRule.priority)
+			(ingressRule.action != currentANPState.ingressRules[i].action ||
+				!reflect.DeepEqual(ingressRule.ports, currentANPState.ingressRules[i].ports) ||
+				!reflect.DeepEqual(ingressRule.namedPorts, currentANPState.ingressRules[i].namedPorts)) {
+			klog.V(3).Infof("ANP %s's ingress rule %s/%d at priority %d was updated", desiredANPState.name, ingressRule.name, i, ingressRule.priority)
 			*atLeastOneRuleUpdated = true
 		}
 	}
@@ -199,8 +202,10 @@ func (c *Controller) convertANPRulesToACLs(desiredANPState, currentANPState *adm
 		acls = append(acls, acl...)
 		if isAtLeastOneRuleUpdatedCheckRequired &&
 			!*atLeastOneRuleUpdated &&
-			(egressRule.action != currentANPState.egressRules[i].action || !reflect.DeepEqual(egressRule.ports, currentANPState.egressRules[i].ports)) {
-			klog.V(3).Infof("ANP %s's egress rule %s at priority %d was updated", desiredANPState.name, egressRule.name, egressRule.priority)
+			(egressRule.action != currentANPState.egressRules[i].action ||
+				!reflect.DeepEqual(egressRule.ports, currentANPState.egressRules[i].ports) ||
+				!reflect.DeepEqual(egressRule.namedPorts, currentANPState.egressRules[i].namedPorts)) {
+			klog.V(3).Infof("ANP %s's egress rule %s/%d at priority %d was updated", desiredANPState.name, egressRule.name, i, egressRule.priority)
 			*atLeastOneRuleUpdated = true
 		}
 	}
@@ -218,16 +223,44 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 	// create match based on rule type (ingress/egress) and port-group
 	lportMatch := libovsdbutil.GetACLMatch(pgName, "", libovsdbutil.ACLDirection(rule.gressPrefix))
 	var match string
+	hasNamedPorts := len(rule.namedPorts) > 0
 	acls := []*nbdb.ACL{}
-	// We will have one ACL per protocol if len(rule.ports) > 0 and one single ACL if len(rule.ports) == 0
+	// We will have
+	// - one single ACL if len(rule.ports) == 0 && len(rule.namedPorts) == 0
+	// - one ACL per protocol if len(rule.ports) > 0 and len(rule.namedPorts) == 0
+	//   (so max 3 ACLs (tcp,udp,sctp) per rule {portNumber, portRange type ports ONLY})
+	// - one ACL per protocol if len(rule.namedPorts) > 0 and len(rule.ports) == 0
+	//   (so max 3 ACLs (tcp,udp,sctp) per rule {namedPort type ports ONLY})
+	// - one ACL per protocol if len(rule.ports) > 0 and one ACL per protocol if len(rule.namedPorts) > 0
+	//   (so max 6 ACLs (2tcp,2udp,2sctp) per rule {{portNumber, portRange, namedPorts ALL PRESENT}})
 	for protocol, l4Match := range libovsdbutil.GetL4MatchesFromNetworkPolicyPorts(rule.ports) {
 		if l4Match == libovsdbutil.UnspecifiedL4Match {
-			match = fmt.Sprintf("%s && %s", l3Match, lportMatch)
+			if hasNamedPorts {
+				continue
+			} // if we have namedPorts we shouldn't add the noneProtocol ACL even if the namedPort doesn't match any pods
+			match = fmt.Sprintf("%s && %s", lportMatch, l3Match)
 		} else {
-			match = fmt.Sprintf("%s && %s && %s", l3Match, lportMatch, l4Match)
+			match = fmt.Sprintf("%s && %s && %s", lportMatch, l3Match, l4Match)
 		}
 		acl := libovsdbutil.BuildANPACL(
 			getANPRuleACLDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), protocol, c.controllerName, isBanp),
+			int(rule.priority),
+			match,
+			rule.action,
+			libovsdbutil.ACLDirectionToACLPipeline(libovsdbutil.ACLDirection(rule.gressPrefix)),
+			aclLoggingParams,
+		)
+		acls = append(acls, acl)
+	}
+	// Process match for NamedPorts if any
+	for protocol, l3l4Match := range libovsdbutil.GetL3L4MatchesFromNamedPorts(rule.namedPorts) {
+		if rule.gressPrefix == string(libovsdbutil.ACLIngress) {
+			match = fmt.Sprintf("%s && %s", l3Match, l3l4Match)
+		} else {
+			match = fmt.Sprintf("%s && %s", lportMatch, l3l4Match)
+		}
+		acl := libovsdbutil.BuildANPACL(
+			getANPRuleACLDbIDs(anpName, rule.gressPrefix, fmt.Sprintf("%d", rule.gressIndex), protocol+libovsdbutil.NamedPortL4MatchSuffix, c.controllerName, isBanp),
 			int(rule.priority),
 			match,
 			rule.action,
@@ -245,7 +278,7 @@ func (c *Controller) convertANPRuleToACL(rule *gressRule, pgName, anpName string
 func (c *Controller) expandANPRulePeers(anp *adminNetworkPolicyState) error {
 	var err error
 	for _, ingressRule := range anp.ingressRules {
-		err = c.expandRulePeers(ingressRule)
+		err = c.expandRulePeers(ingressRule) // namedPorts has to be processed for subject in case of ingress rules
 		if err != nil {
 			return fmt.Errorf("unable to create address set for "+
 				" rule %s with priority %d: %w", ingressRule.name, ingressRule.priority, err)
@@ -298,11 +331,32 @@ func (c *Controller) expandRulePeers(rule *gressRule) error {
 						// move on to next item in the loop
 						continue
 					}
-					return err
+					return err // we won't hit this TBH because the only error that GetPodIPsOfNetwork returns is podIPsNotFound
 				}
 				rule.peerAddresses.Insert(util.StringSlice(podIPs)...)
 				podCache.Insert(pod.Name)
+				// Process NamedPorts if any
+				if len(rule.namedPorts) == 0 {
+					continue
+				}
+				for _, container := range pod.Spec.Containers {
+					for _, port := range container.Ports { // this loop is/might get expensive
+						if port.Name == "" {
+							continue
+						}
+						namedPortReps, ok := rule.namedPorts[port.Name]
+						if !ok {
+							continue
+						}
+						*namedPortReps = append(*namedPortReps, convertPodIPContainerPortToNNPP(port, podIPs)...)
+					}
+				}
 			}
+		}
+		// we have to store the sorted slice here because in convertANPRulesToACLs
+		// we use DeepEqual to compare ports which doesn't do well with unordered slices
+		for _, v := range rule.namedPorts {
+			sortNamedPorts(v)
 		}
 		peer.namespaces = namespaceCache
 		nodes, err := c.anpNodeLister.List(peer.nodeSelector)
@@ -326,12 +380,23 @@ func (c *Controller) expandRulePeers(rule *gressRule) error {
 // convertANPSubjectToLSPs calculates all the LSP's that match for the provided anp's subject and returns them
 // It also populates the adminNetworkPolicySubject.namespaces and adminNetworkPolicySubject.podPorts
 // pieces of the cache
-func (c *Controller) convertANPSubjectToLSPs(anpSubject *adminNetworkPolicySubject) ([]*nbdb.LogicalSwitchPort, error) {
-	ports := []*nbdb.LogicalSwitchPort{}
-	anpSubject.podPorts = sets.Set[string]{}
-	namespaces, err := c.anpNamespaceLister.List(anpSubject.namespaceSelector)
+// Since we have to loop through all the pods here, we also take the opportunity to update our namedPorts cache
+func (c *Controller) convertANPSubjectToLSPs(anp *adminNetworkPolicyState) ([]*nbdb.LogicalSwitchPort, error) {
+	lsports := []*nbdb.LogicalSwitchPort{}
+	anp.subject.podPorts = sets.Set[string]{}
+	namespaces, err := c.anpNamespaceLister.List(anp.subject.namespaceSelector)
 	if err != nil {
 		return nil, err
+	}
+	// Process NamedPorts if any
+	namedPortRepresentations := map[string][]*[]libovsdbutil.NamedNetworkPolicyPort{}
+	for _, ingress := range anp.ingressRules {
+		for name, port := range ingress.namedPorts {
+			// we are creating a pointer mapping representation so that ALL original rule.namedPorts
+			// map across all ingress rules can be appended in place for every peer in the following peer loop
+			// (otherwise we'd need to iterate over all ports always for all pods)
+			namedPortRepresentations[name] = append(namedPortRepresentations[name], port)
+		}
 	}
 	namespaceCache := make(map[string]sets.Set[string])
 	for _, namespace := range namespaces {
@@ -341,7 +406,7 @@ func (c *Controller) convertANPSubjectToLSPs(anpSubject *adminNetworkPolicySubje
 			namespaceCache[namespace.Name] = podCache
 		}
 		podNamespaceLister := c.anpPodLister.Pods(namespace.Name)
-		pods, err := podNamespaceLister.List(anpSubject.podSelector)
+		pods, err := podNamespaceLister.List(anp.subject.podSelector)
 		if err != nil {
 			return nil, err
 		}
@@ -367,14 +432,49 @@ func (c *Controller) convertANPSubjectToLSPs(anpSubject *adminNetworkPolicySubje
 				return nil, fmt.Errorf("error retrieving logical switch port with name %s "+
 					" from libovsdb cache: %w", logicalPortName, err)
 			}
-			ports = append(ports, lsp)
-			anpSubject.podPorts.Insert(lsp.UUID)
+			lsports = append(lsports, lsp)
+			anp.subject.podPorts.Insert(lsp.UUID)
 			podCache.Insert(pod.Name)
+			if len(namedPortRepresentations) == 0 {
+				continue
+			}
+			// we need to collect podIP:cPort information
+			podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+			if err != nil {
+				if errors.Is(err, util.ErrNoPodIPFound) {
+					// we ignore podIPsNotFound error here because onANPPodUpdate
+					// will take care of this; no need to add nil podIPs to slice...
+					// move on to next item in the loop
+					continue
+				}
+				return nil, err // we won't hit this TBH because the only error that GetPodIPsOfNetwork returns is podIPsNotFound
+			}
+			for _, container := range pod.Spec.Containers {
+				for _, port := range container.Ports { // this loop is/might get expensive
+					if port.Name == "" {
+						continue
+					}
+					namedPortRepsList, ok := namedPortRepresentations[port.Name]
+					if !ok {
+						continue
+					}
+					for _, namedPortReps := range namedPortRepsList {
+						*namedPortReps = append(*namedPortReps, convertPodIPContainerPortToNNPP(port, podIPs)...)
+					}
+				}
+			}
 		}
 	}
-	anpSubject.namespaces = namespaceCache
+	// we have to store the sorted slice here because in convertANPRulesToACLs
+	// we use DeepEqual to compare ports which doesn't do well with unordered slices
+	for _, v := range namedPortRepresentations {
+		for _, namedPortReps := range v {
+			sortNamedPorts(namedPortReps)
+		}
+	}
+	anp.subject.namespaces = namespaceCache
 
-	return ports, nil
+	return lsports, nil
 }
 
 // clearAdminNetworkPolicy will handle the logic for deleting all db objects related

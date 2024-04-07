@@ -3,6 +3,8 @@ package adminnetworkpolicy
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"sort"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -11,8 +13,10 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+	utilnet "k8s.io/utils/net"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 )
 
@@ -94,15 +98,18 @@ func GetANPPeerAddrSetDbIDs(name, gressPrefix, gressIndex, controller string, is
 	})
 }
 
+func getDirectionFromGressPrefix(gressPrefix string) string {
+	if gressPrefix == string(libovsdbutil.ACLIngress) {
+		return "src"
+	}
+	return "dst"
+}
+
 // constructMatchFromAddressSet returns the L3Match for an ACL constructed from a gressRule
 func constructMatchFromAddressSet(gressPrefix string, addrSetIndex *libovsdbops.DbObjectIDs) string {
 	hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 := addressset.GetHashNamesForAS(addrSetIndex)
-	var direction, match string
-	if gressPrefix == string(libovsdbutil.ACLIngress) {
-		direction = "src"
-	} else {
-		direction = "dst"
-	}
+	var match string
+	direction := getDirectionFromGressPrefix(gressPrefix)
 
 	switch {
 	case config.IPv4Mode && config.IPv6Mode:
@@ -167,4 +174,34 @@ func getACLLoggingLevelsForANP(annotations map[string]string) (*libovsdbutil.ACL
 		aclLogLevels.Pass = ""
 	}
 	return aclLogLevels, apierrors.NewAggregate(errors)
+}
+
+// convertPodIPContainerPortToNNPP converts the given pod container port and podIPs into a list (max 2 for dualstack)
+// of libovsdbutil.NamedNetworkPolicyPort (NNPP)
+func convertPodIPContainerPortToNNPP(cPort v1.ContainerPort, podIPs []net.IP) []libovsdbutil.NamedNetworkPolicyPort {
+	out := make([]libovsdbutil.NamedNetworkPolicyPort, 0)
+	namedPortRep := libovsdbutil.NamedNetworkPolicyPort{
+		L4Protocol: libovsdbutil.ConvertK8sProtocolToOVNProtocol(cPort.Protocol),
+		L4PodPort:  fmt.Sprintf("%d", cPort.ContainerPort),
+	}
+	for _, podIP := range podIPs {
+		family := ""
+		if utilnet.IsIPv4(podIP) {
+			family = "ip4"
+		} else {
+			family = "ip6"
+		}
+		namedPortRep.L3PodIP = podIP.String()
+		namedPortRep.L3PodIPFamily = family
+		out = append(out, namedPortRep)
+	}
+	return out
+}
+
+// sortNamedPorts does an in place sort where it arranges the NamedNetworkPolicyPort
+// in the provided array in a sorted fashion based on L3PodIP.
+// We can use the L3PodIP because it is guaranteed to be unique for a given named port
+func sortNamedPorts(namedPortList *[]libovsdbutil.NamedNetworkPolicyPort) {
+	out := *namedPortList
+	sort.SliceStable(out, func(i, j int) bool { return out[i].L3PodIP < out[j].L3PodIP })
 }

@@ -217,10 +217,13 @@ const (
 	// as the value of l4MatchACLExtIdKey in acl external_ids_syncer for older ACLs.
 	// This value shouldn't be changed.
 	UnspecifiedL4Match = "None"
+	// NamedPortL4MatchSuffix is used to create ACL for gressPolicy that
+	// has named port policies.
+	NamedPortL4MatchSuffix = "-namedPort"
 )
 
 // convertK8sProtocolToOVNProtocol returns the OVN syntax-specific protocol value for a v1.Protocol K8s type
-func convertK8sProtocolToOVNProtocol(proto v1.Protocol) string {
+func ConvertK8sProtocolToOVNProtocol(proto v1.Protocol) string {
 	var protocol string
 	switch proto {
 	case v1.ProtocolTCP:
@@ -246,7 +249,7 @@ type NetworkPolicyPort struct {
 // It also sets the provided protocol, port and endPort fields
 func GetNetworkPolicyPort(proto v1.Protocol, port, endPort int32) *NetworkPolicyPort {
 	return &NetworkPolicyPort{
-		Protocol: convertK8sProtocolToOVNProtocol(proto),
+		Protocol: ConvertK8sProtocolToOVNProtocol(proto),
 		Port:     port,
 		EndPort:  endPort,
 	}
