@@ -69,6 +69,8 @@ func TestNetworkPolicyV2Conformance(t *testing.T) {
 					suite.SupportBaselineAdminNetworkPolicyEgressNodePeers,
 					suite.SupportAdminNetworkPolicyEgressInlineCIDRPeers,
 					suite.SupportBaselineAdminNetworkPolicyEgressInlineCIDRPeers,
+					suite.SupportAdminNetworkPolicyNamedPorts,
+					suite.SupportBaselineAdminNetworkPolicyNamedPorts,
 				),
 				BaseManifests: conformanceTestsBaseManifests,
 				TimeoutConfig: netpolv1config.TimeoutConfig{GetTimeout: 300 * time.Second},
