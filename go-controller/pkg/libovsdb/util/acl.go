@@ -239,7 +239,7 @@ func convertK8sProtocolToOVNProtocol(proto v1.Protocol) string {
 type NetworkPolicyPort struct {
 	Protocol string // will store the OVN protocol string syntax for the corresponding K8s protocol
 	Port     int32  // will store startPort if its a range
-	EndPort  int32
+	EndPort  int32  // will store 0 if its not a range
 }
 
 // GetNetworkPolicyPort returns an internal NetworkPolicyPort struct
@@ -317,4 +317,50 @@ func GetL4MatchesFromNetworkPolicyPorts(rulePorts []*NetworkPolicyPort) map[stri
 		l4Matches[protocol] = l4Match
 	}
 	return l4Matches
+}
+
+// NamedNetworkPolicyPort is an internal representation of
+// namedPort type in anpapi.AdminNetworkPolicyPort
+// in a useful representation format for the caches
+type NamedNetworkPolicyPort struct {
+	L4Protocol    string // will store the port's L4 protocol in OVN protocol format
+	L4PodPort     string // will store portNumber for the corresponding port name for the corresponding PodIP or LSP
+	L3PodIP       string // will store the podIP for the corresponding port name for the corresponding PodPort => used for egressACL
+	L3PodIPFamily string // will store whether this is ip4 or ip6 podIP
+}
+
+// GetL3L4MatchesFromNamedPorts returns a map that has protocol as the key and
+// the corresponding L3L4NamedPort ACL Match as its value
+func GetL3L4MatchesFromNamedPorts(ruleNamedPorts map[string]*[]NamedNetworkPolicyPort) map[string]string {
+	// {k:protocol(string), v:l3l4Match(string)}
+	l3l4NamedPortsMatches := make(map[string]string)
+	var l3l4TCPMatch, l3l4UDPMatch, l3l4SCTPMatch []string
+	template := "(%s.dst == %s && %s.dst == %s)"
+	for _, namedPorts := range ruleNamedPorts {
+		if namedPorts == nil {
+			continue
+		}
+		for _, namedPortRep := range *namedPorts {
+			l3l4match := fmt.Sprintf(template, namedPortRep.L3PodIPFamily, namedPortRep.L3PodIP, namedPortRep.L4Protocol, namedPortRep.L4PodPort)
+			switch namedPortRep.L4Protocol {
+			case "tcp":
+				l3l4TCPMatch = append(l3l4TCPMatch, l3l4match)
+			case "sctp":
+				l3l4SCTPMatch = append(l3l4SCTPMatch, l3l4match)
+			case "udp":
+				l3l4UDPMatch = append(l3l4UDPMatch, l3l4match)
+			}
+		}
+	}
+	template = "%s && (%s)" // matches for all namedPorts, per protocol
+	if len(l3l4TCPMatch) > 0 {
+		l3l4NamedPortsMatches["tcp"] = fmt.Sprintf(template, "tcp", strings.Join(l3l4TCPMatch, " || "))
+	}
+	if len(l3l4UDPMatch) > 0 {
+		l3l4NamedPortsMatches["udp"] = fmt.Sprintf(template, "udp", strings.Join(l3l4UDPMatch, " || "))
+	}
+	if len(l3l4SCTPMatch) > 0 {
+		l3l4NamedPortsMatches["sctp"] = fmt.Sprintf(template, "sctp", strings.Join(l3l4SCTPMatch, " || "))
+	}
+	return l3l4NamedPortsMatches
 }
