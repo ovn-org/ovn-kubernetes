@@ -21,6 +21,7 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/klog/v2"
 	utilpointer "k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 )
@@ -43,6 +44,21 @@ func newBANPObject(name string, subject anpapi.AdminNetworkPolicySubject,
 
 func getBANPRulePriority(index int32) int32 {
 	return (anpovn.BANPFlowPriority - index)
+}
+
+func getACLsForBANPRulesWithNamedPorts(banp *anpapi.BaselineAdminNetworkPolicy, namedIPorts, namedEPorts map[string]*[]libovsdbutil.NamedNetworkPolicyPort) []*nbdb.ACL {
+	aclResults := []*nbdb.ACL{}
+	for i, ingress := range banp.Spec.Ingress {
+		acls := getANPGressACL(anpovn.GetACLActionForBANPRule(ingress.Action), banp.Name, string(libovsdbutil.ACLIngress),
+			getBANPRulePriority(int32(i)), int32(i), ingress.Ports, namedIPorts, true)
+		aclResults = append(aclResults, acls...)
+	}
+	for i, egress := range banp.Spec.Egress {
+		acls := getANPGressACL(anpovn.GetACLActionForBANPRule(egress.Action), banp.Name, string(libovsdbutil.ACLEgress),
+			getBANPRulePriority(int32(i)), int32(i), egress.Ports, namedEPorts, true)
+		aclResults = append(aclResults, acls...)
+	}
+	return aclResults
 }
 
 func getACLsForBANPRules(banp *anpapi.BaselineAdminNetworkPolicy) []*nbdb.ACL {
@@ -1147,6 +1163,378 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+		ginkgo.It("NamedPort matching pods Rules for BANP", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+				banpSubjectNamespace := *newNamespaceWithLabels(banpSubjectNamespaceName, anpLabel)
+				banpNamespacePeer := *newNamespaceWithLabels(banpPeerNamespaceName, peerAllowLabel)
+				banpNamespacePeer2 := *newNamespaceWithLabels(banpPeerNamespaceName+"2", peerDenyLabel)
+				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet, node1transitIPv4, node1transitIPv6)
+				node1Switch := &nbdb.LogicalSwitch{
+					Name: node1Name,
+					UUID: node1Name + "-UUID",
+				}
+				t1 := newTPod(
+					node1Name,
+					node1IPv4Subnet+" "+node1IPv6Subnet,
+					"10.128.1.2",
+					"10.128.1.1"+" "+"fe00:10:128:1::1",
+					banpPeerPodName,
+					banpPodV4IP2+" "+banpPodV6IP2,
+					banpPodMAC2,
+					banpPeerNamespaceName,
+				)
+				banpPeerPod := *newPod(banpPeerNamespaceName, banpPeerPodName, node1Name, t1.podIP)
+				// pinning annotations because between subject and peer pods IPAM isunpredictable
+				banpPeerPod.Annotations = map[string]string{}
+				banpPeerPod.Annotations["k8s.ovn.org/pod-networks"] = `{"default":{"ip_addresses":["10.128.1.4/24","fe00:10:128:1::4/64"],` +
+					`"mac_address":"0a:58:0a:80:01:04","gateway_ips":["10.128.1.1","fe00:10:128:1::1"],"routes":[{"dest":"10.128.1.0/24","nextHop":"10.128.1.1"}],` +
+					`"ip_address":"10.128.1.4/24","gateway_ip":"10.128.1.1"}}`
+				banpPeerPod.Spec.Containers = append(banpPeerPod.Spec.Containers,
+					v1.Container{
+						Name:  "containerName",
+						Image: "containerImage",
+						Ports: []v1.ContainerPort{
+							{
+								Name:          "web",
+								ContainerPort: 3535,
+								Protocol:      v1.ProtocolTCP,
+							},
+							{
+								Name:          "web123",
+								ContainerPort: 35356,
+								Protocol:      v1.ProtocolSCTP,
+							},
+						},
+					},
+				)
+				t2 := newTPod(
+					node1Name,
+					node1IPv4Subnet+" "+node1IPv6Subnet,
+					"10.128.1.2",
+					"10.128.1.1"+" "+"fe00:10:128:1::1",
+					banpSubjectPodName,
+					banpPodV4IP+" "+banpPodV6IP,
+					banpPodMAC,
+					banpSubjectNamespaceName,
+				)
+				banpSubjectPod := *newPod(banpSubjectNamespaceName, banpSubjectPodName, node1Name, t2.podIP)
+				// pinning annotations because between subject and peer pods IPAM isunpredictable
+				banpSubjectPod.Annotations = map[string]string{}
+				banpSubjectPod.Annotations["k8s.ovn.org/pod-networks"] = `{"default":{"ip_addresses":["10.128.1.3/24","fe00:10:128:1::3/64"],` +
+					`"mac_address":"0a:58:0a:80:01:03","gateway_ips":["10.128.1.1","fe00:10:128:1::1"],"routes":[{"dest":"10.128.1.0/24","nextHop":"10.128.1.1"}],` +
+					`"ip_address":"10.128.1.3/24","gateway_ip":"10.128.1.1"}}`
+				banpSubjectPod.Spec.Containers[0].Ports = []v1.ContainerPort{
+					{
+						Name:          "dns",
+						ContainerPort: 5353,
+						Protocol:      v1.ProtocolUDP,
+					},
+				}
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						node1Switch,
+					},
+				}
+				fakeOVN.startWithDBSetup(dbSetup,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							banpSubjectNamespace,
+							banpNamespacePeer,
+							banpNamespacePeer2,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*node1,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							banpPeerPod, // peer pod ("house": "slytherin")
+						},
+					},
+				)
+				fakeOVN.controller.zone = node1Name // ensure we set the controller's zone as the node's zone
+				t1.portName = util.GetLogicalPortName(t1.namespace, t1.podName)
+				t1.populateLogicalSwitchCache(fakeOVN)
+				t2.portName = util.GetLogicalPortName(t2.namespace, t2.podName)
+				t2.populateLogicalSwitchCache(fakeOVN)
+				err := fakeOVN.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOVN.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// update namedPorts for constructing right test ACLs
+				namedEPorts := make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort)
+				namedIPorts := make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort)
+				namedEPorts["web"] = &[]libovsdbutil.NamedNetworkPolicyPort{{L4Protocol: "tcp", L3PodIP: banpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "3535"},
+					{L4Protocol: "tcp", L3PodIP: banpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "3535"}}
+				namedEPorts["web123"] = &[]libovsdbutil.NamedNetworkPolicyPort{{L4Protocol: "sctp", L3PodIP: banpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "35356"},
+					{L4Protocol: "sctp", L3PodIP: banpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "35356"}}
+				fakeOVN.InitAndRunANPController()
+				fakeOVN.fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("update", "baselineadminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+					update := action.(clienttesting.UpdateAction)
+					// Since fake client (NewSimpleClientset) does not differentiate between
+					// an update and updatestatus, updatestatus in tests updates the spec as
+					// well causing race conditions. Thus adding a hack here to ensure update
+					// status is caught and processed by the reactor while update spec is
+					// delegated to the main code for handling
+					if action.GetSubresource() == "status" {
+						klog.Infof("Got an update status action for %v", update.GetObject())
+						return true, update.GetObject(), nil
+					}
+					klog.Infof("Got an update spec action for %v", update.GetObject())
+					return false, update.GetObject(), nil
+				})
+				ginkgo.By("1. Create BANP with 1 ingress rule and 1 egress rule with multiple NamedPorts combinations")
+				banpSubject := newANPSubjectObject(
+					&metav1.LabelSelector{
+						MatchLabels: anpLabel,
+					},
+					nil,
+				)
+				anpPortMangle := []anpapi.AdminNetworkPolicyPort{
+					{
+						PortNumber: &anpapi.Port{
+							Port:     36363,
+							Protocol: v1.ProtocolTCP,
+						},
+					},
+					{
+						NamedPort: ptr.To("web123"), // matched by anpPeerPod
+					},
+					{
+						PortRange: &anpapi.PortRange{
+							Start:    36330,
+							End:      36550,
+							Protocol: v1.ProtocolSCTP,
+						},
+					},
+					{
+						NamedPort: ptr.To("web"), // matched by anpPeerPod
+					},
+					{
+						PortRange: &anpapi.PortRange{
+							Start:    36330,
+							End:      36550,
+							Protocol: v1.ProtocolUDP,
+						},
+					},
+					{
+						NamedPort: ptr.To("dns"), // matched by anpSubjectPod (will be created in the future)
+					},
+				}
+				banp := newBANPObject("harry-potter", banpSubject,
+					[]anpapi.BaselineAdminNetworkPolicyIngressRule{
+						{ // 3 ACLs + 1ACL for NamedPort
+							Name:   "deny-traffic-from-slytherin-to-gryffindor",
+							Action: anpapi.BaselineAdminNetworkPolicyRuleActionDeny,
+							From: []anpapi.AdminNetworkPolicyIngressPeer{
+								{
+									Namespaces: &metav1.LabelSelector{
+										MatchLabels: peerDenyLabel,
+									},
+								},
+							},
+							Ports: &anpPortMangle,
+						},
+					},
+					[]anpapi.BaselineAdminNetworkPolicyEgressRule{
+						{ // 3 ACLs
+							Name:   "allow-traffic-to-hufflepuff-from-gryffindor",
+							Action: anpapi.BaselineAdminNetworkPolicyRuleActionAllow,
+							To: []anpapi.AdminNetworkPolicyEgressPeer{
+								{
+									Namespaces: &metav1.LabelSelector{
+										MatchLabels: peerAllowLabel,
+									},
+								},
+							},
+							Ports: &anpPortMangle,
+						},
+					},
+				)
+				banp.ResourceVersion = "1"
+				banp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Create(context.TODO(), banp, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				acls := getACLsForBANPRulesWithNamedPorts(banp, namedIPorts, namedEPorts)
+				pg := getDefaultPGForANPSubject(banp.Name, []string{}, acls, true)
+				subjectNSASIPv4, subjectNSASIPv6 := buildNamespaceAddressSets(banpSubjectNamespaceName, []string{})
+				peerNSASIPv4, peerNSASIPv6 := buildNamespaceAddressSets(banpPeerNamespaceName, []string{banpPodV4IP2, banpPodV6IP2})
+				peerNS2ASIPv4, peerNS2ASIPv6 := buildNamespaceAddressSets(banpPeerNamespaceName+"2", []string{})
+				baseExpectedDatabaseState := []libovsdbtest.TestData{subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6, peerNS2ASIPv4, peerNS2ASIPv6}
+				peerASIngressRule0v4, peerASIngressRule0v6 := buildBANPAddressSets(banp, 0, []string{}, libovsdbutil.ACLIngress)
+				baseExpectedDatabaseState = append(baseExpectedDatabaseState, peerASIngressRule0v4)
+				baseExpectedDatabaseState = append(baseExpectedDatabaseState, peerASIngressRule0v6)
+				peerASEgressRule0v4, peerASEgressRule0v6 := buildBANPAddressSets(banp, 0, []string{banpPodV4IP2, banpPodV6IP2}, libovsdbutil.ACLEgress)
+				baseExpectedDatabaseState = append(baseExpectedDatabaseState, peerASEgressRule0v4)
+				baseExpectedDatabaseState = append(baseExpectedDatabaseState, peerASEgressRule0v6)
+				expectedDatabaseState := append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs,
+				// 3 egress[0] protocol ACLs and 2 egress[0] namedPort ACLs,
+				// total 8ACLs
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("2. Create subject pod and ensure LSP and namedPorts ACLs are updated for the matching ingress rule")
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(banpSubjectNamespaceName).Create(context.TODO(), &banpSubjectPod, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// The pod takes some time to get created so the first add pod event for ANP does nothing as it waits for LSP to be created - this triggers a retry.
+				// Next when the pod is scheduled and IP is allocated and LSP is created we get an update event.
+				// When ANP controller receives the pod update event, it will not trigger an update in unit testing since ResourceVersion and pod.status.Running
+				// is not updated by the test, hence we need to trigger a manual update in the unit test framework that is accompanied by label update.
+				// NOTE: This is not an issue in real deployments with actual kapi server; its just a potential flake in the UT framework that we need to protect against.
+				time.Sleep(time.Second)
+				banpSubjectPod.ResourceVersion = "5"
+				// - this is to trigger an actual update technically speaking the pod already matches the namespace of the subject
+				banpSubjectPod.Labels["rv"] = "resourceVersionUTHack"
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(banpSubjectPod.Namespace).Update(context.TODO(), &banpSubjectPod, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				namedIPorts["dns"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+					{L4Protocol: "udp", L3PodIP: banpPodV4IP, L3PodIPFamily: "ip4", L4PodPort: "5353"},
+					{L4Protocol: "udp", L3PodIP: banpPodV6IP, L3PodIPFamily: "ip6", L4PodPort: "5353"}}
+
+				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(banpSubjectNamespaceName, []string{banpPodV4IP, banpPodV6IP})
+				acls = getACLsForBANPRulesWithNamedPorts(banp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(banp.Name, []string{t2.portUUID}, acls, true)
+				baseExpectedDatabaseState[0] = subjectNSASIPv4
+				baseExpectedDatabaseState[1] = subjectNSASIPv6
+				expectedDatabaseState = append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs and 1 ingress namedPort ACL,
+				// 3 egress[0] protocol ACLs and 2 egress[0] namedPort ACLs,
+				// total 9ACLs
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("3. Update ANP ingress rule ports to remove DNS namedPort and ensure ACLs are updated correctly")
+				banp.ResourceVersion = "4"
+				newPort := anpPortMangle[0:5]
+				banp.Spec.Ingress[0].Ports = &newPort
+				banp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Update(context.TODO(), banp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				delete(namedIPorts, "dns")
+				acls = getACLsForBANPRulesWithNamedPorts(banp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(banp.Name, []string{t2.portUUID}, acls, true)
+				expectedDatabaseState = append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs
+				// 3 egress[0] protocol ACLs and 2 egress[0] namedPort ACLs,
+				// total 8ACLs
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("4. Delete matching peer pod and ensure ACLs are updated correctly")
+				banpPeerPod.ResourceVersion = "3"
+				err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(banpPeerPod.Namespace).Delete(context.TODO(), banpPeerPod.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				delete(namedEPorts, "web")
+				delete(namedEPorts, "web123")
+				acls = getACLsForBANPRulesWithNamedPorts(banp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(banp.Name, []string{t2.portUUID}, acls, true)
+				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(banpPeerNamespaceName, []string{}) // pod is gone from peer namespace address-set
+				baseExpectedDatabaseState[2] = peerNSASIPv4
+				baseExpectedDatabaseState[3] = peerNSASIPv6
+				peerASEgressRule0v4, peerASEgressRule0v6 = buildBANPAddressSets(banp, 0, []string{}, libovsdbutil.ACLEgress)
+				baseExpectedDatabaseState[8] = peerASEgressRule0v4
+				baseExpectedDatabaseState[9] = peerASEgressRule0v6
+				expectedDatabaseState = append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t2}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs
+				// 3 egress[0] protocol ACLs
+				// totalACLs: 6
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("5. Re-Add matching peer pod and ensure ACLs are updated correctly")
+				banpPeerPod.ResourceVersion = "5"
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(banpPeerPod.Namespace).Create(context.TODO(), &banpPeerPod, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// update namedPorts for constructing right test ACLs
+				namedEPorts["web"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+					{L4Protocol: "tcp", L3PodIP: banpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "3535"},
+					{L4Protocol: "tcp", L3PodIP: banpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "3535"}}
+				namedEPorts["web123"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+					{L4Protocol: "sctp", L3PodIP: banpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "35356"},
+					{L4Protocol: "sctp", L3PodIP: banpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "35356"}}
+				acls = getACLsForBANPRulesWithNamedPorts(banp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(banp.Name, []string{t2.portUUID}, acls, true)
+				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(banpPeerNamespaceName, []string{"fe00:10:128:1::4", "10.128.1.4"}) // pod is gone from peer namespace address-set
+				baseExpectedDatabaseState[2] = peerNSASIPv4
+				baseExpectedDatabaseState[3] = peerNSASIPv6
+				peerASEgressRule0v4, peerASEgressRule0v6 = buildBANPAddressSets(banp, 0, []string{"fe00:10:128:1::4", "10.128.1.4"}, libovsdbutil.ACLEgress)
+				baseExpectedDatabaseState[8] = peerASEgressRule0v4
+				baseExpectedDatabaseState[9] = peerASEgressRule0v6
+				expectedDatabaseState = append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs
+				// 3 egress[0] protocol ACLs; 2 namedPort ACLs
+				// totalACLs: 8
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("6. Update ANP egress rule port to rename web namedPort and ensure ACLs are updated correctly")
+				banp.ResourceVersion = "7"
+				newPort = anpPortMangle
+				newPort[3].NamedPort = ptr.To("http")
+				banp.Spec.Egress[0].Ports = &newPort
+				banp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Update(context.TODO(), banp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				delete(namedEPorts, "web")
+				acls = getACLsForBANPRulesWithNamedPorts(banp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(banp.Name, []string{t2.portUUID}, acls, true)
+				expectedDatabaseState = append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs
+				// 3 egress[0] protocol ACLs and 1 egress[0] namedPort ACLs,
+				// totalACLs: 7
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("7. Delete 1st ANP egress rule and ensure ACLs are updated correctly")
+				banp.ResourceVersion = "9"
+				banp.Spec.Egress = []anpapi.BaselineAdminNetworkPolicyEgressRule{}
+				_, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().BaselineAdminNetworkPolicies().Update(context.TODO(), banp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				delete(namedEPorts, "web123")
+				acls = getACLsForBANPRulesWithNamedPorts(banp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(banp.Name, []string{t2.portUUID}, acls, true)
+				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6, peerNS2ASIPv4, peerNS2ASIPv6}
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{node1Name})...)
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs
+				// totalACLs: 3
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 				return nil
 			}
 			err := app.Run([]string{app.Name})
