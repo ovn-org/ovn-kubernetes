@@ -54,6 +54,6 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 }
 
 // Cleanup cleans up node entities for the given secondary network
-func (nc *SecondaryNodeNetworkController) Cleanup(netName string) error {
+func (nc *SecondaryNodeNetworkController) Cleanup() error {
 	return nil
 }

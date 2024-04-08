@@ -246,7 +246,9 @@ func (oc *BaseSecondaryLayer2NetworkController) stop() {
 
 // cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
-func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string) error {
+func (oc *BaseSecondaryLayer2NetworkController) cleanup() error {
+	netName := oc.GetNetworkName()
+	klog.Infof("Delete OVN logical entities for network %s", netName)
 	// delete layer 2 logical switches
 	ops, err := libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, nil,
 		func(item *nbdb.LogicalSwitch) bool {
@@ -256,8 +258,7 @@ func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
 	}
 
-	controllerName := getNetworkControllerName(netName)
-	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, controllerName)
+	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, oc.controllerName)
 	if err != nil {
 		return err
 	}

@@ -266,13 +266,13 @@ func (ncc *networkClusterController) newRetryFramework(objectType reflect.Type, 
 }
 
 // Cleanup the subnet annotations from the node for the secondary networks
-func (ncc *networkClusterController) Cleanup(netName string) error {
+func (ncc *networkClusterController) Cleanup() error {
 	if !ncc.IsSecondary() {
 		return fmt.Errorf("default network can't be cleaned up")
 	}
 
 	if ncc.hasNodeAllocation() {
-		err := ncc.nodeAllocator.Cleanup(netName)
+		err := ncc.nodeAllocator.Cleanup()
 		if err != nil {
 			return err
 		}

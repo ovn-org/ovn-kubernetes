@@ -103,9 +103,8 @@ func (oc *SecondaryLocalnetNetworkController) run(ctx context.Context) error {
 
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
-func (oc *SecondaryLocalnetNetworkController) Cleanup(netName string) error {
-	klog.Infof("Delete OVN logical entities for network %s", netName)
-	return oc.BaseSecondaryLayer2NetworkController.cleanup(types.LocalnetTopology, netName)
+func (oc *SecondaryLocalnetNetworkController) Cleanup() error {
+	return oc.BaseSecondaryLayer2NetworkController.cleanup()
 }
 
 func (oc *SecondaryLocalnetNetworkController) Init() error {
