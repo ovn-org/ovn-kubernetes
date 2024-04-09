@@ -285,10 +285,16 @@ var metricOvsUpcallFlowLimitHit = prometheus.NewGauge(prometheus.GaugeOpts{
 type ovsClient func(args ...string) (string, string, error)
 
 func getOvsVersionInfo() {
-	stdout, _, err := util.RunOVSVsctl("--version")
-	if err == nil && strings.HasPrefix(stdout, "ovs-vsctl (Open vSwitch)") {
-		ovsVersion = strings.Fields(stdout)[3]
+	stdout, _, err := util.RunOvsVswitchdAppCtl("version")
+	if err != nil {
+		klog.Errorf("Failed to get version information: %s", err.Error())
+		return
 	}
+	if !strings.HasPrefix(stdout, "ovs-vswitchd (Open vSwitch)") {
+		klog.Errorf("Unexpected ovs-appctl version output: %s", stdout)
+		return
+	}
+	ovsVersion = strings.Fields(stdout)[3]
 }
 
 // ovsDatapathLookupsMetrics obtains the ovs datapath
