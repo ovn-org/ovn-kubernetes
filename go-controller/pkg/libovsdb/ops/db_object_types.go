@@ -301,3 +301,12 @@ var QoSEgressQoS = newObjectIDsType(qos, EgressQoSOwnerType, []ExternalIDKey{
 	// namespace
 	ObjectNameKey,
 })
+
+var QoSRuleEgressIP = newObjectIDsType(qos, EgressIPOwnerType, []ExternalIDKey{
+	// the priority of the QoSRule
+	PriorityKey,
+	// should be the unique global name
+	ObjectNameKey,
+	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
+	IPFamilyKey,
+})

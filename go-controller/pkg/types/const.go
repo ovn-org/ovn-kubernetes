@@ -94,6 +94,7 @@ const (
 	DefaultNoRereoutePriority             = 102
 	EgressSVCReroutePriority              = 101
 	EgressIPReroutePriority               = 100
+	EgressIPRerouteQoSRulePriority        = 103
 	EgressLiveMigrationReroutePiority     = 10
 
 	// Packet marking
