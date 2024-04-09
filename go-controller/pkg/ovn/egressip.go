@@ -2028,7 +2028,7 @@ func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressS
 		matchV6 = fmt.Sprintf(`(ip6.src == $%s || ip6.src == $%s) && ip6.dst == $%s`,
 			ipv6EgressIPServedPodsAS, ipv6EgressServiceServedPodsAS, ipv6ClusterNodeIPAS)
 	}
-	options := map[string]string{"pkt_mark": "1008"}
+	options := map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark}
 	// Create global allow policy for node traffic
 	if matchV4 != "" {
 		if err := createLogicalRouterPolicy(nbClient, matchV4, types.DefaultNoRereoutePriority, nil, options); err != nil {

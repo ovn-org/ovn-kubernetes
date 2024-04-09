@@ -96,6 +96,9 @@ const (
 	EgressIPReroutePriority               = 100
 	EgressLiveMigrationReroutePiority     = 10
 
+	// Packet marking
+	EgressIPNodeConnectionMark = "1008"
+
 	V6NodeLocalNATSubnet           = "fd99::/64"
 	V6NodeLocalNATSubnetPrefix     = 64
 	V6NodeLocalNATSubnetNextHop    = "fd99::1"

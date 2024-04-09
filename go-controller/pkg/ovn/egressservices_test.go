@@ -15,6 +15,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -1614,7 +1615,7 @@ func getDefaultNoReroutePolicies(controllerName string) []*nbdb.LogicalRouterPol
 				egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 			Action:  nbdb.LogicalRouterPolicyActionAllow,
 			UUID:    "default-no-reroute-node-UUID",
-			Options: map[string]string{"pkt_mark": "1008"},
+			Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 		},
 		&nbdb.LogicalRouterPolicy{
 			Priority: ovntypes.DefaultNoRereoutePriority,
@@ -1622,7 +1623,7 @@ func getDefaultNoReroutePolicies(controllerName string) []*nbdb.LogicalRouterPol
 				egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
 			Action:  nbdb.LogicalRouterPolicyActionAllow,
 			UUID:    "default-v6-no-reroute-node-UUID",
-			Options: map[string]string{"pkt_mark": "1008"},
+			Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 		},
 	)
 
