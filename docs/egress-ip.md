@@ -115,27 +115,28 @@ COMMIT
 ...
 ```
 
-IPRoute2 rules will look like the following - note rule with priority `6000` and also the refered table `1008`:
+IPRoute2 rules will look like the following - note rule with priority `6000` and also the table `1111`:
 ```shell
 sh-5.2# ip rule
 0:	from all lookup local
 30:	from all fwmark 0x1745ec lookup 7
-6000:	from 10.244.2.3 lookup 1008
+6000:	from 10.244.2.3 lookup 1111
 32766:	from all lookup main
 32767:	from all lookup default
 ```
 
-And the default route in the correct table `1008`:
+And the default route in the correct table `1111`:
 ```shell
-sh-5.2# ip route show table 1008
+sh-5.2# ip route show table 1111
 default dev dummy
 ```
 
 No NAT is required on the OVN primary network gateway router.
 OVN-Kubernetes (ovnkube-node) takes care of adding a rule to the rule table with src IP of the pod and routed towards a
-new routing table specifically created to route the traffic out the correct interface. IPTables is also altered and an entry
-is created within the chain `OVN-KUBE-EGRESS-IP-Multi-NIC` for each pod to allow SNAT to occur when a src IP is match
-leaving a particular interface.
+new routing table specifically created to route the traffic out the correct interface. IPTables rules are also altered and an entry
+is created within the chain `OVN-KUBE-EGRESS-IP-Multi-NIC` for each selected pod to allow SNAT to occur when
+egress-ing a particular interface. The routing table number `1111` is generated from the interface name.
+Routes within the main routing table who's output interface share the same interface used for Egress IP are also cloned into the VRF 1111.
 
 ### Pod to node IP traffic
 When a cluster networked pod matched by an egress IP tries to connect to a non-local node IP it hits the following
@@ -156,6 +157,24 @@ priority=105,pkt_mark=0x3f0,ip,in_port=2 actions=ct(commit,zone=64000,nat(src=<N
 ``` 
 This is required to make `pod -> node IP` traffic behave the same regardless of where the pod is hosted.  
 Implementation details: https://github.com/ovn-org/ovn-kubernetes/commit/e2c981a42a28e6213d9daf3b4489c18dc2b84b19.
+
+For local gateway mode, in which an Egress IP is assigned to a non-primary interface, an IP rule is added to send packets
+to the main routing table at a priority higher than that of EgressIP IP rules, which are set to priority `6000`:
+```shell
+5999:	from all fwmark 0x3f0 lookup main
+```
+Note: `0x3f0` is `1008` in hexadecimal. Lower IP rule priority number indicates higher precedence versus higher IP rule priority number.
+
+This ensures all traffic to node IPs will not be selected by EgressIP IP rules.
+However, reply traffic will not have the mark `1008` and would be dropped by reverse path filtering, therefore we add
+an IPTable rule to the mangle table to save and restore the `1008` mark:
+```shell
+sh-5.2# iptables -t mangle -L  PREROUTING
+Chain PREROUTING (policy ACCEPT)
+target     prot opt source               destination
+CONNMARK   all  --  anywhere             anywhere             mark match 0x3f0 CONNMARK save
+CONNMARK   all  --  anywhere             anywhere             mark match 0x0 CONNMARK restore
+```
 
 ### Dealing with non SNATed traffic
 Egress IP is often configured on a node different from the one hosting the affected pods.  
