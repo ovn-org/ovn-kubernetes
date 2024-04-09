@@ -12,6 +12,7 @@ type DNS struct {
 	UUID        string            `ovsdb:"_uuid"`
 	Datapaths   []string          `ovsdb:"datapaths"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
+	Options     map[string]string `ovsdb:"options"`
 	Records     map[string]string `ovsdb:"records"`
 }
 
@@ -77,6 +78,36 @@ func equalDNSExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *DNS) GetOptions() map[string]string {
+	return a.Options
+}
+
+func copyDNSOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalDNSOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *DNS) GetRecords() map[string]string {
 	return a.Records
 }
@@ -111,6 +142,7 @@ func (a *DNS) DeepCopyInto(b *DNS) {
 	*b = *a
 	b.Datapaths = copyDNSDatapaths(a.Datapaths)
 	b.ExternalIDs = copyDNSExternalIDs(a.ExternalIDs)
+	b.Options = copyDNSOptions(a.Options)
 	b.Records = copyDNSRecords(a.Records)
 }
 
@@ -133,6 +165,7 @@ func (a *DNS) Equals(b *DNS) bool {
 	return a.UUID == b.UUID &&
 		equalDNSDatapaths(a.Datapaths, b.Datapaths) &&
 		equalDNSExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalDNSOptions(a.Options, b.Options) &&
 		equalDNSRecords(a.Records, b.Records)
 }
 

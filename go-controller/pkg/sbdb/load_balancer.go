@@ -19,14 +19,16 @@ var (
 
 // LoadBalancer defines an object in Load_Balancer table
 type LoadBalancer struct {
-	UUID          string                `ovsdb:"_uuid"`
-	DatapathGroup *string               `ovsdb:"datapath_group"`
-	Datapaths     []string              `ovsdb:"datapaths"`
-	ExternalIDs   map[string]string     `ovsdb:"external_ids"`
-	Name          string                `ovsdb:"name"`
-	Options       map[string]string     `ovsdb:"options"`
-	Protocol      *LoadBalancerProtocol `ovsdb:"protocol"`
-	Vips          map[string]string     `ovsdb:"vips"`
+	UUID            string                `ovsdb:"_uuid"`
+	DatapathGroup   *string               `ovsdb:"datapath_group"`
+	Datapaths       []string              `ovsdb:"datapaths"`
+	ExternalIDs     map[string]string     `ovsdb:"external_ids"`
+	LrDatapathGroup *string               `ovsdb:"lr_datapath_group"`
+	LsDatapathGroup *string               `ovsdb:"ls_datapath_group"`
+	Name            string                `ovsdb:"name"`
+	Options         map[string]string     `ovsdb:"options"`
+	Protocol        *LoadBalancerProtocol `ovsdb:"protocol"`
+	Vips            map[string]string     `ovsdb:"vips"`
 }
 
 func (a *LoadBalancer) GetUUID() string {
@@ -111,6 +113,50 @@ func equalLoadBalancerExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LoadBalancer) GetLrDatapathGroup() *string {
+	return a.LrDatapathGroup
+}
+
+func copyLoadBalancerLrDatapathGroup(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLoadBalancerLrDatapathGroup(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *LoadBalancer) GetLsDatapathGroup() *string {
+	return a.LsDatapathGroup
+}
+
+func copyLoadBalancerLsDatapathGroup(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLoadBalancerLsDatapathGroup(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
 }
 
 func (a *LoadBalancer) GetName() string {
@@ -204,6 +250,8 @@ func (a *LoadBalancer) DeepCopyInto(b *LoadBalancer) {
 	b.DatapathGroup = copyLoadBalancerDatapathGroup(a.DatapathGroup)
 	b.Datapaths = copyLoadBalancerDatapaths(a.Datapaths)
 	b.ExternalIDs = copyLoadBalancerExternalIDs(a.ExternalIDs)
+	b.LrDatapathGroup = copyLoadBalancerLrDatapathGroup(a.LrDatapathGroup)
+	b.LsDatapathGroup = copyLoadBalancerLsDatapathGroup(a.LsDatapathGroup)
 	b.Options = copyLoadBalancerOptions(a.Options)
 	b.Protocol = copyLoadBalancerProtocol(a.Protocol)
 	b.Vips = copyLoadBalancerVips(a.Vips)
@@ -229,6 +277,8 @@ func (a *LoadBalancer) Equals(b *LoadBalancer) bool {
 		equalLoadBalancerDatapathGroup(a.DatapathGroup, b.DatapathGroup) &&
 		equalLoadBalancerDatapaths(a.Datapaths, b.Datapaths) &&
 		equalLoadBalancerExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalLoadBalancerLrDatapathGroup(a.LrDatapathGroup, b.LrDatapathGroup) &&
+		equalLoadBalancerLsDatapathGroup(a.LsDatapathGroup, b.LsDatapathGroup) &&
 		a.Name == b.Name &&
 		equalLoadBalancerOptions(a.Options, b.Options) &&
 		equalLoadBalancerProtocol(a.Protocol, b.Protocol) &&

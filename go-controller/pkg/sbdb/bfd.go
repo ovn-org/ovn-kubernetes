@@ -21,6 +21,7 @@ var (
 // BFD defines an object in BFD table
 type BFD struct {
 	UUID        string            `ovsdb:"_uuid"`
+	ChassisName string            `ovsdb:"chassis_name"`
 	DetectMult  int               `ovsdb:"detect_mult"`
 	Disc        int               `ovsdb:"disc"`
 	DstIP       string            `ovsdb:"dst_ip"`
@@ -35,6 +36,10 @@ type BFD struct {
 
 func (a *BFD) GetUUID() string {
 	return a.UUID
+}
+
+func (a *BFD) GetChassisName() string {
+	return a.ChassisName
 }
 
 func (a *BFD) GetDetectMult() int {
@@ -152,6 +157,7 @@ func (a *BFD) CloneModel() model.Model {
 
 func (a *BFD) Equals(b *BFD) bool {
 	return a.UUID == b.UUID &&
+		a.ChassisName == b.ChassisName &&
 		a.DetectMult == b.DetectMult &&
 		a.Disc == b.Disc &&
 		a.DstIP == b.DstIP &&
