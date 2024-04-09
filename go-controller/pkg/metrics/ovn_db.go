@@ -333,8 +333,8 @@ func getNBDBSockPath() (string, error) {
 }
 
 func getOvnDbVersionInfo() {
-	stdout, _, err := util.RunOVSDBClient("-V")
-	if err == nil && strings.HasPrefix(stdout, "ovsdb-client (Open vSwitch) ") {
+	stdout, _, err := util.RunOVNNBAppCtl("version")
+	if err == nil && strings.HasPrefix(stdout, "ovsdb-server (Open vSwitch) ") {
 		ovnDbVersion = strings.Fields(stdout)[3]
 	}
 	basePath, err := getNBDBSockPath()
