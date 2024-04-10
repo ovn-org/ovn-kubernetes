@@ -17,6 +17,7 @@ Measurement accuracy can be impacted by other parallel processing that might be 
 ## Change log
 This list is to help notify if there are additions, changes or removals to metrics. Latest changes are at the top of this list.
 
+- Remove ovnkube_controller_ovn_cli_latency_seconds metrics since we have moved most of the OVN DB operations to libovsdb.
 - Effect of OVN IC architecture:
   - Move all the metrics from subsystem "ovnkube-master" to subsystem "ovnkube-controller". The non-IC and IC deployments will each continue to have their ovnkube-master and ovnkube-controller containers running inside the ovnkube-master and ovnkube-controller pods. The metrics scraping should work seemlessly. See https://github.com/ovn-org/ovn-kubernetes/pull/3723 for details
   - Move the following metrics from subsystem "master" to subsystem "clustermanager". Therefore, the follow metrics are renamed.

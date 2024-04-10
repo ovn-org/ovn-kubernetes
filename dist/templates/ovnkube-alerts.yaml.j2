@@ -95,38 +95,6 @@ spec:
          The pod creation latency aggregated across all masters for the last 
          15minutes is more than 5 seconds as compared to 15 minutes before last 15 minutes.
 
-    - alert: OvnKubeHighNBCliLatency99thPercentile
-      expr: |
-        histogram_quantile(0.99,
-          sum by (le) (
-            rate(ovnkube_controller_ovn_cli_latency_seconds_bucket{
-              command="ovn-nbctl"}[15m])
-          )
-        ) > 3 
-      for: 10m
-      labels:
-       severity: warning
-      annotations:
-       description: |
-         The ovn-nbctl 99th percentile CLI latency {{ value }} aggregated 
-         across all masters for the last 15minutes is more than 3 seconds.
-
-    - alert: OvnKubeHighSBCliLatency99thPercentile
-      expr: |
-        histogram_quantile(0.99,
-          sum by (le) (
-            rate(ovnkube_controller_ovn_cli_latency_seconds_bucket{
-              command="ovn-sbctl"}[15m])
-          )
-        ) > 3
-      for: 10m
-      labels:
-       severity: warning
-      annotations:
-       description: |
-         The ovn-sbctl 99th percentile CLI latency {{ value }} aggregated
-         across all masters for the last 15minutes is more than 3 seconds.
-
     - alert: OvnKubeHighK8sNetworkPolicyUpdateLatency99thPercentile
       expr: |
         histogram_quantile(0.99,
