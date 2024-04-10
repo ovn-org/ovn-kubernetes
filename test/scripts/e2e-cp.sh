@@ -39,7 +39,6 @@ test node readiness according to its defaults interface MTU size|\
 egress IP validation|\
 e2e egress firewall policy validation|\
 OVS CPU affinity pinning|\
-should listen on each host addresses|\
 Pod to pod TCP with low MTU|\
 queries to the hostNetworked server pod on another node shall work for TCP|\
 queries to the hostNetworked server pod on another node shall work for UDP|\
@@ -100,10 +99,6 @@ if [ "$OVN_GATEWAY_MODE" == "shared" ]; then
   fi
   SKIPPED_TESTS+="Should ensure load balancer service|LGW"
   # See https://github.com/ovn-org/ovn-kubernetes/issues/4138 for details
-  if [ "$KIND_IPV6_SUPPORT" == true ]; then
-    SKIPPED_TESTS+="|"
-    SKIPPED_TESTS+="queries to the nodePort service shall work for UDP"
-  fi
 fi
 
 if [ "$OVN_GATEWAY_MODE" == "local" ]; then
@@ -112,9 +107,7 @@ if [ "$OVN_GATEWAY_MODE" == "local" ]; then
     if [ "$SKIPPED_TESTS" != "" ]; then
         SKIPPED_TESTS+="|"
     fi
-    SKIPPED_TESTS+="Should be allowed to node local host-networked endpoints by nodeport services|\
-Should be allowed by nodeport services|\
-Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|\
+    SKIPPED_TESTS+="Should be allowed by nodeport services|\
 Should successfully create then remove a static pod|\
 Should validate connectivity from a pod to a non-node host address on same node|\
 Should validate connectivity within a namespace of pods on separate nodes|\
