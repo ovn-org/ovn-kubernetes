@@ -34,9 +34,20 @@ var metricOvnNodePortEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "Specifies if the node port is enabled on this node(1) or not(0).",
 })
 
+// metric to get the size of ovnkube.log file
+var metricOvnKubeNodeLogFileSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemNode,
+	Name:      "logfile_size_bytes",
+	Help:      "The size of ovnkube logfile on the node."},
+	[]string{
+		"logfile_name",
+	},
+)
+
 var registerNodeMetricsOnce sync.Once
 
-func RegisterNodeMetrics() {
+func RegisterNodeMetrics(stopChan <-chan struct{}) {
 	registerNodeMetricsOnce.Do(func() {
 		// ovnkube-node metrics
 		prometheus.MustRegister(MetricCNIRequestDuration)
@@ -66,5 +77,7 @@ func RegisterNodeMetrics() {
 				panic(err)
 			}
 		}
+		prometheus.MustRegister(metricOvnKubeNodeLogFileSize)
+		go ovnKubeLogFileSizeMetricsUpdater(metricOvnKubeNodeLogFileSize, stopChan)
 	})
 }
