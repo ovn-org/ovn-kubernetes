@@ -527,7 +527,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			}
 
 			// register ovnkube node specific prometheus metrics exported by the node
-			metrics.RegisterNodeMetrics()
+			metrics.RegisterNodeMetrics(ctx.Done())
 
 			nodeNetworkControllerManager, err := controllerManager.NewNodeNetworkControllerManager(
 				ovnClientset,

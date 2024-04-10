@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/pprof"
+	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -154,6 +156,30 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 		}
 	}
 	return coverageShowMetricsMap, nil
+}
+
+// ovnKubeLogFileSizeMetricsUpdater updates the metrics that obtains the
+// size of ovnkube process' logfile
+func ovnKubeLogFileSizeMetricsUpdater(ovnKubeLogFileMetric *prometheus.GaugeVec,
+	stopChan <-chan struct{}) {
+	ticker := time.NewTicker(metricsUpdateInterval)
+	defer ticker.Stop()
+
+	logfile := config.Logging.File
+	fileName := path.Base(logfile)
+	for {
+		select {
+		case <-ticker.C:
+			fileInfo, err := os.Stat(logfile)
+			if err != nil {
+				klog.Errorf("Failed to get the logfile size for %s: %v", fileName, err)
+			} else {
+				ovnKubeLogFileMetric.WithLabelValues(fileName).Set(float64(fileInfo.Size()))
+			}
+		case <-stopChan:
+			return
+		}
+	}
 }
 
 // coverageShowMetricsUpdater updates the metric

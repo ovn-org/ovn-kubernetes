@@ -159,6 +159,20 @@ spec:
          The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated
          across all masters for the last 15minutes is more than 1 seconds.
 
+    # The logfile size is in bytes. We first convert it into MiB. Then, we collect last 15 minutes of
+    # the time series data and check if the rate at which the log file is increasing is more than 1MB
+    # over the last 5 minutes.
+    - alert: OvnKubeNodeLogFileSize
+      expr: |
+        rate(ovnkube_node_logfile_size_bytes{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 1
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.logfile_name }} file size is
+         increasing {{ printf "%.2f" $value }} Mb / 5 minutes for the last 10 minutes
+
     - alert: OvnNBDBStale
       expr: time() - max(ovnkube_controller_nb_e2e_timestamp) > 120
       for: 4m
