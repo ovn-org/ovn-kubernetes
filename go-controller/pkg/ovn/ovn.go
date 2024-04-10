@@ -455,7 +455,12 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 		// kubernetes controller-manager
 		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
 		if err != nil {
-			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
+			// runRepair is set to false for unit testing cases
+			if runRepair {
+				klog.Fatalf("Error running OVN Kubernetes Services controller: %v", err)
+			} else {
+				klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
+			}
 		}
 	}()
 	return nil
