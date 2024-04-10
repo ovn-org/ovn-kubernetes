@@ -61,17 +61,6 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
 
-// metricOvnCliLatency is the duration to execute OVN commands using CLI tools ovn-nbctl or ovn-sbctl.
-var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemController,
-	Name:      "ovn_cli_latency_seconds",
-	Help:      "The latency of various OVN commands. Currently, ovn-nbctl and ovn-sbctl",
-	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-	// labels
-	[]string{"command"},
-)
-
 // MetricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
 var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Namespace: MetricOvnkubeNamespace,
@@ -388,9 +377,6 @@ func RegisterOVNKubeControllerPerformance(nbClient libovsdbclient.Client) {
 	prometheus.MustRegister(MetricRequeueServiceCount)
 	prometheus.MustRegister(MetricSyncServiceCount)
 	prometheus.MustRegister(MetricSyncServiceLatency)
-	prometheus.MustRegister(metricOvnCliLatency)
-	// This is set to not create circular import between metrics and util package
-	util.MetricOvnCliLatency = metricOvnCliLatency
 	registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemController)
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
