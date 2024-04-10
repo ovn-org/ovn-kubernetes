@@ -45,6 +45,9 @@ queries to the hostNetworked server pod on another node shall work for TCP|\
 queries to the hostNetworked server pod on another node shall work for UDP|\
 ipv4 pod"
 
+METALLB_SKIPPED_TESTS="EgressService|\
+Load Balancer Service Tests with MetalLB"
+
 SKIPPED_TESTS=""
 
 if [ "$KIND_IPV4_SUPPORT" == true ]; then
@@ -168,6 +171,14 @@ if [ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}" ]; then
 	SKIPPED_TESTS+="|"
   fi
   SKIPPED_TESTS+=$KV_LIVE_MIGRATION_TESTS
+fi
+
+# Skip tests that require metal-lb, if such is not being installed
+if [ "${KIND_INSTALL_METALLB}" == "false" ];then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+=$METALLB_SKIPPED_TESTS
 fi
 
 # setting these is required to make RuntimeClass tests work ... :/
