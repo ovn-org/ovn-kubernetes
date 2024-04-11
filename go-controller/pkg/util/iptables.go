@@ -295,6 +295,7 @@ func (f *FakeIPTables) Restore(tableName string, rulesMap map[string][][]string)
 		return err
 	}
 	for chainName, rules := range rulesMap {
+		(*table)[chainName] = []string{}
 		for _, rule := range rules {
 			chain, _ := table.getChain(chainName)
 			(*table)[chainName] = append([]string{strings.Join(rule, " ")}, chain...)

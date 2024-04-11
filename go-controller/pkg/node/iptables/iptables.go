@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -17,9 +18,10 @@ type Rule struct {
 	Protocol iptables.Protocol
 }
 
-// AddRulesFiltered adds the given rules to iptables.
+// RestoreRulesFiltered adds the given rules to iptables.
 // filter is a map[table][chain] of valid tables/chains to use for filtering rules to be added.
-func AddRulesFiltered(rules []Rule, filter map[string]map[string]bool) error {
+// If no rule exists for the filter, the chain will still be restored as empty.
+func RestoreRulesFiltered(rules []Rule, filter map[string]map[string]struct{}) error {
 	addErrors := errors.New("")
 	var err error
 	var ipt util.IPTablesHelper
@@ -30,11 +32,23 @@ func AddRulesFiltered(rules []Rule, filter map[string]map[string]bool) error {
 		iptables.ProtocolIPv6: make(map[string]map[string][][]string),
 	}
 
+	// Initialize ruleMap with empty chains, so that if no rules are found we will restore the empty chain anyway
+	for filterTable, filterChainMap := range filter {
+		for filterChain := range filterChainMap {
+			if config.IPv4Mode {
+				ruleMap[iptables.ProtocolIPv4][filterTable] = map[string][][]string{filterChain: {}}
+			}
+			if config.IPv6Mode {
+				ruleMap[iptables.ProtocolIPv6][filterTable] = map[string][][]string{filterChain: {}}
+			}
+		}
+	}
+
 	// rules can be inserted in groups if they are within the same table
 	// sort them into a proper map. Ignore rules that do not pass the filter
 	for _, r := range rules {
 		if _, ok := filter[r.Table][r.Chain]; !ok {
-			klog.V(5).Infof("Ignoring processing rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ",
+			klog.V(5).Infof("Ignoring processing rule in table due to filtering: %s, chain: %s with args: \"%s\" for protocol: %v ",
 				r.Table, r.Chain, strings.Join(r.Args, " "), r.Protocol)
 			continue
 		}

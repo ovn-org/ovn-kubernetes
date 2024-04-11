@@ -58,10 +58,12 @@ func insertIptRules(rules []nodeipt.Rule) error {
 	return nodeipt.AddRules(rules, false)
 }
 
-// insertIptRulesFiltered adds the provided rules in an insert fashion with a filter for table/chain
+// restoreIptRulesFiltered restores the provided rules in an insert fashion with a filter for table/chain
 // i.e each rule gets added at the first position in the chain
-func insertIptRulesFiltered(rules []nodeipt.Rule, filter map[string]map[string]bool) error {
-	return nodeipt.AddRulesFiltered(rules, filter)
+// filter is defined as a map of table/chains. Only rules matching this filter will be restored.
+// If no rules match the filter, the chain will still be restored as empty as specified in the filter.
+func restoreIptRulesFiltered(rules []nodeipt.Rule, filter map[string]map[string]struct{}) error {
+	return nodeipt.RestoreRulesFiltered(rules, filter)
 }
 
 // appendIptRules adds the provided rules in an append fashion
@@ -539,18 +541,10 @@ func cleanupSharedGatewayIPTChains() {
 func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 	var errors []error
 	var err error
-	var ipt util.IPTablesHelper
-	for _, proto := range clusterIPTablesProtocols() {
-		if ipt, err = util.GetIPTablesHelper(proto); err != nil {
-			errors = append(errors, err)
-			continue
-		}
-		if err = ipt.ClearChain(table, chain); err != nil {
-			errors = append(errors, fmt.Errorf("error clearing Chain: %s in Table: %s, err: %v", chain, table, err))
-		}
-	}
-	filter := map[string]map[string]bool{table: {chain: false}}
-	if err = insertIptRulesFiltered(keepIPTRules, filter); err != nil {
+	klog.Infof("Recreating iptables rules for table: %s, chain: %s", table, chain)
+	// filter is a map of the table/chain to program rules for, as all rules are included in keepIPTRules
+	filter := map[string]map[string]struct{}{table: {chain: {}}}
+	if err = restoreIptRulesFiltered(keepIPTRules, filter); err != nil {
 		errors = append(errors, err)
 	}
 	return apierrors.NewAggregate(errors)
