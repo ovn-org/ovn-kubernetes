@@ -1423,14 +1423,14 @@ spec:
 	   15. Check that egress IP remains assigned to node 1. We should not be moving the egress IP to node 2 if the node 1 works fine, as to reduce cluster entropy - read: changes.
 	   16. Check connectivity from pod to an external "node" and verify that the IP is the egress IP
 	   17. Make node 1 NotReady
-	   18. Check that egress IP is assigned to node 2
+	   18. Check that egress IP remains assigned to node 1. We should not be moving the egress IP to node 2 if the node 1 is reachable, as to reduce cluster entropy - read: changes.
 	   19. Check connectivity from pod to an external "node" and verify that the IP is the egress IP
 	   20. Make node 1 not reachable
 	   21. Unlabel node 2
 	   22. Check that egress IP is un-assigned (since node 1 is both unreachable and NotReady)
-	   23. Make node 1 Ready
-	   24. Check that egress IP is un-assigned (since node 1 is unreachable)
-	   25. Make node 1 reachable again
+	   23. Make node 1 reachable
+	   24. Check that egress IP is un-assigned (since node 1 is NotReady)
+	   25. Make node 1 Ready
 	   26. Check that egress IP is assigned to node 1 again
 	   27. Check connectivity from pod to an external "node" and verify that the IP is the egress IP
 	*/
@@ -1555,10 +1555,10 @@ spec:
 		ginkgo.By("17. Make node 1 NotReady")
 		setNodeReady(node1, false)
 
-		ginkgo.By("18. Check that egress IP is assigned to node 2")
-		statuses = verifyEgressIPStatusLengthEquals(1, func(statuses []egressIPStatus) bool {
+		ginkgo.By("18. Check that egress IP remains assigned to node 1. We should not be moving the egress IP to node 2 if the node 1 is reachable, as to reduce cluster entropy")
+		verifyEgressIPStatusLengthEquals(1, func(statuses []egressIPStatus) bool {
 			testNode := statuses[0].Node
-			return testNode == node2
+			return testNode == node1
 		})
 
 		ginkgo.By("19. Check connectivity from pod to an external \"node\" and verify that the IP is the egress IP")
@@ -1577,17 +1577,17 @@ spec:
 		ginkgo.By("22. Check that egress IP is un-assigned (since node 1 is both unreachable and NotReady)")
 		verifyEgressIPStatusLengthEquals(0, nil)
 
-		ginkgo.By("23. Make node 1 Ready")
-		setNodeReady(node1, true)
-
-		ginkgo.By("24. Check that egress IP is un-assigned (since node 1 is unreachable)")
-		verifyEgressIPStatusLengthEquals(0, nil)
-
-		ginkgo.By("25. Make node 1 reachable again")
+		ginkgo.By("23. Make node 1 reachable again")
 		setNodeReachable("iptables", node1, true)
 		if IsIPv6Cluster(f.ClientSet) {
 			setNodeReachable("ip6tables", node1, true)
 		}
+
+		ginkgo.By("24. Check that egress IP is un-assigned (since node 1 is NotReady)")
+		verifyEgressIPStatusLengthEquals(0, nil)
+
+		ginkgo.By("25. Make node 1 Ready")
+		setNodeReady(node1, true)
 
 		ginkgo.By("26. Check that egress IP is assigned to node 1 again")
 		statuses = verifyEgressIPStatusLengthEquals(1, func(statuses []egressIPStatus) bool {

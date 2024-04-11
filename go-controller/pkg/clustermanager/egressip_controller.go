@@ -483,10 +483,6 @@ func (eIPC *egressIPClusterController) setNodeEgressReady(nodeName string, isRea
 	defer eIPC.allocator.Unlock()
 	if eNode, exists := eIPC.allocator.cache[nodeName]; exists {
 		eNode.isReady = isReady
-		// see setNodeEgressAssignable
-		if !isReady {
-			eNode.allocations = make(map[string]string)
-		}
 	}
 }
 
@@ -1243,12 +1239,20 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 				klog.Errorf("Allocator error: EgressIP: %s assigned to node: %s which does not have egress label, will attempt rebalancing", name, eIPStatus.Node)
 				validAssignment = false
 			}
+			// We only deallocate if service status of the node can be ascertained. If
+			// ovnk is running, regardless of readiness, or unavailable during a rollout
+			// deallocating might not be the best thing to do. However if ovnk is
+			// unavailable and the node is not ready it may be a sign of other issues so
+			// assume unreachable in that case out of precaution (this can still happen
+			// if an abnormally slow rollout of multus happens at the same time as ovnk
+			// on a node, so perhaps is better to outright tolerate unavailability for a
+			// period regardless of readiness)
 			if eNode.health == healthcheck.UNREACHABLE {
 				klog.Errorf("Allocator error: EgressIP: %s assigned to node: %s which is unreachable, will attempt rebalancing", name, eIPStatus.Node)
 				validAssignment = false
 			}
-			if !eNode.isReady {
-				klog.Errorf("Allocator error: EgressIP: %s assigned to node: %s which is not ready, will attempt rebalancing", name, eIPStatus.Node)
+			if eNode.health == healthcheck.UNAVAILABLE && !eNode.isReady {
+				klog.Errorf("Allocator error: EgressIP: %s assigned to node: %s which is unavailable and not ready, will attempt rebalancing", name, eIPStatus.Node)
 				validAssignment = false
 			}
 			ip := net.ParseIP(eIPStatus.EgressIP)
@@ -1547,7 +1551,7 @@ func (eIPC *egressIPClusterController) monitorHealthState(nodeName string) bool 
 	eIPC.allocator.Lock()
 	defer eIPC.allocator.Unlock()
 	egressNode := eIPC.allocator.cache[nodeName]
-	return egressNode != nil && egressNode.isEgressAssignable && egressNode.isReady
+	return egressNode != nil && egressNode.isEgressAssignable
 }
 
 func (eIPC *egressIPClusterController) reconcileNode(nodeName string) error {
@@ -1591,12 +1595,13 @@ func (eIPC *egressIPClusterController) reconcileNode(nodeName string) error {
 	if !hasEgressLabel {
 		return eIPC.deleteEgressNode(nodeName)
 	}
+	eIPC.healthStateProvider.MonitorHealthState(node.Name)
 
+	// we won't allocate egress IPs to unready nodes out of precaution but we
+	// won't deallocate from unready nodes either as they should still be
+	// serviced
 	isReady := eIPC.isEgressNodeReady(node)
 	eIPC.setNodeEgressReady(node.Name, isReady)
-	if hasEgressLabel && isReady {
-		eIPC.healthStateProvider.MonitorHealthState(node.Name)
-	}
 
 	health := eIPC.healthStateProvider.GetHealthState(node.Name)
 	eIPC.setNodeEgressHealth(node.Name, health)
@@ -1609,7 +1614,7 @@ func (eIPC *egressIPClusterController) reconcileNode(nodeName string) error {
 		}
 	}
 
-	if isUnreachable || !isReady {
+	if isUnreachable {
 		if err := eIPC.deleteEgressNode(node.Name); err != nil {
 			return err
 		}
