@@ -63,8 +63,6 @@ validates that there is no conflict between pods with same hostPort but differen
 should create Services and servce on different Service CIDRs
 "
 
-
-
 IPV4_ONLY_TESTS="
 # Limit the IPv4 related test to IPv4 only deployments
 #  See: https://github.com/leblancd/kube-v6-test
