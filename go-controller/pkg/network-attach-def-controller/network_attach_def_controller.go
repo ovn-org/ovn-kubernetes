@@ -43,6 +43,7 @@ const (
 )
 
 var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
+var ErrOldNADDeletedNeedsRetry = errors.New("previous NAD is now deleted successfully, retry to add the new NAD")
 
 type BaseNetworkController interface {
 	Start(ctx context.Context) error
@@ -68,9 +69,10 @@ type NetworkControllerManager interface {
 }
 
 type networkNADInfo struct {
-	nadNames  map[string]struct{}
-	nc        NetworkController
-	isStarted bool
+	nadNames      map[string]struct{}
+	nc            NetworkController
+	isStarted     bool
+	nadInDeletion string
 }
 
 type NetAttachDefinitionController struct {
@@ -406,6 +408,10 @@ func (nadController *NetAttachDefinitionController) AddNetAttachDef(ncm NetworkC
 				}
 				err = nadController.addNADToController(ncm, nadName, nInfo, doStart)
 				if err != nil {
+					if errors.Is(err, ErrOldNADDeletedNeedsRetry) {
+						// an old NAD of the same name that was in deletion is now successfully deleted, remove NAD from perNADNetInfo
+						nadController.perNADNetInfo.Delete(nadName)
+					}
 					klog.Errorf("%s: Failed to add net-attach-def %s to network %s: %v", nadController.name, nadName, netName, err)
 					return err
 				}
@@ -470,9 +476,10 @@ func (nadController *NetAttachDefinitionController) addNADToController(ncm Netwo
 	klog.V(5).Infof("%s: Add net-attach-def %s to network %s", nadController.name, nadName, netName)
 	return nadController.perNetworkNADInfo.DoWithLock(netName, func(networkName string) error {
 		nni, loaded := nadController.perNetworkNADInfo.LoadOrStore(networkName, &networkNADInfo{
-			nadNames:  map[string]struct{}{},
-			nc:        nil,
-			isStarted: false,
+			nadNames:      map[string]struct{}{},
+			nc:            nil,
+			isStarted:     false,
+			nadInDeletion: "",
 		})
 		if !loaded {
 			defer func() {
@@ -503,6 +510,19 @@ func (nadController *NetAttachDefinitionController) addNADToController(ncm Netwo
 						nadController.name, nadName, networkName)
 				}
 			}
+			if nni.nadInDeletion != "" {
+				if nni.nadInDeletion == nadName {
+					// the NAD being added is exactly the same as NAD being deleted, keep trying to delete the old NAD first
+					err = nadController.deleteNADFromControllerCommon(nni, networkName, nadName)
+					if err != nil {
+						return err
+					}
+					nni.nadInDeletion = ""
+					return ErrOldNADDeletedNeedsRetry
+				}
+				return fmt.Errorf("%s: NAD %s in network %s is still in the process of deletion",
+					nadController.name, nni.nadInDeletion, networkName)
+			}
 		}
 		if !nadExists {
 			nni.nadNames[nadName] = struct{}{}
@@ -530,6 +550,32 @@ func (nadController *NetAttachDefinitionController) addNADToController(ncm Netwo
 	})
 }
 
+func (nadController *NetAttachDefinitionController) deleteNADFromControllerCommon(nni *networkNADInfo, netName, nadName string) error {
+	oc := nni.nc
+	delete(nni.nadNames, nadName)
+	if len(nni.nadNames) == 0 {
+		klog.V(5).Infof("%s: The last NAD: %s of network %s has been deleted, stopping network controller", nadController.name, nadName, netName)
+		// if nadInDeletion is not empty, the controller has already been stopped in last try but Cleanup() failed
+		if nni.nadInDeletion == "" {
+			oc.Stop()
+		}
+		err := oc.Cleanup(oc.GetNetworkName())
+		// set isStarted to false even stop failed, as the operation could be half-done.
+		nni.isStarted = false
+		if err != nil {
+			// set nadInDeletion so the future NADs of this network will only be added when deletion of this NAD  succeeds.
+			nni.nadInDeletion = nadName
+			nni.nadNames[nadName] = struct{}{}
+			return fmt.Errorf("%s: failed to stop network controller for network %s: %v", nadController.name, netName, err)
+		}
+		nni.nadInDeletion = ""
+		nadController.perNetworkNADInfo.Delete(netName)
+	}
+	nni.nc.DeleteNAD(nadName)
+	klog.V(5).Infof("%s: Delete NAD %s from controller of network %s", nadController.name, nadName, netName)
+	return nil
+}
+
 func (nadController *NetAttachDefinitionController) deleteNADFromController(netName, nadName string) error {
 	klog.V(5).Infof("%s: Delete net-attach-def %s from network %s", nadController.name, nadName, netName)
 	return nadController.perNetworkNADInfo.DoWithLock(netName, func(networkName string) error {
@@ -544,23 +590,6 @@ func (nadController *NetAttachDefinitionController) deleteNADFromController(netN
 			return nil
 		}
 
-		oc := nni.nc
-		delete(nni.nadNames, nadName)
-		if len(nni.nadNames) == 0 {
-			klog.V(5).Infof("%s: The last NAD: %s of network %s has been deleted, stopping network controller", nadController.name, nadName, networkName)
-			oc.Stop()
-			err := oc.Cleanup(oc.GetNetworkName())
-			// set isStarted to false even stop failed, as the operation could be half-done.
-			// So if a new NAD with the same netconf comes in, it can restart the controller.
-			nni.isStarted = false
-			if err != nil {
-				nni.nadNames[nadName] = struct{}{}
-				return fmt.Errorf("%s: failed to stop network controller for network %s: %v", nadController.name, networkName, err)
-			}
-			nadController.perNetworkNADInfo.Delete(networkName)
-		}
-		nni.nc.DeleteNAD(nadName)
-		klog.V(5).Infof("%s: Delete NAD %s from controller of network %s", nadController.name, nadName, networkName)
-		return nil
+		return nadController.deleteNADFromControllerCommon(nni, networkName, nadName)
 	})
 }
