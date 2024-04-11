@@ -131,10 +131,10 @@ func (c *Controller) syncNode(key string) error {
 
 	if n == nil {
 		if state != nil {
-			// The node was deleted or is no longer ready but had allocated services.
-			// We mark it as draining and remove all allocations from it,
-			// queuing them to attempt assigning a new node.
-			// Services can't be assigned to a node while it is in draining status.
+			// The node was deleted but had allocated services. We mark it as
+			// draining and remove all allocations from it, queuing them to
+			// attempt assigning a new node. Services can't be assigned to a
+			// node while it is in draining status.
 			state.draining = true
 			for svcKey, svcState := range state.allocations {
 				if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
@@ -147,16 +147,27 @@ func (c *Controller) syncNode(key string) error {
 		return nil
 	}
 
+	nodeReady := nodeIsReady(n)
+	nodeLabels := n.Labels
 	healthState := c.healthStateProvider.GetHealthState(n.Name)
 	nodeAvailable := healthState <= healthcheck.AVAILABLE
 	nodeUnreachable := healthState == healthcheck.UNREACHABLE
-	nodeReady := nodeIsReady(n)
-	nodeLabels := n.Labels
+
+	// We only deallocate if service status of the node can be ascertained. If
+	// ovnk is running, regardless of readiness, or unavailable during a rollout
+	// deallocating might not be the best thing to do. However if ovnk is
+	// unavailable and the node is not ready it may be a sign of other issues so
+	// assume unreachable in that case out of precaution (this can still happen
+	// if an abnormally slow rollout of multus happens at the same time as ovnk
+	// on a node, so perhaps is better to outright tolerate unavailability for a
+	// period regardless of readiness)
+	nodeUnreachable = nodeUnreachable || (healthState == healthcheck.UNAVAILABLE && !nodeReady)
 
 	if state == nil {
 		if nodeReady && nodeAvailable {
-			// The node has no allocated services and is ready, this means unallocated services whose labels match
-			// the node's labels can be allocated to it.
+			// The node has no allocated services, is available and ready, this
+			// means unallocated services whose labels match the node's labels
+			// can be allocated to it.
 			for svcKey, selector := range c.unallocatedServices {
 				if selector.Matches(labels.Set(nodeLabels)) {
 					c.egressServiceQueue.Add(svcKey)
@@ -174,19 +185,6 @@ func (c *Controller) syncNode(key string) error {
 			return c.kubeOVN.SetLabelsOnNode(n.Name, labelsToRemove)
 		}
 
-		return nil
-	}
-
-	if !nodeReady {
-		// The node is not ready but had allocated services, we drain it
-		// and attempt reallocating its services, deleting it from our cache
-		// because we don't care about its reachability status until it becomes ready.
-		for svcKey, svcState := range state.allocations {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
-				return err
-			}
-		}
-		delete(c.nodes, nodeName)
 		return nil
 	}
 

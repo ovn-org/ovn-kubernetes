@@ -273,10 +273,6 @@ func (c *Controller) repair() error {
 			klog.Errorf("Node %s could not be retrieved from lister, err: %v", svcHost, err)
 			continue
 		}
-		if !nodeIsReady(node) {
-			klog.Infof("Node %s is not ready, it can not be used for egress service %s", svcHost, key)
-			continue
-		}
 
 		epsNodes, err := c.backendNodesFor(svc)
 		if err != nil {
