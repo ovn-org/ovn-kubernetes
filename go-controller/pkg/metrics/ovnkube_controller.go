@@ -155,6 +155,16 @@ var MetricOVNKubeControllerLeader = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "Identifies whether the instance of ovnkube-controller is a leader(1) or not(0).",
 })
 
+var metricOvnKubeControllerLogFileSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "logfile_size_bytes",
+	Help:      "The size of ovnkube-controller log file."},
+	[]string{
+		"logfile_name",
+	},
+)
+
 var metricEgressIPAssignLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemController,
@@ -414,7 +424,7 @@ func RegisterOVNKubeControllerPerformance(nbClient libovsdbclient.Client) {
 
 // RegisterOVNKubeControllerFunctional is a collection of metrics that help us understand ovnkube-controller functions. Call once after
 // LE is won.
-func RegisterOVNKubeControllerFunctional() {
+func RegisterOVNKubeControllerFunctional(stopChan <-chan struct{}) {
 	// No need to unregister because process exits when leadership is lost.
 	if config.Metrics.EnableScaleMetrics {
 		klog.Infof("Scale metrics are enabled")
@@ -437,7 +447,9 @@ func RegisterOVNKubeControllerFunctional() {
 			panic(err)
 		}
 	}
-
+	// ovnkube-controller logfile size metric
+	prometheus.MustRegister(metricOvnKubeControllerLogFileSize)
+	go ovnKubeLogFileSizeMetricsUpdater(metricOvnKubeControllerLogFileSize, stopChan)
 }
 
 func registerOVNKubeFeatureDBObjectsMetrics() {
