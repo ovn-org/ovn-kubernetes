@@ -1452,13 +1452,13 @@ func TestRunOVNNBAppCtl(t *testing.T) {
 		onRetArgsKexecIface     *ovntest.TestifyMockHelper
 	}{
 		{
-			desc:                    "negative: run `ovn-appctl -t nbdbCtlSockPath` command",
-			expectedErr:             fmt.Errorf("failed to execute ovn-appctl -t nbdbCtlSockPath command"),
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-appctl -t nbdbCtlSockPath command")}},
+			desc:                    "negative: run `ovn-appctl -t nbdbCtlFileName` command",
+			expectedErr:             fmt.Errorf("failed to execute ovn-appctl -t nbdbCtlFileName command"),
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-appctl -t nbdbCtlFileName command")}},
 			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 		{
-			desc:                    "positive: run `ovn-appctl -t nbdbCtlSockPath` command",
+			desc:                    "positive: run `ovn-appctl -t nbdbCtlFileName` command",
 			expectedErr:             nil,
 			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
 			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
@@ -1495,13 +1495,13 @@ func TestRunOVNSBAppCtl(t *testing.T) {
 		onRetArgsKexecIface     *ovntest.TestifyMockHelper
 	}{
 		{
-			desc:                    "negative: run `ovn-appctl -t sbdbCtlSockPath` command",
-			expectedErr:             fmt.Errorf("failed to execute ovn-appctl -t sbdbCtlSockPath command"),
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-appctl -t sbdbCtlSockPath command")}},
+			desc:                    "negative: run `ovn-appctl -t sbdbCtlFileName` command",
+			expectedErr:             fmt.Errorf("failed to execute ovn-appctl -t sbdbCtlFileName command"),
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-appctl -t sbdbCtlFileName command")}},
 			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 		{
-			desc:                    "positive: run `ovn-appctl -t sbdbCtlSockPath` command",
+			desc:                    "positive: run `ovn-appctl -t sbdbCtlFileName` command",
 			expectedErr:             nil,
 			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
 			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},

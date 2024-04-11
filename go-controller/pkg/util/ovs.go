@@ -45,8 +45,8 @@ const (
 )
 
 const (
-	nbdbCtlSock     = "ovnnb_db.ctl"
-	sbdbCtlSock     = "ovnsb_db.ctl"
+	nbdbCtlFileName = "ovnnb_db.ctl"
+	sbdbCtlFileName = "ovnsb_db.ctl"
 	OvnNbdbLocation = "/etc/ovn/ovnnb_db.db"
 	OvnSbdbLocation = "/etc/ovn/ovnsb_db.db"
 	FloodAction     = "FLOOD"
@@ -486,12 +486,12 @@ func RunOVNNBAppCtlWithTimeout(timeout int, args ...string) (string, string, err
 	return RunOVNNBAppCtl(cmdArgs...)
 }
 
-// RunOVNNBAppCtl runs an 'ovn-appctl -t nbdbCtlSockPath command'.
+// RunOVNNBAppCtl runs an 'ovn-appctl -t nbdbCtlFileName command'.
 func RunOVNNBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{
 		"-t",
-		runner.ovnRunDir + nbdbCtlSock,
+		runner.ovnRunDir + nbdbCtlFileName,
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
@@ -505,12 +505,12 @@ func RunOVNSBAppCtlWithTimeout(timeout int, args ...string) (string, string, err
 	return RunOVNSBAppCtl(cmdArgs...)
 }
 
-// RunOVNSBAppCtl runs an 'ovn-appctl -t sbdbCtlSockPath command'.
+// RunOVNSBAppCtl runs an 'ovn-appctl -t sbdbCtlFileName command'.
 func RunOVNSBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{
 		"-t",
-		runner.ovnRunDir + sbdbCtlSock,
+		runner.ovnRunDir + sbdbCtlFileName,
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
