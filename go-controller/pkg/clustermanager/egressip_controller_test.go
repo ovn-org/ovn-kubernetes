@@ -1380,10 +1380,20 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				fakeClusterManagerOVN.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node.Name)
 				gomega.Eventually(getEgressIPStatusLen(eIP1.Name)).Should(gomega.Equal(0))
 
+				// node kept unassigned when unavailable
+				fakeClusterManagerOVN.FakeHealthCheckProvider.ReportHealthState(healthcheck.UNAVAILABLE)
+				fakeClusterManagerOVN.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node.Name)
+				gomega.Consistently(getEgressIPStatusLen(eIP1.Name)).Should(gomega.Equal(0))
+
 				// node assigned when available again
 				fakeClusterManagerOVN.FakeHealthCheckProvider.ReportHealthState(healthcheck.AVAILABLE)
 				fakeClusterManagerOVN.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node.Name)
 				gomega.Eventually(getEgressIPStatusLen(eIP1.Name)).Should(gomega.Equal(1))
+
+				// node kept assigned when unavailable
+				fakeClusterManagerOVN.FakeHealthCheckProvider.ReportHealthState(healthcheck.UNAVAILABLE)
+				fakeClusterManagerOVN.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node.Name)
+				gomega.Consistently(getEgressIPStatusLen(eIP1.Name)).Should(gomega.Equal(1))
 
 				return nil
 			}

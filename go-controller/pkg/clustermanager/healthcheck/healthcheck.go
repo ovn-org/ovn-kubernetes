@@ -2,12 +2,16 @@ package healthcheck
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
@@ -17,6 +21,38 @@ import (
 func healthStateFromError(err error) HealthState {
 	if err == nil {
 		return AVAILABLE
+	}
+
+	if errors.Is(err, healthcheck.ErrNotServing) {
+		// connected fine but not serving
+		return UNAVAILABLE
+	}
+
+	status, ok := status.FromError(err)
+	if !ok {
+		// not a GRPC error
+		return UNREACHABLE
+	}
+
+	if status.Code() != codes.Unavailable {
+		// not an unavailable error
+		return UNREACHABLE
+	}
+
+	msg := status.Message()
+
+	// we want to interpret connection refused (TCP RST reply to a TCP SYN) as a
+	// sign of unavailability rather than unreachability (best effort) however
+	// this might be unrealiable if connecting through a SOCKS proxy so fallback
+	// to UNREACHABLE
+	// NOTE: A refused connection proxied through a single SOCKS proxy could be
+	// interpreted, by spec, just the same as a direct connection refused.
+	// However a SOCKS proxy that relies itself on another proxy (i.e. HTTP
+	// CONNECT proxy) is not bound to the same interpretation; what could be
+	// refused is the connection to that second proxy and not the final
+	// destination. We can't tell both of this scenarios apart.
+	if strings.Contains(msg, "connect: connection refused") && !strings.Contains(msg, "socks connect") {
+		return UNAVAILABLE
 	}
 
 	return UNREACHABLE

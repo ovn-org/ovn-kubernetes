@@ -64,6 +64,12 @@ func Test_controller_probe(t *testing.T) {
 			expectHealth: AVAILABLE,
 		},
 		{
+			name:           "initial unavailable probe",
+			health:         UNKNOWN,
+			isReachableErr: healthcheck.ErrNotServing,
+			expectHealth:   UNREACHABLE,
+		},
+		{
 			name:           "initial unreachable probe",
 			health:         UNKNOWN,
 			isReachableErr: fmt.Errorf("some unreachable error"),
@@ -73,6 +79,12 @@ func Test_controller_probe(t *testing.T) {
 			name:         "available probe",
 			health:       AVAILABLE,
 			expectHealth: AVAILABLE,
+		},
+		{
+			name:           "unavailable probe",
+			health:         AVAILABLE,
+			isReachableErr: healthcheck.ErrNotServing,
+			expectHealth:   UNAVAILABLE,
 		},
 		{
 			name:           "unreachable probe before timeout",
@@ -89,9 +101,32 @@ func Test_controller_probe(t *testing.T) {
 			expectHealth:   UNREACHABLE,
 		},
 		{
+			name:         "available probe after unavailable",
+			health:       UNAVAILABLE,
+			expectHealth: AVAILABLE,
+		},
+		{
+			name:           "unavailable probe after unavailable",
+			health:         UNAVAILABLE,
+			isReachableErr: healthcheck.ErrNotServing,
+			expectHealth:   UNAVAILABLE,
+		},
+		{
+			name:           "unavailable probe after unreachable",
+			health:         UNREACHABLE,
+			isReachableErr: healthcheck.ErrNotServing,
+			expectHealth:   UNREACHABLE,
+		},
+		{
 			name:         "available probe after unreachable",
 			health:       UNREACHABLE,
 			expectHealth: AVAILABLE,
+		},
+		{
+			name:           "unavailable probe after unreachable",
+			health:         UNREACHABLE,
+			isReachableErr: healthcheck.ErrNotServing,
+			expectHealth:   UNREACHABLE,
 		},
 		{
 			name:           "unreachable probe after unreachable",

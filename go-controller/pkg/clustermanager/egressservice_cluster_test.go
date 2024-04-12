@@ -1525,10 +1525,69 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
 				gomega.Eventually(errorIfAllocated).ShouldNot(gomega.HaveOccurred())
 
+				ginkgo.By("informing the node has become UNAVAILABLE and checking it is kept drained")
+				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.UNAVAILABLE)
+				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
+				gomega.Consistently(func() error {
+					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if es.Status.Host != "" {
+						return fmt.Errorf("expected svc1's host value %s to be empty", es.Status.Host)
+					}
+
+					node1ExpectedLabels := map[string]string{
+						"kubernetes.io/hostname": "node1",
+					}
+
+					node1, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if !reflect.DeepEqual(node1.Labels, node1ExpectedLabels) {
+						return fmt.Errorf("expected node1's labels %v to be equal %v", node1.Labels, node1ExpectedLabels)
+					}
+
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
+
 				ginkgo.By("informing the node has become AVAILABLE so that the service will be reallocated")
 				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.AVAILABLE)
 				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
 				gomega.Eventually(errorIfNotAllocated).ShouldNot(gomega.HaveOccurred())
+
+				ginkgo.By("informing the node has become UNAVAILABLE and checking it is not drained")
+				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.UNAVAILABLE)
+				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
+				gomega.Consistently(func() error {
+					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if es.Status.Host != node1.Name {
+						return fmt.Errorf("expected svc1's host value %s to be node1", es.Status.Host)
+					}
+
+					node1ExpectedLabels := map[string]string{
+						"kubernetes.io/hostname":                            "node1",
+						fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix): "",
+					}
+
+					node1, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if !reflect.DeepEqual(node1.Labels, node1ExpectedLabels) {
+						return fmt.Errorf("expected node1's labels %v to be equal %v", node1.Labels, node1ExpectedLabels)
+					}
+
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
 
 				return nil
 			}

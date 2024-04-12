@@ -54,6 +54,15 @@ func transitionNodeState(old nodeState, health HealthState, on time.Time, timeou
 			new.health = UNREACHABLE
 			reason = fmt.Sprintf("not available since %s", old.available)
 		}
+	case UNAVAILABLE:
+		// only if we were available, otherwise services that chose to schedule
+		// in UNKNOWN state might be in trouble
+		if old.health == AVAILABLE || old.health == UNAVAILABLE {
+			new.health = UNAVAILABLE
+			break
+		}
+		reason = "unavailable but not previously available"
+		new.health = UNREACHABLE
 	default:
 		new.health = health
 	}

@@ -22,6 +22,13 @@ const (
 	// available for scheduling.
 	AVAILABLE
 
+	// UNAVAILABLE is the health state of a node that is reachable but might not
+	// have a healthy ovn-kube running. Services should not consider the node
+	// available for scheduling but might not unschedule from it either as
+	// already scheduled services might still be working fine. Only an AVAILABLE
+	// node can become UNAVAILABLE.
+	UNAVAILABLE
+
 	// UNREACHABLE is the health state of a node that is not reachable. Services
 	// should not consider the node available for scheduling and should attempt
 	// to unschedule from it as well.
@@ -32,6 +39,8 @@ func (s HealthState) String() string {
 	switch s {
 	case AVAILABLE:
 		return "AVAILABLE"
+	case UNAVAILABLE:
+		return "UNAVAILABLE"
 	case UNREACHABLE:
 		return "UNREACHABLE"
 	}
