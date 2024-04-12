@@ -12,7 +12,6 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	controllerutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/timeoutqueue"
@@ -78,7 +77,7 @@ type nodeInfo struct {
 // is executed under and the client used for the probe
 type probeTask struct {
 	node   string
-	client healthcheck.EgressIPHealthClient
+	client healthStateClient
 	ctx    context.Context
 }
 
@@ -206,22 +205,20 @@ func (c *controller) run() {
 
 func (c *controller) probe(task *probeTask) {
 	// check if task was cancelled before probing
-	nodeInfo, exists := c.isProbedWithNodeInfo(task.node)
-	if !exists || task.cancelled() {
-		task.client.Disconnect()
+	if task.cancelled() {
+		task.client.disconnect()
 		return
 	}
 
 	// probe
 	klog.V(5).Infof("Probing health state of node %s", task.node)
-	state := AVAILABLE
-	reachable := IsReachable(task.ctx, task.node, nodeInfo.ips, task.client, c.port, period)
-	if !reachable {
-		klog.Errorf("Failed health state probe for node %s", task.node)
-		state = UNREACHABLE
+	err := task.client.isReachable(task.ctx)
+	if err != nil {
+		klog.Errorf("Failed health state probe for node %s: %v", task.node, err)
 	}
 
 	// update state & retask
+	state := healthStateFromError(err)
 	updated := c.setNodeStateAndRetask(task, state)
 	if updated {
 		c.informConsumers(task.node)
@@ -357,7 +354,7 @@ func (c *controller) startProbeWithNodeInfo(node string, nodeInfo nodeInfo) {
 
 	task := &probeTask{
 		node:   node,
-		client: healthcheck.NewEgressIPHealthClient(node),
+		client: newHealthStateClient(node, nodeInfo.ips, c.port, period),
 		ctx:    ctx,
 	}
 
@@ -373,7 +370,7 @@ func (c *controller) setNodeStateAndRetask(task *probeTask, new HealthState) boo
 
 	// check if task was cancelled after probing
 	if task.cancelled() {
-		task.client.Disconnect()
+		task.client.disconnect()
 		return false
 	}
 
