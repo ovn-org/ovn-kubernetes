@@ -1,26 +1,22 @@
 package clustermanager
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/healthcheck"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -35,74 +31,12 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-const (
-	egressIPReachabilityCheckInterval = 5 * time.Second
-)
-
-type egressIPHealthcheckClientAllocator struct{}
-
-func (hccAlloc *egressIPHealthcheckClientAllocator) allocate(nodeName string) healthcheck.EgressIPHealthClient {
-	return healthcheck.NewEgressIPHealthClient(nodeName)
-}
-
-func isReachableViaGRPC(mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient, healthCheckPort, totalTimeout int) bool {
-	dialCtx, dialCancel := context.WithTimeout(context.Background(), time.Duration(totalTimeout)*time.Second)
-	defer dialCancel()
-
-	if !healthClient.IsConnected() {
-		// gRPC session is not up. Attempt to connect and if that suceeds, we will declare node as reacheable.
-		return healthClient.Connect(dialCtx, mgmtIPs, healthCheckPort)
-	}
-
-	// gRPC session is already established. Send a probe, which will succeed, or close the session.
-	return healthClient.Probe(dialCtx)
-}
-
-type egressIPDialer interface {
-	dial(ip net.IP, timeout time.Duration) bool
-}
-
-type egressIPDial struct{}
-
-var dialer egressIPDialer = &egressIPDial{}
-
-type healthcheckClientAllocator interface {
-	allocate(nodeName string) healthcheck.EgressIPHealthClient
-}
-
-// Blantant copy from: https://github.com/openshift/sdn/blob/master/pkg/network/common/egressip.go#L499-L505
-// Ping a node and return whether or not we think it is online. We do this by trying to
-// open a TCP connection to the "discard" service (port 9); if the node is offline, the
-// attempt will either time out with no response, or else return "no route to host" (and
-// we will return false). If the node is online then we presumably will get a "connection
-// refused" error; but the code below assumes that anything other than timeout or "no
-// route" indicates that the node is online.
-func (e *egressIPDial) dial(ip net.IP, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip.String(), "9"), timeout)
-	if conn != nil {
-		conn.Close()
-	}
-	if opErr, ok := err.(*net.OpError); ok {
-		if opErr.Timeout() {
-			return false
-		}
-		if sysErr, ok := opErr.Err.(*os.SyscallError); ok && sysErr.Err == syscall.EHOSTUNREACH {
-			return false
-		}
-	}
-	return true
-}
-
-var hccAllocator healthcheckClientAllocator = &egressIPHealthcheckClientAllocator{}
-
 // egressNode is a cache helper used for egress IP assignment, representing an egress node
 type egressNode struct {
 	egressIPConfig     *util.ParsedNodeEgressIPConfiguration
-	mgmtIPs            []net.IP
 	allocations        map[string]string
-	healthClient       healthcheck.EgressIPHealthClient
+	health             healthcheck.HealthState
 	isReady            bool
-	isReachable        bool
 	isEgressAssignable bool
 	name               string
 }
@@ -370,12 +304,6 @@ type egressIPClusterController struct {
 	allocator allocator
 	// watchFactory watching k8s objects
 	watchFactory *factory.WatchFactory
-	// EgressIP Node reachability total timeout configuration
-	egressIPTotalTimeout int
-	// reachability check interval
-	reachabilityCheckInterval time.Duration
-	// EgressIP Node reachability gRPC port (0 means it should use dial instead)
-	egressIPNodeHealthCheckPort int
 	// retry framework for Egress nodes
 	retryEgressNodes *objretry.RetryFramework
 	// retry framework for egress IP
@@ -388,9 +316,16 @@ type egressIPClusterController struct {
 	egressIPHandler *factory.Handler
 	// cloudPrivateIPConfig events factory handler
 	cloudPrivateIPConfigHandler *factory.Handler
+
+	healthStateProvider healthcheck.Provider
 }
 
-func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *egressIPClusterController {
+func newEgressIPController(
+	ovnClient *util.OVNClusterManagerClientset,
+	wf *factory.WatchFactory,
+	healthStateProvider healthcheck.Provider,
+	recorder record.EventRecorder,
+) *egressIPClusterController {
 	kube := &kube.KubeOVN{
 		Kube:               kube.Kube{KClient: ovnClient.KubeClient},
 		EIPClient:          ovnClient.EgressIPClient,
@@ -406,9 +341,7 @@ func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *facto
 		allocator:                         allocator{&sync.Mutex{}, make(map[string]*egressNode)},
 		watchFactory:                      wf,
 		recorder:                          recorder,
-		egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
-		reachabilityCheckInterval:         egressIPReachabilityCheckInterval,
-		egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
+		healthStateProvider:               healthStateProvider,
 		stopChan:                          make(chan struct{}),
 	}
 	eIPC.initRetryFramework()
@@ -440,6 +373,13 @@ func (eIPC *egressIPClusterController) newRetryFramework(objectType reflect.Type
 
 func (eIPC *egressIPClusterController) Start() error {
 	var err error
+
+	eIPC.healthStateProvider.Register(healthcheck.ConsumerAdaptor(
+		"Egress IP",
+		func(node string) { eIPC.requeueNode(node) },
+		func(node string) bool { return eIPC.monitorHealthState(node) },
+	))
+
 	// In cluster manager, we only need to watch for egressNodes, egressIPs
 	// and cloudPrivateIPConfig
 	if eIPC.egressNodeHandler, err = eIPC.WatchEgressNodes(); err != nil {
@@ -453,12 +393,7 @@ func (eIPC *egressIPClusterController) Start() error {
 			return err
 		}
 	}
-	if config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout == 0 {
-		klog.V(2).Infof("EgressIP node reachability check disabled")
-	} else if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort != 0 {
-		klog.Infof("EgressIP node reachability enabled and using gRPC port %d",
-			config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
-	}
+
 	return nil
 }
 
@@ -506,7 +441,8 @@ func (eIPC *egressIPClusterController) getSortedEgressData() ([]*egressNode, map
 	assignableNodes := []*egressNode{}
 	allAllocations := make(map[string]egressIPNodeStatus)
 	for _, eNode := range eIPC.allocator.cache {
-		if eNode.isEgressAssignable && eNode.isReady && eNode.isReachable {
+		isAvailable := eNode.health == healthcheck.AVAILABLE
+		if eNode.isEgressAssignable && eNode.isReady && isAvailable {
 			assignableNodes = append(assignableNodes, eNode)
 		}
 		for ip, eipName := range eNode.allocations {
@@ -517,11 +453,6 @@ func (eIPC *egressIPClusterController) getSortedEgressData() ([]*egressNode, map
 		return len(assignableNodes[i].allocations) < len(assignableNodes[j].allocations)
 	})
 	return assignableNodes, allAllocations
-}
-
-func (eIPC *egressIPClusterController) initEgressNodeReachability(nodes []interface{}) error {
-	go eIPC.checkEgressNodesReachability()
-	return nil
 }
 
 func (eIPC *egressIPClusterController) setNodeEgressAssignable(nodeName string, isAssignable bool) {
@@ -547,125 +478,6 @@ func (eIPC *egressIPClusterController) isEgressNodeReady(egressNode *v1.Node) bo
 	return false
 }
 
-func isReachableLegacy(node string, mgmtIPs []net.IP, totalTimeout int) bool {
-	var retryTimeOut, initialRetryTimeOut time.Duration
-
-	numMgmtIPs := len(mgmtIPs)
-	if numMgmtIPs == 0 {
-		return false
-	}
-
-	switch totalTimeout {
-	// Check if we need to do node reachability check
-	case 0:
-		return true
-	case 1:
-		// Using time duration for initial retry with 700/numIPs msec and retry of 100/numIPs msec
-		// to ensure total wait time will be in range with the configured value including a sleep of 100msec between attempts.
-		initialRetryTimeOut = time.Duration(700/numMgmtIPs) * time.Millisecond
-		retryTimeOut = time.Duration(100/numMgmtIPs) * time.Millisecond
-	default:
-		// Using time duration for initial retry with 900/numIPs msec
-		// to ensure total wait time will be in range with the configured value including a sleep of 100msec between attempts.
-		initialRetryTimeOut = time.Duration(900/numMgmtIPs) * time.Millisecond
-		retryTimeOut = initialRetryTimeOut
-	}
-
-	timeout := initialRetryTimeOut
-	endTime := time.Now().Add(time.Second * time.Duration(totalTimeout))
-	for time.Now().Before(endTime) {
-		for _, ip := range mgmtIPs {
-			if dialer.dial(ip, timeout) {
-				return true
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-		timeout = retryTimeOut
-	}
-	klog.Errorf("Failed reachability check for %s", node)
-	return false
-}
-
-// checkEgressNodesReachability continuously checks if all nodes used for egress
-// IP assignment are reachable, and updates the nodes following the result. This
-// is important because egress IP is based upon routing traffic to these nodes,
-// and if they aren't reachable we shouldn't be using them for egress IP.
-func (eIPC *egressIPClusterController) checkEgressNodesReachability() {
-	timer := time.NewTicker(eIPC.reachabilityCheckInterval)
-	defer timer.Stop()
-	for {
-		select {
-		case <-timer.C:
-			checkEgressNodesReachabilityIterate(eIPC)
-		case <-eIPC.stopChan:
-			klog.V(5).Infof("Stop channel got triggered: will stop checkEgressNodesReachability")
-			return
-		}
-	}
-}
-
-func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
-	reAddOrDelete := map[string]bool{}
-	eIPC.allocator.Lock()
-	for _, eNode := range eIPC.allocator.cache {
-		if eNode.isEgressAssignable && eNode.isReady {
-			wasReachable := eNode.isReachable
-			isReachable := eIPC.isReachable(eNode.name, eNode.mgmtIPs, eNode.healthClient)
-			if wasReachable && !isReachable {
-				reAddOrDelete[eNode.name] = true
-			} else if !wasReachable && isReachable {
-				reAddOrDelete[eNode.name] = false
-			}
-			eNode.isReachable = isReachable
-		} else {
-			// End connection (if there is one). This is important because
-			// it accounts for cases where node is not labelled with
-			// egress-assignable, so connection is no longer needed. Calling
-			// this on a already disconnected node is expected to be cheap.
-			eNode.healthClient.Disconnect()
-		}
-	}
-	eIPC.allocator.Unlock()
-	for nodeName, shouldDelete := range reAddOrDelete {
-		if shouldDelete {
-			metrics.RecordEgressIPUnreachableNode()
-			klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", nodeName)
-			if err := eIPC.deleteEgressNode(nodeName); err != nil {
-				klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", nodeName, err)
-			}
-		} else {
-			klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
-			nodeToAdd, err := eIPC.watchFactory.GetNode(nodeName)
-			if err != nil {
-				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
-			} else if err := eIPC.retryEgressNodes.AddRetryObjWithAddNoBackoff(nodeToAdd); err != nil {
-				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
-			}
-		}
-	}
-}
-
-func (eIPC *egressIPClusterController) isReachable(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool {
-	// Check if we need to do node reachability check
-	if eIPC.egressIPTotalTimeout == 0 {
-		return true
-	}
-
-	if eIPC.egressIPNodeHealthCheckPort == 0 {
-		return isReachableLegacy(nodeName, mgmtIPs, eIPC.egressIPTotalTimeout)
-	}
-	return isReachableViaGRPC(mgmtIPs, healthClient, eIPC.egressIPNodeHealthCheckPort, eIPC.egressIPTotalTimeout)
-}
-
-func (eIPC *egressIPClusterController) isEgressNodeReachable(egressNode *v1.Node) bool {
-	eIPC.allocator.Lock()
-	defer eIPC.allocator.Unlock()
-	if eNode, exists := eIPC.allocator.cache[egressNode.Name]; exists {
-		return eNode.isReachable || eIPC.isReachable(eNode.name, eNode.mgmtIPs, eNode.healthClient)
-	}
-	return false
-}
-
 func (eIPC *egressIPClusterController) setNodeEgressReady(nodeName string, isReady bool) {
 	eIPC.allocator.Lock()
 	defer eIPC.allocator.Unlock()
@@ -678,13 +490,13 @@ func (eIPC *egressIPClusterController) setNodeEgressReady(nodeName string, isRea
 	}
 }
 
-func (eIPC *egressIPClusterController) setNodeEgressReachable(nodeName string, isReachable bool) {
+func (eIPC *egressIPClusterController) setNodeEgressHealth(nodeName string, health healthcheck.HealthState) {
 	eIPC.allocator.Lock()
 	defer eIPC.allocator.Unlock()
 	if eNode, exists := eIPC.allocator.cache[nodeName]; exists {
-		eNode.isReachable = isReachable
+		eNode.health = health
 		// see setNodeEgressAssignable
-		if !isReachable {
+		if health == healthcheck.UNREACHABLE {
 			eNode.allocations = make(map[string]string)
 		}
 	}
@@ -778,18 +590,14 @@ func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 
 // deleteNodeForEgress remove the default allow logical router policies for the
 // node and removes the node from the allocator cache.
-func (eIPC *egressIPClusterController) deleteNodeForEgress(node *v1.Node) {
+func (eIPC *egressIPClusterController) deleteNodeForEgress(nodeName string) {
 	eIPC.allocator.Lock()
-	if eNode, exists := eIPC.allocator.cache[node.Name]; exists {
-		eNode.healthClient.Disconnect()
-	}
-	delete(eIPC.allocator.cache, node.Name)
+	delete(eIPC.allocator.cache, nodeName)
 	eIPC.allocator.Unlock()
 }
 
 func (eIPC *egressIPClusterController) deleteEgressNode(nodeName string) error {
 	var errorAggregate []error
-	klog.V(5).Infof("Egress node: %s about to be removed", nodeName)
 	// Since the node has been labelled as "not usable" for egress IP
 	// assignments we need to find all egress IPs which have an assignment to
 	// it, and move them elsewhere.
@@ -840,13 +648,10 @@ func (eIPC *egressIPClusterController) initEgressIPAllocator(node *v1.Node) (err
 		eIPC.allocator.cache[node.Name] = &egressNode{
 			name:           node.Name,
 			egressIPConfig: parsedEgressIPConfig,
-			mgmtIPs:        mgmtIPs,
 			allocations:    make(map[string]string),
-			healthClient:   hccAllocator.allocate(node.Name),
 		}
 	} else {
 		eNode.egressIPConfig = parsedEgressIPConfig
-		eNode.mgmtIPs = mgmtIPs
 	}
 	return nil
 }
@@ -1438,8 +1243,8 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 				klog.Errorf("Allocator error: EgressIP: %s assigned to node: %s which does not have egress label, will attempt rebalancing", name, eIPStatus.Node)
 				validAssignment = false
 			}
-			if !eNode.isReachable {
-				klog.Errorf("Allocator error: EgressIP: %s assigned to node: %s which is not reachable, will attempt rebalancing", name, eIPStatus.Node)
+			if eNode.health == healthcheck.UNREACHABLE {
+				klog.Errorf("Allocator error: EgressIP: %s assigned to node: %s which is unreachable, will attempt rebalancing", name, eIPStatus.Node)
 				validAssignment = false
 			}
 			if !eNode.isReady {
@@ -1722,4 +1527,93 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 		}
 	}
 	return resyncs, nil
+}
+
+func (eIPC *egressIPClusterController) requeueNode(nodeName string) {
+	node, err := eIPC.watchFactory.GetNode(nodeName)
+	if err != nil && !apierrors.IsNotFound(err) {
+		klog.Warningf("Failed while requeueing node %s: %v", nodeName, err)
+		return
+	}
+	err = eIPC.retryEgressNodes.AddRetryObjWithAddNoBackoff(node)
+	if err != nil {
+		klog.Warningf("Failed while requeueing node %s: %v", nodeName, err)
+		return
+	}
+	eIPC.retryEgressNodes.RequestRetryObjs()
+}
+
+func (eIPC *egressIPClusterController) monitorHealthState(nodeName string) bool {
+	eIPC.allocator.Lock()
+	defer eIPC.allocator.Unlock()
+	egressNode := eIPC.allocator.cache[nodeName]
+	return egressNode != nil && egressNode.isEgressAssignable && egressNode.isReady
+}
+
+func (eIPC *egressIPClusterController) reconcileNode(nodeName string) error {
+	start := time.Now()
+	klog.V(5).Infof("Reconciling Egress IP node %s", nodeName)
+	defer func() {
+		klog.V(5).Infof("Finished reconciling Egress IP node %s: %v", nodeName, time.Since(start))
+	}()
+
+	node, err := eIPC.watchFactory.GetNode(nodeName)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	if node == nil {
+		eIPC.deleteNodeForEgress(nodeName)
+		if err := eIPC.deleteEgressNode(nodeName); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// EgressIP is not supported on hybrid overlay nodes
+	if util.NoHostSubnet(node) {
+		return nil
+	}
+
+	// Initialize the allocator on every update,
+	// ovnkube-node/cloud-network-config-controller will make sure to
+	// annotate the node with the egressIPConfig, but that might have
+	// happened after we processed the ADD for that object, hence keep
+	// retrying for all UPDATEs.
+	if err := eIPC.initEgressIPAllocator(node); err != nil {
+		klog.Warningf("Egress node initialization error: %v", err)
+	}
+
+	nodeEgressLabel := util.GetNodeEgressLabel()
+	nodeLabels := node.GetLabels()
+	_, hasEgressLabel := nodeLabels[nodeEgressLabel]
+	eIPC.setNodeEgressAssignable(node.Name, hasEgressLabel)
+	if !hasEgressLabel {
+		return eIPC.deleteEgressNode(nodeName)
+	}
+
+	isReady := eIPC.isEgressNodeReady(node)
+	eIPC.setNodeEgressReady(node.Name, isReady)
+	if hasEgressLabel && isReady {
+		eIPC.healthStateProvider.MonitorHealthState(node.Name)
+	}
+
+	health := eIPC.healthStateProvider.GetHealthState(node.Name)
+	eIPC.setNodeEgressHealth(node.Name, health)
+	isAvailable := health == healthcheck.AVAILABLE
+	isUnreachable := health == healthcheck.UNREACHABLE
+
+	if isAvailable && isReady {
+		if err := eIPC.addEgressNode(node.Name); err != nil {
+			return err
+		}
+	}
+
+	if isUnreachable || !isReady {
+		if err := eIPC.deleteEgressNode(node.Name); err != nil {
+			return err
+		}
+	}
+
+	return eIPC.reconcileSecondaryHostNetworkEIPs(node)
 }

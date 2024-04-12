@@ -78,7 +78,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		cm.eIPC = newEgressIPController(ovnClient, wf, recorder)
+		cm.eIPC = newEgressIPController(ovnClient, wf, healthcheck.GetProvider(), recorder)
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
