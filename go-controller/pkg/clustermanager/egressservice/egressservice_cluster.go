@@ -2,17 +2,16 @@ package egressservice
 
 import (
 	"fmt"
-	"net"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/listers/egressservice/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
@@ -67,7 +66,7 @@ type Controller struct {
 	nodesQueue           workqueue.RateLimitingInterface
 	nodesSynced          cache.InformerSynced
 
-	IsReachable func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool // TODO: make a universal cache instead
+	healthStateProvider healthcheck.Provider
 }
 
 type svcState struct {
@@ -77,23 +76,13 @@ type svcState struct {
 }
 
 type nodeState struct {
-	name             string
-	labels           map[string]string
-	mgmtIPs          []net.IP
-	v4MgmtIP         net.IP
-	v6MgmtIP         net.IP
-	v4InternalNodeIP net.IP
-	v6InternalNodeIP net.IP
-	healthClient     healthcheck.EgressIPHealthClient
-	allocations      map[string]*svcState // svc key -> state
-	reachable        bool
-	draining         bool
+	name        string
+	labels      map[string]string
+	allocations map[string]*svcState // svc key -> state
+	draining    bool
 }
 
-func NewController(
-	ovnClient *util.OVNClusterManagerClientset,
-	wf *factory.WatchFactory,
-	isReachable func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool) (*Controller, error) {
+func NewController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, healthStateProvider healthcheck.Provider) (*Controller, error) {
 	klog.Info("Setting up event handlers for Egress Services")
 
 	wg := &sync.WaitGroup{}
@@ -103,12 +92,12 @@ func NewController(
 			EgressServiceClient: ovnClient.EgressServiceClient,
 		},
 		watchFactory:        wf,
-		IsReachable:         isReachable,
 		stopCh:              make(chan struct{}),
 		wg:                  wg,
 		services:            map[string]*svcState{},
 		nodes:               map[string]*nodeState{},
 		unallocatedServices: map[string]labels.Selector{},
+		healthStateProvider: healthStateProvider,
 	}
 
 	esInformer := wf.EgressServiceInformer()
@@ -190,6 +179,12 @@ func (c *Controller) Start(threadiness int) error {
 		klog.Errorf("Failed to repair Egress Services entries: %v", err)
 	}
 
+	c.healthStateProvider.Register(healthcheck.ConsumerAdaptor(
+		"Egress Service",
+		func(node string) { c.healthStateChanged(node) },
+		func(node string) bool { return c.monitorHealthState(node) },
+	))
+
 	for i := 0; i < threadiness; i++ {
 		c.wg.Add(1)
 		go func() {
@@ -210,7 +205,6 @@ func (c *Controller) Start(threadiness int) error {
 		}()
 	}
 
-	go c.checkNodesReachability()
 	return nil
 }
 
@@ -600,6 +594,7 @@ func (c *Controller) syncEgressService(key string) error {
 		node.allocations[key] = newState
 		c.nodes[node.name] = node
 		state = newState
+		c.healthStateProvider.MonitorHealthState(node.name)
 	}
 
 	state.selector = selector
@@ -646,7 +641,11 @@ func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcSt
 		if err := c.removeNodeServiceLabel(namespace, name, svcState.node); err != nil {
 			return fmt.Errorf("failed to remove svc node label for %s, err: %v", svcState.node, err)
 		}
+
 		delete(nodeState.allocations, key)
+		if len(nodeState.allocations) == 0 {
+			delete(c.nodes, svcState.node)
+		}
 	}
 
 	delete(c.services, key)

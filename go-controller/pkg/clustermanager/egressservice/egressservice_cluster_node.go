@@ -2,17 +2,13 @@ package egressservice
 
 import (
 	"fmt"
-	"net"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/healthcheck"
 	corev1 "k8s.io/api/core/v1"
-	utilnet "k8s.io/utils/net"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
@@ -22,59 +18,15 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// TODO: https://github.com/ovn-org/ovn-kubernetes/pull/3135#discussion_r960042582
-// Currently we are creating another goroutine that pretty much does what EgressIP
-// does to monitor nodes' reachability.
-// Ideally we should move the healthchecking logic from these controllers and make
-// a universal cache that both of them can query to obtain the "health" status of the nodes.
-
-// Similarly to the EgressIP controller, we loop over all of the nodes that have
-// allocations and check if they are still usable.
-func (c *Controller) checkNodesReachability() {
-	timer := time.NewTicker(5 * time.Second)
-	defer timer.Stop()
-	for {
-		select {
-		case <-timer.C:
-			c.CheckNodesReachabilityIterate()
-		case <-c.stopCh:
-			klog.V(5).Infof("Stop channel got triggered: will stop CheckNodesReachability")
-			return
-		}
-	}
+func (c *Controller) healthStateChanged(node string) {
+	c.nodesQueue.Add(node)
 }
 
-func (c *Controller) CheckNodesReachabilityIterate() {
+func (c *Controller) monitorHealthState(node string) bool {
 	c.Lock()
 	defer c.Unlock()
-
-	nodesToFree := []*nodeState{}
-	for _, node := range c.nodes {
-		wasReachable := node.reachable
-		isReachable := c.IsReachable(node.name, node.mgmtIPs, node.healthClient)
-		node.reachable = isReachable
-		if wasReachable && !isReachable {
-			// The node is not reachable, we need to drain it and reassign its allocations
-			c.nodesQueue.Add(node.name)
-			continue
-		}
-
-		startedDrain := node.draining
-		fullyDrained := len(node.allocations) == 0
-		if startedDrain && fullyDrained && isReachable {
-			// We make the node usable for new allocations only when
-			// it has finished draining and is reachable again.
-			// As long it is in the cache and in draining state it can't
-			// be chosen for new allocations.
-			nodesToFree = append(nodesToFree, node)
-		}
-	}
-
-	for _, node := range nodesToFree {
-		delete(c.nodes, node.name)
-		node.healthClient.Disconnect()
-		c.nodesQueue.Add(node.name) // Since it is available we queue it as it might match unallocated services
-	}
+	_, monitor := c.nodes[node]
+	return monitor
 }
 
 func (c *Controller) onNodeAdd(obj interface{}) {
@@ -190,16 +142,19 @@ func (c *Controller) syncNode(key string) error {
 				}
 			}
 			delete(c.nodes, nodeName)
-			state.healthClient.Disconnect()
 		}
 
 		return nil
 	}
 
+	healthState := c.healthStateProvider.GetHealthState(n.Name)
+	nodeAvailable := healthState <= healthcheck.AVAILABLE
+	nodeUnreachable := healthState == healthcheck.UNREACHABLE
 	nodeReady := nodeIsReady(n)
 	nodeLabels := n.Labels
+
 	if state == nil {
-		if nodeReady {
+		if nodeReady && nodeAvailable {
 			// The node has no allocated services and is ready, this means unallocated services whose labels match
 			// the node's labels can be allocated to it.
 			for svcKey, selector := range c.unallocatedServices {
@@ -226,22 +181,19 @@ func (c *Controller) syncNode(key string) error {
 		// The node is not ready but had allocated services, we drain it
 		// and attempt reallocating its services, deleting it from our cache
 		// because we don't care about its reachability status until it becomes ready.
-		state.draining = true
 		for svcKey, svcState := range state.allocations {
 			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
 				return err
 			}
 		}
 		delete(c.nodes, nodeName)
-		state.healthClient.Disconnect()
 		return nil
 	}
 
-	if !state.reachable || state.draining {
+	if nodeUnreachable || state.draining {
 		// The node has allocated services but is not suitable to run them anymore, we drain it
 		// and attempt reallocating its services similarly to the "n == nil && state != nil" path.
 		// When it is fully drained and reachable again it will be requeued.
-		state.draining = true
 		for svcKey, svcState := range state.allocations {
 			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
 				return err
@@ -286,9 +238,11 @@ func (c *Controller) syncNode(key string) error {
 
 	// The node might match the selectors of an unallocated service.
 	// If it does, we queue that service to attempt allocating it to this node.
-	for svcKey, selector := range c.unallocatedServices {
-		if selector.Matches(labels.Set(nodeLabels)) {
-			c.egressServiceQueue.Add(svcKey)
+	if nodeAvailable {
+		for svcKey, selector := range c.unallocatedServices {
+			if selector.Matches(labels.Set(nodeLabels)) {
+				c.egressServiceQueue.Add(svcKey)
+			}
 		}
 	}
 
@@ -302,30 +256,7 @@ func (c *Controller) nodeStateFor(name string) (*nodeState, error) {
 		return nil, err
 	}
 
-	nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse node %s subnets annotation %v", node.Name, err)
-	}
-
-	mgmtIPs := make([]net.IP, len(nodeSubnets))
-	for i, subnet := range nodeSubnets {
-		mgmtIPs[i] = util.GetNodeManagementIfAddr(subnet).IP
-	}
-
-	var v4IP, v6IP net.IP
-	for _, ip := range mgmtIPs {
-		if utilnet.IsIPv4(ip) {
-			v4IP = ip
-			continue
-		}
-		v6IP = ip
-	}
-
-	v4NodeAddr, v6NodeAddr := util.GetNodeInternalAddrs(node)
-
-	return &nodeState{name: name, mgmtIPs: mgmtIPs, v4MgmtIP: v4IP, v6MgmtIP: v6IP, v4InternalNodeIP: v4NodeAddr, v6InternalNodeIP: v6NodeAddr,
-		healthClient: healthcheck.NewEgressIPHealthClient(name), allocations: map[string]*svcState{}, labels: node.Labels,
-		reachable: true, draining: false}, nil
+	return &nodeState{name: name, allocations: map[string]*svcState{}, labels: node.Labels}, nil
 }
 
 // Returns the names of all of the nodes in the nodes cache that match the given selector
@@ -385,16 +316,18 @@ func (c *Controller) selectNodeFor(selector labels.Selector) (*nodeState, error)
 		return nil, err
 	}
 
-	allReadyNodes := sets.New[string]()
+	allAvailableNodes := sets.New[string]()
 	for _, n := range nodes {
-		if nodeIsReady(n) {
-			allReadyNodes.Insert(n.Name)
+		healthState := c.healthStateProvider.GetHealthState(n.Name)
+		nodeAvailable := healthState <= healthcheck.AVAILABLE
+		if nodeIsReady(n) && nodeAvailable {
+			allAvailableNodes.Insert(n.Name)
 		}
 	}
 
 	cachedNames, cachedStates := c.cachedNodesFor(selector)
 
-	freeNodes := allReadyNodes.Difference(cachedNames)
+	freeNodes := allAvailableNodes.Difference(cachedNames)
 	if freeNodes.Len() > 0 {
 		// We have a matching node with 0 allocations, we can just use it
 		// instead of using one from the cache.
@@ -410,7 +343,8 @@ func (c *Controller) selectNodeFor(selector labels.Selector) (*nodeState, error)
 	})
 
 	for _, node := range cachedStates {
-		if !node.draining {
+		_, available := allAvailableNodes[node.name]
+		if available && !node.draining {
 			return node, nil
 		}
 	}

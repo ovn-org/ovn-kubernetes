@@ -9,9 +9,9 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -1451,16 +1451,13 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 					},
 				}
 
-				ginkgo.By("modifying the controller's IsReachable func to return false on the first call and true for the second")
-				count := 0
+				// initially egress service will allocate to nodes with unknown
+				// state
+				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.UNKNOWN)
 
-				isReachable = func(nodeName string, _ []net.IP, _ healthcheck.EgressIPHealthClient) bool {
-					count++
-					return count == 2
-				}
 				fakeCM.start(objs...)
 
-				gomega.Eventually(func() error {
+				errorIfNotAllocated := func() error {
 					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
@@ -1485,11 +1482,9 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 					}
 
 					return nil
-				}).ShouldNot(gomega.HaveOccurred())
+				}
 
-				ginkgo.By("calling the reachability check which will return that the node is unreachable it will be drained")
-				fakeCM.esvc.CheckNodesReachabilityIterate()
-				gomega.Eventually(func() error {
+				errorIfAllocated := func() error {
 					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
@@ -1513,36 +1508,27 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 					}
 
 					return nil
-				}).ShouldNot(gomega.HaveOccurred())
+				}
 
-				ginkgo.By("calling the reachability check which will return that the node is reachable the service will be reallocated")
-				fakeCM.esvc.CheckNodesReachabilityIterate()
-				gomega.Eventually(func() error {
-					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
-					if err != nil {
-						return err
-					}
+				// initially allocated
+				ginkgo.By("initally allocating the node with UNKNOWN availability")
+				gomega.Eventually(errorIfNotAllocated).ShouldNot(gomega.HaveOccurred())
 
-					if es.Status.Host != node1.Name {
-						return fmt.Errorf("expected svc1's host value %s to be node1", es.Status.Host)
-					}
+				// stays allocated
+				ginkgo.By("informing the node has become AVAILABLE so that the service stays allocated")
+				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.AVAILABLE)
+				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
+				gomega.Consistently(errorIfNotAllocated).ShouldNot(gomega.HaveOccurred())
 
-					node1ExpectedLabels := map[string]string{
-						"kubernetes.io/hostname":                            "node1",
-						fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix): "",
-					}
+				ginkgo.By("informing the node has become UNREACHABLE so that it will be drained")
+				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.UNREACHABLE)
+				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
+				gomega.Eventually(errorIfAllocated).ShouldNot(gomega.HaveOccurred())
 
-					node1, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
-					if err != nil {
-						return err
-					}
-
-					if !reflect.DeepEqual(node1.Labels, node1ExpectedLabels) {
-						return fmt.Errorf("expected node1's labels %v to be equal %v", node1.Labels, node1ExpectedLabels)
-					}
-
-					return nil
-				}).ShouldNot(gomega.HaveOccurred())
+				ginkgo.By("informing the node has become AVAILABLE so that the service will be reallocated")
+				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.AVAILABLE)
+				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
+				gomega.Eventually(errorIfNotAllocated).ShouldNot(gomega.HaveOccurred())
 
 				return nil
 			}
