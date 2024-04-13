@@ -1077,7 +1077,7 @@ var _ = ginkgo.Describe("e2e network policy hairpinning validation", func() {
 
 		ginkgo.By("verify hairpinned connection from a pod to its own service is allowed")
 		hostname := pokeEndpoint(namespaceName, pod1.Name, "http", svcIP, serviceHTTPPort, "hostname")
-		framework.ExpectEqual(hostname, pod1.Name, fmt.Sprintf("returned client: %v was not correct", hostname))
+		gomega.Expect(hostname).To(gomega.Equal(pod1.Name), fmt.Sprintf("returned client: %v was not correct", hostname))
 
 		ginkgo.By("verify connection to another pod is denied")
 		err = pokePod(f, pod1.Name, pod2.Status.PodIP)
@@ -1205,8 +1205,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 								break
 							}
 						}
-						framework.ExpectEqual(valid, true,
-							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, nodesHostnames, responses))
+						gomega.Expect(valid).To(gomega.Equal(true), fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, nodesHostnames, responses))
 					}
 				}
 			}
@@ -1358,8 +1357,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 										break
 									}
 								}
-								framework.ExpectEqual(valid, true,
-									fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", nodeName, nodesHostnames, responses))
+								gomega.Expect(valid).To(gomega.Equal(true), fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", nodeName, nodesHostnames, responses))
 							}
 						}
 					}
@@ -1429,8 +1427,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							}
 
 						}
-						framework.ExpectEqual(valid, true,
-							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
+						gomega.Expect(valid).To(gomega.Equal(true), fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
 					}
 				}
 			}
@@ -1477,7 +1474,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			for _, externalAddress := range addresses {
 				ginkgo.By(fmt.Sprintf("Making sure that the neighbor entry is stable for endpoint IP %s", externalAddress))
 				valid := isNeighborEntryStable(clientContainerName, externalAddress, 10)
-				framework.ExpectEqual(valid, true, "Validation failed for neighbor entry of external address: %s", externalAddress)
+				gomega.Expect(valid).To(gomega.Equal(true), "Validation failed for neighbor entry of external address: %s", externalAddress)
 
 				for _, protocol := range []string{"http", "udp"} {
 					externalPort := int32(clusterHTTPPort)
@@ -1490,7 +1487,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							protocol,
 							externalPort))
 					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
-					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
+					gomega.Expect(valid).To(gomega.Equal(true), "Validation failed for external address: %s", externalAddress)
 				}
 			}
 
@@ -1502,7 +1499,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			for _, externalAddress := range addresses {
 				ginkgo.By(fmt.Sprintf("Making sure that the neighbor entry is stable for endpoint IP %s", externalAddress))
 				valid := isNeighborEntryStable(clientContainerName, externalAddress, 10)
-				framework.ExpectEqual(valid, true, "Validation failed for neighbor entry of external address: %s", externalAddress)
+				gomega.Expect(valid).To(gomega.Equal(true), "Validation failed for neighbor entry of external address: %s", externalAddress)
 
 				for _, protocol := range []string{"http", "udp"} {
 					externalPort := int32(clusterHTTPPort2)
@@ -1515,7 +1512,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							protocol,
 							externalPort))
 					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
-					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
+					gomega.Expect(valid).To(gomega.Equal(true), "Validation failed for external address: %s", externalAddress)
 				}
 			}
 		})
@@ -1637,7 +1634,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							break
 						}
 					}
-					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
+					gomega.Expect(valid).To(gomega.Equal(true), "Validation failed for external address: %s", externalAddress)
 				}
 			}
 		})
@@ -1775,7 +1772,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 							}
 
 						}
-						framework.ExpectEqual(valid, true,
+						gomega.Expect(valid).To(gomega.Equal(true),
 							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
 					}
 				}
@@ -1901,7 +1898,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 				if err != nil {
 					framework.Failf("could not lookup ovs %s targets: %v", protocolStr, stderr)
 				}
-				framework.ExpectEmpty(targets)
+				gomega.Expect(targets).To(gomega.BeEmpty())
 			}
 		},
 		// This is a long test (~5 minutes per run), so let's just validate netflow v5

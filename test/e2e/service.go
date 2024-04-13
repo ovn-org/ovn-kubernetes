@@ -1126,9 +1126,9 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
 		framework.ExpectNoError(err, "failed to parse client ip:port")
 
 		if isIpv6 {
-			framework.ExpectEqual(clientIP, V6LBHairpinMasqueradeIP, fmt.Sprintf("returned client ipv6: %v was not correct", clientIP))
+			gomega.Expect(clientIP).To(gomega.Equal(V6LBHairpinMasqueradeIP), fmt.Sprintf("returned client ipv6: %v was not correct", clientIP))
 		} else {
-			framework.ExpectEqual(clientIP, V4LBHairpinMasqueradeIP, fmt.Sprintf("returned client ipv4: %v was not correct", clientIP))
+			gomega.Expect(clientIP).To(gomega.Equal(V4LBHairpinMasqueradeIP), fmt.Sprintf("returned client ipv4: %v was not correct", clientIP))
 		}
 	})
 
@@ -1159,7 +1159,7 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
 		clientIP, _, err = net.SplitHostPort(clientIP)
 		framework.ExpectNoError(err, "failed to parse client ip:port")
 
-		framework.ExpectEqual(clientIP, nodeIP, fmt.Sprintf("returned client: %v was not correct", clientIP))
+		gomega.Expect(clientIP).To(gomega.Equal(nodeIP), fmt.Sprintf("returned client: %v was not correct", clientIP))
 	})
 
 })
@@ -1405,7 +1405,7 @@ metadata:
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
 
 		numberOfETPRules := pokeIPTableRules(backendNodeName, "OVN-KUBE-EXTERNALIP")
-		framework.ExpectEqual(numberOfETPRules, 5)
+		gomega.Expect(numberOfETPRules).To(gomega.Equal(5))
 
 		// curl the LB service from the client container to trigger BGP route advertisement
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
@@ -1562,13 +1562,13 @@ spec:
 		framework.ExpectNoError(err)
 
 		output := e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.allocateLoadBalancerNodePorts}'")
-		framework.ExpectEqual(output, "'false'")
+		gomega.Expect(output).To(gomega.Equal("'false'"))
 
 		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/externalTrafficPolicy", "Local")
 		framework.ExpectNoError(err)
 
 		output = e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.externalTrafficPolicy}'")
-		framework.ExpectEqual(output, "'Local'")
+		gomega.Expect(output).To(gomega.Equal("'Local'"))
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
@@ -1627,7 +1627,7 @@ spec:
 		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/externalTrafficPolicy", "Local")
 		framework.ExpectNoError(err)
 		output := e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.externalTrafficPolicy}'")
-		framework.ExpectEqual(output, "'Local'")
+		gomega.Expect(output).To(gomega.Equal("'Local'"))
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
 		ginkgo.By("1 nodeIP route is advertised correctly by metalb BGP routes")
@@ -1695,9 +1695,9 @@ spec:
 		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/sessionAffinity", "ClientIP")
 		framework.ExpectNoError(err)
 		output = e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.sessionAffinity}'")
-		framework.ExpectEqual(output, "'ClientIP'")
+		gomega.Expect(output).To(gomega.Equal("'ClientIP'"))
 		output = e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.sessionAffinityConfig.clientIP.timeoutSeconds}'")
-		framework.ExpectEqual(output, "'10800'")
+		gomega.Expect(output).To(gomega.Equal("'10800'"))
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
 		ginkgo.By("by sending a UDP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)

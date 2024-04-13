@@ -337,7 +337,7 @@ for node in $MASTER_NODES; do
 done
 
 # redownload the e2e test binaries if their version differs
-K8S_VERSION="v1.28.3"
+K8S_VERSION="v1.29.2"
 E2E_VERSION=$(/usr/local/bin/e2e.test --version)
 if [[ "$E2E_VERSION" != "$K8S_VERSION" ]]; then
    echo "found version $E2E_VERSION of e2e binary, need version $K8S_VERSION ; will download it."
