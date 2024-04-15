@@ -1316,6 +1316,8 @@ metadata:
 			framework.Logf("Re-create the default BGP Advertisement configuration for other tests")
 			e2ekubectl.RunKubectlOrDie("metallb-system", "apply", "-f", bgpEmptyYaml)
 		}()
+		e2ekubectl.RunKubectlOrDie("default", "delete", "eip", "egressip", "--ignore-not-found=true")
+		e2ekubectl.RunKubectlOrDie("default", "label", "node", nonBackendNodeName, "k8s.ovn.org/egress-assignable-")
 	})
 
 	ginkgo.It("Should ensure connectivity works on an external service when mtu changes in intermediate node", func() {
@@ -1709,6 +1711,176 @@ spec:
 		time.Sleep(time.Second * 10) // buffer to ensure all learn flows are created correctly after the previous drop
 
 		// OVN drops the 1st packet so let's be sure to another set of netcat connections at least to check the srcIP
+		output, err = runCommand(cmd...)
+		framework.ExpectNoError(err, "failed to connect to load balancer service")
+		framework.Logf("netcat command output %s", output)
+
+		// Check that sourceIP of the LBService is preserved
+		ginkgo.By("ensure the sourceIP of the external container is preserved!")
+		targetPodLogs, err = e2ekubectl.RunKubectl("default", "logs", "-l", "app=nginx", "--container", "udp-server")
+		framework.ExpectNoError(err, "failed to inspect logs in backend pods")
+		framework.Logf("%v", targetPodLogs)
+		if strings.Count(targetPodLogs, lbClientIPv4) >= 2 {
+			framework.Logf("found the expected srcIP %s!", lbClientIPv4)
+		} else if strings.Count(targetPodLogs, lbClientIPv6) >= 2 {
+			framework.Logf("found the expected srcIP %s!", lbClientIPv6)
+		} else {
+			framework.Failf("could not get expected srcIP!")
+		}
+	})
+	ginkgo.It("Should ensure load balancer service works when ETP=local and backend pods are also egressIP served pods", func() {
+		// TEST LOGIC: This test uses metaLB BGP for advertising routes towards 1 KIND ovnk cluster node
+		// (node where the service backend pods live) as potential candidate to reach the load balancer service (192.168.10.0 service VIP).
+		// There is also a FRR router that sits in front of the KIND cluster through which traffic flows to the service VIP.
+		// External client (name: lbclient container {installation details in kind.sh script}) tries to reach a
+		// load balancer service with VIP: 192.168.10.0 that has 4 backends running on one of the nodes in the cluster through
+		// the FRR router.
+		// -----------------       ------------------      VIP: 192.168.10.0  ---------------------
+		// |               |       |                |                         | ovn-control-plane |
+		// |   lbclient    |------>|   FRR router   |------> KIND cluster --> ---------------------
+		// |               |       |                |                         |    ovn-worker     |   (4 backend CNI pods running
+		// -----------------       ------------------                         ---------------------    on one of the nodes - say on ovn-worker -
+		//                                                                    |    ovn-worker2    |    serving lb service; they are also
+		//                                                                    ---------------------    served by EIP on primary network)
+		//
+		// So as an example here ovn-worker is where pods live and pods are served by EIP which is assigned on ovn-worker2
+		// Now we test ETP=local works as expected without EIP re-routes messing with the reply traffic:
+		// lbclient->FRR router->ovn-worker->br-ex->GR_ovn-worker->join->cluster-router->ovn-worker-switch->pod and response goes back
+		// same way without it getting re-routed to egressNode ovn-worker2
+		err := framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*120)
+		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an enpoint, err: %v", svcName, err))
+
+		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
+
+		ginkgo.By("patching service " + svcName + " to externalTrafficPolicy=local")
+		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/externalTrafficPolicy", "Local")
+		framework.ExpectNoError(err)
+		output := e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.externalTrafficPolicy}'")
+		gomega.Expect(output).To(gomega.Equal("'Local'"))
+		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
+
+		ginkgo.By("1 nodeIP route is advertised correctly by metalb BGP routes")
+		// since ETP=local; ensure only this node's IP route is advertised correctly by metalb BGP routes
+		// sample:
+		// 192.168.10.0 nhid 31 via 172.19.0.4 dev eth0 proto bgp metric 20
+		nodeIP, err := getNodeIP(f.ClientSet, backendNodeName)
+		framework.ExpectNoError(err, fmt.Sprintf("failed to get nodes's %s node ip address", backendNodeName))
+		framework.Logf("NodeIP of node %s is %s", backendNodeName, nodeIP)
+		cmd := []string{containerRuntime, "exec", routerContainer}
+
+		ipVer := ""
+		if utilnet.IsIPv6String(svcLoadBalancerIP) {
+			ipVer = " -6"
+		}
+		bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, svcLoadBalancerIP), " ")
+		cmd = append(cmd, bgpRouteCommand...)
+
+		gomega.Eventually(func() bool {
+			routes, err := runCommand(cmd...)
+			framework.ExpectNoError(err, "failed to get BGP routes from intermediary router")
+			framework.Logf("Routes in FRR %s", routes)
+			routeCount := 0
+			matchedRoute := ""
+			for _, route := range strings.Split(routes, "\n") {
+				match := strings.Contains(route, nodeIP)
+				if match {
+					framework.Logf("DEBUG: Matched route %s for pattern %s", route, nodeIP)
+					matchedRoute = route
+				}
+				if strings.Contains(route, "via") {
+					routeCount++
+				}
+			}
+			return routeCount == 1 && strings.Contains(matchedRoute, nodeIP)
+		}, 60*time.Second).Should(gomega.BeTrue())
+
+		ginkgo.By("by sending a UDP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
+		netcatCmd := fmt.Sprintf("echo hostname | nc -uv -w2 %s %d",
+			svcLoadBalancerIP,
+			endpointUDPPort,
+		)
+		cmd = []string{containerRuntime, "exec", clientContainer, "bash", "-x", "-c", netcatCmd}
+		framework.Logf("netcat command %s", cmd)
+		output, err = runCommand(cmd...)
+		framework.ExpectNoError(err, "failed to connect to load balancer service")
+		framework.Logf("netcat command output %s", output)
+
+		ginkgo.By("ensure the sourceIP of the external container is preserved!")
+		// Check that sourceIP of the LBService is preserved
+		targetPodLogs, err := e2ekubectl.RunKubectl("default", "logs", "-l", "app=nginx", "--container", "udp-server")
+		framework.ExpectNoError(err, "failed to inspect logs in backend pods")
+		framework.Logf("%v", targetPodLogs)
+		lbClientIPv4, lbClientIPv6 := getContainerAddressesForNetwork(clientContainer, "clientnet")
+		framework.Logf("%v", lbClientIPv4)
+		if strings.Contains(targetPodLogs, lbClientIPv4) {
+			framework.Logf("found the expected srcIP %s!", lbClientIPv4)
+		} else if strings.Contains(targetPodLogs, lbClientIPv6) {
+			framework.Logf("found the expected srcIP %s!", lbClientIPv6)
+		} else {
+			framework.Failf("could not get expected srcIP!")
+		}
+
+		ginkgo.By("label " + nonBackendNodeName + " as egressIP assignable")
+		e2enode.AddOrUpdateLabelOnNode(f.ClientSet, nonBackendNodeName, "k8s.ovn.org/egress-assignable", "dummy")
+
+		ginkgo.By("Create an EgressIP object with one egress IP defined")
+		// Assign the egress IP without conflicting with any node IP,
+		// the kind subnet is /16 or /64 so the following should be fine.
+		dupIP := func(ip net.IP) net.IP {
+			dup := make(net.IP, len(ip))
+			copy(dup, ip)
+			return dup
+		}
+		sampleNodeIP := net.ParseIP(nodeIP)
+		egressIP1 := dupIP(sampleNodeIP)
+		egressIP1[len(egressIP1)-2]++
+
+		var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: ` + "egressip" + `
+spec:
+    egressIPs:
+    - ` + egressIP1.String() + `
+    podSelector:
+        matchLabels:
+            app: nginx
+    namespaceSelector:
+        matchLabels:
+            kubernetes.io/metadata.name: ` + namespaceName + `
+`)
+		if err := os.WriteFile("egressip.yaml", []byte(egressIPConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove("egressip.yaml"); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+
+		framework.Logf("Create the EgressIP configuration")
+		e2ekubectl.RunKubectlOrDie("default", "create", "-f", "egressip.yaml")
+
+		ginkgo.By("4. Check that the status is of length one and that it is assigned to " + nonBackendNodeName)
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			egressIP := egressIPs{}
+			egressIPStdout, err := e2ekubectl.RunKubectl("default", "get", "eip", "-o", "json")
+			if err != nil {
+				framework.Logf("Error: failed to get the EgressIP object, err: %v", err)
+				return false, nil
+			}
+			json.Unmarshal([]byte(egressIPStdout), &egressIP)
+			if len(egressIP.Items) > 1 {
+				framework.Failf("Didn't expect to retrieve more than one egress IP during the execution of this test, saw: %v", len(egressIP.Items))
+			}
+			return egressIP.Items[0].Status.Items[0].Node == nonBackendNodeName, nil
+		})
+		if err != nil {
+			framework.Failf("Error: expected to have 1 egress IP assignment")
+		}
+
+		ginkgo.By("by sending a UDP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 		output, err = runCommand(cmd...)
 		framework.ExpectNoError(err, "failed to connect to load balancer service")
 		framework.Logf("netcat command output %s", output)

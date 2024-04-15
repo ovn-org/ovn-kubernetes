@@ -176,6 +176,20 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) Disable(nodeName string) {
 	h.setMode(nodeName, true, false)
 }
 
+type egressIPStatus struct {
+	Node     string `json:"node"`
+	EgressIP string `json:"egressIP"`
+}
+
+type egressIP struct {
+	Status struct {
+		Items []egressIPStatus `json:"items"`
+	} `json:"status"`
+}
+type egressIPs struct {
+	Items []egressIP `json:"items"`
+}
+
 var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	const (
 		servicePort             int32  = 9999
@@ -297,20 +311,6 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 			}
 			return true, nil
 		}
-	}
-
-	type egressIPStatus struct {
-		Node     string `json:"node"`
-		EgressIP string `json:"egressIP"`
-	}
-
-	type egressIP struct {
-		Status struct {
-			Items []egressIPStatus `json:"items"`
-		} `json:"status"`
-	}
-	type egressIPs struct {
-		Items []egressIP `json:"items"`
 	}
 
 	command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
