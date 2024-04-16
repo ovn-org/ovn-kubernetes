@@ -486,6 +486,31 @@ func AddRoutesGatewayIP(
 		switch topoType {
 		case types.LocalnetTopology:
 			// no route needed for directly connected subnets
+			if len(netinfo.ExtraRouteDests()) == 0 {
+				return nil
+			}
+			// Add routes for specified additional routes
+			for _, podIfAddr := range podAnnotation.IPs {
+				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+				for _, subnet := range netinfo.ExtraRouteDests() {
+					var gatewayIP net.IP
+					if isIPv6 == utilnet.IsIPv6CIDR(subnet) {
+						for _, gw := range netinfo.Gateways() {
+							if utilnet.IsIPv6(gw) == isIPv6 {
+								gatewayIP = gw
+							}
+						}
+						if gatewayIP == nil {
+							return fmt.Errorf("no valid nexthop available for destination %s", subnet)
+						}
+						podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
+							Dest:    subnet,
+							NextHop: gatewayIP,
+						})
+					}
+				}
+			}
+
 			return nil
 		case types.Layer2Topology:
 			if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
@@ -519,6 +544,15 @@ func AddRoutesGatewayIP(
 					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 						podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
 							Dest:    clusterSubnet.CIDR,
+							NextHop: gatewayIPnet.IP,
+						})
+					}
+				}
+
+				for _, subnet := range netinfo.ExtraRouteDests() {
+					if isIPv6 == utilnet.IsIPv6CIDR(subnet) {
+						podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
+							Dest:    subnet,
 							NextHop: gatewayIPnet.IP,
 						})
 					}
