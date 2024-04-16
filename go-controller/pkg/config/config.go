@@ -124,7 +124,7 @@ var (
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
-		EgressIPReachabiltyTotalTimeout: 1,
+		EgressIPReachabiltyTotalTimeout: 10,
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
@@ -988,7 +988,7 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Name:        "egressip-reachability-total-timeout",
 		Usage:       "EgressIP node reachability total timeout in seconds (default: 1)",
 		Destination: &cliConfig.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
-		Value:       1,
+		Value:       10,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-egress-firewall",

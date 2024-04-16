@@ -330,7 +330,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeFalse())
 			gomega.Expect(Gateway.AllowNoUplink).To(gomega.BeFalse())
-			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(1))
+			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(10))
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(0))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeFalse())
