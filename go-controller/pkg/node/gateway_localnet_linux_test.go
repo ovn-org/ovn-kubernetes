@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -18,6 +19,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
 
+	"github.com/coreos/go-iptables/iptables"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -218,6 +220,12 @@ func addConntrackMocks(nlMock *mocks.NetLinkOps, filterDescs []ctFilterDesc) {
 	ovntest.ProcessMockFnList(&nlMock.Mock, ctMocks)
 }
 
+/*
+Note: all of the tests described below actually rely on OVNK node controller start up failing. This is
+because no node is actually added when the controller is started, so node start up fails querying kapi for its
+own node. This is either intentional or accidentally convenient as the node port watcher is then replaced with a fake
+one and started again to exercise the tests.
+*/
 var _ = Describe("Node Operations", func() {
 	var (
 		app                *cli.App
@@ -310,11 +318,18 @@ var _ = Describe("Node Operations", func() {
 				)
 				Expect(insertIptRules(fakeRules)).To(Succeed())
 
+				// Inject rules into SNAT MGMT chain that shouldn't exist and should be cleared on a restore, even if the chain has no rules
+				fakeRule := getSkipMgmtSNATRule("TCP", "1337", "8.8.8.8", iptables.ProtocolIPv4)
+				Expect(insertIptRules([]nodeipt.Rule{fakeRule})).To(Succeed())
+
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p UDP -d 10.10.10.10 --dport 27000 -j DNAT --to-destination 172.32.0.12:27000"),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+						},
+						iptableMgmPortChain: []string{
+							fmt.Sprintf("-p TCP -d 8.8.8.8 --dport 1337 -j RETURN"),
 						},
 					},
 					"filter": {},
@@ -633,7 +648,7 @@ var _ = Describe("Node Operations", func() {
 		It("inits iptables rules with LoadBalancer", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
-				for i := 0; i < 6; i++ {
+				for i := 0; i < 3; i++ {
 					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 						Cmd: "ovs-ofctl show ",
 					})
@@ -844,6 +859,10 @@ var _ = Describe("Node Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
 				config.Gateway.Mode = config.GatewayModeLocal
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ovs-ofctl show ",
 					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
@@ -1313,7 +1332,7 @@ var _ = Describe("Node Operations", func() {
 				clusterIPv4 := "10.129.0.2"
 				clusterIPv6 := "fd00:10:96::10"
 				fNPW.gatewayIPv6 = v6localnetGatewayIP
-				for i := 0; i < 6; i++ {
+				for i := 0; i < 3; i++ {
 					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 						Cmd: "ovs-ofctl show ",
 					})
@@ -1768,7 +1787,6 @@ var _ = Describe("Node Operations", func() {
 				key, err := retry.GetResourceKey(&service)
 				Expect(err).NotTo(HaveOccurred())
 				retry.CheckRetryObjectEventually(key, true, nodePortWatcherRetry)
-
 				// check iptables
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables)

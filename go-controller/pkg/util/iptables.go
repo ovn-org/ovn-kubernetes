@@ -34,6 +34,8 @@ type IPTablesHelper interface {
 	Append(string, string, ...string) error
 	// Delete removes rulespec in specified table/chain
 	Delete(string, string, ...string) error
+	// Restore uses iptables-restore to restore rules for multiple chains in a table at once
+	Restore(table string, rulesMap map[string][][]string) error
 }
 
 var helpers = make(map[iptables.Protocol]IPTablesHelper)
@@ -280,6 +282,23 @@ func (f *FakeIPTables) Delete(tableName, chainName string, rulespec ...string) e
 		if r == rule {
 			(*table)[chainName] = append(chain[:i], chain[i+1:]...)
 			break
+		}
+	}
+	return nil
+}
+
+func (f *FakeIPTables) Restore(tableName string, rulesMap map[string][][]string) error {
+	f.Lock()
+	defer f.Unlock()
+	table, err := f.getTable(tableName)
+	if err != nil {
+		return err
+	}
+	for chainName, rules := range rulesMap {
+		(*table)[chainName] = []string{}
+		for _, rule := range rules {
+			chain, _ := table.getChain(chainName)
+			(*table)[chainName] = append([]string{strings.Join(rule, " ")}, chain...)
 		}
 	}
 	return nil
