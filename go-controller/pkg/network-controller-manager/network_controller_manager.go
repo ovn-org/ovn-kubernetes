@@ -224,7 +224,9 @@ func (cm *NetworkControllerManager) configureSCTPSupport() error {
 }
 
 func (cm *NetworkControllerManager) configureSvcTemplateSupport() {
-	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Chassis_Template_Var"); err != nil {
+	if !config.OVNKubernetesFeature.EnableServiceTemplateSupport {
+		cm.svcTemplateSupport = false
+	} else if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Chassis_Template_Var"); err != nil {
 		klog.Warningf("Version of OVN in use does not support Chassis_Template_Var. " +
 			"Disabling Templates Support")
 		cm.svcTemplateSupport = false
