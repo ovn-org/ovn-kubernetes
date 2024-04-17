@@ -1380,7 +1380,6 @@ function is_nested_virt_enabled() {
 }
 
 function install_kubevirt() {
-    local kubevirt_version="$(curl -L https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)"
     for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_instances=512' >> /etc/sysctl.conf"
@@ -1389,7 +1388,9 @@ function install_kubevirt() {
             kubectl label nodes $node node-role.kubernetes.io/worker="" --overwrite=true
         fi
     done
-    local kubevirt_release_url="https://github.com/kubevirt/kubevirt/releases/download/${kubevirt_version}"
+
+    local kubevirt_version="$(curl -L https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt/latest)"
+    local kubevirt_release_url="https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt/${kubevirt_version}"
 
     echo "Deploy latest nighly build Kubevirt"
     if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
