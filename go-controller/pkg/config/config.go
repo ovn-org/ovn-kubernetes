@@ -405,6 +405,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
 	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
 	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
+	EnableServiceTemplateSupport    bool `gcfg:"enable-svc-template-support"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1054,6 +1055,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use DNSNameResolver CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableDNSNameResolver,
 		Value:       OVNKubernetesFeature.EnableDNSNameResolver,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-svc-template-support",
+		Usage:       "Configure to use svc-template with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableServiceTemplateSupport,
+		Value:       OVNKubernetesFeature.EnableServiceTemplateSupport,
 	},
 }
 
