@@ -35,6 +35,8 @@ type BasicNetInfo interface {
 	Subnets() []config.CIDRNetworkEntry
 	ExcludeSubnets() []*net.IPNet
 	Vlan() uint
+	ExtraRouteDests() []*net.IPNet
+	Gateways() []net.IP
 
 	// utility methods
 	CompareNetInfo(BasicNetInfo) bool
@@ -127,6 +129,16 @@ func (nInfo *DefaultNetInfo) Vlan() uint {
 	return config.Gateway.VLANID
 }
 
+// ExtraRouteDests returns the defaultNetConfInfo's extra destination IP ranges
+func (nInfo *DefaultNetInfo) ExtraRouteDests() []*net.IPNet {
+	panic("unexpected call for default network")
+}
+
+// Gateway returns the defaultNetConfInfo's gateway IP address
+func (nInfo *DefaultNetInfo) Gateways() []net.IP {
+	panic("unexpected call for default network")
+}
+
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
 type secondaryNetInfo struct {
 	netName  string
@@ -137,6 +149,8 @@ type secondaryNetInfo struct {
 	ipv4mode, ipv6mode bool
 	subnets            []config.CIDRNetworkEntry
 	excludeSubnets     []*net.IPNet
+	extraRouteDests    []*net.IPNet
+	gateways           []net.IP
 
 	// all net-attach-def NAD names for this network, used to determine if a pod needs
 	// to be plumbed for this network
@@ -218,6 +232,16 @@ func (nInfo *secondaryNetInfo) ExcludeSubnets() []*net.IPNet {
 	return nInfo.excludeSubnets
 }
 
+// ExtraRouteDests returns the extraRouteDests value
+func (nInfo *secondaryNetInfo) ExtraRouteDests() []*net.IPNet {
+	return nInfo.extraRouteDests
+}
+
+// Gateway returns the gateway IP address
+func (nInfo *secondaryNetInfo) Gateways() []net.IP {
+	return nInfo.gateways
+}
+
 // CompareNetInfo compares for equality this network information with the other
 func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
 	if nInfo.netName != other.GetNetworkName() {
@@ -233,28 +257,58 @@ func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
 		return false
 	}
 
+	lessIP := func(a, b net.IP) bool { return a.String() < b.String() }
+	if !cmp.Equal(nInfo.gateways, other.Gateways(), cmpopts.SortSlices(lessIP)) {
+		return false
+	}
+
 	lessCIDRNetworkEntry := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
 	if !cmp.Equal(nInfo.subnets, other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
 		return false
 	}
 
 	lessIPNet := func(a, b net.IPNet) bool { return a.String() < b.String() }
-	return cmp.Equal(nInfo.excludeSubnets, other.ExcludeSubnets(), cmpopts.SortSlices(lessIPNet))
+	if !cmp.Equal(nInfo.excludeSubnets, other.ExcludeSubnets(), cmpopts.SortSlices(lessIPNet)) {
+		return false
+	}
+
+	return cmp.Equal(nInfo.extraRouteDests, other.ExtraRouteDests(), cmpopts.SortSlices(lessIPNet))
 }
 
 func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
+	var extraDestList []*net.IPNet
+	var needIPv4, needIPv6 bool
+
 	subnets, _, err := parseSubnets(netconf.Subnets, "", types.Layer3Topology)
 	if err != nil {
 		return nil, err
 	}
+	ipv4mode, ipv6mode := getIPMode(subnets)
+	if netconf.ExtraRouteDests != "" {
+		extraDestList, needIPv4, needIPv6, err = parseExtraRouteDests(netconf.ExtraRouteDests)
+		if err != nil {
+			return nil, fmt.Errorf("invalid extraRouteDests '%s' for %s network %s: %v", netconf.ExtraRouteDests,
+				netconf.Topology, netconf.Name, err)
+		}
+		if needIPv4 && !ipv4mode {
+			return nil, fmt.Errorf("invalid IPV4 destinations in extraRouteDest '%s' but %s network %s is IPv6 only",
+				netconf.ExtraRouteDests, netconf.Topology, netconf.Name)
+		}
+		if needIPv6 && !ipv6mode {
+			return nil, fmt.Errorf("invalid IPV6 destinations in extraRouteDest '%s' but %s network %s is IPv4 only",
+				netconf.ExtraRouteDests, netconf.Topology, netconf.Name)
+		}
+	}
 
 	ni := &secondaryNetInfo{
-		netName:  netconf.Name,
-		topology: types.Layer3Topology,
-		subnets:  subnets,
-		mtu:      netconf.MTU,
+		netName:         netconf.Name,
+		topology:        types.Layer3Topology,
+		subnets:         subnets,
+		mtu:             netconf.MTU,
+		ipv4mode:        ipv4mode,
+		ipv6mode:        ipv6mode,
+		extraRouteDests: extraDestList,
 	}
-	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
 }
 
@@ -262,6 +316,14 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	subnets, excludes, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, types.Layer2Topology)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
+	}
+
+	if netconf.ExtraRouteDests != "" {
+		return nil, fmt.Errorf("extraRouteDests is not supported on %s network %s", netconf.Topology, netconf.Name)
+	}
+
+	if netconf.Gateways != "" {
+		return nil, fmt.Errorf("gateway is not supported on %s network %s", netconf.Topology, netconf.Name)
 	}
 
 	ni := &secondaryNetInfo{
@@ -276,20 +338,55 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 }
 
 func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
+	var extraDestList []*net.IPNet
+	var gateways []net.IP
+	var needIPv4, needIPv6 bool
+
 	subnets, excludes, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, types.LocalnetTopology)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
 	}
+	ipv4mode, ipv6mode := getIPMode(subnets)
+
+	if netconf.ExtraRouteDests != "" {
+		if netconf.Gateways == "" {
+			return nil, fmt.Errorf("missing gateways when extraRouteDests %s is defined for %s netconf %s",
+				netconf.ExtraRouteDests, netconf.Topology, netconf.Name)
+		}
+		extraDestList, needIPv4, needIPv6, err = parseExtraRouteDests(netconf.ExtraRouteDests)
+		if err != nil {
+			return nil, fmt.Errorf("invalid extraRouteDests '%s' for %s network %s: %v", netconf.ExtraRouteDests,
+				netconf.Topology, netconf.Name, err)
+		}
+		if needIPv4 && !ipv4mode {
+			return nil, fmt.Errorf("invalid IPV4 destinations in extraRouteDest '%s' but %s network %s is IPv6 only",
+				netconf.ExtraRouteDests, netconf.Topology, netconf.Name)
+		}
+		if needIPv6 && !ipv6mode {
+			return nil, fmt.Errorf("invalid IPV6 destinations in extraRouteDest '%s' but %s network %s is IPv4 only",
+				netconf.ExtraRouteDests, netconf.Topology, netconf.Name)
+		}
+	}
+	if netconf.Gateways != "" {
+		gateways, err = parseGateways(netconf.Gateways, needIPv4, needIPv6)
+		if err != nil {
+			return nil, fmt.Errorf("invalid gateways %s in %s network %s: %v", netconf.Gateways, netconf.Topology,
+				netconf.Name, err)
+		}
+	}
 
 	ni := &secondaryNetInfo{
-		netName:        netconf.Name,
-		topology:       types.LocalnetTopology,
-		subnets:        subnets,
-		excludeSubnets: excludes,
-		mtu:            netconf.MTU,
-		vlan:           uint(netconf.VLANID),
+		netName:         netconf.Name,
+		topology:        types.LocalnetTopology,
+		subnets:         subnets,
+		excludeSubnets:  excludes,
+		extraRouteDests: extraDestList,
+		gateways:        gateways,
+		mtu:             netconf.MTU,
+		vlan:            uint(netconf.VLANID),
+		ipv4mode:        ipv4mode,
+		ipv6mode:        ipv6mode,
 	}
-	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
 }
 
@@ -342,6 +439,57 @@ func parseSubnets(subnetsString, excludeSubnetsString, topology string) ([]confi
 	}
 
 	return subnets, excludeIPNets, nil
+}
+
+func parseExtraRouteDests(extraRouteDestsString string) ([]*net.IPNet, bool, bool, error) {
+	var needIPv4, needIPv6 bool
+	destStringList := strings.Split(extraRouteDestsString, ",")
+	extraDestList := make([]*net.IPNet, len(destStringList))
+	for i, destString := range destStringList {
+		destString = strings.TrimSpace(destString)
+		_, dest, err := net.ParseCIDR(destString)
+		if err != nil {
+			return nil, false, false, err
+		}
+		if knet.IsIPv6CIDR(dest) {
+			needIPv6 = true
+		} else {
+			needIPv4 = true
+		}
+		extraDestList[i] = dest
+	}
+	return extraDestList, needIPv4, needIPv6, nil
+}
+
+func parseGateways(gateways string, needIPv4, needIPv6 bool) ([]net.IP, error) {
+	var hasV4, hasV6 bool
+	gwStringList := strings.Split(gateways, ",")
+	gwList := make([]net.IP, len(gwStringList))
+	for i, gwString := range gwStringList {
+		gwString = strings.TrimSpace(gwString)
+		gw := net.ParseIP(gwString)
+		if gw == nil {
+			return nil, fmt.Errorf("invalid gateway %s", gwString)
+		}
+		if knet.IsIPv6(gw) {
+			if hasV6 {
+				return nil, fmt.Errorf("more than one IPv6 gateways are specified")
+			}
+			hasV6 = true
+		} else {
+			if hasV4 {
+				return nil, fmt.Errorf("more than one IPv4 gateways are specified")
+			}
+			hasV4 = true
+		}
+		gwList[i] = gw
+	}
+	if needIPv6 && !hasV6 {
+		return nil, fmt.Errorf("IPv6 gateway is needed but not specified")
+	} else if needIPv4 && !hasV4 {
+		return nil, fmt.Errorf("IPv4 gateway is needed but not specified")
+	}
+	return gwList, nil
 }
 
 func getIPMode(subnets []config.CIDRNetworkEntry) (bool, bool) {
