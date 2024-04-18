@@ -44,7 +44,11 @@ type BaselineAdminNetworkPolicy struct {
 // BaselineAdminNetworkPolicyStatus defines the observed state of
 // BaselineAdminNetworkPolicy.
 type BaselineAdminNetworkPolicyStatus struct {
-	Conditions []metav1.Condition `json:"conditions"`
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 // BaselineAdminNetworkPolicySpec defines the desired state of
@@ -138,6 +142,8 @@ type BaselineAdminNetworkPolicyIngressRule struct {
 // BaselineAdminNetworkPolicyEgressRule describes an action to take on a particular
 // set of traffic originating from pods selected by a BaselineAdminNetworkPolicy's
 // Subject field.
+// <network-policy-api:experimental:validation>
+// +kubebuilder:validation:XValidation:rule="!(self.to.exists(peer, has(peer.networks) || has(peer.nodes)) && has(self.ports) && self.ports.exists(port, has(port.namedPort)))",message="networks/nodes peer cannot be set with namedPorts since there are no namedPorts for networks/nodes"
 type BaselineAdminNetworkPolicyEgressRule struct {
 	// Name is an identifier for this rule, that may be no more than 100 characters
 	// in length. This field should be used by the implementation to help
@@ -171,7 +177,7 @@ type BaselineAdminNetworkPolicyEgressRule struct {
 	To []AdminNetworkPolicyEgressPeer `json:"to"`
 
 	// Ports allows for matching traffic based on port and protocols.
-	// This field is a list of destination ports for the outging egress traffic.
+	// This field is a list of destination ports for the outgoing egress traffic.
 	// If Ports is not set then the rule does not filter traffic via port.
 	// +optional
 	// +kubebuilder:validation:MaxItems=100
@@ -184,6 +190,7 @@ type BaselineAdminNetworkPolicyEgressRule struct {
 // Support: Core
 //
 // +enum
+// +kubebuilder:validation:Enum={"Allow", "Deny"}
 type BaselineAdminNetworkPolicyRuleAction string
 
 const (

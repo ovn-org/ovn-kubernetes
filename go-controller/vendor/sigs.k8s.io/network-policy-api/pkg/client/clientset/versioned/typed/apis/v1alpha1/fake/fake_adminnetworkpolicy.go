@@ -20,6 +20,8 @@ package fake
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
@@ -27,6 +29,7 @@ import (
 	watch "k8s.io/apimachinery/pkg/watch"
 	testing "k8s.io/client-go/testing"
 	v1alpha1 "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	apisv1alpha1 "sigs.k8s.io/network-policy-api/pkg/client/applyconfiguration/apis/v1alpha1"
 )
 
 // FakeAdminNetworkPolicies implements AdminNetworkPolicyInterface
@@ -125,6 +128,49 @@ func (c *FakeAdminNetworkPolicies) DeleteCollection(ctx context.Context, opts v1
 func (c *FakeAdminNetworkPolicies) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1alpha1.AdminNetworkPolicy, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewRootPatchSubresourceAction(adminnetworkpoliciesResource, name, pt, data, subresources...), &v1alpha1.AdminNetworkPolicy{})
+	if obj == nil {
+		return nil, err
+	}
+	return obj.(*v1alpha1.AdminNetworkPolicy), err
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied adminNetworkPolicy.
+func (c *FakeAdminNetworkPolicies) Apply(ctx context.Context, adminNetworkPolicy *apisv1alpha1.AdminNetworkPolicyApplyConfiguration, opts v1.ApplyOptions) (result *v1alpha1.AdminNetworkPolicy, err error) {
+	if adminNetworkPolicy == nil {
+		return nil, fmt.Errorf("adminNetworkPolicy provided to Apply must not be nil")
+	}
+	data, err := json.Marshal(adminNetworkPolicy)
+	if err != nil {
+		return nil, err
+	}
+	name := adminNetworkPolicy.Name
+	if name == nil {
+		return nil, fmt.Errorf("adminNetworkPolicy.Name must be provided to Apply")
+	}
+	obj, err := c.Fake.
+		Invokes(testing.NewRootPatchSubresourceAction(adminnetworkpoliciesResource, *name, types.ApplyPatchType, data), &v1alpha1.AdminNetworkPolicy{})
+	if obj == nil {
+		return nil, err
+	}
+	return obj.(*v1alpha1.AdminNetworkPolicy), err
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *FakeAdminNetworkPolicies) ApplyStatus(ctx context.Context, adminNetworkPolicy *apisv1alpha1.AdminNetworkPolicyApplyConfiguration, opts v1.ApplyOptions) (result *v1alpha1.AdminNetworkPolicy, err error) {
+	if adminNetworkPolicy == nil {
+		return nil, fmt.Errorf("adminNetworkPolicy provided to Apply must not be nil")
+	}
+	data, err := json.Marshal(adminNetworkPolicy)
+	if err != nil {
+		return nil, err
+	}
+	name := adminNetworkPolicy.Name
+	if name == nil {
+		return nil, fmt.Errorf("adminNetworkPolicy.Name must be provided to Apply")
+	}
+	obj, err := c.Fake.
+		Invokes(testing.NewRootPatchSubresourceAction(adminnetworkpoliciesResource, *name, types.ApplyPatchType, data, "status"), &v1alpha1.AdminNetworkPolicy{})
 	if obj == nil {
 		return nil, err
 	}

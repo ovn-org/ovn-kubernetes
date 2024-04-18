@@ -4,9 +4,15 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	. "github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 	. "github.com/onsi/gomega"
+	clienttesting "k8s.io/client-go/testing"
+	"k8s.io/klog/v2"
+	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager/zone_tracker"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -33,6 +39,29 @@ func getNodeWithZone(nodeName, zoneName string) *v1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        nodeName,
 			Annotations: annotations,
+		},
+	}
+}
+
+func newAdminNetworkPolicy(name string, priority int32) anpapi.AdminNetworkPolicy {
+	return anpapi.AdminNetworkPolicy{
+		ObjectMeta: util.NewObjectMeta(name, ""),
+		Spec: anpapi.AdminNetworkPolicySpec{
+			Priority: priority,
+			Subject: anpapi.AdminNetworkPolicySubject{
+				Namespaces: &metav1.LabelSelector{},
+			},
+		},
+	}
+}
+
+func newBaselineAdminNetworkPolicy(name string) anpapi.BaselineAdminNetworkPolicy {
+	return anpapi.BaselineAdminNetworkPolicy{
+		ObjectMeta: util.NewObjectMeta(name, ""),
+		Spec: anpapi.BaselineAdminNetworkPolicySpec{
+			Subject: anpapi.AdminNetworkPolicySubject{
+				Namespaces: &metav1.LabelSelector{},
+			},
 		},
 	}
 }
@@ -419,4 +448,62 @@ var _ = Describe("Cluster Manager Status Manager", func() {
 		checkEQStatusEventually(egressQoS, false, false, fakeClient)
 	})
 	// cleanup can't be tested by unit test apiserver, since it relies on SSA logic with FieldManagers
+	It("test if APIServer lister/patcher is called for AdminNetworkPolicy when the zone is deleted", func() {
+		config.OVNKubernetesFeature.EnableAdminNetworkPolicy = true
+		zones := sets.New[string]("zone1", "zone2")
+		start(zones)
+		statusManager.onZoneUpdate(sets.New[string]("zone1", "zone2", "zone3")) // add
+		// the actual status update for zones is done in ovnkube-controller but here we just want to
+		// check if a zone delete at least triggers the API List calls which means we are triggering
+		// the SSA logic to delete/clear that status. Real cleanup cannot be tested since fakeClient
+		// doesn't support ApplyStatus patch with FieldManagers
+		var anpsWereListed, banpWereListed uint32
+		fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("list", "adminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+			atomic.StoreUint32(&anpsWereListed, anpsWereListed+1)
+			anpList := &anpapi.AdminNetworkPolicyList{Items: []anpapi.AdminNetworkPolicy{newAdminNetworkPolicy("harry-potter", 5)}}
+			return true, anpList, nil
+		})
+		fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("list", "baselineadminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+			atomic.StoreUint32(&banpWereListed, banpWereListed+1)
+			banpList := &anpapi.BaselineAdminNetworkPolicyList{Items: []anpapi.BaselineAdminNetworkPolicy{newBaselineAdminNetworkPolicy("default")}}
+			return true, banpList, nil
+		})
+		var anpsWerePatched, banpWerePatched uint32
+		fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("patch", "adminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+			atomic.StoreUint32(&anpsWerePatched, anpsWerePatched+1)
+			patch := action.(clienttesting.PatchAction)
+			if action.GetSubresource() == "status" {
+				klog.Infof("Got a patch status action for %v", patch.GetResource())
+				return true, nil, nil
+			}
+			klog.Infof("Got a patch spec action for %v", patch.GetResource())
+			return false, nil, nil
+		})
+		fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("patch", "baselineadminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+			atomic.StoreUint32(&banpWerePatched, banpWerePatched+1)
+			patch := action.(clienttesting.PatchAction)
+			if action.GetSubresource() == "status" {
+				klog.Infof("Got a patch status action for %v", patch.GetResource())
+				return true, nil, nil
+			}
+			klog.Infof("Got an patch spec action for %v", patch.GetResource())
+			return false, nil, nil
+		})
+		statusManager.onZoneUpdate(sets.New[string]("zone1")) // delete "zone2", "zone3"
+		// ensure list was called only once for each resource even if multiple zones are deleted
+		gomega.Eventually(func() uint32 {
+			return atomic.LoadUint32(&anpsWereListed)
+		}).Should(gomega.Equal(uint32(1)))
+		gomega.Eventually(func() uint32 {
+			return atomic.LoadUint32(&banpWereListed)
+		}).Should(gomega.Equal(uint32(1)))
+		// ensure patch status clean was called once for every zone, so here since two zones were deleted
+		// we should have called it two times
+		gomega.Eventually(func() uint32 {
+			return atomic.LoadUint32(&anpsWerePatched)
+		}).Should(gomega.Equal(uint32(2)))
+		gomega.Eventually(func() uint32 {
+			return atomic.LoadUint32(&banpWerePatched)
+		}).Should(gomega.Equal(uint32(2)))
+	})
 })

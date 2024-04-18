@@ -189,10 +189,10 @@ func newAdminNetworkPolicyPort(raw anpapi.AdminNetworkPolicyPort) *libovsdbutil.
 
 // newAdminNetworkPolicyPeer takes the provided ANP API Peer and creates a new corresponding
 // adminNetworkPolicyPeer cache object for that Peer.
-func newAdminNetworkPolicyPeer(rawNamespaces *anpapi.NamespacedPeer, rawPods *anpapi.NamespacedPodPeer) (*adminNetworkPolicyPeer, error) {
+func newAdminNetworkPolicyPeer(rawNamespaces *metav1.LabelSelector, rawPods *anpapi.NamespacedPod) (*adminNetworkPolicyPeer, error) {
 	var anpPeer *adminNetworkPolicyPeer
 	if rawNamespaces != nil {
-		peerNamespaceSelector, err := metav1.LabelSelectorAsSelector(rawNamespaces.NamespaceSelector)
+		peerNamespaceSelector, err := metav1.LabelSelectorAsSelector(rawNamespaces)
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +208,7 @@ func newAdminNetworkPolicyPeer(rawNamespaces *anpapi.NamespacedPeer, rawPods *an
 			}
 		}
 	} else if rawPods != nil {
-		peerNamespaceSelector, err := metav1.LabelSelectorAsSelector(rawPods.Namespaces.NamespaceSelector)
+		peerNamespaceSelector, err := metav1.LabelSelectorAsSelector(&rawPods.NamespaceSelector)
 		if err != nil {
 			return nil, err
 		}

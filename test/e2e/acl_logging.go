@@ -967,23 +967,20 @@ spec:
     action: "Allow"
     to:
     - namespaces:
-        namespaceSelector:
-          matchLabels:
-            kubernetes.io/metadata.name: anp-peer-restricted
+        matchLabels:
+          kubernetes.io/metadata.name: anp-peer-restricted
   - name: "deny-to-open"
     action: "Deny"
     to:
     - namespaces:
-        namespaceSelector:
-          matchLabels:
-            kubernetes.io/metadata.name: anp-peer-open
+        matchLabels:
+          kubernetes.io/metadata.name: anp-peer-open
   - name: "pass-to-unknown"
     action: "Pass"
     to:
     - namespaces:
-        namespaceSelector:
-          matchLabels:
-            kubernetes.io/metadata.name: anp-peer-unknown
+        matchLabels:
+          kubernetes.io/metadata.name: anp-peer-unknown
 `, anpName, priority, anpSubjectNS)
 
 	if err := os.WriteFile(anpYaml, []byte(anpConfig), 0644); err != nil {
@@ -1016,16 +1013,14 @@ spec:
     action: "Allow"
     to:
     - namespaces:
-        namespaceSelector:
-          matchLabels:
-            kubernetes.io/metadata.name: anp-peer-restricted
+        matchLabels:
+          kubernetes.io/metadata.name: anp-peer-restricted
   - name: "deny-to-unknown"
     action: "Deny"
     to:
     - namespaces:
-        namespaceSelector:
-          matchLabels:
-            kubernetes.io/metadata.name: anp-peer-unknown
+        matchLabels:
+          kubernetes.io/metadata.name: anp-peer-unknown
 `, banpSubjectNS)
 
 	if err := os.WriteFile(banpYaml, []byte(banpConfig), 0644); err != nil {

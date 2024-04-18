@@ -98,6 +98,7 @@ type OVNNodeClientset struct {
 
 type OVNClusterManagerClientset struct {
 	KubeClient             kubernetes.Interface
+	ANPClient              anpclientset.Interface
 	EgressIPClient         egressipclientset.Interface
 	CloudNetworkClient     ocpcloudnetworkclientset.Interface
 	NetworkAttchDefClient  networkattchmentdefclientset.Interface
@@ -160,6 +161,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset {
 	return &OVNClusterManagerClientset{
 		KubeClient:             cs.KubeClient,
+		ANPClient:              cs.ANPClient,
 		EgressIPClient:         cs.EgressIPClient,
 		CloudNetworkClient:     cs.CloudNetworkClient,
 		NetworkAttchDefClient:  cs.NetworkAttchDefClient,

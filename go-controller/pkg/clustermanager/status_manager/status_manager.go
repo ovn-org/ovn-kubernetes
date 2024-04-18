@@ -153,6 +153,7 @@ type StatusManager struct {
 	zonesLock     sync.RWMutex
 	zones         sets.Set[string]
 	zoneTracker   *zone_tracker.ZoneTracker
+	ovnClient     *util.OVNClusterManagerClientset
 }
 
 type resourceReconciler interface {
@@ -166,6 +167,7 @@ func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManage
 		typedManagers: map[string]resourceReconciler{},
 		zonesLock:     sync.RWMutex{},
 		zones:         sets.New[string](),
+		ovnClient:     ovnClient,
 	}
 	zoneTracker := zone_tracker.NewZoneTracker(wf.NodeCoreInformer(), sm.onZoneUpdate)
 	sm.zoneTracker = zoneTracker
@@ -230,6 +232,7 @@ func (sm *StatusManager) Stop() {
 func (sm *StatusManager) onZoneUpdate(newZones sets.Set[string]) {
 	klog.Infof("StatusManager got zones update: %v", newZones)
 	sm.zonesLock.Lock()
+	deletedZones := sm.zones.Difference(newZones)
 	sm.zones = newZones
 	sm.zonesLock.Unlock()
 
@@ -239,6 +242,16 @@ func (sm *StatusManager) onZoneUpdate(newZones sets.Set[string]) {
 	}
 	for _, typedManager := range sm.typedManagers {
 		typedManager.ReconcileAll()
+	}
+	deletedZones.Delete(zone_tracker.UnknownZone) // delete the unknown zone, but proceed to cleanup for other known zones if any
+	if len(deletedZones) > 0 && config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
+		klog.Infof("Zones that got deleted are %s", deletedZones.UnsortedList())
+		// there are zones that got deleted, this is expensive because we do a list from kapi server directly but
+		// we don't anticipate too many node deletes in an env, it should be a rare operation which is why we are
+		// not maintaining local caches for ANP/BANP
+		// we must try to clean up statuses across all ANPs that were managed by that zone
+		anpZoneDeleteCleanupManager := newANPManager(sm.ovnClient.ANPClient)
+		anpZoneDeleteCleanupManager.cleanupDeletedZoneStatuses(deletedZones)
 	}
 }
 

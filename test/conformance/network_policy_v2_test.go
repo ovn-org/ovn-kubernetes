@@ -22,8 +22,7 @@ import (
 const (
 	showDebug                  = true
 	shouldCleanup              = true
-	enableAllSupportedFeatures = true
-	NetworkPolicyAPIRepoURL    = "https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.2"
+	NetworkPolicyAPIRepoURL    = "https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.3"
 )
 
 var conformanceTestsBaseManifests = fmt.Sprintf("%s/conformance/base/manifests.yaml", NetworkPolicyAPIRepoURL)
@@ -65,16 +64,15 @@ func TestNetworkPolicyV2Conformance(t *testing.T) {
 				KubeConfig:                 *cfg,
 				Debug:                      showDebug,
 				CleanupBaseResources:       shouldCleanup,
-				EnableAllSupportedFeatures: enableAllSupportedFeatures,
 				BaseManifests:              conformanceTestsBaseManifests,
 				TimeoutConfig:              netpolv1config.TimeoutConfig{GetTimeout: 300 * time.Second},
 			},
 			Implementation: confv1a1.Implementation{
-				Organization: "ovn-org",
-				Project: "ovn-kubernetes",
-				URL: "https://github.com/ovn-org/ovn-kubernetes",
-				Version: "v0.1.2",
-				Contact: []string{"@tssurya"},
+				Organization:          "ovn-org",
+				Project:               "ovn-kubernetes",
+				URL:                   "https://github.com/ovn-org/ovn-kubernetes",
+				Version:               "v1.0.0",
+				Contact:               []string{"@tssurya"},
 				AdditionalInformation: "https://github.com/ovn-org/ovn-kubernetes/blob/master/test/conformance/network_policy_v2_test.go",
 			},
 			ConformanceProfiles: profiles,
@@ -95,7 +93,6 @@ func TestNetworkPolicyV2Conformance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error marshalling conformance profile report: %v", err)
 	}
-	t.Logf("Printing raw report...%v", rawReport)
 	err = os.WriteFile("../../"+reportFileName, rawReport, 0o600)
 	if err != nil {
 		t.Fatalf("error writing conformance profile report: %v", err)

@@ -73,11 +73,11 @@ func (c *Controller) syncBaselineAdminNetworkPolicy(key string) error {
 	err = c.ensureBaselineAdminNetworkPolicy(banp)
 	if err != nil {
 		// we can ignore the error if status update doesn't succeed; best effort
-		_ = c.updateBANPStatusToNotReady(banp, c.zone, err.Error())
+		_ = c.updateBANPStatusToNotReady(banp.Name, err.Error())
 		return err
 	}
 	// we can ignore the error if status update doesn't succeed; best effort
-	_ = c.updateBANPStatusToReady(banp, c.zone)
+	_ = c.updateBANPStatusToReady(banp.Name)
 	return nil
 }
 

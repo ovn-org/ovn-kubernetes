@@ -361,6 +361,32 @@ calculate_timeout() {
   echo ${timeout}
 }
 
+install_online_ovn_kubernetes_crds() {
+  # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
+  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.3/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
+  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.3/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
+}
+
+# Copied from kind.sh
+# TODO: we should have a common file for common functions without duplicating them
+run_kubectl() {
+  local retries=0
+  local attempts=10
+  while true; do
+    if kubectl "$@"; then
+      break
+    fi
+
+    ((retries += 1))
+    if [[ "${retries}" -gt ${attempts} ]]; then
+      echo "error: 'kubectl $*' did not succeed, failing"
+      exit 1
+    fi
+    echo "info: waiting for 'kubectl $*' to succeed..."
+    sleep 1
+  done
+}
+
 check_dependencies
 set_default_params
 print_params
@@ -371,4 +397,5 @@ create_kind_cluster
 docker_disable_ipv6
 coredns_patch
 create_ovn_kubernetes
+install_online_ovn_kubernetes_crds
 kubectl_wait_pods
