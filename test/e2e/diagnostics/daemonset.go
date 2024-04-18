@@ -44,10 +44,11 @@ func (d *Diagnostics) composeDiagnosticsDaemonSet(name, cmd, tool string) appsv1
 				},
 				Spec: v1.PodSpec{
 					Containers: []v1.Container{{
-						Name:    "ovn-kube",
-						Image:   ovnImage,
-						Command: []string{"bash", "-c"},
-						Args:    []string{cmd},
+						Name:            "ovn-kube",
+						Image:           ovnImage,
+						ImagePullPolicy: v1.PullIfNotPresent,
+						Command:         []string{"bash", "-c"},
+						Args:            []string{cmd},
 						SecurityContext: &v1.SecurityContext{
 							Privileged: pointer.Bool(true),
 						},
