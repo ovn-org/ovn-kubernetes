@@ -574,6 +574,8 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}()
 	}
 
+	metrics.RunOVNKubeFeatureDBObjectsMetricsUpdater(oc.nbClient, oc.controllerName, 30*time.Second, oc.stopChan)
+
 	return nil
 }
 
