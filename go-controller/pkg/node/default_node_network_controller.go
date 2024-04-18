@@ -308,6 +308,8 @@ func setupOVNNode(node *kapi.Node) error {
 		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
 		fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
 		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
+		// when creating tunnel ports set local_ip, helps ensures multiple interfaces and ipv6 will work
+		"external_ids:ovn-set-local-ip=\"true\"",
 	}
 
 	if config.Default.LFlowCacheLimit > 0 {

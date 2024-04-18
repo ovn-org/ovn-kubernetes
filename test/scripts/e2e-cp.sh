@@ -39,7 +39,6 @@ test node readiness according to its defaults interface MTU size|\
 egress IP validation|\
 e2e egress firewall policy validation|\
 OVS CPU affinity pinning|\
-should listen on each host addresses|\
 Pod to pod TCP with low MTU|\
 queries to the hostNetworked server pod on another node shall work for TCP|\
 queries to the hostNetworked server pod on another node shall work for UDP|\
