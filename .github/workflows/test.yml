@@ -496,6 +496,9 @@ jobs:
       # set 3 hours for control-plane tests as these might take a while
       timeout-minutes: ${{ matrix.target == 'control-plane' && 180 || matrix.target == 'external-gateway' && 180 || 120 }}
       run: |
+        # used by e2e diagnostics package
+        export OVN_IMAGE="ovn-daemonset-f:pr"
+        
         if [ "${{ matrix.target }}" == "multi-homing" ]; then
           make -C test control-plane WHAT="Multi Homing"
         elif [ "${{ matrix.target }}" == "node-ip-mac-migration" ]; then
