@@ -49,6 +49,8 @@ type nodeInfo struct {
 	switchName string
 	// The chassisID of the node (ovs.external-ids:system-id)
 	chassisID string
+	// if nodePort is disabled on this node?
+	nodePortDisabled bool
 
 	// The node's zone
 	zone string
@@ -146,7 +148,7 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.Res
 // updateNodeInfo updates the node info cache, and syncs all services
 // if it changed.
 func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisID string, l3gatewayAddresses,
-	hostAddresses []net.IP, podSubnets []*net.IPNet, zone string, migrated bool) {
+	hostAddresses []net.IP, podSubnets []*net.IPNet, zone string, nodePortDisabled, migrated bool) {
 	ni := nodeInfo{
 		name:               nodeName,
 		l3gatewayAddresses: l3gatewayAddresses,
@@ -155,6 +157,7 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 		gatewayRouterName:  routerName,
 		switchName:         switchName,
 		chassisID:          chassisID,
+		nodePortDisabled:   nodePortDisabled,
 		zone:               zone,
 		migrated:           migrated,
 	}
@@ -214,6 +217,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 	grName := ""
 	l3gatewayAddresses := []net.IP{}
 	chassisID := ""
+	nodePortEnabled := false
 
 	// if the node has a gateway config, it will soon have a gateway router
 	// so, set the router name
@@ -222,11 +226,10 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		klog.Infof("Node %s has invalid / no gateway config: %v", node.Name, err)
 	} else if gwConf.Mode != globalconfig.GatewayModeDisabled {
 		grName = util.GetGatewayRouterFromNode(node.Name)
-		if gwConf.NodePortEnable {
-			for _, ip := range gwConf.IPAddresses {
-				l3gatewayAddresses = append(l3gatewayAddresses, ip.IP)
-			}
+		for _, ip := range gwConf.IPAddresses {
+			l3gatewayAddresses = append(l3gatewayAddresses, ip.IP)
 		}
+		nodePortEnabled = gwConf.NodePortEnable
 		chassisID = gwConf.ChassisID
 	}
 	hostAddresses, err := util.GetNodeHostAddrs(node)
@@ -249,6 +252,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		hostAddressesIPs,
 		hsn,
 		util.GetNodeZone(node),
+		!nodePortEnabled,
 		util.HasNodeMigratedZone(node),
 	)
 }
