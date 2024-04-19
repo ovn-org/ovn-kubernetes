@@ -288,9 +288,10 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, svcPort *kapi.ServicePort, add bool,
 	hasLocalHostNetworkEp bool, protocol string, actions string, externalIPOrLBIngressIPs []string, ipType string, ofPorts []string) error {
 
-	// each path has per IP generates about 4-5 flows. So we preallocate a slice with capacity = max flows * num IPs
-	externalIPFlows := make([]string, 0, 5*len(externalIPOrLBIngressIPs))
 	for _, externalIPOrLBIngressIP := range externalIPOrLBIngressIPs {
+		// each path has per IP generates about 4-5 flows. So we preallocate a slice with capacity.
+		externalIPFlows := make([]string, 0, 5)
+
 		// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 		// that dl_src is included in match criteria!
 
@@ -312,7 +313,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 		// Delete if needed and skip to next protocol
 		if !add {
 			npw.ofm.deleteFlowsByKey(key)
-			return nil
+			continue
 		}
 		// add the ARP bypass flow regardless of service type or gateway modes since its applicable in all scenarios.
 		arpFlow := npw.generateARPBypassFlow(ofPorts, externalIPOrLBIngressIP, cookie)

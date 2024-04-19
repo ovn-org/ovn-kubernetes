@@ -1711,6 +1711,108 @@ var _ = Describe("Node Operations", func() {
 
 		})
 
+		It("check openflows for LoadBalancer and external ip are correctly added and removed where ETP=local, LGW mode", func() {
+			app.Action = func(ctx *cli.Context) error {
+				externalIP := "1.1.1.1"
+				externalIP2 := "1.1.1.2"
+				config.Gateway.Mode = config.GatewayModeLocal
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				service := *newService("service1", "namespace1", "10.129.0.2",
+					[]v1.ServicePort{
+						{
+							NodePort: int32(31111),
+							Protocol: v1.ProtocolTCP,
+							Port:     int32(8080),
+						},
+					},
+					v1.ServiceTypeLoadBalancer,
+					[]string{externalIP, externalIP2},
+					v1.ServiceStatus{
+						LoadBalancer: v1.LoadBalancerStatus{
+							Ingress: []v1.LoadBalancerIngress{{
+								IP: "5.5.5.5",
+							}},
+						},
+					},
+					true, false,
+				)
+				// endpointSlice.Endpoints is empty and yet this will come under
+				// !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
+
+				fakeOvnNode.start(ctx,
+					&v1.ServiceList{
+						Items: []v1.Service{
+							service,
+						},
+					},
+					&endpointSlice,
+				)
+
+				fNPW.watchFactory = fakeOvnNode.watcher
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
+
+				expectedLBIngressFlows := []string{
+					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
+				}
+				expectedLBExternalIPFlows1 := []string{
+					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
+				}
+				expectedLBExternalIPFlows2 := []string{
+					"cookie=0x77df6d2c74c0a658, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.2, actions=output:LOCAL",
+				}
+
+				Expect(err).NotTo(HaveOccurred())
+				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				Expect(flows).To(BeNil())
+				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
+				Expect(flows).To(Equal(expectedLBIngressFlows))
+				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
+				Expect(flows).To(Equal(expectedLBExternalIPFlows1))
+				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.2_8080"]
+				Expect(flows).To(Equal(expectedLBExternalIPFlows2))
+
+				addConntrackMocks(netlinkMock, []ctFilterDesc{
+					{"1.1.1.1", 8080},
+					{"1.1.1.2", 8080},
+					{"5.5.5.5", 8080},
+					{"192.168.18.15", 31111},
+					{"10.129.0.2", 8080},
+				})
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
+				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				Expect(flows).To(BeNil())
+				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
+				Expect(flows).To(BeNil())
+				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
+				Expect(flows).To(BeNil())
+				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.2_8080"]
+				Expect(flows).To(BeNil())
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 		It("manages iptables rules with ExternalIP through retry logic", func() {
 			app.Action = func(ctx *cli.Context) error {
 				var nodePortWatcherRetry *retry.RetryFramework
