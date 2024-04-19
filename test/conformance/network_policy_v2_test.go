@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	showDebug                  = true
-	shouldCleanup              = true
-	NetworkPolicyAPIRepoURL    = "https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.3"
+	showDebug               = true
+	shouldCleanup           = true
+	NetworkPolicyAPIRepoURL = "https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5"
 )
 
 var conformanceTestsBaseManifests = fmt.Sprintf("%s/conformance/base/manifests.yaml", NetworkPolicyAPIRepoURL)
@@ -59,13 +59,19 @@ func TestNetworkPolicyV2Conformance(t *testing.T) {
 	cSuite, err := suite.NewConformanceProfileTestSuite(
 		suite.ConformanceProfileOptions{
 			Options: suite.Options{
-				Client:                     client,
-				ClientSet:                  clientset,
-				KubeConfig:                 *cfg,
-				Debug:                      showDebug,
-				CleanupBaseResources:       shouldCleanup,
-				BaseManifests:              conformanceTestsBaseManifests,
-				TimeoutConfig:              netpolv1config.TimeoutConfig{GetTimeout: 300 * time.Second},
+				Client:               client,
+				ClientSet:            clientset,
+				KubeConfig:           *cfg,
+				Debug:                showDebug,
+				CleanupBaseResources: shouldCleanup,
+				SupportedFeatures: sets.New(
+					suite.SupportAdminNetworkPolicyEgressNodePeers,
+					suite.SupportBaselineAdminNetworkPolicyEgressNodePeers,
+					suite.SupportAdminNetworkPolicyEgressInlineCIDRPeers,
+					suite.SupportBaselineAdminNetworkPolicyEgressInlineCIDRPeers,
+				),
+				BaseManifests: conformanceTestsBaseManifests,
+				TimeoutConfig: netpolv1config.TimeoutConfig{GetTimeout: 300 * time.Second},
 			},
 			Implementation: confv1a1.Implementation{
 				Organization:          "ovn-org",
