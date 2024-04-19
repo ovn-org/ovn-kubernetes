@@ -69,6 +69,7 @@ type AdminNetworkPolicySpec struct {
 	Priority int32 `json:"priority"`
 
 	// Subject defines the pods to which this AdminNetworkPolicy applies.
+	// Note that host-networked pods are not included in subject selection.
 	//
 	// Support: Core
 	//
