@@ -669,7 +669,8 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 				continue
 			}
 			for _, clusterIP := range clusterIPs {
-				if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt {
+				// .3 masquerade VIP rules are only needed when forwarding services via mp0, which only happens in LGW mode
+				if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt && config.Gateway.Mode == config.GatewayModeLocal {
 					// case1 (see function description for details)
 					// A DNAT rule to masqueradeIP is added that takes priority over DNAT to clusterIP.
 					rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.NodePort, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
@@ -691,7 +692,8 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 				continue
 			}
 			if clusterIP, err := util.MatchIPStringFamily(utilnet.IsIPv6String(externalIP), clusterIPs); err == nil {
-				if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt {
+				// .3 masquerade VIP rules are only needed when forwarding services via mp0, which only happens in LGW mode
+				if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt && config.Gateway.Mode == config.GatewayModeLocal {
 					// case1 (see function description for details)
 					// DNAT traffic to masqueradeIP:nodePort instead of clusterIP:Port. We are leveraging the existing rules for NODEPORT
 					// service so no need to add skip SNAT rule to OVN-KUBE-SNAT-MGMTPORT since the corresponding nodePort svc would have one.
