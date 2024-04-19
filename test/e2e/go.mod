@@ -182,7 +182,7 @@ require (
 
 require (
 	github.com/coreos/butane v0.18.0
-	github.com/docker/docker v24.0.7+incompatible
+	github.com/docker/docker v24.0.9+incompatible
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
 	github.com/openshift-kni/k8sreporter v1.0.4
 	github.com/ovn-org/ovn-kubernetes/go-controller v0.0.0-20230914190234-9cbdd02db9c6
