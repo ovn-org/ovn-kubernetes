@@ -55,6 +55,7 @@ type BaselineAdminNetworkPolicyStatus struct {
 // BaselineAdminNetworkPolicy.
 type BaselineAdminNetworkPolicySpec struct {
 	// Subject defines the pods to which this BaselineAdminNetworkPolicy applies.
+	// Note that host-networked pods are not included in subject selection.
 	//
 	// Support: Core
 	//

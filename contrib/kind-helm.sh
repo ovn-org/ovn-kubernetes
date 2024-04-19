@@ -363,8 +363,8 @@ calculate_timeout() {
 
 install_online_ovn_kubernetes_crds() {
   # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
-  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.3/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
-  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.3/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
+  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
+  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
 }
 
 # Copied from kind.sh
