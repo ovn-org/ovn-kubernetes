@@ -404,6 +404,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableInterconnect              bool `gcfg:"enable-interconnect"`
 	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
 	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
+	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1047,6 +1048,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use the persistent ips feature for virtualization with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnablePersistentIPs,
 		Value:       OVNKubernetesFeature.EnablePersistentIPs,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-dns-name-resolver",
+		Usage:       "Configure to use DNSNameResolver CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableDNSNameResolver,
+		Value:       OVNKubernetesFeature.EnableDNSNameResolver,
 	},
 }
 

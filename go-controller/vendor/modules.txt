@@ -312,6 +312,8 @@ github.com/onsi/gomega/types
 ## explicit; go 1.20
 github.com/openshift/api/cloudnetwork/v1
 github.com/openshift/api/config/v1
+github.com/openshift/api/network/v1
+github.com/openshift/api/network/v1alpha1
 # github.com/openshift/client-go v0.0.0-20231121143148-910ca30a1a9a
 ## explicit; go 1.20
 github.com/openshift/client-go/cloudnetwork/applyconfigurations/cloudnetwork/v1
@@ -326,6 +328,23 @@ github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetw
 github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1
 github.com/openshift/client-go/cloudnetwork/informers/externalversions/internalinterfaces
 github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1
+github.com/openshift/client-go/network/applyconfigurations/internal
+github.com/openshift/client-go/network/applyconfigurations/network/v1
+github.com/openshift/client-go/network/applyconfigurations/network/v1alpha1
+github.com/openshift/client-go/network/clientset/versioned
+github.com/openshift/client-go/network/clientset/versioned/fake
+github.com/openshift/client-go/network/clientset/versioned/scheme
+github.com/openshift/client-go/network/clientset/versioned/typed/network/v1
+github.com/openshift/client-go/network/clientset/versioned/typed/network/v1/fake
+github.com/openshift/client-go/network/clientset/versioned/typed/network/v1alpha1
+github.com/openshift/client-go/network/clientset/versioned/typed/network/v1alpha1/fake
+github.com/openshift/client-go/network/informers/externalversions
+github.com/openshift/client-go/network/informers/externalversions/internalinterfaces
+github.com/openshift/client-go/network/informers/externalversions/network
+github.com/openshift/client-go/network/informers/externalversions/network/v1
+github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1
+github.com/openshift/client-go/network/listers/network/v1
+github.com/openshift/client-go/network/listers/network/v1alpha1
 # github.com/openshift/custom-resource-status v1.1.2
 ## explicit; go 1.12
 github.com/openshift/custom-resource-status/conditions/v1
@@ -1099,6 +1118,7 @@ k8s.io/kube-openapi/pkg/validation/spec
 k8s.io/kubernetes/pkg/apis/core
 k8s.io/kubernetes/pkg/probe
 k8s.io/kubernetes/pkg/probe/http
+k8s.io/kubernetes/pkg/util/hash
 k8s.io/kubernetes/pkg/util/iptables
 # k8s.io/utils v0.0.0-20230726121419-3b25d923346b
 ## explicit; go 1.18
