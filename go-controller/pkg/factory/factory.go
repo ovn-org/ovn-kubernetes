@@ -239,7 +239,9 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		stopChan:             make(chan struct{}),
 	}
 
-	if config.OVNKubernetesFeature.EnableMultiNetwork && !config.OVNKubernetesFeature.EnableInterconnect {
+	if config.OVNKubernetesFeature.EnableMultiNetwork &&
+		config.OVNKubernetesFeature.EnablePersistentIPs &&
+		!config.OVNKubernetesFeature.EnableInterconnect {
 		wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
 	}
 
@@ -359,7 +361,9 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableMultiNetwork && !config.OVNKubernetesFeature.EnableInterconnect {
+	if config.OVNKubernetesFeature.EnableMultiNetwork &&
+		config.OVNKubernetesFeature.EnablePersistentIPs &&
+		!config.OVNKubernetesFeature.EnableInterconnect {
 		wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
 		if err != nil {
 			return nil, err
@@ -607,7 +611,9 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		stopChan:             make(chan struct{}),
 	}
 
-	if config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableInterconnect {
+	if config.OVNKubernetesFeature.EnableMultiNetwork &&
+		config.OVNKubernetesFeature.EnablePersistentIPs &&
+		config.OVNKubernetesFeature.EnableInterconnect {
 		wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
 	}
 
@@ -685,9 +691,12 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		if err != nil {
 			return nil, err
 		}
-		wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
-		if err != nil {
-			return nil, err
+
+		if config.OVNKubernetesFeature.EnablePersistentIPs {
+			wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 

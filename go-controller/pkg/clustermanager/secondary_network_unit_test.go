@@ -326,8 +326,9 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 						gomega.Expect(
 							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
-								EnableMultiNetwork: true,
-								EnableInterconnect: true},
+								EnableMultiNetwork:  true,
+								EnableInterconnect:  true,
+								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
 						f, err = factory.NewClusterManagerWatchFactory(fakeClient)
@@ -371,8 +372,9 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 						gomega.Expect(
 							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
-								EnableMultiNetwork: true,
-								EnableInterconnect: true},
+								EnableMultiNetwork:  true,
+								EnableInterconnect:  true,
+								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
 						f, err = factory.NewClusterManagerWatchFactory(fakeClient)
@@ -417,8 +419,9 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 						gomega.Expect(
 							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
-								EnableMultiNetwork: true,
-								EnableInterconnect: true},
+								EnableMultiNetwork:  true,
+								EnableInterconnect:  true,
+								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
 						f, err = factory.NewClusterManagerWatchFactory(fakeClient)
@@ -483,8 +486,9 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 						gomega.Expect(
 							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
-								EnableMultiNetwork: true,
-								EnableInterconnect: true},
+								EnableMultiNetwork:  true,
+								EnableInterconnect:  true,
+								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
 						f, err = factory.NewClusterManagerWatchFactory(fakeClient)
@@ -552,8 +556,9 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 						gomega.Expect(
 							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
-								EnableMultiNetwork: true,
-								EnableInterconnect: true},
+								EnableMultiNetwork:  true,
+								EnableInterconnect:  true,
+								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 
 						f, err = factory.NewClusterManagerWatchFactory(fakeClient)

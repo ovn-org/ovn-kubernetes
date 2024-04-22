@@ -403,6 +403,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
 	EnableInterconnect              bool `gcfg:"enable-interconnect"`
 	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
+	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1040,6 +1041,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiExternalGateway,
 		Value:       OVNKubernetesFeature.EnableMultiExternalGateway,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-persistent-ips",
+		Usage:       "Configure to use the persistent ips feature for virtualization with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnablePersistentIPs,
+		Value:       OVNKubernetesFeature.EnablePersistentIPs,
 	},
 }
 

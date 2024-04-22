@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -59,7 +60,7 @@ func NewPodAllocator(
 	// this network might not have IPAM, we will just allocate MAC addresses
 	if util.DoesNetworkRequireIPAM(netInfo) {
 		podAllocator.ipAllocator = ipAllocator
-		if netInfo.AllowsPersistentIPs() {
+		if config.OVNKubernetesFeature.EnablePersistentIPs && netInfo.AllowsPersistentIPs() {
 			podAllocator.ipamClaimsReconciler = claimsReconciler
 		}
 	}

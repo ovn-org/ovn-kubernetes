@@ -357,6 +357,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		config.OVNKubernetesFeature.EnableEgressService = true
 		config.OVNKubernetesFeature.EnableAdminNetworkPolicy = true
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnablePersistentIPs = true
 		config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
 
 		fakeClient = &fake.Clientset{}
@@ -876,6 +877,20 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("does not contain Baseline Admin Network Policy informer", func() {
 			config.OVNKubernetesFeature.EnableAdminNetworkPolicy = false
 			testExisting(BaselineAdminNetworkPolicyType)
+		})
+	})
+
+	Context("when Persistent IPs feature is disabled", func() {
+		testExisting := func(objType reflect.Type) {
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wf.informers).NotTo(HaveKey(objType))
+		}
+		It("does not contain IPAMClaims informer", func() {
+			config.OVNKubernetesFeature.EnablePersistentIPs = false
+			testExisting(IPAMClaimsType)
 		})
 	})
 

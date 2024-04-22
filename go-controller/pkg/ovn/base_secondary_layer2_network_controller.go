@@ -283,7 +283,7 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 
 	// when on IC, it will be the NetworkController that returns the IPAMClaims
 	// IPs back to the pool
-	if oc.allocatesPodAnnotation() && oc.NetInfo.AllowsPersistentIPs() {
+	if oc.allocatesPodAnnotation() && oc.allowPersistentIPs() {
 		// WatchIPAMClaims should be started before WatchPods to prevent OVN-K
 		// master assigning IPs to pods without taking into account the persistent
 		// IPs set aside for the IPAMClaims
