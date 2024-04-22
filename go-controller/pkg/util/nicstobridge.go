@@ -143,7 +143,7 @@ func saveRoute(oldLink, newLink netlink.Link, routes []netlink.Route) error {
 		// Handle routes for default gateway later.  This is a special case for
 		// GCE where we have /32 IP addresses and we can't add the default
 		// gateway before the route to the gateway.
-		if IsAnyNetwork(route.Dst) && route.Gw != nil && route.LinkIndex > 0 {
+		if IsNilOrAnyNetwork(route.Dst) && route.Gw != nil && route.LinkIndex > 0 {
 			continue
 		} else if route.Dst != nil && !route.Dst.IP.IsGlobalUnicast() {
 			continue
@@ -158,7 +158,7 @@ func saveRoute(oldLink, newLink netlink.Link, routes []netlink.Route) error {
 	// Now add the default gateway (if any) via this interface.
 	for i := range routes {
 		route := routes[i]
-		if IsAnyNetwork(route.Dst) && route.Gw != nil && route.LinkIndex > 0 {
+		if IsNilOrAnyNetwork(route.Dst) && route.Gw != nil && route.LinkIndex > 0 {
 			// Remove route from 'oldLink' and move it to 'newLink'
 			err := delAddRoute(oldLink, newLink, route)
 			if err != nil {

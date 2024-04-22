@@ -303,7 +303,7 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 			deleteRoute := false
 
 			if subnet == nil {
-				deleteRoute = IsAnyNetwork(route.Dst)
+				deleteRoute = IsNilOrAnyNetwork(route.Dst)
 			} else if route.Dst != nil {
 				deleteRoute = route.Dst.String() == subnet.String()
 			}
@@ -349,25 +349,13 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 	return nil
 }
 
-// IsAnyNetwork checks if the argument network is an any network for ipv4 or ipv6.
-func IsAnyNetwork(ipNet *net.IPNet) bool {
+// IsNilOrAnyNetwork checks if the argument network is nil or an any network for ipv4 or ipv6.
+func IsNilOrAnyNetwork(ipNet *net.IPNet) bool {
 	if ipNet == nil {
-		return false
+		return true
 	}
-	ones, _ := ipNet.Mask.Size()
-	//v4
-	if ipNet.IP.To4() != nil {
-		v4Any := net.ParseIP("0.0.0.0")
-		if ipNet.IP.Equal(v4Any) && ones == 0 {
-			return true
-		}
-	} else {
-		v6Any := net.ParseIP("::")
-		if ipNet.IP.Equal(v6Any) && ones == 0 {
-			return true
-		}
-	}
-	return false
+
+	return ipNet.IP.IsUnspecified()
 }
 
 // LinkRouteGetFilteredRoute gets a route for the given route filter.
