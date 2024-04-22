@@ -182,8 +182,11 @@ func ovnKubeLogFileSizeMetricsUpdater(ovnKubeLogFileMetric *prometheus.GaugeVec,
 	}
 }
 
-// coverageShowMetricsUpdater updates the metric
-// by obtaining values from getCoverageShowOutputMap for specified component.
+// coverageShowMetricsUpdater updates the metric by obtaining values from
+// getCoverageShowOutputMap for specified component. The counters displayed
+// by coverage/show output are called events. It could be that the event never
+// happened, and therefore there will be no counter for it in the output. In such
+// cases the default value of the counter will be 0.
 func coverageShowMetricsUpdater(component string, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(metricsUpdateInterval)
 	defer ticker.Stop()
