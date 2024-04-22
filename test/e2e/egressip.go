@@ -322,13 +322,33 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	}
 
 	waitForStatus := func(node string, isReady bool) {
-		wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+		err := wait.PollUntilContextTimeout(context.Background(), retryInterval, retryTimeout, true, func(context.Context) (bool, error) {
 			status := getNodeStatus(node)
 			if isReady {
 				return status == string(corev1.ConditionTrue), nil
 			}
 			return status != string(corev1.ConditionTrue), nil
 		})
+		if err != nil {
+			framework.Failf("failed while waiting for node %s to be ready: %v", node, err)
+		}
+	}
+
+	hasTaint := func(node, taint string) bool {
+		taint, err := e2ekubectl.RunKubectl("default", "get", "node", "-o", "jsonpath={.spec.taints[?(@.key=='"+taint+"')].key}", node)
+		if err != nil {
+			framework.Failf("failed to get node %s taint %s: %v", node, taint, err)
+		}
+		return taint != ""
+	}
+
+	waitForNoTaint := func(node, taint string) {
+		err := wait.PollUntilContextTimeout(context.Background(), retryInterval, retryTimeout, true, func(context.Context) (bool, error) {
+			return !hasTaint(node, taint), nil
+		})
+		if err != nil {
+			framework.Failf("failed while waiting for node %s to not have taint %s: %v", node, taint, err)
+		}
 	}
 
 	setNodeReady := func(node string, setReady bool) {
@@ -529,6 +549,8 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 			if IsIPv6Cluster(f.ClientSet) {
 				setNodeReachable("ip6tables", node.Name, true)
 			}
+			waitForNoTaint(node.Name, "node.kubernetes.io/unreachable")
+			waitForNoTaint(node.Name, "node.kubernetes.io/not-ready")
 		}
 	})
 
@@ -547,6 +569,8 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 			if IsIPv6Cluster(f.ClientSet) {
 				setNodeReachable("ip6tables", node, true)
 			}
+			waitForNoTaint(node, "node.kubernetes.io/unreachable")
+			waitForNoTaint(node, "node.kubernetes.io/not-ready")
 		}
 	})
 	// Validate the egress IP by creating a httpd container on the kind networking
