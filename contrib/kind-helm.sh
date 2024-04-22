@@ -2,10 +2,21 @@
 
 set -exo pipefail
 
-export SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+# Returns the full directory name of the script
+export DIR="$( cd -- "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+export OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
+
+# Source the kind-common file from the same directory where this script is located
+source "${DIR}/kind-common"
 
 set_default_params() {
+
   # Set default values
+  export KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
+  export KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
+  export KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
+  export KIND_INSTALL_KUBEVIRT=${KIND_INSTALL_KUBEVIRT:-false}
   export OVN_HA=${OVN_HA:-false}
   export OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
   export OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
@@ -17,26 +28,62 @@ set_default_params() {
 
   # Setup KUBECONFIG patch based on cluster-name
   export KUBECONFIG=${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME}.conf}
+
+  # Input not currently validated. Modify outside script at your own risk.
+  # These are the same values defaulted to in KIND code (kind/default.go).
+  # NOTE: KIND NET_CIDR_IPV6 default use a /64 but OVN have a /64 per host
+  # so it needs to use a larger subnet
+  #  Upstream - NET_CIDR_IPV6=fd00:10:244::/64 SVC_CIDR_IPV6=fd00:10:96::/112
+  export NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.244.0.0/16}
+  export NET_SECOND_CIDR_IPV4=${NET_SECOND_CIDR_IPV4:-172.19.0.0/16}
+  export SVC_CIDR_IPV4=${SVC_CIDR_IPV4:-10.96.0.0/16}
+  export NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
+  export SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/112}
+  export JOIN_SUBNET_IPV4=${JOIN_SUBNET_IPV4:-100.64.0.0/16}
+  export JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
+  export MASQUERADE_SUBNET_IPV4=${MASQUERADE_SUBNET_IPV4:-169.254.169.0/29}
+  export MASQUERADE_SUBNET_IPV6=${MASQUERADE_SUBNET_IPV6:-fd69::/125}
+  export TRANSIT_SWITCH_SUBNET_IPV4=${TRANSIT_SWITCH_SUBNET_IPV4:-100.88.0.0/16}
+  export TRANSIT_SWITCH_SUBNET_IPV6=${TRANSIT_SWITCH_SUBNET_IPV6:-fd97::/64}
+  export METALLB_CLIENT_NET_SUBNET_IPV4=${METALLB_CLIENT_NET_SUBNET_IPV4:-172.22.0.0/16}
+  export METALLB_CLIENT_NET_SUBNET_IPV6=${METALLB_CLIENT_NET_SUBNET_IPV6:-fc00:f853:ccd:e792::/64}
+
+  export KIND_NUM_MASTER=1
+  if [ "$OVN_HA" == true ]; then
+    KIND_NUM_MASTER=3
+  fi
+
+  # Hard code ipv4 support until IPv6 is implemented
+  export KIND_IPV4_SUPPORT=true
 }
 
 usage() {
     echo "usage: kind-helm.sh [--delete]"
-    echo "       [ -kt | --keep-taint ]"
-    echo "       [ -ha | --ha-enabled ]"
-    echo "       [ -me | --multicast-enabled ]"
-    echo "       [ -ho | --hybrid-enabled ]"
-    echo "       [ -el | --ovn-empty-lb-events ]"
-    echo "       [ -wk | --num-workers <num> ]"
-    echo "       [ -cn | --cluster-name ]"
+    echo "       [ -kt  | --keep-taint ]"
+    echo "       [ -ha  | --ha-enabled ]"
+    echo "       [ -me  | --multicast-enabled ]"
+    echo "       [ -ho  | --hybrid-enabled ]"
+    echo "       [ -el  | --ovn-empty-lb-events ]"
+    echo "       [ -ii  | --install-ingress ]"
+    echo "       [ -mlb | --install-metallb ]"
+    echo "       [ -pl  | --install-cni-plugins ]"
+    echo "       [ -ikv | --install-kubevirt ]"
+    echo "       [ -wk  | --num-workers <num> ]"
+    echo "       [ -cn  | --cluster-name ]"
     echo "       [ -h ]"
     echo ""
     echo "--delete                            Delete current cluster"
     echo "-kt  | --keep-taint                 Do not remove taint components"
     echo "                                    DEFAULT: Remove taint components"
-    echo "-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled"
     echo "-me  | --multicast-enabled          Enable multicast. DEFAULT: Disabled"
     echo "-ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled"
     echo "-el  | --ovn-empty-lb-events        Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
+    echo "-ii  | --install-ingress            Flag to install Ingress Components."
+    echo "                                    DEFAULT: Don't install ingress components."
+    echo "-mlb | --install-metallb            Install metallb to test service type LoadBalancer deployments"
+    echo "-pl  | --install-cni-plugins        Install CNI plugins"
+    echo "-ikv | --install-kubevirt           Install kubevirt"
+    echo "-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled"
     echo "-wk  | --num-workers                Number of worker nodes. DEFAULT: 2 workers"
     echo "-cn  | --cluster-name               Configure the kind cluster's name"
     echo ""
@@ -49,13 +96,24 @@ parse_args() {
             --delete )                          delete
                                                 exit
                                                 ;;
-            -ha | --ha-enabled )                OVN_HA=true
+            -kt | --keep-taint )                KIND_REMOVE_TAINT=false
                                                 ;;
             -me | --multicast-enabled)          OVN_MULTICAST_ENABLE=true
                                                 ;;
             -ho | --hybrid-enabled )            OVN_HYBRID_OVERLAY_ENABLE=true
                                                 ;;
-            -kt | --keep-taint )                KIND_REMOVE_TAINT=false
+            -el | --ovn-empty-lb-events )       OVN_EMPTY_LB_EVENTS=true
+                                                ;;
+            -ii | --install-ingress )           KIND_INSTALL_INGRESS=true
+                                                ;;
+            -mlb | --install-metallb )          KIND_INSTALL_METALLB=true
+                                                ;;
+            -pl | --install-cni-plugins )       KIND_INSTALL_PLUGINS=true
+                                                ;;
+            -ikv | --install-kubevirt)          KIND_INSTALL_KUBEVIRT=true
+                                                ;;
+            -ha | --ha-enabled )                OVN_HA=true
+                                                KIND_NUM_MASTER=3
                                                 ;;
             -wk | --num-workers )               shift
                                                 if ! [[ "$1" =~ ^[0-9]+$ ]]; then
@@ -70,8 +128,6 @@ parse_args() {
                                                 # Setup KUBECONFIG
                                                 set_default_params
                                                 ;;
-            -el | --ovn-empty-lb-events )       OVN_EMPTY_LB_EVENTS=true
-                                                ;;
             * )                                 usage
                                                 exit 1
         esac
@@ -83,6 +139,10 @@ print_params() {
      echo "Using these parameters to deploy KIND + helm"
      echo ""
      echo "KUBECONFIG = $KUBECONFIG"
+     echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
+     echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
+     echo "KIND_INSTALL_PLUGINS = $KIND_INSTALL_PLUGINS"
+     echo "KIND_INSTALL_KUBEVIRT = $KIND_INSTALL_KUBEVIRT"
      echo "OVN_HA = $OVN_HA"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
@@ -90,17 +150,13 @@ print_params() {
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
      echo "OVN_IMAGE = $OVN_IMAGE"
+     echo "KIND_NUM_MASTER = $KIND_NUM_MASTER"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo ""
 }
 
-command_exists() {
-  cmd="$1"
-  command -v ${cmd} >/dev/null 2>&1
-}
-
 check_dependencies() {
-    for cmd in docker kubectl kind helm go ; do \
+    for cmd in $OCI_BIN kubectl kind helm go ; do \
          if ! command_exists $cmd ; then
            2&>1 echo "Dependency not met: $cmd"
            exit 1
@@ -108,8 +164,8 @@ check_dependencies() {
     done
 
     # check for currently unsupported features
-    [ "${KIND_INSTALL_METALLB}" == "true" ] && { &>1 echo "Fatal: KIND_INSTALL_METALLB support not implemented yet"; exit 1; } ||:
     [ "${KIND_IPV6_SUPPORT}" == "true" ] && { &>1 echo "Fatal: KIND_IPV6_SUPPORT support not implemented yet"; exit 1; } ||:
+    [ "${OVN_ENABLE_INTERCONNECT}" == "true" ] && { &>1 echo "Fatal: OVN_ENABLE_INTERCONNECT support not implemented yet"; exit 1; } ||:
 }
 
 helm_prereqs() {
@@ -119,21 +175,6 @@ helm_prereqs() {
     sudo sysctl fs.inotify.max_user_instances=512
 }
 
-docker_disable_ipv6() {
-  # Docker disables IPv6 globally inside containers except in the eth0 interface.
-  # Kind enables IPv6 globally the containers ONLY for dual-stack and IPv6 deployments.
-  # Ovnkube-node tries to move all global addresses from the gateway interface to the
-  # bridge interface it creates. This breaks on KIND with IPv4 only deployments, because the new
-  # internal bridge has IPv6 disable and can't move the IPv6 from the eth0 interface.
-  # We can enable IPv6 always in the container, since the docker setup with IPv4 only
-  # is not very common.
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | grep -v external-load-balancer)
-  for n in $KIND_NODES; do
-    docker exec "$n" sysctl --ignore net.ipv6.conf.all.disable_ipv6=0
-    docker exec "$n" sysctl --ignore net.ipv6.conf.all.forwarding=1
-  done
-}
-
 build_ovn_image() {
     if [ "${SKIP_OVN_IMAGE_REBUILD}" == "true" ]; then
       echo "Explicitly instructed not to rebuild ovn image: ${OVN_IMAGE}"
@@ -141,16 +182,16 @@ build_ovn_image() {
     fi
 
     # Build ovn image
-    pushd ${SCRIPT_DIR}/../go-controller
+    pushd ${DIR}/../go-controller
     make
     popd
 
     # Build ovn kube image
-    pushd ${SCRIPT_DIR}/../dist/images
+    pushd ${DIR}/../dist/images
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-    docker build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
+    $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
     popd
 }
 
@@ -164,40 +205,6 @@ get_tag() {
     local image_and_tag="${1:-$OVN_IMAGE}"  # Use $1 if provided, otherwise use $OVN_IMAGE
     local tag="${image_and_tag##*:}"  # Extract everything after the last colon
     echo "$tag"
-}
-
-coredns_patch() {
-  dns_server="8.8.8.8"
-  # No need for ipv6 nameserver for dual stack, it will ask for
-  # A and AAAA records
-  if [ "$IP_FAMILY" == "ipv6" ]; then
-    dns_server="2001:4860:4860::8888"
-  fi
-
-  # Patch CoreDNS to work
-  # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
-  # to work in an offline environment:
-  # https://github.com/coredns/coredns/issues/2494#issuecomment-457215452
-  # 2. Github CI adds following domains to resolv.conf search field:
-  # .net.
-  # CoreDNS should handle those domains and answer with NXDOMAIN instead of SERVFAIL
-  # otherwise pods stops trying to resolve the domain.
-  # Get the current config
-  original_coredns=$(kubectl get -oyaml -n=kube-system configmap/coredns)
-  echo "Original CoreDNS config:"
-  echo "${original_coredns}"
-  # Patch it
-  fixed_coredns=$(
-    printf '%s' "${original_coredns}" | sed \
-      -e 's/^.*kubernetes cluster\.local/& net/' \
-      -e '/^.*upstream$/d' \
-      -e '/^.*fallthrough.*$/d' \
-      -e 's/^\(.*forward \.\).*$/\1 '"$dns_server"' {/' \
-      -e '/^.*loop$/d' \
-  )
-  echo "Patched CoreDNS config:"
-  echo "${fixed_coredns}"
-  printf '%s' "${fixed_coredns}" | kubectl apply -f -
 }
 
 create_kind_cluster() {
@@ -257,12 +264,13 @@ EOT
 }
 
 create_ovn_kubernetes() {
-    cd ${SCRIPT_DIR}/../helm/ovn-kubernetes
+    cd ${DIR}/../helm/ovn-kubernetes
 
     MASTER_REPLICAS=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l)
     helm install ovn-kubernetes . -f values.yaml \
-        --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" \
-	--set serviceNetwork=10.96.0.0/16 \
+        --set k8sAPIServer=${API_URL} \
+        --set podNetwork="${NET_CIDR_IPV4}/24" \
+        --set serviceNetwork=${SVC_CIDR_IPV4} \
         --set ovnkube-identity.replicas=${MASTER_REPLICAS} \
         --set ovnkube-master.replicas=${MASTER_REPLICAS} \
         --set global.image.repository=$(get_image) \
@@ -275,116 +283,17 @@ create_ovn_kubernetes() {
 }
 
 delete() {
+  if [ "$KIND_INSTALL_METALLB" == true ]; then
+    destroy_metallb
+  fi
   helm uninstall ovn-kubernetes && sleep 5 ||:
   kind delete cluster --name "${KIND_CLUSTER_NAME:-ovn}"
-}
-
-coredns_patch() {
-  dns_server="8.8.8.8"
-  # No need for ipv6 nameserver for dual stack, it will ask for 
-  # A and AAAA records
-  if [ "$IP_FAMILY" == "ipv6" ]; then
-    dns_server="2001:4860:4860::8888"
-  fi
-
-  # Patch CoreDNS to work
-  # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
-  # to work in an offline environment:
-  # https://github.com/coredns/coredns/issues/2494#issuecomment-457215452
-  # 2. Github CI adds following domains to resolv.conf search field:
-  # .net.
-  # CoreDNS should handle those domains and answer with NXDOMAIN instead of SERVFAIL
-  # otherwise pods stops trying to resolve the domain.
-  # Get the current config
-  original_coredns=$(kubectl get -oyaml -n=kube-system configmap/coredns)
-  echo "Original CoreDNS config:"
-  echo "${original_coredns}"
-  # Patch it
-  fixed_coredns=$(
-    printf '%s' "${original_coredns}" | sed \
-      -e 's/^.*kubernetes cluster\.local/& net/' \
-      -e '/^.*upstream$/d' \
-      -e '/^.*fallthrough.*$/d' \
-      -e 's/^\(.*forward \.\).*$/\1 '"$dns_server"' {/' \
-      -e '/^.*loop$/d' \
-  )
-  echo "Patched CoreDNS config:"
-  echo "${fixed_coredns}"
-  printf '%s' "${fixed_coredns}" | kubectl apply -f -
-}
-
-# kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
-# DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
-# Next, it iterates over all pods in ovn-kubernetes namespace and waits for them to post "Ready".
-# Last, it will do the same with all pods in the kube-system namespace.
-kubectl_wait_pods() {
-  local OVN_TIMEOUT=300
-
-  # We will make sure that we timeout all commands at current seconds + the desired timeout.
-  endtime=$(( SECONDS + OVN_TIMEOUT ))
-
-  dss=$(kubectl -n ovn-kubernetes get daemonset --no-headers --sort-by=.metadata.name -o jsonpath='{.items[*].metadata.name}')
-  for ds in ${dss}; do
-    timeout=$(calculate_timeout ${endtime})
-    echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
-    kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
-  done
-
-  pods=$(kubectl -n ovn-kubernetes get pod --no-headers --sort-by=.metadata.name -o jsonpath='{.items[*].metadata.name}')
-  for pod in ${pods}; do
-    timeout=$(calculate_timeout ${endtime})
-    echo "Waiting for k8s to create pod ${pod} (timeout ${timeout})..."
-    if ! kubectl wait pod ${pod} -n ovn-kubernetes --for condition=Ready --timeout=${timeout}s ; then
-        >&2 echo "pod $pod in the ovn-kubernetes namespace is not ready after time out"
-        kubectl get pods -A -o wide || true
-        exit 1
-    fi
-  done
-
-  timeout=$(calculate_timeout ${endtime})
-  if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=${timeout}s ; then
-    >&2 echo "some pods in the system are not running"
-    kubectl get pods -A -o wide || true
-    exit 1
-  fi
-}
-
-# calculate_timeout takes an absolute endtime in seconds (based on bash script runtime, see
-# variable $SECONDS) and calculates a relative timeout value. Should the calculated timeout
-# be <= 0, return one second.
-calculate_timeout() {
-  endtime=$1
-  timeout=$(( endtime - SECONDS ))
-  if [ ${timeout} -le 0 ]; then
-      timeout=1
-  fi
-  echo ${timeout}
 }
 
 install_online_ovn_kubernetes_crds() {
   # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
   run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
   run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
-}
-
-# Copied from kind.sh
-# TODO: we should have a common file for common functions without duplicating them
-run_kubectl() {
-  local retries=0
-  local attempts=10
-  while true; do
-    if kubectl "$@"; then
-      break
-    fi
-
-    ((retries += 1))
-    if [[ "${retries}" -gt ${attempts} ]]; then
-      echo "error: 'kubectl $*' did not succeed, failing"
-      exit 1
-    fi
-    echo "info: waiting for 'kubectl $*' to succeed..."
-    sleep 1
-  done
 }
 
 check_dependencies
@@ -394,8 +303,25 @@ parse_args "$@"
 helm_prereqs
 build_ovn_image
 create_kind_cluster
+detect_apiserver_url
 docker_disable_ipv6
 coredns_patch
 create_ovn_kubernetes
+
 install_online_ovn_kubernetes_crds
+if [ "$KIND_INSTALL_INGRESS" == true ]; then
+  install_ingress
+fi
+
 kubectl_wait_pods
+sleep_until_pods_settle
+
+if [ "$KIND_INSTALL_METALLB" == true ]; then
+  install_metallb
+fi
+if [ "$KIND_INSTALL_PLUGINS" == true ]; then
+  install_plugins
+fi
+if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
+  install_kubevirt
+fi

@@ -1,6 +1,10 @@
 if [ "${BASH_SOURCE[0]}" -ef "$0" ]
 then
-    >&2 echo 'Please source this script, not execute it!'
+    >&2 echo 'This file contains bash helper functions that are common to'
+    >&2 echo 'kind.sh and kind-helm.sh scripts and is meant to be sourced'
+    >&2 echo 'by them upon invocation. In other words, it is not useful'
+    >&2 echo 'when executed as a standalone script.'
+    >&2 echo 'Please source this script, do not execute it!'
     exit 1
 fi
 
