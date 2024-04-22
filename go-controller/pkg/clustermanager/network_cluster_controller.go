@@ -133,7 +133,8 @@ func (ncc *networkClusterController) hasNodeAllocation() bool {
 }
 
 func (ncc *networkClusterController) allowPersistentIPs() bool {
-	return ncc.NetInfo.AllowsPersistentIPs() &&
+	return config.OVNKubernetesFeature.EnablePersistentIPs &&
+		ncc.NetInfo.AllowsPersistentIPs() &&
 		util.DoesNetworkRequireIPAM(ncc.NetInfo) &&
 		(ncc.NetInfo.TopologyType() == types.Layer2Topology || ncc.NetInfo.TopologyType() == types.LocalnetTopology)
 }

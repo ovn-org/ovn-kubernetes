@@ -13,6 +13,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -674,7 +675,8 @@ func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
 }
 
 func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
-	return oc.NetInfo.AllowsPersistentIPs() &&
+	return config.OVNKubernetesFeature.EnablePersistentIPs &&
+		oc.NetInfo.AllowsPersistentIPs() &&
 		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
 		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
 }
