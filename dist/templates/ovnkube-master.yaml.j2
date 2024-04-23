@@ -296,6 +296,8 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: OVN_ENABLE_PERSISTENT_IPS
+          value: "{{ ovn_enable_persistent_ips }}"
       # end of container
 
       volumes:

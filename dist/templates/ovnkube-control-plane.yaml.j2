@@ -168,6 +168,8 @@ spec:
           value: "{{ ovn_v4_transit_switch_subnet }}"
         - name: OVN_V6_TRANSIT_SWITCH_SUBNET
           value: "{{ ovn_v6_transit_switch_subnet }}"
+        - name: OVN_ENABLE_PERSISTENT_IPS
+          value: "{{ ovn_enable_persistent_ips }}"
       # end of container
 
       volumes:

@@ -904,7 +904,8 @@ create_ovn_kube_manifests() {
     --compact-mode="${OVN_COMPACT_MODE}" \
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
     --enable-multi-external-gateway=true \
-    --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}"
+    --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}" \
+    --enable-persistent-ips=true
   popd
 }
 
