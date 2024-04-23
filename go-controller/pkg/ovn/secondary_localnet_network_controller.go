@@ -56,7 +56,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 	}
 
 	if oc.allocatesPodAnnotation() {
-		var claimsReconciler *persistentips.IPAMClaimReconciler
+		var claimsReconciler persistentips.PersistentAllocations
 		if oc.allowPersistentIPs() {
 			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
 				oc.kube,
