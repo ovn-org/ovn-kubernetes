@@ -708,6 +708,11 @@ var _ = ginkgo.Describe("Services", func() {
 		var nodes *v1.NodeList
 		var err error
 		nodeIPs := make(map[string]map[int]string)
+		var egressPod *v1.Pod
+		var egressNode string
+		targetSecondaryNode := node{
+			name: "egressSecondaryTargetNode-allowed",
+		}
 
 		const (
 			endpointHTTPPort    = 80
@@ -734,6 +739,13 @@ var _ = ginkgo.Describe("Services", func() {
 						framework.Failf("failed to remove ip address %s from node %s, err: %q", ip, nodeName, err)
 					}
 				}
+			}
+			if len(targetSecondaryNode.nodeIP) > 0 {
+				ginkgo.By("Deleting EgressIP Setup if any")
+				e2ekubectl.RunKubectlOrDie("default", "delete", "eip", "egressip", "--ignore-not-found=true")
+				e2ekubectl.RunKubectlOrDie("default", "label", "node", egressNode, "k8s.ovn.org/egress-assignable-")
+				tearDownNetworkAndTargetForMultiNIC([]string{egressNode}, targetSecondaryNode)
+				targetSecondaryNode.nodeIP = ""
 			}
 		})
 
@@ -875,6 +887,247 @@ var _ = ginkgo.Describe("Services", func() {
 							return nodesHostnames.Has(epHostname)
 						}, "40s", "1s").Should(gomega.BeTrue())
 					}
+				}
+			}
+		})
+
+		ginkgo.It("should work on secondary node interfaces for ETP=local and ETP=cluster when backend pods are also served by EgressIP", func() {
+			endPoints := make([]*v1.Pod, 0)
+			endpointsSelector := map[string]string{"servicebackend": "true"}
+			nodesHostnames := sets.NewString()
+			isIPv6Cluster := IsIPv6Cluster(f.ClientSet)
+
+			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
+			framework.ExpectNoError(err)
+
+			if len(nodes.Items) < 3 {
+				framework.Failf(
+					"Test requires >= 3 Ready nodes, but there are only %v nodes",
+					len(nodes.Items))
+			}
+
+			ginkgo.By("Creating the endpoints pod, one for each worker")
+			for _, node := range nodes.Items {
+				args := []string{
+					"netexec",
+					fmt.Sprintf("--http-port=%d", endpointHTTPPort),
+					fmt.Sprintf("--udp-port=%d", endpointUDPPort),
+				}
+				pod, err := createPod(f, node.Name+"-ep", node.Name, f.Namespace.Name, []string{},
+					endpointsSelector, func(p *v1.Pod) {
+						p.Spec.Containers[0].Args = args
+					})
+				framework.ExpectNoError(err)
+
+				endPoints = append(endPoints, pod)
+				nodesHostnames.Insert(pod.Name)
+			}
+
+			ginkgo.By("Choosing egressIP pod")
+			egressPod = endPoints[0]
+			framework.Logf("EgressIP pod is %s/%s", endPoints[0].Namespace, endPoints[0].Name)
+
+			ginkgo.By("Label egress node" + egressNode + " create external container to send egress traffic to via secondary MultiNIC EIP")
+			egressNode = egressPod.Spec.NodeName
+			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egressNode, "k8s.ovn.org/egress-assignable", "dummy")
+			// configure and add additional network to worker containers for EIP multi NIC feature
+			if isIPv6Cluster {
+				_, targetSecondaryNode.nodeIP = configNetworkAndGetTarget(secondaryIPV6Subnet, []string{egressNode}, isIPv6Cluster, targetSecondaryNode)
+			} else {
+				targetSecondaryNode.nodeIP, _ = configNetworkAndGetTarget(secondaryIPV4Subnet, []string{egressNode}, isIPv6Cluster, targetSecondaryNode)
+			}
+
+			ginkgo.By("Create an EgressIP object with one secondary multi NIC egress IP defined")
+			egressIP := "10.10.10.105" // secondary subnet as defined in EIP test suite
+			if isIPv6Cluster {
+				egressIP = "2001:db8:abcd:1234:c001::" // secondary subnet as defined in EIP test suite
+			}
+
+			var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: ` + "egressip" + `
+spec:
+    egressIPs:
+    - "` + egressIP + `"
+    namespaceSelector:
+        matchLabels:
+            kubernetes.io/metadata.name: ` + f.Namespace.Name + `
+`)
+			if err := os.WriteFile("egressip.yaml", []byte(egressIPConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			defer func() {
+				if err := os.Remove("egressip.yaml"); err != nil {
+					framework.Logf("Unable to remove the CRD config from disk: %v", err)
+				}
+			}()
+
+			framework.Logf("Create the EgressIP configuration")
+			e2ekubectl.RunKubectlOrDie("default", "create", "-f", "egressip.yaml")
+
+			ginkgo.By("Check that the status is of length one and that it is assigned to " + egressNode)
+			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+				egressIP := egressIPs{}
+				egressIPStdout, err := e2ekubectl.RunKubectl("default", "get", "eip", "-o", "json")
+				if err != nil {
+					framework.Logf("Error: failed to get the EgressIP object, err: %v", err)
+					return false, nil
+				}
+				json.Unmarshal([]byte(egressIPStdout), &egressIP)
+				if len(egressIP.Items) > 1 {
+					framework.Failf("Didn't expect to retrieve more than one egress IP during the execution of this test, saw: %v", len(egressIP.Items))
+				}
+				return egressIP.Items[0].Status.Items[0].Node == egressNode, nil
+			})
+			if err != nil {
+				framework.Failf("Error: expected to have 1 egress IP assignment")
+			}
+
+			ginkgo.By("Creating an external container to send the ingress nodeport service traffic from")
+			extClientv4, extClientv6 := createClusterExternalContainer(clientContainerName, agnhostImage,
+				[]string{"--network", "kind", "-P"},
+				[]string{"netexec", "--http-port=80"})
+
+			// If `kindexgw` exists, connect client container to it
+			runCommand(containerRuntime, "network", "connect", "kindexgw", clientContainerName)
+
+			ginkgo.By("Selecting additional IP addresses for each node")
+			// add new secondary IP from node subnet to all nodes, if the cluster is v6 add an ipv6 address
+			toCurlAddresses := sets.NewString()
+			for i, node := range nodes.Items {
+
+				addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-cidrs"]
+				gomega.Expect(ok).To(gomega.BeTrue())
+
+				var addrs []string
+				err := json.Unmarshal([]byte(addrAnnotation), &addrs)
+				framework.ExpectNoError(err, "failed to parse node[%s] host-address annotation[%s]", node.Name,
+					addrAnnotation)
+				for i, addr := range addrs {
+					addrSplit := strings.Split(addr, "/")
+					gomega.Expect(addrSplit).Should(gomega.HaveLen(2))
+					addrs[i] = addrSplit[0]
+				}
+				toCurlAddresses.Insert(addrs...)
+
+				// Calculate and store for AfterEach new target IP addresses.
+				var newIP string
+				if nodeIPs[node.Name] == nil {
+					nodeIPs[node.Name] = make(map[int]string)
+				}
+				if utilnet.IsIPv6String(e2enode.GetAddresses(&node, v1.NodeInternalIP)[0]) {
+					newIP = "fc00:f853:ccd:e793:1111::" + strconv.Itoa(i)
+					nodeIPs[node.Name][6] = newIP
+				} else {
+					newIP = "172.18.1." + strconv.Itoa(i+1)
+					nodeIPs[node.Name][4] = newIP
+				}
+			}
+
+			ginkgo.By("Adding additional IP addresses to each node")
+			for nodeName, ipFamilies := range nodeIPs {
+				for _, ip := range ipFamilies {
+					// manually add the a secondary IP to each node
+					_, err = runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "add", ip, "dev", "breth0")
+					if err != nil {
+						framework.Failf("failed to add new IP address %s to node %s: %v", ip, nodeName, err)
+					}
+					toCurlAddresses.Insert(ip)
+				}
+			}
+
+			ginkgo.By("Creating NodePort services")
+
+			etpLocalServiceName := "etp-local-svc"
+			etpLocalSvc := nodePortServiceSpecFrom(etpLocalServiceName, v1.IPFamilyPolicyPreferDualStack,
+				endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector,
+				v1.ServiceExternalTrafficPolicyTypeLocal)
+			etpLocalSvc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), etpLocalSvc,
+				metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+
+			etpClusterServiceName := "etp-cluster-svc"
+			etpClusterSvc := nodePortServiceSpecFrom(etpClusterServiceName, v1.IPFamilyPolicyPreferDualStack,
+				endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector,
+				v1.ServiceExternalTrafficPolicyTypeCluster)
+			etpClusterSvc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(),
+				etpClusterSvc, metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the endpoints to pop up")
+
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name,
+				etpLocalServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s",
+				etpLocalServiceName, f.Namespace.Name)
+
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name,
+				etpClusterServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s",
+				etpClusterServiceName, f.Namespace.Name)
+			
+			ginkgo.By("Checking connectivity to the external container from egressIP pod " + egressPod.Name + " and verify that the source IP is the secondary NIC egress IP")
+			framework.Logf("Destination IPs for external container are ip=%v", targetSecondaryNode.nodeIP)
+			err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, egressPod.Name,
+				egressPod.Namespace, true, []string{egressIP}))
+			framework.ExpectNoError(err, "Check connectivity from pod (%s/%s) to an external container attached to "+
+				"a network that is a secondary host network and verify that the src IP is the expected egressIP %s, failed: %v",
+				egressPod.Namespace, egressPod.Name, egressIP, err)
+
+			externalSvcClientIPs := sets.NewString(extClientv4, extClientv6)
+			for _, serviceSpec := range []*v1.Service{etpLocalSvc, etpClusterSvc} {
+				tcpNodePort, udpNodePort := nodePortsFromService(serviceSpec)
+
+				for _, protocol := range []string{"http", "udp"} {
+					toCurlPort := int32(tcpNodePort)
+					if protocol == "udp" {
+						toCurlPort = int32(udpNodePort)
+					}
+					for _, address := range toCurlAddresses.List() {
+						if !isIPv6Cluster && utilnet.IsIPv6String(address) {
+							continue
+						}
+
+						ginkgo.By("Hitting service " + serviceSpec.Name + " on " + address + " via " + protocol)
+						gomega.Eventually(func() bool {
+							epHostname := pokeEndpoint("", clientContainerName, protocol, address, toCurlPort,
+								"hostname")
+							// Expect to receive a valid hostname
+							return nodesHostnames.Has(epHostname)
+						}, "40s", "1s").Should(gomega.BeTrue())
+					}
+					egressNodeIP, err := getNodeIP(f.ClientSet, egressNode)
+					framework.ExpectNoError(err, fmt.Sprintf("failed to get nodes's %s node ip address", egressNode))
+					framework.Logf("NodeIP of node %s is %s", egressNode, egressNodeIP)
+					ginkgo.By("Hitting service nodeport " + serviceSpec.Name + " on " + egressNodeIP + " via " + protocol)
+					// send ingress traffic from external container to egressNode where the pod lives
+					// On secondary bridges CI lane we will also created eth1 interface on each node
+					// in the cluster. In that case:
+					// (1) SGW: npclient's eth1 -> node's eth1-> node's breth1 -> iptables -> DNAT to CIP ->
+					//          route to breth0 -> send to OVN -> hit GR; ETP=local will not be respected
+					//          in this case and its broken at the moment. (FIXME)
+					// (2) LGW: npclient's eth1 -> node's eth1-> node's breth1 -> iptables -> DNAT to .3 masquerade ->
+					//          route to mp0 -> send to OVN -> hit switch; ETP=local will be respected
+					//          in this case and its delivered to the pod. (test works for this case)
+					if !isLocalGWModeEnabled() || serviceSpec.Name != etpLocalServiceName {
+						framework.Logf("Mode is shared gateway OR service is ETP=cluster, so skipping srcIP verification")
+						continue // cannot verify sourceIP for ETP=local with SGW on secondary interfaces
+					}
+
+					// verify srcIP of traffic is that of the external container npclient when for nodeport service type ETP=local
+					// we try to hit the backend pod which is on the egressNode
+					framework.Logf("%+v", externalSvcClientIPs)
+					gomega.Eventually(func() bool {
+						epClientIP := pokeEndpoint("", clientContainerName, protocol, egressNodeIP, toCurlPort, "clientip") // Returns the request's IP address.
+						framework.Logf("Received srcIP: %v", epClientIP)
+						IP, _, err := net.SplitHostPort(epClientIP)
+						if err != nil {
+							return false
+						}
+						// Expect to receive a valid hostname
+						return externalSvcClientIPs.Has(IP)
+					}, "40s", "1s").Should(gomega.BeTrue())
 				}
 			}
 		})
