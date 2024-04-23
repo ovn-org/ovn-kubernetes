@@ -13,9 +13,9 @@ tags:
 # -- Endpoint of Kubernetes api server
 k8sAPIServer: https://172.25.0.2:6443
 # -- IP range for Kubernetes pods, /14 is the top level range, under which each /23 range will be assigned to a node
-podNetwork: 10.128.0.0/14/23
+podNetwork: 10.244.0.0/16/24
 # -- A comma-separated set of CIDR notation IP ranges from which k8s assigns service cluster IPs. This should be the same as the value provided for kube-apiserver "--service-cluster-ip-range" option
-serviceNetwork: 172.30.0.0/16
+serviceNetwork: 10.96.0.0/16
 # -- MTU of network interface in a Kubernetes pod
 mtu: 1400
 # -- Whether or not call `lookup` Helm function, set it to `true` if you want to run `helm dry-run/template/lint`
@@ -51,7 +51,7 @@ global:
   # -- A comma separated set of IP subnets and the associated hostsubnetlengths (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\") to use with the extended hybrid network
   hybridOverlayNetCidr: ""
   # -- Whether or not to use Admin Network Policy CRD feature with ovn-kubernetes
-  enableAdminNetworkPolicy: true
+  enableAdminNetworkPolicy: false
   # -- Configure to use EgressIP CRD feature with ovn-kubernetes
   enableEgressIp: true
   # -- Configure EgressIP node reachability using gRPC on this TCP port

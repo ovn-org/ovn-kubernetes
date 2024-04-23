@@ -275,6 +275,7 @@ create_ovn_kubernetes() {
         --set ovnkube-master.replicas=${MASTER_REPLICAS} \
         --set global.image.repository=$(get_image) \
         --set global.image.tag=$(get_tag) \
+        --set global.enableAdminNetworkPolicy=true \
         --set global.enableMulticast=$(if [ "${OVN_MULTICAST_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.enableHybridOverlay=$(if [ "${OVN_HYBRID_OVERLAY_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.emptyLbEvents=$(if [ "${OVN_EMPTY_LB_EVENTS}" == "true" ]; then echo "true"; else echo "false"; fi) \
