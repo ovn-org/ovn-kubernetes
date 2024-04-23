@@ -165,17 +165,17 @@ func (ncc *networkClusterController) init() error {
 
 		var (
 			podAllocationAnnotator *annotationalloc.PodAnnotationAllocator
-			ipamClaimsReconciler   *persistentips.IPAMClaimReconciler
+			ipamClaimsReconciler   persistentips.PersistentAllocations
 		)
 
 		if ncc.allowPersistentIPs() {
 			ncc.retryIPAMClaims = ncc.newRetryFramework(factory.IPAMClaimsType, true)
-			ipamClaimsReconciler = persistentips.NewIPAMClaimReconciler(
+			ncc.ipamClaimReconciler = persistentips.NewIPAMClaimReconciler(
 				ncc.kube,
 				ncc.NetInfo,
 				ncc.watchFactory.IPAMClaimsInformer().Lister(),
 			)
-			ncc.ipamClaimReconciler = ipamClaimsReconciler
+			ipamClaimsReconciler = ncc.ipamClaimReconciler
 		}
 
 		podAllocationAnnotator = annotationalloc.NewPodAnnotationAllocator(
