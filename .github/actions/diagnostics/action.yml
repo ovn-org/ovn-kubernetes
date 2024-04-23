@@ -1,0 +1,18 @@
+name: 'Runner Diagnostics'
+description: 'Check disk space usage' # can be extended with other non-disk related steps
+runs:
+  using: 'composite'
+  steps:
+    - name: Check free disk space
+      shell: bash
+      run: |
+        set -x
+        sudo df -h
+    - name: Check detailed disk usage
+      shell: bash
+      run: |
+        set -x
+        # sort will throw errors on some unreadable mounts and head will exit 2 because the output of the du command
+        # is too large that it hits the ulimit max. adding the 2>/dev/null and || true are the workarounds so this
+        # gives the right output and exits cleanly
+        sudo du -a / --exclude="/proc" --exclude="/sys" --exclude="/dev" | sort -rn 2>/dev/null | head -20 || true
