@@ -280,6 +280,8 @@ ovn_enable_interconnect=${OVN_ENABLE_INTERCONNECT:-false}
 ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY:-false}
 #OVN_ENABLE_OVNKUBE_IDENTITY - enable per node cert
 ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
+#OVN_ENABLE_PERSISTENT_IPS - enable IPAM for virtualization workloads (KubeVirt persistent IPs)
+ovn_enable_persistent_ips=${OVN_ENABLE_PERSISTENT_IPS:-false}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -1247,6 +1249,12 @@ ovn-master() {
     echo "=============== ovn-master ========== MASTER ONLY"
   fi
 
+  persistent_ips_enabled_flag=
+  if [[ ${ovn_enable_persistent_ips} == "true" ]]; then
+	  persistent_ips_enabled_flag="--enable-persistent-ips"
+  fi
+  echo "persistent_ips_enabled_flag: ${persistent_ips_enabled_flag}"
+
   /usr/bin/ovnkube --init-master ${K8S_NODE} \
     ${anp_enabled_flag} \
     ${disable_forwarding_flag} \
@@ -1273,6 +1281,7 @@ ovn-master() {
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
+    ${persistent_ips_enabled_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -2063,6 +2072,12 @@ ovn-cluster-manager() {
   fi
   echo "multi_network_enabled_flag: ${multi_network_enabled_flag}"
 
+  persistent_ips_enabled_flag=
+  if [[ ${ovn_enable_persistent_ips} == "true" ]]; then
+	  persistent_ips_enabled_flag="--enable-persistent-ips"
+  fi
+  echo "persistent_ips_enabled_flag: ${persistent_ips_enabled_flag}"
+
   ovnkube_cluster_manager_metrics_bind_address="${metrics_endpoint_ip}:9411"
   echo "ovnkube_cluster_manager_metrics_bind_address: ${ovnkube_cluster_manager_metrics_bind_address}"
 
@@ -2105,6 +2120,7 @@ ovn-cluster-manager() {
     ${hybrid_overlay_flags} \
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
+    ${persistent_ips_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_tls_opts} \
