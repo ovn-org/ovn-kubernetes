@@ -40,7 +40,7 @@ const (
 	PriorityKey           ExternalIDKey = "priority"
 	PolicyDirectionKey    ExternalIDKey = "direction"
 	GressIdxKey           ExternalIDKey = "gress-index"
-	AddressSetIPFamilyKey ExternalIDKey = "ip-family"
+	IPFamilyKey           ExternalIDKey = "ip-family"
 	TypeKey               ExternalIDKey = "type"
 	IpKey                 ExternalIDKey = "ip"
 	PortPolicyIndexKey    ExternalIDKey = "port-policy-index"
@@ -59,7 +59,7 @@ var AddressSetAdminNetworkPolicy = newObjectIDsType(addressSet, AdminNetworkPoli
 	PolicyDirectionKey,
 	// gress rule's index
 	GressIdxKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetBaselineAdminNetworkPolicy = newObjectIDsType(addressSet, BaselineAdminNetworkPolicyOwnerType, []ExternalIDKey{
@@ -69,19 +69,19 @@ var AddressSetBaselineAdminNetworkPolicy = newObjectIDsType(addressSet, Baseline
 	PolicyDirectionKey,
 	// gress rule's index
 	GressIdxKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetEgressFirewallDNS = newObjectIDsType(addressSet, EgressFirewallDNSOwnerType, []ExternalIDKey{
 	// dnsName
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetHybridNodeRoute = newObjectIDsType(addressSet, HybridNodeRouteOwnerType, []ExternalIDKey{
 	// nodeName
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetEgressQoS = newObjectIDsType(addressSet, EgressQoSOwnerType, []ExternalIDKey{
@@ -89,13 +89,13 @@ var AddressSetEgressQoS = newObjectIDsType(addressSet, EgressQoSOwnerType, []Ext
 	ObjectNameKey,
 	// egress qos priority
 	PriorityKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetPodSelector = newObjectIDsType(addressSet, PodSelectorOwnerType, []ExternalIDKey{
 	// pod selector string representation
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 // deprecated, should only be used for sync
@@ -106,25 +106,25 @@ var AddressSetNetworkPolicy = newObjectIDsType(addressSet, NetworkPolicyOwnerTyp
 	PolicyDirectionKey,
 	// gress rule index
 	GressIdxKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetNamespace = newObjectIDsType(addressSet, NamespaceOwnerType, []ExternalIDKey{
 	// namespace
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetEgressIP = newObjectIDsType(addressSet, EgressIPOwnerType, []ExternalIDKey{
 	// cluster-wide address set name
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetEgressService = newObjectIDsType(addressSet, EgressServiceOwnerType, []ExternalIDKey{
 	// cluster-wide address set name
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var ACLAdminNetworkPolicy = newObjectIDsType(acl, AdminNetworkPolicyOwnerType, []ExternalIDKey{
