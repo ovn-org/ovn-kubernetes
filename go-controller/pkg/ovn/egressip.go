@@ -38,17 +38,33 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-type egressIpAddrSetName string
+type egressIPAddrSetName string
+type egressIPPolicyIPFamilyValue string
+type egressIPNoReroutePolicyName string
 
 const (
-	NodeIPAddrSetName             egressIpAddrSetName = "node-ips"
-	EgressIPServedPodsAddrSetName egressIpAddrSetName = "egressip-served-pods"
+	NodeIPAddrSetName             egressIPAddrSetName = "node-ips"
+	EgressIPServedPodsAddrSetName egressIPAddrSetName = "egressip-served-pods"
+	// the possible values for LRP DB objects for EIPs
+	IPFamilyValueV4       egressIPPolicyIPFamilyValue = "ip4"
+	IPFamilyValueV6       egressIPPolicyIPFamilyValue = "ip6"
+	IPFamilyValue         egressIPPolicyIPFamilyValue = "ip" // use it when its dualstack
+	ReplyTrafficNoReroute egressIPNoReroutePolicyName = "EIP-No-Reroute-reply-traffic"
 )
 
-func getEgressIPAddrSetDbIDs(name egressIpAddrSetName, controller string) *libovsdbops.DbObjectIDs {
+func getEgressIPAddrSetDbIDs(name egressIPAddrSetName, controller string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressIP, controller, map[libovsdbops.ExternalIDKey]string{
 		// egress ip creates cluster-wide address sets with egressIpAddrSetName
 		libovsdbops.ObjectNameKey: string(name),
+	})
+}
+
+func getEgressIPLRPNoReRouteDbIDs(priority int, uniqueName egressIPNoReroutePolicyName, ipFamily egressIPPolicyIPFamilyValue) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.LogicalRouterPolicyEgressIP, DefaultNetworkControllerName, map[libovsdbops.ExternalIDKey]string{
+		// egress ip creates global no-reroute policies at 102 priority
+		libovsdbops.ObjectNameKey: string(uniqueName),
+		libovsdbops.PriorityKey:   fmt.Sprintf("%d", priority),
+		libovsdbops.IPFamilyKey:   string(ipFamily),
 	})
 }
 
@@ -1297,6 +1313,9 @@ func InitClusterEgressPolicies(nbClient libovsdbclient.Client, addressSetFactory
 	if err := createDefaultNoRerouteServicePolicies(nbClient, v4ClusterSubnet, v6ClusterSubnet); err != nil {
 		return err
 	}
+	if err := createDefaultNoRerouteReplyTrafficPolicy(nbClient); err != nil {
+		return err
+	}
 
 	// ensure the address-set for storing nodeIPs exists
 	dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, controllerName)
@@ -1664,9 +1683,9 @@ func (e *egressIPZoneController) getGatewayRouterJoinIP(node string, wantsIPv6 b
 // ipFamilyName returns IP family name based on the provided flag
 func ipFamilyName(isIPv6 bool) string {
 	if isIPv6 {
-		return "ip6"
+		return string(IPFamilyValueV6)
 	}
-	return "ip4"
+	return string(IPFamilyValueV4)
 }
 
 func (e *egressIPZoneController) getTransitIP(nodeName string, wantsIPv6 bool) (string, error) {
@@ -1943,6 +1962,18 @@ func createDefaultNoRerouteServicePolicies(nbClient libovsdbclient.Client, v4Clu
 		if err := createLogicalRouterPolicy(nbClient, match, types.DefaultNoRereoutePriority, nil, nil); err != nil {
 			return fmt.Errorf("unable to create IPv6 no-reroute service policies, err: %v", err)
 		}
+	}
+	return nil
+}
+
+// createDefaultNoRerouteReplyTrafficPolicies ensures any traffic which is a response/reply from the egressIP pods
+// will not be re-routed to egress-nodes. This ensures EIP can work well with ETP=local
+// this policy is ipFamily neutral
+func createDefaultNoRerouteReplyTrafficPolicy(nbClient libovsdbclient.Client) error {
+	match := fmt.Sprintf("pkt.mark == %d", types.EgressIPReplyTrafficConnectionMark)
+	externalIDs := getEgressIPLRPNoReRouteDbIDs(types.DefaultNoRereoutePriority, ReplyTrafficNoReroute, IPFamilyValue).GetExternalIDs()
+	if err := createLogicalRouterPolicy(nbClient, match, types.DefaultNoRereoutePriority, externalIDs, nil); err != nil {
+		return fmt.Errorf("unable to create no-reroute reply traffic policies, err: %v", err)
 	}
 	return nil
 }

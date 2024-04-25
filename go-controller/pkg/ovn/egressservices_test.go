@@ -1625,6 +1625,7 @@ func getDefaultNoReroutePolicies(controllerName string) []*nbdb.LogicalRouterPol
 			UUID:    "default-v6-no-reroute-node-UUID",
 			Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 		},
+		getNoReRouteReplyTrafficPolicy(),
 	)
 
 	allLRPS = append(allLRPS,
