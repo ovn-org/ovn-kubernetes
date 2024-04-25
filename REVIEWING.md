@@ -35,7 +35,8 @@ Be trustworthy. During a review, your actions both build and help maintain the t
 
 ## Process
 
-* Approvers are automatically assigned based on the [CODEOWNERS](./CODEOWNERS) file.
+* Reviewers are automatically assigned via the load-balancing algorithm using contributors from the ovn-org/ovn-kubernetes-members team.
+* Reviewers may opt out of reviewing of any PR or the reviewing process altogether by contacting committers or setting their github profile status as "busy" and removing themselves from any currently assigned PR.
 * Reviewers should wait for automated checks to pass before reviewing
 * At least 1 approved review is required from a maintainer before a pull request can be merged
 * All CI checks must pass
@@ -44,7 +45,7 @@ Be trustworthy. During a review, your actions both build and help maintain the t
   * A maintainer may choose to carry a PR forward on their own, but they should ALWAYS include the original author's commits
   * A maintainer may choose to open additional PRs to help lay a foundation on which the stuck PR can be unstuck. They may either rebase the stuck PR themselves or leave this to the author
 * Maintainers should not merge their pull requests without a review
-* Maintainers should let the Mergify bot merge PRs and not merge PRs directly
+* Once a reviewer has approved the PR, the reviewer should add a committer for final PR approval and merge.
 * In times of need, i.e. to fix pressing security issues or fix critical panic issues, the Maintainers may, at their discretion, merge PRs without review. They must add a comment to the PR explaining why they did so.
 
 
