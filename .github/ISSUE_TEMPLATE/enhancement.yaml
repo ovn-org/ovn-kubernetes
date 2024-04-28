@@ -1,0 +1,19 @@
+name: Enhancement Tracking Issue
+description: Provide supporting details for a feature in development
+labels: kind/feature
+body:
+  - type: textarea
+    id: feature
+    attributes:
+      label: What would you like to be added?
+      description: |
+        Please consider engaging with maintainers on slack and mailing lists, and come to our meetings to talk more about this issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why is this needed?
+    validations:
+      required: true

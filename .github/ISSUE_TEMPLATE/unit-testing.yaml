@@ -1,0 +1,17 @@
+name: Enhancing Unit Test Coverage
+description: Provide supporting details for enhancements to our existing unit test coverage
+labels: unit-testing
+body:
+  - type: textarea
+    id: unit-testing
+    attributes:
+      label: What would you like to see added/updated/deleted in our unit tests?
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why is this needed?
+    validations:
+      required: true

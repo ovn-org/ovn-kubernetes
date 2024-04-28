@@ -1,0 +1,11 @@
+name: Generic Issue
+description: This template should be used for generic issues which don't match any other
+body:
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is this issue about?
+      description: |
+        Please provide as much info as possible. Not doing so may result in your bug not being addressed in a timely manner.
+    validations:
+      required: true
