@@ -44,7 +44,9 @@ jobs:
       - name: Deploy preview
         uses: rossjrw/pr-preview-action@v1
         with:
-          source-dir: ./_site
+          source-dir: ./docs
+          token: ${{ secrets.GITHUB_TOKEN }}
+          umbrella-dir: pr-preview
 
   # Deployment job
 #  deploy:
