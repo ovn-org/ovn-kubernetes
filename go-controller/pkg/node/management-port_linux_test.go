@@ -121,10 +121,10 @@ func checkMgmtPortTestIptables(configs []managementPortTestConfig, mgmtPortName 
 			"mangle": {},
 		}
 		if cfg.protocol == iptables.ProtocolIPv4 {
-			err = fakeIpv4.MatchState(expectedTables)
+			err = fakeIpv4.MatchState(expectedTables, nil)
 			Expect(err).NotTo(HaveOccurred())
 		} else {
-			err = fakeIpv6.MatchState(expectedTables)
+			err = fakeIpv6.MatchState(expectedTables, nil)
 			Expect(err).NotTo(HaveOccurred())
 		}
 	}
@@ -221,15 +221,11 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		"ovs-vsctl --timeout=15 set interface " + mgtPort + " " + fmt.Sprintf("mac=%s", strings.ReplaceAll(mgtPortMAC, ":", "\\:")),
 	})
 	for _, cfg := range configs {
+		// We do not enable per-interface forwarding for IPv6
 		if cfg.family == netlink.FAMILY_V4 {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
 				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-			})
-		} else {
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv6.conf.ovn-k8s-mp0.forwarding=1",
-				Output: "net.ipv6.conf.ovn-k8s-mp0.forwarding = 1",
 			})
 		}
 	}
@@ -427,16 +423,11 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 	})
 
 	for _, cfg := range configs {
+		// We do not enable per-interface forwarding for IPv6
 		if cfg.family == netlink.FAMILY_V4 {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
 				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-			})
-		}
-		if cfg.family == netlink.FAMILY_V6 {
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv6.conf.ovn-k8s-mp0.forwarding=1",
-				Output: "net.ipv6.conf.ovn-k8s-mp0.forwarding = 1",
 			})
 		}
 	}
