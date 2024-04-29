@@ -14,7 +14,7 @@ case $(uname -m) in
     aarch64) ARCH="arm64"   ;;
 esac
 
-function if_error_exit {
+if_error_exit() {
     ###########################################################################
     # Description:                                                            #
     # Validate if previous command failed and show an error msg (if provided) #
@@ -157,6 +157,7 @@ install_metallb() {
     # Enable IPv6 forwarding in FRR
     docker exec frr sysctl -w net.ipv6.conf.all.forwarding=1
   fi
+  # Note: this image let's us use it also for creating load balancer backends that can send big packets
   docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
   popd
   delete_metallb_dir
@@ -308,7 +309,7 @@ sleep_until_pods_settle() {
   sleep 30
 }
 
-function is_nested_virt_enabled() {
+is_nested_virt_enabled() {
     local kvm_nested="unknown"
     if [ -f "/sys/module/kvm_intel/parameters/nested" ]; then
         kvm_nested=$( cat /sys/module/kvm_intel/parameters/nested )
@@ -318,7 +319,7 @@ function is_nested_virt_enabled() {
     [ "$kvm_nested" == "1" ] || [ "$kvm_nested" == "Y" ] || [ "$kvm_nested" == "y" ]
 }
 
-function install_kubevirt() {
+install_kubevirt() {
     local kubevirt_version="$(curl -L https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)"
     for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
