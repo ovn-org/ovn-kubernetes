@@ -44,7 +44,7 @@ jobs:
       - name: Deploy preview
         uses: rossjrw/pr-preview-action@v1
         with:
-          source-dir: ./docs  
+          source-dir: ./_site
 
   # Deployment job
 #  deploy:
