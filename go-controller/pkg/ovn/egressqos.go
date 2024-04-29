@@ -1108,6 +1108,6 @@ func (oc *DefaultNetworkController) updateEgressQoSZoneStatusCondition(newCondit
 	applyObj := egressqosapply.EgressQoS(name, namespace).
 		WithStatus(egressqosapply.EgressQoSStatus().WithConditions(newCondition))
 	_, err = oc.kube.EgressQoSClient.K8sV1().EgressQoSes(namespace).ApplyStatus(context.TODO(),
-		applyObj, metav1.ApplyOptions{FieldManager: oc.zone})
+		applyObj, metav1.ApplyOptions{FieldManager: oc.zone, Force: true})
 	return err
 }
