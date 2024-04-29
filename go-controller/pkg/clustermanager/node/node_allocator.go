@@ -96,18 +96,18 @@ func (na *NodeAllocator) hasHybridOverlayAllocation() bool {
 }
 
 func (na *NodeAllocator) recordSubnetCount() {
-	// only for the default network
-	if !na.netInfo.IsSecondary() {
+	// only for L3 networks
+	if na.hasNodeSubnetAllocation() {
 		v4count, v6count := na.clusterSubnetAllocator.Count()
-		metrics.RecordSubnetCount(float64(v4count), float64(v6count))
+		metrics.RecordSubnetCount(float64(v4count), float64(v6count), na.netInfo.GetNetworkName())
 	}
 }
 
 func (na *NodeAllocator) recordSubnetUsage() {
-	// only for the default network
-	if !na.netInfo.IsSecondary() {
+	// only for L3 networks
+	if na.hasNodeSubnetAllocation() {
 		v4used, v6used := na.clusterSubnetAllocator.Usage()
-		metrics.RecordSubnetUsage(float64(v4used), float64(v6used))
+		metrics.RecordSubnetUsage(float64(v4used), float64(v6used), na.netInfo.GetNetworkName())
 	}
 }
 
@@ -149,7 +149,7 @@ func (na *NodeAllocator) releaseHybridOverlayNodeSubnet(nodeName string) {
 
 // HandleAddUpdateNodeEvent handles the add or update node event
 func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
-	defer na.recordSubnetCount()
+	defer na.recordSubnetUsage()
 
 	if util.NoHostSubnet(node) {
 		if na.hasHybridOverlayAllocation() {
@@ -236,7 +236,7 @@ func (na *NodeAllocator) HandleDeleteNode(node *corev1.Node) error {
 
 	if na.hasNodeSubnetAllocation() {
 		na.clusterSubnetAllocator.ReleaseAllNetworks(node.Name)
-		na.recordSubnetCount()
+		na.recordSubnetUsage()
 	}
 
 	return nil

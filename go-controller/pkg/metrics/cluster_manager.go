@@ -26,33 +26,45 @@ var MetricClusterManagerReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts
 	Help:      "The duration for the cluster manager to get to ready state",
 })
 
-var metricV4HostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
+var metricV4HostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemClusterManager,
 	Name:      "num_v4_host_subnets",
-	Help:      "The total number of v4 host subnets possible",
-})
+	Help:      "The total number of v4 host subnets possible per network"},
+	[]string{
+		"network_name",
+	},
+)
 
-var metricV6HostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
+var metricV6HostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemClusterManager,
 	Name:      "num_v6_host_subnets",
-	Help:      "The total number of v6 host subnets possible",
-})
+	Help:      "The total number of v6 host subnets possible per network"},
+	[]string{
+		"network_name",
+	},
+)
 
-var metricV4AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
+var metricV4AllocatedHostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemClusterManager,
 	Name:      "allocated_v4_host_subnets",
-	Help:      "The total number of v4 host subnets currently allocated",
-})
+	Help:      "The total number of v4 host subnets currently allocated per network"},
+	[]string{
+		"network_name",
+	},
+)
 
-var metricV6AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
+var metricV6AllocatedHostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemClusterManager,
 	Name:      "allocated_v6_host_subnets",
-	Help:      "The total number of v6 host subnets currently allocated",
-})
+	Help:      "The total number of v6 host subnets currently allocated per network"},
+	[]string{
+		"network_name",
+	},
+)
 
 /** EgressIP metrics recorded from cluster-manager begins**/
 var metricEgressIPCount = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -125,16 +137,16 @@ func RegisterClusterManagerFunctional() {
 }
 
 // RecordSubnetUsage records the number of subnets allocated for nodes
-func RecordSubnetUsage(v4SubnetsAllocated, v6SubnetsAllocated float64) {
-	metricV4AllocatedHostSubnetCount.Set(v4SubnetsAllocated)
-	metricV6AllocatedHostSubnetCount.Set(v6SubnetsAllocated)
+func RecordSubnetUsage(v4SubnetsAllocated, v6SubnetsAllocated float64, networkName string) {
+	metricV4AllocatedHostSubnetCount.WithLabelValues(networkName).Set(v4SubnetsAllocated)
+	metricV6AllocatedHostSubnetCount.WithLabelValues(networkName).Set(v6SubnetsAllocated)
 }
 
 // RecordSubnetCount records the number of available subnets per configuration
 // for ovn-kubernetes
-func RecordSubnetCount(v4SubnetCount, v6SubnetCount float64) {
-	metricV4HostSubnetCount.Set(v4SubnetCount)
-	metricV6HostSubnetCount.Set(v6SubnetCount)
+func RecordSubnetCount(v4SubnetCount, v6SubnetCount float64, networkName string) {
+	metricV4HostSubnetCount.WithLabelValues(networkName).Set(v4SubnetCount)
+	metricV6HostSubnetCount.WithLabelValues(networkName).Set(v6SubnetCount)
 }
 
 // RecordEgressIPReachableNode records how many times EgressIP detected an unuseable node.
