@@ -1,4 +1,3 @@
-theme: jekyll-theme-minimal
+theme: jasonlong/architect-theme
 title: OVN-Kubernetes Homepage
 description: test
-url: "http://ovn-kubernetes.github.io"  
