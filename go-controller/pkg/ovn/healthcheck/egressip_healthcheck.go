@@ -1,17 +1,20 @@
 package healthcheck
 
 import (
-	"crypto/tls"
+	"net"
+	"strconv"
+	"sync"
+	"time"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"golang.org/x/net/context"
 	"golang.org/x/net/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials/tls/certprovider/pemfile"
+	"google.golang.org/grpc/security/advancedtls"
 	"k8s.io/klog/v2"
-	"net"
-	"strconv"
-	"sync"
 )
 
 const (
@@ -70,13 +73,30 @@ func (ehs *egressIPHealthServer) Run(stopCh <-chan struct{}) {
 	if cfg.Cert == "" || cfg.PrivKey == "" {
 		klog.Warning("Health checking using insecure connection")
 	} else {
-		// Enable TLS for all incoming connections.
-		cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.PrivKey)
+		// certProvider is responsible for reloading the certificate if it rotates.
+		// Use a short RefreshDuration to ensure that the certificate is reloaded if the cluster was suspended.
+		certProvider, err := pemfile.NewProvider(pemfile.Options{
+			CertFile:        cfg.Cert,
+			KeyFile:         cfg.PrivKey,
+			RefreshDuration: time.Minute,
+		})
 		if err != nil {
-			klog.Fatalf("Health checking TLS key failed: %v", err)
+			klog.Fatalf("Failed to create the cert provider: %v", err)
 		}
-		opts = append(opts, grpc.Creds(credentials.NewServerTLSFromCert(&cert)))
+		defer certProvider.Close()
+
+		srvOpts := &advancedtls.ServerOptions{
+			IdentityOptions: advancedtls.IdentityCertificateOptions{
+				IdentityProvider: certProvider,
+			},
+		}
+		serverTLSCreds, err := advancedtls.NewServerCreds(srvOpts)
+		if err != nil {
+			klog.Fatalf("Failed to create the server creds: %v", err)
+		}
+		opts = append(opts, grpc.Creds(serverTLSCreds))
 	}
+
 	grpcServer := grpc.NewServer(opts...)
 
 	wg.Add(1)
