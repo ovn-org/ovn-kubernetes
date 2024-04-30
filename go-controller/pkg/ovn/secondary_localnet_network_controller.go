@@ -284,9 +284,7 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 		Name:      oc.GetNetworkScopedName(types.OVNLocalnetPort),
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
-		Options: map[string]string{
-			"network_name": oc.GetNetworkName(),
-		},
+		Options:   oc.localnetPortNetworkNameOptions(),
 	}
 	intVlanID := int(oc.Vlan())
 	if intVlanID != 0 {
@@ -345,4 +343,14 @@ func (oc *SecondaryLocalnetNetworkController) newRetryFramework(
 		oc.watchFactory,
 		resourceHandler,
 	)
+}
+
+func (oc *SecondaryLocalnetNetworkController) localnetPortNetworkNameOptions() map[string]string {
+	localnetLSPOptions := map[string]string{
+		"network_name": oc.GetNetworkName(),
+	}
+	if oc.PhysicalNetworkName() != "" {
+		localnetLSPOptions["network_name"] = oc.PhysicalNetworkName()
+	}
+	return localnetLSPOptions
 }
