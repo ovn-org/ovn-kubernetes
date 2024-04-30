@@ -72,6 +72,7 @@ func getEgressIPAddrSetDbIDs(name egressIpAddrSetName, controller string) *libov
 //
 //	We only care about `Spec.NamespaceSelector`, `Spec.PodSelector` and `Status` field
 func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.EgressIP) (err error) {
+	klog.Infof("SURYA")
 	// CASE 1: EIP object deletion, we need to teardown database configuration for all the statuses
 	if old != nil && new == nil {
 		removeStatus := old.Status.Items
