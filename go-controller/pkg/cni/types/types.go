@@ -33,6 +33,8 @@ type NetConf struct {
 	// restart.
 	AllowPersistentIPs bool `json:"allowPersistentIPs,omitempty"`
 
+	Alias string `json:"alias,omitempty"`
+
 	// PciAddrs in case of using sriov or Auxiliry device name in case of SF
 	DeviceID string `json:"deviceID,omitempty"`
 	// LogFile to log all the messages from cni shim binary to

@@ -36,6 +36,7 @@ type BasicNetInfo interface {
 	ExcludeSubnets() []*net.IPNet
 	Vlan() uint
 	AllowsPersistentIPs() bool
+	Alias() string
 
 	// utility methods
 	CompareNetInfo(BasicNetInfo) bool
@@ -133,6 +134,10 @@ func (nInfo *DefaultNetInfo) AllowsPersistentIPs() bool {
 	return false
 }
 
+func (nInfo *DefaultNetInfo) Alias() string {
+	return ""
+}
+
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
 type secondaryNetInfo struct {
 	netName            string
@@ -148,6 +153,8 @@ type secondaryNetInfo struct {
 	// all net-attach-def NAD names for this network, used to determine if a pod needs
 	// to be plumbed for this network
 	nadNames sync.Map
+
+	localnetAlias string
 }
 
 // GetNetworkName returns the network name
@@ -213,6 +220,10 @@ func (nInfo *secondaryNetInfo) Vlan() uint {
 // AllowsPersistentIPs returns the defaultNetConfInfo's AllowPersistentIPs value
 func (nInfo *secondaryNetInfo) AllowsPersistentIPs() bool {
 	return nInfo.allowPersistentIPs
+}
+
+func (nInfo *secondaryNetInfo) Alias() string {
+	return nInfo.localnetAlias
 }
 
 // IPMode returns the ipv4/ipv6 mode
@@ -305,6 +316,7 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		mtu:                netconf.MTU,
 		vlan:               uint(netconf.VLANID),
 		allowPersistentIPs: netconf.AllowPersistentIPs,
+		localnetAlias:      netconf.Alias,
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
