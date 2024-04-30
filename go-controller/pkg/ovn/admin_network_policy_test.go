@@ -25,6 +25,7 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/klog/v2"
 	utilpointer "k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 )
@@ -89,7 +90,9 @@ func getDefaultPGForANPSubject(anpName string, portUUIDs []string, acls []*nbdb.
 }
 
 func getANPGressACL(action, anpName, direction string, rulePriority int32,
-	ruleIndex int32, ports *[]anpapi.AdminNetworkPolicyPort, banp bool) []*nbdb.ACL {
+	ruleIndex int32, ports *[]anpapi.AdminNetworkPolicyPort,
+	namedPorts map[string]*[]libovsdbutil.NamedNetworkPolicyPort, banp bool) []*nbdb.ACL {
+	retACLs := []*nbdb.ACL{}
 	// we are not using BuildACL and instead manually building it on purpose so that the code path for BuildACL is also tested
 	acl := nbdb.ACL{}
 	acl.Action = action
@@ -120,59 +123,114 @@ func getANPGressACL(action, anpName, direction string, rulePriority int32,
 	acl.UUID = fmt.Sprintf("%s_%s_%d-%f-UUID", anpName, direction, ruleIndex, rand.Float64())
 	// determine ACL match
 	pgName := libovsdbutil.GetPortGroupName(anpovn.GetANPPortGroupDbIDs(anpName, banp, DefaultNetworkControllerName))
-	var l3PortMatch, matchDirection string
+	var lPortMatch, l3Match, matchDirection, match string
 	if direction == string(libovsdbutil.ACLIngress) {
 		acl.Direction = nbdb.ACLDirectionToLport
-		l3PortMatch = fmt.Sprintf("outport == @%s", pgName)
+		lPortMatch = fmt.Sprintf("outport == @%s", pgName)
 		matchDirection = "src"
 	} else {
 		acl.Direction = nbdb.ACLDirectionFromLport
 		acl.Options = map[string]string{
 			"apply-after-lb": "true",
 		}
-		l3PortMatch = fmt.Sprintf("inport == @%s", pgName)
+		lPortMatch = fmt.Sprintf("inport == @%s", pgName)
 		matchDirection = "dst"
 	}
 	asIndex := anpovn.GetANPPeerAddrSetDbIDs(anpName, direction, fmt.Sprintf("%d", ruleIndex),
 		DefaultNetworkControllerName, banp)
 	asv4, asv6 := addressset.GetHashNamesForAS(asIndex)
 	if config.IPv4Mode && config.IPv6Mode {
-		acl.Match = fmt.Sprintf("((ip4.%s == $%s || ip6.%s == $%s)) && %s", matchDirection, asv4, matchDirection, asv6, l3PortMatch)
+		l3Match = fmt.Sprintf("((ip4.%s == $%s || ip6.%s == $%s))", matchDirection, asv4, matchDirection, asv6)
 	} else if config.IPv4Mode {
-		acl.Match = fmt.Sprintf("(ip4.%s == $%s) && %s", matchDirection, asv4, l3PortMatch)
+		l3Match = fmt.Sprintf("(ip4.%s == $%s)", matchDirection, asv4)
 	} else {
-		acl.Match = fmt.Sprintf("(ip6.%s == $%s) && %s", matchDirection, asv6, l3PortMatch)
+		l3Match = fmt.Sprintf("(ip6.%s == $%s)", matchDirection, asv6)
 	}
+	// determine L4 Port match
+	npps := []*libovsdbutil.NetworkPolicyPort{}
+	nnpps := make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort, 0)
 	if ports != nil && len(*ports) != 0 {
-		portACLs := []*nbdb.ACL{}
-		for i, port := range *ports {
-			aclCopy := acl
-			aclCopy.ExternalIDs = make(map[string]string)
-			for k, v := range acl.ExternalIDs {
-				aclCopy.ExternalIDs[k] = v
+		for _, port := range *ports {
+			if port.NamedPort != nil {
+				// hardcoding the logic in the tests for enabling us to construct the matches;
+				// dns matches ingress and web/web123 matches egress@0th index
+				val, ok := namedPorts[*port.NamedPort]
+				if ok {
+					nnpps[*port.NamedPort] = val
+				}
+			} else if port.PortNumber != nil {
+				npps = append(npps, libovsdbutil.GetNetworkPolicyPort(port.PortNumber.Protocol, port.PortNumber.Port, 0))
+			} else {
+				npps = append(npps, libovsdbutil.GetNetworkPolicyPort(port.PortRange.Protocol, port.PortRange.Start, port.PortRange.End))
 			}
-			var l4PortMatch, protocol string
-			if port.PortNumber != nil && port.PortNumber.Port != 0 {
-				protocol = strings.ToLower(string(port.PortNumber.Protocol))
-				l4PortMatch = fmt.Sprintf("%s && %s.dst==%d", protocol, protocol, port.PortNumber.Port)
-			} else if port.PortRange != nil && port.PortRange.End != 0 && port.PortRange.Start != port.PortRange.End {
-				protocol = strings.ToLower(string(port.PortRange.Protocol))
-				l4PortMatch = fmt.Sprintf("%s && %d<=%s.dst<=%d", protocol, port.PortRange.Start, protocol, port.PortRange.End)
-			}
-			aclCopy.Match = fmt.Sprintf("%s && %s", acl.Match, l4PortMatch)
-			aclCopy.UUID = fmt.Sprintf("%s_%s_%d.%d-%f-UUID", anpName, direction, ruleIndex, i, rand.Float64())
-			aclCopy.ExternalIDs[libovsdbops.PortPolicyProtocolKey.String()] = protocol
-			aclCopy.ExternalIDs[libovsdbops.PrimaryIDKey.String()] = fmt.Sprintf("%s:AdminNetworkPolicy:%s:%s:%d:%s",
-				DefaultNetworkControllerName, anpName, direction, ruleIndex, protocol)
-			if banp {
-				aclCopy.ExternalIDs[libovsdbops.PrimaryIDKey.String()] = fmt.Sprintf("%s:BaselineAdminNetworkPolicy:%s:%s:%d:%s",
-					DefaultNetworkControllerName, anpName, direction, ruleIndex, protocol)
-			}
-			portACLs = append(portACLs, &aclCopy)
 		}
-		return portACLs
 	}
-	return []*nbdb.ACL{&acl}
+	for protocol, l4Match := range libovsdbutil.GetL4MatchesFromNetworkPolicyPorts(npps) {
+		aclCopy := acl
+		aclCopy.ExternalIDs = make(map[string]string)
+		for k, v := range acl.ExternalIDs {
+			aclCopy.ExternalIDs[k] = v
+		}
+		if l4Match == libovsdbutil.UnspecifiedL4Match {
+			// we don't need the lportMatch here but we are keeping it for safety reasons
+			match = fmt.Sprintf("%s && %s", lPortMatch, l3Match)
+		} else {
+			match = fmt.Sprintf("%s && %s && %s", lPortMatch, l3Match, l4Match)
+		}
+		aclCopy.ExternalIDs[libovsdbops.PortPolicyProtocolKey.String()] = protocol
+		aclCopy.Match = match
+		aclCopy.ExternalIDs[libovsdbops.PrimaryIDKey.String()] = fmt.Sprintf("%s:AdminNetworkPolicy:%s:%s:%d:%s",
+			DefaultNetworkControllerName, anpName, direction, ruleIndex, protocol)
+		if banp {
+			aclCopy.ExternalIDs[libovsdbops.PrimaryIDKey.String()] = fmt.Sprintf("%s:BaselineAdminNetworkPolicy:%s:%s:%d:%s",
+				DefaultNetworkControllerName, anpName, direction, ruleIndex, protocol)
+		}
+		aclCopy.UUID = fmt.Sprintf("%s_%s_%d.%s-%f-UUID", anpName, direction, ruleIndex, protocol, rand.Float64())
+		retACLs = append(retACLs, &aclCopy)
+	}
+	// Process match for NamedPorts if any
+	for protocol, l3l4Match := range libovsdbutil.GetL3L4MatchesFromNamedPorts(nnpps) {
+		aclCopy := acl
+		aclCopy.ExternalIDs = make(map[string]string)
+		for k, v := range acl.ExternalIDs {
+			aclCopy.ExternalIDs[k] = v
+		}
+		if direction == string(libovsdbutil.ACLIngress) {
+			match = fmt.Sprintf("%s && %s", l3Match, l3l4Match)
+		} else {
+			match = fmt.Sprintf("%s && %s", lPortMatch, l3l4Match)
+		}
+		aclCopy.ExternalIDs[libovsdbops.PortPolicyProtocolKey.String()] = protocol + "-namedPort"
+		aclCopy.Match = match
+		aclCopy.ExternalIDs[libovsdbops.PrimaryIDKey.String()] = fmt.Sprintf("%s:AdminNetworkPolicy:%s:%s:%d:%s",
+			DefaultNetworkControllerName, anpName, direction, ruleIndex, protocol+"-namedPort")
+		if banp {
+			aclCopy.ExternalIDs[libovsdbops.PrimaryIDKey.String()] = fmt.Sprintf("%s:BaselineAdminNetworkPolicy:%s:%s:%d:%s",
+				DefaultNetworkControllerName, anpName, direction, ruleIndex, protocol+"-namedPort")
+		}
+		retACLs = append(retACLs, &aclCopy)
+	}
+	return retACLs
+}
+
+func getACLsForANPRulesWithNamedPorts(anp *anpapi.AdminNetworkPolicy, namedIPorts, namedEPorts map[string]*[]libovsdbutil.NamedNetworkPolicyPort) []*nbdb.ACL {
+	aclResults := []*nbdb.ACL{}
+	ovnBaseANPPriority := getBaseRulePriority(anp.Spec.Priority)
+	for i, ingress := range anp.Spec.Ingress {
+		acls := getANPGressACL(anpovn.GetACLActionForANPRule(ingress.Action), anp.Name, string(libovsdbutil.ACLIngress),
+			getANPRulePriority(ovnBaseANPPriority, int32(i)), int32(i), ingress.Ports, namedIPorts, false)
+		aclResults = append(aclResults, acls...)
+	}
+	for i, egress := range anp.Spec.Egress {
+		// web/web123 matches egressRule@0th index; egressRule@1st index doesn't have matching pods
+		if i != 0 {
+			namedEPorts = nil
+		}
+		acls := getANPGressACL(anpovn.GetACLActionForANPRule(egress.Action), anp.Name, string(libovsdbutil.ACLEgress),
+			getANPRulePriority(ovnBaseANPPriority, int32(i)), int32(i), egress.Ports, namedEPorts, false)
+		aclResults = append(aclResults, acls...)
+	}
+	return aclResults
 }
 
 func getACLsForANPRules(anp *anpapi.AdminNetworkPolicy) []*nbdb.ACL {
@@ -180,12 +238,12 @@ func getACLsForANPRules(anp *anpapi.AdminNetworkPolicy) []*nbdb.ACL {
 	ovnBaseANPPriority := getBaseRulePriority(anp.Spec.Priority)
 	for i, ingress := range anp.Spec.Ingress {
 		acls := getANPGressACL(anpovn.GetACLActionForANPRule(ingress.Action), anp.Name, string(libovsdbutil.ACLIngress),
-			getANPRulePriority(ovnBaseANPPriority, int32(i)), int32(i), ingress.Ports, false)
+			getANPRulePriority(ovnBaseANPPriority, int32(i)), int32(i), ingress.Ports, nil, false)
 		aclResults = append(aclResults, acls...)
 	}
 	for i, egress := range anp.Spec.Egress {
 		acls := getANPGressACL(anpovn.GetACLActionForANPRule(egress.Action), anp.Name, string(libovsdbutil.ACLEgress),
-			getANPRulePriority(ovnBaseANPPriority, int32(i)), int32(i), egress.Ports, false)
+			getANPRulePriority(ovnBaseANPPriority, int32(i)), int32(i), egress.Ports, nil, false)
 		aclResults = append(aclResults, acls...)
 	}
 	return aclResults
@@ -353,8 +411,6 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				pg = getDefaultPGForANPSubject(anp.Name, []string{t.portUUID}, nil, false)
 				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
 				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t}, []string{node1Name})...)
-				// NOTE(tssurya): It takes a retry until LSP is created before this controller can add this port to port-group and that takes
-				// over a second in unit tests. Need to check if this is a testing framework delay or in actual environments we are this slow
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				ginkgo.By("3. update the ANP by adding one ingress rule; check if acl is created and added on the port-group")
@@ -464,13 +520,13 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 							{
 								PortNumber: &anpapi.Port{
 									Protocol: v1.ProtocolUDP,
-									Port:     int32(12345),
+									Port:     int32(1235),
 								},
 							},
 							{
 								PortNumber: &anpapi.Port{
 									Protocol: v1.ProtocolSCTP,
-									Port:     int32(12345),
+									Port:     int32(1345),
 								},
 							},
 						},
@@ -880,7 +936,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
-		ginkgo.It("PortNumber and PortRange Rules for ANP", func() {
+		ginkgo.It("PortNumber, PortRange and NamedPort (no matching pods) Rules for ANP", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.IPv4Mode = true
 				config.IPv6Mode = true
@@ -913,6 +969,22 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 							Port:     36363,
 							Protocol: v1.ProtocolTCP,
 						},
+					},
+					{
+						PortNumber: &anpapi.Port{
+							Port:     36364,
+							Protocol: v1.ProtocolTCP,
+						},
+					},
+					{
+						PortRange: &anpapi.PortRange{
+							Start:    36330,
+							End:      36550,
+							Protocol: v1.ProtocolTCP,
+						},
+					},
+					{
+						NamedPort: ptr.To("http"), // unmatched port; no pod has it; ensure its ignored
 					},
 					{
 						PortRange: &anpapi.PortRange{
@@ -994,13 +1066,424 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 
 				ginkgo.By("2. Update ANP by changing port range in ingress rule and ensure its honoured")
 				anp.ResourceVersion = "2"
-				anpPortMangle[1].PortRange.End = 60000
+				anpPortMangle[4].PortRange.End = 60000
 				anp.Spec.Ingress[0].Ports = &anpPortMangle
 				_, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				ingressACL := expectedDatabaseState[2] // ingress SCTP ACL
 				acl := ingressACL.(*nbdb.ACL)
 				_ = strings.Replace(acl.Match, "36550", "60000", 1)
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+		ginkgo.It("NamedPort matching pods Rules for ANP", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+				anpSubjectNamespace := *newNamespaceWithLabels(anpSubjectNamespaceName, anpLabel)
+				anpNamespacePeer := *newNamespaceWithLabels(anpPeerNamespaceName, peerPassLabel)
+				anpNamespacePeer2 := *newNamespaceWithLabels(anpPeerNamespaceName+"2", peerDenyLabel)
+				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet, node1transitIPv4, node1transitIPv6)
+				node1Switch := &nbdb.LogicalSwitch{
+					Name: node1Name,
+					UUID: node1Name + "-UUID",
+				}
+				t1 := newTPod(
+					node1Name,
+					node1IPv4Subnet+" "+node1IPv6Subnet,
+					"10.128.1.2",
+					"10.128.1.1"+" "+"fe00:10:128:1::1",
+					anpPeerPodName,
+					anpPodV4IP2+" "+anpPodV6IP2,
+					anpPodMAC2,
+					anpPeerNamespaceName,
+				)
+				anpPeerPod := *newPod(anpPeerNamespaceName, anpPeerPodName, node1Name, t1.podIP)
+				// pinning annotations because between subject and peer pods IPAM isunpredictable
+				anpPeerPod.Annotations = map[string]string{}
+				anpPeerPod.Annotations["k8s.ovn.org/pod-networks"] = `{"default":{"ip_addresses":["10.128.1.4/24","fe00:10:128:1::4/64"],` +
+					`"mac_address":"0a:58:0a:80:01:04","gateway_ips":["10.128.1.1","fe00:10:128:1::1"],"routes":[{"dest":"10.128.1.0/24","nextHop":"10.128.1.1"}],` +
+					`"ip_address":"10.128.1.4/24","gateway_ip":"10.128.1.1"}}`
+				anpPeerPod.Spec.Containers = append(anpPeerPod.Spec.Containers,
+					v1.Container{
+						Name:  "containerName",
+						Image: "containerImage",
+						Ports: []v1.ContainerPort{
+							{
+								Name:          "web",
+								ContainerPort: 3535,
+								Protocol:      v1.ProtocolTCP,
+							},
+							{
+								Name:          "web123",
+								ContainerPort: 35356,
+								Protocol:      v1.ProtocolSCTP,
+							},
+						},
+					},
+				)
+				t2 := newTPod(
+					node1Name,
+					node1IPv4Subnet+" "+node1IPv6Subnet,
+					"10.128.1.2",
+					"10.128.1.1"+" "+"fe00:10:128:1::1",
+					anpSubjectPodName,
+					anpPodV4IP+" "+anpPodV6IP,
+					anpPodMAC,
+					anpSubjectNamespaceName,
+				)
+				anpSubjectPod := *newPod(anpSubjectNamespaceName, anpSubjectPodName, node1Name, t2.podIP)
+				// pinning annotations because between subject and peer pods IPAM isunpredictable
+				anpSubjectPod.Annotations = map[string]string{}
+				anpSubjectPod.Annotations["k8s.ovn.org/pod-networks"] = `{"default":{"ip_addresses":["10.128.1.3/24","fe00:10:128:1::3/64"],` +
+					`"mac_address":"0a:58:0a:80:01:03","gateway_ips":["10.128.1.1","fe00:10:128:1::1"],"routes":[{"dest":"10.128.1.0/24","nextHop":"10.128.1.1"}],` +
+					`"ip_address":"10.128.1.3/24","gateway_ip":"10.128.1.1"}}`
+				anpSubjectPod.Spec.Containers[0].Ports = []v1.ContainerPort{
+					{
+						Name:          "dns",
+						ContainerPort: 5353,
+						Protocol:      v1.ProtocolUDP,
+					},
+				}
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						node1Switch,
+					},
+				}
+				fakeOVN.startWithDBSetup(dbSetup,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							anpSubjectNamespace,
+							anpNamespacePeer,
+							anpNamespacePeer2,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*node1,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							anpPeerPod, // peer pod ("house": "slytherin")
+						},
+					},
+				)
+				fakeOVN.controller.zone = node1Name // ensure we set the controller's zone as the node's zone
+				t1.portName = util.GetLogicalPortName(t1.namespace, t1.podName)
+				t1.populateLogicalSwitchCache(fakeOVN)
+				t2.portName = util.GetLogicalPortName(t2.namespace, t2.podName)
+				t2.populateLogicalSwitchCache(fakeOVN)
+				err := fakeOVN.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOVN.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// update namedPorts for constructing right test ACLs
+				namedEPorts := make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort)
+				namedIPorts := make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort)
+				namedEPorts["web"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+					{L4Protocol: "tcp", L3PodIP: anpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "3535"},
+					{L4Protocol: "tcp", L3PodIP: anpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "3535"},
+				}
+				namedEPorts["web123"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+					{L4Protocol: "sctp", L3PodIP: anpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "35356"},
+					{L4Protocol: "sctp", L3PodIP: anpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "35356"},
+				}
+				namedIPorts["dns"] = &[]libovsdbutil.NamedNetworkPolicyPort{}
+				fakeOVN.InitAndRunANPController()
+				fakeOVN.fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("update", "adminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+					update := action.(clienttesting.UpdateAction)
+					// Since fake client (NewSimpleClientset) does not differentiate between
+					// an update and updatestatus, updatestatus in tests updates the spec as
+					// well causing race conditions. Thus adding a hack here to ensure update
+					// status is caught and processed by the reactor while update spec is
+					// delegated to the main code for handling
+					if action.GetSubresource() == "status" {
+						klog.Infof("Got an update status action for %v", update.GetObject())
+						return true, update.GetObject(), nil
+					}
+					klog.Infof("Got an update spec action for %v", update.GetObject())
+					return false, update.GetObject(), nil
+				})
+				ginkgo.By("1. Create ANP with 1 ingress rule and 2 egress rule with multiple NamedPorts combinations")
+				anpSubject := newANPSubjectObject(
+					&metav1.LabelSelector{
+						MatchLabels: anpLabel,
+					},
+					nil,
+				)
+				anpPortMangle := []anpapi.AdminNetworkPolicyPort{
+					{
+						PortNumber: &anpapi.Port{
+							Port:     36363,
+							Protocol: v1.ProtocolTCP,
+						},
+					},
+					{
+						NamedPort: ptr.To("web123"), // matched by anpPeerPod
+					},
+					{
+						PortRange: &anpapi.PortRange{
+							Start:    36330,
+							End:      36550,
+							Protocol: v1.ProtocolSCTP,
+						},
+					},
+					{
+						NamedPort: ptr.To("web"), // matched by anpPeerPod
+					},
+					{
+						PortRange: &anpapi.PortRange{
+							Start:    36330,
+							End:      36550,
+							Protocol: v1.ProtocolUDP,
+						},
+					},
+					{
+						NamedPort: ptr.To("dns"), // matched by anpSubjectPod (will be created in the future)
+					},
+				}
+				anp := newANPObject("harry-potter", 65, anpSubject,
+					[]anpapi.AdminNetworkPolicyIngressRule{
+						{ // 3 ACLs + 1ACL for NamedPort
+							Name:   "deny-traffic-from-slytherin-to-gryffindor",
+							Action: anpapi.AdminNetworkPolicyRuleActionDeny,
+							From: []anpapi.AdminNetworkPolicyIngressPeer{
+								{
+									Namespaces: &metav1.LabelSelector{
+										MatchLabels: peerDenyLabel,
+									},
+								},
+							},
+							Ports: &anpPortMangle,
+						},
+					},
+					[]anpapi.AdminNetworkPolicyEgressRule{
+						{ // 3 ACLs + 2ACLs for NamedPort
+							Name:   "pass-traffic-to-slytherin-from-gryffindor",
+							Action: anpapi.AdminNetworkPolicyRuleActionPass,
+							To: []anpapi.AdminNetworkPolicyEgressPeer{
+								{
+									Namespaces: &metav1.LabelSelector{
+										MatchLabels: peerPassLabel,
+									},
+								},
+							},
+							Ports: &anpPortMangle,
+						},
+						{ // 3 ACLs
+							Name:   "allow-traffic-to-hufflepuff-from-gryffindor",
+							Action: anpapi.AdminNetworkPolicyRuleActionAllow,
+							To: []anpapi.AdminNetworkPolicyEgressPeer{
+								{
+									Namespaces: &metav1.LabelSelector{
+										MatchLabels: peerAllowLabel,
+									},
+								},
+							},
+							Ports: &anpPortMangle,
+						},
+					},
+				)
+				anp.ResourceVersion = "1"
+				anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Create(context.TODO(), anp, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				acls := getACLsForANPRulesWithNamedPorts(anp, namedIPorts, namedEPorts)
+				pg := getDefaultPGForANPSubject(anp.Name, []string{}, acls, false)
+				subjectNSASIPv4, subjectNSASIPv6 := buildNamespaceAddressSets(anpSubjectNamespaceName, []string{})
+				peerNSASIPv4, peerNSASIPv6 := buildNamespaceAddressSets(anpPeerNamespaceName, []string{anpPodV4IP2, anpPodV6IP2})
+				peerNS2ASIPv4, peerNS2ASIPv6 := buildNamespaceAddressSets(anpPeerNamespaceName+"2", []string{})
+				baseExpectedDatabaseState := []libovsdbtest.TestData{subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6, peerNS2ASIPv4, peerNS2ASIPv6}
+				peerASIngressRule0v4, peerASIngressRule0v6 := buildANPAddressSets(anp, 0, []string{}, libovsdbutil.ACLIngress)
+				baseExpectedDatabaseState = append(baseExpectedDatabaseState, peerASIngressRule0v4)
+				baseExpectedDatabaseState = append(baseExpectedDatabaseState, peerASIngressRule0v6)
+				peerASEgressRule0v4, peerASEgressRule0v6 := buildANPAddressSets(anp, 0, []string{"fe00:10:128:1::4", "10.128.1.4"}, libovsdbutil.ACLEgress)
+				baseExpectedDatabaseState = append(baseExpectedDatabaseState, peerASEgressRule0v4)
+				baseExpectedDatabaseState = append(baseExpectedDatabaseState, peerASEgressRule0v6)
+				peerASEgressRule1v4, peerASEgressRule1v6 := buildANPAddressSets(anp, 1, []string{}, libovsdbutil.ACLEgress)
+				baseExpectedDatabaseState = append(baseExpectedDatabaseState, peerASEgressRule1v4)
+				baseExpectedDatabaseState = append(baseExpectedDatabaseState, peerASEgressRule1v6)
+				expectedDatabaseState := append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs,
+				// 3 egress[0] protocol ACLs and 2 egress[0] namedPort ACLs,
+				// 3 egress[1] protocol ACLs
+				// total 11ACLs
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("2. Create subject pod and ensure LSP and namedPorts ACLs are updated for the matching ingress rule")
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(anpSubjectNamespaceName).Create(context.TODO(), &anpSubjectPod, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// The pod takes some time to get created so the first add pod event for ANP does nothing as it waits for LSP to be created - this triggers a retry.
+				// Next when the pod is scheduled and IP is allocated and LSP is created we get an update event.
+				// When ANP controller receives the pod update event, it will not trigger an update in unit testing since ResourceVersion and pod.status.Running
+				// is not updated by the test, hence we need to trigger a manual update in the unit test framework that is accompanied by label update.
+				// NOTE: This is not an issue in real deployments with actual kapi server; its just a potential flake in the UT framework that we need to protect against.
+				time.Sleep(time.Second)
+				anpSubjectPod.ResourceVersion = "5"
+				// - this is to trigger an actual update technically speaking the pod already matches the namespace of the subject
+				anpSubjectPod.Labels["rv"] = "resourceVersionUTHack"
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(anpSubjectPod.Namespace).Update(context.TODO(), &anpSubjectPod, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				namedIPorts["dns"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+					{L4Protocol: "udp", L3PodIP: anpPodV4IP, L3PodIPFamily: "ip4", L4PodPort: "5353"},
+					{L4Protocol: "udp", L3PodIP: anpPodV6IP, L3PodIPFamily: "ip6", L4PodPort: "5353"},
+				}
+
+				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(anpSubjectNamespaceName, []string{anpPodV4IP, anpPodV6IP})
+				baseExpectedDatabaseState[0] = subjectNSASIPv4
+				baseExpectedDatabaseState[1] = subjectNSASIPv6
+				acls = getACLsForANPRulesWithNamedPorts(anp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(anp.Name, []string{t2.portUUID}, acls, false)
+				expectedDatabaseState = append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs and 1 ingress namedPort ACL,
+				// 3 egress[0] protocol ACLs and 2 egress[0] namedPort ACLs,
+				// 3 egress[1] protocol ACLs
+				// total 12ACLs
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("3. Update ANP ingress rule ports to remove DNS namedPort and ensure ACLs are updated correctly")
+				anp.ResourceVersion = "4"
+				newPort := anpPortMangle[0:5]
+				anp.Spec.Ingress[0].Ports = &newPort
+				anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				delete(namedIPorts, "dns")
+				acls = getACLsForANPRulesWithNamedPorts(anp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(anp.Name, []string{t2.portUUID}, acls, false)
+				expectedDatabaseState = append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs
+				// 3 egress[0] protocol ACLs and 2 egress[0] namedPort ACLs,
+				// 3 egress[1] protocol ACLs
+				// total 11ACLs
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("4. Delete matching peer pod and ensure ACLs are updated correctly")
+				anpPeerPod.ResourceVersion = "3"
+				err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(anpPeerPod.Namespace).Delete(context.TODO(), anpPeerPod.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				delete(namedEPorts, "web")
+				delete(namedEPorts, "web123")
+				acls = getACLsForANPRulesWithNamedPorts(anp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(anp.Name, []string{t2.portUUID}, acls, false)
+				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(anpPeerNamespaceName, []string{}) // pod is gone from peer namespace address-set
+				baseExpectedDatabaseState[2] = peerNSASIPv4
+				baseExpectedDatabaseState[3] = peerNSASIPv6
+				peerASEgressRule0v4, peerASEgressRule0v6 = buildANPAddressSets(anp, 0, []string{}, libovsdbutil.ACLEgress)
+				baseExpectedDatabaseState[8] = peerASEgressRule0v4
+				baseExpectedDatabaseState[9] = peerASEgressRule0v6
+				expectedDatabaseState = append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t2}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs
+				// 3 egress[0] protocol ACLs
+				// 3 egress[1] protocol ACLs
+				// totalACLs: 9
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("5. Re-Add matching peer pod and ensure ACLs are updated correctly")
+				anpPeerPod.ResourceVersion = "5"
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(anpPeerPod.Namespace).Create(context.TODO(), &anpPeerPod, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// update namedPorts for constructing right test ACLs
+				namedEPorts["web"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+					{L4Protocol: "tcp", L3PodIP: anpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "3535"},
+					{L4Protocol: "tcp", L3PodIP: anpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "3535"},
+				}
+				namedEPorts["web123"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+					{L4Protocol: "sctp", L3PodIP: anpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "35356"},
+					{L4Protocol: "sctp", L3PodIP: anpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "35356"},
+				}
+				acls = getACLsForANPRulesWithNamedPorts(anp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(anp.Name, []string{t2.portUUID}, acls, false)
+				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(anpPeerNamespaceName, []string{"fe00:10:128:1::4", "10.128.1.4"}) // pod is re-added to peer namespace address-set
+				baseExpectedDatabaseState[2] = peerNSASIPv4
+				baseExpectedDatabaseState[3] = peerNSASIPv6
+				peerASEgressRule0v4, peerASEgressRule0v6 = buildANPAddressSets(anp, 0, []string{"fe00:10:128:1::4", "10.128.1.4"}, libovsdbutil.ACLEgress)
+				baseExpectedDatabaseState[8] = peerASEgressRule0v4
+				baseExpectedDatabaseState[9] = peerASEgressRule0v6
+				expectedDatabaseState = append(baseExpectedDatabaseState, pg)
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{node1Name})...)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs
+				// 3 egress[0] protocol ACLs; 2 namedPort ACLs
+				// 3 egress[1] protocol ACLs
+				// totalACLs: 11
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("6. Update ANP egress rule port to rename web namedPort and ensure ACLs are updated correctly")
+				anp.ResourceVersion = "7"
+				newPort = anpPortMangle
+				newPort[3].NamedPort = ptr.To("http")
+				anp.Spec.Egress[0].Ports = &newPort
+				anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				delete(namedEPorts, "web")
+				acls = getACLsForANPRulesWithNamedPorts(anp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(anp.Name, []string{t2.portUUID}, acls, false)
+				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6, peerNS2ASIPv4, peerNS2ASIPv6}
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{node1Name})...)
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule1v6)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs
+				// 3 egress[0] protocol ACLs and 1 egress[0] namedPort ACLs,
+				// 3 egress[1] protocol ACLs
+				// totalACLs: 10
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				ginkgo.By("7. Delete 1st ANP egress rule and ensure ACLs are updated correctly")
+				anp.ResourceVersion = "9"
+				anp.Spec.Egress = anp.Spec.Egress[1:]
+				_, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				delete(namedEPorts, "web123")
+				acls = getACLsForANPRulesWithNamedPorts(anp, namedIPorts, namedEPorts)
+				pg = getDefaultPGForANPSubject(anp.Name, []string{t2.portUUID}, acls, false)
+				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6, peerNS2ASIPv4, peerNS2ASIPv6}
+				expectedDatabaseState = append(expectedDatabaseState, getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{node1Name})...)
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASIngressRule0v6)
+				peerASEgressRule0v4, peerASEgressRule0v6 = buildANPAddressSets(anp, 0, []string{}, libovsdbutil.ACLEgress)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v4)
+				expectedDatabaseState = append(expectedDatabaseState, peerASEgressRule0v6)
+				for _, acl := range acls {
+					acl := acl
+					expectedDatabaseState = append(expectedDatabaseState, acl)
+				}
+				// 3 ingress protocol ACLs
+				// 3 egress[0] protocol ACLs
+				// totalACLs: 6
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 				return nil
 			}
@@ -1206,11 +1689,11 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					// update ACL logging information
 					acl.Log = true
 					if acl.Action == nbdb.ACLActionPass {
-						acl.Severity = utilpointer.String(nbdb.ACLSeverityNotice)
+						acl.Severity = ptr.To(nbdb.ACLSeverityNotice)
 					} else if acl.Action == nbdb.ACLActionDrop {
-						acl.Severity = utilpointer.String(nbdb.ACLSeverityAlert)
+						acl.Severity = ptr.To(nbdb.ACLSeverityAlert)
 					} else if acl.Action == nbdb.ACLActionAllowRelated {
-						acl.Severity = utilpointer.String(nbdb.ACLSeverityInfo)
+						acl.Severity = ptr.To(nbdb.ACLSeverityInfo)
 					}
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
@@ -1237,11 +1720,11 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					// update ACL logging information
 					acl.Log = true
 					if acl.Action == nbdb.ACLActionPass {
-						acl.Severity = utilpointer.String(nbdb.ACLSeverityInfo)
+						acl.Severity = ptr.To(nbdb.ACLSeverityInfo)
 					} else if acl.Action == nbdb.ACLActionDrop {
-						acl.Severity = utilpointer.String(nbdb.ACLSeverityWarning)
+						acl.Severity = ptr.To(nbdb.ACLSeverityWarning)
 					} else if acl.Action == nbdb.ACLActionAllowRelated {
-						acl.Severity = utilpointer.String(nbdb.ACLSeverityDebug)
+						acl.Severity = ptr.To(nbdb.ACLSeverityDebug)
 					}
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
