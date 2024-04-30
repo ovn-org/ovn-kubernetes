@@ -44,6 +44,7 @@ type BasicNetInfo interface {
 	JoinSubnets() []*net.IPNet
 	Vlan() uint
 	AllowsPersistentIPs() bool
+	PhysicalNetworkName() string
 
 	// utility methods
 	Equals(BasicNetInfo) bool
@@ -265,6 +266,11 @@ func (nInfo *DefaultNetInfo) AllowsPersistentIPs() bool {
 	return false
 }
 
+// PhysicalNetworkName has no impact on defaultNetConfInfo (localnet feature)
+func (nInfo *DefaultNetInfo) PhysicalNetworkName() string {
+	return ""
+}
+
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
 type secondaryNetInfo struct {
 	netName string
@@ -285,6 +291,8 @@ type secondaryNetInfo struct {
 	// to be plumbed for this network
 	sync.Mutex
 	nadNames sets.Set[string]
+
+	physicalNetworkName string
 }
 
 // GetNetworkName returns the network name
@@ -434,6 +442,11 @@ func (nInfo *secondaryNetInfo) AllowsPersistentIPs() bool {
 	return nInfo.allowPersistentIPs
 }
 
+// PhysicalNetworkName returns the user provided physical network name value
+func (nInfo *secondaryNetInfo) PhysicalNetworkName() string {
+	return nInfo.physicalNetworkName
+}
+
 // IPMode returns the ipv4/ipv6 mode
 func (nInfo *secondaryNetInfo) IPMode() (bool, bool) {
 	return nInfo.ipv4mode, nInfo.ipv6mode
@@ -519,18 +532,19 @@ func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
 
 	// everything is immutable except the NADs
 	c := &secondaryNetInfo{
-		netName:            nInfo.netName,
-		primaryNetwork:     nInfo.primaryNetwork,
-		topology:           nInfo.topology,
-		mtu:                nInfo.mtu,
-		vlan:               nInfo.vlan,
-		allowPersistentIPs: nInfo.allowPersistentIPs,
-		ipv4mode:           nInfo.ipv4mode,
-		ipv6mode:           nInfo.ipv6mode,
-		subnets:            nInfo.subnets,
-		excludeSubnets:     nInfo.excludeSubnets,
-		joinSubnets:        nInfo.joinSubnets,
-		nadNames:           nInfo.nadNames.Clone(),
+		netName:             nInfo.netName,
+		primaryNetwork:      nInfo.primaryNetwork,
+		topology:            nInfo.topology,
+		mtu:                 nInfo.mtu,
+		vlan:                nInfo.vlan,
+		allowPersistentIPs:  nInfo.allowPersistentIPs,
+		ipv4mode:            nInfo.ipv4mode,
+		ipv6mode:            nInfo.ipv6mode,
+		subnets:             nInfo.subnets,
+		excludeSubnets:      nInfo.excludeSubnets,
+		joinSubnets:         nInfo.joinSubnets,
+		nadNames:            nInfo.nadNames.Clone(),
+		physicalNetworkName: nInfo.physicalNetworkName,
 	}
 
 	return c
@@ -589,14 +603,15 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	}
 
 	ni := &secondaryNetInfo{
-		netName:            netconf.Name,
-		topology:           types.LocalnetTopology,
-		subnets:            subnets,
-		excludeSubnets:     excludes,
-		mtu:                netconf.MTU,
-		vlan:               uint(netconf.VLANID),
-		allowPersistentIPs: netconf.AllowPersistentIPs,
-		nadNames:           sets.Set[string]{},
+		netName:             netconf.Name,
+		topology:            types.LocalnetTopology,
+		subnets:             subnets,
+		excludeSubnets:      excludes,
+		mtu:                 netconf.MTU,
+		vlan:                uint(netconf.VLANID),
+		allowPersistentIPs:  netconf.AllowPersistentIPs,
+		nadNames:            sets.Set[string]{},
+		physicalNetworkName: netconf.PhysicalNetworkName,
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
