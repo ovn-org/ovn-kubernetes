@@ -1,0 +1,142 @@
+.TH OVN_K8S.CONF "5" "Mar 2018" "ovn-kubernetes" "OVN-KUBERNETES Configuration File"
+.SH NAME
+ovn_k8s.conf \- Configuration File for ovn-kubernetes
+.SH DESCRIPTION
+.PP
+\fB/etc/openvswitch/ovn_k8s.conf\fR
+.PP
+This file overrides programmed defaults. It is usually set up during installation 
+and is the same on all nodes. Command line options override options in this file.
+.PP
+This is in token=value format.
+.SH SECTIONS
+.SH [Default]
+.TP
+\fBmtu\fR=1400
+MTU value used for the overlay network.
+.TP
+\fBconntrack-zone\fR=64000
+ConntrackZone affects only the gateway nodes, This value is used to track connections
+that are initiated from the pods so that the reverse connections go back to the pods.
+This represents the conntrack zone used for the conntrack flow rules.
+.PP
+.SH [Logging]
+.TP
+\fBlogfile\fR=
+When logging to a file, this is the path and file. E.g., /var/log/openvswitch/ovn-k8s-cni-overlay.log
+Default is not to log to a file.
+.TP
+\fBloglevel\fR=4
+Level is the logging verbosity level: 5=debug, 4=info, 3=warn, 2=error, 1=fatal (default: 4).
+.SH [CNI]
+.PP
+The following config values are used for the CNI plugin.
+.TP
+\fBconf-dir\fR=/etc/cni/net.d
+Directory that contains the cni configuration.
+.TP
+\fBplugin\fR=ovn-k8s-cni-overlay
+Cni plugin name.
+.SH [Kubernetes]
+.PP
+K8S apiserver and authentication details are declared in the following options.
+.TP
+\fBkubeconfig\fR=
+Absolute path to the kubeconfig file (not required if the apiserver, cacert, and token are given).
+.TP
+\fBcacert\fR=
+The absolute path to the Kubernetes API CA certificate, e.g.,
+/etc/openvswitch/k8s-ca.crt (not required if kubeconfig is given).
+.TP
+\fBapiserver\fR=http://localhost:8080
+URL to access the Kubernetes apiserver. The host must be a name, not IP. The kubernetes/openshift
+api server, by default, listens on 8443. E.g., https://masterhost:8443"
+(Not required if kubeconfig is given.)
+.TP
+\fBtoken\fR=
+The Kubernetes API authentication token permits the ovn plugin to communicate with the
+api server. On kubernetes, the token can be generated on the cluster master as follows:
+
+# kubectl create serviceaccount ovn
+
+# kubectl create clusterrolebinding ovn-admin --clusterrole=cluster-admin --serviceaccount=default:ovn
+
+# export TOKEN=$(kubectl describe secret $(kubectl get secrets | grep ovn | cut -f1 -d ' ') | grep -E '^token' | cut -f2 -d':' | tr -d '\t')
+
+On openshift, the token can be generated on the cluster master as follows:
+
+# oc create serviceaccount ovn
+
+# oc adm policy add-cluster-role-to-user cluster-admin -z ovn
+
+# oc adm policy add-scc-to-user anyuid -z ovn
+
+# oc sa get-token ovn
+
+(not required if kubeconfig is given).
+
+.SH [OvnNorth]
+.TP
+\fBaddress\fR=
+This is the url used to access the northbound database server. The scheme may be ssl or tcp.
+When ssl is used, the certs must be provided. The host must be a host IP address, not name.
+The port, by default, is 6441. E.g., ssl:1.2.3.4:6641
+.TP
+\fBclient-privkey\fR=/etc/openvswitch/ovnnb-privkey.pem
+.TP
+\fBclient-cert\fR=/etc/openvswitch/ovnnb-cert.pem
+.TP
+\fBclient-cacert\fR=
+For example: /etc/openvswitch/ovnnb-ca.cert
+.TP
+\fBserver-privkey\fR=
+.TP
+\fBserver-cert\fR=
+.TP
+\fBserver-cacert\fR=
+
+.SH [OvnSouth]
+.TP
+\fBaddress\fR=
+This is the url used to access the southbound database server. The scheme may be ssl or tcp.
+When ssl is used, the certs must be provided. The host must be a host IP address, not name.
+The port, by default, is 6442. E.g., ssl:1.2.3.4:6642
+.TP
+\fBclient-privkey\fR=/etc/openvswitch/ovnsb-privkey.pem
+.TP
+\fBclient-cert\fR=/etc/openvswitch/ovnsb-cert.pem
+.TP
+\fBclient-cacert\fR=/etc/openvswitch/ovnsb-ca.cert
+.TP
+\fBserver-privkey\fR=
+.TP
+\fBserver-cert\fR=
+.TP
+\fBserver-cacert\fR=
+
+.SH [Gateway]
+.TP
+\fBmode\fR=shared
+This is the node gateway mode. It can be left empty (disable gateway functionality),
+or set to "shared" (share a network interface) or "local" (use a NAT-ed virtual interface).
+.TP
+\fBinterface\fR=eth1
+This interface will be used as the gateway interface in "shared" mode. If not
+specified the interface with the default route will be used.
+.TP
+\fBnext-hop\fR=1.2.3.4
+This is the gateway IP address of \fBinterface\fR to which traffic exiting the
+OVN logical network should be sent in "shared" mode. If not specified
+the next-hop of the default route will be used.
+\fBvlan-id\fR=0
+This is the VLAN tag to apply to traffic exiting the OVN logical network in
+"shared" mode. A value of 0 means traffic should be untagged.
+\fBnodeport\fR=true
+When set to true Kubernetes NodePort services will be supported.
+
+.SH "SEE ALso"
+.BR ovnkube (1),
+.BR ovn-kube-util (1).
+
+.PP
+https://github.com/ovn-org/ovn-kubernetes

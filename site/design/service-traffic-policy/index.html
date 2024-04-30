@@ -1,0 +1,3251 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://www.ovn.org/ovn-kubernetes/design/service-traffic-policy/">
+      
+      
+        <link rel="prev" href="../topology/">
+      
+      
+        <link rel="next" href="../host-to-node-port-hairpin-trafficflow/">
+      
+      
+      <link rel="icon" href="../../images/ovn-inside-k8s.png">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.10">
+    
+    
+      
+        <title>Service Traffic Policy - OVN Kubernetes</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.7e359304.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#kubernetes-service-traffic-policy-implementation" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="OVN Kubernetes" class="md-header__button md-logo" aria-label="OVN Kubernetes" data-md-component="logo">
+      
+  <img src="../../images/ovn-inside-k8s.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            OVN Kubernetes
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Service Traffic Policy
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3 3.19.09m3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95 2.06.05m-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="cyan" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5c-.84 0-1.65.15-2.39.42L12 2M3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29L3.34 7m.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14L3.36 17M20.65 7l-1.77 3.79a7.023 7.023 0 0 0-2.38-4.15l4.15.36m-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29L20.64 17M12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44L12 22Z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ovn-org/ovn-kubernetes" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ovn-org/ovn-kubernetes
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Introduction
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../architecture/" class="md-tabs__link">
+          
+  
+    
+  
+  Overview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/overview.md" class="md-tabs__link">
+          
+  
+    
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../governance/CONTRIBUTING/" class="md-tabs__link">
+          
+  
+    
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../features/cluster-egress-controls/egress-ip/" class="md-tabs__link">
+          
+  
+    
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../troubleshooting/debugging/" class="md-tabs__link">
+          
+  
+    
+  
+  Troubleshooting
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../observability/metrics/" class="md-tabs__link">
+          
+  
+    
+  
+  Observability
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../blog/" class="md-tabs__link">
+          
+  
+    
+  
+  Blog
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="OVN Kubernetes" class="md-nav__button md-logo" aria-label="OVN Kubernetes" data-md-component="logo">
+      
+  <img src="../../images/ovn-inside-k8s.png" alt="logo">
+
+    </a>
+    OVN Kubernetes
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ovn-org/ovn-kubernetes" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ovn-org/ovn-kubernetes
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Introduction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+        
+        
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Overview
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topology/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Network Topology
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gateway-modes.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gateway Modes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../traffic-flows.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Traffic Flows
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pod-creation-workflow.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Pod Creation Workflow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../service-creation-workflow.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Service Creation Workflow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Service Traffic Policy
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Service Traffic Policy
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#external-traffic-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      External Traffic Policy
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementing-externaltrafficpolicy-in-ovn-kubernetes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Implementing externalTrafficPolicy In OVN-Kubernetes
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#externaltrafficpolicylocal" class="md-nav__link">
+    <span class="md-ellipsis">
+      ExternalTrafficPolicy=Local
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ExternalTrafficPolicy=Local">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ovn-load_balancer-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      OVN Load_Balancer configuration
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#handling-flows-between-the-overlay-and-underlay" class="md-nav__link">
+    <span class="md-ellipsis">
+      Handling Flows between the overlay and underlay
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ingress-traffic" class="md-nav__link">
+    <span class="md-ellipsis">
+      Ingress Traffic
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-source-service-ovn-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      External Source -&gt; Service -&gt; OVN pod
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="External Source -> Service -> OVN pod">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shared-gateway-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Shared Gateway Mode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-gateway-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Local Gateway Mode
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Local Gateway Mode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#allocateloadbalancernodeportsfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      AllocateLoadBalancerNodePorts=False
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-source-service-host-networked-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      External Source -&gt; Service -&gt; Host Networked pod
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#host-traffic" class="md-nav__link">
+    <span class="md-ellipsis">
+      Host Traffic
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#externaltrafficpolicycluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      ExternalTrafficPolicy=Cluster
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ExternalTrafficPolicy=Cluster">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#local-gateway-mode_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Local Gateway Mode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-source-service-host-networked-pod-non-hairpin-case" class="md-nav__link">
+    <span class="md-ellipsis">
+      External Source -&gt; Service -&gt; Host Networked pod (non-hairpin case)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-source-service-ovn-pod_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      External Source -&gt; Service -&gt; OVN pod
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sources
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#internal-traffic-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      Internal Traffic Policy
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#internaltrafficpolicylocal" class="md-nav__link">
+    <span class="md-ellipsis">
+      InternalTrafficPolicy=Local
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="InternalTrafficPolicy=Local">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pod-traffic" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pod Traffic
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#host-traffic_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Host Traffic
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#host-service-clusterip-ovn-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      Host -&gt; Service (ClusterIP) -&gt; OVN Pod
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#host-service-host-networked-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      Host -&gt; Service -&gt; Host Networked Pod
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../host-to-node-port-hairpin-trafficflow/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Host To NodePort Hairpin
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-ip-and-loadbalancer-ingress/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ExternalIPs/LoadBalancerIngress
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ovn-kubernetes-subnets.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Internal Subnets
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../live-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Kubevirt VM Live Migration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Getting Started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/overview.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OVN Kubernetes Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/launching-ovn-kubernetes.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Launching OVN Kubernetes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/example-pod-creation.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Deploying Workloads on OVN Kubernetes cluster
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/example-service creation.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Deploying Services on OVN Kubernetes cluster
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/building-ovn-kubernetes.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Setup and Building
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/running-release.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Run OVN Kubernetes From Release Image
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/running-rpm.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Run OVN Kubernetes From RPM
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/cli-guide.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    CLI Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/configuration.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Developer Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Developer Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../governance/CONTRIBUTING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Contributing Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../governance/REVIEWING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Reviewing Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/developer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Coding Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/api-spec.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Kubernetes CRD API-Reference Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/image-build.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OVN Kubernetes Container Images
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/documentation.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Documentation Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/testing.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Local Testing Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ci/ci/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    CI Testing Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/debugging.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Debugging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/release.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Releasing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Features
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    ClusterEgressControls
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            ClusterEgressControls
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/cluster-egress-controls/egress-ip/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    EgressIP
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/cluster-egress-controls/egress-service/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    EgressService
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/cluster-egress-controls/egress-qos/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    EgressQoS
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/cluster-egress-controls/egress-gateway.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    EgressGateway
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    NetworkSecurityControls
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            NetworkSecurityControls
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/network-security-controls/network-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    NetworkPolicy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/network-security-controls/admin-network-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AdminNetworkPolicy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/network-security-controls/egress-firewall/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    EgressFirewall
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    InfrastructureSecurityControls
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3">
+            <span class="md-nav__icon md-icon"></span>
+            InfrastructureSecurityControls
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/infrastructure-security-controls/node-identity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    NodeIdentity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_4" id="__nav_5_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    MultiNetworking
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_4">
+            <span class="md-nav__icon md-icon"></span>
+            MultiNetworking
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/multi-homing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multihoming
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/multicast/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multicast
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/live-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    LiveMigration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/hybrid-overlay/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    HybridOverlay
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_8" id="__nav_5_8_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Hardware Offload
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_8">
+            <span class="md-nav__icon md-icon"></span>
+            Hardware Offload
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/hardware-offload/ovs_offload/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OVS Offload
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/hardware-offload/dpu-acceleration.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Support DPU Acceleration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Troubleshooting
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/debugging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Introduction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/ovnkube-trace/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OVNKube Trace
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/logging.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Logging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Observability
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Observability
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../observability/metrics/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Metrics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../blog/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Blog
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8" id="__nav_8_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            Blog
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Archive
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#external-traffic-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      External Traffic Policy
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementing-externaltrafficpolicy-in-ovn-kubernetes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Implementing externalTrafficPolicy In OVN-Kubernetes
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#externaltrafficpolicylocal" class="md-nav__link">
+    <span class="md-ellipsis">
+      ExternalTrafficPolicy=Local
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ExternalTrafficPolicy=Local">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ovn-load_balancer-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      OVN Load_Balancer configuration
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#handling-flows-between-the-overlay-and-underlay" class="md-nav__link">
+    <span class="md-ellipsis">
+      Handling Flows between the overlay and underlay
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ingress-traffic" class="md-nav__link">
+    <span class="md-ellipsis">
+      Ingress Traffic
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-source-service-ovn-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      External Source -&gt; Service -&gt; OVN pod
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="External Source -> Service -> OVN pod">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shared-gateway-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Shared Gateway Mode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-gateway-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Local Gateway Mode
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Local Gateway Mode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#allocateloadbalancernodeportsfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      AllocateLoadBalancerNodePorts=False
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-source-service-host-networked-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      External Source -&gt; Service -&gt; Host Networked pod
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#host-traffic" class="md-nav__link">
+    <span class="md-ellipsis">
+      Host Traffic
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#externaltrafficpolicycluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      ExternalTrafficPolicy=Cluster
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ExternalTrafficPolicy=Cluster">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#local-gateway-mode_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Local Gateway Mode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-source-service-host-networked-pod-non-hairpin-case" class="md-nav__link">
+    <span class="md-ellipsis">
+      External Source -&gt; Service -&gt; Host Networked pod (non-hairpin case)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-source-service-ovn-pod_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      External Source -&gt; Service -&gt; OVN pod
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sources
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#internal-traffic-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      Internal Traffic Policy
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#internaltrafficpolicylocal" class="md-nav__link">
+    <span class="md-ellipsis">
+      InternalTrafficPolicy=Local
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="InternalTrafficPolicy=Local">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pod-traffic" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pod Traffic
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#host-traffic_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Host Traffic
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#host-service-clusterip-ovn-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      Host -&gt; Service (ClusterIP) -&gt; OVN Pod
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#host-service-host-networked-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      Host -&gt; Service -&gt; Host Networked Pod
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="kubernetes-service-traffic-policy-implementation">Kubernetes Service Traffic Policy Implementation<a class="headerlink" href="#kubernetes-service-traffic-policy-implementation" title="Permanent link">&para;</a></h1>
+<h2 id="external-traffic-policy">External Traffic Policy<a class="headerlink" href="#external-traffic-policy" title="Permanent link">&para;</a></h2>
+<p>For <a href="https://kubernetes.io/docs/concepts/services-networking/service/">Kubernetes Services</a> of type Nodeport or
+Loadbalancer a user can set the <code>service.spec.externalTrafficPolicy</code> field to either <code>cluster</code> or <code>local</code> to denote
+whether or not external traffic is routed to cluster-wide or node-local endpoints. The default value for the
+<code>externalTrafficPolicy</code> field is <code>cluster</code>. In this configuration in ingress traffic is equally disributed across all
+backends and the original client IP address is lost due to SNAT. If set to <code>local</code> then the client
+source IP is preserved throughout the service flow and if service traffic arrives at nodes without
+local endpoints it gets dropped. See <a href="#sources">sources</a> for more information on ETP=local.</p>
+<p>Setting an <code>ExternalTrafficPolicy</code> to <code>Local</code> is only allowed for Services of type <code>NodePort</code> or <code>LoadBalancer</code>. The
+APIServer enforces this requirement.</p>
+<h2 id="implementing-externaltrafficpolicy-in-ovn-kubernetes">Implementing <code>externalTrafficPolicy</code> In OVN-Kubernetes<a class="headerlink" href="#implementing-externaltrafficpolicy-in-ovn-kubernetes" title="Permanent link">&para;</a></h2>
+<p>To properly implement this feature for all relevant traffic flows, required changing how OVN, Iptables rules, and
+Physical OVS flows are updated and managed in OVN-Kubernetes</p>
+<h2 id="externaltrafficpolicylocal">ExternalTrafficPolicy=Local<a class="headerlink" href="#externaltrafficpolicylocal" title="Permanent link">&para;</a></h2>
+<h3 id="ovn-load_balancer-configuration">OVN Load_Balancer configuration<a class="headerlink" href="#ovn-load_balancer-configuration" title="Permanent link">&para;</a></h3>
+<p>Normally, each service in Kubernetes has a corresponding single Load_Balancer row created in OVN. This LB is attached
+to all node switches and gateway routers (GWRs). ExternalTrafficPolicy creates multiple LBs, however.</p>
+<p>Specifically, different load balancers are attached to switches versus routers. The node switch LBs handle traffic from pods,
+whereas the gateway router LBs handle external traffic.</p>
+<p>Thus, an additional LB is created with the <code>skip_snat="true"</code> option and is applied to the GatewayRouters
+and Worker switches. It is needed to override the <code>lb_force_snat_ip=router_ip</code> option that is on all the Gateway Routers,
+which allows ingress traffic to arrive at OVN managed endpoints with the original client IP.</p>
+<p>All externally-accessible vips (NodePort, ExternalIPs, LoadBalancer Status IPs) for services with <code>externalTrafficPolicy:local</code>
+will reside on this loadbalancer. The loadbalancer backends may be empty, depending on whether there are pods local
+to that node.</p>
+<h3 id="handling-flows-between-the-overlay-and-underlay">Handling Flows between the overlay and underlay<a class="headerlink" href="#handling-flows-between-the-overlay-and-underlay" title="Permanent link">&para;</a></h3>
+<p>In this section we will look at some relevant traffic flows when a service's <code>externalTrafficPolicy</code> is <code>local</code>.  For
+these examples we will be using a Nodeport service, but the flow is generally the same for ExternalIP and Loadbalancer
+type services.</p>
+<h3 id="ingress-traffic">Ingress Traffic<a class="headerlink" href="#ingress-traffic" title="Permanent link">&para;</a></h3>
+<p>This section will cover the networking entities hit when traffic ingresses a cluster via a service to either host
+networked pods or cluster networked pods. If its host networked pods, then the traffic flow is the same on both gateway modes. If its cluster networked pods, they will be different for each mode.</p>
+<h3 id="external-source-service-ovn-pod">External Source -&gt; Service -&gt; OVN pod<a class="headerlink" href="#external-source-service-ovn-pod" title="Permanent link">&para;</a></h3>
+<h4 id="shared-gateway-mode"><strong>Shared Gateway Mode</strong><a class="headerlink" href="#shared-gateway-mode" title="Permanent link">&para;</a></h4>
+<p>This case is the same as normal shared gateway traffic ingress, meaning the externally sourced traffic is routed into
+OVN via flows on breth0, except in this case the new local load balancer is hit on the GR, which ensures the ip of the
+client is preserved  by the time it gets to the destination Pod.</p>
+<div class="highlight"><pre><span></span><code>          host (ovn-worker, 172.18.0.3) 
+           |
+eth0---&gt;|breth0| -----&gt; 172.18.0.3 OVN GR 100.64.0.4 --&gt; join switch --&gt; ovn_cluster_router --&gt; 10.244.1.3 pod
+</code></pre></div>
+<h4 id="local-gateway-mode"><strong>Local Gateway Mode</strong><a class="headerlink" href="#local-gateway-mode" title="Permanent link">&para;</a></h4>
+<p>The implementation of this case differs for local gateway from that for shared gateway. In local gateway if the above path is used, response traffic would be assymmetric since the default route for pod egress traffic is via <code>ovn-k8s-mp0</code>.</p>
+<p>In local gateway mode, rather than sending the traffic from breth0 into OVN via gateway router, we use flows on breth0 to send it into the host.</p>
+<div class="highlight"><pre><span></span><code>          host (ovn-worker, 172.18.0.3) ---- 172.18.0.3 LOCAL(host) -- iptables -- ovn-k8s-mp0 -- node-local-switch -- 10.244.1.3 pod
+           ^
+           ^
+           |
+eth0---&gt;|breth0|
+</code></pre></div>
+<ol>
+<li>Match on the incoming traffic via default flow on <code>table0</code>, send it to <code>table1</code>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=3189.786s, table=0, n_packets=99979, n_bytes=298029215, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000)
+</code></pre></div>
+<ol>
+<li>Send it out to LOCAL ovs port on breth0 and traffic is delivered to the host:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=3189.787s, table=1, n_packets=108, n_bytes=23004, priority=0 actions=NORMAL
+</code></pre></div>
+<ol>
+<li>In the host, we have an IPtable rule in the PREROUTING chain that DNATs this packet matched on nodePort to a masqueradeIP (169.254.169.3) used specially for this traffic flow.</li>
+</ol>
+<div class="highlight"><pre><span></span><code>[3:180] -A OVN-KUBE-ETP -p tcp -m addrtype --dst-type LOCAL -m tcp --dport 31746 -j DNAT --to-destination 169.254.169.3:31746
+</code></pre></div>
+<ol>
+<li>The special masquerade route in the host sends this packet into OVN via the management port.</li>
+</ol>
+<div class="highlight"><pre><span></span><code>169.254.169.3 via 10.244.0.1 dev ovn-k8s-mp0 
+</code></pre></div>
+<ol>
+<li>Since by default, all traffic into <code>ovn-k8s-mp0</code> gets SNAT-ed, we add an IPtable rule to <code>OVN-KUBE-SNAT-MGMTPORT</code> chain to ensure it doesn't get SNAT-ed to preserve its source-ip.</li>
+</ol>
+<div class="highlight"><pre><span></span><code>[3:180] -A OVN-KUBE-SNAT-MGMTPORT -p tcp -m tcp --dport 31746 -j RETURN
+</code></pre></div>
+<ol>
+<li>Traffic enters the node local switch on the worker node and hits the load-balancer where we add a new vip for this masqueradeIP to DNAT it correctly to the local backends. Note that this vip will translate only to the backends that are local to that worker node and hence traffic will be rejected if there is no local endpoint thus respecting ETP=local type traffic rules.</li>
+</ol>
+<p>The switch load-balancer on a node with local endpoints will look like this:</p>
+<div class="highlight"><pre><span></span><code>_uuid               : b3201caf-3089-4462-b96e-1406fd7c4256
+external_ids        : {&quot;k8s.ovn.org/kind&quot;=Service, &quot;k8s.ovn.org/owner&quot;=&quot;default/example-service-1&quot;}
+health_check        : []
+ip_port_mappings    : {}
+name                : &quot;Service_default/example-service-1_TCP_node_switch_ovn-worker2&quot;
+options             : {event=&quot;false&quot;, reject=&quot;true&quot;, skip_snat=&quot;false&quot;}
+protocol            : tcp
+selection_fields    : []
+vips                : {&quot;169.254.169.3:31746&quot;=&quot;10.244.1.3:8080&quot;, &quot;172.18.0.3:31746&quot;=&quot;10.244.1.3:8080,10.244.2.3:8080&quot;}
+</code></pre></div>
+<p>The switch load-balancer on a node without local endpoints will look like this:
+<div class="highlight"><pre><span></span><code>_uuid               : 42d75e10-5598-4197-a6f2-1a37094bee13
+external_ids        : {&quot;k8s.ovn.org/kind&quot;=Service, &quot;k8s.ovn.org/owner&quot;=&quot;default/example-service-1&quot;}
+health_check        : []
+ip_port_mappings    : {}
+name                : &quot;Service_default/example-service-1_TCP_node_switch_ovn-worker&quot;
+options             : {event=&quot;false&quot;, reject=&quot;true&quot;, skip_snat=&quot;false&quot;}
+protocol            : tcp
+selection_fields    : []
+vips                : {&quot;169.254.169.3:31746&quot;=&quot;&quot;, &quot;172.18.0.4:31746&quot;=&quot;10.244.1.3:8080,10.244.2.3:8080&quot;}
+</code></pre></div></p>
+<p>Response traffic will follow the same path (backend-&gt;node switch-&gt;mp0-&gt;host-&gt;breth0-&gt;eth0).</p>
+<ol>
+<li>Return traffic gets matched on default flow in <code>table0</code> and it sent out via default interface back to the external source.</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=12994.192s, table=0, n_packets=47706, n_bytes=3199460, idle_age=0, priority=100,ip,in_port=LOCAL actions=ct(commit,zone=64000,exec(load:0x2-&gt;NXM_NX_CT_MARK[])),output:1
+</code></pre></div>
+<p>The conntrack state looks like this:
+<div class="highlight"><pre><span></span><code>    [NEW] tcp      6 120 SYN_SENT src=172.18.0.1 dst=172.18.0.3 sport=36366 dport=31746 [UNREPLIED] src=169.254.169.3 dst=172.18.0.1 sport=31746 dport=36366
+    [NEW] tcp      6 120 SYN_SENT src=172.18.0.1 dst=169.254.169.3 sport=36366 dport=31746 [UNREPLIED] src=10.244.1.3 dst=172.18.0.1 sport=8080 dport=36366 zone=9
+    [NEW] tcp      6 120 SYN_SENT src=172.18.0.1 dst=10.244.1.3 sport=36366 dport=8080 [UNREPLIED] src=10.244.1.3 dst=172.18.0.1 sport=8080 dport=36366 zone=11
+ [UPDATE] tcp      6 60 SYN_RECV src=172.18.0.1 dst=172.18.0.3 sport=36366 dport=31746 src=169.254.169.3 dst=172.18.0.1 sport=31746 dport=36366
+ [UPDATE] tcp      6 432000 ESTABLISHED src=172.18.0.1 dst=172.18.0.3 sport=36366 dport=31746 src=169.254.169.3 dst=172.18.0.1 sport=31746 dport=36366 [ASSURED]
+    [NEW] tcp      6 300 ESTABLISHED src=172.18.0.3 dst=172.18.0.1 sport=31746 dport=36366 [UNREPLIED] src=172.18.0.1 dst=172.18.0.3 sport=36366 dport=31746 mark=2 zone=64000
+ [UPDATE] tcp      6 120 FIN_WAIT src=172.18.0.1 dst=172.18.0.3 sport=36366 dport=31746 src=169.254.169.3 dst=172.18.0.1 sport=31746 dport=36366 [ASSURED]
+ [UPDATE] tcp      6 30 LAST_ACK src=172.18.0.1 dst=172.18.0.3 sport=36366 dport=31746 src=169.254.169.3 dst=172.18.0.1 sport=31746 dport=36366 [ASSURED]
+ [UPDATE] tcp      6 120 TIME_WAIT src=172.18.0.1 dst=172.18.0.3 sport=36366 dport=31746 src=169.254.169.3 dst=172.18.0.1 sport=31746 dport=36366 [ASSURED]
+</code></pre></div></p>
+<h5 id="allocateloadbalancernodeportsfalse">AllocateLoadBalancerNodePorts=False<a class="headerlink" href="#allocateloadbalancernodeportsfalse" title="Permanent link">&para;</a></h5>
+<p>If AllocateLoadBalancerNodePorts=False then we cannot follow the same path as above since there won't be any node ports to DNAT to. Thus, for this special case which is only applicable to services of type LoadBalancer, we directly DNAT to the endpoints. Steps 1 &amp; 2 are same as above i.e packet arrives into the host via openflows on <code>breth0</code>.</p>
+<ol>
+<li>In the host, we introduce IPtable rules in the PREROUTING chain that DNATs this packet matched on externalIP or load balancer ingress VIP directly to the pod backend using random probability mode algorithm</li>
+</ol>
+<div class="highlight"><pre><span></span><code>[0:0] -A OVN-KUBE-ETP -d 172.18.0.10/32 -p tcp -m tcp --dport 80 -m statistic --mode random --probability 0.50000000000 -j DNAT --to-destination 10.244.0.3:8080
+[3:180] -A OVN-KUBE-ETP -d 172.18.0.10/32 -p tcp -m tcp --dport 80 -m statistic --mode random --probability 1.00000000000 -j DNAT --to-destination 10.244.0.4:8080
+</code></pre></div>
+<ol>
+<li>The pod subnet route in the host sends this packet into OVN via the management port.</li>
+</ol>
+<div class="highlight"><pre><span></span><code>10.244.0.0/24 dev ovn-k8s-mp0 proto kernel scope link src 10.244.0.2 
+</code></pre></div>
+<ol>
+<li>Since by default, all traffic into <code>ovn-k8s-mp0</code> gets SNAT-ed, we add an IPtable rule to <code>OVN-KUBE-SNAT-MGMTPORT</code> chain to ensure it doesn't get SNAT-ed to preserve its source-ip.</li>
+</ol>
+<div class="highlight"><pre><span></span><code>[0:0] -A OVN-KUBE-SNAT-MGMTPORT -d 10.244.0.3/32 -p tcp -m tcp --dport 8080 -j RETURN
+[3:180] -A OVN-KUBE-SNAT-MGMTPORT -d 10.244.0.4/32 -p tcp -m tcp --dport 8080 -j RETURN
+</code></pre></div>
+<ol>
+<li>Traffic hits the switch and enters the destination pod. OVN load balancers play no role in this traffic flow.</li>
+</ol>
+<p>Here are conntrack entries for this traffic:
+<div class="highlight"><pre><span></span><code>tcp,orig=(src=172.18.0.5,dst=10.244.0.4,sport=50134,dport=8080),reply=(src=10.244.0.4,dst=172.18.0.5,sport=8080,dport=50134),zone=11,protoinfo=(state=TIME_WAIT)
+tcp,orig=(src=172.18.0.5,dst=172.18.0.10,sport=50134,dport=80),reply=(src=10.244.0.4,dst=172.18.0.5,sport=8080,dport=50134),protoinfo=(state=TIME_WAIT)
+tcp,orig=(src=172.18.0.10,dst=172.18.0.5,sport=80,dport=50134),reply=(src=172.18.0.5,dst=172.18.0.10,sport=50134,dport=80),zone=64000,mark=2,protoinfo=(state=TIME_WAIT)
+tcp,orig=(src=172.18.0.5,dst=10.244.0.4,sport=50134,dport=8080),reply=(src=10.244.0.4,dst=172.18.0.5,sport=8080,dport=50134),zone=10,protoinfo=(state=TIME_WAIT)
+</code></pre></div></p>
+<h3 id="external-source-service-host-networked-pod">External Source -&gt; Service -&gt; Host Networked pod<a class="headerlink" href="#external-source-service-host-networked-pod" title="Permanent link">&para;</a></h3>
+<p>This Scenario is a bit different, specifically traffic now needs to be directed from an external source to service and
+then to the host itself (a host networked pod)</p>
+<p>In this flow, rather than going from breth0 into OVN we shortcircuit the path with physical flows on breth0. This is the same for both the gateway modes.</p>
+<div class="highlight"><pre><span></span><code>          host (ovn-worker, 172.18.0.3) 
+           ^
+           ^
+           |
+eth0---&gt;|breth0| ---- 172.18.0.3 OVN GR 100.64.0.4 -- join switch -- ovn_cluster_router -- 10.244.1.3 pod
+</code></pre></div>
+<ol>
+<li>Match on the incoming traffic via it's nodePort, DNAT directly to the host networked endpoint, and send to <code>table=6</code></li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0x790ba3355d0c209b, duration=153.288s, table=0, n_packets=18, n_bytes=1468, idle_age=100, priority=100,tcp,in_port=1,tp_dst=&lt;nodePort&gt; actions=ct(commit,table=6,zone=64003,nat(dst=&lt;nodeIP&gt;:&lt;targetIP&gt;))
+</code></pre></div>
+<ol>
+<li>Send out the LOCAL ovs port on breth0, and traffic is delivered to host netwoked pod</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0x790ba3355d0c209b, duration=113.033s, table=6, n_packets=18, n_bytes=1468, priority=100 actions=LOCAL
+</code></pre></div>
+<ol>
+<li>Return traffic from the host networked pod to external source is matched in <code>table=7</code> based on the src_ip of the return
+   traffic being equal to <code>&lt;targetIP&gt;</code>, and un-Nat back to <code>&lt;nodeIP&gt;:&lt;NodePort&gt;</code></li>
+</ol>
+<div class="highlight"><pre><span></span><code> cookie=0x790ba3355d0c209b, duration=501.037s, table=0, n_packets=12, n_bytes=1259, idle_age=448, priority=100,tcp,in_port=LOCAL,tp_src=&lt;targetIP&gt; actions=ct(commit,table=7,zone=64003,nat)
+</code></pre></div>
+<ol>
+<li>Send the traffic back out breth0 back to the external source in <code>table=7</code></li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0x790ba3355d0c209b, duration=501.037s, table=7, n_packets=12, n_bytes=1259, idle_age=448, priority=100 actions=output:1
+</code></pre></div>
+<h3 id="host-traffic">Host Traffic<a class="headerlink" href="#host-traffic" title="Permanent link">&para;</a></h3>
+<p>NOTE: Host-&gt; svc (NP/EIP/LB) is neither "internal" nor "external" traffic, hence it defaults to special case "Cluster" even if ETP=local. Only Host-&gt;differentNP traffic flow obeys ETP=local.</p>
+<h2 id="externaltrafficpolicycluster">ExternalTrafficPolicy=Cluster<a class="headerlink" href="#externaltrafficpolicycluster" title="Permanent link">&para;</a></h2>
+<h4 id="local-gateway-mode_1"><strong>Local Gateway Mode</strong><a class="headerlink" href="#local-gateway-mode_1" title="Permanent link">&para;</a></h4>
+<h3 id="external-source-service-host-networked-pod-non-hairpin-case">External Source -&gt; Service -&gt; Host Networked pod (non-hairpin case)<a class="headerlink" href="#external-source-service-host-networked-pod-non-hairpin-case" title="Permanent link">&para;</a></h3>
+<p>NOTE: Same steps happen for <code>Host -&gt; Service -&gt; Host Networked Pods (non-hairpin case)</code>.</p>
+<p>The implementation of this case differs for local gateway from that for shared gateway. In local gateway all service traffic is sent straight to host (instead of sending it to OVN) to allow users to apply custom routes according to their use cases.</p>
+<p>In local gateway mode, rather than sending the traffic from breth0 into OVN via gateway router, we use flows on breth0 to send it into the host. Similarly rather than sending the DNAT-ed traffic from OVN to wire, we send it to host first.</p>
+<div class="highlight"><pre><span></span><code>          host (ovn-worker2, 172.19.0.3) ---- 172.19.0.3 LOCAL(host) -- iptables -- breth0 -- GR -- breth0 -- host -- breth0 -- eth0 (backend ovn-worker 172.19.0.4)
+           ^
+           ^
+           |
+eth0---&gt;|breth0|
+</code></pre></div>
+<p>SYN flow:</p>
+<ol>
+<li>Match on the incoming traffic via default flow on <code>table0</code>, send it to <code>table1</code>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=3189.786s, table=0, n_packets=99979, n_bytes=298029215, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000,nat)
+</code></pre></div>
+<ol>
+<li>Send it out to LOCAL ovs port on breth0 and traffic is delivered to the host:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=3189.787s, table=1, n_packets=108, n_bytes=23004, priority=0 actions=NORMAL
+</code></pre></div>
+<ol>
+<li>In the host, we have an IPtable rule in the PREROUTING chain that DNATs this packet matched on nodePort to its clusterIP:targetPort</li>
+</ol>
+<div class="highlight"><pre><span></span><code>[8:480] -A OVN-KUBE-NODEPORT -p tcp -m addrtype --dst-type LOCAL -m tcp --dport 31339 -j DNAT --to-destination 10.96.115.103:80
+</code></pre></div>
+<ol>
+<li>The service route in the host sends this packet back to breth0.</li>
+</ol>
+<div class="highlight"><pre><span></span><code>10.96.0.0/16 via 169.254.169.4 dev breth0 mtu 1400 
+</code></pre></div>
+<ol>
+<li>On breth0, we have priority 500 flows meant to handle hairpining, that will SNAT the srcIP to the special <code>169.254.169.2</code> masqueradeIP and send it to <code>table2</code></li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=3189.786s, table=0, n_packets=11, n_bytes=814, priority=500,ip,in_port=LOCAL,nw_dst=10.96.0.0/16 actions=ct(commit,table=2,zone=64001,nat(src=169.254.169.2))
+</code></pre></div>
+<ol>
+<li>In <code>table2</code> we have a flow that forwards this to patch port that takes the traffic in OVN:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=6.308s, table=2, n_packets=11, n_bytes=814, actions=set_field:02:42:ac:12:00:03-&gt;eth_dst,output:&quot;patch-breth0_ov&quot;
+</code></pre></div>
+<ol>
+<li>Traffic enters the GR on the worker node and hits the load-balancer where we DNAT it correctly to the local backends.</li>
+</ol>
+<p>The GR load-balancer on a node with endpoints for the clusterIP will look like this:</p>
+<div class="highlight"><pre><span></span><code>_uuid               : 4e7ff1e3-a211-45d7-8243-54e087ca3965                                                                                                                   
+external_ids        : {&quot;k8s.ovn.org/kind&quot;=Service, &quot;k8s.ovn.org/owner&quot;=&quot;default/example-service-hello-world&quot;}                                                                
+health_check        : []                                                                                                                                                     
+ip_port_mappings    : {}                                                                                                                                                     
+name                : &quot;Service_default/example-service-hello-world_TCP_node_router+switch_ovn-control-plane&quot;                                                                 
+options             : {event=&quot;false&quot;, hairpin_snat_ip=&quot;169.254.169.5 fd69::5&quot;, reject=&quot;true&quot;, skip_snat=&quot;false&quot;}                                                             
+protocol            : tcp                                                                                                                                                    
+selection_fields    : []                                                                                                                                                     
+vips                : {&quot;10.96.115.103:80&quot;=&quot;172.19.0.3:8080&quot;, &quot;172.19.0.3:31339&quot;=&quot;172.19.0.4:8080&quot;} 
+</code></pre></div>
+<ol>
+<li>Traffic from OVN is sent back to host:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>  cookie=0xdeff105, duration=839.789s, table=0, n_packets=6, n_bytes=484, priority=175,tcp,in_port=&quot;patch-breth0_ov&quot;,nw_src=172.19.0.3 actions=ct(table=4,zone=64001)
+  cookie=0xdeff105, duration=2334.510s, table=4, n_packets=18, n_bytes=1452, ip actions=ct(commit,table=3,zone=64002,nat(src=169.254.169.1))
+  cookie=0xdeff105, duration=1.612s, table=3, n_packets=10, n_bytes=892, actions=move:NXM_OF_ETH_DST[]-&gt;NXM_OF_ETH_SRC[],set_field:02:42:ac:13:00:03-&gt;eth_dst,LOCAL
+</code></pre></div>
+<ol>
+<li>The routes in the host send this back to breth0:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>169.254.169.1 dev breth0 src 172.19.0.4 mtu 1400 
+</code></pre></div>
+<ol>
+<li>Traffic leaves to primary interface from breth0:</li>
+</ol>
+<div class="highlight"><pre><span></span><code> cookie=0xdeff105, duration=2334.510s, table=0, n_packets=7611, n_bytes=754388, priority=100,ip,in_port=LOCAL actions=ct(commit,zone=64000,exec(load:0x2-&gt;NXM_NX_CT_MARK[])),output:eth0
+</code></pre></div>
+<p>Packet goes to other host via underlay.</p>
+<p>SYNACK flow:</p>
+<ol>
+<li>Match on the incoming traffic via default flow on <code>table0</code>, send it to <code>table1</code>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=3189.786s, table=0, n_packets=99979, n_bytes=298029215, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000,nat)
+</code></pre></div>
+<ol>
+<li>Send it out to LOCAL ovs port on breth0 and traffic is delivered to the host:</li>
+</ol>
+<div class="highlight"><pre><span></span><code> cookie=0xdeff105, duration=2334.510s, table=1, n_packets=9466, n_bytes=4512265, priority=100,ct_state=+est+trk,ct_mark=0x2,ip actions=LOCAL
+</code></pre></div>
+<ol>
+<li>Before coming to host in breth0 using above flow it will get unSNATed back to .1 masqueradeIP in 64000 zone, then unDNATed back to clusterIP using iptables and sent to OVN:</li>
+</ol>
+<div class="highlight"><pre><span></span><code> cookie=0xdeff105, duration=2334.510s, table=0, n_packets=14, n_bytes=1356, priority=500,ip,in_port=LOCAL,nw_dst=169.254.169.1 actions=ct(table=5,zone=64002,nat)
+ cookie=0xdeff105, duration=2334.510s, table=5, n_packets=14, n_bytes=1356, ip actions=ct(commit,table=2,zone=64001,nat)
+ cookie=0xdeff105, duration=0.365s, table=2, n_packets=33, n_bytes=2882, actions=set_field:02:42:ac:13:00:03-&gt;eth_dst,output:&quot;patch-breth0_ov&quot;
+</code></pre></div>
+<ol>
+<li>From OVN it gets sent back to host and then back from host into breth0 and into the wire:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>  cookie=0xdeff105, duration=2334.510s, table=0, n_packets=18, n_bytes=1452, priority=175,ip,in_port=&quot;patch-breth0_ov&quot;,nw_src=172.19.0.4 actions=ct(table=4,zone=64001,nat)
+  cookie=0xdeff105, duration=2334.510s, table=4, n_packets=18, n_bytes=1452, ip actions=ct(commit,table=3,zone=64002,nat(src=169.254.169.1))
+  cookie=0xdeff105, duration=0.365s, table=3, n_packets=32, n_bytes=2808, actions=move:NXM_OF_ETH_DST[]-&gt;NXM_OF_ETH_SRC[],set_field:02:42:ac:13:00:03-&gt;eth_dst,LOCAL
+  cookie=0xdeff105, duration=2334.510s, table=0, n_packets=7611, n_bytes=754388, priority=100,ip,in_port=LOCAL actions=ct(commit,zone=64000,exec(load:0x2-&gt;NXM_NX_CT_MARK[])),output:eth0
+</code></pre></div>
+<p>NOTE: We have added a masquerade rule to iptable rules to SNAT towards the netIP of the interface via which the packet leaves.</p>
+<div class="highlight"><pre><span></span><code>[12:720] -A POSTROUTING -s 169.254.169.0/29 -j MASQUERADE
+</code></pre></div>
+<p>tcpdump:
+<div class="highlight"><pre><span></span><code>SYN:
+13:38:52.988279 eth0  In  ifindex 19 02:42:df:4d:b6:d2 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 &gt; 172.19.0.4.30950: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.988315 breth0 In  ifindex 6 02:42:df:4d:b6:d2 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 &gt; 172.19.0.4.30950: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.988357 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 &gt; 10.96.211.228.80: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.989240 breth0 In  ifindex 6 02:42:ac:13:00:03 ethertype IPv4 (0x0800), length 80: 169.254.169.1.36363 &gt; 172.19.0.3.8080: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.989240 breth0 In  ifindex 6 02:42:ac:13:00:03 ethertype IPv4 (0x0800), length 80: 172.19.0.4.31991 &gt; 172.19.0.3.8080: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+SYNACK:
+13:38:52.989515 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.3.8080 &gt; 172.19.0.4.31991: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989515 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.3.8080 &gt; 169.254.169.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989562 breth0 In  ifindex 6 0a:58:a9:fe:a9:04 ethertype IPv4 (0x0800), length 80: 10.96.211.228.80 &gt; 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989571 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.4.30950 &gt; 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989581 eth0  Out ifindex 19 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.4.30950 &gt; 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+</code></pre></div></p>
+<h3 id="external-source-service-ovn-pod_1">External Source -&gt; Service -&gt; OVN pod<a class="headerlink" href="#external-source-service-ovn-pod_1" title="Permanent link">&para;</a></h3>
+<p>The implementation of this case differs for local gateway from that for shared gateway. In local gateway all service traffic is sent straight to host (instead of sending it to OVN) to allow users to apply custom routes according to their use cases.</p>
+<p>In local gateway mode, rather than sending the traffic from breth0 into OVN via gateway router, we use flows on breth0 to send it into the host.</p>
+<div class="highlight"><pre><span></span><code>          host (ovn-worker, 172.18.0.3) ---- 172.18.0.3 LOCAL(host) -- iptables -- breth0 -- GR -- 10.244.1.3 pod
+           ^
+           ^
+           |
+eth0---&gt;|breth0|
+</code></pre></div>
+<ol>
+<li>Match on the incoming traffic via default flow on <code>table0</code>, send it to <code>table1</code>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=3189.786s, table=0, n_packets=99979, n_bytes=298029215, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000)
+</code></pre></div>
+<ol>
+<li>Send it out to LOCAL ovs port on breth0 and traffic is delivered to the host:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=3189.787s, table=1, n_packets=108, n_bytes=23004, priority=0 actions=NORMAL
+</code></pre></div>
+<ol>
+<li>In the host, we have an IPtable rule in the PREROUTING chain that DNATs this packet matched on nodePort to its clusterIP:targetPort</li>
+</ol>
+<div class="highlight"><pre><span></span><code>[8:480] -A OVN-KUBE-NODEPORT -p tcp -m addrtype --dst-type LOCAL -m tcp --dport 31842 -j DNAT --to-destination 10.96.67.170:80
+</code></pre></div>
+<ol>
+<li>The service route in the host sends this packet back to breth0.</li>
+</ol>
+<div class="highlight"><pre><span></span><code>10.96.0.0/16 via 172.18.0.1 dev breth0 mtu 1400
+</code></pre></div>
+<ol>
+<li>On breth0, we have priority 500 flows meant to handle hairpining, that will SNAT the srcIP to the special <code>169.254.169.2</code> masqueradeIP and send it to <code>table2</code></li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=3189.786s, table=0, n_packets=11, n_bytes=814, priority=500,ip,in_port=LOCAL,nw_dst=10.96.0.0/16 actions=ct(commit,table=2,zone=64001,nat(src=169.254.169.2))
+</code></pre></div>
+<ol>
+<li>In <code>table2</code> we have a flow that forwards this to patch port that takes the traffic in OVN:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=6.308s, table=2, n_packets=11, n_bytes=814, actions=set_field:02:42:ac:12:00:03-&gt;eth_dst,output:&quot;patch-breth0_ov&quot;
+</code></pre></div>
+<ol>
+<li>Traffic enters the GR on the worker node and hits the load-balancer where we DNAT it correctly to the local backends.</li>
+</ol>
+<p>The GR load-balancer on a node with endpoints for the clusterIP will look like this:</p>
+<div class="highlight"><pre><span></span><code>_uuid               : b3201caf-3089-4462-b96e-1406fd7c4256
+external_ids        : {&quot;k8s.ovn.org/kind&quot;=Service, &quot;k8s.ovn.org/owner&quot;=&quot;default/example-service-1&quot;}
+health_check        : []
+ip_port_mappings    : {}
+name                : &quot;Service_default/example-service-1_TCP_cluster&quot;
+options             : {event=&quot;false&quot;, reject=&quot;true&quot;, skip_snat=&quot;false&quot;}
+protocol            : tcp
+selection_fields    : []
+vips                : {&quot;10.96.67.170:80&quot;=&quot;10.244.1.3:8080,10.244.2.3:8080&quot;}
+</code></pre></div>
+<p>Response traffic will follow the same path (backend-&gt;GR-&gt;breth0-&gt;host-&gt;breth0-&gt;eth0).</p>
+<ol>
+<li>Return traffic gets matched on the priority 500 flow in <code>table0</code> which sends it to <code>table3</code>.</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=3189.786s, table=0, n_packets=10, n_bytes=540, priority=500,ip,in_port=&quot;patch-breth0_ov&quot;,nw_src=10.96.0.0/16,nw_dst=169.254.169.2 actions=ct(table=3,zone=64001,nat)
+</code></pre></div>
+<ol>
+<li>In <code>table3</code>, we send it to host:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=6.308s, table=3, n_packets=10, n_bytes=540, actions=move:NXM_OF_ETH_DST[]-&gt;NXM_OF_ETH_SRC[],set_field:02:42:ac:12:00:03-&gt;eth_dst,LOCAL
+</code></pre></div>
+<ol>
+<li>From host we send it back to breth0 using:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cookie=0xdeff105, duration=5992.878s, table=0, n_packets=89312, n_bytes=6154654, idle_age=0, priority=100,ip,in_port=LOCAL actions=ct(commit,zone=64000,exec(load:0x2-&gt;NXM_NX_CT_MARK[])),output:eth0
+</code></pre></div>
+<p>where packet leaves the node and goes back to the external entity that initiated the connection.</p>
+<h2 id="sources">Sources<a class="headerlink" href="#sources" title="Permanent link">&para;</a></h2>
+<ul>
+<li>https://www.asykim.com/blog/deep-dive-into-kubernetes-external-traffic-policies</li>
+</ul>
+<h2 id="internal-traffic-policy">Internal Traffic Policy<a class="headerlink" href="#internal-traffic-policy" title="Permanent link">&para;</a></h2>
+<p>Service Internal Traffic Policy (ITP) is a feature that can be enabled on a kubernetes service type object. This feature imposes restrictions on traffic that originates internally by routing it only to endpoints that are local to the node from where the traffic originated from. Here "internal" traffic means traffic originating from pods and nodes within the cluster. See https://kubernetes.io/docs/concepts/services-networking/service-traffic-policy/ for more details.</p>
+<div class="highlight"><pre><span></span><code>NOTE1: ITP is applicable only to service of type &quot;ClusterIP&quot; meaning it has no effect on services of type NodePorts, ExternalIPs or LoadBalancers. So if
+InternalTrafficPolicy=Local for services of types NodePorts, ExternalIPs or LoadBalancers, then the restirction of traffic policy will apply only to the
+clusterIP serviceVIP of these service types.
+
+NOTE2: Unlike ETP, it is not necessary that the srcIP be preserved in case of ITP.
+</code></pre></div>
+<p>By default ITP is of type <code>Cluster</code> on all services; meaning internal traffic will be routed to any of the endpoints for that service. When it is set to <code>Local</code>, only local endpoints are considered. The way this is implemented in OVN-K is by filtering out endpoints from the load balancer on the node switches for <code>ClusterIP</code> services .</p>
+<h2 id="internaltrafficpolicylocal">InternalTrafficPolicy=Local<a class="headerlink" href="#internaltrafficpolicylocal" title="Permanent link">&para;</a></h2>
+<p>This feature is implemented exactly in the same way for both the gateway modes.</p>
+<h3 id="pod-traffic"><strong>Pod Traffic</strong><a class="headerlink" href="#pod-traffic" title="Permanent link">&para;</a></h3>
+<p>This section will cover the networking entities hit when traffic travels from an OVN pod via a service backed by either host networked pods or cluster networked pods.</p>
+<p>We have a service of type <code>NodePort</code> where <code>internalTrafficPolicy: Local</code>:</p>
+<div class="highlight"><pre><span></span><code>$ oc get svc
+NAMESPACE        NAME            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)                  AGE
+default          hello-world-2   NodePort    10.96.61.132   172.18.0.9    80:31358/TCP             108m
+$ oc get ep
+NAME            ENDPOINTS                         AGE
+hello-world-2   10.244.0.6:8080,10.244.1.3:8080   111m
+</code></pre></div>
+<p>This service is backed by two ovn pods:
+<div class="highlight"><pre><span></span><code>$ oc get pods -owide -n surya
+NAME                            READY   STATUS    RESTARTS   AGE    IP           NODE          NOMINATED NODE   READINESS GATES
+hello-world-2-5c87676b7-h6rm5   1/1     Running   0          111m   10.244.0.6   ovn-worker    &lt;none&gt;           &lt;none&gt;
+hello-world-2-5c87676b7-l82w8   1/1     Running   0          111m   10.244.1.3   ovn-worker2   &lt;none&gt;           &lt;none&gt;
+</code></pre></div></p>
+<p>Traffic from pod hits the load balancer on the switch where the non-local endpoints for clusterIPs are filtered out. So traffic will be DNAT-ed to local endpoints if any. Here is how the load balancers will look like on the three KIND worker nodes for the above service.</p>
+<div class="highlight"><pre><span></span><code>a7865d9f-43d2-4cf9-a316-fc35e8c357a8    Service_surya/he    tcp        10.96.61.132:80        
+                                                            tcp        172.18.0.4:31358       10.244.0.6:8080,10.244.1.3:8080
+                                                            tcp        172.18.0.9:80          10.244.0.6:8080,10.244.1.3:8080
+d58c012a-7b1f-45ad-a817-a86845fde164    Service_surya/he    tcp        10.96.61.132:80        10.244.0.6:8080
+                                                            tcp        172.18.0.2:31358       10.244.0.6:8080,10.244.1.3:8080
+                                                            tcp        172.18.0.9:80          10.244.0.6:8080,10.244.1.3:8080
+a993003a-a177-4673-8f7c-825e2c9bf205    Service_surya/he    tcp        10.96.61.132:80        10.244.1.3:8080
+                                                            tcp        172.18.0.3:31358       10.244.0.6:8080,10.244.1.3:8080
+                                                            tcp        172.18.0.9:80          10.244.0.6:8080,10.244.1.3:8080
+</code></pre></div>
+<p>Once the packet is DNAT-ed it is then redirected to the backend pod.</p>
+<p>NOTE: This traffic flow behaves exactly the same if the backend pods were host-networked.</p>
+<h3 id="host-traffic_1"><strong>Host Traffic</strong><a class="headerlink" href="#host-traffic_1" title="Permanent link">&para;</a></h3>
+<p>This section will cover the networking entities hit when traffic travels from a cluster host via a clusterIP service to either host
+networked pods or cluster networked pods. Note that host to clusterIP is considered "internal" traffic.</p>
+<h3 id="host-service-clusterip-ovn-pod"><strong>Host -&gt; Service (ClusterIP) -&gt; OVN Pod</strong><a class="headerlink" href="#host-service-clusterip-ovn-pod" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Packet generated from the host towards clusterIP service <code>10.96.61.132:80</code> is marked for forwarding in the <code>mangle</code> table by an IP table rule called from the <code>OUTPUT</code> chain:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>-A OUTPUT -j OVN-KUBE-ITP
+[1:60] -A OVN-KUBE-ITP -d 10.96.61.132/32 -p tcp -m tcp --dport 80 -j MARK --set-xmark 0x1745ec/0xffffffff
+</code></pre></div>
+<ol>
+<li>A routing policy (priority 30) is setup in the database to match on this mark and send it to custom routing table <code>number 7</code>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>root@ovn-worker:/# ip rule
+30: from all fwmark 0x1745ec lookup 7
+</code></pre></div>
+<ol>
+<li>In routing table <code>7</code> we have a route that steers this traffic into management port <code>ovn-k8s-mp0</code> instead of sending it via default service route towards <code>breth0</code>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>root@ovn-worker:/# ip r show table 7
+10.96.0.0/16 via 10.244.0.1 dev ovn-k8s-mp0 
+</code></pre></div>
+<ol>
+<li>Packet enters ovn via <code>k8s-nodename</code> port and hits the load balancer on the switch where the packet is DNAT-ed into the local endpoint if any, else rejected.</li>
+</ol>
+<p>Here is a sample load balancer on <code>ovn-worker</code> node which has an endpoint:</p>
+<div class="highlight"><pre><span></span><code>_uuid               : d58c012a-7b1f-45ad-a817-a86845fde164
+external_ids        : {&quot;k8s.ovn.org/kind&quot;=Service, &quot;k8s.ovn.org/owner&quot;=&quot;surya/hello-world-2&quot;}
+health_check        : []
+ip_port_mappings    : {}
+name                : &quot;Service_surya/hello-world-2_TCP_node_switch_ovn-worker&quot;
+options             : {event=&quot;false&quot;, reject=&quot;true&quot;, skip_snat=&quot;false&quot;}
+protocol            : tcp
+selection_fields    : []
+vips                : {&quot;10.96.61.132:80&quot;=&quot;10.244.0.6:8080&quot;, &quot;172.18.0.2:31358&quot;=&quot;10.244.0.6:8080,10.244.1.3:8080&quot;, &quot;172.18.0.9:80&quot;=&quot;10.244.0.6:8080,10.244.1.3:8080&quot;}
+</code></pre></div>
+<p>Note that only endpoints for <code>ClusterIP</code> are filtered, externalIPs/nodePorts are not.</p>
+<p>Here is a sample load balancer on <code>ovn-control-plane</code> node which does not have an endpoint:</p>
+<div class="highlight"><pre><span></span><code>_uuid               : a7865d9f-43d2-4cf9-a316-fc35e8c357a8
+external_ids        : {&quot;k8s.ovn.org/kind&quot;=Service, &quot;k8s.ovn.org/owner&quot;=&quot;surya/hello-world-2&quot;}
+health_check        : []
+ip_port_mappings    : {}
+name                : &quot;Service_surya/hello-world-2_TCP_node_switch_ovn-control-plane&quot;
+options             : {event=&quot;false&quot;, reject=&quot;true&quot;, skip_snat=&quot;false&quot;}
+protocol            : tcp
+selection_fields    : []
+vips                : {&quot;10.96.61.132:80&quot;=&quot;&quot;, &quot;172.18.0.4:31358&quot;=&quot;10.244.0.6:8080,10.244.1.3:8080&quot;, &quot;172.18.0.9:80&quot;=&quot;10.244.0.6:8080,10.244.1.3:8080&quot;}
+</code></pre></div>
+<ol>
+<li>Packet is then delivered to backend pod.</li>
+</ol>
+<h3 id="host-service-host-networked-pod"><strong>Host -&gt; Service -&gt; Host Networked Pod</strong><a class="headerlink" href="#host-service-host-networked-pod" title="Permanent link">&para;</a></h3>
+<p>When the backend is a host networked pod we shortcircuit OVN to counter reverse path filtering issues and use iptables rules on the host to DNAT directly to the correct host endpoint.</p>
+<div class="highlight"><pre><span></span><code>[1:60] -A OVN-KUBE-ITP -d 10.96.48.132/32 -p tcp -m tcp --dport 80 -j REDIRECT --to-ports 8080
+</code></pre></div>
+<p>NOTE: If a service with ITP=local has both host-networked pods and ovn pods as local endpoints, traffic will always be delivered to the host-networked pod. This is acceptable since traffic policy claims unfair load balancing as a side effect of the feature.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.indexes", "navigation.tabs", "navigation.tabs.sticky", "content.code.annotate", "navigation.instant.preview"], "search": "../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.8fd75fb4.min.js"></script>
+      
+    
+  </body>
+</html>
