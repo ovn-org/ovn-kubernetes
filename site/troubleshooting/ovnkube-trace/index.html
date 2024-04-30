@@ -1,0 +1,3026 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://www.ovn.org/ovn-kubernetes/troubleshooting/ovnkube-trace/">
+      
+      
+        <link rel="prev" href="../debugging/">
+      
+      
+        <link rel="next" href="../../observability/metrics/">
+      
+      
+      <link rel="icon" href="../../images/ovn-inside-k8s.png">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.10">
+    
+    
+      
+        <title>OVNKube Trace - OVN Kubernetes</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.7e359304.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#ovnkube-trace" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="OVN Kubernetes" class="md-header__button md-logo" aria-label="OVN Kubernetes" data-md-component="logo">
+      
+  <img src="../../images/ovn-inside-k8s.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            OVN Kubernetes
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              OVNKube Trace
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3 3.19.09m3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95 2.06.05m-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="cyan" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5c-.84 0-1.65.15-2.39.42L12 2M3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29L3.34 7m.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14L3.36 17M20.65 7l-1.77 3.79a7.023 7.023 0 0 0-2.38-4.15l4.15.36m-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29L20.64 17M12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44L12 22Z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ovn-org/ovn-kubernetes" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ovn-org/ovn-kubernetes
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Introduction
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../design/architecture/" class="md-tabs__link">
+          
+  
+    
+  
+  Overview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/overview.md" class="md-tabs__link">
+          
+  
+    
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../governance/CONTRIBUTING/" class="md-tabs__link">
+          
+  
+    
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../features/cluster-egress-controls/egress-ip/" class="md-tabs__link">
+          
+  
+    
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../debugging/" class="md-tabs__link">
+          
+  
+    
+  
+  Troubleshooting
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../observability/metrics/" class="md-tabs__link">
+          
+  
+    
+  
+  Observability
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../blog/" class="md-tabs__link">
+          
+  
+    
+  
+  Blog
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="OVN Kubernetes" class="md-nav__button md-logo" aria-label="OVN Kubernetes" data-md-component="logo">
+      
+  <img src="../../images/ovn-inside-k8s.png" alt="logo">
+
+    </a>
+    OVN Kubernetes
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ovn-org/ovn-kubernetes" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ovn-org/ovn-kubernetes
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Introduction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Overview
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/topology/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Network Topology
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/gateway-modes.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gateway Modes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/traffic-flows.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Traffic Flows
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/pod-creation-workflow.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Pod Creation Workflow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/service-creation-workflow.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Service Creation Workflow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/service-traffic-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Service Traffic Policy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/host-to-node-port-hairpin-trafficflow/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Host To NodePort Hairpin
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/external-ip-and-loadbalancer-ingress/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ExternalIPs/LoadBalancerIngress
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/ovn-kubernetes-subnets.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Internal Subnets
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/live-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Kubevirt VM Live Migration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Getting Started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/overview.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OVN Kubernetes Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/launching-ovn-kubernetes.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Launching OVN Kubernetes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/example-pod-creation.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Deploying Workloads on OVN Kubernetes cluster
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/example-service creation.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Deploying Services on OVN Kubernetes cluster
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/building-ovn-kubernetes.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Setup and Building
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/running-release.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Run OVN Kubernetes From Release Image
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/running-rpm.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Run OVN Kubernetes From RPM
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/cli-guide.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    CLI Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/configuration.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Developer Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Developer Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../governance/CONTRIBUTING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Contributing Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../governance/REVIEWING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Reviewing Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/developer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Coding Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/api-spec.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Kubernetes CRD API-Reference Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/image-build.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OVN Kubernetes Container Images
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/documentation.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Documentation Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/testing.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Local Testing Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ci/ci/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    CI Testing Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/debugging.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Debugging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/release.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Releasing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Features
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    ClusterEgressControls
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            ClusterEgressControls
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/cluster-egress-controls/egress-ip/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    EgressIP
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/cluster-egress-controls/egress-service/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    EgressService
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/cluster-egress-controls/egress-qos/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    EgressQoS
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/cluster-egress-controls/egress-gateway.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    EgressGateway
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    NetworkSecurityControls
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            NetworkSecurityControls
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/network-security-controls/network-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    NetworkPolicy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/network-security-controls/admin-network-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AdminNetworkPolicy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/network-security-controls/egress-firewall/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    EgressFirewall
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    InfrastructureSecurityControls
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3">
+            <span class="md-nav__icon md-icon"></span>
+            InfrastructureSecurityControls
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/infrastructure-security-controls/node-identity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    NodeIdentity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_4" id="__nav_5_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    MultiNetworking
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_4">
+            <span class="md-nav__icon md-icon"></span>
+            MultiNetworking
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/multi-homing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multihoming
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/multicast/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multicast
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/live-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    LiveMigration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/hybrid-overlay/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    HybridOverlay
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_8" id="__nav_5_8_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Hardware Offload
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_8">
+            <span class="md-nav__icon md-icon"></span>
+            Hardware Offload
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/hardware-offload/ovs_offload/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OVS Offload
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/hardware-offload/dpu-acceleration.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Support DPU Acceleration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+        
+        
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Troubleshooting
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../debugging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Introduction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    OVNKube Trace
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    OVNKube Trace
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Usage:
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage:">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../logging.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Logging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Observability
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Observability
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../observability/metrics/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Metrics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../blog/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Blog
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8" id="__nav_8_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            Blog
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Archive
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Usage:
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage:">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="ovnkube-trace">ovnkube-trace<a class="headerlink" href="#ovnkube-trace" title="Permanent link">&para;</a></h1>
+<p>A tool to trace packet simulations for arbitrary UDP or TCP traffic between points in an ovn-kubernetes driven cluster.</p>
+<h3 id="usage">Usage:<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h3>
+<p>Given the command-line arguments, ovnkube-trace would inspect the cluster to determine the addresses (MAC and IP) of the source and destination and perform <code>ovn-trace</code>, <code>ovs-appctl ofproto/trace</code>, and <code>ovn-detrace</code> from/to both directions.</p>
+<div class="highlight"><pre><span></span><code>Usage of _output/go/bin/ovnkube-trace:
+  -addr-family string
+        Address family (ip4 or ip6) to be used for tracing (default &quot;ip4&quot;)
+  -dst string
+        dest: destination pod name
+  -dst-ip string
+        destination IP address (meant for tests to external targets)
+  -dst-namespace string
+        k8s namespace of dest pod (default &quot;default&quot;)
+  -dst-port string
+        dst-port: destination port (default &quot;80&quot;)
+  -kubeconfig string
+        absolute path to the kubeconfig file
+  -loglevel string
+        loglevel: klog level (default &quot;0&quot;)
+  -ovn-config-namespace string
+        namespace used by ovn-config itself
+  -service string
+        service: destination service name
+  -skip-detrace
+        skip ovn-detrace command
+  -src string
+        src: source pod name
+  -src-namespace string
+        k8s namespace of source pod (default &quot;default&quot;)
+  -tcp
+        use tcp transport protocol
+  -udp
+        use udp transport protocol
+</code></pre></div>
+<p>Currently implemented loglevels are: 
+* <code>0</code> (minimal output)
+* <code>2</code> (more verbose output showing results of trace commands) 
+* and <code>5</code> (debug output)</p>
+<h4 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h4>
+<p>In an environment between 2 pods in namespace <code>default</code>, where the pods are named <code>fedora-deployment-7d49fddf69-chmvh</code> and <code>fedora-deployment-7d49fddf69-t4hqw</code>, the goal would be to trace UDP traffic on port 53 between both pods. Each node in the cluster is running in a different interconnect zone.
+<div class="highlight"><pre><span></span><code># kubectl get pods -o wide
+NAME                                 READY   STATUS    RESTARTS   AGE   IP           NODE                NOMINATED NODE   READINESS GATES
+fedora-deployment-7d49fddf69-chmvh   1/1     Running   0          10m   10.244.2.3   ovn-worker2         &lt;none&gt;           &lt;none&gt;
+fedora-deployment-7d49fddf69-t4hqw   1/1     Running   0          10m   10.244.1.6   ovn-worker          &lt;none&gt;           &lt;none&gt;
+fedora-deployment-7d49fddf69-vwjt7   1/1     Running   0          10m   10.244.0.3   ovn-control-plane   &lt;none&gt;           &lt;none&gt;
+</code></pre></div></p>
+<p>The command that one would run in this case would be:
+<div class="highlight"><pre><span></span><code>ovnkube-trace \
+  -src-namespace default \
+  -src fedora-deployment-7d49fddf69-chmvh \
+  -dst-namespace default \
+  -dst fedora-deployment-7d49fddf69-t4hqw \
+  -udp -dst-port 53 \
+  -loglevel 0
+</code></pre></div></p>
+<p>The result with loglevel 0 would be for a successful trace:
+<div class="highlight"><pre><span></span><code># ovnkube-trace -src-namespace default -src fedora-deployment-7d49fddf69-chmvh -dst-namespace default -dst fedora-deployment-7d49fddf69-t4hqw -udp -dst-port 53 -loglevel 0
+ovn-trace source pod to destination pod indicates success from fedora-deployment-7d49fddf69-chmvh to fedora-deployment-7d49fddf69-t4hqw
+ovn-trace (remote) source pod to destination pod indicates success from fedora-deployment-7d49fddf69-chmvh to fedora-deployment-7d49fddf69-t4hqw
+ovn-trace destination pod to source pod indicates success from fedora-deployment-7d49fddf69-t4hqw to fedora-deployment-7d49fddf69-chmvh
+ovn-trace (remote) destination pod to source pod indicates success from fedora-deployment-7d49fddf69-t4hqw to fedora-deployment-7d49fddf69-chmvh
+ovs-appctl ofproto/trace source pod to destination pod indicates success from fedora-deployment-7d49fddf69-chmvh to fedora-deployment-7d49fddf69-t4hqw
+ovs-appctl ofproto/trace destination pod to source pod indicates success from fedora-deployment-7d49fddf69-t4hqw to fedora-deployment-7d49fddf69-chmvh
+ovn-detrace source pod to destination pod indicates success from fedora-deployment-7d49fddf69-chmvh to fedora-deployment-7d49fddf69-t4hqw
+ovn-detrace destination pod to source pod indicates success from fedora-deployment-7d49fddf69-t4hqw to fedora-deployment-7d49fddf69-chmvh
+</code></pre></div></p>
+<p>In order to see the actual trace output of the <code>ovn-trace</code> and <code>ovs-appctl ofproto/trace</code> commands, one can increase the loglevel to <code>2</code>, and in order to see debug output for the ovnkube-trace application one can raise the loglevel to <code>5</code>:
+<div class="highlight"><pre><span></span><code># ovnkube-trace -src-namespace default -src fedora-deployment-7d49fddf69-chmvh -dst-namespace default -dst fedora-deployment-7d49fddf69-t4hqw -udp -dst-port 53 -loglevel 2
+I0823 21:33:18.112821 2457963 ovnkube-trace.go:1157] Log level set to: 2
+I0823 21:33:18.857705 2457963 ovnkube-trace.go:693] ovn-trace source pod to destination pod Output:
+# udp,reg14=0x3,vlan_tci=0x0000,dl_src=0a:58:0a:f4:02:03,dl_dst=0a:58:0a:f4:02:01,nw_src=10.244.2.3,nw_dst=10.244.1.6,nw_tos=0,nw_ecn=0,nw_ttl=64,nw_frag=no,tp_src=52888,tp_dst=53
+
+ingress(dp=&quot;ovn-worker2&quot;, inport=&quot;default_fedora-deployment-7d49fddf69-chmvh&quot;)
+------------------------------------------------------------------------------
+ 0. ls_in_check_port_sec (northd.c:8583): 1, priority 50, uuid de664d3a
+    reg0[15] = check_in_port_sec();
+    next;
+ 4. ls_in_pre_acl (northd.c:5991): ip, priority 100, uuid d9a60156
+    reg0[0] = 1;
+    next;
+ 5. ls_in_pre_lb (northd.c:6178): ip, priority 100, uuid 4f6825b1
+    reg0[2] = 1;
+    next;
+ 6. ls_in_pre_stateful (northd.c:6201): reg0[2] == 1, priority 110, uuid 82c039a6
+    ct_lb_mark;
+
+ct_lb_mark /* default (use --ct to customize) */
+------------------------------------------------
+ 7. ls_in_acl_hint (northd.c:6297): !ct.new &amp;&amp; ct.est &amp;&amp; !ct.rpl &amp;&amp; ct_mark.blocked == 0, priority 4, uuid 0b20013d
+    reg0[8] = 1;
+    reg0[10] = 1;
+    next;
+ 9. ls_in_acl_action (northd.c:6764): reg8[30..31] == 0, priority 500, uuid 3eec76bb
+    reg8[30..31] = 1;
+    next(8);
+ 9. ls_in_acl_action (northd.c:6764): reg8[30..31] == 1, priority 500, uuid b327f7af
+    reg8[30..31] = 2;
+    next(8);
+ 9. ls_in_acl_action (northd.c:6753): 1, priority 0, uuid b0f710dc
+    reg8[16] = 0;
+    reg8[17] = 0;
+    reg8[18] = 0;
+    reg8[30..31] = 0;
+    next;
+15. ls_in_pre_hairpin (northd.c:7786): ip &amp;&amp; ct.trk, priority 100, uuid 88ef5011
+    reg0[6] = chk_lb_hairpin();
+    reg0[12] = chk_lb_hairpin_reply();
+    next;
+19. ls_in_acl_after_lb_action (northd.c:6764): reg8[30..31] == 0, priority 500, uuid 01461328
+    reg8[30..31] = 1;
+    next(18);
+19. ls_in_acl_after_lb_action (northd.c:6764): reg8[30..31] == 1, priority 500, uuid a22021af
+    reg8[30..31] = 2;
+    next(18);
+19. ls_in_acl_after_lb_action (northd.c:6753): 1, priority 0, uuid 2c98ee3d
+    reg8[16] = 0;
+    reg8[17] = 0;
+    reg8[18] = 0;
+    reg8[30..31] = 0;
+    next;
+27. ls_in_l2_lkup (northd.c:9407): eth.dst == { 0a:58:a9:fe:01:01, 0a:58:0a:f4:02:01 }, priority 50, uuid b29511a2
+    outport = &quot;stor-ovn-worker2&quot;;
+    output;
+
+egress(dp=&quot;ovn-worker2&quot;, inport=&quot;default_fedora-deployment-7d49fddf69-chmvh&quot;, outport=&quot;stor-ovn-worker2&quot;)
+---------------------------------------------------------------------------------------------------------
+ 0. ls_out_pre_acl (northd.c:5878): ip &amp;&amp; outport == &quot;stor-ovn-worker2&quot;, priority 110, uuid 8b1bef96
+    next;
+ 1. ls_out_pre_lb (northd.c:5878): ip &amp;&amp; outport == &quot;stor-ovn-worker2&quot;, priority 110, uuid d7c53e71
+    next;
+ 3. ls_out_acl_hint (northd.c:6297): !ct.new &amp;&amp; ct.est &amp;&amp; !ct.rpl &amp;&amp; ct_mark.blocked == 0, priority 4, uuid 26b08bb5
+    reg0[8] = 1;
+    reg0[10] = 1;
+    next;
+ 5. ls_out_acl_action (northd.c:6764): reg8[30..31] == 0, priority 500, uuid ea58bb8e
+    reg8[30..31] = 1;
+    next(4);
+ 5. ls_out_acl_action (northd.c:6764): reg8[30..31] == 1, priority 500, uuid 03897328
+    reg8[30..31] = 2;
+    next(4);
+ 5. ls_out_acl_action (northd.c:6753): 1, priority 0, uuid bcfbe611
+    reg8[16] = 0;
+    reg8[17] = 0;
+    reg8[18] = 0;
+    reg8[30..31] = 0;
+    next;
+ 9. ls_out_check_port_sec (northd.c:5843): 1, priority 0, uuid 79358872
+    reg0[15] = check_out_port_sec();
+    next;
+10. ls_out_apply_port_sec (northd.c:5848): 1, priority 0, uuid 12ba0dbe
+    output;
+    /* output to &quot;stor-ovn-worker2&quot;, type &quot;patch&quot; */
+
+ingress(dp=&quot;ovn_cluster_router&quot;, inport=&quot;rtos-ovn-worker2&quot;)
+-----------------------------------------------------------
+ 0. lr_in_admission (northd.c:11790): eth.dst == { 0a:58:a9:fe:01:01, 0a:58:0a:f4:02:01 } &amp;&amp; inport == &quot;rtos-ovn-worker2&quot; &amp;&amp; is_chassis_resident(&quot;cr-rtos-ovn-worker2&quot;), priority 50, uuid e40942af
+    xreg0[0..47] = 0a:58:0a:f4:02:01;
+    next;
+ 1. lr_in_lookup_neighbor (northd.c:11956): 1, priority 0, uuid 897d00f0
+    reg9[2] = 1;
+    next;
+ 2. lr_in_learn_neighbor (northd.c:11965): reg9[2] == 1 || reg9[3] == 0, priority 100, uuid 234da6ee
+    next;
+12. lr_in_ip_routing_pre (northd.c:12190): 1, priority 0, uuid b1a3a6af
+    reg7 = 0;
+    next;
+13. lr_in_ip_routing (northd.c:10603): reg7 == 0 &amp;&amp; ip4.dst == 10.244.1.0/24, priority 73, uuid 1ed4e720
+    ip.ttl--;
+    reg8[0..15] = 0;
+    reg0 = 100.88.0.4;
+    reg1 = 100.88.0.2;
+    eth.src = 0a:58:a8:fe:00:02;
+    outport = &quot;rtots-ovn-worker2&quot;;
+    flags.loopback = 1;
+    next;
+14. lr_in_ip_routing_ecmp (northd.c:12285): reg8[0..15] == 0, priority 150, uuid a1ea724a
+    next;
+15. lr_in_policy (northd.c:9741): ip4.src == 10.244.0.0/16 &amp;&amp; ip4.dst == 10.244.0.0/16, priority 102, uuid 1c6af09a
+    reg8[0..15] = 0;
+    next;
+16. lr_in_policy_ecmp (northd.c:12452): reg8[0..15] == 0, priority 150, uuid 3841a2fc
+    next;
+17. lr_in_arp_resolve (northd.c:12665): outport == &quot;rtots-ovn-worker2&quot; &amp;&amp; reg0 == 100.88.0.4, priority 100, uuid 792c14a1
+    eth.dst = 0a:58:a8:fe:00:04;
+    next;
+21. lr_in_arp_request (northd.c:13083): 1, priority 0, uuid f21b210a
+    output;
+
+egress(dp=&quot;ovn_cluster_router&quot;, inport=&quot;rtos-ovn-worker2&quot;, outport=&quot;rtots-ovn-worker2&quot;)
+---------------------------------------------------------------------------------------
+ 0. lr_out_chk_dnat_local (northd.c:14444): 1, priority 0, uuid 2f6e84ed
+    reg9[4] = 0;
+    next;
+ 6. lr_out_delivery (northd.c:13129): outport == &quot;rtots-ovn-worker2&quot;, priority 100, uuid 81cdee53
+    output;
+    /* output to &quot;rtots-ovn-worker2&quot;, type &quot;patch&quot; */
+
+ingress(dp=&quot;transit_switch&quot;, inport=&quot;tstor-ovn-worker2&quot;)
+--------------------------------------------------------
+ 0. ls_in_check_port_sec (northd.c:8583): 1, priority 50, uuid de664d3a
+    reg0[15] = check_in_port_sec();
+    next;
+ 5. ls_in_pre_lb (northd.c:5875): ip &amp;&amp; inport == &quot;tstor-ovn-worker2&quot;, priority 110, uuid 69169a39
+    next;
+27. ls_in_l2_lkup (northd.c:9329): eth.dst == 0a:58:a8:fe:00:04, priority 50, uuid da101703
+    outport = &quot;tstor-ovn-worker&quot;;
+    output;
+
+egress(dp=&quot;transit_switch&quot;, inport=&quot;tstor-ovn-worker2&quot;, outport=&quot;tstor-ovn-worker&quot;)
+-----------------------------------------------------------------------------------
+ 9. ls_out_check_port_sec (northd.c:5843): 1, priority 0, uuid 79358872
+    reg0[15] = check_out_port_sec();
+    next;
+10. ls_out_apply_port_sec (northd.c:5848): 1, priority 0, uuid 12ba0dbe
+    output;
+    /* output to &quot;tstor-ovn-worker&quot;, type &quot;remote&quot; */
+
+ovn-trace source pod to destination pod indicates success from fedora-deployment-7d49fddf69-chmvh to fedora-deployment-7d49fddf69-t4hqw
+I0823 21:33:18.858296 2457963 ovnkube-trace.go:704] Search string matched:
+output to &quot;tstor-ovn-worker&quot;
+(...)
+I0823 21:33:19.169751 2457963 ovnkube-trace.go:693] ovs-appctl ofproto/trace source pod to destination pod Output:
+Flow: udp,in_port=7,vlan_tci=0x0000,dl_src=0a:58:0a:f4:02:03,dl_dst=0a:58:0a:f4:02:01,nw_src=10.244.2.3,nw_dst=10.244.1.6,nw_tos=0,nw_ecn=0,nw_ttl=64,nw_frag=no,tp_src=12345,tp_dst=53
+
+bridge(&quot;br-int&quot;)
+----------------
+ 0. in_port=7, priority 100, cookie 0x6c1d0b4a
+    set_field:0x13-&gt;reg13
+    set_field:0xb-&gt;reg11
+    set_field:0x6-&gt;reg12
+    set_field:0x3-&gt;metadata
+    set_field:0x3-&gt;reg14
+    resubmit(,8)
+ 8. metadata=0x3, priority 50, cookie 0xde664d3a
+    set_field:0/0x1000-&gt;reg10
+    resubmit(,73)
+    73. ip,reg14=0x3,metadata=0x3,dl_src=0a:58:0a:f4:02:03,nw_src=10.244.2.3, priority 90, cookie 0x6c1d0b4a
+            set_field:0/0x1000-&gt;reg10
+    move:NXM_NX_REG10[12]-&gt;NXM_NX_XXREG0[111]
+     -&gt; NXM_NX_XXREG0[111] is now 0
+    resubmit(,9)
+ 9. metadata=0x3, priority 0, cookie 0x57b52622
+    resubmit(,10)
+10. metadata=0x3, priority 0, cookie 0x98964ef0
+    resubmit(,11)
+11. metadata=0x3, priority 0, cookie 0x72c60524
+    resubmit(,12)
+12. ip,metadata=0x3, priority 100, cookie 0xd9a60156
+    set_field:0x1000000000000000000000000/0x1000000000000000000000000-&gt;xxreg0
+    resubmit(,13)
+13. ip,metadata=0x3, priority 100, cookie 0x4f6825b1
+    set_field:0x4000000000000000000000000/0x4000000000000000000000000-&gt;xxreg0
+    resubmit(,14)
+14. ip,reg0=0x4/0x4,metadata=0x3, priority 110, cookie 0x82c039a6
+    ct(table=15,zone=NXM_NX_REG13[0..15],nat)
+    nat
+     -&gt; A clone of the packet is forked to recirculate. The forked pipeline will be resumed at table 15.
+     -&gt; Sets the packet to an untracked state, and clears all the conntrack fields.
+
+Final flow: udp,reg0=0x5,reg11=0xb,reg12=0x6,reg13=0x13,reg14=0x3,metadata=0x3,in_port=7,vlan_tci=0x0000,dl_src=0a:58:0a:f4:02:03,dl_dst=0a:58:0a:f4:02:01,nw_src=10.244.2.3,nw_dst=10.244.1.6,nw_tos=0,nw_ecn=0,nw_ttl=64,nw_frag=no,tp_src=12345,tp_dst=53
+Megaflow: recirc_id=0,eth,udp,in_port=7,dl_src=0a:58:0a:f4:02:03,dl_dst=0a:58:0a:f4:02:01,nw_src=10.244.2.3,nw_dst=10.128.0.0/9,nw_frag=no,tp_src=0x2000/0xe000
+Datapath actions: ct(zone=19,nat),recirc(0x12)
+
+===============================================================================
+recirc(0x12) - resume conntrack with default ct_state=trk|new (use --ct-next to customize)
+Replacing src/dst IP/ports to simulate NAT:
+ Initial flow: 
+ Modified flow: 
+===============================================================================
+
+Flow: recirc_id=0x12,ct_state=new|trk,ct_zone=19,eth,udp,reg0=0x5,reg11=0xb,reg12=0x6,reg13=0x13,reg14=0x3,metadata=0x3,in_port=7,vlan_tci=0x0000,dl_src=0a:58:0a:f4:02:03,dl_dst=0a:58:0a:f4:02:01,nw_src=10.244.2.3,nw_dst=10.244.1.6,nw_tos=0,nw_ecn=0,nw_ttl=64,nw_frag=no,tp_src=12345,tp_dst=53
+
+bridge(&quot;br-int&quot;)
+----------------
+    thaw
+        Resuming from table 15
+15. ct_state=+new-est+trk,metadata=0x3, priority 7, cookie 0xf14d8019
+    set_field:0x80000000000000000000000000/0x80000000000000000000000000-&gt;xxreg0
+    set_field:0x200000000000000000000000000/0x200000000000000000000000000-&gt;xxreg0
+    resubmit(,16)
+16. ct_state=-est+trk,ip,metadata=0x3, priority 1, cookie 0x8dfd1f3e
+    set_field:0x2000000000000000000000000/0x2000000000000000000000000-&gt;xxreg0
+    resubmit(,17)
+17. reg8=0/0xc0000000,metadata=0x3, priority 500, cookie 0x3eec76bb
+    set_field:0x4000000000000000/0xc000000000000000-&gt;xreg4
+    resubmit(,16)
+16. ct_state=-est+trk,ip,metadata=0x3, priority 1, cookie 0x8dfd1f3e
+    set_field:0x2000000000000000000000000/0x2000000000000000000000000-&gt;xxreg0
+    resubmit(,17)
+17. reg8=0x40000000/0xc0000000,metadata=0x3, priority 500, cookie 0xb327f7af
+    set_field:0x8000000000000000/0xc000000000000000-&gt;xreg4
+    resubmit(,16)
+16. ct_state=-est+trk,ip,metadata=0x3, priority 1, cookie 0x8dfd1f3e
+    set_field:0x2000000000000000000000000/0x2000000000000000000000000-&gt;xxreg0
+    resubmit(,17)
+17. metadata=0x3, priority 0, cookie 0xb0f710dc
+    set_field:0/0x1000000000000-&gt;xreg4
+    set_field:0/0x2000000000000-&gt;xreg4
+    set_field:0/0x4000000000000-&gt;xreg4
+    set_field:0/0xc000000000000000-&gt;xreg4
+    resubmit(,18)
+18. metadata=0x3, priority 0, cookie 0xcae3d5b1
+    resubmit(,19)
+19. metadata=0x3, priority 0, cookie 0x66860608
+    resubmit(,20)
+20. metadata=0x3, priority 0, cookie 0x9db4b75e
+    resubmit(,21)
+21. metadata=0x3, priority 0, cookie 0x414a15a0
+    resubmit(,22)
+22. metadata=0x3, priority 0, cookie 0xebbc94cf
+    resubmit(,23)
+23. ct_state=+trk,ip,metadata=0x3, priority 100, cookie 0x88ef5011
+    set_field:0/0x80-&gt;reg10
+    resubmit(,68)
+    68. No match.
+            drop
+    move:NXM_NX_REG10[7]-&gt;NXM_NX_XXREG0[102]
+     -&gt; NXM_NX_XXREG0[102] is now 0
+    set_field:0/0x80-&gt;reg10
+    resubmit(,69)
+    69. No match.
+            drop
+    move:NXM_NX_REG10[7]-&gt;NXM_NX_XXREG0[108]
+     -&gt; NXM_NX_XXREG0[108] is now 0
+    resubmit(,24)
+24. metadata=0x3, priority 0, cookie 0x7fd98606
+    resubmit(,25)
+25. metadata=0x3, priority 0, cookie 0xd3d8976
+    resubmit(,26)
+26. metadata=0x3, priority 0, cookie 0x1ecb6f2e
+    resubmit(,27)
+27. reg8=0/0xc0000000,metadata=0x3, priority 500, cookie 0x1461328
+    set_field:0x4000000000000000/0xc000000000000000-&gt;xreg4
+    resubmit(,26)
+26. metadata=0x3, priority 0, cookie 0x1ecb6f2e
+    resubmit(,27)
+27. reg8=0x40000000/0xc0000000,metadata=0x3, priority 500, cookie 0xa22021af
+    set_field:0x8000000000000000/0xc000000000000000-&gt;xreg4
+    resubmit(,26)
+26. metadata=0x3, priority 0, cookie 0x1ecb6f2e
+    resubmit(,27)
+27. metadata=0x3, priority 0, cookie 0x2c98ee3d
+    set_field:0/0x1000000000000-&gt;xreg4
+    set_field:0/0x2000000000000-&gt;xreg4
+    set_field:0/0x4000000000000-&gt;xreg4
+    set_field:0/0xc000000000000000-&gt;xreg4
+    resubmit(,28)
+28. ip,reg0=0x2/0x2002,metadata=0x3, priority 100, cookie 0xd8583947
+    ct(commit,zone=NXM_NX_REG13[0..15],nat(src),exec(set_field:0/0x1-&gt;ct_mark))
+    nat(src)
+    set_field:0/0x1-&gt;ct_mark
+     -&gt; Sets the packet to an untracked state, and clears all the conntrack fields.
+    resubmit(,29)
+29. metadata=0x3, priority 0, cookie 0x41080b67
+    resubmit(,30)
+30. metadata=0x3, priority 0, cookie 0x936e8520
+    resubmit(,31)
+31. metadata=0x3, priority 0, cookie 0x6d369d0e
+    resubmit(,32)
+32. metadata=0x3, priority 0, cookie 0x119a6138
+    resubmit(,33)
+33. metadata=0x3, priority 0, cookie 0x1d30f590
+    resubmit(,34)
+34. metadata=0x3, priority 0, cookie 0x74ef3d9
+    resubmit(,35)
+35. metadata=0x3,dl_dst=0a:58:0a:f4:02:01, priority 50, cookie 0xb29511a2
+    set_field:0x1-&gt;reg15
+    resubmit(,37)
+37. priority 0
+    resubmit(,38)
+38. priority 0
+    resubmit(,40)
+40. priority 0
+    resubmit(,41)
+41. reg15=0x1,metadata=0x3, priority 100, cookie 0x7c79d0e2
+    set_field:0xb-&gt;reg11
+    set_field:0x6-&gt;reg12
+    resubmit(,42)
+42. priority 0
+    set_field:0-&gt;reg0
+    set_field:0-&gt;reg1
+    set_field:0-&gt;reg2
+    set_field:0-&gt;reg3
+    set_field:0-&gt;reg4
+    set_field:0-&gt;reg5
+    set_field:0-&gt;reg6
+    set_field:0-&gt;reg7
+    set_field:0-&gt;reg8
+    set_field:0-&gt;reg9
+    resubmit(,43)
+43. ip,reg15=0x1,metadata=0x3, priority 110, cookie 0x8b1bef96
+    resubmit(,44)
+44. ip,reg15=0x1,metadata=0x3, priority 110, cookie 0xd7c53e71
+    resubmit(,45)
+45. metadata=0x3, priority 0, cookie 0xe59d971f
+    resubmit(,46)
+46. ct_state=-trk,metadata=0x3, priority 5, cookie 0xd4c65410
+    set_field:0x100000000000000000000000000/0x100000000000000000000000000-&gt;xxreg0
+    set_field:0x200000000000000000000000000/0x200000000000000000000000000-&gt;xxreg0
+    resubmit(,47)
+47. metadata=0x3, priority 0, cookie 0x17ae0ddf
+    resubmit(,48)
+48. reg8=0/0xc0000000,metadata=0x3, priority 500, cookie 0xea58bb8e
+    set_field:0x4000000000000000/0xc000000000000000-&gt;xreg4
+    resubmit(,47)
+47. metadata=0x3, priority 0, cookie 0x17ae0ddf
+    resubmit(,48)
+48. reg8=0x40000000/0xc0000000,metadata=0x3, priority 500, cookie 0x3897328
+    set_field:0x8000000000000000/0xc000000000000000-&gt;xreg4
+    resubmit(,47)
+47. metadata=0x3, priority 0, cookie 0x17ae0ddf
+    resubmit(,48)
+48. metadata=0x3, priority 0, cookie 0xbcfbe611
+    set_field:0/0x1000000000000-&gt;xreg4
+    set_field:0/0x2000000000000-&gt;xreg4
+    set_field:0/0x4000000000000-&gt;xreg4
+    set_field:0/0xc000000000000000-&gt;xreg4
+    resubmit(,49)
+49. metadata=0x3, priority 0, cookie 0x39bbcf9
+    resubmit(,50)
+50. metadata=0x3, priority 0, cookie 0xaf9ffaea
+    resubmit(,51)
+51. metadata=0x3, priority 0, cookie 0xbee9000e
+    resubmit(,52)
+52. metadata=0x3, priority 0, cookie 0x79358872
+    set_field:0/0x1000-&gt;reg10
+    resubmit(,75)
+    75. No match.
+            drop
+    move:NXM_NX_REG10[12]-&gt;NXM_NX_XXREG0[111]
+     -&gt; NXM_NX_XXREG0[111] is now 0
+    resubmit(,53)
+53. metadata=0x3, priority 0, cookie 0x12ba0dbe
+    resubmit(,64)
+64. priority 0
+    resubmit(,65)
+65. reg15=0x1,metadata=0x3, priority 100, cookie 0x7c79d0e2
+    clone(ct_clear,set_field:0-&gt;reg11,set_field:0-&gt;reg12,set_field:0-&gt;reg13,set_field:0x8-&gt;reg11,set_field:0xe-&gt;reg12,set_field:0x1-&gt;metadata,set_field:0x2-&gt;reg14,set_field:0-&gt;reg10,set_field:0-&gt;reg15,set_field:0-&gt;reg0,set_field:0-&gt;reg1,set_field:0-&gt;reg2,set_field:0-&gt;reg3,set_field:0-&gt;reg4,set_field:0-&gt;reg5,set_field:0-&gt;reg6,set_field:0-&gt;reg7,set_field:0-&gt;reg8,set_field:0-&gt;reg9,resubmit(,8))
+    ct_clear
+    set_field:0-&gt;reg11
+    set_field:0-&gt;reg12
+    set_field:0-&gt;reg13
+    set_field:0x8-&gt;reg11
+    set_field:0xe-&gt;reg12
+    set_field:0x1-&gt;metadata
+    set_field:0x2-&gt;reg14
+    set_field:0-&gt;reg10
+    set_field:0-&gt;reg15
+    set_field:0-&gt;reg0
+    set_field:0-&gt;reg1
+    set_field:0-&gt;reg2
+    set_field:0-&gt;reg3
+    set_field:0-&gt;reg4
+    set_field:0-&gt;reg5
+    set_field:0-&gt;reg6
+    set_field:0-&gt;reg7
+    set_field:0-&gt;reg8
+    set_field:0-&gt;reg9
+    resubmit(,8)
+ 8. reg14=0x2,metadata=0x1,dl_dst=0a:58:0a:f4:02:01, priority 50, cookie 0xe40942af
+    set_field:0xa580af402010000000000000000/0xffffffffffff0000000000000000-&gt;xxreg0
+    resubmit(,9)
+ 9. metadata=0x1, priority 0, cookie 0x897d00f0
+    set_field:0x4/0x4-&gt;xreg4
+    resubmit(,10)
+10. reg9=0/0x8,metadata=0x1, priority 100, cookie 0x234da6ee
+    resubmit(,11)
+11. metadata=0x1, priority 0, cookie 0x7f28e0ff
+    resubmit(,12)
+12. metadata=0x1, priority 0, cookie 0x1ee2fb50
+    resubmit(,13)
+13. metadata=0x1, priority 0, cookie 0x17a7cfa8
+    resubmit(,14)
+14. metadata=0x1, priority 0, cookie 0x56f6cf85
+    resubmit(,15)
+15. metadata=0x1, priority 0, cookie 0x600f694f
+    resubmit(,16)
+16. metadata=0x1, priority 0, cookie 0xda085702
+    resubmit(,17)
+17. metadata=0x1, priority 0, cookie 0x30578698
+    resubmit(,18)
+18. metadata=0x1, priority 0, cookie 0x58ec3bea
+    resubmit(,19)
+19. metadata=0x1, priority 0, cookie 0xe6096bd7
+    resubmit(,20)
+20. metadata=0x1, priority 0, cookie 0xb1a3a6af
+    set_field:0/0xffffffff-&gt;xxreg1
+    resubmit(,21)
+21. ip,reg7=0,metadata=0x1,nw_dst=10.244.1.0/24, priority 73, cookie 0x1ed4e720
+    dec_ttl()
+    set_field:0/0xffff00000000-&gt;xreg4
+    set_field:0xa8fe0004000000000000000000000000/0xffffffff000000000000000000000000-&gt;xxreg0
+    set_field:0xa8fe00020000000000000000/0xffffffff0000000000000000-&gt;xxreg0
+    set_field:0a:58:a8:fe:00:02-&gt;eth_src
+    set_field:0x4-&gt;reg15
+    set_field:0x1/0x1-&gt;reg10
+    resubmit(,22)
+22. reg8=0/0xffff,metadata=0x1, priority 150, cookie 0xa1ea724a
+    resubmit(,23)
+23. ip,metadata=0x1,nw_src=10.244.0.0/16,nw_dst=10.244.0.0/16, priority 102, cookie 0x1c6af09a
+    set_field:0/0xffff00000000-&gt;xreg4
+    resubmit(,24)
+24. reg8=0/0xffff,metadata=0x1, priority 150, cookie 0x3841a2fc
+    resubmit(,25)
+25. reg0=0xa8fe0004,reg15=0x4,metadata=0x1, priority 100, cookie 0x792c14a1
+    set_field:0a:58:a8:fe:00:04-&gt;eth_dst
+    resubmit(,26)
+26. metadata=0x1, priority 0, cookie 0x8be057a3
+    resubmit(,27)
+27. metadata=0x1, priority 0, cookie 0x5ea30a7d
+    resubmit(,28)
+28. metadata=0x1, priority 0, cookie 0x79529c6a
+    resubmit(,29)
+29. metadata=0x1, priority 0, cookie 0xf21b210a
+    resubmit(,37)
+37. priority 0
+    resubmit(,38)
+38. priority 0
+    resubmit(,40)
+40. priority 0
+    resubmit(,41)
+41. reg15=0x4,metadata=0x1, priority 100, cookie 0x93ec5715
+    set_field:0x8-&gt;reg11
+    set_field:0xe-&gt;reg12
+    resubmit(,42)
+42. priority 0
+    set_field:0-&gt;reg0
+    set_field:0-&gt;reg1
+    set_field:0-&gt;reg2
+    set_field:0-&gt;reg3
+    set_field:0-&gt;reg4
+    set_field:0-&gt;reg5
+    set_field:0-&gt;reg6
+    set_field:0-&gt;reg7
+    set_field:0-&gt;reg8
+    set_field:0-&gt;reg9
+    resubmit(,43)
+43. metadata=0x1, priority 0, cookie 0x2f6e84ed
+    set_field:0/0x10-&gt;xreg4
+    resubmit(,44)
+44. metadata=0x1, priority 0, cookie 0x90d7e25c
+    resubmit(,45)
+45. metadata=0x1, priority 0, cookie 0xe36440a6
+    resubmit(,46)
+46. metadata=0x1, priority 0, cookie 0xd3dbde6f
+    resubmit(,47)
+47. metadata=0x1, priority 0, cookie 0x519ebaf8
+    resubmit(,48)
+48. metadata=0x1, priority 0, cookie 0xc8fb3dc1
+    resubmit(,49)
+49. reg15=0x4,metadata=0x1, priority 100, cookie 0x81cdee53
+    resubmit(,64)
+64. reg10=0x1/0x1,reg15=0x4,metadata=0x1, priority 100, cookie 0x93ec5715
+    push:NXM_OF_IN_PORT[]
+    set_field:ANY-&gt;in_port
+    resubmit(,65)
+    65. reg15=0x4,metadata=0x1, priority 100, cookie 0x93ec5715
+            clone(ct_clear,set_field:0-&gt;reg11,set_field:0-&gt;reg12,set_field:0-&gt;reg13,set_field:0x3-&gt;reg11,set_field:0x11-&gt;reg12,set_field:0xff0003-&gt;metadata,set_field:0x2-&gt;reg14,set_field:0-&gt;reg10,set_field:0-&gt;reg15,set_field:0-&gt;reg0,set_field:0-&gt;reg1,set_field:0-&gt;reg2,set_field:0-&gt;reg3,set_field:0-&gt;reg4,set_field:0-&gt;reg5,set_field:0-&gt;reg6,set_field:0-&gt;reg7,set_field:0-&gt;reg8,set_field:0-&gt;reg9,resubmit(,8))
+            ct_clear
+            set_field:0-&gt;reg11
+            set_field:0-&gt;reg12
+            set_field:0-&gt;reg13
+            set_field:0x3-&gt;reg11
+            set_field:0x11-&gt;reg12
+            set_field:0xff0003-&gt;metadata
+            set_field:0x2-&gt;reg14
+            set_field:0-&gt;reg10
+            set_field:0-&gt;reg15
+            set_field:0-&gt;reg0
+            set_field:0-&gt;reg1
+            set_field:0-&gt;reg2
+            set_field:0-&gt;reg3
+            set_field:0-&gt;reg4
+            set_field:0-&gt;reg5
+            set_field:0-&gt;reg6
+            set_field:0-&gt;reg7
+            set_field:0-&gt;reg8
+            set_field:0-&gt;reg9
+            resubmit(,8)
+         8. metadata=0xff0003, priority 50, cookie 0xde664d3a
+            set_field:0/0x1000-&gt;reg10
+            resubmit(,73)
+            73. No match.
+                    drop
+            move:NXM_NX_REG10[12]-&gt;NXM_NX_XXREG0[111]
+             -&gt; NXM_NX_XXREG0[111] is now 0
+            resubmit(,9)
+         9. metadata=0xff0003, priority 0, cookie 0x57b52622
+            resubmit(,10)
+        10. metadata=0xff0003, priority 0, cookie 0x98964ef0
+            resubmit(,11)
+        11. metadata=0xff0003, priority 0, cookie 0x72c60524
+            resubmit(,12)
+        12. metadata=0xff0003, priority 0, cookie 0x351dd7a3
+            resubmit(,13)
+        13. ip,reg14=0x2,metadata=0xff0003, priority 110, cookie 0x69169a39
+            resubmit(,14)
+        14. metadata=0xff0003, priority 0, cookie 0x5c78cf83
+            resubmit(,15)
+        15. metadata=0xff0003, priority 65535, cookie 0x8ac9010
+            resubmit(,16)
+        16. metadata=0xff0003, priority 65535, cookie 0x973723d7
+            resubmit(,17)
+        17. metadata=0xff0003, priority 0, cookie 0xc722ae8c
+            resubmit(,18)
+        18. metadata=0xff0003, priority 0, cookie 0xcae3d5b1
+            resubmit(,19)
+        19. metadata=0xff0003, priority 0, cookie 0x66860608
+            resubmit(,20)
+        20. metadata=0xff0003, priority 0, cookie 0x9db4b75e
+            resubmit(,21)
+        21. metadata=0xff0003, priority 0, cookie 0x414a15a0
+            resubmit(,22)
+        22. metadata=0xff0003, priority 0, cookie 0xebbc94cf
+            resubmit(,23)
+        23. metadata=0xff0003, priority 0, cookie 0x74d6cf40
+            resubmit(,24)
+        24. metadata=0xff0003, priority 0, cookie 0x7fd98606
+            resubmit(,25)
+        25. metadata=0xff0003, priority 0, cookie 0xd3d8976
+            resubmit(,26)
+        26. metadata=0xff0003, priority 0, cookie 0x1ecb6f2e
+            resubmit(,27)
+        27. metadata=0xff0003, priority 0, cookie 0xba824d52
+            resubmit(,28)
+        28. metadata=0xff0003, priority 0, cookie 0xa5e04afc
+            resubmit(,29)
+        29. metadata=0xff0003, priority 0, cookie 0x41080b67
+            resubmit(,30)
+        30. metadata=0xff0003, priority 0, cookie 0x936e8520
+            resubmit(,31)
+        31. metadata=0xff0003, priority 0, cookie 0x6d369d0e
+            resubmit(,32)
+        32. metadata=0xff0003, priority 0, cookie 0x119a6138
+            resubmit(,33)
+        33. metadata=0xff0003, priority 0, cookie 0x1d30f590
+            resubmit(,34)
+        34. metadata=0xff0003, priority 0, cookie 0x74ef3d9
+            resubmit(,35)
+        35. metadata=0xff0003,dl_dst=0a:58:a8:fe:00:04, priority 50, cookie 0xda101703
+            set_field:0x4-&gt;reg15
+            resubmit(,37)
+        37. priority 0
+            resubmit(,38)
+        38. priority 0
+            resubmit(,40)
+        40. reg15=0x4,metadata=0xff0003, priority 100, cookie 0xb6badb74
+            set_field:0xff0003/0xffffff-&gt;tun_id
+            set_field:0x4-&gt;tun_metadata0
+            move:NXM_NX_REG14[0..14]-&gt;NXM_NX_TUN_METADATA0[16..30]
+             -&gt; NXM_NX_TUN_METADATA0[16..30] is now 0x2
+            output:4
+             -&gt; output to kernel tunnel
+            resubmit(,41)
+        41. priority 0
+            drop
+    pop:NXM_OF_IN_PORT[]
+     -&gt; NXM_OF_IN_PORT[] is now 7
+
+Final flow: recirc_id=0x12,eth,udp,reg0=0x300,reg11=0xb,reg12=0x6,reg13=0x13,reg14=0x3,reg15=0x1,metadata=0x3,in_port=7,vlan_tci=0x0000,dl_src=0a:58:0a:f4:02:03,dl_dst=0a:58:0a:f4:02:01,nw_src=10.244.2.3,nw_dst=10.244.1.6,nw_tos=0,nw_ecn=0,nw_ttl=64,nw_frag=no,tp_src=12345,tp_dst=53
+Megaflow: recirc_id=0x12,ct_state=+new-est-rel-rpl-inv+trk,ct_mark=0/0xf,eth,udp,in_port=7,dl_src=0a:58:0a:f4:02:03,dl_dst=0a:58:0a:f4:02:01,nw_src=10.244.2.3,nw_dst=10.244.1.0/24,nw_ecn=0,nw_ttl=64,nw_frag=no
+Datapath actions: ct(commit,zone=19,mark=0/0x1,nat(src)),set(tunnel(tun_id=0xff0003,dst=172.18.0.2,ttl=64,tp_dst=6081,geneve({class=0x102,type=0x80,len=4,0x20004}),flags(df|csum|key))),set(eth(src=0a:58:a8:fe:00:02,dst=0a:58:a8:fe:00:04)),set(ipv4(ttl=63)),5
+
+ovs-appctl ofproto/trace source pod to destination pod indicates success from fedora-deployment-7d49fddf69-chmvh to fedora-deployment-7d49fddf69-t4hqw
+I0823 21:33:19.170205 2457963 ovnkube-trace.go:704] Search string matched:
+-&gt; output to kernel tunnel
+(...)
+</code></pre></div></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.indexes", "navigation.tabs", "navigation.tabs.sticky", "content.code.annotate", "navigation.instant.preview"], "search": "../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.8fd75fb4.min.js"></script>
+      
+    
+  </body>
+</html>
