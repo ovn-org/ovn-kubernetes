@@ -14,7 +14,7 @@ these two modes of deployment.
 ## OVN Kubernetes Components - Default Mode
 
 <p align="center">
-  <img src=../../../ovn-kubernetes/images/ovnkube-centralized-components.png alt="ovn-kubernetes-centralized-components"/>
+  <img src=../images/ovnkube-centralized-components.png alt="ovn-kubernetes-centralized-components"/>
 </p>
 
 
@@ -54,7 +54,7 @@ namespace which are running on all your nodes in the cluster.
         * Digests the IPAM annotation set on pod by ovnkube-master
         * Creates the veth pair for the pod
         * Creates the ovs port on bridge
-        * Programs the necessary iptables and gateway service flows on a per node basis.
+        * Programs the necessary iptables and gateway service flows on a per-node basis.
     * ovn-controller container:
         * Native OVN component
         * Connects to SBDB running in control plane using TLS
@@ -74,23 +74,23 @@ loose ends and show how these components run on a standard HA Kubernetes cluster
 ### Control Plane Nodes:
 
 <p align="center">
-  <img src=../../../ovn-kubernetes/images/ovnkube-centralized-arch-cp.png alt="ovn-kubernetes-centralized-components-control-plane"/>
+  <img src=../images/ovnkube-centralized-arch-cp.png alt="ovn-kubernetes-centralized-components-control-plane"/>
 </p>
 
 ### Worker Nodes:
 
 <p align="center">
-  <img src=../../../ovn-kubernetes/images/ovnkube-centralized-arch-dp.png alt="ovn-kubernetes-centralized-components-data-plane"/>
+  <img src=../images/ovnkube-centralized-arch-dp.png alt="ovn-kubernetes-centralized-components-data-plane"/>
 </p>
 
 ## OVN Kubernetes Components - Interconnect mode
 
 <p align="center">
-  <img src=../../../ovn-kubernetes/images/ovnkube-distributed-components.png alt="ovn-kubernetes-distributed-components"/>
+  <img src=../images/ovnkube-distributed-components.png alt="ovn-kubernetes-distributed-components"/>
 </p>
 
 The control plane has the `ovnkube-control-plane` pod in the `ovn-kubernetes` namespace
-which is super light weight and running only on the control plane nodes in your cluster:
+which is super lightweight and running only on the control plane nodes in your cluster:
 
 * ovnkube-control-plane pod
     * ovnkube-cluster-manager container:
@@ -143,7 +143,7 @@ and more distributed.
         * OVS daemon and database running as a container
         * virtual switch that pushes the network plumbing to the edge on the node
 
-Thus as we can see, the databases, northd and ovn kubernetes controller components
+As we can see, the databases, northd and ovn kubernetes controller components
 now run per zone rather than only on the control-plane.
 
 ## Interconnect Mode Architecture
@@ -163,20 +163,20 @@ In order to effectively adapt the capabilities of the interconnect feature in th
 world, ovn-kubernetes components will replace `ovn-ic` daemon. Also note that the term `zone`
 which will be used heavily in these docs just refers to a single OVN deployment. Now that we
 know the pods and components running in the interconnect mode, let's tie up loose ends and
-show how these components run on a standard HA Kubernetes cluster. By default each node in
+show how these components run on a standard HA Kubernetes cluster. By default, each node in
 the cluster is a `zone`, so each `zone` contains 1 node. There is no more RAFT since each
 node has its own database.
 
 ### Control Plane Nodes:
 
 <p align="center">
-  <img src=../../../ovn-kubernetes/images/ovnkube-distributed-arch-cp.png alt="ovn-kubernetes-distributed-components-control-plane"/>
+  <img src=../images/ovnkube-distributed-arch-cp.png alt="ovn-kubernetes-distributed-components-control-plane"/>
 </p>
 
 ### Worker Nodes:
 
 <p align="center">
-  <img src=../../../ovn-kubernetes/images/ovnkube-distributed-arch-dp.png alt="ovn-kubernetes-distributed-components-data-plane"/>
+  <img src=../images/ovnkube-distributed-arch-dp.png alt="ovn-kubernetes-distributed-components-data-plane"/>
 </p>
 
 ### Why do we need Interconnect mode in OVN-Kubernetes?
@@ -193,7 +193,7 @@ local Southbound database for logical flow information. On large clusters with N
 this means each Southbound database is handling only one connection from its own local
 ovn-controller. This has removed the scale bottlenecks that were present in the centralized
 model helping us to scale horizontally with node count.
-* Performance: The OVN Kubernetes brain is now local to each node in the cluster and it is
+* Performance: The OVN Kubernetes brain is now local to each node in the cluster, and it is
 storing and processing changes to only those Kubernetes pods, services, endpoints objects
 that are relevant for that node (note: some features like NetworkPolicies need to process
 pods running on other nodes). This in turn means the OVN stack is also processing less data

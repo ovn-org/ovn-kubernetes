@@ -14,7 +14,7 @@ topology running on each node in the cluster
 The centralized architecture in OVN-K looks like this today:
 
 <p align="center">
-  <img src=../../../ovn-kubernetes/images/centralized-network-topology.png alt="ovn-kubernetes-centralized-topology"/>
+  <img src=../images/centralized-network-topology.png alt="ovn-kubernetes-centralized-topology"/>
 </p>
 
 On each node we have:
@@ -40,7 +40,7 @@ The interconnect architecture in OVN-K looks like this today
 (we assume each node is in a zone of their own):
 
 <p align="center">
-  <img src=../../../ovn-kubernetes/images/distributed-network-topology.png alt="ovn-kubernetes-distributed-topology"/>
+  <img src=../images/distributed-network-topology.png alt="ovn-kubernetes-distributed-topology"/>
 </p>
 
 On each node we have:
