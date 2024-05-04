@@ -81,7 +81,7 @@ nav:
     - OVN Kubernetes Overview: getting-started/overview.md
     - Launching OVN Kubernetes: getting-started/launching-ovn-kubernetes.md
     - Deploying Workloads on OVN Kubernetes cluster: getting-started/example-pod-creation.md
-    - Deploying Services on OVN Kubernetes cluster: getting-started/example-service creation.md
+    - Deploying Services on OVN Kubernetes cluster: getting-started/example-service-creation.md
     - Setup and Building: getting-started/building-ovn-kubernetes.md
     - Run OVN Kubernetes From Release Image: getting-started/running-release.md
     - Run OVN Kubernetes From RPM: getting-started/running-rpm.md
