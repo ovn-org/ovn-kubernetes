@@ -102,12 +102,12 @@ to be a highly scalable and performant Networking Platform.
 
 For more details, please see the following:
 
-- [OVN Kubernetes Overview](./getting-started/overview.md) for an overview of ovn-kubernetes.
-- [Deploying OVN Kubernetes cluster using KIND](./getting-started/ovn-kubernetes-using-kind.md)
-- [Deploying OVN Kubernetes CNI using Helm](./getting-started/ovn-kubernetes-using-helm.md)
-- [Setup and Building OVN Kubernetes](./developer-guide/building-ovn-kubernetes.md) for instructions
+- [OVN Kubernetes Overview](getting-started/overview.md) for an overview of ovn-kubernetes.
+- [Deploying OVN Kubernetes cluster using KIND](getting-started)
+- [Deploying OVN Kubernetes CNI using Helm](getting-started)
+- [Setup and Building OVN Kubernetes](developer-guide) for instructions
   on setting up your development environment and building ovn kubernetes.
-- [Contributing to OVN Kubernetes](./governance/CONTRIBUTING.md) for how to get involved
+- [Contributing to OVN Kubernetes](governance/CONTRIBUTING.md) for how to get involved
   in our project
-- [Meet the Community](./governance/MEETINGS.md) for details on community
+- [Meet the Community](governance/MEETINGS.md) for details on community
   meeting details.
