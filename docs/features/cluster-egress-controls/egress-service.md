@@ -8,7 +8,7 @@ In addition, this allows to separate the egress traffic of specified LoadBalance
 
 By introducing a new CRD `EgressService`, users could request that egress packets originating from all of the pods that are endpoints of a LoadBalancer service would use a different network than the main one and/or their source IP will be the Service's ingress IP.
 The CRD is namespace scoped. The name of the EgressService corresponds to the name of a LoadBalancer Service that should be affected by this functionality. Note the mapping of EgressService to Kubernetes Service is 1to1.
-The feature is supported fully by "Local" gateway mode and almost entirely by "Shared" gateway mode (it does not support [Network without LoadBalancer SNAT](#Network-without-LoadBalancer-SNAT)). In any case the affected traffic will be that which is coming from a pod to a destination outside of the cluster - meaning pod-pod / pod-service / pod-node traffic will not be affected.
+The feature is supported fully by "Local" gateway mode and almost entirely by "Shared" gateway mode (it does not support [Network without LoadBalancer SNAT](#network-without-loadbalancer-snat). In any case the affected traffic will be that which is coming from a pod to a destination outside of the cluster - meaning pod-pod / pod-service / pod-node traffic will not be affected.
 
 Announcing the service externally (for ingress traffic) is handled by a LoadBalancer provider (like MetalLB) and not by OVN-Kubernetes as explained later.
 
@@ -42,7 +42,7 @@ If a node fails the health check, its allocated services move to another node by
 If the node becomes not ready or its labels no longer match the service's selectors the same re-election process happens.
 
 The ingress part is handled by a LoadBalancer provider, such as MetalLB, that needs to select the right node (and only it) for announcing the LoadBalancer service (ingress traffic) according to the `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""` label set by OVN-Kubernetes.
-A full example with MetalLB is detailed in [Usage Example](#Usage-Example).
+A full example with MetalLB is detailed in [Usage Example](#usage-example).
 
 Just to be clear, OVN-Kubernetes does not care which component advertises the LoadBalancer service or checks if it does it correctly - it is the user's responsibility to make sure ingress traffic arrives only to the node with the `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""` label.
 
@@ -104,7 +104,7 @@ As mentioned earlier, it is possible to use the "Network" capability without SNA
 
 An EgressService with `sourceIPBy: "Network"` does not need to have a host selected, as the traffic will exit each node with the IP of the interface corresponding to the "Network" by leveraging the masquerade rules that are already in place.
 
-This works only on clusters running on "Local" gateway mode, because on "Shared" gateway mode the ip rules created by the controller are ignored (like all of the node's routing stack).
+This works only on clusters running on "Local" gateway mode, because on "Shared" gateway mode the ip rules created by the controller are ignored (like all the node's routing stack).
 
 When `sourceIPBy: "Network"`, `ovnkube-master` does not need to create any logical router policies as the egress packets of each pod would exit through the pod's node.
 However, `ovnkube-master` will set the status field of the resource with `host: ALL` to designate that no reroute logical router policies exist for the service, "instructing" all of the `ovnkube-nodes` to handle the resource's `Network` field without creating SNAT iptables rules.
@@ -356,7 +356,7 @@ Due to the fact that ovn-controllers on different nodes apply the changes indepe
 a chance that some pod traffic will reach the host before it configures the relevant SNAT iptables rules.
 In that timeframe, the egress traffic from these pods will exit the host with their ip instead of the LB's ingress ip, and the it will not be able to return properly because an external client is not aware of a pod's inner ip.
 
-This is currently a known issue for EgressService because we can't leverage the same as [EgressIP](./egress-ip.md#Dealing-with-non-SNATed-traffic) currently does by setting a flow on breth0 - the flow won't be hit because the traffic "exits" OVN when using EgressService (= doesn't hit the host's breth0) as opposed to how EgressIP "keeps everything" inside OVN.
+This is currently a known issue for EgressService because we can't leverage the same as [EgressIP](egress-ip.md#dealing-with-non-snated-traffic) currently does by setting a flow on breth0 - the flow won't be hit because the traffic "exits" OVN when using EgressService (= doesn't hit the host's breth0) as opposed to how EgressIP "keeps everything" inside OVN.
 
 ## Usage Example
 

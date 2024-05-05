@@ -5,7 +5,7 @@ Open vSwitch 2.7.
 ## Generating certificates
 
 Detailed explanation of how OVS utilites and daemons use SSL certificates is
-explained at [OVS.SSL].  The following section summarizes it for
+explained at [OVS.SSL](http://docs.openvswitch.org/en/latest/howto/ssl).  The following section summarizes it for
 ovn-kubernetes.
 
 ### Create a certificate authority.
@@ -135,7 +135,7 @@ needs to be passed in for TLS server certificate verification using the
 
 ## One time setup.
 
-As explained in [README.md], OVN architecture has a central component which
+As explained [here](../design/architecture.md), OVN architecture has a central component which
 stores your networking intent in a database.  You start this central component
 on the node where you intend to start your k8s central daemons by running:
 
@@ -219,6 +219,3 @@ sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -k8s-service-cidr=$SERVICE_IP_SUBNET \
     -cluster-subnets=$CLUSTER_IP_SUBNET
 ```
-
-[README.md]: README.md
-[OVS.SSL]: http://docs.openvswitch.org/en/latest/howto/ssl

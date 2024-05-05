@@ -103,9 +103,9 @@ to be a highly scalable and performant Networking Platform.
 For more details, please see the following:
 
 - [OVN Kubernetes Overview](getting-started/overview.md) for an overview of ovn-kubernetes.
-- [Deploying OVN Kubernetes cluster using KIND](getting-started)
-- [Deploying OVN Kubernetes CNI using Helm](getting-started)
-- [Setup and Building OVN Kubernetes](developer-guide) for instructions
+- [Deploying OVN Kubernetes cluster using KIND](installation/kind.md)
+- [Deploying OVN Kubernetes CNI using Helm](installation/helm.md)
+- [Setup and Building OVN Kubernetes](developer-guide/documentation.md) for instructions
   on setting up your development environment and building ovn kubernetes.
 - [Contributing to OVN Kubernetes](governance/CONTRIBUTING.md) for how to get involved
   in our project

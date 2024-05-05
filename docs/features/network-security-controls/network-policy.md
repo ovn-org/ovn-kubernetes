@@ -1,10 +1,10 @@
 # NetworkPolicy
 
-Kubernetes NetworkPolicy documentation: https://kubernetes.io/docs/concepts/services-networking/network-policies
+[Kubernetes NetworkPolicy documentation](https://kubernetes.io/docs/concepts/services-networking/network-policies)
 
-Kubernetes NetworkPolicy API reference: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#networkpolicy-v1-networking-k8s-io
+[Kubernetes NetworkPolicy API reference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#networkpolicy-v1-networking-k8s-io)
 
-By default the network traffic from and to K8s pods is not restricted in any way. Using NetworkPolicy is a way to enforce network isolation of selected pods. When a pod is selected by a NetworkPolicy allowed traffic is specified by the `Ingress` and `Egress` sections.  
+By default, the network traffic from and to K8s pods is not restricted in any way. Using NetworkPolicy is a way to enforce network isolation of selected pods. When a pod is selected by a NetworkPolicy allowed traffic is specified by the `Ingress` and `Egress` sections.  
 
 Each NetworkPolicy object consists of four sections:
 
@@ -167,13 +167,13 @@ Rules defined in `spec.Ingress` can match on two main sections, 1.`spec.Ingress.
         The ip addresses from which to allow traffic, contains fields `spec.Ingress.from.ipBlock.cidr` to specify which ip address are allowed and 
         `spec.Ingress.from.ipBlock.except` to specifiy which address's are not allowed 
     
-    - `spec.Ingress.from.namespaceSelector` 
+      - `spec.Ingress.from.namespaceSelector` 
 
-        The Namespaces from which to allow traffic, uses matchLabels to select much like the [`spec.Podselector` field](#**Applying-the-network-policy-to-specific-pods-using-`spec.podSelector`**)
+          The Namespaces from which to allow traffic, uses matchLabels to select much like the [`spec.Podselector` field](#applying-the-network-policy-to-specific-pods-using-specpodselector)
     
     - `spec.Ingress.from.podSelector` 
 
-        The pods from which to allow traffic, matches the same as described [above](#**Applying-the-network-policy-to-specific-pods-using-`spec.podSelector`**)
+        The pods from which to allow traffic, matches the same as described [above](#applying-the-network-policy-to-specific-pods-using-specpodselector)
     
 2. `spec.Ingress.ports`
     
@@ -198,11 +198,11 @@ Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to
     
     - `spec.Egress.to.namespaceSelector` 
 
-        The Namespaces allowed to receive traffic, uses matchLabels to select much like the [`spec.Podselector` field](#**Applying-the-network-policy-to-specific-pods-using-`spec.podSelector`**)
+        The Namespaces allowed to receive traffic, uses matchLabels to select much like the [`spec.Podselector` field](#applying-the-network-policy-to-specific-pods-using-specpodselector)
     
     - `spec.Egress.to.podSelector` 
 
-        The pods allowed to receive traffic, uses matchLabels to select much like described [`spec.Podselector` field](#**Applying-the-network-policy-to-specific-pods-using-`spec.podSelector`**)
+        The pods allowed to receive traffic, uses matchLabels to select much like described [`spec.Podselector` field](#applying-the-network-policy-to-specific-pods-using-specpodselector)
     
 2. `spec.Egress.ports`
 
