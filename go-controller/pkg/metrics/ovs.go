@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -926,14 +927,18 @@ func registerOvsMetrics(registry prometheus.Registerer, stopChan <-chan struct{}
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
 
-		registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
-			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovs-vswitchd.pid"),
-			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemVswitchd),
-		}))
-		registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
-			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovsdb-server.pid"),
-			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemDB),
-		}))
+		// When ovnkube-node is running in privileged mode, the hostPID will be set to true,
+		// and therefore it can monitor OVS running on the host using PID.
+		if !config.UnprivilegedMode {
+			registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+				PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovs-vswitchd.pid"),
+				Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemVswitchd),
+			}))
+			registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+				PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovsdb-server.pid"),
+				Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemDB),
+			}))
+		}
 
 		// OVS datapath metrics updater
 		go ovsDatapathMetricsUpdater(util.RunOVSAppctl, 30*time.Second, stopChan)
