@@ -106,6 +106,8 @@ Maintainer on receipt of a security issue or CoC report.  All current Maintainer
 must be invited to such closed meetings, except for any Maintainer who is
 accused of a CoC violation.
 
+## CNCF Resources
+
 ## Code of Conduct
 
 [Code of Conduct](./CODE_OF_CONDUCT.md)

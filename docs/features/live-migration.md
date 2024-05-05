@@ -2,7 +2,7 @@
 
 ## Introduction
 
-The Live Migration feature allows [kubevirt](kubevirt.io) virtual machines to be [live migrated](https://kubevirt.io/user-guide/operations/live_migration/)
+The Live Migration feature allows [kubevirt](https://kubevirt.io) virtual machines to be [live migrated](https://kubevirt.io/user-guide/operations/live_migration/)
 while keeping the established TCP connections alive, and preserving the VM IP configuration.
 These two requirements provide seamless live-migration of a KubeVirt VM using OVN-Kubernetes
 cluster default network.

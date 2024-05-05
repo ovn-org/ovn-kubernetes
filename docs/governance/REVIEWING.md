@@ -35,7 +35,7 @@ Be trustworthy. During a review, your actions both build and help maintain the t
 
 ## Process
 
-* Approvers are automatically assigned based on the [CODEOWNERS](./CODEOWNERS) file.
+* Approvers are automatically assigned based on the [CODEOWNERS](https://github.com/ovn-org/ovn-kubernetes/blob/master/CODEOWNERS) file.
 * Reviewers should wait for automated checks to pass before reviewing
 * At least 1 approved review is required from a maintainer before a pull request can be merged
 * All CI checks must pass
