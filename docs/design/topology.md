@@ -13,9 +13,7 @@ topology running on each node in the cluster
 
 The centralized architecture in OVN-K looks like this today:
 
-<p align="center">
-  <img src=../images/centralized-network-topology.png alt="ovn-kubernetes-centralized-topology"/>
-</p>
++![ovn-kubernetes-centralized-topology](../images/centralized-network-topology.png)
 
 On each node we have:
 
@@ -39,9 +37,7 @@ external bridge
 The interconnect architecture in OVN-K looks like this today
 (we assume each node is in a zone of their own):
 
-<p align="center">
-  <img src=../images/distributed-network-topology.png alt="ovn-kubernetes-distributed-topology"/>
-</p>
++![ovn-kubernetes-distributed-topology](../images/distributed-network-topology.png)
 
 On each node we have:
 

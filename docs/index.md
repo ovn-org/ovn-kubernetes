@@ -1,6 +1,4 @@
-<p align="center"> <!-- markdownlint-disable-line first-line-heading -->
-  <img src=./images/ovn-inside-k8s.png alt="ovn-kubernetes-logo"/>
-</p>
+![ovn-kubernetes-logo](images/ovn-inside-k8s.png)
 
 # OVN Kubernetes: A Robust Kubernetes Networking Provider
 
@@ -48,9 +46,7 @@ abstraction on top of Open vSwitch) converts these logical constructs into logic
 flows in its database and programs the OpenFlow flows on the node, which enables
 networking on a Kubernetes cluster.
 
-<p align="center">
-  <img src=./images/ovnkube-introduction.png alt="ovn-kubernetes-introduction"/>
-</p>
+![ovn-kubernetes-introduction](images/ovnkube-introduction.png)
 
 The key functionalities and features that OVN Kubernetes provides include:
 
