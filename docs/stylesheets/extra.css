@@ -1,5 +1,12 @@
 img[alt=ovn-kubernetes-logo] { width: 350px; }
 
+img {
+     display:block;
+     float:none;
+     margin-left:auto;
+     margin-right:auto;
+}
+
 .md-copyright__netlify {
     float: right;
 }

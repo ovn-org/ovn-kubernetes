@@ -13,10 +13,7 @@ these two modes of deployment.
 
 ## OVN Kubernetes Components - Default Mode
 
-<p align="center">
-  <img src=../images/ovnkube-centralized-components.png alt="ovn-kubernetes-centralized-components"/>
-</p>
-
+![ovn-kubernetes-centralized-components](../images/ovnkube-centralized-components.png)
 
 The control plane has the `ovnkube-master` pod in the `ovn-kubernetes` namespace
 which are running only on the control plane nodes in your cluster:
@@ -73,21 +70,15 @@ loose ends and show how these components run on a standard HA Kubernetes cluster
 
 ### Control Plane Nodes:
 
-<p align="center">
-  <img src=../images/ovnkube-centralized-arch-cp.png alt="ovn-kubernetes-centralized-components-control-plane"/>
-</p>
+![ovn-kubernetes-centralized-components-control-plane](../images/ovnkube-centralized-arch-cp.png)
 
 ### Worker Nodes:
 
-<p align="center">
-  <img src=../images/ovnkube-centralized-arch-dp.png alt="ovn-kubernetes-centralized-components-data-plane"/>
-</p>
+![ovn-kubernetes-centralized-components-data-plane](../images/ovnkube-centralized-arch-dp.png)
 
 ## OVN Kubernetes Components - Interconnect mode
 
-<p align="center">
-  <img src=../images/ovnkube-distributed-components.png alt="ovn-kubernetes-distributed-components"/>
-</p>
+![ovn-kubernetes-distributed-components](../images/ovnkube-distributed-components.png)
 
 The control plane has the `ovnkube-control-plane` pod in the `ovn-kubernetes` namespace
 which is super lightweight and running only on the control plane nodes in your cluster:
@@ -169,15 +160,11 @@ node has its own database.
 
 ### Control Plane Nodes:
 
-<p align="center">
-  <img src=../images/ovnkube-distributed-arch-cp.png alt="ovn-kubernetes-distributed-components-control-plane"/>
-</p>
+![ovn-kubernetes-distributed-components-control-plane](../images/ovnkube-distributed-arch-cp.png)
 
 ### Worker Nodes:
 
-<p align="center">
-  <img src=../images/ovnkube-distributed-arch-dp.png alt="ovn-kubernetes-distributed-components-data-plane"/>
-</p>
+![ovn-kubernetes-distributed-components-data-plane](../images/ovnkube-distributed-arch-dp.png)
 
 ### Why do we need Interconnect mode in OVN-Kubernetes?
 
