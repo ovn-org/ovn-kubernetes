@@ -95,6 +95,7 @@ nav:
         - EgressService: developer-guide/egress-service-api-spec.md
         - EgressQoS: developer-guide/egress-qos-api-spec.md
         - EgressFirewall: developer-guide/egress-firewall-api-spec.md
+        - AdminPolicyBasedExternalRoutes: developer-guide/admin-epbr-api-spec.md
       - OVN Kubernetes Container Images: developer-guide/image-build.md
       - Documentation Guide: developer-guide/documentation.md
       - Local Testing Guide: developer-guide/testing.md
