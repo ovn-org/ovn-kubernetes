@@ -15,6 +15,48 @@ type SriovnetOps struct {
 	mock.Mock
 }
 
+// GetPciFromNetDevice provides a mock function with given fields: name
+func (_m *SriovnetOps) GetPciFromNetDevice(name string) (string, error) {
+	ret := _m.Called(name)
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(name)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetPortIndexFromRepresentor provides a mock function with given fields: name
+func (_m *SriovnetOps) GetPortIndexFromRepresentor(name string) (int, error) {
+	ret := _m.Called(name)
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(string) int); ok {
+		r0 = rf(name)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetNetDevicesFromAux provides a mock function with given fields: auxDev
 func (_m *SriovnetOps) GetNetDevicesFromAux(auxDev string) ([]string, error) {
 	ret := _m.Called(auxDev)

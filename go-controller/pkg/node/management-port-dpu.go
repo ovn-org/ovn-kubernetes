@@ -36,6 +36,11 @@ func (mp *managementPortRepresentor) Create(_ *routemanager.Controller, nodeAnno
 		k8sMgmtIntfName += "_0"
 	}
 
+	br_type, err := util.GetDatapathType("br-int")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get datapath type for bridge br-int : %v", err)
+	}
+
 	klog.Infof("Lookup representor link and existing management port for '%v'", mp.repName)
 	// Get management port representor netdevice
 	link, err := util.GetNetLinkOps().LinkByName(mp.repName)
@@ -51,6 +56,7 @@ func (mp *managementPortRepresentor) Create(_ *routemanager.Controller, nodeAnno
 
 	// configure management port: rename, set MTU and set link up and connect representor port to br-int
 	klog.Infof("Setup representor management port: %s", link.Attrs().Name)
+
 	setName := link.Attrs().Name != k8sMgmtIntfName
 	setMTU := link.Attrs().MTU != config.Default.MTU
 
@@ -84,6 +90,13 @@ func (mp *managementPortRepresentor) Create(_ *routemanager.Controller, nodeAnno
 	if mp.repName != k8sMgmtIntfName {
 		ovsArgs = append(ovsArgs, "external-ids:ovn-orig-mgmt-port-rep-name="+mp.repName)
 	}
+
+	if br_type == types.DatapathUserspace {
+		dpdkArgs := []string{"type=dpdk"}
+		ovsArgs = append(ovsArgs, dpdkArgs...)
+		ovsArgs = append(ovsArgs, fmt.Sprintf("mtu_request=%v", config.Default.MTU))
+	}
+
 	// Plug management port representor to OVS.
 	stdout, stderr, err := util.RunOVSVsctl(ovsArgs...)
 	if err != nil {
