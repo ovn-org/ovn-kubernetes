@@ -1,0 +1,8 @@
+processor:
+  ignoreTypes:
+    - "(EgressIP|EgressQoS|EgressFirewall|EgressService|AdminPolicyBasedExternalRoute)List$"
+  ignoreFields:
+    - "TypeMeta$"
+
+render:
+  kubernetesVersion: 1.28
