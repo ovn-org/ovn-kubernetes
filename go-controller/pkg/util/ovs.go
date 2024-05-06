@@ -328,6 +328,31 @@ func GetOVSOfPort(args ...string) (string, string, error) {
 	return stdout, stderr, err
 }
 
+func GetDatapathType(bridge string) (string, error) {
+	br_type, err := getOvsEntry("bridge", bridge, "datapath_type", "")
+	if err != nil {
+		return "", err
+	}
+	return br_type, nil
+}
+
+// getOvsEntry queries the OVS-DB using ovs-vsctl and returns
+// the requested entries.
+func getOvsEntry(table, record, column, key string) (string, error) {
+	args := []string{"--if-exists", "get", table, record}
+	if key != "" {
+		args = append(args, fmt.Sprintf("%s:%s", column, key))
+	} else {
+		args = append(args, column)
+	}
+	stdout, stderr, err := RunOVSVsctl(args...)
+	if err != nil {
+		return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v: %q",
+			strings.Join(args, " "), err, stderr)
+	}
+	return stdout, err
+}
+
 // RunOVSAppctlWithTimeout runs a command via ovs-appctl.
 func RunOVSAppctlWithTimeout(timeout int, args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}

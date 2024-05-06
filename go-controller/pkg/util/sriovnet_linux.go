@@ -23,6 +23,7 @@ const (
 type SriovnetOps interface {
 	GetNetDevicesFromPci(pciAddress string) ([]string, error)
 	GetNetDevicesFromAux(auxDev string) ([]string, error)
+	GetPciFromNetDevice(name string) (string, error)
 	GetUplinkRepresentor(vfPciAddress string) (string, error)
 	GetUplinkRepresentorFromAux(auxDev string) (string, error)
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
@@ -37,6 +38,7 @@ type SriovnetOps interface {
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
 	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
 	GetPCIFromDeviceName(netdevName string) (string, error)
+	GetPortIndexFromRepresentor(name string) (int, error)
 }
 
 type defaultSriovnetOps struct {
@@ -60,6 +62,10 @@ func (defaultSriovnetOps) GetNetDevicesFromPci(pciAddress string) ([]string, err
 
 func (defaultSriovnetOps) GetNetDevicesFromAux(auxDev string) ([]string, error) {
 	return sriovnet.GetNetDevicesFromAux(auxDev)
+}
+
+func (defaultSriovnetOps) GetPciFromNetDevice(name string) (string, error) {
+	return sriovnet.GetPciFromNetDevice(name)
 }
 
 func (defaultSriovnetOps) GetUplinkRepresentor(vfPciAddress string) (string, error) {
@@ -108,6 +114,10 @@ func (defaultSriovnetOps) GetRepresentorPeerMacAddress(netdev string) (net.Hardw
 
 func (defaultSriovnetOps) GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error) {
 	return sriovnet.GetRepresentorPortFlavour(netdev)
+}
+
+func (defaultSriovnetOps) GetPortIndexFromRepresentor(name string) (int, error) {
+	return sriovnet.GetPortIndexFromRepresentor(name)
 }
 
 // GetFunctionRepresentorName returns representor name for passed device ID. Supported devices are Virtual Function

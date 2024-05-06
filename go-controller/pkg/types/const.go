@@ -25,6 +25,9 @@ const (
 	LocalBridgeName            = "br-local"
 	LocalnetGatewayNextHopPort = "ovn-k8s-gw0"
 
+	// OVS Bridge Datapath types
+	DatapathUserspace = "netdev"
+
 	// types.OVNClusterRouter is the name of the distributed router
 	OVNClusterRouter = "ovn_cluster_router"
 	OVNJoinSwitch    = "join"

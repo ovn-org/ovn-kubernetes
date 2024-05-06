@@ -202,9 +202,9 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 			// Find the hostInterface name
 			condString := []string{"external-ids:sandbox=" + pr.SandboxID}
 			if pr.netName != types.DefaultNetworkName {
-				condString = append(condString, fmt.Sprintf(" external_ids:%s=%s", types.NADExternalID, pr.nadName))
+				condString = append(condString, fmt.Sprintf("external_ids:%s=%s", types.NADExternalID, pr.nadName))
 			} else {
-				condString = append(condString, fmt.Sprintf(" external_ids:%s{=}[]", types.NADExternalID))
+				condString = append(condString, fmt.Sprintf("external_ids:%s{=}[]", types.NADExternalID))
 			}
 			ovsIfNames, err := ovsFind("Interface", "name", condString...)
 			if err != nil || len(ovsIfNames) != 1 {

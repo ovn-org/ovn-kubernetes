@@ -196,6 +196,10 @@ var _ = Describe("Node DPU tests", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
 			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return(vfPciAddress, nil)
 
+			sriovnetOpsMock.On("GetPciFromNetDevice", vfRep).Return("0000:03:00.8", nil)
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
+			})
 			// set ovs CMD output
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSFindCmd("30", "Interface", "name",
@@ -225,6 +229,10 @@ var _ = Describe("Node DPU tests", func() {
 		It("Fails if configure OVS fails but OVS interface is added", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
 			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return(vfPciAddress, nil)
+			sriovnetOpsMock.On("GetPciFromNetDevice", vfRep).Return("0000:03:00.8", nil)
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
+			})
 			// set ovs CMD output
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSFindCmd("30", "Interface", "name",
@@ -259,6 +267,9 @@ var _ = Describe("Node DPU tests", func() {
 			BeforeEach(func() {
 				sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
 				sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return(vfPciAddress, nil)
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
+				})
 				// set ovs CMD output so cni.ConfigureOVS passes without error
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genOVSFindCmd("30", "Interface", "name",

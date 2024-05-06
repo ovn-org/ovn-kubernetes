@@ -1445,6 +1445,9 @@ func TestConfigureOVS(t *testing.T) {
 			assert.Nil(t, err)
 
 			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
+			})
+			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSFindCmd("30", "Interface", "name",
 					"external-ids:iface-id=ns-foo_pod-bar"),
 			})
@@ -1582,6 +1585,9 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 			pfEncapIp: "",
 			execMockCommands: []*ovntest.ExpectedCmd{
 				{
+					Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
+				},
+				{
 					Cmd: genOVSFindCmd("30", "Interface", "name",
 						"external-ids:iface-id=ns-foo_pod-bar"),
 				},
@@ -1612,6 +1618,9 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 			errMatch:  fmt.Errorf("bad ovn-pf-encap-ip-mapping config"),
 			pfEncapIp: "",
 			execMockCommands: []*ovntest.ExpectedCmd{
+				{
+					Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
+				},
 				{
 					Cmd: genOVSFindCmd("30", "Interface", "name",
 						"external-ids:iface-id=ns-foo_pod-bar"),

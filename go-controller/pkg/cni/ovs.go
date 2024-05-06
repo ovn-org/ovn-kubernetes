@@ -89,6 +89,14 @@ func ovsSet(table, record string, values ...string) error {
 	return err
 }
 
+func getDatapathType(bridge string) (string, error) {
+	br_type, err := ovsGet("bridge", bridge, "datapath_type", "")
+	if err != nil {
+		return "", err
+	}
+	return br_type, nil
+}
+
 func ovsGet(table, record, column, key string) (string, error) {
 	args := []string{"--if-exists", "get", table, record}
 	if key != "" {
