@@ -8,14 +8,12 @@ import (
 	"sync"
 	"time"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -720,57 +718,12 @@ func (bnc *BaseNetworkController) cleanupPodSelectorAddressSets() error {
 	}
 
 	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetPodSelector, bnc.controllerName, nil)
-	return deleteAddrSetsWithoutACLRef(predicateIDs, bnc.nbClient)
+	return libovsdbutil.DeleteAddrSetsWithoutACLRef(predicateIDs, bnc.nbClient)
 }
 
 // network policies will start using new shared address sets after the initial Add events handling.
 // On the next restart old address sets will be unreferenced and can be safely deleted.
 func (bnc *BaseNetworkController) deleteStaleNetpolPeerAddrSets() error {
 	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetNetworkPolicy, bnc.controllerName, nil)
-	return deleteAddrSetsWithoutACLRef(predicateIDs, bnc.nbClient)
-}
-
-func deleteAddrSetsWithoutACLRef(predicateIDs *libovsdbops.DbObjectIDs,
-	nbClient libovsdbclient.Client) error {
-	// fill existing address set names
-	addrSetReferenced := map[string]bool{}
-	predicate := libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, func(item *nbdb.AddressSet) bool {
-		addrSetReferenced[item.Name] = false
-		return false
-	})
-
-	_, err := libovsdbops.FindAddressSetsWithPredicate(nbClient, predicate)
-	if err != nil {
-		return fmt.Errorf("failed to find address sets with predicate: %w", err)
-	}
-	// set addrSetReferenced[addrSetName] = true if referencing acl exists
-	_, err = libovsdbops.FindACLsWithPredicate(nbClient, func(item *nbdb.ACL) bool {
-		for addrSetName := range addrSetReferenced {
-			if strings.Contains(item.Match, addrSetName) {
-				addrSetReferenced[addrSetName] = true
-			}
-		}
-		return false
-	})
-	if err != nil {
-		return fmt.Errorf("cannot find ACLs referencing address set: %v", err)
-	}
-	ops := []ovsdb.Operation{}
-	for addrSetName, isReferenced := range addrSetReferenced {
-		if !isReferenced {
-			// no references for stale address set, delete
-			ops, err = libovsdbops.DeleteAddressSetsOps(nbClient, ops, &nbdb.AddressSet{
-				Name: addrSetName,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to get delete address set ops: %w", err)
-			}
-		}
-	}
-	// update acls to not reference stale address sets
-	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("faile to trasact db ops: %v", err)
-	}
-	return nil
+	return libovsdbutil.DeleteAddrSetsWithoutACLRef(predicateIDs, bnc.nbClient)
 }

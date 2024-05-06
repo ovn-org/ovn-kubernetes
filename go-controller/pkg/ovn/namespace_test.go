@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
+	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -119,7 +120,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			hybridNode := apbroute.GetHybridRouteAddrSetDbIDs("node", DefaultNetworkControllerName)
 			fakeOvn.asf.NewAddressSet(hybridNode, []string{"1.1.1.5"})
 			// egress firewall-owned address set, should stay
-			ef := getEgressFirewallDNSAddrSetDbIDs("dnsname", controllerName)
+			ef := dnsnameresolver.GetEgressFirewallDNSAddrSetDbIDs("dnsname", controllerName)
 			fakeOvn.asf.NewAddressSet(ef, []string{"1.1.1.6"})
 
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{}})

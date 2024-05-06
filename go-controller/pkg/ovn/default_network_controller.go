@@ -22,6 +22,7 @@ import (
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
 	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
@@ -100,7 +101,9 @@ type DefaultNetworkController struct {
 	// Controller used to handle the admin policy based external route resources
 	apbExternalRouteController *apbroutecontroller.ExternalGatewayMasterController
 
-	egressFirewallDNS *EgressDNS
+	// dnsNameResolver is used for resolving the IP addresses of DNS names
+	// used in egress firewall rules
+	dnsNameResolver dnsnameresolver.DNSNameResolver
 
 	// retry framework for egress firewall
 	retryEgressFirewalls *retry.RetryFramework
@@ -337,6 +340,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
+	oc.dnsNameResolver.Shutdown()
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
@@ -497,11 +501,22 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
 		var err error
-		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan)
+		// If DNSNameResolver is enabled, then initialize dnsNameResolver to ExternalEgressDNS
+		// for maintaining the address sets corresponding to the DNS names and start watching
+		// DNSNameResolver resources. Otherwise initialize dnsNameResolver to EgressDNS.
+		if config.OVNKubernetesFeature.EnableDNSNameResolver {
+			oc.dnsNameResolver, err = dnsnameresolver.NewExternalEgressDNS(oc.addressSetFactory, oc.controllerName, true,
+				oc.watchFactory.DNSNameResolverInformer().Informer(), oc.watchFactory.EgressFirewallInformer().Lister())
+		} else {
+			oc.dnsNameResolver, err = dnsnameresolver.NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan, egressFirewallDNSDefaultDuration)
+		}
 		if err != nil {
 			return err
 		}
-		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
+		err = oc.dnsNameResolver.Run()
+		if err != nil {
+			return err
+		}
 		err = WithSyncDurationMetric("egress firewall", oc.WatchEgressFirewall)
 		if err != nil {
 			return err

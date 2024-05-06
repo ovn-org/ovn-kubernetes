@@ -3,7 +3,6 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -84,30 +83,17 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 		access: rawEgressFirewallRule.Type,
 	}
 
-	if rawEgressFirewallRule.To.DNSName != "" {
-		efr.to.dnsName = rawEgressFirewallRule.To.DNSName
-	} else if len(rawEgressFirewallRule.To.CIDRSelector) > 0 {
-		_, ipNet, err := net.ParseCIDR(rawEgressFirewallRule.To.CIDRSelector)
-		if err != nil {
-			return nil, err
-		}
-		efr.to.cidrSelector = rawEgressFirewallRule.To.CIDRSelector
-		intersect := false
-		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			if clusterSubnet.CIDR.Contains(ipNet.IP) || ipNet.Contains(clusterSubnet.CIDR.IP) {
-				intersect = true
-				break
-			}
-		}
-		efr.to.clusterSubnetIntersection = intersect
-	} else {
-		efr.to.nodeSelector = rawEgressFirewallRule.To.NodeSelector
+	// Validate the egress firewall rule destination and update the appropriate
+	// fields of efr.
+	var err error
+	efr.to.cidrSelector, efr.to.dnsName, efr.to.clusterSubnetIntersection, efr.to.nodeSelector, err =
+		util.ValidateAndGetEgressFirewallDestination(rawEgressFirewallRule.To)
+	if err != nil {
+		return efr, err
+	}
+	// If nodeSelector is set then fetch the node addresses.
+	if efr.to.nodeSelector != nil {
 		efr.to.nodeAddrs = sets.New[string]()
-		// validate node selector
-		_, err := metav1.LabelSelectorAsSelector(rawEgressFirewallRule.To.NodeSelector)
-		if err != nil {
-			return nil, fmt.Errorf("rule destination has invalid node selector, err: %v", err)
-		}
 		nodes, err := oc.watchFactory.GetNodesByLabelSelector(*rawEgressFirewallRule.To.NodeSelector)
 		if err != nil {
 			return efr, fmt.Errorf("unable to query nodes for egress firewall: %w", err)
@@ -185,7 +171,12 @@ func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interfa
 		}
 		return nil
 	})
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Delete stale address sets related to EgressFirewallDNS which are not referenced by any ACL.
+	return oc.dnsNameResolver.DeleteStaleAddrSets(oc.nbClient)
 }
 
 // deleteStaleACLs cleans up 2 previous implementations:
@@ -362,7 +353,7 @@ func (oc *DefaultNetworkController) deleteEgressFirewall(egressFirewallObj *egre
 		return err
 	}
 	if deleteDNS {
-		if err := oc.egressFirewallDNS.Delete(egressFirewallObj.Namespace); err != nil {
+		if err := oc.dnsNameResolver.Delete(egressFirewallObj.Namespace); err != nil {
 			return err
 		}
 	}
@@ -413,9 +404,17 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, p
 			}
 		} else if len(rule.to.dnsName) > 0 {
 			// rule based on DNS NAME
-			dnsNameAddressSets, err := oc.egressFirewallDNS.Add(ef.namespace, rule.to.dnsName)
+			dnsName := rule.to.dnsName
+			// If DNSNameResolver is enabled, then use the egressFirewallExternalDNS to get the address
+			// set corresponding to the DNS name, otherwise use the egressFirewallDNS
+			// to get the address set.
+			if config.OVNKubernetesFeature.EnableDNSNameResolver {
+				// Convert the DNS name to lower case fully qualified domain name.
+				dnsName = util.LowerCaseFQDN(rule.to.dnsName)
+			}
+			dnsNameAddressSets, err := oc.dnsNameResolver.Add(ef.namespace, dnsName)
 			if err != nil {
-				return fmt.Errorf("error with EgressFirewallDNS - %v", err)
+				return fmt.Errorf("error with DNSNameResolver - %v", err)
 			}
 			dnsNameIPv4ASHashName, dnsNameIPv6ASHashName := dnsNameAddressSets.GetASHashNames()
 			if dnsNameIPv4ASHashName != "" {
