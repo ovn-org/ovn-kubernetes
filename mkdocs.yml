@@ -92,6 +92,8 @@ nav:
       - Reviewing Guide: governance/REVIEWING.md
       - Coding Guide: developer-guide/developer.md
       - Kubernetes CRD API-Reference Guide: developer-guide/api-spec.md
+      - Kubernetes CRD API-Reference Guide:
+        - EgressFirewall: developer-guide/egress-firewall-api-spec.md
       - OVN Kubernetes Container Images: developer-guide/image-build.md
       - Documentation Guide: developer-guide/documentation.md
       - Local Testing Guide: developer-guide/testing.md
