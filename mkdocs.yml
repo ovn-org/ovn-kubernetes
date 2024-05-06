@@ -92,6 +92,7 @@ nav:
       - Reviewing Guide: governance/REVIEWING.md
       - Coding Guide: developer-guide/developer.md
       - Kubernetes CRD API-Reference Guide:
+        - EgressIP: developer-guide/egress-ip-api-spec.md
         - EgressService: developer-guide/egress-service-api-spec.md
         - EgressQoS: developer-guide/egress-qos-api-spec.md
         - EgressFirewall: developer-guide/egress-firewall-api-spec.md
