@@ -2,7 +2,7 @@ The following is a walkthrough for an installation in an environment with 4 virt
 
 Note that the resulting environment might be highly unstable.
 
-If your goal is to set up an environment quickly or to set up a development environment, see the [kind installation documentation](https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/kind.md) instead.
+If your goal is to set up an environment quickly or to set up a development environment, see the [kind installation documentation](kind.md) instead.
 
 ## Environment setup
 
@@ -465,7 +465,7 @@ SVC_CIDR="172.17.0.0/16"
     --k8s-apiserver=https://${MASTER_IP}:6443
 ~~~
 
-You might also have to work around an issue where br-int is added by OVN, but the necessary files in /var/run/openvswitch are not created until Open vSwitch is restarted - [see here for more details](#issues--workarounds). This only happens on the master, so let's pre-create `br-int` there:
+You might also have to work around an issue where br-int is added by OVN, but the necessary files in /var/run/openvswitch are not created until Open vSwitch is restarted - [see here for more details](#issues-workarounds). This only happens on the master, so let's pre-create `br-int` there:
 ~~~
 ovs-vsctl add-br br-int
 ~~~

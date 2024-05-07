@@ -121,7 +121,7 @@ allowed by network policy, but denied by egress firewall will be dropped.
 
 ## Multicast
 
-For more details about Multicast in ovn see [Multicast docs](./multicast.md)
+For more details about Multicast in ovn see [Multicast docs](../features/multicast.md)
 Multicast creates 2 types of ACLs: global default ACLs with `ExternalIDs["k8s.ovn.org/owner-type"]=MulticastCluster`
 and per-namespace ACLs with `ExternalIDs["owner_object_type"]="MulticastNS"`. 
 

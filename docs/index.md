@@ -1,6 +1,4 @@
-<p align="center"> <!-- markdownlint-disable-line first-line-heading -->
-  <img src=./images/ovn-inside-k8s.png alt="ovn-kubernetes-logo"/>
-</p>
+![ovn-kubernetes-logo](images/ovn-inside-k8s.png)
 
 # OVN Kubernetes: A Robust Kubernetes Networking Provider
 
@@ -48,9 +46,7 @@ abstraction on top of Open vSwitch) converts these logical constructs into logic
 flows in its database and programs the OpenFlow flows on the node, which enables
 networking on a Kubernetes cluster.
 
-<p align="center">
-  <img src=./images/ovnkube-introduction.png alt="ovn-kubernetes-introduction"/>
-</p>
+![ovn-kubernetes-introduction](images/ovnkube-introduction.png)
 
 The key functionalities and features that OVN Kubernetes provides include:
 
@@ -102,12 +98,12 @@ to be a highly scalable and performant Networking Platform.
 
 For more details, please see the following:
 
-- [OVN Kubernetes Overview](./getting-started/overview.md) for an overview of ovn-kubernetes.
-- [Deploying OVN Kubernetes cluster using KIND](./getting-started/ovn-kubernetes-using-kind.md)
-- [Deploying OVN Kubernetes CNI using Helm](./getting-started/ovn-kubernetes-using-helm.md)
-- [Setup and Building OVN Kubernetes](./developer-guide/building-ovn-kubernetes.md) for instructions
+- [OVN Kubernetes Overview](getting-started/overview.md) for an overview of ovn-kubernetes.
+- [Deploying OVN Kubernetes cluster using KIND](installation/kind.md)
+- [Deploying OVN Kubernetes CNI using Helm](installation/helm.md)
+- [Setup and Building OVN Kubernetes](developer-guide/documentation.md) for instructions
   on setting up your development environment and building ovn kubernetes.
-- [Contributing to OVN Kubernetes](./governance/CONTRIBUTING.md) for how to get involved
+- [Contributing to OVN Kubernetes](governance/CONTRIBUTING.md) for how to get involved
   in our project
-- [Meet the Community](./governance/MEETINGS.md) for details on community
+- [Meet the Community](governance/MEETINGS.md) for details on community
   meeting details.
