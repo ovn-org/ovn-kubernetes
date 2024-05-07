@@ -838,12 +838,8 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if err != nil {
 			return err
 		}
-		// add the GARP configuration for all the new nodes we get
-		// since we use the "exclude-lb-vips-from-garp": "true"
-		// we shouldn't have scale issues
-		// NOTE: Adding GARP needs to be done only during node add
-		// It is a one time operation and doesn't need to be done during
-		// node updates. It needs to be done only for nodes local to this zone
+		// Add routing specific to Egress IP NOTE: GARP configuration that
+		// Egress IP depends on is added from the gateway reconciliation logic
 		return h.oc.addEgressNode(node)
 
 	case factory.EgressFwNodeType:
@@ -1081,10 +1077,6 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 
 	case factory.EgressNodeType:
 		node := obj.(*kapi.Node)
-		// remove the GARP setup for the node
-		if err := h.oc.deleteEgressNode(node); err != nil {
-			return err
-		}
 		// remove the IPs from the destination address-set of the default LRP (102)
 		err := h.oc.ensureDefaultNoRerouteNodePolicies()
 		if err != nil {
