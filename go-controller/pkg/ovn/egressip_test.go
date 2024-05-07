@@ -193,7 +193,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			annotations := map[string]string{
 				"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", "", ni.addresses[0]),
 				"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", nodeSubnets[i]),
-				util.OVNNodeHostCIDRs:                         fmt.Sprintf("%s", hostCIDRs),
+				util.OVNNodeHostCIDRs:                         hostCIDRs,
 				"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv6\":\"%s\"}", ni.transitPortIP), // used only for ic=true test
 				"k8s.ovn.org/zone-name":                       ni.zone,
 			}
@@ -304,7 +304,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitch{
@@ -482,7 +484,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -687,7 +691,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitchPort{
@@ -695,7 +701,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitch{
@@ -728,11 +736,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-					lsp := &nbdb.LogicalSwitchPort{Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name}
-					gomega.Expect(fakeOvn.controller.nbClient.Get(context.Background(), lsp)).Should(gomega.Succeed())
-					gomega.Eventually(lsp.Options["nat-addresses"]).Should(gomega.Equal("router"))
-					gomega.Eventually(lsp.Options["exclude-lb-vips-from-garp"]).Should(gomega.Equal("true"))
 
 					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4OVNNet)
 					gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
@@ -967,7 +970,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -975,7 +980,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -983,7 +990,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -1023,18 +1032,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-					lsp := &nbdb.LogicalSwitchPort{Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name}
-					err = fakeOvn.controller.nbClient.Get(context.Background(), lsp)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					gomega.Eventually(lsp.Options["nat-addresses"]).Should(gomega.Equal("router"))
-					gomega.Eventually(lsp.Options["exclude-lb-vips-from-garp"]).Should(gomega.Equal("true"))
-
-					lsp = &nbdb.LogicalSwitchPort{Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name}
-					err = fakeOvn.controller.nbClient.Get(context.Background(), lsp)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					gomega.Eventually(lsp.Options["nat-addresses"]).Should(gomega.Equal("router"))
-					gomega.Eventually(lsp.Options["exclude-lb-vips-from-garp"]).Should(gomega.Equal("true"))
 
 					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4OVNNet)
 
@@ -1182,10 +1179,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
-								/* GARP is deleted since node has been deleted */
-								// "nat-addresses":             "router",
-								// "exclude-lb-vips-from-garp": "true",
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -1331,7 +1327,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -1339,7 +1337,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -1347,7 +1347,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -1551,10 +1553,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
-								/* GARP is deleted since node has been deleted */
-								// "nat-addresses":             "router",
-								// "exclude-lb-vips-from-garp": "true",
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -1724,7 +1725,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitchPort{
@@ -1732,7 +1735,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitchPort{
@@ -1875,7 +1880,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -1883,7 +1890,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -1916,16 +1925,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name:  node2.Name,
 							Ports: []string{"k8s-" + node2.Name + "-UUID"},
 						},
-					}
-					if node2Zone != "remote" {
-						// add GARP config only if node is in local zone
-						expectedDatabaseState[10].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[10].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
-					}
-					if node1Zone == "global" {
-						// GARP is configured only for nodes in local zones, the master of the remote zone will do it for the remote nodes
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 					}
 					if node1Zone == "remote" {
 						expectedDatabaseState = append(expectedDatabaseState, getReRoutePolicy(egressPod.Status.PodIP, "4", "remote-reroute-UUID", reroutePolicyNextHop, eipExternalID))
@@ -2059,7 +2058,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitchPort{
@@ -2067,7 +2068,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitchPort{
@@ -2261,7 +2264,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -2269,7 +2274,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -2304,10 +2311,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					}
 					if node1Zone != "remote" {
-						// GARP is configured only for nodes in local zones, the master of the remote zone will do it for the remote nodes
-
-						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState[3].(*nbdb.LogicalRouter).Nat = append(expectedDatabaseState[3].(*nbdb.LogicalRouter).Nat, "egressip-nat-UUID", "egressip2-nat-UUID")
 						expectedDatabaseState = append(expectedDatabaseState, &nbdb.NAT{
 							UUID:       "egressip-nat-UUID",
@@ -2334,11 +2337,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								"stateless": "false",
 							},
 						})
-					}
-					if node2Zone != "remote" {
-						// add GARP config only if node is in local zone
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 					}
 
 					for _, lrp := range lrps {
@@ -2469,7 +2467,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitchPort{
@@ -2477,7 +2477,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitch{
@@ -2526,14 +2528,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4Net)
-
-					lsp := &nbdb.LogicalSwitchPort{Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name}
-					fakeOvn.controller.nbClient.Get(context.Background(), lsp)
-					if node1Zone == "global" {
-						// only if node is global we add this
-						gomega.Eventually(lsp.Options["nat-addresses"]).Should(gomega.Equal("router"))
-						gomega.Eventually(lsp.Options["exclude-lb-vips-from-garp"]).Should(gomega.Equal("true"))
-					}
 
 					gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 					egressIPs, nodes := getEgressIPStatus(egressIPName)
@@ -2609,7 +2603,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -2617,7 +2613,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitch{
@@ -2655,15 +2653,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Ports: []string{"k8s-" + node2.Name + "-UUID"},
 						},
 					}
-					if node2Zone != "remote" {
-						// add GARP config only if node is in local zone
-						expectedDatabaseState[10].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[10].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
-					}
 					if node1Zone != "remote" {
-						// add GARP config only if node is in local zone
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState = append(expectedDatabaseState, getReRoutePolicy(egressPod.Status.PodIP, "4", "reroute-UUID", nodeLogicalRouterIPv4, eipExternalID))
 						expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies = append(expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies, "reroute-UUID")
 					} else {
@@ -2740,7 +2730,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitch{
@@ -2777,9 +2769,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						// either not interconnect or egressNode is in localZone
 						expectedDatabaseState = append(expectedDatabaseState, eipSNAT)
 						expectedDatabaseState[4].(*nbdb.LogicalRouter).Nat = []string{"egressip-nat-UUID"} // 4th item is node2's GR
-						// add GARP config only if node is in local zone
-						expectedDatabaseState[7].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[7].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 					}
 					// all cases: reroute logical router policy is gone and won't be recreated since node1 is deleted - that is where the pod lives
 					// NOTE: This test is not really a real scenario, it depicts a transient state.
@@ -2884,7 +2873,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitchPort{
@@ -2892,7 +2883,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitchPort{
@@ -2946,14 +2939,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP, node1IPv4SecondaryHostNet)
-
-					lsp := &nbdb.LogicalSwitchPort{Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name}
-					fakeOvn.controller.nbClient.Get(context.Background(), lsp)
-					if node1Zone == "global" {
-						// GARP is configured only for nodes in local zones, the master of the remote zone will do it for the remote nodes
-						gomega.Eventually(lsp.Options["nat-addresses"]).Should(gomega.Equal("router"))
-						gomega.Eventually(lsp.Options["exclude-lb-vips-from-garp"]).Should(gomega.Equal("true"))
-					}
 
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3041,7 +3026,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -3049,7 +3036,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -3084,16 +3073,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					}
 
-					if node1Zone == "global" {
-						// GARP is configured only for nodes in local zones, the master of the remote zone will do it for the remote nodes
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
-					}
-					if node2Zone != "remote" {
-						// add GARP config only if node is in local zone
-						expectedDatabaseState[10].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[10].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
-					}
 					if node1Zone == "remote" {
 						podPolicy := getReRoutePolicy(podV4IP, "4", "static-reroute-UUID", []string{node2MgntIP.To4().String()}, eipExternalID)
 						expectedDatabaseState = append(expectedDatabaseState, podPolicy)
@@ -5100,7 +5079,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitchPort{
@@ -5108,7 +5089,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										"nat-addresses":             "router",
+										"exclude-lb-vips-from-garp": "true",
 									},
 								},
 								&nbdb.LogicalSwitchPort{
@@ -5273,7 +5256,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -5281,7 +5266,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalRouterPolicy{
@@ -5324,8 +5311,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					}
 					if !interconnect || node1Zone != "remote" {
-						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState[3].(*nbdb.LogicalRouter).Nat = []string{"egressip-nat-1-UUID"}
 						expectedDatabaseState = append(expectedDatabaseState, natEIP1)
 					}
@@ -5334,8 +5319,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 					}
 					if !interconnect || node2Zone != "remote" {
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState[4].(*nbdb.LogicalRouter).Nat = []string{"egressip-nat-2-UUID"}
 						expectedDatabaseState = append(expectedDatabaseState, natEIP2)
 					}
@@ -5431,7 +5414,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -5439,7 +5424,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalRouterPolicy{
@@ -5482,8 +5469,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					}
 					if !interconnect || node1Zone != "remote" {
-						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[8].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState[3].(*nbdb.LogicalRouter).Nat = []string{"egressip-nat-1-UUID"}
 						natEIP1.ExternalIP = assignedEgressIP1
 						expectedDatabaseState = append(expectedDatabaseState, natEIP1)
@@ -5493,8 +5478,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						expectedDatabaseState[5].(*nbdb.LogicalRouter).StaticRoutes = []string{"reroute-static-route-UUID"}
 					}
 					if !interconnect || node2Zone != "remote" {
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["nat-addresses"] = "router"
-						expectedDatabaseState[9].(*nbdb.LogicalSwitchPort).Options["exclude-lb-vips-from-garp"] = "true"
 						expectedDatabaseState[4].(*nbdb.LogicalRouter).Nat = []string{"egressip-nat-2-UUID"}
 						natEIP2.ExternalIP = assignedEgressIP2
 						expectedDatabaseState = append(expectedDatabaseState, natEIP2)
@@ -5871,7 +5854,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -5879,7 +5864,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -6066,7 +6053,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
 							Type: "router",
 							Options: map[string]string{
-								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
+								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
 							},
 						},
 						&nbdb.LogicalSwitchPort{
@@ -6155,7 +6144,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
 						Type: "router",
 						Options: map[string]string{
-							"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
+							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
+							"nat-addresses":             "router",
+							"exclude-lb-vips-from-garp": "true",
 						},
 					},
 					&nbdb.LogicalSwitchPort{
@@ -6256,7 +6247,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							nodeSwitch,
@@ -6584,7 +6577,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							nodeSwitch,
@@ -6960,7 +6955,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							"nat-addresses":             "router",
+							"exclude-lb-vips-from-garp": "true",
 						},
 					}
 					node2LSP := &nbdb.LogicalSwitchPort{
@@ -6968,7 +6965,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							"nat-addresses":             "router",
+							"exclude-lb-vips-from-garp": "true",
 						},
 					}
 
@@ -7110,24 +7109,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID: "reroute-UUID1",
 					}
 					node1GR.Nat = []string{"egressip-nat-UUID1"}
-					node1LSP.Options = map[string]string{
-						"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
-						"nat-addresses":             "router",
-						"exclude-lb-vips-from-garp": "true",
-					}
-					if node1Zone != node2Zone && node1Zone == "remote" {
-						// GARP for remote zones are taken care of by remote controller
-						node1LSP.Options = map[string]string{
-							"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
-						}
-					}
-					if !interconnect || node2Zone == "global" {
-						node2LSP.Options = map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
-							"nat-addresses":             "router",
-							"exclude-lb-vips-from-garp": "true",
-						}
-					}
 					nodeIPsASdbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName)
 					fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4})
 
@@ -7568,7 +7549,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node.Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node.Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node.Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -7791,7 +7774,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -7799,7 +7784,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -7966,7 +7953,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -7974,7 +7963,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -8242,7 +8233,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -8250,7 +8243,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -8504,7 +8499,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -8650,7 +8647,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 					Type: "router",
 					Options: map[string]string{
-						"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						"nat-addresses":             "router",
+						"exclude-lb-vips-from-garp": "true",
 					},
 				}
 				fakeOvn.startWithDBSetup(
@@ -8740,11 +8739,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				podEIPSNAT := getEIPSNAT(podV4IP, egressIP, "k8s-node1")
 				podReRoutePolicy := getReRoutePolicy(egressPodIP[0].String(), "4", "reroute-UUID", nodeLogicalRouterIPv4, eipExternalID)
 				node1GR.Nat = []string{"egressip-nat-UUID"}
-				node1LSP.Options = map[string]string{
-					"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
-					"nat-addresses":             "router",
-					"exclude-lb-vips-from-garp": "true",
-				}
 
 				nodeIPsASdbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName)
 				fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(nodeIPsASdbIDs, []string{node1IPv4})
@@ -8852,7 +8846,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -8860,7 +8856,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -9183,7 +9181,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -9191,7 +9191,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -9546,7 +9548,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 					Type: "router",
 					Options: map[string]string{
-						"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						"nat-addresses":             "router",
+						"exclude-lb-vips-from-garp": "true",
 					},
 				}
 				fakeOvn.startWithDBSetup(
@@ -9617,11 +9621,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(nodes[0]).To(gomega.Equal(node1.Name))
 				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
 
-				node1LSP.Options = map[string]string{
-					"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
-					"nat-addresses":             "router",
-					"exclude-lb-vips-from-garp": "true",
-				}
 				nodeIPsASdbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName)
 				fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(nodeIPsASdbIDs, []string{node1IPv4})
 
@@ -9739,7 +9738,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 					Type: "router",
 					Options: map[string]string{
-						"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						"nat-addresses":             "router",
+						"exclude-lb-vips-from-garp": "true",
 					},
 				}
 				fakeOvn.startWithDBSetup(
@@ -9836,11 +9837,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					UUID: "reroute-UUID1",
 				}
 				node1GR.Nat = []string{"egressip-nat-UUID1"}
-				node1LSP.Options = map[string]string{
-					"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
-					"nat-addresses":             "router",
-					"exclude-lb-vips-from-garp": "true",
-				}
 				nodeIPsASdbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName)
 				fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(nodeIPsASdbIDs, []string{node1IPv4})
 
@@ -10022,7 +10018,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -10030,7 +10028,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -10834,9 +10834,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									//"nat-addresses":             "router",
-									//"exclude-lb-vips-from-garp": "true",
-									"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -10943,7 +10943,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							"nat-addresses":             "router",
+							"exclude-lb-vips-from-garp": "true",
 						},
 					},
 					&nbdb.LogicalSwitch{
@@ -11135,7 +11137,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							"nat-addresses":             "router",
+							"exclude-lb-vips-from-garp": "true",
 						},
 					},
 					&nbdb.LogicalSwitchPort{

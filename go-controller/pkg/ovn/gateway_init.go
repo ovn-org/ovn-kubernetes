@@ -592,6 +592,20 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 		Type: "router",
 		Options: map[string]string{
 			"router-port": externalRouterPort,
+
+			// This option will program OVN to start sending GARPs for all external IPS
+			// that the logical switch port has been configured to use. This is
+			// necessary for egress IP because if an egress IP is moved between two
+			// nodes, the nodes need to actively update the ARP cache of all neighbors
+			// as to notify them the change. If this is not the case: packets will
+			// continue to be routed to the old node which hosted the egress IP before
+			// it was moved, and the connections will fail.
+			"nat-addresses": "router",
+
+			// Setting nat-addresses to router will send out GARPs for all externalIPs and LB VIPs
+			// hosted on the GR. Setting exclude-lb-vips-from-garp to true will make sure GARPs for
+			// LB VIPs are not sent, thereby preventing GARP overload.
+			"exclude-lb-vips-from-garp": "true",
 		},
 		Addresses: []string{macAddress},
 	}

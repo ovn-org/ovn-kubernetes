@@ -15,7 +15,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -31,10 +30,10 @@ func init() {
 	format.MaxLength = 0
 }
 
-func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
+func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
 	expectedNodeSwitch *nbdb.LogicalSwitch, nodeName string, clusterIPSubnets []*net.IPNet, hostSubnets []*net.IPNet,
 	l3GatewayConfig *util.L3GatewayConfig, joinLRPIPs, defLRPIPs []*net.IPNet, skipSnat bool, nodeMgmtPortIP,
-	gatewayMTU string) []libovsdb.TestData {
+	gatewayMTU string) []libovsdbtest.TestData {
 
 	GRName := "GR_" + nodeName
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + GRName
@@ -308,7 +307,9 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			Name: externalSwitchPortToRouter,
 			Type: "router",
 			Options: map[string]string{
-				"router-port": externalRouterPort,
+				"router-port":               externalRouterPort,
+				"nat-addresses":             "router",
+				"exclude-lb-vips-from-garp": "true",
 			},
 			Addresses: []string{l3GatewayConfig.MACAddress.String()},
 		},
@@ -424,7 +425,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := false
 			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover LGW route should have got deleted
 			// We don't set up the Allow from mgmt port ACL here
@@ -500,7 +501,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := false
 			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover LGW route should have got deleted
 			// We don't set up the Allow from mgmt port ACL here
@@ -566,7 +567,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := false
 			expectedOVNClusterRouter.StaticRoutes = []string{}
 			// We don't set up the Allow from mgmt port ACL here
@@ -648,7 +649,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := false
 			expectedOVNClusterRouter.StaticRoutes = []string{}
 			// We don't set up the Allow from mgmt port ACL here
@@ -746,7 +747,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := false
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
@@ -816,7 +817,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := false
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
@@ -888,7 +889,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := false
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
@@ -958,7 +959,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := true
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
@@ -1060,7 +1061,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := true
 
 			// remove bad route from expected data
@@ -1163,7 +1164,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := false
 			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover SGW route should have got deleted
 			// We don't set up the Allow from mgmt port ACL here
@@ -1242,7 +1243,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := true
 
 			// remove bad route from expected data
@@ -1350,7 +1351,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			testData := []libovsdb.TestData{}
+			testData := []libovsdbtest.TestData{}
 			skipSnat := true
 
 			mgmtPortIP := ""
