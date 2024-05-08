@@ -963,6 +963,11 @@ func (oc *DefaultNetworkController) delIPFromHostNetworkNamespaceAddrSet(node *k
 
 	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
 	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// if annotation is not set for node subnet or node GW router LRP IP address, we can assume nothing was added to the
+			// host network namespace address set. We depend on both annotations to be set before configuring the address set.
+			return nil
+		}
 		return fmt.Errorf("error parsing annotation for node %s: %v", node.Name, err)
 	}
 

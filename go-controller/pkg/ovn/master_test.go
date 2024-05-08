@@ -1453,6 +1453,46 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
+	ginkgo.It("doesn't retry deleting a node that doesn't have a node-subnet annotation", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			startFakeController(oc, wg)
+			newNode := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "newNode",
+					Annotations: map[string]string{},
+				},
+			}
+			ginkgo.By("create new node with no host-subnet annotation defined and ensure theres a retry entry")
+			_, err = kubeFakeClient.CoreV1().Nodes().Create(context.TODO(), newNode, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			retry.CheckRetryObjectMultipleFieldsEventually(
+				newNode.Name,
+				oc.retryNodes,
+				gomega.BeNil(),             // oldObj should be nil
+				gomega.Not(gomega.BeNil()), // newObj should not be nil
+			)
+			keyExists := true
+			retry.CheckRetryObjectEventually(newNode.Name, keyExists, oc.retryNodes)
+			ginkgo.By("delete node and check that there are no retries for the deleted node")
+			err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), newNode.Name, metav1.DeleteOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			retry.CheckRetryObjectEventually(newNode.Name, !keyExists, oc.retryNodes)
+			ginkgo.By("ensure failures for sync host network address or adding nodes are cleared")
+			gomega.Eventually(func() bool {
+				_, foundSyncHostNetAddrSetFailed := oc.syncHostNetAddrSetFailed.Load(newNode.Name)
+				_, foundAddNodeFailed := oc.addNodeFailed.Load(newNode.Name)
+				return foundSyncHostNetAddrSetFailed || foundAddNodeFailed
+			}).Should(gomega.BeFalse())
+			return nil
+		}
+		err := app.Run([]string{
+			app.Name,
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
 	ginkgo.It("delete a partially constructed node", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
