@@ -6,7 +6,9 @@ import (
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	cloudservicefake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
+	ocpnetworkclientfake "github.com/openshift/client-go/network/clientset/versioned/fake"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedroutefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -38,6 +40,7 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 	v1Objects := []runtime.Object{}
 	nads := []runtime.Object{}
 	cloudObjects := []runtime.Object{}
+	dnsNameResolverObjects := []runtime.Object{}
 	for _, object := range objects {
 		switch object.(type) {
 		case *egressip.EgressIP:
@@ -58,6 +61,8 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 			apbExternalRouteObjects = append(apbExternalRouteObjects, object)
 		case *anpapi.AdminNetworkPolicy:
 			anpObjects = append(anpObjects, object)
+		case *ocpnetworkapiv1alpha1.DNSNameResolver:
+			dnsNameResolverObjects = append(dnsNameResolverObjects, object)
 		default:
 			v1Objects = append(v1Objects, object)
 		}
@@ -73,6 +78,7 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
+		OCPNetworkClient:         ocpnetworkclientfake.NewSimpleClientset(dnsNameResolverObjects...),
 	}
 }
 

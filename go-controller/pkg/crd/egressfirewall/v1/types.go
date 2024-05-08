@@ -78,7 +78,10 @@ type EgressFirewallDestination struct {
 	// cidrSelector is the CIDR range to allow/deny traffic to. If this is set, dnsName and nodeSelector must be unset.
 	CIDRSelector string `json:"cidrSelector,omitempty"`
 	// dnsName is the domain name to allow/deny traffic to. If this is set, cidrSelector and nodeSelector must be unset.
-	// +kubebuilder:validation:Pattern=^([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$
+	// For a wildcard DNS name, the '*' will match only one label. Additionally, only a single '*' can be
+	// used at the beginning of the wildcard DNS name. For example, '*.example.com' will match 'sub1.example.com'
+	// but won't match 'sub2.sub1.example.com'.
+	// +kubebuilder:validation:Pattern=`^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$`
 	DNSName string `json:"dnsName,omitempty"`
 	// nodeSelector will allow/deny traffic to the Kubernetes node IP of selected nodes. If this is set,
 	// cidrSelector and DNSName must be unset.

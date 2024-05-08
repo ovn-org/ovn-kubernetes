@@ -13,6 +13,8 @@ import (
 	mnpfake "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/fake"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/gomega"
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	ocpnetworkfake "github.com/openshift/client-go/network/clientset/versioned/fake"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -106,6 +108,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 
 	egressIPObjects := []runtime.Object{}
 	egressFirewallObjects := []runtime.Object{}
+	dnsNameResolverObjects := []runtime.Object{}
 	egressQoSObjects := []runtime.Object{}
 	multiNetworkPolicyObjects := []runtime.Object{}
 	egressServiceObjects := []runtime.Object{}
@@ -119,6 +122,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			egressIPObjects = append(egressIPObjects, object)
 		case *egressfirewall.EgressFirewallList:
 			egressFirewallObjects = append(egressFirewallObjects, object)
+		case *ocpnetworkapiv1alpha1.DNSNameResolverList:
+			dnsNameResolverObjects = append(dnsNameResolverObjects, object)
 		case *egressqos.EgressQoSList:
 			egressQoSObjects = append(egressQoSObjects, object)
 		case *mnpapi.MultiNetworkPolicyList:
@@ -140,6 +145,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		ANPClient:                anpfake.NewSimpleClientset(anpObjects...),
 		EgressIPClient:           egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient:     egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		OCPNetworkClient:         ocpnetworkfake.NewSimpleClientset(dnsNameResolverObjects...),
 		EgressQoSClient:          egressqosfake.NewSimpleClientset(egressQoSObjects...),
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),

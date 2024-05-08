@@ -1,4 +1,4 @@
-package ovn
+package dnsnameresolver
 
 import (
 	"fmt"
@@ -6,8 +6,10 @@ import (
 	"sync"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -25,6 +27,9 @@ type EgressDNS struct {
 	// allows for the creation of addresssets
 	addressSetFactory addressset.AddressSetFactory
 	controllerName    string
+	// default interval of time to send DNS lookup
+	// requests.
+	defaultInterval time.Duration
 
 	// Report change when Add operation is done
 	added          chan struct{}
@@ -32,6 +37,8 @@ type EgressDNS struct {
 	stopChan       chan struct{}
 	controllerStop <-chan struct{}
 }
+
+var _ DNSNameResolver = &EgressDNS{}
 
 type dnsEntry struct {
 	// this map holds all the namespaces that a dnsName appears in
@@ -43,7 +50,7 @@ type dnsEntry struct {
 	dnsAddressSet addressset.AddressSet
 }
 
-func getEgressFirewallDNSAddrSetDbIDs(dnsName, controller string) *libovsdbops.DbObjectIDs {
+func GetEgressFirewallDNSAddrSetDbIDs(dnsName, controller string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressFirewallDNS, controller,
 		map[libovsdbops.ExternalIDKey]string{
 			// dns address sets are cluster-wide objects, they have unique names
@@ -52,7 +59,7 @@ func getEgressFirewallDNSAddrSetDbIDs(dnsName, controller string) *libovsdbops.D
 }
 
 func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerName string,
-	controllerStop <-chan struct{}) (*EgressDNS, error) {
+	controllerStop <-chan struct{}, defaultInterval time.Duration) (*EgressDNS, error) {
 	dnsInfo, err := util.NewDNS("/etc/resolv.conf")
 	if err != nil {
 		return nil, err
@@ -63,6 +70,7 @@ func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerName
 		dnsEntries:        make(map[string]*dnsEntry),
 		addressSetFactory: addressSetFactory,
 		controllerName:    controllerName,
+		defaultInterval:   defaultInterval,
 
 		added:          make(chan struct{}, 1),
 		deleted:        make(chan string, 1),
@@ -85,7 +93,7 @@ func (e *EgressDNS) Add(namespace, dnsName string) (addressset.AddressSet, error
 		if e.addressSetFactory == nil {
 			return nil, fmt.Errorf("error adding EgressFirewall DNS rule for host %s, in namespace %s: addressSetFactory is nil", dnsName, namespace)
 		}
-		asIndex := getEgressFirewallDNSAddrSetDbIDs(dnsName, e.controllerName)
+		asIndex := GetEgressFirewallDNSAddrSetDbIDs(dnsName, e.controllerName)
 		dnsEntry.dnsAddressSet, err = e.addressSetFactory.NewAddressSet(asIndex, nil)
 		if err != nil {
 			return nil, fmt.Errorf("cannot create addressSet for %s: %v", dnsName, err)
@@ -95,7 +103,6 @@ func (e *EgressDNS) Add(namespace, dnsName string) (addressset.AddressSet, error
 	}
 	e.dnsEntries[dnsName].namespaces[namespace] = struct{}{}
 	return e.dnsEntries[dnsName].dnsAddressSet, nil
-
 }
 
 func (e *EgressDNS) Delete(namespace string) error {
@@ -128,8 +135,8 @@ func (e *EgressDNS) Delete(namespace string) error {
 	return nil
 }
 
-func (e *EgressDNS) Update(dns string) (bool, error) {
-	return e.dns.Update(dns)
+func (e *EgressDNS) Update(dnsName string) (bool, error) {
+	return e.dns.Update(dnsName)
 }
 
 func (e *EgressDNS) updateEntryForName(dnsName string) error {
@@ -189,12 +196,12 @@ func (e *EgressDNS) addToDNS(dnsName string) {
 //     and the durationTillNextQuery is updated
 //  2. e.added is received and durationTillNextQuery is recomputed
 //  3. e.deleted is received and coincides with dnsName
-func (e *EgressDNS) Run(defaultInterval time.Duration) {
+func (e *EgressDNS) Run() error {
 	var domainNameExpiringNext, domainNameDeleted string
 	var ttl time.Time
 	var timeSet bool
 	// initially the next DNS Query happens at the default interval
-	durationTillNextQuery := defaultInterval
+	durationTillNextQuery := e.defaultInterval
 	go func() {
 		timer := time.NewTicker(durationTillNextQuery)
 		defer timer.Stop()
@@ -230,8 +237,8 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 			// set timer to what's sooner: default update interval or next expiration time
 			ttl, domainNameExpiringNext, timeSet = e.dns.GetNextQueryTime()
 			ttlDuration := time.Until(ttl)
-			if ttlDuration > defaultInterval || !timeSet {
-				durationTillNextQuery = defaultInterval
+			if ttlDuration > e.defaultInterval || !timeSet {
+				durationTillNextQuery = e.defaultInterval
 			} else if ttlDuration.Seconds() > 0 {
 				durationTillNextQuery = ttlDuration
 			} else {
@@ -242,8 +249,19 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 		}
 	}()
 
+	return nil
 }
 
 func (e *EgressDNS) Shutdown() {
 	close(e.stopChan)
+}
+
+// DeleteStaleAddrSets deletes all the address sets related to EgressFirewall DNS rules which are not
+// referenced by any acl.
+func (e *EgressDNS) DeleteStaleAddrSets(nbClient libovsdbclient.Client) error {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressFirewallDNS, e.controllerName, nil)
+	return libovsdbutil.DeleteAddrSetsWithoutACLRef(predicateIDs, nbClient)
 }
