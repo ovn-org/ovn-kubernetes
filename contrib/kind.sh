@@ -172,6 +172,7 @@ usage() {
     echo "-ic  | --enable-interconnect        Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
     echo "--disable-ovnkube-identity          Disable per-node cert and ovnkube-identity webhook"
     echo "-npz | --nodes-per-zone             If interconnect is enabled, number of nodes per zone (Default 1). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
+    echo "-mtu                                Define the overlay mtu"
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
@@ -350,6 +351,9 @@ parse_args() {
                                                 ;;
             --disable-ovnkube-identity)         OVN_ENABLE_OVNKUBE_IDENTITY=false
                                                 ;;
+            -mtu  )                             shift
+                                                OVN_MTU=$1
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
@@ -431,6 +435,7 @@ print_params() {
      fi
      echo "OVN_ENABLE_OVNKUBE_IDENTITY = $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
+     echo "OVN_MTU= $OVN_MTU"
      echo ""
 }
 
@@ -626,6 +631,7 @@ set_default_params() {
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
   fi
+  OVN_MTU=${OVN_MTU:-1400}
 }
 
 detect_apiserver_url() {
@@ -905,7 +911,8 @@ create_ovn_kube_manifests() {
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
     --enable-multi-external-gateway=true \
     --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}" \
-    --enable-persistent-ips=true
+    --enable-persistent-ips=true \
+    --mtu="${OVN_MTU}"
   popd
 }
 
