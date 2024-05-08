@@ -101,6 +101,7 @@ nav:
       - Documentation Guide: developer-guide/documentation.md
       - Local Testing Guide: developer-guide/testing.md
       - CI Testing Guide: ci/ci.md
+      - Web Design Guide: developer-guide/web-design.md
       - Debugging: developer-guide/debugging.md
       - Releasing: developer-guide/release.md
   - Features:
