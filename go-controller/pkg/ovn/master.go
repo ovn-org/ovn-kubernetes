@@ -927,7 +927,11 @@ func (oc *DefaultNetworkController) addIPToHostNetworkNamespaceAddrSet(node *kap
 
 	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
 	if err != nil {
-		return fmt.Errorf("error parsing annotation for node %s: %v", node.Name, err)
+		parsedErr := err
+		if !oc.isLocalZoneNode(node) {
+			parsedErr = types.NewSuppressedError(err)
+		}
+		return fmt.Errorf("error parsing annotation for node %s: %w", node.Name, parsedErr)
 	}
 
 	// add the host network IPs for this node to host network namespace's address set
