@@ -334,6 +334,15 @@ false
 			<td>Configure to use stateless network policy feature with ovn-kubernetes</td>
 		</tr>
 		<tr>
+			<td>global.enableSvcTemplate</td>
+			<td>bool</td>
+			<td><pre lang="json">
+true
+</pre>
+</td>
+			<td>Configure to use service template feature with ovn-kubernetes</td>
+		</tr>
+		<tr>
 			<td>global.encapPort</td>
 			<td>int</td>
 			<td><pre lang="json">

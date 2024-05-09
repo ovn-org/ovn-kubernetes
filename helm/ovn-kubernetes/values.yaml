@@ -78,6 +78,8 @@ global:
   enableStatelessNetworkPolicy: false
   # -- Configure to use the IPAMClaims CRD feature with ovn-kubernetes, thus granting persistent IPs across restarts / migration for KubeVirt VMs
   enablePersistentIPs: false
+  # -- Configure to use service template feature with ovn-kubernetes
+  enableSvcTemplate: true
   # -- Enables metrics related to scaling
   enableMetricsScale: ""
   # -- Enables monitoring OVN-Kubernetes master and OVN configuration duration
