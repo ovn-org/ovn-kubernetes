@@ -345,14 +345,23 @@ jobs:
     - name: Check out code into the Go module directory - from PR branch
       uses: actions/checkout@v4
 
+    - name: Runner Diagnostics
+      uses: ./.github/actions/diagnostics
+
     - name: ovn upgrade
       run: |
         export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test upgrade-ovn
 
+    - name: Runner Diagnostics
+      uses: ./.github/actions/diagnostics
+
     - name: Run E2E shard-conformance
       run: |
         make -C test shard-conformance
+
+    - name: Runner Diagnostics
+      uses: ./.github/actions/diagnostics
 
     - name: Export kind logs
       if: always()
@@ -491,6 +500,9 @@ jobs:
         export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test install-kind
 
+    - name: Runner Diagnostics
+      uses: ./.github/actions/diagnostics
+
     - name: Run Tests
       # e2e tests take ~60 minutes normally, 120 should be more than enough
       # set 3 hours for control-plane tests as these might take a while
@@ -519,6 +531,9 @@ jobs:
             make -C test conformance
           fi
         fi
+
+    - name: Runner Diagnostics
+      uses: ./.github/actions/diagnostics
 
     - name: Export kind logs
       if: always()
@@ -599,13 +614,22 @@ jobs:
       run: |
         ./contrib/kind-dual-stack-conversion.sh
 
+    - name: Runner Diagnostics
+      uses: ./.github/actions/diagnostics
+
     - name: Run Dual-Stack Tests
       run: |
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
 
+    - name: Runner Diagnostics
+      uses: ./.github/actions/diagnostics
+
     - name: Run Dual-Stack Control-Plane Tests
       run: |
         make -C test control-plane WHAT="DualStack"
+
+    - name: Runner Diagnostics
+      uses: ./.github/actions/diagnostics
 
     - name: Export kind logs
       if: always()
@@ -694,9 +718,17 @@ jobs:
         run: |
           export OVN_IMAGE="ovn-daemonset-f:pr"
           make -C test install-kind
+
+      - name: Runner Diagnostics
+        uses: ./.github/actions/diagnostics
+
       - name: Run Tests
         run: |
           make -C test ${{ matrix.target }}
+
+      - name: Runner Diagnostics
+        uses: ./.github/actions/diagnostics
+
       - name: Export logs
         if: always()
         run: |
