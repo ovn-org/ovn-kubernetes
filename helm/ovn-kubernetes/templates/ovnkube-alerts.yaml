@@ -365,5 +365,26 @@ spec:
          {{ range query "ovn_controller_integration_bridge_geneve_ports_total{job='ovnkube-node', namespace='ovn-kubernetes'} !=  scalar(count(kube_node_info)) - 1" }}
          {{ .Labels.instance }}: {{ .Value }}
          {{ end }}.`}}
- 
+
+    - alert: OVNKubeAllocatedV4SubnetsDoNotMatch
+      expr: |
+        ovnkube_clustermanager_allocated_v4_host_subnets{job="ovnkube-master", namespace="ovn-kubernetes"} > 0 and
+        ovnkube_clustermanager_allocated_v4_host_subnets{job="ovnkube-master", namespace="ovn-kubernetes"} != scalar(sum(kube_node_info))
+      for: 10m
+      labels:
+       severity: major
+      annotations:
+       message: |
+         {{`ovnkube clustermanager allocated IPv4 host subnets value for {{ $labels.network_name }} network should be same as the number of K8s nodes`}}
+
+    - alert: OVNKubeAllocatedV6SubnetsDoNotMatch
+      expr: |
+        ovnkube_clustermanager_allocated_v6_host_subnets{job="ovnkube-master", namespace="ovn-kubernetes"} > 0 and
+        ovnkube_clustermanager_allocated_v6_host_subnets{job="ovnkube-master", namespace="ovn-kubernetes"} != scalar(sum(kube_node_info))
+      for: 10m
+      labels:
+       severity: major
+      annotations:
+       message: |
+         {{`ovnkube clustermanager allocated IPv6 host subnets value for {{ $labels.network_name }} network should be same as the number of K8s nodes`}}
 
