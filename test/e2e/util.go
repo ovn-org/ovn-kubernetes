@@ -923,7 +923,8 @@ func wrappedTestFramework(basename string) *framework.Framework {
 
 		logLocation := "/var/log"
 		dbLocation := "/var/lib/openvswitch"
-		ovsdbLocation := "/etc/origin/openvswitch"
+		// Potential database locations
+		ovsdbLocations := []string{"/etc/origin/openvswitch", "/etc/openvswitch"}
 		dbs := []string{"ovnnb_db.db", "ovnsb_db.db"}
 		ovsdb := "conf.db"
 
@@ -941,11 +942,19 @@ func wrappedTestFramework(basename string) *framework.Framework {
 			_, err = runCommand(args...)
 			framework.ExpectNoError(err)
 
-			// node name is the same in kapi and docker
-			args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
-				fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
-			_, err = runCommand(args...)
-			framework.ExpectNoError(err)
+			// Loop through potential OVSDB db locations
+			for _, ovsdbLocation := range ovsdbLocations {
+				args = []string{containerRuntime, "exec", node.Name, "stat", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb)}
+				_, err = runCommand(args...)
+				if err == nil {
+					// node name is the same in kapi and docker
+					args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
+						fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
+					_, err = runCommand(args...)
+					framework.ExpectNoError(err)
+					break // Stop the loop: the file is found and copied successfully
+				}
+			}
 
 			// IC will have dbs on every node, but legacy mode wont, check if they exist
 			args = []string{containerRuntime, "exec", node.Name, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
