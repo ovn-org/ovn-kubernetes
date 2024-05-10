@@ -1233,6 +1233,18 @@ install_ipamclaim_crd() {
   run_kubectl apply -f "$ipamclaims_manifest"
 }
 
+install_kubevirt_ipam_claims() {
+  local cert_manager_version="v1.14.4"
+  echo "Installing cert-manager ..."
+  manifest="https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
+  run_kubectl apply -f "$manifest"
+
+  echo "Installing KubeVirt IPAM manager ..."
+  manifest="https://raw.githubusercontent.com/maiqueb/kubevirt-ipam-claims/main/dist/install.yaml"
+  run_kubectl apply -f "$manifest"
+  kubectl wait -n kubevirt-ipam-claims-system deployment kubevirt-ipam-claims-controller-manager --for condition=Available --timeout 2m
+}
+
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
 # DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
 # Next, it iterates over all pods with name=ovnkube-db and ovnkube-master and waits for them to post "Ready".
@@ -1556,4 +1568,5 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
+  install_kubevirt_ipam_claims
 fi
