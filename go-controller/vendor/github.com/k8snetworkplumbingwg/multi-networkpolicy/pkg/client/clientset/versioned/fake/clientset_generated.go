@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Kubernetes Authors
+Copyright 2022 The Kubernetes Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,6 +22,8 @@ import (
 	clientset "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned"
 	k8scnicncfiov1beta1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1"
 	fakek8scnicncfiov1beta1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1/fake"
+	k8scnicncfiov1beta2 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta2"
+	fakek8scnicncfiov1beta2 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta2/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
@@ -74,9 +76,17 @@ func (c *Clientset) Tracker() testing.ObjectTracker {
 	return c.tracker
 }
 
-var _ clientset.Interface = &Clientset{}
+var (
+	_ clientset.Interface = &Clientset{}
+	_ testing.FakeClient  = &Clientset{}
+)
 
 // K8sCniCncfIoV1beta1 retrieves the K8sCniCncfIoV1beta1Client
 func (c *Clientset) K8sCniCncfIoV1beta1() k8scnicncfiov1beta1.K8sCniCncfIoV1beta1Interface {
 	return &fakek8scnicncfiov1beta1.FakeK8sCniCncfIoV1beta1{Fake: &c.Fake}
+}
+
+// K8sCniCncfIoV1beta2 retrieves the K8sCniCncfIoV1beta2Client
+func (c *Clientset) K8sCniCncfIoV1beta2() k8scnicncfiov1beta2.K8sCniCncfIoV1beta2Interface {
+	return &fakek8scnicncfiov1beta2.FakeK8sCniCncfIoV1beta2{Fake: &c.Fake}
 }

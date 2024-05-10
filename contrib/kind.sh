@@ -981,9 +981,14 @@ install_multus() {
 }
 
 install_mpolicy_crd() {
+
   echo "Installing multi-network-policy CRD ..."
+  pushd ${MANIFEST_OUTPUT_DIR}
   mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml"
-  run_kubectl apply -f "$mpolicy_manifest"
+  curl -sSL $mpolicy_manifest -o k8s.cni.cncf.io_multi-networkpolicies.yaml
+  sed -i'' -e '/v1beta1/,+3{s/storage: true/storage: false/};/v1beta2/,+3{s/false/true/}' k8s.cni.cncf.io_multi-networkpolicies.yaml
+  run_kubectl apply -f k8s.cni.cncf.io_multi-networkpolicies.yaml
+  popd
 }
 
 install_ipamclaim_crd() {

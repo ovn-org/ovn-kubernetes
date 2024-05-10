@@ -19,22 +19,22 @@ limitations under the License.
 package fake
 
 import (
-	v1beta1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1"
+	v1beta2 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta2"
 	rest "k8s.io/client-go/rest"
 	testing "k8s.io/client-go/testing"
 )
 
-type FakeK8sCniCncfIoV1beta1 struct {
+type FakeK8sCniCncfIoV1beta2 struct {
 	*testing.Fake
 }
 
-func (c *FakeK8sCniCncfIoV1beta1) MultiNetworkPolicies(namespace string) v1beta1.MultiNetworkPolicyInterface {
+func (c *FakeK8sCniCncfIoV1beta2) MultiNetworkPolicies(namespace string) v1beta2.MultiNetworkPolicyInterface {
 	return &FakeMultiNetworkPolicies{c, namespace}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
-func (c *FakeK8sCniCncfIoV1beta1) RESTClient() rest.Interface {
+func (c *FakeK8sCniCncfIoV1beta2) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
 }

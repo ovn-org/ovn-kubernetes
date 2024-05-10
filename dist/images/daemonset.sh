@@ -976,5 +976,8 @@ cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressip
 cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egressqoses.yaml
 cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
+mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml"
+curl -sSL $mpolicy_manifest -o ${output_dir}/k8s.cni.cncf.io_multi-networkpolicies.yaml
+sed -i'' -e '/v1beta1/,+3{s/storage: true/storage: false/};/v1beta2/,+3{s/false/true/}' ${output_dir}/k8s.cni.cncf.io_multi-networkpolicies.yaml
 
 exit 0

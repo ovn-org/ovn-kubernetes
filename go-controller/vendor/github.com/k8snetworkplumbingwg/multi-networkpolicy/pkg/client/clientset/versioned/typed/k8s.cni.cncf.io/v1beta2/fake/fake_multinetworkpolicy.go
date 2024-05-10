@@ -21,7 +21,7 @@ package fake
 import (
 	"context"
 
-	v1beta1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	v1beta2 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -32,29 +32,29 @@ import (
 
 // FakeMultiNetworkPolicies implements MultiNetworkPolicyInterface
 type FakeMultiNetworkPolicies struct {
-	Fake *FakeK8sCniCncfIoV1beta1
+	Fake *FakeK8sCniCncfIoV1beta2
 	ns   string
 }
 
-var multinetworkpoliciesResource = schema.GroupVersionResource{Group: "k8s.cni.cncf.io", Version: "v1beta1", Resource: "multi-networkpolicies"}
+var multinetworkpoliciesResource = schema.GroupVersionResource{Group: "k8s.cni.cncf.io", Version: "v1beta2", Resource: "multi-networkpolicies"}
 
-var multinetworkpoliciesKind = schema.GroupVersionKind{Group: "k8s.cni.cncf.io", Version: "v1beta1", Kind: "MultiNetworkPolicy"}
+var multinetworkpoliciesKind = schema.GroupVersionKind{Group: "k8s.cni.cncf.io", Version: "v1beta2", Kind: "MultiNetworkPolicy"}
 
 // Get takes name of the multiNetworkPolicy, and returns the corresponding multiNetworkPolicy object, and an error if there is any.
-func (c *FakeMultiNetworkPolicies) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.MultiNetworkPolicy, err error) {
+func (c *FakeMultiNetworkPolicies) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta2.MultiNetworkPolicy, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(multinetworkpoliciesResource, c.ns, name), &v1beta1.MultiNetworkPolicy{})
+		Invokes(testing.NewGetAction(multinetworkpoliciesResource, c.ns, name), &v1beta2.MultiNetworkPolicy{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*v1beta1.MultiNetworkPolicy), err
+	return obj.(*v1beta2.MultiNetworkPolicy), err
 }
 
 // List takes label and field selectors, and returns the list of MultiNetworkPolicies that match those selectors.
-func (c *FakeMultiNetworkPolicies) List(ctx context.Context, opts v1.ListOptions) (result *v1beta1.MultiNetworkPolicyList, err error) {
+func (c *FakeMultiNetworkPolicies) List(ctx context.Context, opts v1.ListOptions) (result *v1beta2.MultiNetworkPolicyList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(multinetworkpoliciesResource, multinetworkpoliciesKind, c.ns, opts), &v1beta1.MultiNetworkPolicyList{})
+		Invokes(testing.NewListAction(multinetworkpoliciesResource, multinetworkpoliciesKind, c.ns, opts), &v1beta2.MultiNetworkPolicyList{})
 
 	if obj == nil {
 		return nil, err
@@ -64,8 +64,8 @@ func (c *FakeMultiNetworkPolicies) List(ctx context.Context, opts v1.ListOptions
 	if label == nil {
 		label = labels.Everything()
 	}
-	list := &v1beta1.MultiNetworkPolicyList{ListMeta: obj.(*v1beta1.MultiNetworkPolicyList).ListMeta}
-	for _, item := range obj.(*v1beta1.MultiNetworkPolicyList).Items {
+	list := &v1beta2.MultiNetworkPolicyList{ListMeta: obj.(*v1beta2.MultiNetworkPolicyList).ListMeta}
+	for _, item := range obj.(*v1beta2.MultiNetworkPolicyList).Items {
 		if label.Matches(labels.Set(item.Labels)) {
 			list.Items = append(list.Items, item)
 		}
@@ -81,31 +81,31 @@ func (c *FakeMultiNetworkPolicies) Watch(ctx context.Context, opts v1.ListOption
 }
 
 // Create takes the representation of a multiNetworkPolicy and creates it.  Returns the server's representation of the multiNetworkPolicy, and an error, if there is any.
-func (c *FakeMultiNetworkPolicies) Create(ctx context.Context, multiNetworkPolicy *v1beta1.MultiNetworkPolicy, opts v1.CreateOptions) (result *v1beta1.MultiNetworkPolicy, err error) {
+func (c *FakeMultiNetworkPolicies) Create(ctx context.Context, multiNetworkPolicy *v1beta2.MultiNetworkPolicy, opts v1.CreateOptions) (result *v1beta2.MultiNetworkPolicy, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(multinetworkpoliciesResource, c.ns, multiNetworkPolicy), &v1beta1.MultiNetworkPolicy{})
+		Invokes(testing.NewCreateAction(multinetworkpoliciesResource, c.ns, multiNetworkPolicy), &v1beta2.MultiNetworkPolicy{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*v1beta1.MultiNetworkPolicy), err
+	return obj.(*v1beta2.MultiNetworkPolicy), err
 }
 
 // Update takes the representation of a multiNetworkPolicy and updates it. Returns the server's representation of the multiNetworkPolicy, and an error, if there is any.
-func (c *FakeMultiNetworkPolicies) Update(ctx context.Context, multiNetworkPolicy *v1beta1.MultiNetworkPolicy, opts v1.UpdateOptions) (result *v1beta1.MultiNetworkPolicy, err error) {
+func (c *FakeMultiNetworkPolicies) Update(ctx context.Context, multiNetworkPolicy *v1beta2.MultiNetworkPolicy, opts v1.UpdateOptions) (result *v1beta2.MultiNetworkPolicy, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(multinetworkpoliciesResource, c.ns, multiNetworkPolicy), &v1beta1.MultiNetworkPolicy{})
+		Invokes(testing.NewUpdateAction(multinetworkpoliciesResource, c.ns, multiNetworkPolicy), &v1beta2.MultiNetworkPolicy{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*v1beta1.MultiNetworkPolicy), err
+	return obj.(*v1beta2.MultiNetworkPolicy), err
 }
 
 // Delete takes name of the multiNetworkPolicy and deletes it. Returns an error if one occurs.
 func (c *FakeMultiNetworkPolicies) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(multinetworkpoliciesResource, c.ns, name), &v1beta1.MultiNetworkPolicy{})
+		Invokes(testing.NewDeleteAction(multinetworkpoliciesResource, c.ns, name), &v1beta2.MultiNetworkPolicy{})
 
 	return err
 }
@@ -114,17 +114,17 @@ func (c *FakeMultiNetworkPolicies) Delete(ctx context.Context, name string, opts
 func (c *FakeMultiNetworkPolicies) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
 	action := testing.NewDeleteCollectionAction(multinetworkpoliciesResource, c.ns, listOpts)
 
-	_, err := c.Fake.Invokes(action, &v1beta1.MultiNetworkPolicyList{})
+	_, err := c.Fake.Invokes(action, &v1beta2.MultiNetworkPolicyList{})
 	return err
 }
 
 // Patch applies the patch and returns the patched multiNetworkPolicy.
-func (c *FakeMultiNetworkPolicies) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.MultiNetworkPolicy, err error) {
+func (c *FakeMultiNetworkPolicies) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta2.MultiNetworkPolicy, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(multinetworkpoliciesResource, c.ns, name, pt, data, subresources...), &v1beta1.MultiNetworkPolicy{})
+		Invokes(testing.NewPatchSubresourceAction(multinetworkpoliciesResource, c.ns, name, pt, data, subresources...), &v1beta2.MultiNetworkPolicy{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*v1beta1.MultiNetworkPolicy), err
+	return obj.(*v1beta2.MultiNetworkPolicy), err
 }

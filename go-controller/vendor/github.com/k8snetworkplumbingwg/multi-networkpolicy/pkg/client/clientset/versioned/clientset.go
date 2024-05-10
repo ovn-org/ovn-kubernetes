@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Kubernetes Authors
+Copyright 2022 The Kubernetes Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	k8scnicncfiov1beta1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1"
+	k8scnicncfiov1beta2 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta2"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
@@ -30,6 +31,7 @@ import (
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
 	K8sCniCncfIoV1beta1() k8scnicncfiov1beta1.K8sCniCncfIoV1beta1Interface
+	K8sCniCncfIoV1beta2() k8scnicncfiov1beta2.K8sCniCncfIoV1beta2Interface
 }
 
 // Clientset contains the clients for groups. Each group has exactly one
@@ -37,11 +39,17 @@ type Interface interface {
 type Clientset struct {
 	*discovery.DiscoveryClient
 	k8sCniCncfIoV1beta1 *k8scnicncfiov1beta1.K8sCniCncfIoV1beta1Client
+	k8sCniCncfIoV1beta2 *k8scnicncfiov1beta2.K8sCniCncfIoV1beta2Client
 }
 
 // K8sCniCncfIoV1beta1 retrieves the K8sCniCncfIoV1beta1Client
 func (c *Clientset) K8sCniCncfIoV1beta1() k8scnicncfiov1beta1.K8sCniCncfIoV1beta1Interface {
 	return c.k8sCniCncfIoV1beta1
+}
+
+// K8sCniCncfIoV1beta2 retrieves the K8sCniCncfIoV1beta2Client
+func (c *Clientset) K8sCniCncfIoV1beta2() k8scnicncfiov1beta2.K8sCniCncfIoV1beta2Interface {
+	return c.k8sCniCncfIoV1beta2
 }
 
 // Discovery retrieves the DiscoveryClient
@@ -69,6 +77,10 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	cs.k8sCniCncfIoV1beta2, err = k8scnicncfiov1beta2.NewForConfig(&configShallowCopy)
+	if err != nil {
+		return nil, err
+	}
 
 	cs.DiscoveryClient, err = discovery.NewDiscoveryClientForConfig(&configShallowCopy)
 	if err != nil {
@@ -82,6 +94,7 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 func NewForConfigOrDie(c *rest.Config) *Clientset {
 	var cs Clientset
 	cs.k8sCniCncfIoV1beta1 = k8scnicncfiov1beta1.NewForConfigOrDie(c)
+	cs.k8sCniCncfIoV1beta2 = k8scnicncfiov1beta2.NewForConfigOrDie(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClientForConfigOrDie(c)
 	return &cs
@@ -91,6 +104,7 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
 	cs.k8sCniCncfIoV1beta1 = k8scnicncfiov1beta1.New(c)
+	cs.k8sCniCncfIoV1beta2 = k8scnicncfiov1beta2.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
 	return &cs
