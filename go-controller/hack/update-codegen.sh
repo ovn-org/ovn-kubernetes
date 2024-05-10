@@ -13,7 +13,7 @@ SCRIPT_ROOT=$(dirname ${BASH_SOURCE})/..
 olddir="${PWD}"
 builddir="$(mktemp -d)"
 cd "${builddir}"
-GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.14.0
 BINS=(
     deepcopy-gen
     applyconfiguration-gen
