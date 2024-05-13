@@ -1,0 +1,17 @@
+name: Ask a Question
+description: Ask a question or get support related to anything in ovn-kubernetes
+labels: kind/support, kind/question
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What would you like to know?
+      description: |
+        Please provide as much info as possible. Not doing so may result in your bug not being addressed in a timely manner.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Anything else we need to know?
