@@ -85,27 +85,16 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, nodeAnno
 
 	// Create a OVS internal interface.
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(mp.nodeName)
+	macAddress := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
 		"--", "--may-exist", "add-port", "br-int", types.K8sMgmtIntfName,
 		"--", "set", "interface", types.K8sMgmtIntfName,
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
-		"external-ids:iface-id="+types.K8sPrefix+mp.nodeName)
+		"external-ids:iface-id="+types.K8sPrefix+mp.nodeName,
+		"mac="+strings.ReplaceAll(macAddress.String(), ":", "\\:"))
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return nil, err
-	}
-	macAddress, err := util.GetOVSPortMACAddress(types.K8sMgmtIntfName)
-	if err != nil {
-		klog.Errorf("Failed to get management port MAC address: %v", err)
-		return nil, err
-	}
-	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", types.K8sMgmtIntfName,
-		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
-	if err != nil {
-		klog.Errorf("Failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress.String(),
-			types.K8sMgmtIntfName, stderr, err)
 		return nil, err
 	}
 
@@ -158,6 +147,25 @@ func managementPortReady() (bool, error) {
 	if !strings.Contains(stdout, "actions=output:"+ofport) {
 		return false, nil
 	}
+
+	// In the case of transitioning from random MAC to ip-mapped MAC, following code will get the
+	// MAC from mgmt port, and check if the address is applied in openflow table 35 or not
+	mac, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", k8sMgmtIntfName, "mac")
+	if err != nil {
+		return false, nil
+	}
+	// check mac address in openflow
+	stdout, _, err = util.RunOVSOfctl("--no-stats", "--no-names", "dump-flows", "br-int",
+		"table=35,dl_dst="+mac)
+	if err != nil {
+		klog.Warningf("Failed to look up MAC address of management port in openflow: %v", err)
+		return false, nil
+	}
+	if stdout == "" {
+		klog.Warningf("Openflow doesn't have MAC address %s for management port, not ready.", mac)
+		return false, nil
+	}
+
 	klog.Infof("Management port %s is ready", k8sMgmtIntfName)
 	return true, nil
 }

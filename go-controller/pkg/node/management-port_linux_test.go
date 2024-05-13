@@ -195,12 +195,12 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	configs []managementPortTestConfig, expectedLRPMAC string) {
 	const (
 		nodeName      string = "node1"
-		mgtPortMAC    string = "00:00:00:55:66:77"
 		mgtPort       string = types.K8sMgmtIntfName
 		legacyMgtPort string = types.K8sPrefix + nodeName
 		mtu           string = "1400"
 	)
 
+	mgtPortMAC := util.IPAddrToHWAddr(configs[0].GetMgtPortAddr().IP).String()
 	// generic setup
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgtPort,
@@ -211,14 +211,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		Output: "internal," + mgtPort + "_0",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + legacyMgtPort + " -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + legacyMgtPort,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac_in_use",
-		Output: mgtPortMAC,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 set interface " + mgtPort + " " + fmt.Sprintf("mac=%s", strings.ReplaceAll(mgtPortMAC, ":", "\\:")),
+		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + legacyMgtPort + " -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + legacyMgtPort + " mac=" + strings.ReplaceAll(mgtPortMAC, ":", "\\:"),
 	})
 	for _, cfg := range configs {
 		if cfg.family == netlink.FAMILY_V4 {
@@ -240,6 +233,14 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=65,out_port=1",
 		Output: " table=65, priority=100,reg15=0x2,metadata=0x2 actions=output:1",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac",
+		Output: mgtPortMAC,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=35,dl_dst=" + mgtPortMAC,
+		Output: " table=35, priority=50,metadata=0x5,dl_dst=" + mgtPortMAC,
 	})
 
 	err := util.SetExec(fexec)
@@ -337,6 +338,14 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=65,out_port=1",
 		Output: " table=65, priority=100,reg15=0x2,metadata=0x2 actions=output:1",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac",
+		Output: mgtPortMAC,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=35,dl_dst=" + mgtPortMAC,
+		Output: " table=35, priority=50,metadata=0x5,dl_dst=" + mgtPortMAC,
 	})
 
 	err := util.SetExec(fexec)
