@@ -176,6 +176,7 @@ usage() {
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
+    echo "--add-nodes                         Adds nodes to an existing cluster. The number of nodes to be added is specified by --num-workers. Also use -ic if the cluster is using interconnect."
     echo ""
 }
 
@@ -359,6 +360,9 @@ parse_args() {
                                                 ;;
             --deploy)                           KIND_CREATE=false
                                                 ;;
+            --add-nodes)                        KIND_ADD_NODES=true
+                                                KIND_CREATE=false
+                                                ;;
             -h | --help )                       usage
                                                 exit
                                                 ;;
@@ -514,6 +518,7 @@ set_default_params() {
   # Set default values
   # Used for multi cluster setups
   KIND_CREATE=${KIND_CREATE:-true}
+  KIND_ADD_NODES=${KIND_ADD_NODES:-false}
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
   # Setup KUBECONFIG patch based on cluster-name
   export KUBECONFIG=${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME}.conf}
@@ -735,6 +740,25 @@ EOF
 
 }
 
+scale_kind_cluster() {
+  echo "Scaling cluster to ${KIND_NUM_WORKER} workers..."
+  rm -rf /tmp/kindscaler
+  # change this to https://github.com/lobuhi/kindscaler once PR https://github.com/lobuhi/kindscaler/pull/1 is accepted
+  git clone https://github.com/trozet/kindscaler /tmp/kindscaler
+  /tmp/kindscaler/kindscaler.sh ${KIND_CLUSTER_NAME} -r worker -c ${KIND_NUM_WORKER}
+  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
+      if [ "${KIND_NUM_NODES_PER_ZONE}" == "1" ]; then
+       label_ovn_single_node_zones
+      else
+        label_ovn_multiple_nodes_zones
+      fi
+  fi
+  if [ "$OVN_IMAGE" == local ]; then
+    set_ovn_image
+  fi
+  install_ovn_image
+}
+
 create_kind_cluster() {
   # Output of the jinjanate command
   KIND_CONFIG_LCL=${DIR}/kind-${KIND_CLUSTER_NAME}.yaml
@@ -817,14 +841,18 @@ coredns_patch() {
   printf '%s' "${fixed_coredns}" | kubectl apply -f -
 }
 
+set_ovn_image() {
+  # if we're using the local registry and still need to build, push to local registry
+  if [ "$KIND_LOCAL_REGISTRY" == true ];then
+    OVN_IMAGE="localhost:5000/ovn-daemonset-f:latest"
+  else
+    OVN_IMAGE="localhost/ovn-daemonset-f:dev"
+  fi
+}
+
 build_ovn_image() {
   if [ "$OVN_IMAGE" == local ]; then
-    # if we're using the local registry and still need to build, push to local registry
-    if [ "$KIND_LOCAL_REGISTRY" == true ];then
-      OVN_IMAGE="localhost:5000/ovn-daemonset-f:latest"
-    else
-      OVN_IMAGE="localhost/ovn-daemonset-f:dev"
-    fi
+    set_ovn_image
 
     # Build ovn image
     pushd ${DIR}/../go-controller
@@ -946,11 +974,15 @@ install_ovn_global_zone() {
   run_kubectl apply -f ovnkube-node.yaml
 }
 
-install_ovn_single_node_zones() {
+label_ovn_single_node_zones() {
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
     kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
   done
+}
+
+install_ovn_single_node_zones() {
+  label_ovn_single_node_zones
 
   if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
     run_kubectl apply -f ovnkube-identity.yaml
@@ -959,8 +991,7 @@ install_ovn_single_node_zones() {
   run_kubectl apply -f ovnkube-single-node-zone.yaml
 }
 
-
-install_ovn_multiple_nodes_zones() {
+label_ovn_multiple_nodes_zones() {
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort)
   zone_idx=1
   n=1
@@ -979,6 +1010,11 @@ install_ovn_multiple_nodes_zones() {
       n=$((n+1))
     fi
   done
+}
+
+
+install_ovn_multiple_nodes_zones() {
+  label_ovn_multiple_nodes_zones
 
   if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
     run_kubectl apply -f ovnkube-identity.yaml
@@ -1459,6 +1495,12 @@ if [ "${ENABLE_IPSEC}" == true ]; then
 fi
 
 set -euxo pipefail
+if [ "$KIND_ADD_NODES" == true ]; then
+  scale_kind_cluster
+  kubectl_wait_pods
+  exit 0
+fi
+
 check_ipv6
 set_cluster_cidr_ip_families
 if [ "$KIND_CREATE" == true ]; then
