@@ -32,7 +32,7 @@ body:
       label: Anything else we need to know?
 
   - type: textarea
-    id: OVN Kubernetes Version
+    id: ovn-kubernetes-version
     attributes:
       label: OVN Kubernetes version
       value: |
@@ -48,7 +48,7 @@ body:
       required: true
 
   - type: textarea
-    id: Kubernetes Version
+    id: kubernetes-version
     attributes:
       label: Kubernetes version
       value: |
@@ -64,7 +64,7 @@ body:
       required: true
 
   - type: textarea
-    id: OVN Version
+    id: ovn-version
     attributes:
       label: OVN version
       value: |
@@ -79,7 +79,7 @@ body:
         </details>
 
   - type: textarea
-    id: OVS Version
+    id: ovs-version
     attributes:
       label: OVS version
       value: |
