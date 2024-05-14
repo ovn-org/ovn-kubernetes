@@ -117,7 +117,9 @@ nav:
     - InfrastructureSecurityControls:
       - NodeIdentity: features/infrastructure-security-controls/node-identity.md
     - MultiNetworking:
-      - Multihoming: features/multi-homing.md
+      - Multihoming: features/multiple-networks/multi-homing.md
+      - MultiNetworkPolicies: features/multiple-networks/multi-network-policies.md
+      - MultiNetworkRails: features/multiple-networks/multi-vtep.md
     - Multicast: features/multicast.md
     - LiveMigration: features/live-migration.md
     - HybridOverlay: features/hybrid-overlay.md
