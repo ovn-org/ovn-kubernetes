@@ -1190,14 +1190,30 @@ passwd:
 			topology    string
 		}
 		DescribeTable("should keep ip", func(td testData) {
+			netConfig := newNetworkAttachmentConfig(
+				networkAttachmentConfigParams{
+					namespace:          namespace,
+					name:               "net1",
+					topology:           td.topology,
+					cidr:               strings.Join([]string{cidrIPv4, cidrIPv6}, ","),
+					allowPersistentIPs: true,
+				})
+
+			if td.topology == "localnet" {
+				By("setting up the localnet underlay")
+				nodes := ovsPods(clientSet)
+				Expect(nodes).NotTo(BeEmpty())
+				defer func() {
+					By("tearing down the localnet underlay")
+					Expect(teardownUnderlay(nodes)).To(Succeed())
+				}()
+
+				const secondaryInterfaceName = "eth1"
+				Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+			}
+
 			By("Creating NetworkAttachmentDefinition")
-			nad = generateNAD(newNetworkAttachmentConfig(networkAttachmentConfigParams{
-				namespace:          namespace,
-				name:               "net1",
-				topology:           td.topology,
-				cidr:               strings.Join([]string{cidrIPv4, cidrIPv6}, ","),
-				allowPersistentIPs: true,
-			}))
+			nad = generateNAD(netConfig)
 			Expect(crClient.Create(context.Background(), nad)).To(Succeed())
 			workerNodeList, err := fr.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{LabelSelector: labels.FormatLabels(map[string]string{"node-role.kubernetes.io/worker": ""})})
 			Expect(err).ToNot(HaveOccurred())
