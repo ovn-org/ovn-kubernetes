@@ -71,6 +71,13 @@ func getEgressQosAddrSetDbIDs(namespace, priority, controller string) *libovsdbo
 	})
 }
 
+func getEgressQoSRuleDbIDs(namespace string, rulePriority int) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.QoSEgressQoS, DefaultNetworkControllerName, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: namespace,
+		libovsdbops.PriorityKey:   fmt.Sprintf("%d", rulePriority),
+	})
+}
+
 // shallow copies the EgressQoS object provided.
 func (oc *DefaultNetworkController) cloneEgressQoS(raw *egressqosapi.EgressQoS) (*egressQoS, error) {
 	eq := &egressQoS{
@@ -404,16 +411,13 @@ func (oc *DefaultNetworkController) repairEgressQoSes() error {
 	for _, q := range existing {
 		nsWithQoS[q.Namespace] = true
 	}
-
-	p := func(q *nbdb.QoS) bool {
-		ns, ok := q.ExternalIDs["EgressQoS"]
-		if !ok {
-			return false
-		}
-
-		return !nsWithQoS[ns]
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.QoSEgressQoS, oc.controllerName, nil)
+	predicateQoSFunc := func(q *nbdb.QoS) bool {
+		// ObjectNameKey is namespace
+		return !nsWithQoS[q.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
 	}
-	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
+	qPredicate := libovsdbops.GetPredicate[*nbdb.QoS](predicateIDs, predicateQoSFunc)
+	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, qPredicate)
 	if err != nil {
 		return err
 	}
@@ -438,7 +442,7 @@ func (oc *DefaultNetworkController) repairEgressQoSes() error {
 			return fmt.Errorf("unable to remove stale qoses, err: %v", err)
 		}
 	}
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName, nil)
+	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName, nil)
 	predicateFunc := func(as *nbdb.AddressSet) bool {
 		// ObjectNameKey is namespace
 		return !nsWithQoS[as.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
@@ -509,15 +513,12 @@ func (oc *DefaultNetworkController) cleanEgressQoSNS(namespace string) error {
 
 	eq.Lock()
 	defer eq.Unlock()
-
-	p := func(q *nbdb.QoS) bool {
-		eqNs, ok := q.ExternalIDs["EgressQoS"]
-		if !ok { // the QoS is not managed by an EgressQoS
-			return false
-		}
-		return eqNs == eq.namespace
-	}
-	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.QoSEgressQoS, oc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: eq.namespace,
+		})
+	qPredicate := libovsdbops.GetPredicate[*nbdb.QoS](predicateIDs, nil)
+	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, qPredicate)
 	if err != nil {
 		return err
 	}
@@ -548,7 +549,7 @@ func (oc *DefaultNetworkController) cleanEgressQoSNS(namespace string) error {
 			return fmt.Errorf("failed to delete qos, err: %s", err)
 		}
 	}
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName,
+	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: eq.namespace,
 		})
@@ -605,7 +606,7 @@ func (oc *DefaultNetworkController) addEgressQoS(eqObj *egressqosapi.EgressQoS) 
 			Match:       match,
 			Priority:    r.priority,
 			Action:      map[string]int{nbdb.QoSActionDSCP: r.dscp},
-			ExternalIDs: map[string]string{"EgressQoS": eq.namespace},
+			ExternalIDs: getEgressQoSRuleDbIDs(eq.namespace, r.priority).GetExternalIDs(),
 		}
 		qoses = append(qoses, qos)
 	}
@@ -1028,12 +1029,9 @@ func (oc *DefaultNetworkController) syncEgressQoSNode(key string) error {
 	if err != nil {
 		return err
 	}
-
-	p := func(q *nbdb.QoS) bool {
-		_, ok := q.ExternalIDs["EgressQoS"]
-		return ok
-	}
-	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.QoSEgressQoS, oc.controllerName, nil)
+	qPredicate := libovsdbops.GetPredicate[*nbdb.QoS](predicateIDs, nil)
+	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, qPredicate)
 	if err != nil {
 		return err
 	}

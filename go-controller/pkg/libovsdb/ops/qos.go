@@ -2,7 +2,6 @@ package ops
 
 import (
 	"context"
-	"strings"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
@@ -29,10 +28,7 @@ func CreateOrUpdateQoSesOps(nbClient libovsdbclient.Client, ops []libovsdb.Opera
 		// can't use i in the predicate, for loop replaces it in-memory
 		qos := qoses[i]
 		opModel := operationModel{
-			Model: qos,
-			ModelPredicate: func(q *nbdb.QoS) bool {
-				return strings.Contains(q.Match, qos.Match) && q.Priority == qos.Priority
-			},
+			Model:          qos,
 			OnModelUpdates: []interface{}{}, // update all fields
 			ErrNotFound:    false,
 			BulkOp:         false,
@@ -50,10 +46,7 @@ func UpdateQoSesOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, qo
 		// can't use i in the predicate, for loop replaces it in-memory
 		qos := qoses[i]
 		opModel := operationModel{
-			Model: qos,
-			ModelPredicate: func(q *nbdb.QoS) bool {
-				return strings.Contains(q.Match, qos.Match) && q.Priority == qos.Priority
-			},
+			Model:          qos,
 			OnModelUpdates: []interface{}{}, // update all fields
 			ErrNotFound:    true,
 			BulkOp:         false,

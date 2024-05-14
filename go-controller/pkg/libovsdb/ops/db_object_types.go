@@ -8,6 +8,7 @@ const (
 	dhcpOptions
 	portGroup
 	logicalRouterPolicy
+	qos
 )
 
 const (
@@ -291,4 +292,12 @@ var LogicalRouterPolicyEgressIP = newObjectIDsType(logicalRouterPolicy, EgressIP
 	ObjectNameKey,
 	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
 	IPFamilyKey,
+})
+
+var QoSEgressQoS = newObjectIDsType(qos, EgressQoSOwnerType, []ExternalIDKey{
+	// the priority of the QoSRule (OVN priority is the same as the rule index priority for this feature)
+	// this value will be unique in a given namespace
+	PriorityKey,
+	// namespace
+	ObjectNameKey,
 })
