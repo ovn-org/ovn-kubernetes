@@ -1,8 +1,8 @@
 ![ovn-kubernetes-logo](images/ovn-inside-k8s.png)
 
-# OVN Kubernetes: A Robust Kubernetes Networking Provider
+# OVN-Kubernetes: A Robust Kubernetes Networking Provider
 
-OVN Kubernetes (Open Virtual Networking - Kubernetes) is an open-source project
+OVN-Kubernetes (Open Virtual Networking - Kubernetes) is an open-source project
 that provides a robust networking solution for Kubernetes clusters with
 OVN (Open Virtual Networking) and Open vSwitch (Open Virtual Switch) at its core.
 It is a Kubernetes networking conformant plugin written according to the
@@ -36,10 +36,10 @@ CNI (Container Network Interface) specifications.
     endpoints, topology aware hints which involve multiple moving pieces and
     components that needs a "driver" that ensures they work as expected.
 
-## What is OVN Kubernetes?
+## What is OVN-Kubernetes?
 
-OVN Kubernetes was designed to precisely solve the above problems in a Kubernetes
-cluster. The OVN Kubernetes plugin watches the Kubernetes API. It acts on the
+OVN-Kubernetes was designed to precisely solve the above problems in a Kubernetes
+cluster. The OVN-Kubernetes plugin watches the Kubernetes API. It acts on the
 generated Kubernetes cluster events by creating and configuring the corresponding
 OVN logical constructs in the OVN database for those events. OVN (which is an
 abstraction on top of Open vSwitch) converts these logical constructs into logical
@@ -48,7 +48,7 @@ networking on a Kubernetes cluster.
 
 ![ovn-kubernetes-introduction](images/ovnkube-introduction.png)
 
-The key functionalities and features that OVN Kubernetes provides include:
+The key functionalities and features that OVN-Kubernetes provides include:
 
 - Kubernetes Core Networking Conformance
     - Creates pod networking including IP Address Management (IPAM) allocation
@@ -82,28 +82,28 @@ The key functionalities and features that OVN Kubernetes provides include:
     - Adds support for creating secondary and local networks in addition to the
     default primary networks
 
-## Why choose OVN Kubernetes in Kubernetes ecosystem?
+## Why choose OVN-Kubernetes in Kubernetes ecosystem?
 
 Networking is the backbone for any Kubernetes cluster. Kubernetes at its core
 provides an extensive set of Networking APIs and features that need to
 be implemented in a Kubernetes conformant manner for networking to work properly
-in a Kubernetes cluster. The aim of OVN Kubernetes project is to be able to
+in a Kubernetes cluster. The aim of OVN-Kubernetes project is to be able to
 provide a pluggable and seamless networking platform for Kubernetes end users.
 The project focuses strictly on enhancing networking for the Kubernetes platform
 and includes a wide variety of features that are critical to enterprise and
 telco users. OVN-Kubernetes community members are active in upstream Kubernetes
 (particularly in SIG Network) to create new features and then realize them in
-OVN Kubernetes. In addition to a feature rich platform, the project also aims
+OVN-Kubernetes. In addition to a feature rich platform, the project also aims
 to be a highly scalable and performant Networking Platform.
 
 For more details, please see the following:
 
-- [OVN Kubernetes Overview](getting-started/overview.md) for an overview of ovn-kubernetes.
-- [Deploying OVN Kubernetes cluster using KIND](installation/kind.md)
-- [Deploying OVN Kubernetes CNI using Helm](installation/helm.md)
-- [Setup and Building OVN Kubernetes](developer-guide/documentation.md) for instructions
-  on setting up your development environment and building ovn kubernetes.
-- [Contributing to OVN Kubernetes](governance/CONTRIBUTING.md) for how to get involved
+- [OVN-Kubernetes Overview](getting-started/overview.md) for an overview of ovn-kubernetes.
+- [Deploying OVN-Kubernetes cluster using KIND](installation/kind.md)
+- [Deploying OVN-Kubernetes CNI using Helm](installation/helm.md)
+- [Setup and Building OVN-Kubernetes](developer-guide/documentation.md) for instructions
+  on setting up your development environment and building ovn-kubernetes.
+- [Contributing to OVN-Kubernetes](governance/CONTRIBUTING.md) for how to get involved
   in our project
 - [Meet the Community](governance/MEETINGS.md) for details on community
   meeting details.

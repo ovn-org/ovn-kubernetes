@@ -48,7 +48,7 @@ COPY ./iptables-scripts/ip6tables /usr/sbin/
 COPY ./iptables-scripts/ip6tables-save /usr/sbin/
 COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 
-LABEL io.k8s.display-name="ovn kubernetes" \
+LABEL io.k8s.display-name="ovn-kubernetes" \
       io.k8s.description="ovnkube ubuntu image" 
 
 WORKDIR /root

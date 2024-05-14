@@ -9,7 +9,7 @@ East-West traffic (including pod -> node IP) is excluded from Egress IP.
 For more info, consider looking at the following links:
 - [Egress IP CRD](https://github.com/ovn-org/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/crd/egressip/v1/types.go#L47)
 - [Assigning an egress IP address](https://docs.okd.io/latest/networking/ovn_kubernetes_network_provider/assigning-egress-ips-ovn.html)
-- [Managing Egress IP in OpenShift 4 with OVN Kubernetes](https://rcarrata.com/openshift/egress-ip-ovn/)
+- [Managing Egress IP in OpenShift 4 with OVN-Kubernetes](https://rcarrata.com/openshift/egress-ip-ovn/)
 
 
 ## Example
