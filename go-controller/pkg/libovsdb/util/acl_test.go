@@ -175,7 +175,7 @@ func TestGetL3L4MatchesFromNamedPorts(t *testing.T) {
 	testcases := []struct {
 		desc     string
 		protocol []string
-		ports    map[string]*[]NamedNetworkPolicyPort
+		ports    map[string][]NamedNetworkPolicyPort
 		expected []string // per protocol
 	}{
 		{
@@ -187,25 +187,25 @@ func TestGetL3L4MatchesFromNamedPorts(t *testing.T) {
 		{
 			"empty map port policies",
 			[]string{"tcp"},
-			make(map[string]*[]NamedNetworkPolicyPort, 0),
+			make(map[string][]NamedNetworkPolicyPort, 0),
 			[]string{""},
 		},
 		{
 			"empty NamedPorts map",
 			[]string{"sctp"},
-			map[string]*[]NamedNetworkPolicyPort{},
+			map[string][]NamedNetworkPolicyPort{},
 			[]string{""},
 		},
 		{
 			"empty NamedPorts map with no matching pods",
 			[]string{"sctp"},
-			map[string]*[]NamedNetworkPolicyPort{"un-matched-pods": {}},
+			map[string][]NamedNetworkPolicyPort{"un-matched-pods": {}},
 			[]string{""},
 		},
 		{
 			"empty NamedPorts map with no matching pods for multiple ports",
 			[]string{"sctp"},
-			map[string]*[]NamedNetworkPolicyPort{
+			map[string][]NamedNetworkPolicyPort{
 				"un-matched-port-too-bad": {},
 				"un-matched-port-sad":     {},
 			},
@@ -214,7 +214,7 @@ func TestGetL3L4MatchesFromNamedPorts(t *testing.T) {
 		{
 			"single namedPort and single v4 namedPort representation",
 			[]string{"sctp"},
-			map[string]*[]NamedNetworkPolicyPort{
+			map[string][]NamedNetworkPolicyPort{
 				"web": {{L4PodPort: "35356", L3PodIPFamily: "ip4", L3PodIP: "10.128.1.4", L4Protocol: "sctp"}},
 			},
 			[]string{"sctp && ((ip4.dst == 10.128.1.4 && sctp.dst == 35356))"},
@@ -222,7 +222,7 @@ func TestGetL3L4MatchesFromNamedPorts(t *testing.T) {
 		{
 			"single namedPort and multiple v4 namedPort representations",
 			[]string{"tcp"},
-			map[string]*[]NamedNetworkPolicyPort{
+			map[string][]NamedNetworkPolicyPort{
 				"web": {
 					{L4PodPort: "35356", L3PodIPFamily: "ip4", L3PodIP: "10.128.1.4", L4Protocol: "tcp"},
 					{L4PodPort: "35354", L3PodIPFamily: "ip4", L3PodIP: "10.128.1.5", L4Protocol: "tcp"},
@@ -233,7 +233,7 @@ func TestGetL3L4MatchesFromNamedPorts(t *testing.T) {
 		{
 			"single namedPort and multiple v4 & v6 namedPort representations",
 			[]string{"tcp", "sctp"},
-			map[string]*[]NamedNetworkPolicyPort{
+			map[string][]NamedNetworkPolicyPort{
 				"web": {
 					{L4PodPort: "35356", L3PodIPFamily: "ip4", L3PodIP: "10.128.1.4", L4Protocol: "tcp"},
 					{L4PodPort: "35356", L3PodIPFamily: "ip6", L3PodIP: "fe00:10:128:1::4", L4Protocol: "tcp"},
@@ -247,7 +247,7 @@ func TestGetL3L4MatchesFromNamedPorts(t *testing.T) {
 		{
 			"multiple namedPorts and multiple v4 namedPort representations per port; same protocol",
 			[]string{"tcp"},
-			map[string]*[]NamedNetworkPolicyPort{
+			map[string][]NamedNetworkPolicyPort{
 				"web": {
 					{L4PodPort: "35356", L3PodIPFamily: "ip4", L3PodIP: "10.128.1.4", L4Protocol: "tcp"},
 					{L4PodPort: "35354", L3PodIPFamily: "ip4", L3PodIP: "10.128.1.5", L4Protocol: "tcp"},
@@ -262,7 +262,7 @@ func TestGetL3L4MatchesFromNamedPorts(t *testing.T) {
 		{
 			"multiple namedPorts and multiple v4 & v6 namedPort representations per port; all protocols",
 			[]string{"tcp", "sctp", "udp"},
-			map[string]*[]NamedNetworkPolicyPort{
+			map[string][]NamedNetworkPolicyPort{
 				"web": {
 					{L4PodPort: "35356", L3PodIPFamily: "ip4", L3PodIP: "10.128.1.4", L4Protocol: "tcp"},
 					{L4PodPort: "35356", L3PodIPFamily: "ip4", L3PodIP: "10.128.1.5", L4Protocol: "tcp"},

@@ -201,7 +201,6 @@ func convertPodIPContainerPortToNNPP(cPort v1.ContainerPort, podIPs []net.IP) []
 // sortNamedPorts does an in place sort where it arranges the NamedNetworkPolicyPort
 // in the provided array in a sorted fashion based on L3PodIP.
 // We can use the L3PodIP because it is guaranteed to be unique for a given named port
-func sortNamedPorts(namedPortList *[]libovsdbutil.NamedNetworkPolicyPort) {
-	out := *namedPortList
-	sort.SliceStable(out, func(i, j int) bool { return out[i].L3PodIP < out[j].L3PodIP })
+func sortNamedPorts(namedPortList []libovsdbutil.NamedNetworkPolicyPort) {
+	sort.SliceStable(namedPortList, func(i, j int) bool { return namedPortList[i].L3PodIP < namedPortList[j].L3PodIP })
 }

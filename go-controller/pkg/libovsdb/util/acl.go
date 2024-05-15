@@ -334,16 +334,13 @@ type NamedNetworkPolicyPort struct {
 
 // GetL3L4MatchesFromNamedPorts returns a map that has protocol as the key and
 // the corresponding L3L4NamedPort ACL Match as its value
-func GetL3L4MatchesFromNamedPorts(ruleNamedPorts map[string]*[]NamedNetworkPolicyPort) map[string]string {
+func GetL3L4MatchesFromNamedPorts(ruleNamedPorts map[string][]NamedNetworkPolicyPort) map[string]string {
 	// {k:protocol(string), v:l3l4Match(string)}
 	l3l4NamedPortsMatches := make(map[string]string)
 	var l3l4TCPMatch, l3l4UDPMatch, l3l4SCTPMatch []string
 	template := "(%s.dst == %s && %s.dst == %s)"
 	for _, namedPorts := range ruleNamedPorts {
-		if namedPorts == nil {
-			continue
-		}
-		for _, namedPortRep := range *namedPorts {
+		for _, namedPortRep := range namedPorts {
 			l3l4match := fmt.Sprintf(template, namedPortRep.L3PodIPFamily, namedPortRep.L3PodIP, namedPortRep.L4Protocol, namedPortRep.L4PodPort)
 			switch namedPortRep.L4Protocol {
 			case "tcp":

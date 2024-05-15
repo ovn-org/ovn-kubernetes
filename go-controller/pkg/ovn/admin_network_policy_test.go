@@ -91,7 +91,7 @@ func getDefaultPGForANPSubject(anpName string, portUUIDs []string, acls []*nbdb.
 
 func getANPGressACL(action, anpName, direction string, rulePriority int32,
 	ruleIndex int32, ports *[]anpapi.AdminNetworkPolicyPort,
-	namedPorts map[string]*[]libovsdbutil.NamedNetworkPolicyPort, banp bool) []*nbdb.ACL {
+	namedPorts map[string][]libovsdbutil.NamedNetworkPolicyPort, banp bool) []*nbdb.ACL {
 	retACLs := []*nbdb.ACL{}
 	// we are not using BuildACL and instead manually building it on purpose so that the code path for BuildACL is also tested
 	acl := nbdb.ACL{}
@@ -148,7 +148,7 @@ func getANPGressACL(action, anpName, direction string, rulePriority int32,
 	}
 	// determine L4 Port match
 	npps := []*libovsdbutil.NetworkPolicyPort{}
-	nnpps := make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort, 0)
+	nnpps := make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0)
 	if ports != nil && len(*ports) != 0 {
 		for _, port := range *ports {
 			if port.NamedPort != nil {
@@ -213,7 +213,7 @@ func getANPGressACL(action, anpName, direction string, rulePriority int32,
 	return retACLs
 }
 
-func getACLsForANPRulesWithNamedPorts(anp *anpapi.AdminNetworkPolicy, namedIPorts, namedEPorts map[string]*[]libovsdbutil.NamedNetworkPolicyPort) []*nbdb.ACL {
+func getACLsForANPRulesWithNamedPorts(anp *anpapi.AdminNetworkPolicy, namedIPorts, namedEPorts map[string][]libovsdbutil.NamedNetworkPolicyPort) []*nbdb.ACL {
 	aclResults := []*nbdb.ACL{}
 	ovnBaseANPPriority := getBaseRulePriority(anp.Spec.Priority)
 	for i, ingress := range anp.Spec.Ingress {
@@ -1182,17 +1182,17 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				err = fakeOVN.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// update namedPorts for constructing right test ACLs
-				namedEPorts := make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort)
-				namedIPorts := make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort)
-				namedEPorts["web"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+				namedEPorts := make(map[string][]libovsdbutil.NamedNetworkPolicyPort)
+				namedIPorts := make(map[string][]libovsdbutil.NamedNetworkPolicyPort)
+				namedEPorts["web"] = []libovsdbutil.NamedNetworkPolicyPort{
 					{L4Protocol: "tcp", L3PodIP: anpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "3535"},
 					{L4Protocol: "tcp", L3PodIP: anpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "3535"},
 				}
-				namedEPorts["web123"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+				namedEPorts["web123"] = []libovsdbutil.NamedNetworkPolicyPort{
 					{L4Protocol: "sctp", L3PodIP: anpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "35356"},
 					{L4Protocol: "sctp", L3PodIP: anpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "35356"},
 				}
-				namedIPorts["dns"] = &[]libovsdbutil.NamedNetworkPolicyPort{}
+				namedIPorts["dns"] = []libovsdbutil.NamedNetworkPolicyPort{}
 				fakeOVN.InitAndRunANPController()
 				fakeOVN.fakeClient.ANPClient.(*anpfake.Clientset).PrependReactor("update", "adminnetworkpolicies", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
 					update := action.(clienttesting.UpdateAction)
@@ -1332,7 +1332,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				anpSubjectPod.Labels["rv"] = "resourceVersionUTHack"
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(anpSubjectPod.Namespace).Update(context.TODO(), &anpSubjectPod, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				namedIPorts["dns"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+				namedIPorts["dns"] = []libovsdbutil.NamedNetworkPolicyPort{
 					{L4Protocol: "udp", L3PodIP: anpPodV4IP, L3PodIPFamily: "ip4", L4PodPort: "5353"},
 					{L4Protocol: "udp", L3PodIP: anpPodV6IP, L3PodIPFamily: "ip6", L4PodPort: "5353"},
 				}
@@ -1406,11 +1406,11 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(anpPeerPod.Namespace).Create(context.TODO(), &anpPeerPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// update namedPorts for constructing right test ACLs
-				namedEPorts["web"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+				namedEPorts["web"] = []libovsdbutil.NamedNetworkPolicyPort{
 					{L4Protocol: "tcp", L3PodIP: anpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "3535"},
 					{L4Protocol: "tcp", L3PodIP: anpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "3535"},
 				}
-				namedEPorts["web123"] = &[]libovsdbutil.NamedNetworkPolicyPort{
+				namedEPorts["web123"] = []libovsdbutil.NamedNetworkPolicyPort{
 					{L4Protocol: "sctp", L3PodIP: anpPodV4IP2, L3PodIPFamily: "ip4", L4PodPort: "35356"},
 					{L4Protocol: "sctp", L3PodIP: anpPodV6IP2, L3PodIPFamily: "ip6", L4PodPort: "35356"},
 				}

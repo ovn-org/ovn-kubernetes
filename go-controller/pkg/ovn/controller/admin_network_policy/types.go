@@ -70,7 +70,7 @@ type gressRule struct {
 	// saves NamedPort representation;
 	// key is the name of the Port
 	// value is an array of possible representations of this port (relevance wrt to rule, peers)
-	namedPorts map[string]*[]libovsdbutil.NamedNetworkPolicyPort
+	namedPorts map[string][]libovsdbutil.NamedNetworkPolicyPort
 }
 
 // adminNetworkPolicyState is the cache that keeps the state of a single
@@ -288,7 +288,7 @@ func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, 
 		gressPrefix:   string(libovsdbutil.ACLIngress),
 		peers:         make([]*adminNetworkPolicyPeer, 0),
 		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
-		namedPorts:    make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort, 0),
+		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 		peerAddresses: sets.New[string](),
 	}
 	for _, peer := range raw.From {
@@ -301,7 +301,7 @@ func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, 
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
 			if port.NamedPort != nil {
-				anpRule.namedPorts[*port.NamedPort] = &[]libovsdbutil.NamedNetworkPolicyPort{}
+				anpRule.namedPorts[*port.NamedPort] = []libovsdbutil.NamedNetworkPolicyPort{}
 			} else {
 				anpPort := newAdminNetworkPolicyPort(port)
 				anpRule.ports = append(anpRule.ports, anpPort)
@@ -323,7 +323,7 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 		gressPrefix:   string(libovsdbutil.ACLEgress),
 		peers:         make([]*adminNetworkPolicyPeer, 0),
 		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
-		namedPorts:    make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort, 0),
+		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 		peerAddresses: sets.New[string](),
 	}
 	for _, peer := range raw.To {
@@ -345,7 +345,7 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
 			if port.NamedPort != nil {
-				anpRule.namedPorts[*port.NamedPort] = &[]libovsdbutil.NamedNetworkPolicyPort{}
+				anpRule.namedPorts[*port.NamedPort] = []libovsdbutil.NamedNetworkPolicyPort{}
 			} else {
 				anpPort := newAdminNetworkPolicyPort(port)
 				anpRule.ports = append(anpRule.ports, anpPort)
@@ -413,7 +413,7 @@ func newBaselineAdminNetworkPolicyIngressRule(raw anpapi.BaselineAdminNetworkPol
 		gressPrefix:   string(libovsdbutil.ACLIngress),
 		peers:         make([]*adminNetworkPolicyPeer, 0),
 		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
-		namedPorts:    make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort, 0),
+		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 		peerAddresses: sets.New[string](),
 	}
 	for _, peer := range raw.From {
@@ -426,7 +426,7 @@ func newBaselineAdminNetworkPolicyIngressRule(raw anpapi.BaselineAdminNetworkPol
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
 			if port.NamedPort != nil {
-				banpRule.namedPorts[*port.NamedPort] = &[]libovsdbutil.NamedNetworkPolicyPort{}
+				banpRule.namedPorts[*port.NamedPort] = []libovsdbutil.NamedNetworkPolicyPort{}
 			} else {
 				anpPort := newAdminNetworkPolicyPort(port)
 				banpRule.ports = append(banpRule.ports, anpPort)
@@ -448,7 +448,7 @@ func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPoli
 		gressPrefix:   string(libovsdbutil.ACLEgress),
 		peers:         make([]*adminNetworkPolicyPeer, 0),
 		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
-		namedPorts:    make(map[string]*[]libovsdbutil.NamedNetworkPolicyPort, 0),
+		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 		peerAddresses: sets.New[string](),
 	}
 	for _, peer := range raw.To {
@@ -470,7 +470,7 @@ func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPoli
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
 			if port.NamedPort != nil {
-				banpRule.namedPorts[*port.NamedPort] = &[]libovsdbutil.NamedNetworkPolicyPort{}
+				banpRule.namedPorts[*port.NamedPort] = []libovsdbutil.NamedNetworkPolicyPort{}
 			} else {
 				anpPort := newAdminNetworkPolicyPort(port)
 				banpRule.ports = append(banpRule.ports, anpPort)

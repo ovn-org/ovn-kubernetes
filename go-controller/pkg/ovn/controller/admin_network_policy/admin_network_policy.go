@@ -344,11 +344,11 @@ func (c *Controller) expandRulePeers(rule *gressRule) error {
 						if port.Name == "" {
 							continue
 						}
-						namedPortReps, ok := rule.namedPorts[port.Name]
+						_, ok := rule.namedPorts[port.Name]
 						if !ok {
 							continue
 						}
-						*namedPortReps = append(*namedPortReps, convertPodIPContainerPortToNNPP(port, podIPs)...)
+						rule.namedPorts[port.Name] = append(rule.namedPorts[port.Name], convertPodIPContainerPortToNNPP(port, podIPs)...)
 					}
 				}
 			}
@@ -389,13 +389,15 @@ func (c *Controller) convertANPSubjectToLSPs(anp *adminNetworkPolicyState) ([]*n
 		return nil, err
 	}
 	// Process NamedPorts if any
-	namedPortRepresentations := map[string][]*[]libovsdbutil.NamedNetworkPolicyPort{}
-	for _, ingress := range anp.ingressRules {
-		for name, port := range ingress.namedPorts {
-			// we are creating a pointer mapping representation so that ALL original rule.namedPorts
+	// a representation that stores name of the port as key and slice of indexes of rules
+	// that match this namedPort as value
+	namedPortMatchingRulesIndexes := map[string][]int{}
+	for i, ingress := range anp.ingressRules {
+		for name := range ingress.namedPorts {
+			// we are creating a index based mapping representation so that ALL original rule.namedPorts
 			// map across all ingress rules can be appended in place for every peer in the following peer loop
 			// (otherwise we'd need to iterate over all ports always for all pods)
-			namedPortRepresentations[name] = append(namedPortRepresentations[name], port)
+			namedPortMatchingRulesIndexes[name] = append(namedPortMatchingRulesIndexes[name], i)
 		}
 	}
 	namespaceCache := make(map[string]sets.Set[string])
@@ -435,7 +437,7 @@ func (c *Controller) convertANPSubjectToLSPs(anp *adminNetworkPolicyState) ([]*n
 			lsports = append(lsports, lsp)
 			anp.subject.podPorts.Insert(lsp.UUID)
 			podCache.Insert(pod.Name)
-			if len(namedPortRepresentations) == 0 {
+			if len(namedPortMatchingRulesIndexes) == 0 {
 				continue
 			}
 			// we need to collect podIP:cPort information
@@ -454,12 +456,13 @@ func (c *Controller) convertANPSubjectToLSPs(anp *adminNetworkPolicyState) ([]*n
 					if port.Name == "" {
 						continue
 					}
-					namedPortRepsList, ok := namedPortRepresentations[port.Name]
+					namedPortRulesIndexes, ok := namedPortMatchingRulesIndexes[port.Name]
 					if !ok {
 						continue
 					}
-					for _, namedPortReps := range namedPortRepsList {
-						*namedPortReps = append(*namedPortReps, convertPodIPContainerPortToNNPP(port, podIPs)...)
+					for _, namedPortRuleIndex := range namedPortRulesIndexes {
+						anp.ingressRules[namedPortRuleIndex].namedPorts[port.Name] = append(
+							anp.ingressRules[namedPortRuleIndex].namedPorts[port.Name], convertPodIPContainerPortToNNPP(port, podIPs)...)
 					}
 				}
 			}
@@ -467,8 +470,8 @@ func (c *Controller) convertANPSubjectToLSPs(anp *adminNetworkPolicyState) ([]*n
 	}
 	// we have to store the sorted slice here because in convertANPRulesToACLs
 	// we use DeepEqual to compare ports which doesn't do well with unordered slices
-	for _, v := range namedPortRepresentations {
-		for _, namedPortReps := range v {
+	for _, iRule := range anp.ingressRules {
+		for _, namedPortReps := range iRule.namedPorts {
 			sortNamedPorts(namedPortReps)
 		}
 	}
