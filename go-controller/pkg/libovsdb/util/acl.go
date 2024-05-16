@@ -8,6 +8,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovnkubeutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -339,7 +340,12 @@ func GetL3L4MatchesFromNamedPorts(ruleNamedPorts map[string][]NamedNetworkPolicy
 	l3l4NamedPortsMatches := make(map[string]string)
 	var l3l4TCPMatch, l3l4UDPMatch, l3l4SCTPMatch []string
 	template := "(%s.dst == %s && %s.dst == %s)"
-	for _, namedPorts := range ruleNamedPorts {
+	// let's sort the map keys so that the iteration order is guaranteed
+	// if not sorted the match of ACL will keep changing for no functional reason
+	// causing updateACLops to kick in (also useful in predicting stable unit test outputs)
+	sortedMapKeys := ovnkubeutil.SortedKeys(ruleNamedPorts)
+	for _, key := range sortedMapKeys {
+		namedPorts := ruleNamedPorts[key]
 		for _, namedPortRep := range namedPorts {
 			l3l4match := fmt.Sprintf(template, namedPortRep.L3PodIPFamily, namedPortRep.L3PodIP, namedPortRep.L4Protocol, namedPortRep.L4PodPort)
 			switch namedPortRep.L4Protocol {
