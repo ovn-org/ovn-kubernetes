@@ -327,3 +327,13 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 		}
 	}
 }
+
+// isHWOffloadEnabled checks if other_config:hw-offload is set or not
+func isHWOffloadEnabled() (bool, error) {
+	out, err := ovsGet("Open_vSwitch", ".", "other_config", "hw-offload")
+	if err != nil {
+		return false, err
+	}
+
+	return out == "true", nil
+}

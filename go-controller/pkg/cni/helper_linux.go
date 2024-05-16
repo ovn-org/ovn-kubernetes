@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -450,7 +452,15 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", types.NADExternalID}...)
 	}
 
-	if out, err := ovsExec(ovsArgs...); err != nil {
+	retries := 1
+	verifyOffload := false
+	if hwOffloadEnabled, err := isHWOffloadEnabled(); err != nil {
+		return fmt.Errorf("error checking hw-offload flag: %v", err)
+	} else if hwOffloadEnabled {
+		retries = 3
+		verifyOffload = true
+	}
+	if out, err := addOvsPort(hostIfaceName, retries, verifyOffload, ovsArgs...); err != nil {
 		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
 	}
 
@@ -679,4 +689,56 @@ func (pr *PodRequest) deletePorts(ifaceName, podNamespace, podName string) {
 			klog.Warningf("Failed to delete pod %q interface %s: %v", podDesc, ifaceName, err)
 		}
 	}
+}
+
+// addOvsPort adds a ovs port to bridge with the ovsArgs.
+// for dpu mode and hw offload is enabled, verify if offload is in effective by
+// counting tc ingress filter, if not delete the port and retry up to 3 times
+// at interval of 100 ms
+func addOvsPort(hostIfaceName string, retries int, verifyOffload bool, ovsArgs ...string) (string, error) {
+	var link netlink.Link
+	var ovsExecOut string
+	err := retry.OnError(
+		wait.Backoff{
+			Duration: 100 * time.Millisecond,
+			Steps:    retries,
+		}, func(e error) bool {
+			// clean up stale port before retry
+			if out, err := ovsExec("--if-exists", "del-port", "br-int", hostIfaceName); err != nil {
+				klog.Errorf("Fail to delete pod interface %s, stdout: %s, error: %v", hostIfaceName, out, err)
+				// failed to clean up port, stop retrying
+				return false
+			}
+			// retry
+			return true
+		}, func() error {
+			var ovsErr error
+			if ovsExecOut, ovsErr = ovsExec(ovsArgs...); ovsErr != nil {
+				return fmt.Errorf("failure in plugging pod interface: %v\n  %q", ovsErr, ovsExecOut)
+			}
+			if !verifyOffload {
+				klog.V(7).Info("Skip offload verification")
+				return nil
+			}
+			// get link by name
+			if link == nil {
+				if l, e := util.GetNetLinkOps().LinkByName(hostIfaceName); e != nil {
+					return fmt.Errorf("failed to find interface %s: %v", hostIfaceName, e)
+				} else {
+					link = l
+				}
+			}
+			// look for tc ingress filters for the link to verify offload is enabled
+			// return error if no rules are found
+			if numOfIngress, err := util.GetNetLinkOps().CountIngressFilters(link); err != nil {
+				return fmt.Errorf("failed to find ingress filter for %s: %v", hostIfaceName, err)
+			} else if numOfIngress == 0 {
+				return fmt.Errorf("ingress filters for %s not found", hostIfaceName)
+			} else {
+				klog.V(5).Infof("Found %d ingress filter(s) for %s", numOfIngress, hostIfaceName)
+				return nil
+			}
+		},
+	)
+	return ovsExecOut, err
 }

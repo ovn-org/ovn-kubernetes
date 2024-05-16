@@ -471,6 +471,29 @@ func (_m *NetLinkOps) RuleListFiltered(family int, filter *netlink.Rule, filterM
 	return r0, r1
 }
 
+// RouteListFiltered provides a mock function with given fields: family, filter, filterMask
+func (_m *NetLinkOps) CountIngressFilters(link netlink.Link) (uint, error) {
+	ret := _m.Called(link)
+
+	var r0 uint
+	var r1 error
+	if rf, ok := ret.Get(0).(func(netlink.Link) (uint, error)); ok {
+		return rf(link)
+	}
+	if rf, ok := ret.Get(0).(func(netlink.Link) uint); ok {
+		r0 = rf(link)
+	} else {
+		r0 = ret.Get(0).(uint)
+	}
+
+	if rf, ok := ret.Get(1).(func(netlink.Link) error); ok {
+		r1 = rf(link)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
 type mockConstructorTestingTNewNetLinkOps interface {
 	mock.TestingT
 	Cleanup(func())

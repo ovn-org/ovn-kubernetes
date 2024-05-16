@@ -42,8 +42,12 @@ func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string)
 		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ipAddrExtID, sandboxID, hostIfaceName, hostIfaceName, hostIfaceName)
 }
 
-func genOVSDelPortCmd(portName string) string {
-	return fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists del-port br-int %s", portName)
+func genOVSDelPortCmd(portName string, timeout ...int) string {
+	_timeout := 15
+	if len(timeout) > 0 {
+		_timeout = timeout[0]
+	}
+	return fmt.Sprintf("ovs-vsctl --timeout=%d --if-exists del-port br-int %s", _timeout, portName)
 }
 
 func genOVSGetCmd(table, record, column, key string) string {
@@ -187,8 +191,16 @@ var _ = Describe("Node DPU tests", func() {
 			})
 			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSGetCmd("Open_vSwitch", ".", "other_config", "hw-offload"),
+				Output: "false",
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSDelPortCmd(vfRep, 30),
+				Err: nil,
 			})
 			// Mock netlink/ovs calls for cleanup
 			checkOVSPortPodInfo(execMock, vfRep, false, "15", "", "")
@@ -202,6 +214,55 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
 
+		It("addRepPort will retry plug-in if hw-offload is enabled but not working", func() {
+			netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
+			netlinkOpsMock.On("CountIngressFilters", vfLink).Return(uint(0), nil)
+			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
+			// set ovs CMD output
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSFindCmd("30", "Interface", "name",
+					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
+			})
+			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSGetCmd("Open_vSwitch", ".", "other_config", "hw-offload"),
+				Output: "true",
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+				Err: nil,
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSDelPortCmd(vfRep, 30),
+				Output: "true",
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+				Err: nil,
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSDelPortCmd(vfRep, 30),
+				Output: "true",
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+				Err: nil,
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSDelPortCmd(vfRep, 30),
+				Output: "true",
+			})
+			checkOVSPortPodInfo(execMock, vfRep, false, "15", "", "")
+
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
+
+			// call addRepPort()
+			err := dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("ingress filters for " + vfRep + " not found"))
+			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+		})
+
 		It("Fails if configure OVS fails but OVS interface is added", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
 			// set ovs CMD output
@@ -211,8 +272,16 @@ var _ = Describe("Node DPU tests", func() {
 			})
 			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSGetCmd("Open_vSwitch", ".", "other_config", "hw-offload"),
+				Output: "false",
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSDelPortCmd(vfRep, 30),
+				Err: nil,
 			})
 			checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
 			// Mock netlink/ovs calls for cleanup
@@ -239,6 +308,10 @@ var _ = Describe("Node DPU tests", func() {
 						"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 				})
 				checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    genOVSGetCmd("Open_vSwitch", ".", "other_config", "hw-offload"),
+					Output: "false",
+				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				})
