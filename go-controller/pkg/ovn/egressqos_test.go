@@ -84,7 +84,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					Match:       "some-match",
 					Priority:    EgressQoSFlowStartPriority,
 					Action:      map[string]int{nbdb.QoSActionDSCP: 50},
-					ExternalIDs: map[string]string{"EgressQoS": "staleNS"},
+					ExternalIDs: getEgressQoSRuleDbIDs("staleNS", EgressQoSFlowStartPriority).GetExternalIDs(),
 					UUID:        "staleQoS-UUID",
 				}
 				staleAddrSet, _ := addressset.GetTestDbAddrSets(
@@ -148,7 +148,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					Match:       match1,
 					Priority:    EgressQoSFlowStartPriority,
 					Action:      map[string]int{nbdb.QoSActionDSCP: 50},
-					ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+					ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority).GetExternalIDs(),
 					UUID:        "qos1-UUID",
 				}
 				qos2 := &nbdb.QoS{
@@ -156,7 +156,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					Match:       match2,
 					Priority:    EgressQoSFlowStartPriority - 1,
 					Action:      map[string]int{nbdb.QoSActionDSCP: 60},
-					ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+					ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority-1).GetExternalIDs(),
 					UUID:        "qos2-UUID",
 				}
 				node1Switch.QOSRules = []string{qos1.UUID, qos2.UUID}
@@ -190,7 +190,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					Match:       match1,
 					Priority:    EgressQoSFlowStartPriority,
 					Action:      map[string]int{nbdb.QoSActionDSCP: 40},
-					ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+					ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority).GetExternalIDs(),
 					UUID:        "qos3-UUID",
 				}
 				node1Switch.QOSRules = []string{qos3.UUID}
@@ -255,7 +255,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					Match:       "some-match",
 					Priority:    EgressQoSFlowStartPriority,
 					Action:      map[string]int{nbdb.QoSActionDSCP: 50},
-					ExternalIDs: map[string]string{"EgressQoS": "staleNS"},
+					ExternalIDs: getEgressQoSRuleDbIDs("staleNS", EgressQoSFlowStartPriority).GetExternalIDs(),
 					UUID:        "staleQoS-UUID",
 				}
 				staleAddrSet, _ := addressset.GetTestDbAddrSets(
@@ -342,7 +342,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					Match:       match1,
 					Priority:    EgressQoSFlowStartPriority,
 					Action:      map[string]int{nbdb.QoSActionDSCP: 50},
-					ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+					ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority).GetExternalIDs(),
 					UUID:        "qos1-UUID",
 				}
 				qos2 := &nbdb.QoS{
@@ -350,7 +350,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					Match:       match2,
 					Priority:    EgressQoSFlowStartPriority - 1,
 					Action:      map[string]int{nbdb.QoSActionDSCP: 60},
-					ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+					ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority-1).GetExternalIDs(),
 					UUID:        "qos2-UUID",
 				}
 				node1Switch.QOSRules = []string{qos1.UUID, qos2.UUID}
@@ -389,7 +389,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 					Match:       match1,
 					Priority:    EgressQoSFlowStartPriority,
 					Action:      map[string]int{nbdb.QoSActionDSCP: 40},
-					ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+					ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority).GetExternalIDs(),
 					UUID:        "qos3-UUID",
 				}
 				node1Switch.QOSRules = []string{qos3.UUID}
@@ -568,7 +568,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				Match:       fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", asv4),
 				Priority:    EgressQoSFlowStartPriority,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 50},
-				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority).GetExternalIDs(),
 				UUID:        "qos1-UUID",
 			}
 			qos2 := &nbdb.QoS{
@@ -576,7 +576,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				Match:       fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", asv4),
 				Priority:    EgressQoSFlowStartPriority - 1,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 60},
-				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority-1).GetExternalIDs(),
 				UUID:        "qos2-UUID",
 			}
 			node1Switch.QOSRules = append(node1Switch.QOSRules, qos1.UUID, qos2.UUID)
@@ -694,7 +694,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				Match:       fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", asv4),
 				Priority:    EgressQoSFlowStartPriority,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 50},
-				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority).GetExternalIDs(),
 				UUID:        "qos1-UUID",
 			}
 			qos2 := &nbdb.QoS{
@@ -702,7 +702,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				Match:       fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", asv4),
 				Priority:    EgressQoSFlowStartPriority - 1,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 60},
-				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority-1).GetExternalIDs(),
 				UUID:        "qos2-UUID",
 			}
 			node1Switch.QOSRules = append(node1Switch.QOSRules, qos1.UUID, qos2.UUID)
@@ -855,7 +855,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				Match:       fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", asv4),
 				Priority:    EgressQoSFlowStartPriority,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 40},
-				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority).GetExternalIDs(),
 				UUID:        "qos1-UUID",
 			}
 			qosAS := getEgressQosAddrSetDbIDs(namespaceT.Name, fmt.Sprintf("%d", EgressQoSFlowStartPriority-1), controllerName)
@@ -865,7 +865,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				Match:       fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", qosASv4),
 				Priority:    EgressQoSFlowStartPriority - 1,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 50},
-				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority-1).GetExternalIDs(),
 				UUID:        "qos2-UUID",
 			}
 			qosAS = getEgressQosAddrSetDbIDs(namespaceT.Name, fmt.Sprintf("%d", EgressQoSFlowStartPriority-2), controllerName)
@@ -875,7 +875,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				Match:       fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", qosASv4),
 				Priority:    EgressQoSFlowStartPriority - 2,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 60},
-				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority-2).GetExternalIDs(),
 				UUID:        "qos3-UUID",
 			}
 			node1Switch.QOSRules = append(node1Switch.QOSRules, qos1.UUID, qos2.UUID, qos3.UUID)
@@ -998,7 +998,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				Match:       fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", asv4),
 				Priority:    EgressQoSFlowStartPriority,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 40},
-				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority).GetExternalIDs(),
 				UUID:        "qos1-UUID",
 			}
 			qosAS := getEgressQosAddrSetDbIDs(namespaceT.Name, fmt.Sprintf("%d", EgressQoSFlowStartPriority-1), controllerName)
@@ -1008,7 +1008,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				Match:       fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", qosASv4),
 				Priority:    EgressQoSFlowStartPriority - 1,
 				Action:      map[string]int{nbdb.QoSActionDSCP: 50},
-				ExternalIDs: map[string]string{"EgressQoS": namespaceT.Name},
+				ExternalIDs: getEgressQoSRuleDbIDs(namespaceT.Name, EgressQoSFlowStartPriority-1).GetExternalIDs(),
 				UUID:        "qos2-UUID",
 			}
 			nodeSwitch.QOSRules = append(nodeSwitch.QOSRules, qos1.UUID, qos2.UUID)

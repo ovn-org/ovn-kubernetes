@@ -7,6 +7,8 @@ const (
 	acl
 	dhcpOptions
 	portGroup
+	logicalRouterPolicy
+	qos
 )
 
 const (
@@ -40,7 +42,7 @@ const (
 	PriorityKey           ExternalIDKey = "priority"
 	PolicyDirectionKey    ExternalIDKey = "direction"
 	GressIdxKey           ExternalIDKey = "gress-index"
-	AddressSetIPFamilyKey ExternalIDKey = "ip-family"
+	IPFamilyKey           ExternalIDKey = "ip-family"
 	TypeKey               ExternalIDKey = "type"
 	IpKey                 ExternalIDKey = "ip"
 	PortPolicyIndexKey    ExternalIDKey = "port-policy-index"
@@ -59,7 +61,7 @@ var AddressSetAdminNetworkPolicy = newObjectIDsType(addressSet, AdminNetworkPoli
 	PolicyDirectionKey,
 	// gress rule's index
 	GressIdxKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetBaselineAdminNetworkPolicy = newObjectIDsType(addressSet, BaselineAdminNetworkPolicyOwnerType, []ExternalIDKey{
@@ -69,19 +71,19 @@ var AddressSetBaselineAdminNetworkPolicy = newObjectIDsType(addressSet, Baseline
 	PolicyDirectionKey,
 	// gress rule's index
 	GressIdxKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetEgressFirewallDNS = newObjectIDsType(addressSet, EgressFirewallDNSOwnerType, []ExternalIDKey{
 	// dnsName
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetHybridNodeRoute = newObjectIDsType(addressSet, HybridNodeRouteOwnerType, []ExternalIDKey{
 	// nodeName
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetEgressQoS = newObjectIDsType(addressSet, EgressQoSOwnerType, []ExternalIDKey{
@@ -89,13 +91,13 @@ var AddressSetEgressQoS = newObjectIDsType(addressSet, EgressQoSOwnerType, []Ext
 	ObjectNameKey,
 	// egress qos priority
 	PriorityKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetPodSelector = newObjectIDsType(addressSet, PodSelectorOwnerType, []ExternalIDKey{
 	// pod selector string representation
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 // deprecated, should only be used for sync
@@ -106,25 +108,25 @@ var AddressSetNetworkPolicy = newObjectIDsType(addressSet, NetworkPolicyOwnerTyp
 	PolicyDirectionKey,
 	// gress rule index
 	GressIdxKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetNamespace = newObjectIDsType(addressSet, NamespaceOwnerType, []ExternalIDKey{
 	// namespace
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetEgressIP = newObjectIDsType(addressSet, EgressIPOwnerType, []ExternalIDKey{
 	// cluster-wide address set name
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var AddressSetEgressService = newObjectIDsType(addressSet, EgressServiceOwnerType, []ExternalIDKey{
 	// cluster-wide address set name
 	ObjectNameKey,
-	AddressSetIPFamilyKey,
+	IPFamilyKey,
 })
 
 var ACLAdminNetworkPolicy = newObjectIDsType(acl, AdminNetworkPolicyOwnerType, []ExternalIDKey{
@@ -280,4 +282,31 @@ var PortGroupCluster = newObjectIDsType(portGroup, ClusterOwnerType, []ExternalI
 	// name of a global port group
 	// currently ClusterPortGroup and ClusterRtrPortGroup are present
 	ObjectNameKey,
+})
+
+var LogicalRouterPolicyEgressIP = newObjectIDsType(logicalRouterPolicy, EgressIPOwnerType, []ExternalIDKey{
+	// the priority of the LRP
+	PriorityKey,
+	// for the reroute policies it should be the "EIPName_Namespace/podName"
+	// for the no-reroute global policies it should be the unique global name
+	ObjectNameKey,
+	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
+	IPFamilyKey,
+})
+
+var QoSEgressQoS = newObjectIDsType(qos, EgressQoSOwnerType, []ExternalIDKey{
+	// the priority of the QoSRule (OVN priority is the same as the rule index priority for this feature)
+	// this value will be unique in a given namespace
+	PriorityKey,
+	// namespace
+	ObjectNameKey,
+})
+
+var QoSRuleEgressIP = newObjectIDsType(qos, EgressIPOwnerType, []ExternalIDKey{
+	// the priority of the QoSRule
+	PriorityKey,
+	// should be the unique global name
+	ObjectNameKey,
+	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
+	IPFamilyKey,
 })

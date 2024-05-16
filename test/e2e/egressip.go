@@ -176,6 +176,121 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) Disable(nodeName string) {
 	h.setMode(nodeName, true, false)
 }
 
+type egressIPStatus struct {
+	Node     string `json:"node"`
+	EgressIP string `json:"egressIP"`
+}
+
+type egressIP struct {
+	Status struct {
+		Items []egressIPStatus `json:"items"`
+	} `json:"status"`
+}
+type egressIPs struct {
+	Items []egressIP `json:"items"`
+}
+
+type node struct {
+	name   string
+	nodeIP string
+}
+
+func configNetworkAndGetTarget(subnet string, nodesToAttachNet []string, v6 bool, targetSecondaryNode node) (string, string) {
+	// configure and add additional network to worker containers for EIP multi NIC feature
+	createNetwork(secondaryNetworkName, subnet, v6)
+	if v6 {
+		// HACK: ensure bridges don't talk to each other. For IPv6, docker support for isolated networks is experimental.
+		// Remove when it is no longer experimental. See func description for full details.
+		if err := isolateIPv6Networks(primaryNetworkName, secondaryNetworkName); err != nil {
+			framework.Failf("failed to isolate IPv6 networks: %v", err)
+		}
+	}
+	for _, nodeName := range nodesToAttachNet {
+		attachNetwork(secondaryNetworkName, nodeName)
+	}
+	v4Addr, v6Addr := createClusterExternalContainer(targetSecondaryNode.name, "docker.io/httpd", []string{"--network", secondaryNetworkName, "-P"}, []string{})
+	if v4Addr == "" && !v6 {
+		panic("failed to get v4 address")
+	}
+	if v6Addr == "" && v6 {
+		panic("failed to get v6 address")
+	}
+	return v4Addr, v6Addr
+}
+
+func tearDownNetworkAndTargetForMultiNIC(nodeToDetachNet []string, targetSecondaryNode node) {
+	deleteClusterExternalContainer(targetSecondaryNode.name)
+	for _, nodeName := range nodeToDetachNet {
+		detachNetwork(secondaryNetworkName, nodeName)
+	}
+	deleteNetwork(secondaryNetworkName)
+}
+
+func removeSliceElement(s []string, i int) []string {
+	s[i] = s[len(s)-1]
+	return s[:len(s)-1]
+}
+
+// targetExternalContainerAndTest targets the external test container from
+// our test pods, collects its logs and verifies that the logs have traces
+// of the `verifyIPs` provided. We need to target the external test
+// container multiple times until we verify that all IPs provided by
+// `verifyIPs` have been verified. This is done by passing it a slice of
+// verifyIPs and removing each item when it has been found. This function is
+// wrapped in a `wait.PollImmediate` which results in the fact that it only
+// passes once verifyIPs is of length 0. targetExternalContainerAndTest
+// initiates only a single connection at a time, sequentially, hence: we
+// perform one connection attempt, check that the IP seen is expected,
+// remove it from the list of verifyIPs, see that it's length is not 0 and
+// retry again. We do this until all IPs have been seen. If that never
+// happens (because of a bug) the test fails.
+func targetExternalContainerAndTest(targetNode node, podName, podNamespace string, expectSuccess bool, verifyIPs []string) wait.ConditionFunc {
+	return func() (bool, error) {
+		_, err := e2ekubectl.RunKubectl(podNamespace, "exec", podName, "--", "curl", "--connect-timeout", "2", net.JoinHostPort(targetNode.nodeIP, "80"))
+		if err != nil {
+			if !expectSuccess {
+				// curl should timeout with a string containing this error, and this should be the case if we expect a failure
+				if !strings.Contains(err.Error(), "Connection timed out") {
+					framework.Logf("the test expected netserver container to not be able to connect, but it did with another error, err : %v", err)
+					return false, nil
+				}
+				return true, nil
+			}
+			return false, nil
+		}
+		var targetNodeLogs string
+		if strings.Contains(targetNode.name, "-host-net-pod") {
+			// host-networked-pod
+			targetNodeLogs, err = e2ekubectl.RunKubectl(podNamespace, "logs", targetNode.name)
+		} else {
+			// external container
+			targetNodeLogs, err = runCommand(containerRuntime, "logs", targetNode.name)
+		}
+		if err != nil {
+			framework.Logf("failed to inspect logs in test container: %v", err)
+			return false, nil
+		}
+		targetNodeLogs = strings.TrimSuffix(targetNodeLogs, "\n")
+		logLines := strings.Split(targetNodeLogs, "\n")
+		lastLine := logLines[len(logLines)-1]
+		for i := 0; i < len(verifyIPs); i++ {
+			if strings.Contains(lastLine, verifyIPs[i]) {
+				verifyIPs = removeSliceElement(verifyIPs, i)
+				break
+			}
+		}
+		if len(verifyIPs) != 0 && expectSuccess {
+			framework.Logf("the test external container did not have any trace of the IPs: %v being logged, last logs: %s", verifyIPs, logLines[len(logLines)-1])
+			return false, nil
+		}
+		if !expectSuccess && len(verifyIPs) == 0 {
+			framework.Logf("the test external container did have a trace of the IPs: %v being logged, it should not have, last logs: %s", verifyIPs, logLines[len(logLines)-1])
+			return false, nil
+		}
+		return true, nil
+	}
+}
+
 var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	const (
 		servicePort             int32  = 9999
@@ -193,11 +308,6 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		ciNetworkName                  = "kind"
 		retryTimeout                   = 3 * retryTimeout // Boost the retryTimeout for EgressIP tests.
 	)
-
-	type node struct {
-		name   string
-		nodeIP string
-	}
 
 	podEgressLabel := map[string]string{
 		"wants": "egress",
@@ -232,85 +342,6 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 			}
 			return true, nil
 		}
-	}
-
-	removeSliceElement := func(s []string, i int) []string {
-		s[i] = s[len(s)-1]
-		return s[:len(s)-1]
-	}
-
-	// targetExternalContainerAndTest targets the external test container from
-	// our test pods, collects its logs and verifies that the logs have traces
-	// of the `verifyIPs` provided. We need to target the external test
-	// container multiple times until we verify that all IPs provided by
-	// `verifyIPs` have been verified. This is done by passing it a slice of
-	// verifyIPs and removing each item when it has been found. This function is
-	// wrapped in a `wait.PollImmediate` which results in the fact that it only
-	// passes once verifyIPs is of length 0. targetExternalContainerAndTest
-	// initiates only a single connection at a time, sequentially, hence: we
-	// perform one connection attempt, check that the IP seen is expected,
-	// remove it from the list of verifyIPs, see that it's length is not 0 and
-	// retry again. We do this until all IPs have been seen. If that never
-	// happens (because of a bug) the test fails.
-	targetExternalContainerAndTest := func(targetNode node, podName, podNamespace string, expectSuccess bool, verifyIPs []string) wait.ConditionFunc {
-		return func() (bool, error) {
-			_, err := e2ekubectl.RunKubectl(podNamespace, "exec", podName, "--", "curl", "--connect-timeout", "2", net.JoinHostPort(targetNode.nodeIP, "80"))
-			if err != nil {
-				if !expectSuccess {
-					// curl should timeout with a string containing this error, and this should be the case if we expect a failure
-					if !strings.Contains(err.Error(), "Connection timed out") {
-						framework.Logf("the test expected netserver container to not be able to connect, but it did with another error, err : %v", err)
-						return false, nil
-					}
-					return true, nil
-				}
-				return false, nil
-			}
-			var targetNodeLogs string
-			if strings.Contains(targetNode.name, "-host-net-pod") {
-				// host-networked-pod
-				targetNodeLogs, err = e2ekubectl.RunKubectl(podNamespace, "logs", targetNode.name)
-			} else {
-				// external container
-				targetNodeLogs, err = runCommand(containerRuntime, "logs", targetNode.name)
-			}
-			if err != nil {
-				framework.Logf("failed to inspect logs in test container: %v", err)
-				return false, nil
-			}
-			targetNodeLogs = strings.TrimSuffix(targetNodeLogs, "\n")
-			logLines := strings.Split(targetNodeLogs, "\n")
-			lastLine := logLines[len(logLines)-1]
-			for i := 0; i < len(verifyIPs); i++ {
-				if strings.Contains(lastLine, verifyIPs[i]) {
-					verifyIPs = removeSliceElement(verifyIPs, i)
-					break
-				}
-			}
-			if len(verifyIPs) != 0 && expectSuccess {
-				framework.Logf("the test external container did not have any trace of the IPs: %v being logged, last logs: %s", verifyIPs, logLines[len(logLines)-1])
-				return false, nil
-			}
-			if !expectSuccess && len(verifyIPs) == 0 {
-				framework.Logf("the test external container did have a trace of the IPs: %v being logged, it should not have, last logs: %s", verifyIPs, logLines[len(logLines)-1])
-				return false, nil
-			}
-			return true, nil
-		}
-	}
-
-	type egressIPStatus struct {
-		Node     string `json:"node"`
-		EgressIP string `json:"egressIP"`
-	}
-
-	type egressIP struct {
-		Status struct {
-			Items []egressIPStatus `json:"items"`
-		} `json:"status"`
-	}
-	type egressIPs struct {
-		Items []egressIP `json:"items"`
 	}
 
 	command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
@@ -451,37 +482,6 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		return reflect.DeepEqual(eIPsFound, ips)
 	}
 
-	configNetworkAndGetTarget := func(subnet string, nodesToAttachNet []string, v6 bool) (string, string) {
-		// configure and add additional network to worker containers for EIP multi NIC feature
-		createNetwork(secondaryNetworkName, subnet, v6)
-		if v6 {
-			// HACK: ensure bridges don't talk to each other. For IPv6, docker support for isolated networks is experimental.
-			// Remove when it is no longer experimental. See func description for full details.
-			if err := isolateIPv6Networks(primaryNetworkName, secondaryNetworkName); err != nil {
-				framework.Failf("failed to isolate IPv6 networks: %v", err)
-			}
-		}
-		for _, nodeName := range nodesToAttachNet {
-			attachNetwork(secondaryNetworkName, nodeName)
-		}
-		v4Addr, v6Addr := createClusterExternalContainer(targetSecondaryNode.name, "docker.io/httpd", []string{"--network", secondaryNetworkName, "-P"}, []string{})
-		if v4Addr == "" && !v6 {
-			panic("failed to get v4 address")
-		}
-		if v6Addr == "" && v6 {
-			panic("failed to get v6 address")
-		}
-		return v4Addr, v6Addr
-	}
-
-	tearDownNetworkAndTargetForMultiNIC := func(nodeToDetachNet []string) {
-		deleteClusterExternalContainer(targetSecondaryNode.name)
-		for _, nodeName := range nodeToDetachNet {
-			detachNetwork(secondaryNetworkName, nodeName)
-		}
-		deleteNetwork(secondaryNetworkName)
-	}
-
 	getIPVersions := func(ips ...string) (bool, bool) {
 		var v4, v6 bool
 		for _, ip := range ips {
@@ -534,12 +534,12 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 			_, targetNode.nodeIP = createClusterExternalContainer(targetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
 			_, deniedTargetNode.nodeIP = createClusterExternalContainer(deniedTargetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
 			// configure and add additional network to worker containers for EIP multi NIC feature
-			_, targetSecondaryNode.nodeIP = configNetworkAndGetTarget(secondaryIPV6Subnet, []string{egress1Node.name, egress2Node.name}, isV6)
+			_, targetSecondaryNode.nodeIP = configNetworkAndGetTarget(secondaryIPV6Subnet, []string{egress1Node.name, egress2Node.name}, isV6, targetSecondaryNode)
 		} else {
 			targetNode.nodeIP, _ = createClusterExternalContainer(targetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
 			deniedTargetNode.nodeIP, _ = createClusterExternalContainer(deniedTargetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
 			// configure and add additional network to worker containers for EIP multi NIC feature
-			targetSecondaryNode.nodeIP, _ = configNetworkAndGetTarget(secondaryIPV4Subnet, []string{egress1Node.name, egress2Node.name}, isV6)
+			targetSecondaryNode.nodeIP, _ = configNetworkAndGetTarget(secondaryIPV4Subnet, []string{egress1Node.name, egress2Node.name}, isV6, targetSecondaryNode)
 		}
 
 		// ensure all nodes are ready and reachable
@@ -561,7 +561,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		e2ekubectl.RunKubectlOrDie("default", "label", "node", egress2Node.name, "k8s.ovn.org/egress-assignable-")
 		deleteClusterExternalContainer(targetNode.name)
 		deleteClusterExternalContainer(deniedTargetNode.name)
-		tearDownNetworkAndTargetForMultiNIC([]string{egress1Node.name, egress2Node.name})
+		tearDownNetworkAndTargetForMultiNIC([]string{egress1Node.name, egress2Node.name}, targetSecondaryNode)
 		// ensure all nodes are ready and reachable
 		for _, node := range []string{egress1Node.name, egress2Node.name} {
 			setNodeReady(node, true)

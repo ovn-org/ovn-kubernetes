@@ -112,13 +112,13 @@ func newObjectIDsType(dbTable dbObjType, ownerObjectType ownerType, keys []Exter
 //	 dbIndex := NewDbObjectIDs(AddressSetEgressFirewallDNS, "DefaultController",
 //			map[ExternalIDKey]string{
 //				ObjectNameKey: "dns.name",
-//				AddressSetIPFamilyKey: "ipv4"
+//				IPFamilyKey:   "ipv4"
 //		})
 //
 //	uses AddressSetEgressFirewallDNS = newObjectIDsType(addressSet, EgressFirewallDNSOwnerType, []ExternalIDKey{
 //			// dnsName
 //			ObjectNameKey,
-//			AddressSetIPFamilyKey,
+//			IPFamilyKey,
 //	 })
 //
 // its dbIndex will be mapped to the following ExternalIDs

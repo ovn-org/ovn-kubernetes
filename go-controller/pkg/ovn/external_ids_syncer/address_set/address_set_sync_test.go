@@ -563,7 +563,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 					hashedASName1, hashedASName3, hashedASName2),
 				Action:  nbdb.LogicalRouterPolicyActionAllow,
 				UUID:    "default-no-reroute-node-UUID",
-				Options: map[string]string{"pkt_mark": "1008"},
+				Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 			},
 			&nbdb.LogicalRouter{
 				UUID:     types.OVNClusterRouter + "-UUID",
@@ -710,7 +710,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 					hashedASName1, hashedASName3, hashedASName2),
 				Action:  nbdb.LogicalRouterPolicyActionAllow,
 				UUID:    "default-no-reroute-node-UUID",
-				Options: map[string]string{"pkt_mark": "1008"},
+				Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 			},
 			&nbdb.LogicalRouter{
 				UUID:     types.OVNClusterRouter + "-UUID",

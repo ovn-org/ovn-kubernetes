@@ -211,7 +211,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		},
 		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC: egressIPZoneController{
-			nodeIPUpdateMutex:  &sync.Mutex{},
+			nodeUpdateMutex:    &sync.Mutex{},
 			podAssignmentMutex: &sync.Mutex{},
 			podAssignment:      make(map[string]*podAssignmentState),
 			nbClient:           cnci.nbClient,
@@ -833,6 +833,13 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
 		h.oc.eIPC.nodeZoneState.Store(node.Name, h.oc.isLocalZoneNode(node))
 		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		// add the 103 qos rule to new node's switch
+		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
+		if h.oc.isLocalZoneNode(node) {
+			if err := h.oc.ensureDefaultNoRerouteQoSRules(node.Name); err != nil {
+				return err
+			}
+		}
 		// add the nodeIP to the default LRP (102 priority) destination address-set
 		err := h.oc.ensureDefaultNoRerouteNodePolicies()
 		if err != nil {
@@ -1004,6 +1011,16 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		h.oc.eIPC.nodeZoneState.LockKey(newNode.Name)
 		h.oc.eIPC.nodeZoneState.Store(newNode.Name, h.oc.isLocalZoneNode(newNode))
 		h.oc.eIPC.nodeZoneState.UnlockKey(newNode.Name)
+		// try to add the 103 qos rule to new node's switch if it doesn't exist
+		// The reason we call this from update is because in case the add node event
+		// did not succeed and we got an update node event which overrides the add event
+		// and removes the add event from retry cache, we'd need to ensure the qos rule exists
+		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
+		if h.oc.isLocalZoneNode(newNode) {
+			if err := h.oc.ensureDefaultNoRerouteQoSRules(newNode.Name); err != nil {
+				return err
+			}
+		}
 		// update the nodeIP in the defalt-reRoute (102 priority) destination address-set
 		if util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
 			klog.Infof("Egress IP detected IP address change for node %s. Updating no re-route policies", newNode.Name)

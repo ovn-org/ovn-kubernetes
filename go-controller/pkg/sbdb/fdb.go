@@ -9,10 +9,11 @@ const FDBTable = "FDB"
 
 // FDB defines an object in FDB table
 type FDB struct {
-	UUID    string `ovsdb:"_uuid"`
-	DpKey   int    `ovsdb:"dp_key"`
-	MAC     string `ovsdb:"mac"`
-	PortKey int    `ovsdb:"port_key"`
+	UUID      string `ovsdb:"_uuid"`
+	DpKey     int    `ovsdb:"dp_key"`
+	MAC       string `ovsdb:"mac"`
+	PortKey   int    `ovsdb:"port_key"`
+	Timestamp int    `ovsdb:"timestamp"`
 }
 
 func (a *FDB) GetUUID() string {
@@ -29,6 +30,10 @@ func (a *FDB) GetMAC() string {
 
 func (a *FDB) GetPortKey() int {
 	return a.PortKey
+}
+
+func (a *FDB) GetTimestamp() int {
+	return a.Timestamp
 }
 
 func (a *FDB) DeepCopyInto(b *FDB) {
@@ -54,7 +59,8 @@ func (a *FDB) Equals(b *FDB) bool {
 	return a.UUID == b.UUID &&
 		a.DpKey == b.DpKey &&
 		a.MAC == b.MAC &&
-		a.PortKey == b.PortKey
+		a.PortKey == b.PortKey &&
+		a.Timestamp == b.Timestamp
 }
 
 func (a *FDB) EqualsModel(b model.Model) bool {

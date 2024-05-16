@@ -11,6 +11,7 @@ const DNSTable = "DNS"
 type DNS struct {
 	UUID        string            `ovsdb:"_uuid"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
+	Options     map[string]string `ovsdb:"options"`
 	Records     map[string]string `ovsdb:"records"`
 }
 
@@ -34,6 +35,36 @@ func copyDNSExternalIDs(a map[string]string) map[string]string {
 }
 
 func equalDNSExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *DNS) GetOptions() map[string]string {
+	return a.Options
+}
+
+func copyDNSOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalDNSOptions(a, b map[string]string) bool {
 	if (a == nil) != (b == nil) {
 		return false
 	}
@@ -81,6 +112,7 @@ func equalDNSRecords(a, b map[string]string) bool {
 func (a *DNS) DeepCopyInto(b *DNS) {
 	*b = *a
 	b.ExternalIDs = copyDNSExternalIDs(a.ExternalIDs)
+	b.Options = copyDNSOptions(a.Options)
 	b.Records = copyDNSRecords(a.Records)
 }
 
@@ -102,6 +134,7 @@ func (a *DNS) CloneModel() model.Model {
 func (a *DNS) Equals(b *DNS) bool {
 	return a.UUID == b.UUID &&
 		equalDNSExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalDNSOptions(a.Options, b.Options) &&
 		equalDNSRecords(a.Records, b.Records)
 }
 

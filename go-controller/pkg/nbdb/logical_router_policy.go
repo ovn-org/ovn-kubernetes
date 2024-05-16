@@ -21,6 +21,7 @@ var (
 type LogicalRouterPolicy struct {
 	UUID        string                    `ovsdb:"_uuid"`
 	Action      LogicalRouterPolicyAction `ovsdb:"action"`
+	BFDSessions []string                  `ovsdb:"bfd_sessions"`
 	ExternalIDs map[string]string         `ovsdb:"external_ids"`
 	Match       string                    `ovsdb:"match"`
 	Nexthop     *string                   `ovsdb:"nexthop"`
@@ -35,6 +36,34 @@ func (a *LogicalRouterPolicy) GetUUID() string {
 
 func (a *LogicalRouterPolicy) GetAction() LogicalRouterPolicyAction {
 	return a.Action
+}
+
+func (a *LogicalRouterPolicy) GetBFDSessions() []string {
+	return a.BFDSessions
+}
+
+func copyLogicalRouterPolicyBFDSessions(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLogicalRouterPolicyBFDSessions(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *LogicalRouterPolicy) GetExternalIDs() map[string]string {
@@ -157,6 +186,7 @@ func (a *LogicalRouterPolicy) GetPriority() int {
 
 func (a *LogicalRouterPolicy) DeepCopyInto(b *LogicalRouterPolicy) {
 	*b = *a
+	b.BFDSessions = copyLogicalRouterPolicyBFDSessions(a.BFDSessions)
 	b.ExternalIDs = copyLogicalRouterPolicyExternalIDs(a.ExternalIDs)
 	b.Nexthop = copyLogicalRouterPolicyNexthop(a.Nexthop)
 	b.Nexthops = copyLogicalRouterPolicyNexthops(a.Nexthops)
@@ -181,6 +211,7 @@ func (a *LogicalRouterPolicy) CloneModel() model.Model {
 func (a *LogicalRouterPolicy) Equals(b *LogicalRouterPolicy) bool {
 	return a.UUID == b.UUID &&
 		a.Action == b.Action &&
+		equalLogicalRouterPolicyBFDSessions(a.BFDSessions, b.BFDSessions) &&
 		equalLogicalRouterPolicyExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
 		a.Match == b.Match &&
 		equalLogicalRouterPolicyNexthop(a.Nexthop, b.Nexthop) &&

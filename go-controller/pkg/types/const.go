@@ -94,7 +94,12 @@ const (
 	DefaultNoRereoutePriority             = 102
 	EgressSVCReroutePriority              = 101
 	EgressIPReroutePriority               = 100
+	EgressIPRerouteQoSRulePriority        = 103
 	EgressLiveMigrationReroutePiority     = 10
+
+	// Packet marking
+	EgressIPNodeConnectionMark         = "1008"
+	EgressIPReplyTrafficConnectionMark = 42
 
 	V6NodeLocalNATSubnet           = "fd99::/64"
 	V6NodeLocalNATSubnetPrefix     = 64

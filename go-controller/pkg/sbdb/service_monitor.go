@@ -23,6 +23,7 @@ var (
 // ServiceMonitor defines an object in Service_Monitor table
 type ServiceMonitor struct {
 	UUID        string                  `ovsdb:"_uuid"`
+	ChassisName string                  `ovsdb:"chassis_name"`
 	ExternalIDs map[string]string       `ovsdb:"external_ids"`
 	IP          string                  `ovsdb:"ip"`
 	LogicalPort string                  `ovsdb:"logical_port"`
@@ -36,6 +37,10 @@ type ServiceMonitor struct {
 
 func (a *ServiceMonitor) GetUUID() string {
 	return a.UUID
+}
+
+func (a *ServiceMonitor) GetChassisName() string {
+	return a.ChassisName
 }
 
 func (a *ServiceMonitor) GetExternalIDs() map[string]string {
@@ -187,6 +192,7 @@ func (a *ServiceMonitor) CloneModel() model.Model {
 
 func (a *ServiceMonitor) Equals(b *ServiceMonitor) bool {
 	return a.UUID == b.UUID &&
+		a.ChassisName == b.ChassisName &&
 		equalServiceMonitorExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
 		a.IP == b.IP &&
 		a.LogicalPort == b.LogicalPort &&

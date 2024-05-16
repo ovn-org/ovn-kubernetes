@@ -382,7 +382,7 @@ func accessControlList(name string, gressPrefix libovsdbutil.ACLDirection, prior
 func addressSet(name, gressPrefix string, priority int32, banp bool) *nbdb.AddressSet {
 	objIDs := GetANPPeerAddrSetDbIDs(name, gressPrefix, fmt.Sprintf("%d", priority),
 		"default-network-controller", banp)
-	dbIDsWithIPFam := objIDs.AddIDs(map[libovsdbops.ExternalIDKey]string{libovsdbops.AddressSetIPFamilyKey: "ipv4"})
+	dbIDsWithIPFam := objIDs.AddIDs(map[libovsdbops.ExternalIDKey]string{libovsdbops.IPFamilyKey: "ipv4"})
 	as := &nbdb.AddressSet{
 		UUID:        dbIDsWithIPFam.String() + "-UUID",
 		ExternalIDs: dbIDsWithIPFam.GetExternalIDs(),

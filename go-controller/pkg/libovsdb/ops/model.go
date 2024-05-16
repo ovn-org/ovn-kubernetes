@@ -270,6 +270,9 @@ func copyIndexes(model model.Model) model.Model {
 	case *nbdb.QoS:
 		return &nbdb.QoS{
 			UUID: t.UUID,
+			ExternalIDs: map[string]string{
+				types.PrimaryIDKey: t.ExternalIDs[types.PrimaryIDKey],
+			},
 		}
 	case *nbdb.ChassisTemplateVar:
 		return &nbdb.ChassisTemplateVar{
