@@ -41,7 +41,7 @@ type Controller struct {
 	// name of the controller that starts the ANP controller
 	// (values are default-network-controller, secondary-network-controller etc..)
 	controllerName string
-	sync.Mutex
+	sync.RWMutex
 	anpClientSet anpclientset.Interface
 
 	// libovsdb northbound client interface
@@ -292,6 +292,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 			}, time.Second, stopCh)
 		}()
 	}
+	c.setupMetricsCollector()
 
 	<-stopCh
 
@@ -301,6 +302,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 	c.anpNamespaceQueue.ShutDown()
 	c.anpPodQueue.ShutDown()
 	c.anpNodeQueue.ShutDown()
+	c.teardownMetricsCollector()
 	wg.Wait()
 }
 
