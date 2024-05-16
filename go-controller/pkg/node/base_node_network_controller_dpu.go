@@ -105,7 +105,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			klog.V(5).Infof("Add for Pod: %s/%s for network %s", pod.Namespace, pod.Name, netName)
-			if util.PodWantsHostNetwork(pod) || pod.Status.Phase == kapi.PodRunning {
+			if util.PodWantsHostNetwork(pod) {
 				return
 			}
 
