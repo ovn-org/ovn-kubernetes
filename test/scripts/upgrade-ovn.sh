@@ -3,7 +3,7 @@
 # always exit on errors
 set -ex
 
-export KUBECONFIG=${HOME}/ovn.conf
+export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
 export OVN_IMAGE=${OVN_IMAGE:-ovn-daemonset-f:pr}
 
 kubectl_wait_pods() {
