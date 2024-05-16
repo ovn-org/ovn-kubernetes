@@ -237,7 +237,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		// check for duplicate cluster IP subnets for which there would also be
 		// a better way to do it. Adding support for indirection in ModelClients
 		// opModel (being able to operate on thins pointed to from another model)
-		// would be agreat way to simplify this.
+		// would be a great way to simplify this.
 		updatedLogicalRouter, err := libovsdbops.GetLogicalRouter(oc.nbClient, &logicalRouter)
 		if err != nil {
 			return fmt.Errorf("unable to retrieve logical router %+v: %v", logicalRouter, err)
