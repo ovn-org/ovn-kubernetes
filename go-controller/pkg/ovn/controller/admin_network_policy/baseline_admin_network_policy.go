@@ -128,7 +128,7 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 	// 2) Construct Address-sets with IPs of the peers in the rules
 	// 3) Construct ACLs using AS-es and PGs
 	portGroupName := c.getANPPortGroupName(desiredBANPState.name, true)
-	desiredPorts, err := c.convertANPSubjectToLSPs(desiredBANPState.subject)
+	desiredPorts, err := c.convertANPSubjectToLSPs(desiredBANPState)
 	if err != nil {
 		return fmt.Errorf("unable to fetch ports for banp %s: %v", desiredBANPState.name, err)
 	}

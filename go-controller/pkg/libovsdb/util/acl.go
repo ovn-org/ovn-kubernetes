@@ -8,6 +8,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovnkubeutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -217,10 +218,13 @@ const (
 	// as the value of l4MatchACLExtIdKey in acl external_ids_syncer for older ACLs.
 	// This value shouldn't be changed.
 	UnspecifiedL4Match = "None"
+	// NamedPortL4MatchSuffix is used to create ACL for gressPolicy that
+	// has named port policies.
+	NamedPortL4MatchSuffix = "-namedPort"
 )
 
 // convertK8sProtocolToOVNProtocol returns the OVN syntax-specific protocol value for a v1.Protocol K8s type
-func convertK8sProtocolToOVNProtocol(proto v1.Protocol) string {
+func ConvertK8sProtocolToOVNProtocol(proto v1.Protocol) string {
 	var protocol string
 	switch proto {
 	case v1.ProtocolTCP:
@@ -239,14 +243,14 @@ func convertK8sProtocolToOVNProtocol(proto v1.Protocol) string {
 type NetworkPolicyPort struct {
 	Protocol string // will store the OVN protocol string syntax for the corresponding K8s protocol
 	Port     int32  // will store startPort if its a range
-	EndPort  int32
+	EndPort  int32  // will store 0 if its not a range
 }
 
 // GetNetworkPolicyPort returns an internal NetworkPolicyPort struct
 // It also sets the provided protocol, port and endPort fields
 func GetNetworkPolicyPort(proto v1.Protocol, port, endPort int32) *NetworkPolicyPort {
 	return &NetworkPolicyPort{
-		Protocol: convertK8sProtocolToOVNProtocol(proto),
+		Protocol: ConvertK8sProtocolToOVNProtocol(proto),
 		Port:     port,
 		EndPort:  endPort,
 	}
@@ -317,4 +321,52 @@ func GetL4MatchesFromNetworkPolicyPorts(rulePorts []*NetworkPolicyPort) map[stri
 		l4Matches[protocol] = l4Match
 	}
 	return l4Matches
+}
+
+// NamedNetworkPolicyPort is an internal representation of
+// namedPort type in anpapi.AdminNetworkPolicyPort
+// in a useful representation format for the caches
+type NamedNetworkPolicyPort struct {
+	L4Protocol    string // will store the port's L4 protocol in OVN protocol format
+	L4PodPort     string // will store portNumber for the corresponding port name for the corresponding PodIP or LSP
+	L3PodIP       string // will store the podIP for the corresponding port name for the corresponding PodPort => used for egressACL
+	L3PodIPFamily string // will store whether this is ip4 or ip6 podIP
+}
+
+// GetL3L4MatchesFromNamedPorts returns a map that has protocol as the key and
+// the corresponding L3L4NamedPort ACL Match as its value
+func GetL3L4MatchesFromNamedPorts(ruleNamedPorts map[string][]NamedNetworkPolicyPort) map[string]string {
+	// {k:protocol(string), v:l3l4Match(string)}
+	l3l4NamedPortsMatches := make(map[string]string)
+	var l3l4TCPMatch, l3l4UDPMatch, l3l4SCTPMatch []string
+	template := "(%s.dst == %s && %s.dst == %s)"
+	// let's sort the map keys so that the iteration order is guaranteed
+	// if not sorted the match of ACL will keep changing for no functional reason
+	// causing updateACLops to kick in (also useful in predicting stable unit test outputs)
+	sortedMapKeys := ovnkubeutil.SortedKeys(ruleNamedPorts)
+	for _, key := range sortedMapKeys {
+		namedPorts := ruleNamedPorts[key]
+		for _, namedPortRep := range namedPorts {
+			l3l4match := fmt.Sprintf(template, namedPortRep.L3PodIPFamily, namedPortRep.L3PodIP, namedPortRep.L4Protocol, namedPortRep.L4PodPort)
+			switch namedPortRep.L4Protocol {
+			case "tcp":
+				l3l4TCPMatch = append(l3l4TCPMatch, l3l4match)
+			case "sctp":
+				l3l4SCTPMatch = append(l3l4SCTPMatch, l3l4match)
+			case "udp":
+				l3l4UDPMatch = append(l3l4UDPMatch, l3l4match)
+			}
+		}
+	}
+	template = "%s && (%s)" // matches for all namedPorts, per protocol
+	if len(l3l4TCPMatch) > 0 {
+		l3l4NamedPortsMatches["tcp"] = fmt.Sprintf(template, "tcp", strings.Join(l3l4TCPMatch, " || "))
+	}
+	if len(l3l4UDPMatch) > 0 {
+		l3l4NamedPortsMatches["udp"] = fmt.Sprintf(template, "udp", strings.Join(l3l4UDPMatch, " || "))
+	}
+	if len(l3l4SCTPMatch) > 0 {
+		l3l4NamedPortsMatches["sctp"] = fmt.Sprintf(template, "sctp", strings.Join(l3l4SCTPMatch, " || "))
+	}
+	return l3l4NamedPortsMatches
 }
