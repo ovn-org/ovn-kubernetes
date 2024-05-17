@@ -353,6 +353,52 @@ passwd:
 			return fr.ClientSet.NetworkingV1().NetworkPolicies(namespace).Create(context.TODO(), policy, metav1.CreateOptions{})
 		}
 
+		ipv4 = func(iface kubevirt.Interface) []kubevirt.Address {
+			return iface.IPv4.Address
+		}
+
+		ipv6 = func(iface kubevirt.Interface) []kubevirt.Address {
+			return iface.IPv6.Address
+		}
+
+		findNonLoopbackInterface = func(interfaces []kubevirt.Interface) *kubevirt.Interface {
+			for _, iface := range interfaces {
+				if iface.Name != "lo" {
+					return &iface
+				}
+			}
+			return nil
+		}
+
+		addressByFamily = func(familyFn func(iface kubevirt.Interface) []kubevirt.Address, vmi *kubevirtv1.VirtualMachineInstance) func() ([]kubevirt.Address, error) {
+			return func() ([]kubevirt.Address, error) {
+				networkState, err := kubevirt.RetrieveNetworkState(vmi)
+				if err != nil {
+					return nil, err
+				}
+				iface := findNonLoopbackInterface(networkState.Interfaces)
+				if iface == nil {
+					return nil, fmt.Errorf("missing non loopback interface")
+				}
+				return familyFn(*iface), nil
+			}
+
+		}
+
+		findVMIAddresses = func(vmi *kubevirtv1.VirtualMachineInstance) ([]kubevirt.Address, error) {
+			addresses, err := addressByFamily(ipv4, vmi)()
+			if err != nil {
+				return nil, err
+			}
+			if isDualStack {
+				ipv6Addresses, err := addressByFamily(ipv6, vmi)()
+				if err != nil {
+					return nil, err
+				}
+				addresses = append(addresses, ipv6Addresses...)
+			}
+			return addresses, nil
+		}
 		checkConnectivity = func(vmName string, endpoints []*net.TCPConn, stage string) {
 			by(vmName, "Check connectivity "+stage)
 			vmi := &kubevirtv1.VirtualMachineInstance{
@@ -373,22 +419,27 @@ passwd:
 				Should(Succeed(), step)
 
 			step = by(vmName, stage+": Check e/w tcp traffic")
+			vmiAddresses, err := findVMIAddresses(vmi)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(vmiAddresses).ToNot(BeEmpty())
+			Expect(httpServerTestPods).ToNot(BeEmpty())
 			for _, pod := range httpServerTestPods {
-				for _, podIP := range pod.Status.PodIPs {
-					output := ""
-					Eventually(func() error {
-						output, err = kubevirt.RunCommand(vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP.IP, "8000")), polling)
-						return err
-					}).
-						WithOffset(1).
-						WithPolling(polling).
-						WithTimeout(timeout).
-						Should(Succeed(), func() string { return step + ": " + pod.Name + ": " + output })
+				for _, vmiAddress := range vmiAddresses {
+					expectedOutput := "test"
+					netcatCmd := fmt.Sprintf("echo -n %s | nc -N -w %d %s %d", expectedOutput, timeout/time.Second, vmiAddress.Ip, tcpServerPort)
+					obtainedOutput, err := ForPod(pod.Namespace, pod.Name, pod.Spec.Containers[0].Name).Exec("bash", "-ec", netcatCmd)
+					Expect(err).WithOffset(1).ToNot(HaveOccurred(), func() string { return step + ": " + pod.Name + ": " + obtainedOutput })
+					Expect(obtainedOutput).WithOffset(1).To(Equal(expectedOutput), func() string { return step + ": " + pod.Name + ": " + obtainedOutput })
+
 				}
 			}
 
+			step = by(vmName, stage+": Check name resolution")
+			output, err := kubevirt.RunCommand(vmi, "nslookup kubernetes.default.svc.cluster.local", polling)
+			Expect(err).WithOffset(1).Should(Succeed(), func() string { return step + ": " + output })
+
 			step = by(vmName, stage+": Check n/s tcp traffic")
-			output := ""
+			output = ""
 			Eventually(func() error {
 				output, err = kubevirt.RunCommand(vmi, "curl -kL https://kubernetes.default.svc.cluster.local", polling)
 				return err
@@ -515,37 +566,6 @@ passwd:
 			)
 		}
 
-		ipv4 = func(iface kubevirt.Interface) []kubevirt.Address {
-			return iface.IPv4.Address
-		}
-
-		ipv6 = func(iface kubevirt.Interface) []kubevirt.Address {
-			return iface.IPv6.Address
-		}
-
-		findNonLoopbackInterface = func(interfaces []kubevirt.Interface) *kubevirt.Interface {
-			for _, iface := range interfaces {
-				if iface.Name != "lo" {
-					return &iface
-				}
-			}
-			return nil
-		}
-
-		addressByFamily = func(familyFn func(iface kubevirt.Interface) []kubevirt.Address, vmi *kubevirtv1.VirtualMachineInstance) func() ([]kubevirt.Address, error) {
-			return func() ([]kubevirt.Address, error) {
-				networkState, err := kubevirt.RetrieveNetworkState(vmi)
-				if err != nil {
-					return nil, err
-				}
-				iface := findNonLoopbackInterface(networkState.Interfaces)
-				if iface == nil {
-					return nil, fmt.Errorf("missing non loopback interface")
-				}
-				return familyFn(*iface), nil
-			}
-
-		}
 		fcosVM = func(idx int, labels map[string]string, butane string) (*kubevirtv1.VirtualMachine, error) {
 			workingDirectory, err := os.Getwd()
 			if err != nil {
@@ -787,8 +807,8 @@ passwd:
 				"testpod-"+selectedNode.Name,
 				namespace,
 				selectedNode.Name,
-				"netexec", "--http-port", "8000")
-			httpServerTestPod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), httpServerTestPod)
+				"pause")
+			httpServerTestPods = append(httpServerTestPods, e2epod.NewPodClient(fr).CreateSync(context.TODO(), httpServerTestPod))
 		}
 
 		By("Waiting until both pods have an IP address")
