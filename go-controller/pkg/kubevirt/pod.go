@@ -123,15 +123,40 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 	return podAnnotation, nil
 }
 
+// AllVMPodsAreCompleted return true if all the vm pods are completed
+func AllVMPodsAreCompleted(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
+	if !IsPodLiveMigratable(pod) {
+		return false, nil
+	}
+
+	if !util.PodCompleted(pod) {
+		return false, nil
+	}
+
+	vmPods, err := findVMRelatedPods(client, pod)
+	if err != nil {
+		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking if they are completed: %v", pod.Namespace, pod.Name, err)
+	}
+
+	for _, vmPod := range vmPods {
+		if !util.PodCompleted(vmPod) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // IsMigratedSourcePodStale return false if the pod is live migratable,
 // not completed and is the running VM pod with newest creation timestamp
 func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
 	if !IsPodLiveMigratable(pod) {
 		return false, nil
 	}
+
 	if util.PodCompleted(pod) {
 		return true, nil
 	}
+
 	vmPods, err := findVMRelatedPods(client, pod)
 	if err != nil {
 		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking live migration left overs: %v", pod.Namespace, pod.Name, err)
@@ -184,18 +209,20 @@ func ExtractVMNameFromPod(pod *corev1.Pod) *ktypes.NamespacedName {
 	return &ktypes.NamespacedName{Namespace: pod.Namespace, Name: vmName}
 }
 
+// CleanUpLiveMigratablePod remove routing and DHCP ovn related resources
+// when all the pods for the same VM as `pod` argument are completed.
 func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod) error {
-	// This pod is not part of ip migration so we don't need to clean up
 	if !IsPodLiveMigratable(pod) {
 		return nil
 	}
-	isMigratedSourcePodStale, err := IsMigratedSourcePodStale(watchFactory, pod)
+
+	allVMPodsCompleted, err := AllVMPodsAreCompleted(watchFactory, pod)
 	if err != nil {
 		return fmt.Errorf("failed cleaning up VM when checking if pod is leftover: %v", err)
 	}
-	// Everything has already being cleand up since this is an old migration
-	// pod
-	if isMigratedSourcePodStale {
+
+	// Do cleanup only if all the pods related to the VM are completed
+	if !allVMPodsCompleted {
 		return nil
 	}
 
