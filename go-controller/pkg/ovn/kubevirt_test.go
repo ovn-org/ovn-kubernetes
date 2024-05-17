@@ -825,10 +825,20 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				}
 
 				if t.podName != "" {
+					pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					pod.Status.Phase = corev1.PodSucceeded
+					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
 					err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, metav1.DeleteOptions{})
 					Expect(err).NotTo(HaveOccurred())
 
 					if t.migrationTarget.nodeName != "" {
+						pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.migrationTarget.podName, metav1.GetOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						pod.Status.Phase = corev1.PodSucceeded
+						_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})
+						Expect(err).NotTo(HaveOccurred())
 						err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.migrationTarget.podName, metav1.DeleteOptions{})
 						Expect(err).NotTo(HaveOccurred())
 					}
