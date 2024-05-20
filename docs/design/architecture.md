@@ -1,6 +1,6 @@
-# OVN Kubernetes Architecture
+# OVN-Kubernetes Architecture
 
-There are two deployment modes for ovn kubernetes depending on
+There are two deployment modes for ovn-kubernetes depending on
 which the architecture is drastically different:
 
 * default mode (centralized control plane architecture)
@@ -11,7 +11,7 @@ cases and what suits them well. Let's look at both these modes
 in depth so that you are empowered to make your choice between
 these two modes of deployment.
 
-## OVN Kubernetes Components - Default Mode
+## OVN-Kubernetes Components - Default Mode
 
 ![ovn-kubernetes-centralized-components](../images/ovnkube-centralized-components.png)
 
@@ -46,7 +46,7 @@ namespace which are running on all your nodes in the cluster.
 
 * ovnkube-node pod
     * ovnkube-node container:
-        * OVN Kubernetes component
+        * OVN-Kubernetes component
         * Runs the CNI executable (CNI ADD/DEL)
         * Digests the IPAM annotation set on pod by ovnkube-master
         * Creates the veth pair for the pod
@@ -76,7 +76,7 @@ loose ends and show how these components run on a standard HA Kubernetes cluster
 
 ![ovn-kubernetes-centralized-components-data-plane](../images/ovnkube-centralized-arch-dp.png)
 
-## OVN Kubernetes Components - Interconnect mode
+## OVN-Kubernetes Components - Interconnect mode
 
 ![ovn-kubernetes-distributed-components](../images/ovnkube-distributed-components.png)
 
@@ -134,7 +134,7 @@ and more distributed.
         * OVS daemon and database running as a container
         * virtual switch that pushes the network plumbing to the edge on the node
 
-As we can see, the databases, northd and ovn kubernetes controller components
+As we can see, the databases, northd and ovn-kubernetes controller components
 now run per zone rather than only on the control-plane.
 
 ## Interconnect Mode Architecture
@@ -173,14 +173,14 @@ This architecture brings about several improvements:
 * Stability: The OVN Northbound and Southbound databases are local to each node. Since
 they are running in the standalone mode, that eliminates the need for RAFT, thus avoiding
 all the “split-brain” issues. If one of the databases goes down, the impact is now isolated
-to only that node. This has led to improved stability of the OVN Kubernetes stack and
+to only that node. This has led to improved stability of the OVN-Kubernetes stack and
 simpler customer escalation resolution.
 * Scale: As seen in the above diagram, the ovn-controller container connects to the
 local Southbound database for logical flow information. On large clusters with N nodes,
 this means each Southbound database is handling only one connection from its own local
 ovn-controller. This has removed the scale bottlenecks that were present in the centralized
 model helping us to scale horizontally with node count.
-* Performance: The OVN Kubernetes brain is now local to each node in the cluster, and it is
+* Performance: The OVN-Kubernetes brain is now local to each node in the cluster, and it is
 storing and processing changes to only those Kubernetes pods, services, endpoints objects
 that are relevant for that node (note: some features like NetworkPolicies need to process
 pods running on other nodes). This in turn means the OVN stack is also processing less data

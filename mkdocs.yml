@@ -1,4 +1,4 @@
-site_name: OVN Kubernetes
+site_name: OVN-Kubernetes
 site_url: https://www.ovn.org/ovn-kubernetes/
 repo_url: https://github.com/ovn-org/ovn-kubernetes
 repo_name: ovn-org/ovn-kubernetes
@@ -78,13 +78,13 @@ nav:
     - Internal Subnets: design/ovn-kubernetes-subnets.md
     - Kubevirt VM Live Migration: design/live-migration.md
   - Getting Started:
-    - OVN Kubernetes Overview: getting-started/overview.md
-    - Launching OVN Kubernetes: getting-started/launching-ovn-kubernetes.md
-    - Deploying Workloads on OVN Kubernetes cluster: getting-started/example-pod-creation.md
-    - Deploying Services on OVN Kubernetes cluster: getting-started/example-service-creation.md
+    - OVN-Kubernetes Overview: getting-started/overview.md
+    - Launching OVN-Kubernetes: getting-started/launching-ovn-kubernetes.md
+    - Deploying Workloads on OVN-Kubernetes cluster: getting-started/example-pod-creation.md
+    - Deploying Services on OVN-Kubernetes cluster: getting-started/example-service-creation.md
     - Setup and Building: getting-started/building-ovn-kubernetes.md
-    - Run OVN Kubernetes From Release Image: getting-started/running-release.md
-    - Run OVN Kubernetes From RPM: getting-started/running-rpm.md
+    - Run OVN-Kubernetes From Release Image: getting-started/running-release.md
+    - Run OVN-Kubernetes From RPM: getting-started/running-rpm.md
     - CLI Guide: getting-started/cli-guide.md
     - Configuration Guide: developer-guide/configuration.md
   - Developer Guide:
@@ -97,7 +97,7 @@ nav:
         - EgressQoS: developer-guide/egress-qos-api-spec.md
         - EgressFirewall: developer-guide/egress-firewall-api-spec.md
         - AdminPolicyBasedExternalRoutes: developer-guide/admin-epbr-api-spec.md
-      - OVN Kubernetes Container Images: developer-guide/image-build.md
+      - OVN-Kubernetes Container Images: developer-guide/image-build.md
       - Documentation Guide: developer-guide/documentation.md
       - Local Testing Guide: developer-guide/testing.md
       - CI Testing Guide: ci/ci.md

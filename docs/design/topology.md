@@ -1,7 +1,7 @@
-# OVN Kubernetes Network Topology
+# OVN-Kubernetes Network Topology
 
 Like we saw earlier in the architecture section there are
-two modes of deployment in OVN Kubernetes:
+two modes of deployment in OVN-Kubernetes:
 
 * default mode (centralized control plane architecture)
 * interconnect mode (distributed control plane architecture)
