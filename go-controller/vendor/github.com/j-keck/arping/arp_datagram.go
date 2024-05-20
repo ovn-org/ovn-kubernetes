@@ -40,6 +40,23 @@ func newArpRequest(
 		tpa:   dstIP.To4()}
 }
 
+func newArpReply(
+	srcMac net.HardwareAddr,
+	srcIP net.IP,
+	dstMac net.HardwareAddr,
+	dstIP net.IP) arpDatagram {
+	return arpDatagram{
+		htype: uint16(1),
+		ptype: uint16(0x0800),
+		hlen:  uint8(6),
+		plen:  uint8(4),
+		oper:  uint16(responseOper),
+		sha:   srcMac,
+		spa:   srcIP.To4(),
+		tha:   dstMac,
+		tpa:   dstIP.To4()}
+}
+
 func (datagram arpDatagram) Marshal() []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, datagram.htype)
