@@ -8,7 +8,7 @@
 #
 # So this file will change over time.
 
-FROM ubuntu:23.10
+FROM ubuntu:24.04
 
 USER root
 
