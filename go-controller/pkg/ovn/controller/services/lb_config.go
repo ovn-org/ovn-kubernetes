@@ -620,7 +620,9 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				vips := make([]string, 0, len(config.vips))
 				for _, vip := range config.vips {
 					if vip == placeholderNodeIPs {
-						vips = append(vips, node.hostAddressesStr()...)
+						if !node.nodePortDisabled {
+							vips = append(vips, node.hostAddressesStr()...)
+						}
 					} else {
 						vips = append(vips, vip)
 					}
