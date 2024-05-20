@@ -364,13 +364,13 @@ func (oc *SecondaryLayer3NetworkController) Stop() {
 
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
-func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
+func (oc *SecondaryLayer3NetworkController) Cleanup() error {
 	// cleans up related OVN logical entities
 	var ops []ovsdb.Operation
 	var err error
 
 	// Note : Cluster manager removes the subnet annotation for the node.
-
+	netName := oc.GetNetworkName()
 	klog.Infof("Delete OVN logical entities for %s network controller of network %s", types.Layer3Topology, netName)
 	// first delete node logical switches
 	ops, err = libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, ops,
@@ -390,8 +390,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 		return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
 	}
 
-	controllerName := getNetworkControllerName(netName)
-	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, controllerName)
+	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, oc.controllerName)
 	if err != nil {
 		return err
 	}

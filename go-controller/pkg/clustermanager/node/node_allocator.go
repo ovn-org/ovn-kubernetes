@@ -325,7 +325,7 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 }
 
 // Cleanup the subnet annotations from the node
-func (na *NodeAllocator) Cleanup(netName string) error {
+func (na *NodeAllocator) Cleanup() error {
 	networkName := na.netInfo.GetNetworkName()
 
 	// remove hostsubnet annotation for this network

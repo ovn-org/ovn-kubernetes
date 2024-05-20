@@ -160,7 +160,7 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 
 	for netName, oc := range staleNetworkControllers {
 		klog.Infof("Cleanup entities for stale network %s", netName)
-		err = oc.Cleanup(netName)
+		err = oc.Cleanup()
 		if err != nil {
 			klog.Errorf("Failed to delete stale OVN logical entities for network %s: %v", netName, err)
 		}

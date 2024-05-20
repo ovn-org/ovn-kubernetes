@@ -180,7 +180,7 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(allController
 
 	for netName, oc := range staleNetworkControllers {
 		klog.Infof("Cleanup subnet annotation for stale network %s", netName)
-		err = oc.Cleanup(netName)
+		err = oc.Cleanup()
 		if err != nil {
 			klog.Errorf("Failed to delete stale subnet annotation for network %s: %v", netName, err)
 		}
