@@ -1,9 +1,13 @@
 package kubevirt
 
 import (
+	"net"
 	"strings"
 
+	"github.com/j-keck/arping"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 const (
@@ -52,4 +56,25 @@ func ComposeARPProxyLSPOption() string {
 		arpProxy = append(arpProxy, clusterSubnet.CIDR.String())
 	}
 	return strings.Join(arpProxy, " ")
+}
+
+// notifyARPProxyMACForIP will send an GARP to force arp caches to clean up
+// at pods and reference to the arp proxy gw mac
+func notifyARPProxyMACForIP(ip net.IP) error {
+	mgmtIntf, err := net.InterfaceByName(types.K8sMgmtIntfName)
+	if err != nil {
+		return err
+	}
+
+	// We need to change the mac address of the mgmt port interface so
+	// to force the association between ip and mac.
+	mgmtIntf.HardwareAddr, err = net.ParseMAC(ARPProxyMAC)
+	if err != nil {
+		return err
+	}
+
+	if err := arping.GratuitousArpOverIface(ip, *mgmtIntf); err != nil {
+		return err
+	}
+	return nil
 }
