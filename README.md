@@ -40,7 +40,7 @@ Here are some links to help in your ovn-kubernetes journey:
   on setting up your development environment and building ovn kubernetes.
 - [Contributing to OVN Kubernetes](https://ovn-kubernetes.io/governance/CONTRIBUTING/) for how to get involved
   in our project
-- [Meet the Community](.docs/governance/MEETINGS.md) for details on community
+- [Meet the Community](docs/governance/MEETINGS.md) for details on community
   meeting details.
 
 ## License
