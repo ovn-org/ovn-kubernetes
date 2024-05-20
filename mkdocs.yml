@@ -132,5 +132,8 @@ nav:
     - Logging: troubleshooting/logging.md
   - Observability:
     - Metrics: observability/metrics.md
+  - EnhancementProposals:
+    # - FeatureName: okeps/<filename.md>
+    - Template: okeps/okep-4368-template.md
   - Blog:
     - blog/index.md
