@@ -566,7 +566,9 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	}
 
 	// CNI depends on the flows from port security, delay setting it until end
-	lsp.PortSecurity = addresses
+	if !bnc.NetInfo.DisablePortSecurity() {
+		lsp.PortSecurity = addresses
+	}
 
 	// On layer2 topology with interconnect, we need to add specific port config
 	if bnc.isLayer2Interconnect() {
