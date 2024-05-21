@@ -65,6 +65,8 @@ spec:
 - `mtu` (integer, optional): explicitly set MTU to the specified value. Defaults to the value chosen by the kernel.
 - `netAttachDefName` (string, required): must match `<namespace>/<net-attach-def name>`
   of the surrounding object.
+- `disablePortSecurity` (boolean, optional): enable this flag to opt-out of port
+  security, thus removing MAC / IP spoofing protection from your workloads.
 
 **NOTE**
 - the `subnets` attribute indicates both the subnet across the cluster, and per node.
@@ -110,6 +112,11 @@ spec:
 - `excludeSubnets` (string, optional): a comma separated list of CIDRs / IPs.
   These IPs will be removed from the assignable IP pool, and never handed over
   to the pods.
+- `disablePortSecurity` (boolean, optional): enable this flag to opt-out of port
+  security, thus removing MAC / IP spoofing protection from your workloads.
+- `allowL2Unknown` (boolean, optional): enable this flag to allow traffic for
+unknown destinations to be delivered to the ports attached to the secondary
+network.
 
 **NOTE**
 - when the subnets attribute is omitted, the logical switch implementing the
@@ -161,6 +168,11 @@ localnet network.
   These IPs will be removed from the assignable IP pool, and never handed over
   to the pods.
 - `vlanID` (integer, optional): assign VLAN tag. Defaults to none.
+- `disablePortSecurity` (boolean, optional): enable this flag to opt-out of port
+  security, thus removing MAC / IP spoofing protection from your workloads.
+- `allowL2Unknown` (boolean, optional): enable this flag to allow traffic for
+unknown destinations to be delivered to the ports attached to the secondary
+network.
 
 **NOTE**
 - when the subnets attribute is omitted, the logical switch implementing the
