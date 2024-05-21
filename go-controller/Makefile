@@ -11,7 +11,7 @@ PKGS ?=
 GOPATH ?= $(shell go env GOPATH)
 TEST_REPORT_DIR?=$(CURDIR)/_artifacts
 export TEST_REPORT_DIR
-GO_VERSION ?= 1.20.1
+GO_VERSION ?= 1.21.9
 GO_DOCKER_IMG = quay.io/giantswarm/golang:${GO_VERSION}
 # CONTAINER_RUNNABLE determines if the tests can be run inside a container. It checks to see if
 # podman/docker is installed on the system.
