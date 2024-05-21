@@ -639,6 +639,24 @@ var _ = Describe("Multi Homing", func() {
 					nodeSelector: map[string]string{nodeHostnameKey: workerTwoNodeName},
 				},
 			),
+			ginkgo.Entry(
+				"can communicate over an unsafe layer2 secondary network (opted out of port security)",
+				networkAttachmentConfigParams{
+					name:                secondaryNetworkName,
+					topology:            "layer2",
+					cidr:                strings.Join([]string{secondaryLocalnetNetworkCIDR, secondaryIPv6CIDR}, ","),
+					disablePortSecurity: true,
+				},
+				podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        clientPodName,
+				},
+				podConfiguration{
+					attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+				},
+			),
 		)
 
 		Context("localnet OVN-K secondary network", func() {
