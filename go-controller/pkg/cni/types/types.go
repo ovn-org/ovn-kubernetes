@@ -32,6 +32,11 @@ type NetConf struct {
 	// they are originally created - e.g. a KubeVirt VM's migration, or
 	// restart.
 	AllowPersistentIPs bool `json:"allowPersistentIPs,omitempty"`
+	// DisablePortSecurity is valid on both localnet / layer topologies.
+	// It allows the admin to opt out of port security, allowing nested
+	// virtualization scenarios, where traffic from multiple MAC addresses
+	// (bridged VMs) can egress over the OVN port
+	DisablePortSecurity bool `json:"disablePortSecurity,omitempty"`
 
 	// PciAddrs in case of using sriov or Auxiliry device name in case of SF
 	DeviceID string `json:"deviceID,omitempty"`
