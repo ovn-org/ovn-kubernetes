@@ -498,6 +498,50 @@ func (wf *WatchFactory) Start() error {
 	return nil
 }
 
+// Stop stops the factory informers, and waits for their handlers to stop
+func (wf *WatchFactory) Stop() {
+	klog.Info("Stopping watch factory")
+	wf.iFactory.Shutdown()
+	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy && wf.anpFactory != nil {
+		wf.anpFactory.Shutdown()
+	}
+	if config.OVNKubernetesFeature.EnableEgressIP && wf.eipFactory != nil {
+		wf.eipFactory.Shutdown()
+	}
+	if config.OVNKubernetesFeature.EnableEgressFirewall && wf.efFactory != nil {
+		wf.efFactory.Shutdown()
+
+		if config.OVNKubernetesFeature.EnableDNSNameResolver && wf.dnsFactory != nil {
+			wf.dnsFactory.Shutdown()
+		}
+	}
+	if util.PlatformTypeIsEgressIPCloudProvider() && wf.cpipcFactory != nil {
+		wf.cpipcFactory.Shutdown()
+	}
+	if config.OVNKubernetesFeature.EnableEgressQoS && wf.egressQoSFactory != nil {
+		wf.egressQoSFactory.Shutdown()
+	}
+
+	/**
+	FIXME(trozet) when https://github.com/k8snetworkplumbingwg/multi-networkpolicy/issues/22 is resolved
+	if util.IsMultiNetworkPoliciesSupportEnabled() && wf.mnpFactory != nil {
+		wf.mnpFactory.Shutdown()
+	}
+	*/
+
+	if config.OVNKubernetesFeature.EnableEgressService && wf.egressServiceFactory != nil {
+		wf.egressServiceFactory.Shutdown()
+	}
+
+	if config.OVNKubernetesFeature.EnableMultiExternalGateway && wf.apbRouteFactory != nil {
+		wf.apbRouteFactory.Shutdown()
+	}
+
+	if wf.ipamClaimsFactory != nil {
+		wf.ipamClaimsFactory.Shutdown()
+	}
+}
+
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
 // informers to save memory + bandwidth. It is to be used by the node-only process.
 //
@@ -756,6 +800,8 @@ func (wf *WatchFactory) Shutdown() {
 	for _, inf := range wf.informers {
 		inf.shutdown()
 	}
+	// Stop all non-custom informers and wait (closing the above channel will not wait)
+	wf.Stop()
 }
 
 func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, error) {
