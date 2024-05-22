@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/google/go-cmp v0.6.0
+	github.com/k8snetworkplumbingwg/ipamclaims v0.4.0-alpha
 	github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20230301165931-f1873dc329c6
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0
 	github.com/onsi/ginkgo/v2 v2.13.0
