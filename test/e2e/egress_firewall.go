@@ -89,11 +89,6 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 
 	f := wrappedTestFramework(svcname)
 
-	// node2ndaryIPs holds the nodeName as the key and the value is
-	// a map with ipFamily(v4 or v6) as the key and the secondaryIP as the value
-	// This is defined here globally to allow us to cleanup in AfterEach
-	node2ndaryIPs := make(map[string]map[int]string)
-
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 2)
@@ -129,20 +124,6 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 		denyAllCIDR = "0.0.0.0/0"
 		if IsIPv6Cluster(f.ClientSet) {
 			denyAllCIDR = "::/0"
-		}
-	})
-
-	ginkgo.AfterEach(func() {
-		ginkgo.By("Deleting additional IP addresses from nodes")
-		for nodeName, ipFamilies := range node2ndaryIPs {
-			for _, ip := range ipFamilies {
-				_, err := runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "delete",
-					fmt.Sprintf("%s/32", ip), "dev", "breth0")
-				if err != nil && !strings.Contains(err.Error(),
-					"RTNETLINK answers: Cannot assign requested address") {
-					framework.Failf("failed to remove ip address %s from node %s, err: %q", ip, nodeName, err)
-				}
-			}
 		}
 	})
 
@@ -538,7 +519,9 @@ spec:
 			// add new secondary IP from node subnet to the node where the source pod lives on,
 			// if the cluster is v6 add an ipv6 address
 			toCurlSecondaryNodeIPAddresses := sets.NewString()
-			// Calculate and store for AfterEach new target IP addresses.
+			// node2ndaryIPs holds the nodeName as the key and the value is
+			// a map with ipFamily(v4 or v6) as the key and the secondaryIP as the value
+			node2ndaryIPs := make(map[string]map[int]string)
 			var newIP string
 			if node2ndaryIPs[serverNodeInfo.name] == nil {
 				node2ndaryIPs[serverNodeInfo.name] = make(map[int]string)
@@ -565,6 +548,18 @@ spec:
 					toCurlSecondaryNodeIPAddresses.Insert(ip)
 				}
 			}
+			defer func() {
+				for nodeName, ipFamilies := range node2ndaryIPs {
+					for _, ip := range ipFamilies {
+						// manually add the a secondary IP to each node
+						framework.Logf("Deleting IP %s from node %s", ip, nodeName)
+						_, err = runCommand(containerRuntime, "exec", nodeName, "ip", "addr", "del", ip, "dev", "breth0")
+						if err != nil {
+							framework.Logf("failed to delete secondary ip from the node %s: %v", nodeName, err)
+						}
+					}
+				}
+			}()
 
 			// Verify basic external connectivity to ensure egress firewall is working for normal conditions
 			ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
