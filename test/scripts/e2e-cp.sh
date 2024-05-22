@@ -25,8 +25,6 @@ should provide Internet connection continuously when ovnkube-node pod is killed|
 should provide Internet connection continuously when pod running master instance of ovnkube-control-plane is killed|\
 should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane|\
 should provide Internet connection continuously when all ovnkube-control-plane pods are killed|\
-Should validate the egress firewall policy functionality against remote hosts|\
-Should validate the egress firewall policy functionality against cluster nodes by using node selector|\
 Should validate ICMP connectivity to multiple external gateways for an ECMP scenario|\
 Should validate ICMP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
 Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario|\
@@ -36,7 +34,6 @@ Should validate flow data of br-int is sent to an external gateway with netflow 
 can retrieve multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
 egress IP validation|\
-e2e egress firewall policy validation|\
 Pod to pod TCP with low MTU|\
 queries to the hostNetworked server pod on another node shall work for TCP|\
 queries to the hostNetworked server pod on another node shall work for UDP|\
