@@ -63,6 +63,29 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 		}, 10*time.Second).Should(gomega.BeTrue(), fmt.Sprintf("expected egress firewall in namespace %s to be successfully applied", namespace))
 	}
 
+	applyEF := func(egressFirewallConfig, namespace string) {
+		// write the config to a file for application and defer the removal
+		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove(egressFirewallYamlFile); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+		// create the CRD config parameters
+		applyArgs := []string{
+			"apply",
+			"--namespace=" + namespace,
+			"-f",
+			egressFirewallYamlFile,
+		}
+		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
+		// apply the egress firewall configuration
+		e2ekubectl.RunKubectlOrDie(namespace, applyArgs...)
+		waitForEFApplied(namespace)
+	}
+
 	f := wrappedTestFramework(svcname)
 	// node2ndaryIPs holds the nodeName as the key and the value is
 	// a map with ipFamily(v4 or v6) as the key and the secondaryIP as the value
@@ -118,7 +141,6 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 
 	ginkgo.It("Should validate the egress firewall policy functionality against remote hosts", func() {
 		srcPodName := "e2e-egress-fw-src-pod"
-		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
 		testContainer := fmt.Sprintf("%s-container", srcPodName)
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 		// egress firewall crd yaml configuration
@@ -142,26 +164,8 @@ spec:
     to:
       cidrSelector: %s
 `, f.Namespace.Name, exFWPermitTcpDnsDest, singleIPMask, exFWPermitCIDR, exFWDenyCIDR)
-		// write the config to a file for application and defer the removal
-		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
-			framework.Failf("Unable to write CRD config to disk: %v", err)
-		}
-		defer func() {
-			if err := os.Remove(egressFirewallYamlFile); err != nil {
-				framework.Logf("Unable to remove the CRD config from disk: %v", err)
-			}
-		}()
-		// create the CRD config parameters
-		applyArgs := []string{
-			"apply",
-			frameworkNsFlag,
-			"-f",
-			egressFirewallYamlFile,
-		}
-		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
-		// apply the egress firewall configuration
-		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
-		waitForEFApplied(f.Namespace.Name)
+		applyEF(egressFirewallConfig, f.Namespace.Name)
+
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 
@@ -231,7 +235,6 @@ spec:
 
 	ginkgo.It("Should validate the egress firewall policy functionality against cluster nodes by using node selector", func() {
 		srcPodName := "e2e-egress-fw-src-pod"
-		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
 		testContainer := fmt.Sprintf("%s-container", srcPodName)
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 		// use random labels in case test runs again since it's a pain to remove the label from the node
@@ -263,26 +266,7 @@ spec:
       cidrSelector: %s
 `, f.Namespace.Name, exFWPermitTcpDnsDest, singleIPMask, exFWPermitCIDR, f.Namespace.Name, labelMatch, exFWDenyCIDR)
 		framework.Logf("Egress Firewall CR generated: %s", egressFirewallConfig)
-		// write the config to a file for application and defer the removal
-		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
-			framework.Failf("Unable to write CRD config to disk: %v", err)
-		}
-		defer func() {
-			if err := os.Remove(egressFirewallYamlFile); err != nil {
-				framework.Logf("Unable to remove the CRD config from disk: %v", err)
-			}
-		}()
-		// create the CRD config parameters
-		applyArgs := []string{
-			"apply",
-			frameworkNsFlag,
-			"-f",
-			egressFirewallYamlFile,
-		}
-		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
-		// apply the egress firewall configuration
-		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
-		waitForEFApplied(f.Namespace.Name)
+		applyEF(egressFirewallConfig, f.Namespace.Name)
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 		// create host networked pod
@@ -435,7 +419,6 @@ spec:
 	})
 
 	ginkgo.It("Should validate the egress firewall DNS does not deadlock when adding many dnsNames", func() {
-		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
 		var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
 apiVersion: k8s.ovn.org/v1
 metadata:
@@ -492,26 +475,7 @@ spec:
     to:
       cidrSelector: %s
 `, f.Namespace.Name, exFWPermitTcpDnsDest, singleIPMask, exFWPermitCIDR, exFWDenyCIDR)
-		// write the config to a file for application and defer the removal
-		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
-			framework.Failf("Unable to write CRD config to disk: %v", err)
-		}
-		defer func() {
-			if err := os.Remove(egressFirewallYamlFile); err != nil {
-				framework.Logf("Unable to remove the CRD config from disk: %v", err)
-			}
-		}()
-		// create the CRD config parameters
-		applyArgs := []string{
-			"apply",
-			frameworkNsFlag,
-			"-f",
-			egressFirewallYamlFile,
-		}
-		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
-		// apply the egress firewall configuration
-		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
-		waitForEFApplied(f.Namespace.Name)
+		applyEF(egressFirewallConfig, f.Namespace.Name)
 	})
 
 	ginkgo.It("Should validate the egress firewall allows inbound connections", func() {
@@ -527,40 +491,11 @@ spec:
 		externalContainerName := "e2e-egress-fw-external-container"
 		externalContainerPort := 1234
 
-		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
 		testContainer := fmt.Sprintf("%s-container", efPodName)
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 		denyCIDR := "0.0.0.0/0"
 		if IsIPv6Cluster(f.ClientSet) {
 			denyCIDR = "::/0"
-		}
-		// egress firewall crd yaml configuration
-		var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
-apiVersion: k8s.ovn.org/v1
-metadata:
-  name: default
-  namespace: %s
-spec:
-  egress:
-  - type: Deny
-    to:
-      cidrSelector: %s
-`, f.Namespace.Name, denyCIDR)
-		// write the config to a file for application and defer the removal
-		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
-			framework.Failf("Unable to write CRD config to disk: %v", err)
-		}
-		defer func() {
-			if err := os.Remove(egressFirewallYamlFile); err != nil {
-				framework.Logf("Unable to remove the CRD config from disk: %v", err)
-			}
-		}()
-		// create the CRD config parameters
-		applyArgs := []string{
-			"apply",
-			frameworkNsFlag,
-			"-f",
-			egressFirewallYamlFile,
 		}
 
 		ginkgo.By("Creating the egress firewall pod")
@@ -614,9 +549,19 @@ spec:
 		}
 
 		// 3. Apply deny-all egress firewall and wait for it to be applied
-		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
-		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
-		waitForEFApplied(f.Namespace.Name)
+		// egress firewall crd yaml configuration
+		var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
+apiVersion: k8s.ovn.org/v1
+metadata:
+  name: default
+  namespace: %s
+spec:
+  egress:
+  - type: Deny
+    to:
+      cidrSelector: %s
+`, f.Namespace.Name, denyCIDR)
+		applyEF(egressFirewallConfig, f.Namespace.Name)
 
 		// 4. Check that only inbound traffic is allowed
 		// pod -> external container should be blocked
