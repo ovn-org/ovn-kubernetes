@@ -356,6 +356,43 @@ spec:
 				externalContainer1IP, nodeIP, svc.Spec.Ports[0].NodePort))
 			checkExternalContainerConnectivity(externalContainerName1, nodeIP, int(svc.Spec.Ports[0].NodePort))
 		})
+
+		ginkgo.It("Should validate the egress firewall doesn't affect internal connections", func() {
+			srcPodName := "e2e-egress-fw-src-pod"
+			dstPodName := "e2e-egress-fw-dst-pod"
+			dstPort := 1234
+			// egress firewall crd yaml configuration
+			var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
+apiVersion: k8s.ovn.org/v1
+metadata:
+  name: default
+  namespace: %s
+spec:
+  egress:
+  - type: Deny
+    to:
+      cidrSelector: %s
+`, f.Namespace.Name, denyAllCIDR)
+			applyEF(egressFirewallConfig, f.Namespace.Name)
+
+			// create the pod that will be used as the source for the connectivity test
+			createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
+
+			// create dst pod
+			dstPod, err := createPod(f, dstPodName, serverNodeInfo.name, f.Namespace.Name,
+				[]string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", dstPort)}, nil)
+			if err != nil {
+				framework.Failf("Failed to create dst pod %s: %v", dstPodName, err)
+			}
+			dstPodIP := dstPod.Status.PodIP
+
+			ginkgo.By(fmt.Sprintf("Verifying connectivity to an internal pod %s is permitted", dstPodName))
+			checkConnectivity(srcPodName, dstPodIP, dstPort, true)
+
+			ginkgo.By(fmt.Sprintf("Verifying connectivity to an external host %s is not permitted as defined "+
+				"by the external firewall policy", externalContainer1IP))
+			checkConnectivity(srcPodName, externalContainer1IP, externalContainerPort1, false)
+		})
 	})
 
 	ginkgo.It("Should validate the egress firewall policy functionality against cluster nodes by using node selector", func() {
