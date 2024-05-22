@@ -32,7 +32,7 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 
 		ovnContainer           string = "ovnkube-node"
 		egressFirewallYamlFile string = "egress-fw.yml"
-		testTimeout            string = "5"
+		testTimeout            int    = 3
 		retryInterval                 = 1 * time.Second
 		retryTimeout                  = 30 * time.Second
 		ciNetworkName                 = "kind"
@@ -87,6 +87,37 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 	}
 
 	f := wrappedTestFramework(svcname)
+
+	checkConnectivity := func(srcPodName, dstIP string, dstPort int, shouldSucceed bool) {
+		testContainer := fmt.Sprintf("%s-container", srcPodName)
+		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
+		if shouldSucceed {
+			gomega.Eventually(func() bool {
+				_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--",
+					"nc", "-vz", "-w", fmt.Sprint(testTimeout), dstIP, fmt.Sprint(dstPort))
+				return err == nil
+			}, time.Duration(2*testTimeout)*time.Second).Should(gomega.BeTrue(),
+				fmt.Sprintf("expected connection from %s to [%s]:%d to suceed", srcPodName, dstIP, dstPort))
+		} else {
+			gomega.Consistently(func() bool {
+				_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--",
+					"nc", "-vz", "-w", fmt.Sprint(testTimeout), dstIP, fmt.Sprint(dstPort))
+				return err != nil
+			}, time.Duration(2*testTimeout)*time.Second).Should(gomega.BeTrue(),
+				fmt.Sprintf("expected connection from %s to [%s]:%d to fail", srcPodName, dstIP, dstPort))
+		}
+	}
+
+	checkExternalContainerConnectivity := func(containerName, dstIP string, dstPort int) {
+		cmd := []string{"docker", "exec", containerName, "nc", "-vz", "-w", fmt.Sprint(testTimeout), dstIP, fmt.Sprint(dstPort)}
+		framework.Logf("Running command %v", cmd)
+		_, err := runCommand(cmd...)
+		if err != nil {
+			framework.Failf("Failed to connect from external container %s to %s:%d: %v",
+				containerName, dstIP, dstPort, err)
+		}
+	}
+
 	// node2ndaryIPs holds the nodeName as the key and the value is
 	// a map with ipFamily(v4 or v6) as the key and the secondaryIP as the value
 	// This is defined here globally to allow us to cleanup in AfterEach
@@ -141,8 +172,6 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 
 	ginkgo.It("Should validate the egress firewall policy functionality against remote hosts", func() {
 		srcPodName := "e2e-egress-fw-src-pod"
-		testContainer := fmt.Sprintf("%s-container", srcPodName)
-		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 		// egress firewall crd yaml configuration
 		var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
 apiVersion: k8s.ovn.org/v1
@@ -169,68 +198,21 @@ spec:
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 
-		// In very rare cases the 'nc' test commands do not return the expected result on the first try,
-		// but while testing has reproduced these cases, the condition is temporary and only initially
-		// after the pod has been created. Eventually the traffic tests work as expected, so they
-		// are wrapped in PollImmediate with a total duration equal to 4 times the pollingDuration (5 seconds)
-		// which should provide for 3 tries before a failure is actually flagged
-		testTimeoutInt, err := strconv.Atoi(testTimeout)
-		if err != nil {
-			framework.Failf("failed to parse test timeout duration: %v", err)
-		}
-		pollingDuration := time.Duration(4*testTimeoutInt) * time.Second
-
 		// Verify the remote host/port as explicitly allowed by the firewall policy is reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
-		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
-			_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
-			if err == nil {
-				return true, nil
-			}
-			return false, nil
-		})
-		if err != nil {
-			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, ovnContainer, serverNodeInfo.name, err)
-		}
+		checkConnectivity(srcPodName, exFWPermitTcpDnsDest, 53, true)
 
 		// Verify the remote host/port as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied host %s is not permitted as defined by the external firewall policy", exFWDenyTcpDnsDest))
-		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
-			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWDenyTcpDnsDest, "53")
-			if err != nil {
-				return false, nil
-			}
-			return true, nil
-		})
-		if err != wait.ErrWaitTimeout {
-			framework.Failf("Succeeded in connecting the implicitly denied remote host %s from container %s on node %s: %v", exFWDenyTcpDnsDest, ovnContainer, serverNodeInfo.name, err)
-		}
+		checkConnectivity(srcPodName, exFWDenyTcpDnsDest, 53, false)
 
 		// Verify the explicitly allowed host/port tcp port 80 rule is functional
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
-		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
-			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "80")
-			if err == nil {
-				return true, nil
-			}
-			return false, nil
-		})
-		if err != nil {
-			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
-		}
+		checkConnectivity(srcPodName, exFWPermitTcpWwwDest, 80, true)
 
 		// Verify the remote host/port 443 as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied port on host %s is not permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
-		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
-			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "443")
-			if err != nil {
-				return false, nil
-			}
-			return true, nil
-		})
-		if err != wait.ErrWaitTimeout {
-			framework.Failf("Succeeded in connecting the implicitly denied remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
-		}
+		checkConnectivity(srcPodName, exFWPermitTcpWwwDest, 443, false)
 	})
 
 	ginkgo.It("Should validate the egress firewall policy functionality against cluster nodes by using node selector", func() {
@@ -338,25 +320,25 @@ spec:
 
 		// Verify basic external connectivity to ensure egress firewall is working for normal conditions
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
-		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", fmt.Sprint(testTimeout), exFWPermitTcpDnsDest, "53")
 		if err != nil {
 			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, srcPodName, serverNodeInfo.name, err)
 		}
 		// Verify the remote host/port as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied host %s is not permitted as defined by the external firewall policy", exFWDenyTcpDnsDest))
-		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWDenyTcpDnsDest, "53")
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", fmt.Sprint(testTimeout), exFWDenyTcpDnsDest, "53")
 		if err == nil {
 			framework.Failf("Succeeded in connecting the implicitly denied remote host %s from container %s on node %s", exFWDenyTcpDnsDest, ovnContainer, serverNodeInfo.name)
 		}
 		// Verify the explicitly allowed host/port tcp port 80 rule is functional
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
-		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "80")
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", fmt.Sprint(testTimeout), exFWPermitTcpWwwDest, "80")
 		if err != nil {
 			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
 		}
 		// Verify the remote host/port 443 as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied port on host %s is not permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
-		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "443")
+		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", fmt.Sprint(testTimeout), exFWPermitTcpWwwDest, "443")
 		if err == nil {
 			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
 		}
@@ -491,8 +473,6 @@ spec:
 		externalContainerName := "e2e-egress-fw-external-container"
 		externalContainerPort := 1234
 
-		testContainer := fmt.Sprintf("%s-container", efPodName)
-		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 		denyCIDR := "0.0.0.0/0"
 		if IsIPv6Cluster(f.ClientSet) {
 			denyCIDR = "::/0"
@@ -529,24 +509,15 @@ spec:
 		}
 		ginkgo.By(fmt.Sprintf("Verifying connectivity from pod %s to external container [%s]:%d",
 			efPodName, externalContainerIP, externalContainerPort))
-		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", efPodName, testContainerFlag,
-			"--", "nc", "-vz", "-w", testTimeout, externalContainerIP, strconv.Itoa(externalContainerPort))
-		if err != nil {
-			framework.Failf("Failed to connect from pod to external container, before egress firewall is applied")
-		}
+		checkConnectivity(efPodName, externalContainerIP, externalContainerPort, true)
+
 		// external container -> nodePort svc should work
 		svc, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
 		framework.ExpectNoError(err, "failed to fetch service: %s in namespace %s", serviceName, f.Namespace.Name)
 
 		ginkgo.By(fmt.Sprintf("Verifying connectivity from external container %s to nodePort svc [%s]:%d",
 			externalContainerIP, nodeIP, svc.Spec.Ports[0].NodePort))
-		cmd := []string{"docker", "exec", externalContainerName, "nc", "-vz", "-w", testTimeout, nodeIP, strconv.Itoa(int(svc.Spec.Ports[0].NodePort))}
-		framework.Logf("Running command %v", cmd)
-		_, err = runCommand(cmd...)
-		if err != nil {
-			framework.Failf("Failed to connect to nodePort service from external container %s, before egress firewall is applied: %v",
-				externalContainerName, err)
-		}
+		checkExternalContainerConnectivity(externalContainerName, nodeIP, int(svc.Spec.Ports[0].NodePort))
 
 		// 3. Apply deny-all egress firewall and wait for it to be applied
 		// egress firewall crd yaml configuration
@@ -567,20 +538,11 @@ spec:
 		// pod -> external container should be blocked
 		ginkgo.By(fmt.Sprintf("Verifying connection from pod %s to external container %s is blocked:%d",
 			efPodName, externalContainerIP, externalContainerPort))
-		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", efPodName, testContainerFlag,
-			"--", "nc", "-vz", "-w", testTimeout, externalContainerIP, strconv.Itoa(externalContainerPort))
-		if err == nil {
-			framework.Failf("Egress firewall doesn't block connection from pod to external container")
-		}
+		checkConnectivity(efPodName, externalContainerIP, externalContainerPort, false)
+
 		// external container -> nodePort svc should work
 		ginkgo.By(fmt.Sprintf("Verifying connectivity from external container %s to nodePort svc [%s]:%d",
 			externalContainerIP, nodeIP, svc.Spec.Ports[0].NodePort))
-		cmd = []string{"docker", "exec", externalContainerName, "nc", "-vz", "-w", testTimeout, nodeIP, strconv.Itoa(int(svc.Spec.Ports[0].NodePort))}
-		framework.Logf("Running command %v", cmd)
-		_, err = runCommand(cmd...)
-		if err != nil {
-			framework.Failf("Failed to connect to nodePort service from external container %s: %v",
-				externalContainerName, err)
-		}
+		checkExternalContainerConnectivity(externalContainerName, nodeIP, int(svc.Spec.Ports[0].NodePort))
 	})
 })
