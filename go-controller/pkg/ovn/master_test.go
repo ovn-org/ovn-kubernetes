@@ -309,13 +309,6 @@ func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRou
 		expectedClusterPortGroup, node, false)
 }
 
-func addNodeLogicalFlowsWithServiceController(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
-	expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup,
-	node *tNode, svcTemplateSupport bool) []libovsdbtest.TestData {
-	return addNodeLogicalFlowsHelper(testData, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup,
-		expectedClusterPortGroup, node, svcTemplateSupport)
-}
-
 func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
 	expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup,
 	node *tNode, serviceControllerEnabled bool) []libovsdbtest.TestData {
@@ -1076,8 +1069,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 
 		oc.SCTPSupport = true
 
-		expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
-			expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
+		expectedNBDatabaseState = addNodeLogicalFlows(nil, expectedOVNClusterRouter, expectedNodeSwitch,
+			expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 	})
 
 	ginkgo.AfterEach(func() {

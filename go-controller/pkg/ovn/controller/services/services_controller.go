@@ -503,14 +503,20 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 		}
 	}
 
-	// Sync the nodeIP template values to the DB.
-	nodeIPTemplates := []TemplateMap{
-		c.nodeIPv4Templates.AsTemplateMap(),
-		c.nodeIPv6Templates.AsTemplateMap(),
-	}
-	if err := svcCreateOrUpdateTemplateVar(c.nbClient, nodeIPTemplates); err != nil {
-		klog.Errorf("Could not sync node IP templates")
-		return
+	c.startupDoneLock.RLock()
+	defer c.startupDoneLock.RUnlock()
+	// Avoid rendering and programming LB templates during start up. It will happen during service add
+	// and the nodeInfos cache will be synced.
+	if c.startupDone {
+		// Sync the nodeIP template values to the DB.
+		nodeIPTemplates := []TemplateMap{
+			c.nodeIPv4Templates.AsTemplateMap(),
+			c.nodeIPv6Templates.AsTemplateMap(),
+		}
+		if err := svcCreateOrUpdateTemplateVar(c.nbClient, nodeIPTemplates); err != nil {
+			klog.Errorf("Could not sync node IP templates")
+			return
+		}
 	}
 }
 
