@@ -152,6 +152,7 @@ require (
 	github.com/coreos/butane v0.18.0
 	github.com/docker/docker v24.0.9+incompatible
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
+	github.com/onsi/ginkgo v1.16.5
 	github.com/openshift-kni/k8sreporter v1.0.4
 	github.com/ovn-org/ovn-kubernetes/go-controller v0.0.0-20230914190234-9cbdd02db9c6
 	go.universe.tf/metallb v0.0.0-00010101000000-000000000000
