@@ -105,8 +105,10 @@ func (e *EgressDNS) Add(namespace, dnsName string) (addressset.AddressSet, error
 	return e.dnsEntries[dnsName].dnsAddressSet, nil
 }
 
-func (e *EgressDNS) Delete(namespace string) error {
+func (e *EgressDNS) delete(namespace string) ([]string, error) {
 	e.lock.Lock()
+	defer e.lock.Unlock()
+
 	var dnsNamesToDelete []string
 
 	// go through all dnsNames for namespaces
@@ -117,14 +119,21 @@ func (e *EgressDNS) Delete(namespace string) error {
 			// the dnsEntry appears in no other namespace, so delete the address_set
 			err := dnsEntry.dnsAddressSet.Destroy()
 			if err != nil {
-				return fmt.Errorf("error deleting EgressFirewall AddressSet for dnsName: %s %v", dnsName, err)
+				return nil, fmt.Errorf("error deleting EgressFirewall AddressSet for dnsName: %s %v", dnsName, err)
 			}
 			// the dnsEntry is no longer needed because nothing references it, so delete it
 			delete(e.dnsEntries, dnsName)
 			dnsNamesToDelete = append(dnsNamesToDelete, dnsName)
 		}
 	}
-	e.lock.Unlock()
+	return dnsNamesToDelete, nil
+}
+
+func (e *EgressDNS) Delete(namespace string) error {
+	dnsNamesToDelete, err := e.delete(namespace)
+	if err != nil {
+		return err
+	}
 	for _, name := range dnsNamesToDelete {
 		e.dns.Delete(name)
 		// send a message to the "deleted" buffered channel so that Run() stops using
