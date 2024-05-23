@@ -3,15 +3,13 @@ package addressset
 import (
 	"fmt"
 
-	"github.com/pkg/errors"
-
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -182,7 +180,7 @@ func (asf *ovnAddressSetFactory) forEachAddressSet(ownerController string, dbIDs
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("failed to iterate address sets: %v", utilerrors.NewAggregate(errs))
+		return fmt.Errorf("failed to iterate address sets: %v", utilerrors.Join(errs...))
 	}
 
 	return nil
@@ -411,7 +409,7 @@ func (as *ovnAddressSets) SetAddresses(addresses []string) error {
 		err = as.v6.setAddresses(v6addresses)
 	}
 	if as.v4 != nil {
-		err = errors.Wrapf(err, "%v", as.v4.setAddresses(v4addresses))
+		err = utilerrors.Join(err, as.v4.setAddresses(v4addresses))
 	}
 
 	return err

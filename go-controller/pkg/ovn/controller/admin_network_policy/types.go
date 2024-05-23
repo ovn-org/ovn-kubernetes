@@ -1,15 +1,17 @@
 package adminnetworkpolicy
 
 import (
+	"fmt"
 	"net"
 
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
-	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 // NOTE: Iteration v1 of ANP will only support upto 100 ANPs
@@ -110,12 +112,12 @@ func newAdminNetworkPolicyState(raw *anpapi.AdminNetworkPolicy) (*adminNetworkPo
 		return nil, err
 	}
 
-	addErrors := errors.New("")
+	var errs []error
 	for i, rule := range raw.Spec.Ingress {
 		anpRule, err := newAdminNetworkPolicyIngressRule(rule, int32(i), anp.ovnPriority-int32(i))
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create anp ingress Rule %d in ANP %s - %v",
-				i, raw.Name, err)
+			err = fmt.Errorf("cannot create anp ingress Rule %d in ANP %s: %w", i, raw.Name, err)
+			errs = append(errs, err)
 			continue
 		}
 		anp.ingressRules = append(anp.ingressRules, anpRule)
@@ -123,23 +125,20 @@ func newAdminNetworkPolicyState(raw *anpapi.AdminNetworkPolicy) (*adminNetworkPo
 	for i, rule := range raw.Spec.Egress {
 		anpRule, err := newAdminNetworkPolicyEgressRule(rule, int32(i), anp.ovnPriority-int32(i))
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create anp egress Rule %d in ANP %s - %v",
-				i, raw.Name, err)
+			err = fmt.Errorf("cannot create anp egress Rule %d in ANP %s: %w", i, raw.Name, err)
+			errs = append(errs, err)
 			continue
 		}
 		anp.egressRules = append(anp.egressRules, anpRule)
 	}
 	anp.aclLoggingParams, err = getACLLoggingLevelsForANP(raw.Annotations)
 	if err != nil {
-		addErrors = errors.Wrapf(addErrors, "error: cannot parse ANP ACL logging annotation, disabling it for ANP %v - %v",
-			raw.Name, err)
+		err = fmt.Errorf("cannot parse ANP ACL logging annotation, disabling it for ANP %s: %w", raw.Name, err)
+		errs = append(errs, err)
 	}
 	klog.V(5).Infof("Logging parameters for ANP %s are Allow=%s/Deny=%s/Pass=%s", raw.Name,
 		anp.aclLoggingParams.Allow, anp.aclLoggingParams.Deny, anp.aclLoggingParams.Pass)
-	if addErrors.Error() == "" {
-		addErrors = nil
-	}
-	return anp, addErrors
+	return anp, utilerrors.Join(errs...)
 }
 
 // newAdminNetworkPolicySubject takes the provided ANP API Subject and creates a new corresponding
@@ -370,12 +369,12 @@ func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) 
 	if err != nil {
 		return nil, err
 	}
-	addErrors := errors.New("")
+	var errs []error
 	for i, rule := range raw.Spec.Ingress {
 		banpRule, err := newBaselineAdminNetworkPolicyIngressRule(rule, int32(i), BANPFlowPriority-int32(i))
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create banp ingress Rule %d in BANP %s - %v",
-				i, raw.Name, err)
+			err = fmt.Errorf("cannot create banp ingress Rule %d in BANP %s: %w", i, raw.Name, err)
+			errs = append(errs, err)
 			continue
 		}
 		banp.ingressRules = append(banp.ingressRules, banpRule)
@@ -383,23 +382,20 @@ func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) 
 	for i, rule := range raw.Spec.Egress {
 		banpRule, err := newBaselineAdminNetworkPolicyEgressRule(rule, int32(i), BANPFlowPriority-int32(i))
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create banp egress Rule %d in BANP %s - %v",
-				i, raw.Name, err)
+			err = fmt.Errorf("cannot create banp egress Rule %d in BANP %s: %w", i, raw.Name, err)
+			errs = append(errs, err)
 			continue
 		}
 		banp.egressRules = append(banp.egressRules, banpRule)
 	}
 	banp.aclLoggingParams, err = getACLLoggingLevelsForANP(raw.Annotations)
 	if err != nil {
-		addErrors = errors.Wrapf(addErrors, "error: cannot parse BANP ACL logging annotation, disabling it for BANP %v - %v",
-			raw.Name, err)
+		err = fmt.Errorf("cannot parse BANP ACL logging annotation, disabling it for BANP %s: %w", raw.Name, err)
+		errs = append(errs, err)
 	}
 	klog.V(5).Infof("Logging parameters for BANP %s are Allow=%s/Deny=%s", raw.Name,
 		banp.aclLoggingParams.Allow, banp.aclLoggingParams.Deny)
-	if addErrors.Error() == "" {
-		addErrors = nil
-	}
-	return banp, addErrors
+	return banp, utilerrors.Join(errs...)
 }
 
 // newBaselineAdminNetworkPolicyIngressRule takes the provided BANP API Ingress Rule and creates a new corresponding

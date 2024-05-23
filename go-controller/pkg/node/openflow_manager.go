@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
 
 	"k8s.io/klog/v2"
 )
@@ -229,7 +228,7 @@ func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys string) error {
 	// the integration bridge, as a result the ofport number changed for that patch interface
 	curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", patchIntf, "ofport")
 	if err != nil {
-		return errors.Wrapf(err, "Failed to get ofport of %s, stderr: %q", patchIntf, stderr)
+		return fmt.Errorf("failed to get ofport of %s, stderr: %q: %w", patchIntf, stderr, err)
 
 	}
 	if ofPortPatch != curOfportPatch {
@@ -242,7 +241,7 @@ func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys string) error {
 	// bridge, as a result the ofport number changed for that physical interface
 	curOfportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", physIntf, "ofport")
 	if err != nil {
-		return errors.Wrapf(err, "Failed to get ofport of %s, stderr: %q", physIntf, stderr)
+		return fmt.Errorf("failed to get ofport of %s, stderr: %q: %w", physIntf, stderr, err)
 	}
 	if ofPortPhys != curOfportPhys {
 		klog.Errorf("Fatal error: phys port %s ofport changed from %s to %s",
@@ -317,7 +316,7 @@ func bootstrapOVSFlows() error {
 	} else {
 		bridgeMACAddress, err = util.GetOVSPortMACAddress(bridge)
 		if err != nil {
-			return errors.Wrapf(err, "failed to get MAC address for ovs port %s", bridge)
+			return fmt.Errorf("failed to get MAC address for ovs port %s: %w", bridge, err)
 		}
 	}
 

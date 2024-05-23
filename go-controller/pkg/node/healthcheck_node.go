@@ -1,6 +1,7 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/pkg/errors"
 
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"

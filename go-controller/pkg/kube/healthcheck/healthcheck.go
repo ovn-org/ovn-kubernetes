@@ -22,12 +22,12 @@ import (
 	"net/http"
 	"sync"
 
-	"k8s.io/klog/v2"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
+
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 // Server serves HTTP endpoints for each service name, with results
@@ -174,7 +174,7 @@ func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) err
 			klog.V(5).Infof("Healthcheck %q closed", nsn.String())
 		}(nsn, svc)
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 type hcInstance struct {

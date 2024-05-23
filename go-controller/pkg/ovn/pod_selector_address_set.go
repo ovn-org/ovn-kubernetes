@@ -17,12 +17,12 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	kerrorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
@@ -626,7 +626,7 @@ func (bnc *BaseNetworkController) handleNamespaceDel(podHandlerInfo *PodSelector
 			errs = append(errs, err)
 		}
 	}
-	return kerrorsutil.NewAggregate(errs)
+	return utilerrors.Join(errs...)
 }
 
 func getPodSelectorAddrSetDbIDs(psasKey, controller string) *libovsdbops.DbObjectIDs {

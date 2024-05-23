@@ -14,9 +14,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -358,7 +358,7 @@ func (oc *BaseSecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *co
 		// process all pods so they are reconfigured as local
 		errs := oc.addAllPodsOnNode(node.Name)
 		if errs != nil {
-			err := kerrors.NewAggregate(errs)
+			err := utilerrors.Join(errs...)
 			return err
 		}
 	}
@@ -378,7 +378,7 @@ func (oc *BaseSecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *c
 		// process all pods so they are reconfigured as remote
 		errs := oc.addAllPodsOnNode(node.Name)
 		if errs != nil {
-			err = kerrors.NewAggregate(errs)
+			err = utilerrors.Join(errs...)
 			return err
 		}
 	}

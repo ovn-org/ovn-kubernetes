@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -19,7 +20,6 @@ import (
 	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -909,11 +909,11 @@ func (oc *DefaultNetworkController) cleanUpBFDEntry(gatewayIP, gatewayRouter, pr
 func (oc *DefaultNetworkController) extSwitchPrefix(nodeName string) (string, error) {
 	node, err := oc.watchFactory.GetNode(nodeName)
 	if err != nil {
-		return "", errors.Wrapf(err, "extSwitchPrefix: failed to find node %s", nodeName)
+		return "", fmt.Errorf("extSwitchPrefix failed to find node %s: %w", nodeName, err)
 	}
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
-		return "", errors.Wrapf(err, "extSwitchPrefix: failed to parse l3 gateway annotation for node %s", nodeName)
+		return "", fmt.Errorf("extSwitchPrefix failed to parse l3 gateway annotation for node %s: %w", nodeName, err)
 	}
 
 	if l3GatewayConfig.EgressGWInterfaceID != "" {

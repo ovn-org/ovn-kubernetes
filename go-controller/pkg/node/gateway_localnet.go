@@ -14,7 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kerrors2 "k8s.io/apimachinery/pkg/util/errors"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -113,7 +113,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			// Services create OpenFlow flows as well, need to update them all
 			if gw.servicesRetryFramework != nil {
 				if errs := gw.addAllServices(); errs != nil {
-					err := kerrors2.NewAggregate(errs)
+					err := utilerrors.Join(errs...)
 					klog.Errorf("Failed to sync all services after node IP change: %v", err)
 				}
 			}

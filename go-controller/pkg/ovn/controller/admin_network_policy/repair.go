@@ -1,6 +1,7 @@
 package adminnetworkpolicy
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -8,7 +9,6 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"

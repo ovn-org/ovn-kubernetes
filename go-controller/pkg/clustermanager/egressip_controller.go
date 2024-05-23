@@ -24,10 +24,10 @@ import (
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
@@ -738,7 +738,7 @@ func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *v
 		}
 	}
 	if len(errorAggregate) > 0 {
-		return utilerrors.NewAggregate(errorAggregate)
+		return utilerrors.Join(errorAggregate...)
 	}
 	return nil
 }
@@ -771,7 +771,7 @@ func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 	}
 
 	if len(errors) > 0 {
-		return utilerrors.NewAggregate(errors)
+		return utilerrors.Join(errors...)
 	}
 	return nil
 }
@@ -816,7 +816,7 @@ func (eIPC *egressIPClusterController) deleteEgressNode(nodeName string) error {
 		}
 	}
 	if len(errorAggregate) > 0 {
-		return utilerrors.NewAggregate(errorAggregate)
+		return utilerrors.Join(errorAggregate...)
 	}
 	return nil
 }

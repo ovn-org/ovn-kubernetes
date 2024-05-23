@@ -5,10 +5,11 @@ import (
 	"sync"
 	"time"
 
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 
 	"github.com/vishvananda/netlink"
+
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 type ipRule struct {
@@ -164,7 +165,7 @@ func (rm *Controller) reconcile() error {
 	}
 
 	rm.rules = rulesToKeep
-	return utilerrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func areNetlinkRulesEqual(r1, r2 *netlink.Rule) bool {

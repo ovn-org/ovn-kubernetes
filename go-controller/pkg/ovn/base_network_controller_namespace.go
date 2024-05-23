@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -14,11 +15,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
@@ -145,7 +145,7 @@ func (bnc *BaseNetworkController) aclLoggingUpdateNsInfo(annotation string, nsIn
 		nsInfo.aclLogging.Allow = ""
 	}
 
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 // This function implements the main body of work of syncNamespaces.

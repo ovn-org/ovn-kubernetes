@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -13,7 +14,6 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/pkg/errors"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"

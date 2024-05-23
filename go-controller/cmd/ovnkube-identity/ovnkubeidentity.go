@@ -18,7 +18,6 @@ import (
 
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listers "k8s.io/client-go/listers/core/v1"
@@ -40,6 +39,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/csrapprover"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovnwebhook"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sys/unix"
 )
@@ -176,7 +176,7 @@ func main() {
 
 		runWg.Wait()
 		cancel()
-		return errors.NewAggregate([]error{errWebhook, errApprover})
+		return utilerrors.Join(errWebhook, errApprover)
 	}
 
 	c.Flags = []cli.Flag{

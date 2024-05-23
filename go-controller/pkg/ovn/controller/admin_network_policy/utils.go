@@ -2,9 +2,15 @@ package adminnetworkpolicy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
+
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	utilnet "k8s.io/utils/net"
+	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -12,12 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
-	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/apimachinery/pkg/util/sets"
-	utilnet "k8s.io/utils/net"
-	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 var ErrorANPPriorityUnsupported = errors.New("OVNK only supports priority ranges 0-99")
@@ -151,29 +152,29 @@ func getACLLoggingLevelsForANP(annotations map[string]string) (*libovsdbutil.ACL
 	// Valid log levels are the various preestablished levels or the empty string.
 	validLogLevels := sets.NewString(nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
 		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug, "")
-	var errors []error
+	var errs []error
 	// Ensure value parsed is valid
 	// Set Deny logging.
 	if !validLogLevels.Has(aclLogLevels.Deny) {
-		errors = append(errors, fmt.Errorf("disabling deny logging due to an invalid deny annotation. "+
+		errs = append(errs, fmt.Errorf("disabling deny logging due to an invalid deny annotation. "+
 			"%q is not a valid log severity", aclLogLevels.Deny))
 		aclLogLevels.Deny = ""
 	}
 
 	// Set Allow logging.
 	if !validLogLevels.Has(aclLogLevels.Allow) {
-		errors = append(errors, fmt.Errorf("disabling allow logging due to an invalid allow annotation. "+
+		errs = append(errs, fmt.Errorf("disabling allow logging due to an invalid allow annotation. "+
 			"%q is not a valid log severity", aclLogLevels.Allow))
 		aclLogLevels.Allow = ""
 	}
 
 	// Set Pass logging.
 	if !validLogLevels.Has(aclLogLevels.Pass) {
-		errors = append(errors, fmt.Errorf("disabling pass logging due to an invalid pass annotation. "+
+		errs = append(errs, fmt.Errorf("disabling pass logging due to an invalid pass annotation. "+
 			"%q is not a valid log severity", aclLogLevels.Pass))
 		aclLogLevels.Pass = ""
 	}
-	return aclLogLevels, apierrors.NewAggregate(errors)
+	return aclLogLevels, utilerrors.Join(errs...)
 }
 
 // convertPodIPContainerPortToNNPP converts the given pod container port and podIPs into a list (max 2 for dualstack)

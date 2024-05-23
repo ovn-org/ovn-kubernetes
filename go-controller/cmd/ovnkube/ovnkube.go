@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -31,6 +30,7 @@ import (
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kexec "k8s.io/utils/exec"
 )
@@ -572,7 +572,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	wg.Wait()
 	klog.Infof("Stopped ovnkube")
 
-	err = errors.Join(managerErr, controllerErr, nodeErr)
+	err = utilerrors.Join(managerErr, controllerErr, nodeErr)
 	if err != nil {
 		return fmt.Errorf("failed to run ovnkube: %w", err)
 	}

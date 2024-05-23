@@ -14,7 +14,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -39,6 +38,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/vishvananda/netlink"
@@ -1211,7 +1211,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 			}
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 
 }
 func (nc *DefaultNodeNetworkController) WatchEndpointSlices() error {

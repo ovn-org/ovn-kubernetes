@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/pkg/errors"
 )
 
 func clearPodBandwidth(sandboxID string) error {
@@ -83,14 +81,14 @@ func getOvsPortBandwidth(ifname string, dir direction) (int64, error) {
 func getInterfaceIngressBandwith(ifname string) (int64, error) {
 	qos_id, err := ovsGet("port", ifname, "qos", "")
 	if err != nil {
-		return 0, errors.Wrapf(err, "Failed to get qos for port %s", ifname)
+		return 0, fmt.Errorf("failed to get qos for port %s: %w", ifname, err)
 	}
 	if len(qos_id) == 0 {
 		return 0, BandwidthNotFound
 	}
 	maxRate, err := ovsGet("qos", qos_id, "other_config", "max-rate")
 	if err != nil {
-		return 0, errors.Wrapf(err, "Failed to get max-rate for qos_id %s", qos_id)
+		return 0, fmt.Errorf("failed to get max-rate for qos_id %s: %w", qos_id, err)
 	}
 	if len(maxRate) == 0 {
 		return 0, BandwidthNotFound
@@ -98,7 +96,7 @@ func getInterfaceIngressBandwith(ifname string) (int64, error) {
 	maxRate = strings.ReplaceAll(maxRate, "\"", "")
 	ingressBPS, err := strconv.ParseInt(maxRate, 10, 64)
 	if err != nil {
-		return 0, errors.Wrapf(err, "Failed to parse qos max rate for %s", ifname)
+		return 0, fmt.Errorf("failed to parse qos max rate for %s: %w", ifname, err)
 	}
 	return ingressBPS, nil
 }
@@ -107,14 +105,14 @@ func getInterfaceEgressBandwith(ifname string) (int64, error) {
 	// egressBPS
 	out, err := ovsGet("interface", ifname, "ingress_policing_rate", "")
 	if err != nil {
-		return 0, errors.Wrapf(err, "failed to get ingress_policing_rate for interface %s", ifname)
+		return 0, fmt.Errorf("failed to get ingress_policing_rate for interface %s: %w", ifname, err)
 	}
 	if len(out) == 0 {
 		return 0, BandwidthNotFound
 	}
 	egressValue, err := strconv.ParseInt(out, 10, 64)
 	if err != nil {
-		return 0, errors.Wrapf(err, "failed to parse ingress_policing_rate for interface %s: %s", ifname, out)
+		return 0, fmt.Errorf("failed to parse ingress_policing_rate for interface %s from %q: %w", ifname, out, err)
 	}
 	if egressValue == 0 { // 0 is the default value so we return not found
 		return 0, BandwidthNotFound

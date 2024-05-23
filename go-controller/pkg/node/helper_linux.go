@@ -8,7 +8,6 @@ import (
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog/v2"
 )
@@ -94,7 +93,7 @@ func getDefaultGatewayInterfaceByFamily(family int, gwIface string) (string, net
 
 	routeList, err := util.GetNetLinkOps().RouteListFiltered(family, filter, mask)
 	if err != nil {
-		return "", nil, errors.Wrapf(err, "failed to get routing table in node")
+		return "", nil, fmt.Errorf("failed to get routing table in node: %w", err)
 	}
 	routes := filterRoutesByIfIndex(routeList, gwIfIdx)
 	// use the first valid default gateway

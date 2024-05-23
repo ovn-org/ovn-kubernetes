@@ -6,12 +6,12 @@ import (
 	"hash/fnv"
 	"sync"
 
-	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/sets"
 	hashutil "k8s.io/kubernetes/pkg/util/hash"
 
 	ocpnetworkclientset "github.com/openshift/client-go/network/clientset/versioned"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 // resolverInfo maintains consistent information about the DNS names, the
@@ -148,7 +148,7 @@ func (resInfo *resolverInfo) ModifyDNSNamesForNamespace(dnsNames []string, names
 
 	// Return the errors, if any.
 	if len(errorList) != 0 {
-		return errors.NewAggregate(errorList)
+		return utilerrors.Join(errorList...)
 	}
 
 	return nil
@@ -176,7 +176,7 @@ func (resInfo *resolverInfo) DeleteDNSNamesForNamespace(namespace string) error 
 
 	// Return the errors, if any.
 	if len(errorList) != 0 {
-		return errors.NewAggregate(errorList)
+		return utilerrors.Join(errorList...)
 	}
 
 	return nil

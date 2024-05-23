@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -611,11 +610,11 @@ func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP net.IP, node string
 func (nb *northBoundClient) extSwitchPrefix(nodeName string) (string, error) {
 	node, err := nb.nodeLister.Get(nodeName)
 	if err != nil {
-		return "", errors.Wrapf(err, "extSwitchPrefix: failed to find node %s", nodeName)
+		return "", fmt.Errorf("extSwitchPrefix failed to find node %s: %w", nodeName, err)
 	}
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
-		return "", errors.Wrapf(err, "extSwitchPrefix: failed to parse l3 gateway annotation for node %s", nodeName)
+		return "", fmt.Errorf("extSwitchPrefix failed to parse l3 gateway annotation for node %s: %w", nodeName, err)
 	}
 
 	if l3GatewayConfig.EgressGWInterfaceID != "" {

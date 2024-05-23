@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -9,18 +10,6 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
-	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
-	egressqosapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/applyconfiguration/egressqos/v1"
-	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -33,6 +22,18 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	egressqosapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/applyconfiguration/egressqos/v1"
+	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
@@ -90,7 +91,7 @@ func (oc *DefaultNetworkController) cloneEgressQoS(raw *egressqosapi.EgressQoS) 
 		return nil, fmt.Errorf("cannot create EgressQoS with %d rules - maximum is %d", len(raw.Spec.Egress), EgressQoSFlowStartPriority)
 	}
 
-	addErrors := errors.New("")
+	var errs []error
 	for i, rule := range raw.Spec.Egress {
 		eqr, err := oc.cloneEgressQoSRule(rule, EgressQoSFlowStartPriority-i)
 		if err != nil {
@@ -98,18 +99,14 @@ func (oc *DefaultNetworkController) cloneEgressQoS(raw *egressqosapi.EgressQoS) 
 			if rule.DstCIDR != nil {
 				dst = *rule.DstCIDR
 			}
-			addErrors = errors.Wrapf(addErrors, "error: cannot create egressqos Rule to destination %s for namespace %s - %v",
-				dst, eq.namespace, err)
+			err = fmt.Errorf("cannot create egressqos Rule to destination %s for namespace %s: %w", dst, eq.namespace, err)
+			errs = append(errs, err)
 			continue
 		}
 		eq.rules = append(eq.rules, eqr)
 	}
 
-	if addErrors.Error() == "" {
-		addErrors = nil
-	}
-
-	return eq, addErrors
+	return eq, utilerrors.Join(errs...)
 }
 
 // shallow copies the EgressQoSRule object provided.
@@ -455,7 +452,7 @@ func (oc *DefaultNetworkController) repairEgressQoSes() error {
 	return nil
 }
 
-func (oc *DefaultNetworkController) syncEgressQoS(key string, eq *v1.EgressQoS) error {
+func (oc *DefaultNetworkController) syncEgressQoS(key string, eq *egressqosapi.EgressQoS) error {
 	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -488,12 +485,12 @@ func (oc *DefaultNetworkController) syncEgressQoS(key string, eq *v1.EgressQoS) 
 	return oc.addEgressQoS(eq)
 }
 
-func (oc *DefaultNetworkController) getEgressQoS(key string) (*v1.EgressQoS, error) {
+func (oc *DefaultNetworkController) getEgressQoS(key string) (*egressqosapi.EgressQoS, error) {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return nil, err
 	}
-	var eq *v1.EgressQoS
+	var eq *egressqosapi.EgressQoS
 	eq, err = oc.egressQoSLister.EgressQoSes(namespace).Get(name)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return nil, err

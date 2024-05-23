@@ -32,7 +32,6 @@ require (
 	github.com/openshift/api v0.0.0-20231120222239-b86761094ee3
 	github.com/openshift/client-go v0.0.0-20231121143148-910ca30a1a9a
 	github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892
-	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/client_model v0.5.0
 	github.com/safchain/ethtool v0.3.1-0.20231027162144-83e5e0097c91
@@ -101,6 +100,7 @@ require (
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
 	github.com/pborman/uuid v1.2.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/common v0.45.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect

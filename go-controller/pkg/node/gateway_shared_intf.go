@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
@@ -24,8 +25,6 @@ import (
 	discovery "k8s.io/api/discovery/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
-	kerrors2 "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -263,7 +262,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 			errors = append(errors, err)
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 // createLbAndExternalSvcFlows handles managing breth0 gateway flows for ingress traffic towards kubernetes services
@@ -523,8 +522,7 @@ func addServiceRules(service *kapi.Service, localEndpoints []string, svcHasLocal
 		}
 
 	}
-	return apierrors.NewAggregate(errors)
-
+	return utilerrors.Join(errors...)
 }
 
 // delServiceRules deletes all possible iptables rules and OpenFlow physical
@@ -581,7 +579,7 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
@@ -675,7 +673,7 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
 			errors = append(errors, err)
 		}
 	}
-	if err = apierrors.NewAggregate(errors); err != nil {
+	if err = utilerrors.Join(errors...); err != nil {
 		return fmt.Errorf("UpdateService failed for nodePortWatcher: %v", err)
 	}
 	return nil
@@ -747,7 +745,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
 		errors = append(errors, fmt.Errorf("failed to delete conntrack entry for service %v: %v", name, err))
 	}
 
-	if err = apierrors.NewAggregate(errors); err != nil {
+	if err = utilerrors.Join(errors...); err != nil {
 		return fmt.Errorf("DeleteService failed for nodePortWatcher: %v", err)
 	}
 	return nil
@@ -813,7 +811,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			errors = append(errors, err)
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
@@ -871,7 +869,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 		if err = addServiceRules(svc, sets.List(localEndpoints), hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
 		}
-		return apierrors.NewAggregate(errors)
+		return utilerrors.Join(errors...)
 	}
 	return nil
 
@@ -918,7 +916,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 		if err = addServiceRules(svcConfig.service, sets.List(localEndpoints), hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
 		}
-		return apierrors.NewAggregate(errors)
+		return utilerrors.Join(errors...)
 	}
 	return nil
 }
@@ -1002,10 +1000,10 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 		if err = npw.AddEndpointSlice(newEpSlice); err != nil {
 			errors = append(errors, err)
 		}
-		return apierrors.NewAggregate(errors)
+		return utilerrors.Join(errors...)
 	}
 
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (npwipt *nodePortWatcherIptables) AddService(service *kapi.Service) error {
@@ -1040,7 +1038,7 @@ func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) err
 			errors = append(errors, err)
 		}
 	}
-	if err = apierrors.NewAggregate(errors); err != nil {
+	if err = utilerrors.Join(errors...); err != nil {
 		return fmt.Errorf("UpdateService failed for nodePortWatcherIptables: %v", err)
 	}
 	return nil
@@ -1084,7 +1082,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 			errors = append(errors, err)
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]string, error) {
@@ -1794,7 +1792,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			// Services create OpenFlow flows as well, need to update them all
 			if gw.servicesRetryFramework != nil {
 				if errs := gw.addAllServices(); len(errs) > 0 {
-					err := kerrors2.NewAggregate(errs)
+					err := utilerrors.Join(errs...)
 					klog.Errorf("Failed to sync all services after node IP change: %v", err)
 				}
 			}

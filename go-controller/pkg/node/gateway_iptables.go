@@ -7,15 +7,16 @@ import (
 	"fmt"
 	"net"
 
+	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
+
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kapi "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
@@ -547,7 +548,7 @@ func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 	if err = restoreIptRulesFiltered(keepIPTRules, filter); err != nil {
 		errors = append(errors, err)
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 // getGatewayIPTRules returns ClusterIP, NodePort, ExternalIP and LoadBalancer iptables rules for service.

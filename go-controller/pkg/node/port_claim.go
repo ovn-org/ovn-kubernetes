@@ -7,10 +7,10 @@ import (
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -153,7 +153,7 @@ func (p *portClaimWatcher) AddService(svc *kapi.Service) error {
 			errors = append(errors, fmt.Errorf("error claiming port for service: %s/%s: %v", svc.Namespace, svc.Name, err))
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (p *portClaimWatcher) UpdateService(old, new *kapi.Service) error {
@@ -168,7 +168,7 @@ func (p *portClaimWatcher) UpdateService(old, new *kapi.Service) error {
 			errors = append(errors, fmt.Errorf("error updating port claim for service: %s/%s: %v", old.Namespace, old.Name, err))
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (p *portClaimWatcher) DeleteService(svc *kapi.Service) error {
@@ -177,7 +177,7 @@ func (p *portClaimWatcher) DeleteService(svc *kapi.Service) error {
 		for _, err := range raw_errors {
 			errors = append(errors, fmt.Errorf("error removing port claim for service: %s/%s: %v", svc.Namespace, svc.Name, err))
 		}
-		return apierrors.NewAggregate(errors)
+		return utilerrors.Join(errors...)
 	}
 	return nil
 }
