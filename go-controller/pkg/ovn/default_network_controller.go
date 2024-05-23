@@ -341,7 +341,9 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
-	oc.dnsNameResolver.Shutdown()
+	if oc.dnsNameResolver != nil {
+		oc.dnsNameResolver.Shutdown()
+	}
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
