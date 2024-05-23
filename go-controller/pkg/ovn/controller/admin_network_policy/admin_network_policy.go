@@ -1,6 +1,7 @@
 package adminnetworkpolicy
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -14,7 +15,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -84,7 +84,7 @@ func (c *Controller) syncAdminNetworkPolicy(key string) error {
 	if err != nil {
 		// we can ignore the error if status update doesn't succeed; best effort
 		_ = c.updateANPStatusToNotReady(anp.Name, err.Error())
-		if errors.Unwrap(err) != ErrorANPPriorityUnsupported && errors.Unwrap(err) != ErrorANPWithDuplicatePriority {
+		if !errors.Is(err, ErrorANPPriorityUnsupported) && !errors.Is(err, ErrorANPWithDuplicatePriority) {
 			// we don't want to retry for these specific errors since they
 			// need manual intervention from users to update their CRDs
 			return nil

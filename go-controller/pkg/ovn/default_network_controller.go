@@ -32,10 +32,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -803,7 +803,7 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			h.oc.syncHostNetAddrSetFailed.Store(node.Name, true)
 			aggregatedErrors = append(aggregatedErrors, err)
 		}
-		return kerrors.NewAggregate(aggregatedErrors)
+		return utilerrors.Join(aggregatedErrors...)
 
 	case factory.EgressFirewallType:
 		egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
@@ -986,7 +986,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				h.oc.syncHostNetAddrSetFailed.Delete(newNode.Name)
 			}
 		}
-		return kerrors.NewAggregate(aggregatedErrors)
+		return utilerrors.Join(aggregatedErrors...)
 
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)

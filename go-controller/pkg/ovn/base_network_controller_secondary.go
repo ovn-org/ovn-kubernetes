@@ -21,10 +21,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 )
 
@@ -263,7 +263,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		}
 	}
 	if len(errs) != 0 {
-		return kerrors.NewAggregate(errs)
+		return utilerrors.Join(errs...)
 	}
 	return nil
 }
@@ -602,7 +602,7 @@ func (bsnc *BaseSecondaryNetworkController) updateNamespaceForSecondaryNetwork(o
 	if err := bsnc.multicastUpdateNamespace(newer, nsInfo); err != nil {
 		errors = append(errors, err)
 	}
-	return kerrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (bsnc *BaseSecondaryNetworkController) deleteNamespace4SecondaryNetwork(ns *kapi.Namespace) error {

@@ -19,11 +19,11 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -563,7 +563,7 @@ func (c *Controller) repair() error {
 		errorList = append(errorList, fmt.Errorf("failed to set pod IPs in the egressservice address set, err: %v", err))
 	}
 
-	return errors.NewAggregate(errorList)
+	return utilerrors.Join(errorList...)
 }
 
 // onEgressServiceAdd queues the EgressService for processing.

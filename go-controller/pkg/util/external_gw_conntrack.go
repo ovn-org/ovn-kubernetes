@@ -4,6 +4,7 @@
 package util
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -11,14 +12,14 @@ import (
 	"time"
 
 	"github.com/mdlayher/ndp"
-	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 
 	kapi "k8s.io/api/core/v1"
-	utilapierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 // inspired by arping timeout
@@ -324,5 +325,5 @@ func SyncConntrackForExternalGateways(gwIPsToKeep sets.Set[string], isPodInLocal
 		}
 	}
 
-	return utilapierrors.NewAggregate(errs)
+	return utilerrors.Join(errs...)
 }

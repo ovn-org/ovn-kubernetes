@@ -5,7 +5,7 @@ import (
 	"net"
 	"sync"
 
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -231,7 +231,7 @@ func (sna *BaseSubnetAllocator) releaseNetworks(owner string, subnets ...*net.IP
 		}
 	}
 
-	return utilerrors.NewAggregate(errorList)
+	return utilerrors.Join(errorList...)
 }
 
 // releaseAllNetworks attempts to release all subnets of a given owner, even

@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	"github.com/urfave/cli/v2"
-	"k8s.io/apimachinery/pkg/util/errors"
 	kexec "k8s.io/utils/exec"
 )
 
@@ -31,7 +31,7 @@ var NicsToBridgeCommand = cli.Command{
 			}
 		}
 
-		return errors.NewAggregate(errorList)
+		return utilerrors.Join(errorList...)
 	},
 }
 
@@ -57,6 +57,6 @@ var BridgesToNicCommand = cli.Command{
 			}
 		}
 
-		return errors.NewAggregate(errorList)
+		return utilerrors.Join(errorList...)
 	},
 }

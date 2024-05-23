@@ -7,11 +7,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
@@ -79,7 +79,7 @@ func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) error 
 			errors = append(errors, err)
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) error {
