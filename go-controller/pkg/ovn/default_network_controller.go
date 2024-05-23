@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
@@ -103,7 +104,8 @@ type DefaultNetworkController struct {
 
 	// dnsNameResolver is used for resolving the IP addresses of DNS names
 	// used in egress firewall rules
-	dnsNameResolver dnsnameresolver.DNSNameResolver
+	dnsNameResolver  dnsnameresolver.DNSNameResolver
+	efNodeController controller.Controller
 
 	// retry framework for egress firewall
 	retryEgressFirewalls *retry.RetryFramework
@@ -116,8 +118,6 @@ type DefaultNetworkController struct {
 	retryEgressIPPods *retry.RetryFramework
 	// retry framework for Egress nodes
 	retryEgressNodes *retry.RetryFramework
-	// retry framework for Egress Firewall Nodes
-	retryEgressFwNodes *retry.RetryFramework
 
 	// Node-specific syncMaps used by node event handler
 	gatewaysFailed              sync.Map
@@ -251,7 +251,6 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 	oc.retryEgressIPNamespaces = oc.newRetryFramework(factory.EgressIPNamespaceType)
 	oc.retryEgressIPPods = oc.newRetryFramework(factory.EgressIPPodType)
 	oc.retryEgressNodes = oc.newRetryFramework(factory.EgressNodeType)
-	oc.retryEgressFwNodes = oc.newRetryFramework(factory.EgressFwNodeType)
 	oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
 	oc.retryNetworkPolicies = oc.newRetryFramework(factory.PolicyType)
 }
@@ -344,6 +343,10 @@ func (oc *DefaultNetworkController) Stop() {
 	if oc.dnsNameResolver != nil {
 		oc.dnsNameResolver.Shutdown()
 	}
+	if oc.efNodeController != nil {
+		controller.Stop(oc.efNodeController)
+	}
+
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
@@ -524,7 +527,8 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = oc.WatchEgressFwNodes()
+		oc.efNodeController = oc.newEFNodeController(oc.watchFactory.NodeCoreInformer())
+		err = controller.Start(oc.efNodeController)
 		if err != nil {
 			return err
 		}
@@ -852,14 +856,6 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		// Egress IP depends on is added from the gateway reconciliation logic
 		return h.oc.addEgressNode(node)
 
-	case factory.EgressFwNodeType:
-		node := obj.(*kapi.Node)
-		if err = h.oc.updateEgressFirewallForNode(node.Name); err != nil {
-			klog.Infof("Node add failed during egress firewall eval for node: %s, will try again later: %v",
-				node.Name, err)
-			return err
-		}
-
 	case factory.NamespaceType:
 		ns, ok := obj.(*kapi.Namespace)
 		if !ok {
@@ -1034,10 +1030,6 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		}
 		return nil
 
-	case factory.EgressFwNodeType:
-		newNode := newObj.(*kapi.Node)
-		return h.oc.updateEgressFirewallForNode(newNode.Name)
-
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
 		return h.oc.updateNamespace(oldNs, newNs)
@@ -1107,13 +1099,6 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
 		return nil
 
-	case factory.EgressFwNodeType:
-		node, ok := obj.(*kapi.Node)
-		if !ok {
-			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
-		}
-		return h.oc.updateEgressFirewallForNode(node.Name)
-
 	case factory.NamespaceType:
 		ns := obj.(*kapi.Namespace)
 		return h.oc.deleteNamespace(ns)
@@ -1148,9 +1133,6 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 
 		case factory.EgressNodeType:
 			syncFunc = h.oc.initClusterEgressPolicies
-
-		case factory.EgressFwNodeType:
-			syncFunc = nil
 
 		case factory.EgressIPPodType,
 			factory.EgressIPType:

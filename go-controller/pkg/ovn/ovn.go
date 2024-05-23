@@ -329,13 +329,6 @@ func (oc *DefaultNetworkController) WatchEgressNodes() error {
 	return err
 }
 
-// WatchEgressFwNodes starts the watching of nodes for Egress Firewall where
-// firewall rules may match nodes using a node selector
-func (oc *DefaultNetworkController) WatchEgressFwNodes() error {
-	_, err := oc.retryEgressFwNodes.WatchResource()
-	return err
-}
-
 // WatchEgressIP starts the watching of egressip resource and calls back the
 // appropriate handler logic. It also initiates the other dedicated resource
 // handlers for egress IP setup: namespaces, pods.

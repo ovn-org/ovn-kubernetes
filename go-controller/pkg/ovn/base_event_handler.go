@@ -30,7 +30,6 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		factory.EgressIPNamespaceType,
 		factory.EgressIPPodType,
 		factory.EgressNodeType,
-		factory.EgressFwNodeType,
 		factory.NamespaceType,
 		factory.MultiNetworkPolicyType,
 		factory.IPAMClaimsType:
@@ -97,21 +96,6 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 		// force update path for EgressIP resource.
 		return false, nil
 
-	case factory.EgressFwNodeType:
-		oldNode, ok := obj1.(*kapi.Node)
-		if !ok {
-			return false, fmt.Errorf("could not cast obj1 of type %T to *kapi.Node", obj1)
-		}
-		newNode, ok := obj2.(*kapi.Node)
-		if !ok {
-			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Node", obj2)
-		}
-		if reflect.DeepEqual(oldNode.Labels, newNode.Labels) &&
-			!util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
-			return true, nil
-		}
-		return false, nil
-
 	case factory.NamespaceType:
 		// force update path for Namespace resource.
 		return false, nil
@@ -160,8 +144,7 @@ func (h *baseNetworkControllerEventHandler) getResourceFromInformerCache(objType
 		obj, err = watchFactory.GetNetworkPolicy(namespace, name)
 
 	case factory.NodeType,
-		factory.EgressNodeType,
-		factory.EgressFwNodeType:
+		factory.EgressNodeType:
 		obj, err = watchFactory.GetNode(name)
 
 	case factory.PodType,
@@ -206,7 +189,6 @@ func (h *baseNetworkControllerEventHandler) isResourceScheduled(objType reflect.
 func needsUpdateDuringRetry(objType reflect.Type) bool {
 	switch objType {
 	case factory.EgressNodeType,
-		factory.EgressFwNodeType,
 		factory.EgressIPType,
 		factory.EgressIPPodType,
 		factory.EgressIPNamespaceType,
