@@ -3,13 +3,16 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/applyconfiguration/egressfirewall/v1"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -26,6 +29,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	coreinformers "k8s.io/client-go/informers/core/v1"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -739,6 +744,26 @@ func (oc *DefaultNetworkController) getEgressFirewallACLDbIDs(namespace string, 
 			libovsdbops.ObjectNameKey: namespace,
 			libovsdbops.RuleIndex:     strconv.Itoa(ruleIdx),
 		})
+}
+
+func (oc *DefaultNetworkController) newEFNodeController(nodeInformer coreinformers.NodeInformer) controller.Controller {
+	controllerConfig := &controller.ControllerConfig[kapi.Node]{
+		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		Informer:       nodeInformer.Informer(),
+		Lister:         nodeInformer.Lister().List,
+		ObjNeedsUpdate: oc.efNodeNeedsUpdate,
+		Reconcile:      oc.updateEgressFirewallForNode,
+		Threadiness:    1,
+	}
+	return controller.NewController[kapi.Node]("ef_node_controller", controllerConfig)
+}
+
+func (oc *DefaultNetworkController) efNodeNeedsUpdate(oldNode, newNode *kapi.Node) bool {
+	if oldNode == nil || newNode == nil {
+		return true
+	}
+	return !reflect.DeepEqual(oldNode.Labels, newNode.Labels) ||
+		util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 }
 
 func (oc *DefaultNetworkController) updateEgressFirewallForNode(nodeName string) error {

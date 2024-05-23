@@ -146,9 +146,6 @@ type egressIPPod struct{}
 type egressIPNamespace struct{}
 type egressNode struct{}
 
-// types for handlers related to egress Firewall
-type egressFwNode struct{}
-
 // types for handlers in use by ovn-k node
 type namespaceExGw struct{}
 type endpointSliceForStaleConntrackRemoval struct{}
@@ -169,7 +166,6 @@ var (
 	EgressIPNamespaceType                 reflect.Type = reflect.TypeOf(&egressIPNamespace{})
 	EgressIPPodType                       reflect.Type = reflect.TypeOf(&egressIPPod{})
 	EgressNodeType                        reflect.Type = reflect.TypeOf(&egressNode{})
-	EgressFwNodeType                      reflect.Type = reflect.TypeOf(&egressFwNode{})
 	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
 	EgressQoSType                         reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
 	EgressServiceType                     reflect.Type = reflect.TypeOf(&egressserviceapi.EgressService{})
@@ -898,7 +894,7 @@ type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.
 // This is relevant only for handlers that are sharing the same resources:
 // Pods: shared by PodType (0), EgressIPPodType (1), AddressSetPodSelectorType (2), LocalPodSelectorType (3)
 // Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1), PeerNamespaceSelectorType (3), AddressSetNamespaceAndPodSelectorType (4)
-// Nodes: shared by NodeType (0), EgressNodeType (1), EgressFwNodeType (1)
+// Nodes: shared by NodeType (0), EgressNodeType (1)
 // By default handlers get the defaultHandlerPriority which is 0 (highest priority). Higher the number, lower the priority to get an event.
 // Example: EgressIPPodType will always get the pod event after PodType and AddressSetPodSelectorType will always get the event after PodType and EgressIPPodType
 // NOTE: If you are touching this function to add a new object type that uses shared objects, please make sure to update `minHandlerPriority` if needed
@@ -917,8 +913,6 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 	case AddressSetNamespaceAndPodSelectorType:
 		return 3
 	case EgressNodeType:
-		return 1
-	case EgressFwNodeType:
 		return 1
 	default:
 		return defaultHandlerPriority
@@ -946,7 +940,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddMultiNetworkPolicyHandler(funcs, processExisting)
 		}, nil
 
-	case NodeType, EgressNodeType, EgressFwNodeType:
+	case NodeType, EgressNodeType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNodeHandler(funcs, processExisting, priority)
