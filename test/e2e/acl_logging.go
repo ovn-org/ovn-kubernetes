@@ -120,12 +120,21 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 		It("the ACL logs are updated accordingly", func() {
 			clientPodScheduledPodName := pods[pokerPodIndex].Spec.NodeName
 			composedPolicyNameRegex := fmt.Sprintf("NP:%s:%s", nsName, egressDefaultDenySuffix)
-			Eventually(func() (bool, error) {
-				return assertACLLogs(
+			clientPod := pods[pokerPodIndex]
+			pokedPod := pods[pokedPodIndex]
+			Eventually(func() (success bool, err error) {
+				success, err = assertACLLogs(
 					clientPodScheduledPodName,
 					composedPolicyNameRegex,
 					denyACLVerdict,
 					updatedAllowACLLogSeverity)
+				if err == nil && !success {
+					By("poking some more...")
+					Expect(
+						pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
+						"traffic should be blocked since we only use a deny all traffic policy")
+				}
+				return
 			}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 		})
 	})
