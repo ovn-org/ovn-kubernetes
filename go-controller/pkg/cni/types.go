@@ -152,6 +152,8 @@ type PodRequest struct {
 	ctx context.Context
 	// cancel should be called to cancel this request
 	cancel context.CancelFunc
+	// if CNIConf.DeviceID is present, then captures if the VF is of type VFIO or not
+	IsVFIO bool
 
 	// network name, for default network, this will be types.DefaultNetworkName
 	netName string

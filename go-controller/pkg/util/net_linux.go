@@ -47,6 +47,7 @@ type NetLinkOps interface {
 	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
 	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
+	LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error
 }
 
 type defaultNetLinkOps struct {
@@ -675,4 +676,8 @@ func GetIPFamily(v6 bool) int {
 		return netlink.FAMILY_V6
 	}
 	return netlink.FAMILY_V4
+}
+
+func (defaultNetLinkOps) LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error {
+	return netlink.LinkSetVfHardwareAddr(pfLink, vfIndex, hwaddr)
 }

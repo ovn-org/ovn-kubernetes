@@ -284,52 +284,64 @@ func generateIfName(containerID string) string {
 }
 
 // Setup sriov interface in the pod
-func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, deviceID string) (*current.Interface, *current.Interface, error) {
+func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, deviceID string, isVFIO bool) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 	netdevice := ifInfo.NetdevName
 
-	// 1. Move netdevice to Container namespace
-	if len(netdevice) != 0 {
-		newNetdevName, err := safeMoveIfToNetns(netdevice, netns, containerID)
-		if err != nil {
-			return nil, nil, err
+	// 0. init contIface for VFIO
+	if isVFIO {
+		if util.IsAuxDeviceName(deviceID) {
+			return nil, nil, fmt.Errorf("VFIO not supported for device %s", deviceID)
 		}
-		err = netns.Do(func(hostNS ns.NetNS) error {
-			contIface.Name = ifName
-			err = renameLink(newNetdevName, contIface.Name)
+		// if the SR-IOV device is bound to VFIO, then there is nothing
+		// to do as it will be passed to the KVM VM directly
+		contIface.Name = ifName
+		contIface.Mac = ifInfo.MAC.String()
+		contIface.Sandbox = netns.Path()
+	} else {
+		// 1. Move netdevice to Container namespace
+		if len(netdevice) != 0 {
+			newNetdevName, err := safeMoveIfToNetns(netdevice, netns, containerID)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
-			link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
-			if err != nil {
-				return err
-			}
-			err = util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC)
-			if err != nil {
-				return err
-			}
-			err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU)
-			if err != nil {
-				return err
-			}
-			err = util.GetNetLinkOps().LinkSetUp(link)
-			if err != nil {
-				return err
-			}
+			err = netns.Do(func(hostNS ns.NetNS) error {
+				contIface.Name = ifName
+				err = renameLink(newNetdevName, contIface.Name)
+				if err != nil {
+					return err
+				}
+				link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
+				if err != nil {
+					return err
+				}
+				err = util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC)
+				if err != nil {
+					return err
+				}
+				err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU)
+				if err != nil {
+					return err
+				}
+				err = util.GetNetLinkOps().LinkSetUp(link)
+				if err != nil {
+					return err
+				}
 
-			err = setupNetwork(link, ifInfo)
+				err = setupNetwork(link, ifInfo)
+				if err != nil {
+					return err
+				}
+
+				contIface.Mac = ifInfo.MAC.String()
+				contIface.Sandbox = netns.Path()
+
+				return nil
+			})
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
-
-			contIface.Mac = ifInfo.MAC.String()
-			contIface.Sandbox = netns.Path()
-
-			return nil
-		})
-		if err != nil {
-			return nil, nil, err
 		}
 	}
 
@@ -340,7 +352,13 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 			return nil, nil, err
 		}
 
-		// 3. make sure it's not a port managed by OVS to avoid conflicts
+		if isVFIO {
+			// 3. it's not possible to set mac address within container netns for VFIO case, hence set it through VF representor
+			if err := util.SetVFHardwreAddress(deviceID, ifInfo.MAC); err != nil {
+				return nil, nil, err
+			}
+		}
+		// 4. make sure it's not a port managed by OVS to avoid conflicts
 		_, err = ovsExec("--if-exists", "del-port", hostRepName)
 		if err != nil {
 			return nil, nil, err
@@ -496,7 +514,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	klog.V(5).Infof("CNI Conf %v", pr.CNIConf)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
-		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
+		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID, pr.IsVFIO)
 	} else {
 		if ifInfo.IsDPUHostMode {
 			return nil, fmt.Errorf("unexpected configuration, pod request on dpu host. " +
@@ -527,7 +545,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 			break
 		}
 	}
-	if haveV6 {
+	if haveV6 && !pr.IsVFIO {
 		err = netns.Do(func(hostNS ns.NetNS) error {
 			// deny IPv6 neighbor solicitations
 			dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIface.Name)
@@ -559,16 +577,21 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	podDesc := fmt.Sprintf("for pod %s/%s NAD %s", pr.PodNamespace, pr.PodName, pr.nadName)
 	klog.V(5).Infof("Tear down interface (%+v) %s", *pr, podDesc)
-	if pr.CNIConf.DeviceID == "" && ifInfo.IsDPUHostMode {
-		klog.Warningf("Unexpected configuration %s, Device ID must be present for pod request on smart-nic host", podDesc)
-		return nil
+	if ifInfo.IsDPUHostMode {
+		if pr.CNIConf.DeviceID == "" {
+			klog.Warningf("Unexpected configuration %s, pod request on DPU host. device ID must be provided", podDesc)
+			return nil
+		}
+		// nothing else to do in DPUHostMode for VFIO device
+		if pr.IsVFIO {
+			return nil
+		}
+		// in the case of VF, we need to rename the container interface to VF name and move it to host
 	}
-	// 1. For SRIOV case, we'd need to move the netdevice from container namespace back to the host namespace
-	// 2. If it is secondary network and non-dpu mode, then get the container interface index
-	//    so that we know the host-side interface name.
+
 	ifnameSuffix := ""
-	isSecondary := pr.netName != types.DefaultNetworkName
-	if pr.CNIConf.DeviceID != "" || (isSecondary && !ifInfo.IsDPUHostMode) {
+	// nothing needs to be done for the VFIO case in the container namespace
+	if !pr.IsVFIO {
 		netns, err := ns.GetNS(pr.Netns)
 		if err != nil {
 			return fmt.Errorf("failed to get container namespace %s: %v", podDesc, err)
@@ -581,6 +604,10 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		}
 		defer hostNS.Close()
 
+		// 1. For SRIOV case, we'd need to move device from container namespace back to the host namespace
+		// 2. If it is secondary network and not dpu-host mode, then get the container interface index
+		//    so that we know the host-side interface name.
+		isSecondary := pr.netName != types.DefaultNetworkName
 		err = netns.Do(func(_ ns.NetNS) error {
 			// container side interface deletion
 			link, err := util.GetNetLinkOps().LinkByName(pr.IfName)
@@ -612,7 +639,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 						pr.IfName, podDesc, err)
 				}
 			}
-			if isSecondary && !ifInfo.IsDPUHostMode {
+			if isSecondary {
 				ifnameSuffix = fmt.Sprintf("_%d", link.Attrs().Index)
 			}
 			return nil
@@ -622,19 +649,26 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		}
 	}
 
-	if ifInfo.IsDPUHostMode {
-		// there is nothing else to do in the DPU-Host mode
-		return nil
+	if !ifInfo.IsDPUHostMode {
+		var err error
+		// host side interface deletion
+		hostIfName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
+		if pr.CNIConf.DeviceID != "" {
+			hostIfName, err = util.GetFunctionRepresentorName(pr.CNIConf.DeviceID)
+			if err != nil {
+				klog.Errorf("Failed to get the representor name for DeviceID %s for pod %s: %v",
+					pr.CNIConf.DeviceID, podDesc, err)
+			}
+		}
+		if hostIfName != "" {
+			pr.deletePorts(hostIfName, pr.PodNamespace, pr.PodName)
+		}
+		err = clearPodBandwidth(pr.SandboxID)
+		if err != nil {
+			klog.Errorf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
+		}
+		pr.deletePodConntrack()
 	}
-
-	// host side deletion of OVS port and kernel interface
-	ifName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
-	pr.deletePorts(ifName, pr.PodNamespace, pr.PodName)
-
-	if err := clearPodBandwidth(pr.SandboxID); err != nil {
-		klog.Warningf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
-	}
-	pr.deletePodConntrack()
 	return nil
 }
 

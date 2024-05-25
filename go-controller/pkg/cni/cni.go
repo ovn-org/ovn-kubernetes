@@ -112,9 +112,11 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	if pr.CNIConf.DeviceID != "" {
 		var err error
 
-		netdevName, err = util.GetNetdevNameFromDeviceId(pr.CNIConf.DeviceID, pr.deviceInfo)
-		if err != nil {
-			return nil, fmt.Errorf("failed in cmdAdd while getting Netdevice name: %v", err)
+		if !pr.IsVFIO {
+			netdevName, err = util.GetNetdevNameFromDeviceId(pr.CNIConf.DeviceID, pr.deviceInfo)
+			if err != nil {
+				return nil, fmt.Errorf("failed in cmdAdd while getting Netdevice name: %w", err)
+			}
 		}
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 			// Add DPU connection-details annotation so ovnkube-node running on DPU

@@ -297,6 +297,20 @@ func (_m *NetLinkOps) LinkSetUp(link netlink.Link) error {
 	return r0
 }
 
+// LinkSetVfHardwareAddr provides a mock function with given fields: pfLink, vfIndex, hwaddr
+func (_m *NetLinkOps) LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error {
+	ret := _m.Called(pfLink, vfIndex, hwaddr)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link, int, net.HardwareAddr) error); ok {
+		r0 = rf(pfLink, vfIndex, hwaddr)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // NeighAdd provides a mock function with given fields: neigh
 func (_m *NetLinkOps) NeighAdd(neigh *netlink.Neigh) error {
 	ret := _m.Called(neigh)
